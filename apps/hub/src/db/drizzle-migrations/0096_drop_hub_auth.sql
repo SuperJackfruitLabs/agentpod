@@ -6,7 +6,7 @@
 -- "user" foreign keys in production, so every DROP CONSTRAINT is IF EXISTS. No DROP TABLE uses
 -- CASCADE: a foreign key into a dropped table that this file does not name must fail the
 -- migration loudly, not vanish silently.
---
+
 -- The 18 product columns that held a Better Auth user id (P3 plan, "Hub user.id column inventory").
 -- They keep their values (prn_ after the rewrite) as plain text.
 ALTER TABLE "admin_audit_log" DROP CONSTRAINT IF EXISTS "admin_audit_log_admin_user_id_user_id_fk";--> statement-breakpoint

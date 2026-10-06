@@ -34,7 +34,12 @@ import { getAuditLogs } from "../models/admin-audit-log";
 export const adminRouter = new Hono();
 
 // 410 managed_by_org_plane for what the plane now owns (decision D3).
-// First, ahead of authMiddleware — a retired route need not authenticate to say it moved.
+// NOT ahead of authentication: index.ts mounts `/api/*` authMiddleware (and ban check, CSRF,
+// activity log) before this router, so a caller is authenticated before they learn a route moved,
+// and an unauthenticated one gets 401. Kept that way on purpose (security review finding 7b):
+// answering 410 before auth would add an unauthenticated path that enumerates the admin surface,
+// for no gain — the people who need the redirect are signed in. It runs ahead of this router's
+// own authMiddleware/adminMiddleware only so a non-operator learns the route moved instead of 403.
 adminRouter.use("*", retiredUnderPlane());
 
 // Apply auth middleware to all admin routes

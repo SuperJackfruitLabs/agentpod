@@ -273,3 +273,88 @@ func TestExchangeNamesTheClientSoARenewalKeepsEveryPlane(t *testing.T) {
 		t.Fatalf("sent client=%q, want %q", clientSeen, ClientID)
 	}
 }
+
+// Security review finding 5: a file or directory that already existed with looser permissions
+// (an older build, a restore from backup, a hand-made dir) kept them, because MkdirAll and
+// WriteFile only set modes on create. And the write was in place, so a crash mid-write left a
+// truncated credential.
+func TestSaveDeviceTightensAnExistingFileAndDirAndReplacesAtomically(t *testing.T) {
+	withConfigDir(t)
+	dir := filepath.Dir(DevicePath())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(DevicePath(), []byte(`{"id":"old","secret":"old"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(DevicePath(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(DevicePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveDevice(Device{ID: "dev_new", Secret: "s"}); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := os.Stat(DevicePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := after.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("device file is %o, want 600", perm)
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := dirInfo.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("config dir is %o, want 700", perm)
+	}
+	if os.SameFile(before, after) {
+		t.Fatal("the credential was rewritten in place; want a new file renamed over the old one")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		names := []string{}
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("want only device.json left behind, got %v", names)
+	}
+	if got, err := LoadDevice(); err != nil || got.ID != "dev_new" {
+		t.Fatalf("LoadDevice after save: %+v, %v", got, err)
+	}
+}
+
+// The token cache goes through the same write: a pre-existing 0644 token.json ends 0600.
+func TestSaveTightensAnExistingTokenFile(t *testing.T) {
+	withConfigDir(t)
+	if err := os.MkdirAll(filepath.Dir(Path()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(Path(), []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(Path(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save("tok", "https://hub.test"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("token file is %o, want 600", perm)
+	}
+}

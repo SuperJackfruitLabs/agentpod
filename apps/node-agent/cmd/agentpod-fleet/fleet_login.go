@@ -285,6 +285,9 @@ func exchange(hub, code, verifier, redirectURI string) (string, error) {
 // command with arguments, so `BROWSER="firefox --private-window"` works. `BROWSER=none` opens
 // nothing and leaves the printed URL as the whole interface, which is what you want over SSH.
 func openBrowser(u string) {
+	if !browsable(u) {
+		return // printed above; a non-web URL is never handed to the OS opener
+	}
 	if b := strings.TrimSpace(os.Getenv("BROWSER")); b != "" {
 		if b == "none" {
 			return
@@ -304,4 +307,11 @@ func openBrowser(u string) {
 		cmd = "xdg-open"
 	}
 	_ = exec.Command(cmd, append(args, u)...).Start()
+}
+
+// browsable is true only for an absolute http(s) URL with a host: `open` and `xdg-open` would
+// otherwise launch a file: path or a custom-scheme handler (security review finding 6).
+func browsable(u string) bool {
+	p, err := url.Parse(u)
+	return err == nil && (p.Scheme == "https" || p.Scheme == "http") && p.Host != ""
 }

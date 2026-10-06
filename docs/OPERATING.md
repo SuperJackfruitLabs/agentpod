@@ -137,7 +137,7 @@ binary, comes in.
 
 ### Signing in
 
-> **Since migration 0095 the hub issues no tokens** (§11). `fleet login` uses the organization
+> **Since migration 0096 the hub issues no tokens** (§11). `fleet login` uses the organization
 > plane's device flow (the hub's `GET /public/org-plane` says which plane); everything below about
 > the hub's own authorize flow and `HUB_OAUTH_CLIENTS` describes the hub before the cutover.
 
@@ -202,7 +202,7 @@ endpoint, not these verbs.
 
 ## 1b. Service principals
 
-> **Since migration 0095 service principals are the organization plane's** (§11): created with
+> **Since migration 0096 service principals are the organization plane's** (§11): created with
 > the plane's `scripts/service.ts`, exchanged at the plane's token endpoint. The hub's
 > `/api/auth/service-token` and `/api/admin/service-principals` answer 410. What follows describes
 > the hub before the cutover; the scopes are unchanged.
@@ -1880,7 +1880,7 @@ The hub moved onto the organization plane at the P4 cutover: `ORG_PLANE_*` set, 
 `user.id` column rewritten to the human's `prn_` by the one-off script `scripts/rewrite-user-ids.ts`,
 and a 7-day rollback window during which the hub's own auth tables stayed, read-only (design §8).
 
-That window is closed. Migration `0095_drop_hub_auth` dropped the hub's Better Auth tables
+That window is closed. Migration `0096_drop_hub_auth` dropped the hub's Better Auth tables
 (`user`, `session`, `account`, `verification`, `jwks`), its issuer tables (`device_credentials`,
 `service_credentials`, `service_signing_keys`, `oauth_codes`) and its copy of the principals
 (`principals`, `principal_identities`, `principal_grants`, `organizations`). The rewrite script
@@ -1902,5 +1902,11 @@ What this means for an operator:
 - **Whom the hub invites to a person's rooms** is the plane's answer: the hub reads a person's
   Matrix id with `GET /api/principals/:id/identities?system=matrix` (contract §3.5), cached
   60 s. A person whose Matrix id is not linked at the plane is not invited until it is.
+- Every hub holds a shared, session-level advisory lock on its database from boot until it
+  exits: key `(1095782212, 1)` (`0x41504F44`, "APOD"), visible in `pg_locks` as
+  `locktype = 'advisory' AND classid = 1095782212 AND objid = 1`
+  (`apps/hub/src/db/hub-running-lock.ts`). A maintenance script that must not run under a live
+  hub takes it exclusively with `pg_try_advisory_lock` and refuses when it cannot; a hub that
+  finds it held exclusively refuses to boot.
 - `legacy_user_principals` (pre-cutover user id → `prn_`) is permanent: other planes recorded
   hub user ids before the cutover, and `GET /api/evidence/principals/:id` still resolves them.

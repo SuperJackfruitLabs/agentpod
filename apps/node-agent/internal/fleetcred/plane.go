@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -64,6 +65,45 @@ func postJSON(url string, body any, bearer string) (*http.Response, error) {
 	return planeHTTP.Do(req)
 }
 
+// ValidatePlaneURL accepts https, or plain http only for a loopback host — the hub's own rule for
+// ORG_PLANE_URL. Anything else (http to a real host, file:, a bare host) is refused: the plane
+// URL receives this machine's device secret (security review finding 6).
+func ValidatePlaneURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return nil, fmt.Errorf("the account service url %q is not an absolute URL", raw)
+	}
+	switch {
+	case u.Scheme == "https":
+	case u.Scheme == "http" && isLoopback(u.Hostname()):
+	default:
+		return nil, fmt.Errorf("the account service url %q must be https (plain http only for a loopback host)", raw)
+	}
+	return u, nil
+}
+
+func isLoopback(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+// checkVerificationPage requires the page a human is sent to (and that openBrowser opens) to be
+// on the plane's own origin — same scheme, host and port — so a hostile answer cannot open an
+// arbitrary URL or a local file on this machine.
+func checkVerificationPage(p Plane, page string) error {
+	if page == "" {
+		return nil
+	}
+	plane, err := ValidatePlaneURL(p.URL)
+	if err != nil {
+		return err
+	}
+	u, err := url.Parse(page)
+	if err != nil || u.Scheme != plane.Scheme || u.Host != plane.Host {
+		return fmt.Errorf("the account service sent a sign-in page %q that is not on %s; refusing to open it", page, p.URL)
+	}
+	return nil
+}
+
 // DiscoverPlane asks the hub. nil, nil means the hub issues its own tokens (legacy).
 func DiscoverPlane(hub string) (*Plane, error) {
 	res, err := planeHTTP.Get(strings.TrimRight(hub, "/") + "/public/org-plane")
@@ -90,11 +130,17 @@ func DiscoverPlane(hub string) (*Plane, error) {
 	if strings.TrimSpace(out.URL) == "" || strings.TrimSpace(out.Audience) == "" {
 		return nil, fmt.Errorf("the hub names an account service (%s) but not its url and audience", *out.Issuer)
 	}
+	if _, err := ValidatePlaneURL(out.URL); err != nil {
+		return nil, fmt.Errorf("the hub names an unusable account service: %w", err)
+	}
 	return &Plane{Issuer: *out.Issuer, URL: strings.TrimRight(out.URL, "/"), Audience: out.Audience}, nil
 }
 
 // StartDeviceFlow asks the plane for a device code and the page the human approves it at.
 func StartDeviceFlow(p Plane) (DeviceCode, error) {
+	if _, err := ValidatePlaneURL(p.URL); err != nil {
+		return DeviceCode{}, err
+	}
 	res, err := postJSON(p.URL+"/api/auth/device/code", map[string]string{"client_id": ClientID, "scope": "openid"}, "")
 	if err != nil {
 		return DeviceCode{}, fmt.Errorf("could not reach the account service: %w", err)
@@ -103,6 +149,12 @@ func StartDeviceFlow(p Plane) (DeviceCode, error) {
 	var dc DeviceCode
 	if err := json.NewDecoder(res.Body).Decode(&dc); err != nil || res.StatusCode != 200 || dc.DeviceCode == "" {
 		return DeviceCode{}, fmt.Errorf("the account service refused to start a sign-in (%d)", res.StatusCode)
+	}
+	if err := checkVerificationPage(p, dc.VerificationURI); err != nil {
+		return DeviceCode{}, err
+	}
+	if err := checkVerificationPage(p, dc.VerificationURIComplete); err != nil {
+		return DeviceCode{}, err
 	}
 	return dc, nil
 }
@@ -175,6 +227,11 @@ func WaitForDevice(p Plane, dc DeviceCode, sleep func(time.Duration)) (Device, e
 
 // ExchangeAtPlane turns the stored device credential into a 5-minute access token for the hub.
 func ExchangeAtPlane(d Device) (string, error) {
+	// device.json is a file on disk; a PlaneURL edited to http (or written by an older build)
+	// must not carry the secret in the clear.
+	if _, err := ValidatePlaneURL(d.PlaneURL); err != nil {
+		return "", err
+	}
 	res, err := postJSON(strings.TrimRight(d.PlaneURL, "/")+"/api/token/device", map[string]string{"audience": d.Audience}, d.ID+":"+d.Secret)
 	if err != nil {
 		return "", fmt.Errorf("could not reach the account service: %w", err)

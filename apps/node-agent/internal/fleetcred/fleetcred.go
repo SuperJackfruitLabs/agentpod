@@ -99,14 +99,11 @@ func Save(token, hub string) error {
 	if p == "" {
 		return errors.New("cannot determine a config directory to store the token in")
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(stored{Token: token, Hub: hub}, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, b, 0o600)
+	return writePrivate(p, b)
 }
 
 // Forget removes the stored token. Absent is success: `logout` twice is not an error.

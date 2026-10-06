@@ -520,7 +520,7 @@ encryption key.
 
 ### The OAuth client registry
 
-> **Removed with migration 0095.** The hub issues no tokens; `HUB_OAUTH_CLIENTS` is no longer read
+> **Removed with migration 0096.** The hub issues no tokens; `HUB_OAUTH_CLIENTS` is no longer read
 > and `/api/auth/*` answers 410. Clients are registered at the organization plane. Of this
 > section only `WORK_PLANE_AUDIENCES` and the node's `stationTokens` still apply (the hub sends
 > those audiences to the plane's `POST /api/token/agent`).
@@ -607,7 +607,7 @@ Stored events are never modified; redaction applies to what the evidence routes 
 The organization plane is the hub's only sign-in and token issuer (the issuer contract,
 `accounts/docs/superpowers/specs/2026-10-06-issuer-contract.md`). The hub's own Better Auth
 sign-in, token issuer and principal tables were removed after the P4 cutover's rollback window
-(migration `0095_drop_hub_auth`; `docs/OPERATING.md` §11). **All five settings are required.**
+(migration `0096_drop_hub_auth`; `docs/OPERATING.md` §11). **All five settings are required.**
 
 | Variable | Meaning |
 |---|---|

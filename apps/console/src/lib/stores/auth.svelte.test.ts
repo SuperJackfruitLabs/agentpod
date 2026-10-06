@@ -492,13 +492,13 @@ describe("under the org plane", () => {
     expect(tok).toHaveBeenCalledTimes(2);
   });
 
-  test("getToken returns the plane token; logout signs out locally", async () => {
+  test("getToken returns the plane token; logout revokes at the plane and forgets locally", async () => {
     setPlane(P);
     vi.spyOn(plane, "planeAccessToken").mockResolvedValue("at1");
-    const out = vi.spyOn(plane, "signOutLocal");
+    const out = vi.spyOn(plane, "signOut").mockResolvedValue();
     expect(await getToken()).toBe("at1");
     await logout();
-    expect(out).toHaveBeenCalled();
+    expect(out).toHaveBeenCalledWith(P); // signOut clears memory first, then revokes (finding 7a)
     expect(mockAuthClient.signOut).not.toHaveBeenCalled();
   });
 

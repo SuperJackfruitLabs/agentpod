@@ -19,7 +19,7 @@ const log = createLogger("database");
 // Configuration
 // =============================================================================
 
-const connectionString =
+export const connectionString =
   process.env.DATABASE_URL ||
   "postgres://agentpod:agentpod-dev-password@localhost:5432/agentpod";
 

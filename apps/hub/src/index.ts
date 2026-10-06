@@ -5,7 +5,8 @@ import { redactUrlSecrets } from './utils/redact-url-secrets.ts';
 import { config, allowedOrigins, isAllowedOrigin } from './config.ts';
 import { validateConfig } from './utils/validate-config.ts';
 import { describeDatabase } from './utils/describe-database.ts';
-import { initDatabase } from './db/drizzle.ts';
+import { connectionString, initDatabase } from './db/drizzle.ts';
+import { holdHubRunningLock } from './db/hub-running-lock.ts';
 import { resetOrphanedOnlineNodes } from './services/node-registry.ts';
 import { authMiddleware } from './auth/middleware.ts';
 import { orgPlaneOutageBody } from './auth/caller-authority.ts';
@@ -110,6 +111,10 @@ validateConfig();
 const telemetryConfig = readTelemetryConfig();
 const telemetry = await initTelemetry(telemetryConfig);
 console.log('telemetry:', telemetry ? `exporting OTLP to ${telemetryConfig.endpoint}` : '(disabled)');
+
+// Held for the life of the process, from before migrations: operator scripts that must not run
+// under a live hub (the cutover script did; any future one should) check for it. src/db/hub-running-lock.ts.
+await holdHubRunningLock(connectionString);
 
 console.log('Initializing database...');
 await initDatabase();
