@@ -82,6 +82,15 @@ export const config = {
     adminToken: getEnv('FORGE_ADMIN_TOKEN', ''),
   },
 
+  /**
+   * Transcript redaction (services/redact-content.ts). `rulesFile` is a JSON list of
+   * `{"name","pattern"}` applied after the built-in rules; unset or absent means none, and a
+   * file that is there but unusable refuses the boot (validate-config.ts).
+   */
+  redaction: {
+    rulesFile: getEnv('HUB_REDACTION_RULES_FILE', '').trim(),
+  },
+
   // Encryption for provider credentials
   encryption: {
     // 32-byte (256-bit) key for AES-256-GCM
