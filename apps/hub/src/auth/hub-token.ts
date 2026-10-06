@@ -19,10 +19,13 @@
  * have no permission", which is the hardest kind to trace.
  */
 import { createLocalJWKSet, jwtVerify, type JSONWebKeySet } from "jose";
+import type { OrgPlaneTokenClaims } from "@agentpod/contract";
 
 import { config } from "../config.ts";
 import { auth } from "./drizzle-auth.ts";
 import { servicePublicJwks } from "./service-signing.ts";
+import { planeVerifier } from "./org-plane/verify.ts";
+import { tenantForOrg } from "./org-plane/tenant.ts";
 
 /**
  * Pinned, never read from the token's own header.
@@ -79,4 +82,37 @@ export async function verifyHubToken(
   } catch {
     return null;
   }
+}
+
+// =============================================================================
+// The organization plane (contract §2), when ORG_PLANE_* is set
+// =============================================================================
+
+export type PlaneCaller = {
+  sub: string;
+  principalKind: "human" | "agent" | "service";
+  tenantId: string;
+  claims: OrgPlaneTokenClaims;
+};
+export type PlaneBearerResult =
+  | { ok: true; caller: PlaneCaller }
+  | { ok: false; status: 401 }
+  | { ok: false; status: 403; body: { error: "product_not_enabled"; org: string } };
+
+/**
+ * The plane-mode counterpart of `verifyHubToken`, shared by every door so none can drift.
+ * Verification is offline (cached JWKS); the tenant lookup is local. No plane call.
+ *
+ * `client_id` / `azp` are not read: any valid token for this hub's audience is accepted,
+ * whichever first-party client asked for it (contract §3.1). `amr` is never required.
+ */
+export async function verifyPlaneBearer(
+  token: string,
+  deps: { verify?: (t: string) => Promise<OrgPlaneTokenClaims | null>; tenantFor?: typeof tenantForOrg } = {},
+): Promise<PlaneBearerResult> {
+  const claims = await (deps.verify ?? ((t: string) => planeVerifier().verify(t)))(token);
+  if (!claims) return { ok: false, status: 401 };
+  const tenant = await (deps.tenantFor ?? tenantForOrg)(claims);
+  if (!tenant.ok) return { ok: false, status: tenant.status, body: tenant.body };
+  return { ok: true, caller: { sub: claims.sub, principalKind: claims.principalKind, tenantId: tenant.tenantId, claims } };
 }

@@ -8,14 +8,15 @@
  */
 
 import { createMiddleware } from "hono/factory";
-import type { Context, Next } from "hono";
+import type { Context, MiddlewareHandler, Next } from "hono";
 import { timingSafeEqual } from "crypto";
 import { auth, type Session, type User } from "./drizzle-auth";
 import { BOOTSTRAP_TENANT_ID } from "./tenant";
 import { config } from "../config";
 import { createLogger } from "../utils/logger";
 import { userIdForTokenSubject } from "../services/principals";
-import { verifyHubToken } from "./hub-token";
+import { verifyHubToken, verifyPlaneBearer } from "./hub-token";
+import { orgPlane, type OrgPlaneConfig } from "./org-plane/config";
 
 const log = createLogger("auth-middleware");
 
@@ -43,7 +44,7 @@ export interface AuthUser {
   email?: string;
   name?: string;
   image?: string;
-  authType: "better_auth" | "api_key" | "hub_token";
+  authType: "better_auth" | "api_key" | "hub_token" | "org_plane";
   /**
    * The isolation boundary this caller acts in.
    *
@@ -122,8 +123,66 @@ export const sessionMiddleware = createMiddleware(async (c: Context, next: Next)
 /**
  * Authentication middleware - requires valid session or API key
  * Use this for protected routes
+ *
+ * With ORG_PLANE_* set, the organization plane is the only issuer (contract §1 cutover rule:
+ * no dual-accept). The plane branch runs first and returns on every path, so no Better Auth
+ * session — cookie, bearer, or one an earlier middleware loaded — and no hub-issued token
+ * authenticates anybody. The static API_TOKEN stays: it is configuration, not an issuer.
+ * Under the plane `AuthUser.id` is the caller's `prn_`.
  */
-export const authMiddleware = createMiddleware(async (c: Context, next: Next) => {
+export function createAuthMiddleware(
+  deps: { plane?: () => OrgPlaneConfig | null; verifyPlane?: typeof verifyPlaneBearer } = {},
+): MiddlewareHandler {
+  return createMiddleware(async (c: Context, next: Next) => {
+    if ((deps.plane ?? orgPlane)()) return planeAuth(c, next, deps.verifyPlane ?? verifyPlaneBearer);
+    return legacyAuth(c, next);
+  });
+}
+
+async function planeAuth(c: Context, next: Next, verifyPlane: typeof verifyPlaneBearer) {
+  const header = c.req.header("Authorization");
+  // ?token= stays, for the browser's WebSocket and EventSource, exactly as in legacy mode.
+  const bearer = header?.startsWith("Bearer ") ? header.slice(7) : c.req.query("token");
+  if (bearer && safeCompare(bearer, config.auth.token)) {
+    c.set("user", { id: config.defaultUserId, authType: "api_key", tenantId: BOOTSTRAP_TENANT_ID });
+    c.set("session", null);
+    c.set("betterAuthUser", null);
+    return next();
+  }
+  if (bearer) {
+    const r = await verifyPlane(bearer);
+    if (r.ok) {
+      // The same refusal as a non-human hub token below: this API is for people.
+      if (r.caller.principalKind !== "human") {
+        log.warn("Refused a non-human plane token", { kind: r.caller.principalKind });
+        return c.json(
+          {
+            error: "Forbidden",
+            message: `This endpoint takes a human principal. That token names a ${r.caller.principalKind}.`,
+          },
+          403
+        );
+      }
+      c.set("user", {
+        id: r.caller.sub,
+        ...(r.caller.claims.email ? { email: r.caller.claims.email } : {}),
+        authType: "org_plane",
+        tenantId: r.caller.tenantId,
+      });
+      c.set("session", null);
+      c.set("betterAuthUser", null);
+      log.debug("Authenticated via org-plane token", { principal: r.caller.sub, tenantId: r.caller.tenantId });
+      return next();
+    }
+    // Contract §2: an entitlement refusal is never a bare 403.
+    if (r.status === 403) return c.json(r.body, 403);
+  }
+  log.warn("Authentication failed - no valid org-plane token or API key");
+  return c.json({ error: "Unauthorized", message: "Valid session or API key required" }, 401);
+}
+
+/** Today's middleware, byte for byte. The only path while ORG_PLANE_* is unset. */
+async function legacyAuth(c: Context, next: Next) {
   // Check for existing session from sessionMiddleware
   const existingUser = c.get("user");
 
@@ -264,7 +323,9 @@ export const authMiddleware = createMiddleware(async (c: Context, next: Next) =>
     },
     401
   );
-});
+}
+
+export const authMiddleware = createAuthMiddleware();
 
 // =============================================================================
 // Optional Auth Middleware
