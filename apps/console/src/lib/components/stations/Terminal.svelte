@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { createTerminalClient } from "$lib/api/terminal";
+  import { socketToken } from "$lib/api/client";
   import type { TerminalClient, TerminalCloseReason } from "$lib/api/terminal";
   import { themeStore } from "$lib/themes/store.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -144,7 +145,8 @@
   function startConnection() {
     status = attempt === 0 ? "connecting" : "reconnecting";
 
-    const c = createTerminalClient(stationId);
+    // A fresh token per dial (reconnects included) under the org plane; null — the cookie — in legacy.
+    const c = createTerminalClient(stationId, socketToken());
     client = c;
 
     c.onData((text: string) => {

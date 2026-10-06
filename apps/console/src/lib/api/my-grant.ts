@@ -13,6 +13,7 @@
  */
 
 import { http } from "./client";
+import { currentPlane, getToken } from "$lib/stores/auth.svelte";
 
 export interface MyReach {
   mayGrantReach: boolean;
@@ -41,7 +42,11 @@ export function myReach(): Promise<MyReach> {
 
   cached = (async () => {
     try {
-      const { token } = await http<{ token?: string }>("/api/auth/token");
+      // Under the org plane the hub no longer mints (`/api/auth/token` is 410); the console's own
+      // plane token carries the same claim.
+      const token = currentPlane()
+        ? await getToken()
+        : (await http<{ token?: string }>("/api/auth/token")).token;
       const claims = token ? claimsOf(token) : null;
       if (!claims || typeof claims.mayGrantReach !== "boolean") return PERMITTED;
       return { mayGrantReach: claims.mayGrantReach };

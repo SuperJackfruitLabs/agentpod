@@ -16,7 +16,7 @@ import type {
   AuditLogResponse,
   UserRole,
 } from "@agentpod/types";
-import { handleUnauthorized } from "./client";
+import { authFetch, handleUnauthorized } from "./client";
 import { apiError, networkError } from "./http-error";
 // =============================================================================
 // API Client Helper
@@ -48,15 +48,14 @@ async function apiRequest<T>(
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string> || {}),
   };
-  // Auth is via the session cookie (credentials: "include"), same as api/client.ts.
+  // Auth as in api/client.ts: the plane's bearer token under the org plane, else the session cookie.
 
   const requestLine = `${options.method ?? "GET"} ${path}`;
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}${path}`, {
+    response = await authFetch(`${baseUrl}${path}`, {
       ...options,
       headers,
-      credentials: "include",
     });
   } catch (err) {
     throw networkError(requestLine, err);

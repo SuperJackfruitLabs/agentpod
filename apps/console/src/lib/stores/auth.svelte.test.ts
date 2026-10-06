@@ -7,6 +7,7 @@
 import { vi, test, expect, beforeEach, afterEach, describe } from "vitest";
 import * as plane from "$lib/auth/org-plane";
 import * as staticAuth from "./auth.svelte";
+import * as myGrant from "$lib/api/my-grant";
 
 // ---------------------------------------------------------------------------
 // Hoist mock objects so they are available inside vi.mock factory closures
@@ -507,6 +508,28 @@ describe("under the org plane", () => {
     clearAuthSession();
     expect(staticAuth.currentPlane()).toBeNull();
     expect(out).toHaveBeenCalled();
+  });
+
+  test("getToken(minValiditySec) passes the floor to the plane", async () => {
+    setPlane({ issuer: "i", url: "u", audience: "a" });
+    const spy = vi.spyOn(plane, "planeAccessToken").mockResolvedValue("at1");
+    await getToken(60);
+    expect(spy).toHaveBeenCalledWith({ issuer: "i", url: "u", audience: "a" }, { minValiditySec: 60 });
+  });
+
+  test("logout forgets the cached reach answer (it belonged to the user who left)", async () => {
+    setPlane(P);
+    const forget = vi.spyOn(myGrant, "forgetMyReach");
+    await logout();
+    expect(forget).toHaveBeenCalled();
+  });
+
+  test("legacy logout forgets the cached reach answer too", async () => {
+    setPlane(null);
+    mockAuthClient.signOut.mockResolvedValue({});
+    const forget = vi.spyOn(myGrant, "forgetMyReach");
+    await logout();
+    expect(forget).toHaveBeenCalled();
   });
 
   test("legacy mode: getToken is still null", async () => {

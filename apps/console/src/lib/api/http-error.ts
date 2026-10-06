@@ -20,13 +20,36 @@ export class ApiError extends Error {
    * only, and not guaranteed stable across releases).
    */
   readonly code?: string;
+  /**
+   * Where the thing now lives, when the hub says it is managed elsewhere: under the org plane the
+   * hub answers `410 { error: "managed_by_org_plane", url }` for users, grants and devices.
+   */
+  readonly url?: string;
 
-  constructor(message: string, opts: { status: number | null; detail: string; code?: string }) {
+  constructor(message: string, opts: { status: number | null; detail: string; code?: string; url?: string }) {
     super(message);
     this.name = "ApiError";
     this.status = opts.status;
     this.detail = opts.detail;
     this.code = opts.code;
+    this.url = opts.url;
+  }
+}
+
+/** The hub's refusal for anything the organization plane now owns. */
+export const MANAGED_BY_ORG_PLANE = "managed_by_org_plane";
+
+/**
+ * The plane's page for a refusal the hub answered with `managed_by_org_plane`, or null. Only an
+ * http(s) URL comes back, so a page can put it in an `href` as it is.
+ */
+export function managedByPlaneUrl(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.code !== MANAGED_BY_ORG_PLANE || !err.url) return null;
+  try {
+    const u = new URL(err.url);
+    return u.protocol === "https:" || u.protocol === "http:" ? u.href : null;
+  } catch {
+    return null;
   }
 }
 
@@ -59,6 +82,7 @@ export async function apiError(res: Response, requestLine: string): Promise<ApiE
   const detail = `${requestLine} → ${res.status}`;
   let hubMessage: string | undefined;
   let code: string | undefined;
+  let url: string | undefined;
   try {
     const text = await res.text();
     if (text) {
@@ -67,6 +91,11 @@ export async function apiError(res: Response, requestLine: string): Promise<ApiE
         const candidate = parsed.message ?? parsed.error;
         if (typeof candidate === "string" && candidate.trim()) hubMessage = candidate;
         if (typeof parsed.code === "string" && parsed.code.trim()) code = parsed.code;
+        if (parsed.error === MANAGED_BY_ORG_PLANE) {
+          code = MANAGED_BY_ORG_PLANE;
+          hubMessage = "This is managed in your Super Jackfruit account";
+          if (typeof parsed.url === "string") url = parsed.url;
+        }
       } catch {
         // Non-JSON body (HTML error page, plain text): only trust short plain
         // strings — never dump an HTML document into a toast.
@@ -78,7 +107,7 @@ export async function apiError(res: Response, requestLine: string): Promise<ApiE
   }
 
   const message = hubMessage ? asSentence(hubMessage) : copyForStatus(res.status);
-  return new ApiError(message, { status: res.status, detail, code });
+  return new ApiError(message, { status: res.status, detail, code, url });
 }
 
 /** Build an ApiError for a request that never got a response (fetch threw). */

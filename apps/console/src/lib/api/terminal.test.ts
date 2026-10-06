@@ -77,6 +77,9 @@ afterEach(() => {
 // Imported after stubs so the module can read globalThis.WebSocket at call time
 // (it doesn't capture it at import time).
 import { createTerminalClient } from "./terminal";
+import { socketToken } from "./client";
+import { beginSignIn, completeSignIn, signOutLocal } from "$lib/auth/org-plane";
+import { clearAuthSession, setPlane } from "$lib/stores/auth.svelte";
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
@@ -228,4 +231,90 @@ test("{t:'exit'} then the resulting ws.close() does not double-fire onClose", ()
   MockWebSocket.instance!.fireMessage({ t: "exit" }); // client reacts by closing the socket
 
   expect(reasons).toEqual(["exit"]);
+});
+
+// ─── Under the organization plane (P3 Task 15) ───────────────────────────────
+
+test("a token rides the socket URL as ?token= (WebSocket cannot send headers)", () => {
+  createTerminalClient("st_1", "at1");
+  expect(MockWebSocket.instance!.url).toMatch(/\/api\/stations\/st_1\/terminal\?token=at1$/);
+});
+
+test("with a pending token, nothing is dialled until it arrives; early input is not lost", async () => {
+  let resolve!: (t: string | null) => void;
+  const pending = new Promise<string | null>((r) => (resolve = r));
+  const c = createTerminalClient("st_1", pending);
+  c.send("ls\n");
+  c.resize(80, 24);
+  expect(MockWebSocket.instance).toBeNull();
+  resolve("at1");
+  await pending;
+  await Promise.resolve();
+  const ws = MockWebSocket.instance!;
+  expect(ws.url).toMatch(/\?token=at1$/);
+  ws.open();
+  expect(ws.sent.map((m) => JSON.parse(m).t)).toEqual(["input", "resize"]);
+});
+
+test("closed before its token arrives, it never dials and never reports a close", async () => {
+  let resolve!: (t: string | null) => void;
+  const pending = new Promise<string | null>((r) => (resolve = r));
+  const c = createTerminalClient("st_1", pending);
+  const onClose = vi.fn();
+  c.onClose(onClose);
+  c.close();
+  resolve("at1");
+  await pending;
+  await Promise.resolve();
+  expect(MockWebSocket.instance).toBeNull();
+  expect(onClose).not.toHaveBeenCalled();
+});
+
+/**
+ * Review Focus 5: a console tab left open until its 5-minute token is nearly (or fully) spent,
+ * then a terminal opened. The console must refresh first, so the socket carries a token that
+ * outlives the upgrade — not one that dies on the wire.
+ */
+test("opens the terminal socket with a token fresh enough to last", async () => {
+  const PLANE = { issuer: "https://accounts.test", url: "https://accounts.test", audience: "https://hub.test" };
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(1_000_000);
+    clearAuthSession();
+    setPlane(PLANE);
+    let went = "";
+    await beginSignIn(PLANE, { returnTo: "/", origin: "https://console.test", navigate: (u) => (went = u) });
+    const state = new URL(went).searchParams.get("state")!;
+    await completeSignIn(new URLSearchParams({ code: "c", state }), PLANE, {
+      origin: "https://console.test",
+      fetchFn: (async () => json({ access_token: "at-stale", expires_in: 300, refresh_token: "rt1" })) as never,
+    });
+
+    // 250 s later: 50 s of life left. Enough for an ordinary fetch (30 s floor), not for a socket.
+    vi.setSystemTime(1_000_000 + 250_000);
+    const refresh = vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ access_token: "at-fresh", expires_in: 300, refresh_token: "rt2" }));
+    createTerminalClient("st_1", socketToken());
+    await vi.waitFor(() => expect(MockWebSocket.instance).toBeTruthy());
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(MockWebSocket.instance!.url).toBe("ws://hub.test:3001/api/stations/st_1/terminal?token=at-fresh");
+
+    // Left open past the token's whole life: refreshed again, never the dead one.
+    MockWebSocket.instance = null;
+    vi.setSystemTime(1_000_000 + 250_000 + 400_000);
+    refresh.mockResolvedValue(json({ access_token: "at-fresher", expires_in: 300, refresh_token: "rt3" }));
+    createTerminalClient("st_1", socketToken());
+    await vi.waitFor(() => expect(MockWebSocket.instance).toBeTruthy());
+    expect(MockWebSocket.instance!.url).toMatch(/\?token=at-fresher$/);
+  } finally {
+    vi.useRealTimers();
+    signOutLocal();
+    clearAuthSession();
+  }
+});
+
+test("legacy mode: the socket URL carries no token", () => {
+  clearAuthSession();
+  createTerminalClient("st_1", socketToken());
+  expect(MockWebSocket.instance!.url).toBe("ws://hub.test:3001/api/stations/st_1/terminal");
 });

@@ -9,6 +9,7 @@
 
 import { createAuthClient } from "better-auth/svelte";
 import { planeAccessToken, signOutLocal, type PlaneDiscovery } from "$lib/auth/org-plane";
+import { forgetMyReach } from "$lib/api/my-grant";
 
 // =============================================================================
 // Dynamic Auth Client
@@ -351,6 +352,8 @@ export async function logout(): Promise<void> {
   isLoading = true;
   error = null;
 
+  // The reach answer belonged to whoever was signed in; the next user must ask again.
+  forgetMyReach();
   try {
     if (plane) {
       // Tokens are memory-only: forgetting them is the sign-out. The plane's session is its own.
@@ -384,11 +387,12 @@ export async function refreshToken(): Promise<boolean> {
 /**
  * Get the current access token (for API calls).
  *
- * Under the org plane: the plane's access token, refreshed first when it is about to expire.
+ * Under the org plane: the plane's access token, refreshed first when it has under
+ * `minValiditySec` left (default 30 s; sockets ask for more so the token outlives the upgrade).
  * Legacy: null — Better Auth uses an HTTP-only cookie and API calls send `credentials: "include"`.
  */
-export async function getToken(): Promise<string | null> {
-  return plane ? planeAccessToken(plane) : null;
+export async function getToken(minValiditySec?: number): Promise<string | null> {
+  return plane ? planeAccessToken(plane, minValiditySec ? { minValiditySec } : {}) : null;
 }
 
 /**

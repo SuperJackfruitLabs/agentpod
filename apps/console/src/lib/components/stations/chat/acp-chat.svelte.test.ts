@@ -13,6 +13,7 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AcpEvent, AcpSessionRow } from "@agentpod/contract";
 import * as api from "$lib/api/acp";
+import * as client from "$lib/api/client";
 import { AcpChat, ECHO_DEADLINE_MS, _setEchoDeadlineMsForTest } from "./acp-chat.svelte";
 
 // ─── Minimal WebSocket stub ───────────────────────────────────────────────────
@@ -1231,4 +1232,45 @@ test("end() refreshes the session list so the switcher shows it ended", async ()
   await chat.end();
 
   expect(chat.sessions.map((s) => s.status)).toEqual(["ended"]);
+});
+
+// ─── Under the organization plane (P3 Task 15) ───────────────────────────────
+
+test("under the plane the session socket dials with a fresh socket token, and subscribe still goes first", async () => {
+  const tok = vi.spyOn(client, "socketToken").mockReturnValue(Promise.resolve("at1"));
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row()]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  await vi.waitFor(() => expect(MockWebSocket.latest()).toBeTruthy());
+  const ws = MockWebSocket.latest()!;
+  expect(tok).toHaveBeenCalled();
+  expect(ws.url).toBe("ws://hub.test:3001/api/acp/sessions/s1/ws?token=at1");
+  ws.open();
+  expect(ws.frames()[0]).toEqual({ t: "subscribe", sinceSeq: 0 });
+  chat.destroy();
+});
+
+test("a reconnect asks for a fresh token again (an open socket outlives its token; a redial needs a new one)", async () => {
+  const tok = vi.spyOn(client, "socketToken").mockReturnValueOnce(Promise.resolve("at1")).mockReturnValue(Promise.resolve("at2"));
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row()]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  await vi.waitFor(() => expect(MockWebSocket.instances.length).toBe(1));
+  const first = MockWebSocket.latest()!;
+  first.open();
+  first.drop();
+  await vi.runAllTimersAsync();
+  await vi.waitFor(() => expect(MockWebSocket.instances.length).toBe(2));
+  expect(tok).toHaveBeenCalledTimes(2);
+  expect(MockWebSocket.latest()!.url).toMatch(/\?token=at2$/);
+  chat.destroy();
+});
+
+test("legacy mode: the session socket carries no token", async () => {
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row()]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  expect(MockWebSocket.latest()!.url).toBe("ws://hub.test:3001/api/acp/sessions/s1/ws");
+  chat.destroy();
 });
