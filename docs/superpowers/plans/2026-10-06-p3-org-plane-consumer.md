@@ -51,13 +51,16 @@ The five inputs the spec implies, that no task's happy-path test would naturally
 - **D4 — "Admin" becomes a hub-local list of operator principals.** `isUserAdmin` reads `user.role` (`apps/hub/src/models/admin-users.ts:342-349`), and the plane's token carries no role. A new `hub_operators(principal_id)` table, seeded by the rewrite script from `user.role = 'admin'`, answers `isUserAdmin` under the plane. It is AgentPod's own seat, like Superpipeline's (design §4 "Product seats … stay in each product").
 - **D5 — A discovery route, not build-time configuration, tells the console and the CLI which issuer to use.** `GET /public/org-plane` answers `{ issuer: null }` today and `{ issuer, url, audience }` under the plane. The console is a static build (`apps/console/src/routes/+layout.ts:2-3`) shipped independently of the hub, and `fleet` already resolves everything from the hub URL (`apps/node-agent/cmd/agentpod-fleet/fleet.go:35-40`); asking the hub keeps both from needing a rebuild or a new environment variable at cutover.
 
-## Contract gaps this plan depends on (raise with P2 before Task 9)
+## Contract points this plan relies on
 
-- **G1 — Human assertion for Matrix gate approvals.** Today `mintPrincipalAssertion` (`apps/hub/src/auth/service-signing.ts:241-250`) signs a token whose `sub` is a *human* and `act.sub` the bridge, for Superpipeline (`apps/hub/src/services/matrix-as/index.ts:414,489`). The contract's only on-behalf endpoint, `POST /api/token/agent`, checks "the agent's `organization_id` equals the service's", and a human has no `organization_id` (design §4 CHECK). So under the plane, gate and elicitation answers from chat have no token to carry. Task 10 refuses them visibly; it lights up when P2 adds an endpoint (this plan assumes `POST /api/token/assertion { principal, audience }` under scope `token:assert` and isolates the path behind one function).
-- **G2 — Grants in `GET /api/principals/:id`.** The hub reads grants for callers with no token in hand (Matrix inbound dispatch `matrix-as/inbound.ts:488-489`, `grant-reach.ts:98,153`, `missions.ts:132`, `station-say.ts:78`, `acp-sessions.ts:933`). The contract lists `GET /api/principals/:id` without a response shape. This plan assumes `{ id, kind, handle, displayName, organizationId, suspended, email?, emailVerified?, grant: { mayDispatch, mayGrantReach, scopes } | null }`.
-- **G3 — A list endpoint.** `listPrincipals` feeds `GET /api/admin/principals`, handle-uniqueness and `fleet-dispatchable.ts:97`. This plan assumes `GET /api/principals?kind=<kind>` scoped to the caller's workspace under `principals:read`.
-- **G4 — Station tokens with several audiences.** Station tokens carry `STATION_TOKEN_AUDIENCES` (`apps/hub/src/config.ts:455-461`: the hub plus `WORK_PLANE_AUDIENCES`). The contract's `audience` is singular. Task 7 sends a string when the list has one entry and an array otherwise; P2 must accept the array or the hub must stop offering work-plane audiences.
-- **G5 — The `act` claim loses the node.** Today a station token's `act.sub` is the node id (`station-token.ts:126`), which bounds a compromised node's blast radius in the record. The plane sets `act.sub` to the hub's service principal. The hub logs `{ nodeId, stationId, principal, jti }` for every exchange in Task 7 so the attribution survives in the hub's own log.
+AgentPod's first draft of this plan found five gaps. Contract commit `cbc3098` on `accounts` `main` closed four of them; the fifth is a property of the design that the hub works around.
+
+- **Human assertion (was G1) — contract §3.4b.** `POST /api/token/assertion { identity: { system: "matrix", externalId }, audience }` with the hub's `svc_`, scope `token:assert`. The plane resolves the human from the linked identity itself (it never takes a caller-supplied `prn_`), requires a human member of the hub's workspace who is not suspended, and signs `sub` = the human, `act.sub` = the hub's service principal, `amr: ["assertion"]`, 120 s. Errors `403 not_permitted`, `404 unknown_identity`, `409 not_human`, `423 suspended`. This replaces `mintPrincipalAssertion` (`apps/hub/src/auth/service-signing.ts:241-250`) in Task 10.
+- **Principal reads (was G2/G3) — contract §3.5.** `GET /api/principals/:id` → `{ id, kind, handle, displayName, organizationId, suspended, grant: { mayDispatch, mayGrantReach, scopes } }`, and `GET /api/principals?kind=agent|service|human` lists the caller's workspace (humans = its members) in the same shape, unpaged below 500. Both need `principals:read`. No email in either: under the plane the hub never needs a principal's email (it only fed the hub's own token minting).
+- **Several audiences (was G4) — contract §3.4.** `POST /api/token/agent` takes `audience` as a string or an array. Task 7 sends the hub plus any `WORK_PLANE_AUDIENCES`.
+- **Migrated humans' ids — contract §2 "Migrated humans (P4)".** At import the plane re-keys each migrated human's `user.id` to their existing `prn_` (the value `principal_identities (system = 'better-auth')` maps the old id to). So OAuth `sub` is a `prn_` for everyone, and Task 13's rewrite maps every old user id to that same `prn_`.
+- **Other clients may hold hub tokens — contract §3.1.** `superpipeline-web` may request the hub resource (for its assignee picker's `/api/fleet/dispatchable`). The hub ignores `client_id`/`azp` and accepts any valid human token for its audience, so Task 5 needs no client allowlist; Task 5 pins this with a test.
+- **The `act` claim names the hub, not the node (G5, still open by design).** Today a station token's `act.sub` is the node id (`station-token.ts:126`), which bounds a compromised node's blast radius in the record. The plane sets `act.sub` to the hub's service principal. The hub logs `{ nodeId, stationId, principal, jti }` for every exchange in Task 7 so the attribution survives in the hub's own log.
 
 ## Hub `user.id` column inventory
 
@@ -144,7 +147,7 @@ CLI (`apps/node-agent/`): `internal/fleetcred/plane.go` (new), `internal/fleetcr
 
 ## Task order and shippability
 
-Tasks 1–8 are independent of the plane's P2 gaps. Tasks 9–11 depend on G1–G3 being confirmed (their code is written against the assumed shapes and isolated in `services/org-plane/client.ts`, so a shape change is one file). Task 13 can run in parallel with 9–12. Tasks 14–16 need only Task 1's discovery route. Task 17 is written and merged **only after P4 + 7 days**.
+Tasks 1–8 depend only on the contract's verification and agent-token sections. Tasks 9–11 use the §3.4b and §3.5 endpoints; every plane call is in `services/org-plane/client.ts`, so a shape change is one file. Task 13 can run in parallel with 9–12. Tasks 14–16 need only Task 1's discovery route. Task 17 is written and merged **only after P4 + 7 days**.
 
 Every task keeps production identical while `ORG_PLANE_*` is unset; each task's tests include a "legacy mode unchanged" case.
 
@@ -541,7 +544,7 @@ Edit `fixtures/ecosystem-identity/token_claims.json`:
   "claim": "amr",
   "type": "string[]",
   "required": false,
-  "meaning": "How the subject authenticated: [\"device\"], [\"exchange\"] or [\"service\"].",
+  "meaning": "How the subject authenticated: [\"device\"], [\"exchange\"], [\"service\"] or [\"assertion\"] (a service asserting a human who acted from chat, contract §3.4b).",
   "whyItExists": "A consumer may refuse to turn a device-exchanged token into a session.",
   "consumerObligation": "Never require it: it is absent on OAuth authorization-code tokens, where the provider reserves the claim."
 }
@@ -1265,6 +1268,15 @@ describe("authMiddleware with ORG_PLANE_* set", () => {
     expect((await a.request("/api/whoami")).status).toBe(401);
   });
 
+  test("a human token minted for another first-party client (superpipeline-web, contract §3.1) is admitted", async () => {
+    const viaSuperpipeline = {
+      ...human,
+      caller: { ...(human as { caller: object }).caller, claims: { email: "op@example.com", client_id: "superpipeline-web", azp: "superpipeline-web" } },
+    } as PlaneBearerResult;
+    const res = await app(viaSuperpipeline).request("/api/whoami", { headers: { Authorization: "Bearer t" } });
+    expect(res.status).toBe(200);
+  });
+
   test("the static API_TOKEN keeps working (it is configuration, not an issuer)", async () => {
     const res = await app({ ok: false, status: 401 }).request("/api/whoami", {
       headers: { Authorization: `Bearer ${config.auth.token}` },
@@ -1568,16 +1580,16 @@ git commit -m "feat(hub): verify org-plane tokens at every door when ORG_PLANE_*
 - Produces:
   - `class OrgPlaneError extends Error { readonly status: number; readonly code: string }` — `status: 0, code: "unreachable"` for network failures and timeouts.
   - `interface PlaneGrant { mayDispatch: string[]; mayGrantReach: boolean; scopes: string[] }`
-  - `interface PlanePrincipal { id: string; kind: "human" | "agent" | "service"; handle: string; displayName: string | null; organizationId: string | null; suspended: boolean; email: string | null; emailVerified: boolean | null; grant: PlaneGrant | null }` (gap G2)
+  - `interface PlanePrincipal { id: string; kind: "human" | "agent" | "service"; handle: string; displayName: string | null; organizationId: string | null; suspended: boolean; grant: PlaneGrant | null }` (contract §3.5)
   - `interface OrgPlaneClient`:
     - `agentToken(principal: string, audience: string | string[]): Promise<{ accessToken: string; expiresIn: number }>`
-    - `assertionToken(principal: string, audience: string): Promise<{ accessToken: string; expiresIn: number }>` (gap G1)
+    - `assertionToken(identity: { system: string; externalId: string }, audience: string): Promise<{ accessToken: string; expiresIn: number }>` (contract §3.4b)
     - `createAgent(input: { handle: string; displayName: string }): Promise<{ id: string }>`
     - `putGrant(id: string, grant: PlaneGrant): Promise<void>`
     - `linkIdentity(id: string, system: string, externalId: string): Promise<void>`
     - `lookupIdentity(system: string, externalId: string): Promise<{ principalId: string; kind: "human" | "agent" | "service"; suspended: boolean } | null>`
     - `getPrincipal(id: string): Promise<PlanePrincipal | null>`
-    - `listPrincipals(kind?: "human" | "agent" | "service"): Promise<PlanePrincipal[]>` (gap G3)
+    - `listPrincipals(kind: "human" | "agent" | "service"): Promise<PlanePrincipal[]>` (contract §3.5; `kind` is required)
   - `createOrgPlaneClient(o: { url: string; credential: ServiceCredential; fetch?: (url: string, init: RequestInit) => Promise<Response>; timeoutMs?: number }): OrgPlaneClient`
   - `orgPlaneClient(): OrgPlaneClient` (singleton from `orgPlane()`; throws in legacy mode) and `setOrgPlaneClientForTests(c: OrgPlaneClient | null): () => void`.
 
@@ -1654,10 +1666,23 @@ describe("OrgPlaneClient", () => {
   test("getPrincipal returns the principal and its grant", async () => {
     const p = {
       id: "prn_aaaaaaaaaaaaaaaaaaaa", kind: "agent", handle: "cody", displayName: "Cody", organizationId: "org_00000000000000000000",
-      suspended: false, email: null, emailVerified: null, grant: { mayDispatch: [], mayGrantReach: false, scopes: ["runs:write"] },
+      suspended: false, grant: { mayDispatch: [], mayGrantReach: false, scopes: ["runs:write"] },
     };
     const { client } = fake(() => json(200, p));
     expect(await client.getPrincipal(p.id)).toEqual(p as never);
+  });
+
+  test("assertionToken sends the Matrix identity, never a prn_ (contract §3.4b)", async () => {
+    const { seen, client } = fake(() => json(200, { access_token: "a", token_type: "Bearer", expires_in: 120 }));
+    expect(await client.assertionToken({ system: "matrix", externalId: "@op:id.test" }, "https://app.test")).toEqual({ accessToken: "a", expiresIn: 120 });
+    expect(seen[0]!.url).toBe("https://accounts.test/api/token/assertion");
+    expect(seen[0]!.body).toEqual({ identity: { system: "matrix", externalId: "@op:id.test" }, audience: "https://app.test" });
+  });
+
+  test("listPrincipals always names a kind", async () => {
+    const { seen, client } = fake(() => json(200, []));
+    await client.listPrincipals("agent");
+    expect(seen[0]!.url).toBe("https://accounts.test/api/principals?kind=agent");
   });
 
   test("createAgent, putGrant, linkIdentity, suspend shapes", async () => {
@@ -1688,8 +1713,8 @@ Expected: FAIL — module not found.
 ```ts
 /**
  * Every call the hub makes to the organization plane, in one place, authenticated with the
- * hub's own `svc_` credential (contract §3). Response shapes the contract leaves open are the
- * ones this plan asks P2 to confirm (gaps G1–G3); a change there is a change here only.
+ * hub's own `svc_` credential (contract §3, §3.4b, §3.5). A shape change at the plane is a
+ * change here only.
  */
 import { orgPlane, type ServiceCredential } from "../../auth/org-plane/config";
 
@@ -1709,21 +1734,19 @@ export interface PlanePrincipal {
   displayName: string | null;
   organizationId: string | null;
   suspended: boolean;
-  email: string | null;
-  emailVerified: boolean | null;
   grant: PlaneGrant | null;
 }
 export interface PlaneToken { accessToken: string; expiresIn: number }
 
 export interface OrgPlaneClient {
   agentToken(principal: string, audience: string | string[]): Promise<PlaneToken>;
-  assertionToken(principal: string, audience: string): Promise<PlaneToken>;
+  assertionToken(identity: { system: string; externalId: string }, audience: string): Promise<PlaneToken>;
   createAgent(input: { handle: string; displayName: string }): Promise<{ id: string }>;
   putGrant(id: string, grant: PlaneGrant): Promise<void>;
   linkIdentity(id: string, system: string, externalId: string): Promise<void>;
   lookupIdentity(system: string, externalId: string): Promise<{ principalId: string; kind: PlaneKind; suspended: boolean } | null>;
   getPrincipal(id: string): Promise<PlanePrincipal | null>;
-  listPrincipals(kind?: PlaneKind): Promise<PlanePrincipal[]>;
+  listPrincipals(kind: PlaneKind): Promise<PlanePrincipal[]>;
   suspend(id: string): Promise<void>;
   unsuspend(id: string): Promise<void>;
 }
@@ -1776,7 +1799,7 @@ export function createOrgPlaneClient(o: {
 
   return {
     agentToken: async (principal, audience) => token(await call("POST", "/api/token/agent", { principal, audience })),
-    assertionToken: async (principal, audience) => token(await call("POST", "/api/token/assertion", { principal, audience })),
+    assertionToken: async (identity, audience) => token(await call("POST", "/api/token/assertion", { identity, audience })),
     createAgent: async ({ handle, displayName }) => ok(await call("POST", "/api/principals", { kind: "agent", handle, displayName })),
     putGrant: async (id, grant) => void ok(await call("PUT", `/api/principals/${enc(id)}/grants`, grant)),
     linkIdentity: async (id, system, externalId) =>
@@ -1784,7 +1807,7 @@ export function createOrgPlaneClient(o: {
     lookupIdentity: async (system, externalId) =>
       ok(await call("GET", `/api/identities/${enc(system)}/${enc(externalId)}`), true),
     getPrincipal: async (id) => ok(await call("GET", `/api/principals/${enc(id)}`), true),
-    listPrincipals: async (kind) => ok(await call("GET", `/api/principals${kind ? `?kind=${enc(kind)}` : ""}`)),
+    listPrincipals: async (kind) => ok(await call("GET", `/api/principals?kind=${enc(kind)}`)),
     suspend: async (id) => void ok(await call("POST", `/api/principals/${enc(id)}/suspend`)),
     unsuspend: async (id) => void ok(await call("POST", `/api/principals/${enc(id)}/unsuspend`)),
   };
@@ -1918,7 +1941,7 @@ import { createLogger } from "../utils/logger";
 
 const log = createLogger("station-token");
 
-/** The plane's audience for this hub first, then any configured work planes (gap G4). */
+/** The plane's audience for this hub first, then any configured work planes (contract §3.4: string or array). */
 export function stationAudiences(plane: OrgPlaneConfig): string[] {
   return [plane.audience, ...STATION_TOKEN_AUDIENCES.filter((a) => a !== HUB_AUDIENCE && a !== plane.audience)];
 }
@@ -2146,7 +2169,7 @@ import { OrgPlaneError, type PlanePrincipal } from "./client";
 
 const P: PlanePrincipal = {
   id: "prn_aaaaaaaaaaaaaaaaaaaa", kind: "agent", handle: "cody", displayName: "Cody", organizationId: "org_00000000000000000000",
-  suspended: false, email: null, emailVerified: null, grant: { mayDispatch: [], mayGrantReach: false, scopes: [] },
+  suspended: false, grant: { mayDispatch: [], mayGrantReach: false, scopes: [] },
 };
 
 function setup() {
@@ -2163,7 +2186,7 @@ function setup() {
       if (state.down) throw new OrgPlaneError(0, "unreachable");
       return { principalId: P.id, kind: "agent" as const, suspended: false };
     },
-    listPrincipals: async () => [P],
+    listPrincipals: async (kind: string) => (kind === P.kind ? [P] : []),
   });
   const dir = createPrincipalDirectory({ client, ttlMs: 60_000, now: () => now });
   return { state, dir, advance: (ms: number) => (now += ms) };
@@ -2226,10 +2249,10 @@ import { resolveMatrixId } from "../matrix-identity";
 
 const HUMAN: PlanePrincipal = {
   id: "prn_hhhhhhhhhhhhhhhhhhhh", kind: "human", handle: "op", displayName: "Op", organizationId: null,
-  suspended: false, email: "op@example.com", emailVerified: true,
+  suspended: false,
   grant: { mayDispatch: ["prn_aaaaaaaaaaaaaaaaaaaa"], mayGrantReach: true, scopes: [] },
 };
-const AGENT: PlanePrincipal = { ...HUMAN, id: "prn_aaaaaaaaaaaaaaaaaaaa", kind: "agent", handle: "cody", email: null, emailVerified: null, suspended: true, grant: null };
+const AGENT: PlanePrincipal = { ...HUMAN, id: "prn_aaaaaaaaaaaaaaaaaaaa", kind: "agent", handle: "cody", suspended: true, grant: null };
 
 function dir(over: Partial<PrincipalDirectory> = {}): PrincipalDirectory {
   const all = new Map([HUMAN, AGENT].map((p) => [p.id, p]));
@@ -2252,7 +2275,8 @@ function plane(d = dir()) {
 describe("principal reads under the plane", () => {
   test("principalById maps the plane's principal; suspended reads as a truthy suspendedAt", async () => {
     plane();
-    expect(await principalById(HUMAN.id)).toEqual({ id: HUMAN.id, kind: "human", suspendedAt: null, email: "op@example.com", emailVerified: true });
+    // The plane's principal read carries no email; nothing under the plane needs it.
+    expect(await principalById(HUMAN.id)).toEqual({ id: HUMAN.id, kind: "human", suspendedAt: null, email: null, emailVerified: null });
     expect((await principalById(AGENT.id))?.suspendedAt).toBe(SUSPENDED_AT_UNKNOWN);
   });
 
@@ -2320,7 +2344,7 @@ describe("GET /api/evidence/principals/:id under the plane (superwitness's run j
       setPrincipalDirectoryForTests({
         principal: async (id) =>
           id === "prn_aaaaaaaaaaaaaaaaaaaa"
-            ? { id, kind: "agent", handle: "cody", displayName: "Cody", organizationId: "org_00000000000000000000", suspended: true, email: null, emailVerified: null, grant: null }
+            ? { id, kind: "agent", handle: "cody", displayName: "Cody", organizationId: "org_00000000000000000000", suspended: true, grant: null }
             : null,
         identity: async () => null,
         list: async () => [],
@@ -2398,7 +2422,13 @@ export function createPrincipalDirectory(o: {
   return {
     principal: (id) => cached(`p:${id}`, () => o.client().getPrincipal(id)),
     identity: (system, ext) => cached(`i:${system}:${ext}`, () => o.client().lookupIdentity(system, ext)),
-    list: (kind) => cached(`l:${kind ?? "*"}`, () => o.client().listPrincipals(kind)),
+    // The plane lists one kind per call (contract §3.5); "all" is three calls, cached as one.
+    list: (kind) =>
+      cached(`l:${kind ?? "*"}`, async () =>
+        kind
+          ? o.client().listPrincipals(kind)
+          : (await Promise.all((["human", "agent", "service"] as const).map((k) => o.client().listPrincipals(k)))).flat(),
+      ),
     invalidate: (id) => {
       if (!id) return cache.clear();
       cache.delete(`p:${id}`);
@@ -2436,7 +2466,7 @@ import { orgPlaneClient, type PlanePrincipal } from "./org-plane/client";
 export const SUSPENDED_AT_UNKNOWN = new Date(0);
 
 function fromPlane(p: PlanePrincipal): ResolvedPrincipal {
-  return { id: p.id, kind: p.kind, suspendedAt: p.suspended ? SUSPENDED_AT_UNKNOWN : null, email: p.email, emailVerified: p.emailVerified };
+  return { id: p.id, kind: p.kind, suspendedAt: p.suspended ? SUSPENDED_AT_UNKNOWN : null, email: null, emailVerified: null };
 }
 ```
 
@@ -2611,107 +2641,207 @@ git commit -m "feat(hub): principal, grant and Matrix-sender reads through the o
 
 ---
 
-### Task 10: Gate approvals from chat under the plane (gap G1)
+### Task 10: Gate approvals from chat come from the plane (contract §3.4b)
 
-`mintPrincipalAssertion` (`apps/hub/src/auth/service-signing.ts:241-250`) is the hub's last signer after Tasks 7–8, called at `services/matrix-as/index.ts:414` (gates) and `:489` (elicitations). Under the plane it must not sign. The plane has no human-assertion endpoint yet (G1); this task routes the call through one function so it lights up when P2 adds one, and until then refuses visibly instead of failing at Superpipeline with a 401.
+`mintPrincipalAssertion` (`apps/hub/src/auth/service-signing.ts:241-250`) is the hub's last signer after Tasks 7–8. It is called through the `mint(principalId)` dependency of `resolveGateAtSuperpipeline` (`services/matrix-as/gates.ts:845-859`) and `answerElicitationAtSuperpipeline` (`services/matrix-as/elicitations.ts:273-286`), wired at `services/matrix-as/index.ts:413-414` and `:488-489`. Under the plane the hub must not sign, and the plane's `POST /api/token/assertion` takes the sender's **Matrix identity**, not a `prn_` — the plane resolves the human itself so that no caller can name whom to assert. So the sender's mxid has to reach `mint`. Today it stops at `handleGateDecision` (`gates.ts:744`, `event.sender`) and `handleElicitationAnswer` (`elicitations.ts:411`).
+
+The hub still resolves the sender first (Task 9: `principalForMatrixId`, used for the "is this a person?" check at `gates.ts:774-781` and the receipt). As defence in depth it checks that the plane's token names the same principal it resolved; a mismatch means the identity link changed between the two reads, and the answer is refused rather than recorded under someone else.
 
 **Files:**
-- Modify: `apps/hub/src/auth/service-signing.ts` (add `assertPrincipal`)
+- Modify: `apps/hub/src/auth/service-signing.ts` (add `assertPrincipal`, `AssertionMismatch`)
+- Modify: `apps/hub/src/services/matrix-as/gates.ts:679-686` (`resolveGate` input gains `senderMxid`), `:784-791` (pass `event.sender`), `:845-859` (`resolveGateAtSuperpipeline` input gains `senderMxid`; `mint` takes a subject object)
+- Modify: `apps/hub/src/services/matrix-as/elicitations.ts:273-286` and the `answer` dependency at `:364` / its call at `:420` (same two changes)
 - Modify: `apps/hub/src/services/matrix-as/index.ts:413-414,488-489`
-- Modify: `apps/hub/src/auth/service-signing.test.ts`
+- Modify: `apps/hub/src/auth/service-signing.test.ts`, `apps/hub/src/services/matrix-as/gates.test.ts`, `apps/hub/src/services/matrix-as/elicitations.test.ts`
 
 **Interfaces:**
-- Consumes: `orgPlane()` (Task 1); `orgPlaneClient().assertionToken`, `OrgPlaneError` (Task 6).
-- Produces: `assertPrincipal(input: { principalId: string; audience: string }, deps?: { client?: () => Pick<OrgPlaneClient, "assertionToken"> }): Promise<string>` — legacy: `mintPrincipalAssertion({ principalId, audiences: [audience] })`; plane: `assertionToken(principalId, audience).accessToken`; throws `OrgPlaneError` on refusal.
+- Consumes: `orgPlane()` (Task 1); `OrgPlaneClient.assertionToken(identity, audience)`, `OrgPlaneError` (Task 6).
+- Produces:
+  - `interface AssertionSubject { principalId: string; senderMxid: string }`
+  - `assertPrincipal(input: AssertionSubject & { audience: string }, deps?: { client?: () => Pick<OrgPlaneClient, "assertionToken"> }): Promise<string>` — legacy: `mintPrincipalAssertion({ principalId, audiences: [audience] })` (the mxid is unused); plane: `assertionToken({ system: "matrix", externalId: senderMxid }, audience)`, then checks the token's `sub` equals `principalId`.
+  - `class AssertionMismatch extends Error`
+  - `resolveGateAtSuperpipeline` / `answerElicitationAtSuperpipeline` deps: `mint(subject: AssertionSubject): Promise<string>`; inputs gain `senderMxid: string`.
+  - `GateDeps.resolveGate` and the elicitation `answer` dependency inputs gain `senderMxid: string`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 Append to `apps/hub/src/auth/service-signing.test.ts`:
 
 ```ts
-import { assertPrincipal } from "./service-signing";
+import { SignJWT } from "jose";
+import { AssertionMismatch, assertPrincipal } from "./service-signing";
 import { setOrgPlaneForTests, TEST_PLANE } from "./org-plane/config";
 import { OrgPlaneError } from "../services/org-plane/client";
 import { serviceSigningKeys } from "../db/schema/service-keys";
 
-describe("assertPrincipal under the plane", () => {
-  test("asks the plane and never touches the hub's signing keys", async () => {
+/** An unsigned-enough JWT: assertPrincipal only decodes `sub`; Superpipeline verifies the signature. */
+const tokenFor = (sub: string) =>
+  new SignJWT({ sub }).setProtectedHeader({ alg: "HS256" }).sign(new TextEncoder().encode("k".repeat(32)));
+
+describe("assertPrincipal under the plane (contract §3.4b)", () => {
+  const SUBJECT = { principalId: "prn_hhhhhhhhhhhhhhhhhhhh", senderMxid: "@op:id.test" };
+
+  test("sends the sender's Matrix identity, returns the plane's token, touches no hub key", async () => {
     const before = (await db.select().from(serviceSigningKeys)).length;
     const restore = setOrgPlaneForTests(TEST_PLANE);
     try {
-      const asked: string[] = [];
+      const asked: unknown[] = [];
+      const plane = await tokenFor(SUBJECT.principalId);
       const token = await assertPrincipal(
-        { principalId: "prn_hhhhhhhhhhhhhhhhhhhh", audience: "https://app.superpipeline.test" },
-        { client: () => ({ assertionToken: async (p, a) => (asked.push(`${p}→${a}`), { accessToken: "plane-assertion", expiresIn: 120 }) }) },
+        { ...SUBJECT, audience: "https://app.superpipeline.test" },
+        { client: () => ({ assertionToken: async (identity, audience) => (asked.push({ identity, audience }), { accessToken: plane, expiresIn: 120 }) }) },
       );
-      expect(token).toBe("plane-assertion");
-      expect(asked).toEqual(["prn_hhhhhhhhhhhhhhhhhhhh→https://app.superpipeline.test"]);
+      expect(token).toBe(plane);
+      expect(asked).toEqual([{ identity: { system: "matrix", externalId: "@op:id.test" }, audience: "https://app.superpipeline.test" }]);
     } finally {
       restore();
     }
     expect((await db.select().from(serviceSigningKeys)).length).toBe(before);
   });
 
-  test("a plane without the endpoint (404) surfaces as OrgPlaneError, never a hub-signed fallback", async () => {
+  test("a plane token naming a different principal is refused", async () => {
+    const restore = setOrgPlaneForTests(TEST_PLANE);
+    try {
+      const other = await tokenFor("prn_oooooooooooooooooooo");
+      const err = await assertPrincipal(
+        { ...SUBJECT, audience: "https://a" },
+        { client: () => ({ assertionToken: async () => ({ accessToken: other, expiresIn: 120 }) }) },
+      ).catch((e) => e);
+      expect(err).toBeInstanceOf(AssertionMismatch);
+    } finally {
+      restore();
+    }
+  });
+
+  test.each([
+    [404, "unknown_identity"],
+    [409, "not_human"],
+    [423, "suspended"],
+    [0, "unreachable"],
+  ])("a plane refusal %i %s propagates as OrgPlaneError, never a hub-signed fallback", async (status, code) => {
     const restore = setOrgPlaneForTests(TEST_PLANE);
     try {
       const err = await assertPrincipal(
-        { principalId: "prn_hhhhhhhhhhhhhhhhhhhh", audience: "https://a" },
-        { client: () => ({ assertionToken: async () => { throw new OrgPlaneError(404, "error"); } }) },
+        { ...SUBJECT, audience: "https://a" },
+        { client: () => ({ assertionToken: async () => { throw new OrgPlaneError(status, code); } }) },
       ).catch((e) => e);
       expect(err).toBeInstanceOf(OrgPlaneError);
     } finally {
       restore();
     }
   });
+
+  test("legacy mode still signs with the hub's key, as today", async () => {
+    const human = await createPrincipal({ kind: "human", handle: `assert-legacy-${Date.now()}` });
+    const token = await assertPrincipal({ principalId: human, senderMxid: "@x:id.test", audience: "https://a" });
+    expect(decodeJwt(token).sub).toBe(human);
+    expect(decodeJwt(token).act).toEqual({ sub: BRIDGE_ACTOR });
+  });
 });
 ```
 
-(Use the `db` import the file already has; add it if it has none: `import { db } from "../db/drizzle";`.)
+(Use the file's existing imports for `db`, `createPrincipal`, `decodeJwt`, `BRIDGE_ACTOR`; add any that are missing. If legacy `buildTokenPayload` refuses a human with no linked user in this file's setup, create the human the way the file's existing `mintPrincipalAssertion` test does.)
 
-- [ ] **Step 2: Run test to verify it fails**
+Add to `apps/hub/src/services/matrix-as/gates.test.ts`, beside the existing "resolved" case that builds `handleGateDecision` deps with a fake `resolveGate`:
 
-Run: `cd apps/hub && DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod" bun test src/auth/service-signing.test.ts` — Expected: FAIL, `assertPrincipal` not exported.
+```ts
+test("the sender's mxid reaches resolveGate, so the plane can resolve the human itself", async () => {
+  const seen: Array<{ principalId: string; senderMxid: string }> = [];
+  await handleGateDecision(decisionEvent(), ROOM, {
+    ...deps(),
+    resolveGate: async (input) => {
+      seen.push({ principalId: input.principalId, senderMxid: input.senderMxid });
+      return { ok: true };
+    },
+  });
+  expect(seen).toEqual([{ principalId: HUMAN_PRINCIPAL, senderMxid: decisionEvent().sender }]);
+});
+
+test("resolveGateAtSuperpipeline hands mint both the principal and the sender", async () => {
+  const minted: unknown[] = [];
+  await resolveGateAtSuperpipeline(
+    { boardId: "b", gateId: "g", decision: "approve" as never, comment: null, principalId: "prn_hhhhhhhhhhhhhhhhhhhh", senderMxid: "@op:id.test" },
+    { baseUrl: "https://sp.test", mint: async (s) => (minted.push(s), "t"), fetch: (async () => new Response("{}", { status: 200 })) as never },
+  );
+  expect(minted).toEqual([{ principalId: "prn_hhhhhhhhhhhhhhhhhhhh", senderMxid: "@op:id.test" }]);
+});
+```
+
+(`decisionEvent`, `ROOM`, `deps()` and the human principal constant are whatever that file's existing resolved-decision case uses; use the decision option id that case uses instead of `"approve"`.) Add the matching pair to `elicitations.test.ts` for `answer` / `answerElicitationAtSuperpipeline`.
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd apps/hub && DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod" bun test src/auth/service-signing.test.ts src/services/matrix-as/gates.test.ts src/services/matrix-as/elicitations.test.ts`
+Expected: FAIL — `assertPrincipal`/`AssertionMismatch` not exported; `senderMxid` absent from `resolveGate`'s input.
 
 - [ ] **Step 3: Write the implementation**
 
 Append to `apps/hub/src/auth/service-signing.ts`:
 
 ```ts
+import { decodeJwt } from "jose";
 import { orgPlane } from "./org-plane/config";
 import { orgPlaneClient, type OrgPlaneClient } from "../services/org-plane/client";
 
+export interface AssertionSubject {
+  /** Resolved by the hub from the sender (Task 9); used for the legacy mint and the check below. */
+  principalId: string;
+  /** The Matrix sender. Under the plane this, not the prn_, is what is asserted (contract §3.4b). */
+  senderMxid: string;
+}
+
+export class AssertionMismatch extends Error {
+  constructor(expected: string, got: unknown) {
+    super(`the org plane asserted ${String(got)} for a sender this hub resolved to ${expected}`);
+    this.name = "AssertionMismatch";
+  }
+}
+
 /**
- * A human's approval, carried to another plane as that human. The hub signs it in legacy mode;
- * under the org plane only the plane signs, through the endpoint gap G1 asks P2 for.
+ * A human's approval, carried to another plane as that human. Legacy: the hub signs it.
+ * Under the org plane only the plane signs, resolving the human from the Matrix identity itself.
  */
 export async function assertPrincipal(
-  input: { principalId: string; audience: string },
+  input: AssertionSubject & { audience: string },
   deps: { client?: () => Pick<OrgPlaneClient, "assertionToken"> } = {},
 ): Promise<string> {
   if (!orgPlane()) return mintPrincipalAssertion({ principalId: input.principalId, audiences: [input.audience] });
-  const { accessToken } = await (deps.client ?? orgPlaneClient)().assertionToken(input.principalId, input.audience);
+  const { accessToken } = await (deps.client ?? orgPlaneClient)().assertionToken(
+    { system: "matrix", externalId: input.senderMxid },
+    input.audience,
+  );
+  const sub = decodeJwt(accessToken).sub;
+  if (sub !== input.principalId) throw new AssertionMismatch(input.principalId, sub);
   return accessToken;
 }
 ```
 
-`apps/hub/src/services/matrix-as/index.ts` lines 413-414 and 488-489:
+(`decodeJwt` may already be imported in this file via `jose`; merge the import.)
+
+`apps/hub/src/services/matrix-as/gates.ts`:
+- `resolveGate(input: { …; principalId: string; senderMxid: string })` at `:679-686`.
+- At `:784-791` add `senderMxid: event.sender,` to the object passed to `deps.resolveGate`.
+- `resolveGateAtSuperpipeline(input: { …; principalId: string; senderMxid: string }, deps: { baseUrl: string; mint(subject: AssertionSubject): Promise<string>; fetch?: typeof fetch })`, and `:859` becomes `const token = await deps.mint({ principalId: input.principalId, senderMxid: input.senderMxid });`.
+
+`apps/hub/src/services/matrix-as/elicitations.ts`: the same three changes for `answer` (`:364`, call at `:420` passing `senderMxid: event.sender`) and `answerElicitationAtSuperpipeline` (`:273-286`).
+
+`apps/hub/src/services/matrix-as/index.ts` `:413-414` and `:488-489`:
 
 ```ts
-                mint: (principalId) => assertPrincipal({ principalId, audience: superpipelineBaseUrl }),
+                mint: (subject) => assertPrincipal({ ...subject, audience: superpipelineBaseUrl }),
 ```
 
-A failed `mint` already surfaces through `resolveGateAtSuperpipeline`'s existing error path (the gate receipt says the resolution failed); confirm that by running `src/services/matrix-as/gates.test.ts` with a `mint` that throws — if that file has no such case, add one asserting the outcome is a failure receipt, not a crash.
+A thrown `mint` already surfaces through each function's existing failure path as a failed receipt; if `gates.test.ts` has no case where `mint` throws, add one asserting the outcome is `{ ok: false, … }` and the room gets the failure receipt, not a crash.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd apps/hub && DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod" bun test src/auth/ src/services/matrix-as/` — Expected: PASS.
+Run: `cd apps/hub && DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod" bun test src/auth/ src/services/matrix-as/` — Expected: PASS. Revert-proof: delete the `sub !== input.principalId` check and watch "a plane token naming a different principal is refused" fail.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/hub/src/auth/service-signing.ts apps/hub/src/auth/service-signing.test.ts apps/hub/src/services/matrix-as/index.ts
-git commit -m "feat(hub): gate assertions come from the org plane when configured; the hub signs none"
+git add apps/hub/src/auth/service-signing.ts apps/hub/src/auth/service-signing.test.ts apps/hub/src/services/matrix-as/gates.ts apps/hub/src/services/matrix-as/gates.test.ts apps/hub/src/services/matrix-as/elicitations.ts apps/hub/src/services/matrix-as/elicitations.test.ts apps/hub/src/services/matrix-as/index.ts
+git commit -m "feat(hub): gate and elicitation assertions come from the org plane's /api/token/assertion when configured"
 ```
 
 ---
@@ -2762,7 +2892,7 @@ function fakes(principals: Record<string, PlanePrincipal> = {}) {
 
 const human = (grant: PlanePrincipal["grant"]): PlanePrincipal => ({
   id: "prn_hhhhhhhhhhhhhhhhhhhh", kind: "human", handle: "op", displayName: null, organizationId: null,
-  suspended: false, email: null, emailVerified: null, grant,
+  suspended: false, grant,
 });
 
 describe("agent placement under the plane", () => {
@@ -4930,16 +5060,16 @@ git commit -m "feat(hub)!: drop the hub's auth and principal tables after the ro
 
 ## Risks and open questions
 
-1. **G1 blocks gate approvals from chat under the plane.** Until P2 adds a human-assertion endpoint, a gate or elicitation answered in Matrix cannot reach Superpipeline after cutover (Task 10 refuses it visibly). P4 must not cut over until G1 is settled, or must accept that approvals move to Superpipeline's web UI for the interim.
-2. **G2/G3 shapes are assumed.** `GET /api/principals/:id` with `grant` and `GET /api/principals?kind=` are not in the contract. Tasks 9, 11 and the superwitness principals route depend on them. Everything is behind `services/org-plane/client.ts`, so a different shape is a one-file change, but P2 must ship *something* that answers both.
-3. **§5.7 is bent on Matrix inbound dispatch.** The sender's grant now lives at the plane, so a Matrix message is a plane read for identity **and** grant (cached together, 60 s, last-good). A cold cache during a plane outage refuses with an explicit message. Accepting this is a charter-level call, not a code one.
-4. **Station tokens lose the node in `act` (G5) and may lose work-plane audiences (G4).** The hub logs `{nodeId, stationId, principal, jti}` per exchange to keep attribution; the audience array needs P2 to accept `audience: string[]` or the hub must stop offering `WORK_PLANE_AUDIENCES`.
-5. **`grantDispatchTo` is a read-modify-write.** Two placements by one human at the same instant can lose an append (the local version held a row lock). Low frequency; the fix is a plane-side "append to mayDispatch" operation if it ever bites.
-6. **Ordering at cutover is load-bearing.** The hub must be stopped while the rewrite runs and must start under the plane only after it (Task 13 intro). A hub restarted in the wrong mode shows every operator an empty fleet. P4's runbook owns this; `docs/OPERATING.md` gets the steps in Task 13.
-7. **`DEFAULT_USER_ID` / `API_TOKEN`.** The static API token keeps working under the plane (it is configuration, not an issuer) and acts as `config.defaultUserId`. Its rows are the usual "unmapped" value; P4 must map it (`--map default-user=<operator prn_>`) and set `DEFAULT_USER_ID` to the same `prn_`.
-8. **Console sessions do not survive a reload without a plane session.** Tokens are memory-only by design (contract §3.1); a reload re-runs authorize, silent only if the plane's session is alive. Acceptable per the contract; noted so nobody "fixes" it with localStorage.
-9. **Humans' Matrix identities** (`principal_identities` with `system = 'matrix'`) move to the plane in P4's export, not here. Until they do, every human sender is "unlinked" under the plane. P4's checklist must include them.
-10. **The plane's `sub` for migrated humans.** Gate 1 Q1 found the OAuth provider stamps `sub` with the Better Auth user id. Design §4 fixes this by generating a human's `user.id` as its `prn_` — but migrated humans keep their old user ids (design §8 "user and prn_ ids are preserved"). Unless P4's import sets each migrated human's plane `user.id` to their `prn_`, console tokens will carry a UUID `sub`, Task 5's verifier will refuse them (`sub` must be a `prn_`), and the rewritten columns will not match. Raise with P2/P4.
+Contract commit `cbc3098` resolved the earlier gaps (human assertion, principal reads, multi-audience agent tokens, migrated humans' ids). What remains:
+
+1. **Gate approvals from chat need the plane up.** Contract §3.4b names this as the design's one online dependency. Task 9 refuses a decision as `identity-unavailable` when the sender cannot be resolved, and Task 10 records a failed receipt when the assertion is refused or the plane is unreachable.
+2. **§5.7 is bent on Matrix inbound dispatch.** The sender's grant now lives at the plane, so a Matrix message needs a plane read for identity **and** grant (cached together, 60 s, last good). A cold cache during a plane outage is refused with an explicit message. Accepting this is a charter-level call, not a code one.
+3. **Station tokens name the hub, not the node, in `act`.** The hub logs `{nodeId, stationId, principal, jti}` per exchange to keep the attribution (Task 7).
+4. **`grantDispatchTo` is a read-modify-write.** Two placements by one human at the same instant can lose an append (the local version held a row lock). Low frequency; the fix is a plane-side "append to mayDispatch" operation if it ever bites.
+5. **Ordering at cutover is load-bearing.** The hub must be stopped while the rewrite runs and must start under the plane only after it (Task 13 intro). A hub restarted in the wrong mode shows every operator an empty fleet. P4's runbook owns this; `docs/OPERATING.md` gets the steps in Task 13.
+6. **`DEFAULT_USER_ID` / `API_TOKEN`.** The static API token keeps working under the plane (it is configuration, not an issuer) and acts as `config.defaultUserId`. Its rows are the usual "unmapped" value; P4 must map it (`--map default-user=<operator prn_>`) and set `DEFAULT_USER_ID` to the same `prn_`.
+7. **Console sessions do not survive a reload without a plane session.** Tokens are memory-only by design (contract §3.1); a reload re-runs authorize, silent only if the plane's session is alive. Noted so nobody "fixes" it with localStorage.
+8. **Humans' Matrix identities** (`principal_identities` with `system = 'matrix'`) move to the plane in P4's export, not here. Until they do, every human sender is "unlinked" under the plane and §3.4b answers `unknown_identity`. P4's checklist must include them.
 
 ## Self-review
 
@@ -4950,6 +5080,7 @@ git commit -m "feat(hub)!: drop the hub's auth and principal tables after the ro
 | Hub verifies with `ORG_PLANE_*`, no dual-accept, unset = today | 1, 3, 4, 5 (all five verifying doors) |
 | Hub mints no tokens; station exchange via `POST /api/token/agent` with the hub's `svc_` (`ORG_PLANE_SERVICE_CREDENTIAL_FILE`) | 1, 6, 7, 10 |
 | Device/service/code-exchange/authorize routes and JWKS disabled under the plane | 8 |
+| Gate/elicitation assertions via `POST /api/token/assertion` (contract §3.4b) | 10 |
 | Agent principal creation via `POST /api/principals` | 11 (station setup), 9 (`createPrincipal` for `POST /api/admin/agents`) |
 | Grants admin routes: proxied or removed, decided and justified | 12 (decision D3: removed, 410) |
 | Matrix sender → `GET /api/identities/matrix/:mxid`, availability caveat | 9 |
@@ -4964,6 +5095,6 @@ git commit -m "feat(hub)!: drop the hub's auth and principal tables after the ro
 
 **Placeholder scan.** No TBD/TODO. Three places tell the implementer to reuse an existing test file's fixtures by role rather than by name (`evidence.test.ts`, `gates.test.ts`, `station-setup.test.ts`), because those files' local helper names were not all read; each names the existing case to copy from.
 
-**Type consistency.** `OrgPlaneConfig`/`orgPlane()`/`setOrgPlaneForTests`/`TEST_PLANE` (Task 1) are used with those names in Tasks 3–17. `PlaneBearerResult`/`verifyPlaneBearer` (Task 5) match their uses in Tasks 5 and 9. `OrgPlaneClient` method names (Task 6: `agentToken`, `assertionToken`, `createAgent`, `putGrant`, `linkIdentity`, `lookupIdentity`, `getPrincipal`, `listPrincipals`, `suspend`, `unsuspend`) match Tasks 7, 9, 10, 11. `PrincipalDirectory` (`principal`, `identity`, `list`, `invalidate`) matches Tasks 9 and 11. Migration numbers: 0093 `legacy_user_principals` (Task 9), 0094 `hub_operators` (Task 12), 0095 drop (Task 17) — if another PR lands a migration first, renumber with `drizzle-kit generate`, never by hand.
+**Type consistency.** `OrgPlaneConfig`/`orgPlane()`/`setOrgPlaneForTests`/`TEST_PLANE` (Task 1) are used with those names in Tasks 3–17. `PlaneBearerResult`/`verifyPlaneBearer` (Task 5) match their uses in Tasks 5 and 9. `OrgPlaneClient` method names (Task 6: `agentToken`, `assertionToken(identity, audience)`, `createAgent`, `putGrant`, `linkIdentity`, `lookupIdentity`, `getPrincipal`, `listPrincipals`, `suspend`, `unsuspend`) match Tasks 7, 9, 10, 11. `PrincipalDirectory` (`principal`, `identity`, `list`, `invalidate`) matches Tasks 9 and 11. Migration numbers: 0093 `legacy_user_principals` (Task 9), 0094 `hub_operators` (Task 12), 0095 drop (Task 17) — if another PR lands a migration first, renumber with `drizzle-kit generate`, never by hand.
 
 **Review Focus.** Each of the five lines has a named test in its owning task (Task 3 ×2, Task 4, Task 13, Task 15).
