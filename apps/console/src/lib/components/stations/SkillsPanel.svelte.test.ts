@@ -14,7 +14,8 @@ test("shows presence without claiming loading and identifies partial coverage", 
   const { getByText, getByRole } = render(SkillsPanel, {
     props: { stationId: "station_1" },
   });
-  await waitFor(() => expect(getByText("example")).toBeTruthy());
+  await waitFor(() => expect(getByText(/skills catalogued/)).toBeTruthy());
+  await fireEvent.click(getByRole("button", { name: "Show skills" }));
   const row = getByRole("row", { name: /example/ });
   expect(row.textContent).toMatch(/Yes/);
   expect(row.textContent).toMatch(/Unknown/);
@@ -46,7 +47,9 @@ test("a failed refresh remains an error and can be retried", async () => {
     expect(getByRole("alert").textContent).toContain("node offline"),
   );
   await fireEvent.click(getByRole("button", { name: "Refresh" }));
-  await waitFor(() => expect(getByText("example")).toBeTruthy());
+  await waitFor(() => expect(getByText(/skills catalogued/)).toBeTruthy());
+  await fireEvent.click(getByRole("button", { name: "Show skills" }));
+  expect(getByText("example")).toBeTruthy();
   expect(load).toHaveBeenCalledTimes(2);
 });
 test("navigation never shows a late previous station's inventory", async () => {
@@ -65,5 +68,38 @@ test("navigation never shows a late previous station's inventory", async () => {
   await rerender({ stationId: "second" });
   await waitFor(() => expect(getByText(/No skills observed/)).toBeTruthy());
   resolveFirst(fixture());
-  await waitFor(() => expect(queryByText("example")).toBeNull());
+  // Asserting only that "example" is absent would pass for the wrong reason now
+  // that the table arrives folded: the SECOND station's empty state must still
+  // be what is on screen, and no count from the first may replace it.
+  await waitFor(() => expect(getByText(/No skills observed/)).toBeTruthy());
+  expect(queryByText(/skills catalogued/)).toBeNull();
+  expect(queryByText("example")).toBeNull();
+});
+
+// Measured on a live station: 59 skills rendered a 4960px table — 80% of the
+// whole Configuration tab, and four of its five columns read "Unknown" on
+// nearly every row. The rows are still available; they no longer arrive
+// uninvited.
+test("the inventory is summarised behind a count, and opens on request", async () => {
+  const many = {
+    ...fixture(),
+    // Distinct ids: the table's each block is keyed on skill.id, so reusing
+    // one row 59 times is a duplicate-key error, not a 59-row table.
+    skills: Array.from({ length: 59 }, (_, i) => ({
+      ...fixture().skills[0],
+      id: `.agents/skills/skill-${i}/SKILL.md`,
+      name: `skill-${i}`,
+    })),
+  };
+  vi.spyOn(api, "skillsInventory").mockResolvedValue(many);
+  const { getByText, getByRole, queryByRole } = render(SkillsPanel, {
+    props: { stationId: "station_1" },
+  });
+
+  await waitFor(() => expect(getByText(/59 skills catalogued/)).toBeTruthy());
+  expect(queryByRole("table")).toBeNull();
+
+  await fireEvent.click(getByRole("button", { name: "Show skills" }));
+  expect(getByRole("table")).toBeTruthy();
+  expect(getByRole("row", { name: /skill-0/ })).toBeTruthy();
 });

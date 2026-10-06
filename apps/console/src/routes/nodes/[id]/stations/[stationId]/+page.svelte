@@ -197,6 +197,38 @@
       (station?.capabilities?.includes("matrix.avatar") ?? false)
   );
   const hasSkills = $derived(hasSkillInventory || hasSkillManagement || hasNativeSkillManagement || hasPluginManagement);
+  /**
+   * The Configuration tab shows ONE section at a time.
+   *
+   * Measured on a live station before this existed: the tab was 6174px of
+   * content in a 753px pane — 8.2 screens — of which the skill inventory was
+   * 4960px and the declared-configuration panel, the thing the tab is named
+   * for, was 133px. Stacking everything made the rare thing bury the common
+   * one.
+   *
+   * Settings is always offered, even where the node has not enabled
+   * configuration management: a tab called Configuration that contains no
+   * configuration, and no word about why, is the worse answer.
+   */
+  type ConfigSection = "settings" | "plugins" | "skills";
+  const configSections = $derived.by<{ id: ConfigSection; label: string }[]>(() => [
+    { id: "settings", label: "Settings" },
+    ...(hasPluginManagement ? [{ id: "plugins" as const, label: "Plugins" }] : []),
+    ...(hasSkillInventory || hasSkillManagement || hasNativeSkillManagement
+      ? [{ id: "skills" as const, label: "Skills" }]
+      : []),
+  ]);
+  const configSection = $derived.by<ConfigSection>(() => {
+    const raw = $page.url.searchParams?.get("section");
+    return configSections.some((s) => s.id === raw) ? (raw as ConfigSection) : "settings";
+  });
+  function setConfigSection(id: ConfigSection) {
+    const url = new URL($page.url);
+    if (id === "settings") url.searchParams.delete("section");
+    else url.searchParams.set("section", id);
+    void goto(url, { noScroll: true, keepFocus: true });
+  }
+
   /** The Configuration tab's gate. Declared configuration is reason enough for
    *  the tab on its own: a station can advertise `config.manage` with no skills
    *  capability at all, and before this it had no home but the Files tab. */
@@ -385,6 +417,9 @@
 
   function handleTabChange(tabId: string) {
     const url = new URL($page.url);
+    // ?section= belongs to the Configuration tab; carrying it onto Logs would
+    // leave a parameter that means nothing where it lands.
+    if (tabId !== "config") url.searchParams.delete("section");
     if (tabId === defaultTab) {
       url.searchParams.delete("tab");
     } else {
@@ -718,31 +753,73 @@
     -->
     {@render keepAlivePanel("config", configContent)}
     {#snippet configContent()}
-      {#if hasConfigManagement}
-        <HarnessConfigPanel
-          {stationId}
-          {nodeId}
-          stationKey={station?.stationKey}
-          active={activeTab === "config"}
-          onRestart={canLifecycle ? () => askFor("restart") : undefined}
-        />
-      {/if}
-      {#if hasPluginManagement}
-        <PluginManagementPanel
-          {stationId}
-          canManage={mayGrantReach}
-          onRestart={canLifecycle ? () => askFor("restart") : undefined}
-        />
-      {/if}
-      {#if hasSkillInventory}<SkillsPanel {stationId} />{/if}
-      {#if hasSkillManagement || hasNativeSkillManagement}
-        <SkillManagementPanel
-          {stationId}
-          harness={station?.harness ?? ""}
-          canManage={hasSkillManagement && mayGrantReach}
-          canNative={hasNativeSkillManagement && mayGrantReach}
-        />
-      {/if}
+      <div class="flex flex-col">
+        {#if configSections.length > 1}
+          <nav aria-label="Configuration sections" class="flex gap-1 border-b px-4 pt-4">
+            {#each configSections as section (section.id)}
+              <button
+                type="button"
+                aria-current={configSection === section.id ? "page" : undefined}
+                class="rounded-t-md border-b-2 px-3 py-1.5 text-sm {configSection === section.id
+                  ? 'border-foreground font-medium text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'}"
+                onclick={() => setConfigSection(section.id)}
+              >
+                {section.label}
+              </button>
+            {/each}
+          </nav>
+        {/if}
+
+        <!-- Hidden, never unmounted. The declared-configuration panel captures
+             a plan and its digest once and never re-fetches them, so a section
+             switch must not be able to tear it down mid-review. -->
+        <div data-config-section="settings" class={configSection === "settings" ? "contents" : "hidden"}>
+          {#if hasConfigManagement}
+            <HarnessConfigPanel
+              {stationId}
+              {nodeId}
+              stationKey={station?.stationKey}
+              active={activeTab === "config" && configSection === "settings"}
+              onRestart={canLifecycle ? () => askFor("restart") : undefined}
+            />
+          {:else}
+            <div class="space-y-2 p-4">
+              <h2 class="font-semibold">Declared configuration</h2>
+              <p class="text-sm text-muted-foreground">
+                This station's node has not enabled configuration management, so nothing can be declared for
+                it here. A node advertises <code>config.manage</code> once its agent's configuration sets
+                <code>configManagement</code>; until then the harness's own settings are reachable only on the
+                host.
+              </p>
+            </div>
+          {/if}
+        </div>
+
+        {#if hasPluginManagement}
+          <div data-config-section="plugins" class={configSection === "plugins" ? "contents" : "hidden"}>
+            <PluginManagementPanel
+              {stationId}
+              canManage={mayGrantReach}
+              onRestart={canLifecycle ? () => askFor("restart") : undefined}
+            />
+          </div>
+        {/if}
+
+        {#if hasSkillInventory || hasSkillManagement || hasNativeSkillManagement}
+          <div data-config-section="skills" class={configSection === "skills" ? "contents" : "hidden"}>
+            {#if hasSkillInventory}<SkillsPanel {stationId} />{/if}
+            {#if hasSkillManagement || hasNativeSkillManagement}
+              <SkillManagementPanel
+                {stationId}
+                harness={station?.harness ?? ""}
+                canManage={hasSkillManagement && mayGrantReach}
+                canNative={hasNativeSkillManagement && mayGrantReach}
+              />
+            {/if}
+          </div>
+        {/if}
+      </div>
     {/snippet}
   {/if}
 

@@ -652,3 +652,74 @@ test("a reviewed plan survives a switch to Logs and back", async () => {
   expect(region.isConnected).toBe(true);
   expect(region.closest('[role="tabpanel"]')!.className).toContain("hidden");
 });
+
+// ─── Configuration sub-navigation ───────────────────────────────────────────
+//
+// Measured on a live station before this: the tab was 6174px in a 753px pane —
+// 8.2 screens — of which the declared-configuration panel, the thing the tab is
+// named for, was 133px. One section shows at a time now. All three stay MOUNTED
+// and hidden, so switching sections cannot destroy a plan under review.
+
+const sectionOf = (el: Element | null) => el?.closest("[data-config-section]");
+
+test("the tab opens on Settings and keeps the other sections mounted but hidden", async () => {
+  stubConfigPanels();
+  vi.spyOn(api, "listStations").mockResolvedValue([
+    station(["health", "skills.inventory", "plugins.manage", "config.manage"]),
+  ]);
+  setUrl("?tab=config");
+
+  const { getAllByRole, getByRole } = render(StationPage);
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Configuration"));
+
+  expect(sectionOf(getByRole("region", { name: "Harness configuration" }))!.className).not.toContain("hidden");
+  expect(sectionOf(getByRole("region", { name: "Plugin management" }))!.className).toContain("hidden");
+  expect(sectionOf(getByRole("region", { name: "Skill inventory" }))!.className).toContain("hidden");
+});
+
+test("choosing a section writes it to the URL and shows it", async () => {
+  stubConfigPanels();
+  vi.spyOn(api, "listStations").mockResolvedValue([
+    station(["health", "skills.inventory", "plugins.manage", "config.manage"]),
+  ]);
+  setUrl("?tab=config");
+
+  const { getByRole, getAllByRole } = render(StationPage);
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Configuration"));
+
+  await fireEvent.click(getByRole("button", { name: "Plugins" }));
+  expect(String(goto.mock.calls[0][0])).toContain("section=plugins");
+
+  setUrl("?tab=config&section=plugins");
+  await waitFor(() =>
+    expect(sectionOf(getByRole("region", { name: "Plugin management" }))!.className).not.toContain("hidden"),
+  );
+  expect(sectionOf(getByRole("region", { name: "Harness configuration" }))!.className).toContain("hidden");
+});
+
+test("a deep link to a section opens it", async () => {
+  stubConfigPanels();
+  vi.spyOn(api, "listStations").mockResolvedValue([
+    station(["health", "skills.inventory", "plugins.manage", "config.manage"]),
+  ]);
+  setUrl("?tab=config&section=skills");
+
+  const { getByRole, getAllByRole } = render(StationPage);
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Configuration"));
+  expect(sectionOf(getByRole("region", { name: "Skill inventory" }))!.className).not.toContain("hidden");
+});
+
+test("a station whose node has not enabled configuration management says so", async () => {
+  stubConfigPanels();
+  // skills only: the tab exists, but nothing declares configuration.
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "skills.inventory"])]);
+  setUrl("?tab=config");
+
+  const { getByRole, getAllByRole, getByText } = render(StationPage);
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Configuration"));
+
+  // Settings is still the section you land on, and it explains the absence
+  // instead of leaving a tab called Configuration with no configuration in it.
+  expect(getByText(/has not enabled configuration management/i)).toBeTruthy();
+  expect(getByRole("button", { name: "Settings" })).toBeTruthy();
+});
