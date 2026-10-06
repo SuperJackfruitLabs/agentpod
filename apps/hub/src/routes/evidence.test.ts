@@ -24,6 +24,8 @@ import { makeFingerprint } from "../services/evidence/fingerprint";
 import { setGrant } from "../services/grants";
 import { createPrincipal, suspendPrincipal } from "../services/principals";
 import { createEvidenceRoutes } from "./evidence";
+import { setOrgPlaneForTests, TEST_PLANE } from "../auth/org-plane/config";
+import type { PlaneBearerResult } from "../auth/hub-token";
 
 const RUN = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
 const STATION = `station_${crypto.randomUUID()}`;
@@ -311,5 +313,82 @@ describe("who ran it, and who a principal is", () => {
     const denied = await get(`/api/evidence/principals/${agentPrn}`, await serviceToken(plain));
     expect(denied.status).toBe(403);
     expect(await denied.json()).toEqual({ error: "forbidden" });
+  });
+});
+
+describe("the evidence door under the org plane", () => {
+  const agentPrincipalId = "prn_aaaaaaaaaaaaaaaaaaaa";
+  const plane = (result: PlaneBearerResult) => {
+    const seen: string[] = [];
+    return { seen, app: createEvidenceRoutes({ now: () => FIXED_NOW, verifyPlane: async (t) => (seen.push(t), result) }) };
+  };
+  const req = (a: ReturnType<typeof createEvidenceRoutes>, path: string) =>
+    a.request(path, { headers: { Authorization: "Bearer t" } });
+
+  test("under the plane, an agent token's own scope claim authorises evidence:read; a human is 403", async () => {
+    const restore = setOrgPlaneForTests(TEST_PLANE);
+    try {
+      const agentApp = plane({ ok: true, caller: { sub: agentPrincipalId, principalKind: "agent", tenantId: BOOTSTRAP_TENANT_ID, claims: { scope: "evidence:read" } as never } }).app;
+      expect((await req(agentApp, `/api/evidence/attempts/${firstAttempt}`)).status).toBe(200);
+      const humanApp = plane({ ok: true, caller: { sub: "prn_hhhhhhhhhhhhhhhhhhhh", principalKind: "human", tenantId: BOOTSTRAP_TENANT_ID, claims: { scope: "openid evidence:read" } as never } }).app;
+      expect((await req(humanApp, `/api/evidence/attempts/${firstAttempt}`)).status).toBe(403);
+    } finally {
+      restore();
+    }
+  });
+
+  test("a service token without the route's scope is 403; transcripts:read is not evidence:read", async () => {
+    const restore = setOrgPlaneForTests(TEST_PLANE);
+    try {
+      const a = plane({ ok: true, caller: { sub: agentPrincipalId, principalKind: "service", tenantId: BOOTSTRAP_TENANT_ID, claims: { scope: "transcripts:read" } as never } }).app;
+      expect((await req(a, `/api/evidence/attempts/${firstAttempt}`)).status).toBe(403);
+    } finally {
+      restore();
+    }
+  });
+
+  test("rows stay scoped to the tenant the token's org maps to", async () => {
+    const restore = setOrgPlaneForTests(TEST_PLANE);
+    try {
+      const a = plane({ ok: true, caller: { sub: agentPrincipalId, principalKind: "agent", tenantId: "fleet_99999999999999999999", claims: { scope: "evidence:read" } as never } }).app;
+      expect((await req(a, `/api/evidence/attempts/${firstAttempt}`)).status).toBe(404);
+    } finally {
+      restore();
+    }
+  });
+
+  test("product_not_enabled is the contract's 403 body, never a bare 403", async () => {
+    const restore = setOrgPlaneForTests(TEST_PLANE);
+    try {
+      const body = { error: "product_not_enabled", org: "org_00000000000000000000" } as const;
+      const res = await req(plane({ ok: false, status: 403, body }).app, `/api/evidence/attempts/${firstAttempt}`);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual(body);
+    } finally {
+      restore();
+    }
+  });
+
+  test("under the plane, a hub-issued service token is 401 (no dual-accept)", async () => {
+    const restore = setOrgPlaneForTests(TEST_PLANE);
+    try {
+      const { app: a, seen } = plane({ ok: false, status: 401 });
+      const token = await serviceToken(reader);
+      const res = await a.request(`/api/evidence/attempts/${firstAttempt}`, { headers: { Authorization: `Bearer ${token}` } });
+      expect(res.status).toBe(401);
+      expect(seen).toEqual([token]);
+    } finally {
+      restore();
+    }
+  });
+
+  test("legacy mode is unchanged: the hub token is read and the plane is never asked", async () => {
+    const { app: a, seen } = plane({ ok: true, caller: { sub: agentPrincipalId, principalKind: "agent", tenantId: BOOTSTRAP_TENANT_ID, claims: { scope: "evidence:read" } as never } });
+    const token = await serviceToken(reader);
+    const res = await a.request(`/api/evidence/attempts/${firstAttempt}`, { headers: { Authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(200);
+    expect(seen).toEqual([]);
+    expect((await req(a, `/api/evidence/attempts/${firstAttempt}`)).status).toBe(401);
+    expect(seen).toEqual([]);
   });
 });
