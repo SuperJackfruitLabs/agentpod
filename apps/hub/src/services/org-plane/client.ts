@@ -41,6 +41,11 @@ export interface PlaneIdentity {
   kind: PlaneKind;
   suspended: boolean;
 }
+/** Contract §3.5, `GET /api/principals/:id/identities`. */
+export interface PlaneLinkedIdentity {
+  system: string;
+  externalId: string;
+}
 export interface PlaneToken {
   accessToken: string;
   expiresIn: number;
@@ -56,6 +61,8 @@ export interface OrgPlaneClient {
   linkIdentity(id: string, system: string, externalId: string): Promise<void>;
   /** Null when the plane knows no such identity (404). */
   lookupIdentity(system: string, externalId: string): Promise<PlaneIdentity | null>;
+  /** A principal's linked ids in one system; null when the plane knows no such principal (404). */
+  identitiesOf(id: string, system: string): Promise<PlaneLinkedIdentity[] | null>;
   /** Null when the plane knows no such principal (404). */
   getPrincipal(id: string): Promise<PlanePrincipal | null>;
   listPrincipals(kind: PlaneKind): Promise<PlanePrincipal[]>;
@@ -147,6 +154,8 @@ export function createOrgPlaneClient(o: {
       void ok(await call("PUT", `/api/principals/${enc(id)}/identities/${enc(system)}`, { externalId })),
     lookupIdentity: async (system, externalId) =>
       ok(await call("GET", `/api/identities/${enc(system)}/${enc(externalId)}`), true),
+    identitiesOf: async (id, system) =>
+      ok(await call("GET", `/api/principals/${enc(id)}/identities?system=${enc(system)}`), true),
     getPrincipal: async (id) => ok(await call("GET", `/api/principals/${enc(id)}`), true),
     listPrincipals: async (kind) => ok(await call("GET", `/api/principals?kind=${enc(kind)}`)) ?? [],
     suspend: async (id) => void ok(await call("POST", `/api/principals/${enc(id)}/suspend`)),

@@ -17,7 +17,7 @@ import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { matrixMissions, matrixMissionMembers } from "../db/schema/matrix";
-import { principalIdentities } from "../db/schema/identities";
+import { matrixIdForPrincipal } from "../services/principal-matrix-id";
 import { grantAllowsPrincipal } from "../services/grants";
 import { principalHandle } from "../services/principals";
 import { callerGrant, callerPrincipal } from "../auth/caller-authority";
@@ -197,20 +197,10 @@ export function createMissionRoutes(deps: MissionDeps) {
     });
     if (!roomId) return c.json({ error: "Could not create the mission's room." }, 502);
 
-    // `principal_identities.principal_id` is a `prn_…` value — comparing it
-    // against the raw Better Auth `user.id` would find nothing for every
-    // caller, silently dropping them from their own mission's invite list.
-    const [identity] = principal
-      ? await db
-          .select({ externalId: principalIdentities.externalId })
-          .from(principalIdentities)
-          .where(
-            and(
-              eq(principalIdentities.principalId, principal.id),
-              eq(principalIdentities.system, "matrix")
-            )
-          )
-      : [];
+    // Looked up by the caller's principal (a `prn_…`), never the raw Better Auth
+    // `user.id`, which would find nothing and silently drop them from their own
+    // mission's invite list. Under the plane it is the plane's answer.
+    const callerMxid = principal ? await matrixIdForPrincipal(principal.id) : null;
 
     // Every mission goes in the one Missions space. Grouping is by NODE now,
     // and a mission that spans machines — which is most of them, since that is
@@ -219,7 +209,7 @@ export function createMissionRoutes(deps: MissionDeps) {
     const space = await missionsSpace(
       tenantId,
       speaker,
-      identity?.externalId ?? null,
+      callerMxid,
       deps
     );
 
@@ -251,7 +241,7 @@ export function createMissionRoutes(deps: MissionDeps) {
       await deps.client.invite(speaker, roomId, agent).catch(() => {});
     }
 
-    if (identity) await deps.client.invite(speaker, roomId, identity.externalId).catch(() => {});
+    if (callerMxid) await deps.client.invite(speaker, roomId, callerMxid).catch(() => {});
 
     log.info("mission created", { id, name, members: members.length });
 

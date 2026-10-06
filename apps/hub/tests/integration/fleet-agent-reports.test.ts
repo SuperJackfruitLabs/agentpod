@@ -101,6 +101,44 @@ afterAll(async () => {
   }
 });
 
+describe("reportingAgentFor under the organization plane", () => {
+  // Under the plane a station's user_id IS its owner's prn_ (contract §2), and the owner's Matrix id
+  // is the plane's (GET /api/principals/:id/identities?system=matrix); the hub's table has no row.
+  const PLANE_OWNER = `prn_${RUN.padEnd(20, "0")}`;
+  const PLANE_AGENT = `@agent_plane_${RUN}:hs.test`;
+  const PLANE_STATION = `station_fleet_reports_plane_${RUN}`;
+
+  test("the owner's Matrix id comes from the plane", async () => {
+    const { setOrgPlaneForTests, TEST_PLANE } = await import("../../src/auth/org-plane/config");
+    const { setPrincipalDirectoryForTests } = await import("../../src/services/org-plane/directory");
+    await createTestUser({ id: PLANE_OWNER, email: `fleet-reports-plane-${RUN}@example.com`, name: "Plane Owner" });
+    const tenant = await resolveTenantForUser(OWNER);
+    await rawSql`
+      INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name,
+                            matrix_id, matrix_identity_mode, created_at)
+      VALUES (${PLANE_STATION}, ${tenant}, ${PLANE_OWNER}, ${NODE}, 'hermes', ${"hermes:plane-" + RUN}, 'leaf', 'Planed',
+              ${PLANE_AGENT}, 'harness', now())`;
+    const human = { id: PLANE_OWNER, kind: "human" as const, handle: "po", displayName: "Po", organizationId: null, suspended: false, grant: null };
+    const restore = [
+      setOrgPlaneForTests(TEST_PLANE),
+      setPrincipalDirectoryForTests({
+        principal: async (id) => (id === PLANE_OWNER ? human : null),
+        identity: async () => null,
+        identitiesOf: async (id, system) => (id === PLANE_OWNER && system === "matrix" ? [{ system, externalId: `@po_${RUN}:hs.test` }] : null),
+        list: async () => [human],
+        invalidate: () => {},
+      }),
+    ];
+    try {
+      expect(await reportingAgentFor(NODE, PLANE_AGENT, ROOM)).toEqual({ reader: `@po_${RUN}:hs.test`, name: "Planed" });
+    } finally {
+      restore.reverse().forEach((r) => r());
+      await rawSql`DELETE FROM stations WHERE id = ${PLANE_STATION}`;
+      await rawSql`DELETE FROM "user" WHERE id = ${PLANE_OWNER}`;
+    }
+  });
+});
+
 describe("reportingAgentFor — who a report is from", () => {
   test("the node's station that speaks as the agent: its owner's Matrix id, and its name", async () => {
     expect(await reportingAgentFor(NODE, AGENT, ROOM)).toEqual({ reader: READER, name: "Analyst Echo" });
