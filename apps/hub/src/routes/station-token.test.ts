@@ -40,7 +40,9 @@ import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { createTestUser } from "../../tests/helpers/database";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
 import { createPrincipal, suspendPrincipal } from "../services/principals";
-import { stationTokenRoutes } from "./station-token";
+import { createStationTokenRoutes, stationAudiences, stationTokenRoutes } from "./station-token";
+import { TEST_PLANE } from "../auth/org-plane/config";
+import { OrgPlaneError } from "../services/org-plane/client";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const TEST_USER = `test-user-station-token-${RUN}`;
@@ -220,5 +222,141 @@ describe("a node exchanges for one of its stations", () => {
       headers: { Authorization: `Bearer ${nodeId}:wrong` },
     });
     expect(res.status).toBe(401);
+  });
+});
+
+/** An unsigned JWT-shaped string: the hub only decodes the plane's token to log its jti. */
+function planeJwt(claims: Record<string, unknown>): string {
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  return `${b64({ alg: "EdDSA", kid: "k1" })}.${b64(claims)}.c2ln`;
+}
+
+describe("under the org plane", () => {
+  const asked: Array<{ principal: string; audience: string | string[] }> = [];
+  const planeApp = (agentToken: (p: string, a: string | string[]) => Promise<{ accessToken: string; expiresIn: number }>) =>
+    new Hono().route("/api", createStationTokenRoutes({ plane: () => TEST_PLANE, client: () => ({ agentToken }) }));
+  const post = (a: Hono, station: string, secret = nodeSecret) =>
+    a.request(`/api/nodes/${nodeId}/stations/${station}/token`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${nodeId}:${secret}` },
+    });
+  const never = (flag: { called: boolean }) => async () => {
+    flag.called = true;
+    return { accessToken: "x", expiresIn: 300 };
+  };
+
+  test("asks the plane for the station's agent, for the hub's audience, and returns its token", async () => {
+    const token = planeJwt({ sub: agentPrincipalId, jti: "jti-1" });
+    const a = planeApp(async (principal, audience) => {
+      asked.push({ principal, audience });
+      return { accessToken: token, expiresIn: 300 };
+    });
+    const res = await post(a, stationId);
+    expect(res.status).toBe(200);
+    // Shape unchanged: the node's internal/stationtoken reads exactly { token, expiresIn }.
+    expect(await res.json()).toEqual({ token, expiresIn: 300 });
+    expect(asked.at(-1)).toEqual({ principal: agentPrincipalId, audience: TEST_PLANE.audience });
+  });
+
+  test("logs { nodeId, stationId, principal, jti } for every exchange, and never the token", async () => {
+    const token = planeJwt({ sub: agentPrincipalId, jti: "jti-logged" });
+    const lines: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
+    try {
+      const res = await post(planeApp(async () => ({ accessToken: token, expiresIn: 300 })), stationId);
+      expect(res.status).toBe(200);
+    } finally {
+      console.log = original;
+    }
+    const entries = lines.flatMap((l) => {
+      try {
+        return [JSON.parse(l)];
+      } catch {
+        return [];
+      }
+    });
+    const entry = entries.find((e) => e.component === "station-token" && e.context?.jti === "jti-logged");
+    expect(entry?.context).toEqual({ nodeId, stationId, principal: agentPrincipalId, jti: "jti-logged" });
+    expect(lines.join("\n")).not.toContain(token);
+  });
+
+  test("a wrong node secret never reaches the plane", async () => {
+    const flag = { called: false };
+    const res = await post(planeApp(never(flag)), stationId, "wrong");
+    expect(res.status).toBe(401);
+    expect(flag.called).toBe(false);
+  });
+
+  test("another node's station never reaches the plane", async () => {
+    const flag = { called: false };
+    const res = await post(planeApp(never(flag)), otherNodesStation);
+    expect(res.status).toBe(403);
+    expect(flag.called).toBe(false);
+  });
+
+  test("an unoccupied station is still 409 without asking the plane", async () => {
+    const flag = { called: false };
+    const res = await post(planeApp(never(flag)), unoccupied);
+    expect(res.status).toBe(409);
+    expect(flag.called).toBe(false);
+  });
+
+  test.each([
+    [423, "suspended", 403, "principal suspended"],
+    [404, "unknown_principal", 409, "station's principal is unknown to the org plane"],
+    [403, "not_permitted", 502, "the org plane refused this hub"],
+    [500, "error", 502, "the org plane refused this hub"],
+    [0, "unreachable", 503, "the org plane is unreachable"],
+  ])("plane %i %s → %i", async (status, code, want, message) => {
+    const res = await post(
+      planeApp(async () => {
+        throw new OrgPlaneError(status, code);
+      }),
+      stationId,
+    );
+    expect(res.status).toBe(want);
+    expect(await res.json()).toEqual({ error: message });
+  });
+
+  test("the hub's own audience is the plane's, with configured work planes after it", () => {
+    expect(stationAudiences(TEST_PLANE)[0]).toBe(TEST_PLANE.audience);
+    expect(stationAudiences(TEST_PLANE, ["https://app.test", TEST_PLANE.audience, "https://app.test"])).toEqual([
+      TEST_PLANE.audience,
+      "https://app.test",
+    ]);
+  });
+
+  test("several audiences are sent as an array (contract §3.4)", async () => {
+    const sent: Array<string | string[]> = [];
+    const a = new Hono().route(
+      "/api",
+      createStationTokenRoutes({
+        plane: () => TEST_PLANE,
+        audiences: () => [TEST_PLANE.audience, "https://app.test"],
+        client: () => ({
+          agentToken: async (_p, aud) => (sent.push(aud), { accessToken: planeJwt({ jti: "j" }), expiresIn: 300 }),
+        }),
+      }),
+    );
+    expect((await post(a, stationId)).status).toBe(200);
+    expect(sent).toEqual([[TEST_PLANE.audience, "https://app.test"]]);
+  });
+
+  test("legacy mode never asks the plane and still signs locally", async () => {
+    // The suspension test above leaves the principal suspended; legacy refuses it locally, which
+    // is itself the proof the local path ran. Restore it to see a local mint.
+    const { restorePrincipal } = await import("../services/principals");
+    await restorePrincipal(agentPrincipalId);
+    const flag = { called: false };
+    const a = new Hono().route(
+      "/api",
+      createStationTokenRoutes({ plane: () => null, client: () => ({ agentToken: never(flag) }) }),
+    );
+    const res = await post(a, stationId);
+    expect(res.status).toBe(200);
+    const { token } = (await res.json()) as { token: string };
+    expect(decodeJwt(token).act).toEqual({ sub: nodeId });
+    expect(flag.called).toBe(false);
   });
 });
