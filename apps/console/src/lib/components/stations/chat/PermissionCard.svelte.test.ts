@@ -2,7 +2,7 @@ import { test, expect, afterEach, vi } from "vitest";
 import { render, fireEvent, cleanup } from "@testing-library/svelte";
 // Static import: compiled during file collection, not during the test body.
 import PermissionCard from "./PermissionCard.svelte";
-import type { ChatItem } from "./transcript";
+import type { ChatItem } from "@agentpod/contract";
 
 afterEach(() => cleanup());
 

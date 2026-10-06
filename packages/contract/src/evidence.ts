@@ -94,3 +94,79 @@ export const EvidencePrincipalResponse = z
   })
   .strict();
 export type EvidencePrincipalResponse = z.infer<typeof EvidencePrincipalResponse>;
+
+// ─── Transcripts (superwitness transcripts spec §3.3) ───────────────────────────────────────────
+// Pinned by `fixtures/evidence/hub_evidence_transcript.json` and `…_transcript_item.json`.
+
+/** A field the page route cut at 16 KiB, after redaction. `bytes` is the whole field's size. */
+export const EvidenceTruncatedField = z
+  .object({ truncated: z.literal(true), bytes: z.number().int().positive(), head: z.string() })
+  .strict();
+export type EvidenceTruncatedField = z.infer<typeof EvidenceTruncatedField>;
+
+const Text = z.union([z.string(), EvidenceTruncatedField]);
+const Seq = z.number().int().positive();
+const Count = z.number().int().nonnegative();
+
+export const EvidenceTranscriptItem = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("prompt"), seq: Seq, text: Text,
+    images: z.array(z.object({ name: z.string(), mimeType: z.string() }).strict()),
+    redactions: Count,
+  }).strict(),
+  z.object({ kind: z.literal("message"), seq_from: Seq, seq_to: Seq, text: Text, redactions: Count }).strict(),
+  z.object({ kind: z.literal("reasoning"), seq_from: Seq, seq_to: Seq, text: Text, redactions: Count }).strict(),
+  z.object({
+    kind: z.literal("tool_call"), id: z.string(), seq_from: Seq, seq_to: Seq, title: Text,
+    tool_kind: z.string().nullable(), status: z.enum(["pending", "in_progress", "completed", "failed"]),
+    /** Any JSON: the harness's own `rawInput`, null when none was sent, or a truncation marker. */
+    input: z.unknown(),
+    output: z.object({ content: z.unknown(), raw: z.unknown() }).strict(),
+    partial: z.literal(true).optional(),
+    redactions: Count,
+  }).strict(),
+  z.object({
+    kind: z.literal("permission"), seq: Seq, answer_seq: Seq.optional(), tool_call_id: z.string().optional(),
+    title: Text,
+    options: z.array(z.object({ optionId: z.string(), name: z.string(), kind: z.string() }).strict()),
+    outcome: z.union([z.enum(["cancelled", "auto", "pending"]), z.string().regex(/^selected:.+$/)]),
+    partial: z.literal(true).optional(),
+    redactions: Count,
+  }).strict(),
+  z.object({ kind: z.literal("state"), seq: Seq, status: z.string(), reason: Text.optional(), redactions: Count }).strict(),
+  z.object({ kind: z.literal("error"), seq: Seq, error_kind: z.string(), message: Text, redactions: Count }).strict(),
+  z.object({ kind: z.literal("other"), seq: Seq, type: z.string(), redactions: Count }).strict(),
+]);
+export type EvidenceTranscriptItem = z.infer<typeof EvidenceTranscriptItem>;
+
+/** `GET /api/evidence/sessions/:sessionId/transcript`. `seq_from`/`seq_to` are the RANGE, not the page. */
+export const EvidenceTranscriptResponse = z
+  .object({
+    session_id: AcpSessionId,
+    /** 0 and 0 only for a session with no events. */
+    seq_from: z.number().int().nonnegative(),
+    seq_to: z.number().int().nonnegative(),
+    items: z.array(EvidenceTranscriptItem).max(200),
+    /** Opaque. Send it back with the same seq_from/seq_to for the next page; null on the last. */
+    next_cursor: z.string().min(1).nullable(),
+    redactions: Count,
+    truncated_fields: Count,
+  })
+  .strict();
+export type EvidenceTranscriptResponse = z.infer<typeof EvidenceTranscriptResponse>;
+
+/** `GET /api/evidence/sessions/:sessionId/transcript/items/:seqFrom[?full=1]`. The item carries its own `redactions`. */
+export const EvidenceTranscriptItemResponse = z
+  .object({ session_id: AcpSessionId, item: EvidenceTranscriptItem })
+  .strict();
+export type EvidenceTranscriptItemResponse = z.infer<typeof EvidenceTranscriptItemResponse>;
+
+/** Every refusal the transcript routes answer with, by status. */
+export const EvidenceTranscriptError = z.union([
+  z.object({ error: z.literal("unauthorized") }).strict(), // 401
+  z.object({ error: z.literal("forbidden") }).strict(), // 403: no transcripts:read
+  z.object({ error: z.literal("not_found") }).strict(), // 404: no such session in your tenant, or no item starts there
+  z.object({ error: z.literal("bad_range") }).strict(), // 400
+  z.object({ error: z.literal("item_too_large") }).strict(), // 413: over 1 MiB serialised
+]);
+export type EvidenceTranscriptError = z.infer<typeof EvidenceTranscriptError>;

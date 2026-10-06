@@ -1,5 +1,5 @@
-import { test, expect } from "vitest";
-import type { AcpEvent, AcpEventType } from "@agentpod/contract";
+import { test, expect } from "bun:test";
+import type { AcpEvent, AcpEventType } from "./acp-session";
 import {
   emptyTranscript,
   foldEvent,

@@ -18,11 +18,11 @@
  *     malformed payloads are ignored silently (forward compat), never thrown.
  */
 
-import type { AcpEvent, AcpSessionStatus } from "@agentpod/contract";
+import type { AcpEvent, AcpSessionStatus } from "./acp-session";
+import type { ToolStatus } from "./matrix-events";
+import { chunkText, isRecord, str, toolStatus } from "./transcript-narrow";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
 
 export type ToolContent =
   | { type: "text"; text: string }
@@ -133,7 +133,7 @@ export function splitPreamble(items: ChatItem[]): {
   const texts: string[] = [];
   for (let i = 0; i < end; i += 1) {
     const it = items[i];
-    if (it.kind === "assistant") texts.push(it.text);
+    if (it?.kind === "assistant") texts.push(it.text);
   }
   if (texts.length === 0) return { preamble: null, items };
 
@@ -143,25 +143,12 @@ export function splitPreamble(items: ChatItem[]): {
   if (lines.length === 0) return { preamble: null, items: rest };
 
   return {
-    preamble: { text, summary: lines[0].trim(), more: lines.length - 1 },
+    preamble: { text, summary: (lines[0] ?? "").trim(), more: lines.length - 1 },
     items: rest,
   };
 }
 
 // ─── Defensive narrowing helpers ─────────────────────────────────────────────
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null;
-}
-
-function str(v: unknown): string | undefined {
-  return typeof v === "string" ? v : undefined;
-}
-
-const TOOL_STATUSES: readonly ToolStatus[] = ["pending", "in_progress", "completed", "failed"];
-function toolStatus(v: unknown): ToolStatus | undefined {
-  return TOOL_STATUSES.includes(v as ToolStatus) ? (v as ToolStatus) : undefined;
-}
 
 const SESSION_STATUSES: readonly AcpSessionStatus[] = [
   "starting",
@@ -172,13 +159,6 @@ const SESSION_STATUSES: readonly AcpSessionStatus[] = [
 ];
 function sessionStatus(v: unknown): AcpSessionStatus | undefined {
   return SESSION_STATUSES.includes(v as AcpSessionStatus) ? (v as AcpSessionStatus) : undefined;
-}
-
-/** `{type:"text",text}` content block → its text, else undefined. */
-function chunkText(payload: Record<string, unknown>): string | undefined {
-  const content = payload.content;
-  if (!isRecord(content) || content.type !== "text") return undefined;
-  return str(content.text);
 }
 
 /** Map SDK ToolCallContent entries into renderable ToolContent; unknown types dropped. */

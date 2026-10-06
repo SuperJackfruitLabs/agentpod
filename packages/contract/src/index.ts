@@ -25,3 +25,5 @@ export * from "./push";
 export * from "./fleet-live";
 export * from "./fleet-report";
 export * from "./evidence";
+export * from "./transcript";
+export * from "./transcript-evidence";

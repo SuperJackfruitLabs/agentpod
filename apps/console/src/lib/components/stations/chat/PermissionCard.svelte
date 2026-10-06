@@ -14,7 +14,7 @@
    */
   import { Status } from "$lib/components/ui/status";
   import { Button, type ButtonVariant } from "$lib/components/ui/button";
-  import type { ChatItem } from "./transcript";
+  import type { ChatItem } from "@agentpod/contract";
 
   interface Props {
     item: Extract<ChatItem, { kind: "permission" }>;

@@ -2,7 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { EvidenceAttemptResponse, EvidencePrincipalResponse, EvidenceRunResponse } from "./evidence";
+import {
+  EvidenceAttemptResponse,
+  EvidencePrincipalResponse,
+  EvidenceRunResponse,
+  EvidenceTranscriptError,
+  EvidenceTranscriptItemResponse,
+  EvidenceTranscriptResponse,
+} from "./evidence";
 
 const dir = join(import.meta.dir, "../../../fixtures/evidence");
 const read = (f: string) => JSON.parse(readFileSync(join(dir, f), "utf8"));
@@ -58,4 +65,41 @@ test("an attempt without agent_principal_id is refused: absent is not null", () 
   const ex = read("hub_evidence_run.json").examples[0].response;
   const { agent_principal_id: _drop, ...attempt } = ex.attempts[0];
   expect(EvidenceRunResponse.safeParse({ ...ex, attempts: [attempt] }).success).toBe(false);
+});
+
+describe("hub_evidence_transcript.json", () => {
+  const corpus = read("hub_evidence_transcript.json");
+  for (const ex of corpus.examples) {
+    test(`accepts: ${ex.name}`, () => {
+      expect(EvidenceTranscriptResponse.safeParse(ex.response).error).toBeUndefined();
+    });
+  }
+  for (const r of corpus.reject) {
+    test(`rejects: ${r.reason}`, () => {
+      expect(EvidenceTranscriptResponse.safeParse(patched(corpus.examples[0].response, r.patch)).success).toBe(false);
+    });
+  }
+  for (const e of corpus.errors) {
+    test(`error ${e.status}: ${e.body.error}`, () => {
+      expect(EvidenceTranscriptError.safeParse(e.body).error).toBeUndefined();
+    });
+  }
+  test("the page example holds every item kind", () => {
+    const kinds = new Set(corpus.examples[0].response.items.map((i: { kind: string }) => i.kind));
+    expect([...kinds].sort()).toEqual(["error", "message", "other", "permission", "prompt", "reasoning", "state", "tool_call"]);
+  });
+});
+
+describe("hub_evidence_transcript_item.json", () => {
+  const corpus = read("hub_evidence_transcript_item.json");
+  for (const ex of corpus.examples) {
+    test(`accepts: ${ex.name}`, () => {
+      expect(EvidenceTranscriptItemResponse.safeParse(ex.response).error).toBeUndefined();
+    });
+  }
+  for (const e of corpus.errors) {
+    test(`error ${e.status}: ${e.body.error}`, () => {
+      expect(EvidenceTranscriptError.safeParse(e.body).error).toBeUndefined();
+    });
+  }
 });

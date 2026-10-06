@@ -60,6 +60,26 @@ expect() {
   FAILURES=$((FAILURES + 1))
 }
 
+# `expect_body METHOD PATH STATUS BODY WHY` — the status AND the exact body.
+#
+# For a route mounted AHEAD of the auth middleware, a status proves nothing: an unmounted path
+# under /api/* is refused 401 by the middleware as well, so `expect` would pass for a route that
+# does not exist. The route's own refusal (`{"error":"unauthorized"}`) is a body the middleware
+# never sends (`{"error":"Unauthorized","message":…}`), so it is the body that proves the mount.
+expect_body() {
+  method=$1; path=$2; want=$3; body=$4; why=$5
+  out=$(curl -s -w '\n%{http_code}' -X "$method" "$BASE$path" 2>/dev/null) || out=""
+  got=$(printf '%s\n' "$out" | tail -n 1)
+  text=$(printf '%s\n' "$out" | sed '$d')
+  [ -n "$got" ] || got=000
+  if [ "$got" = "$want" ] && [ "$text" = "$body" ]; then
+    echo "ok    $method $path -> $got $body   ($why)"
+  else
+    echo "FAIL  $method $path -> $got $text — wanted $want $body. $why"
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
 echo "smoke: $BASE"
 
 # ── Liveness, which is necessary and nowhere near sufficient ────────────────
@@ -85,6 +105,12 @@ expect POST /api/auth/token/exchange 400,401 "the code exchange refuses an empty
 # ── A route behind the auth middleware ──────────────────────────────────────
 # Proves the middleware is mounted and refusing, not that it is absent.
 expect GET /api/nodes 401,403 "an ordinary API route refuses an anonymous caller"
+
+# ── Evidence routes (self-authenticating, mounted ahead of the auth middleware) ──
+# Their own refusal body, not the middleware's: see expect_body.
+expect_body GET /api/evidence/runs/superpipeline/run_smoke 401 '{"error":"unauthorized"}' "run evidence refuses an anonymous caller"
+expect_body GET /api/evidence/sessions/acps_00000000-0000-0000-0000-000000000000/transcript 401 '{"error":"unauthorized"}' "a transcript refuses an anonymous caller"
+expect_body GET /api/evidence/sessions/acps_00000000-0000-0000-0000-000000000000/transcript/items/1 401 '{"error":"unauthorized"}' "one transcript item refuses an anonymous caller"
 
 echo
 if [ "$FAILURES" -gt 0 ]; then

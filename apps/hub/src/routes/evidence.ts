@@ -13,7 +13,7 @@
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
 import type { JSONWebKeySet } from "jose";
-import { PrincipalId, UNKNOWN_FINGERPRINT_VIEW, type EvidenceFingerprint } from "@agentpod/contract";
+import { PrincipalId, UNKNOWN_FINGERPRINT_VIEW, itemFirstSeq, type EvidenceFingerprint } from "@agentpod/contract";
 
 import { publishedJwks, verifyHubToken } from "../auth/hub-token";
 import { db } from "../db/drizzle";
@@ -21,18 +21,42 @@ import { acpRuns } from "../db/schema/acp";
 import { bridgeDispatches } from "../db/schema/bridge";
 import { principalIdentities } from "../db/schema/identities";
 import { principals } from "../db/schema/organization";
+import { stations } from "../db/schema/stations";
 import { tenantScope } from "../db/tenant-scope";
-import { EVIDENCE_READ, getGrant } from "../services/grants";
+import {
+  ITEM_LIMIT_BYTES,
+  byteLength,
+  decodeCursor,
+  encodeCursor,
+  findSession,
+  foldRange,
+  parseLimit,
+  parseRange,
+  redactItem,
+  selectPage,
+  sessionBounds,
+  truncateItem,
+  type SessionRef,
+  type WireItem,
+} from "../services/evidence/transcript";
+import { recordAudit } from "../services/audit";
+import { EVIDENCE_READ, TRANSCRIPTS_READ, getGrant, type GrantScope } from "../services/grants";
 import { principalById, principalForUser } from "../services/principals";
+import { contentRedactor } from "../services/redact-content";
 
 export interface EvidenceDeps {
   jwks?: () => Promise<JSONWebKeySet>;
   now?: () => Date;
 }
 
-type Authorized = { ok: true; tenant: string } | { ok: false; status: 401 | 403 };
+type Authorized = { ok: true; tenant: string; principalId: string } | { ok: false; status: 401 | 403 };
 
-async function authorize(header: string | undefined, jwks: () => Promise<JSONWebKeySet>): Promise<Authorized> {
+/** Each route names the ONE scope it needs; holding another never stands in for it. */
+async function authorize(
+  header: string | undefined,
+  jwks: () => Promise<JSONWebKeySet>,
+  scope: GrantScope,
+): Promise<Authorized> {
   const match = /^Bearer +(\S+)$/i.exec((header ?? "").trim());
   if (!match) return { ok: false, status: 401 };
   const claims = await verifyHubToken(match[1]!, jwks);
@@ -43,8 +67,8 @@ async function authorize(header: string | undefined, jwks: () => Promise<JSONWeb
   const principal = (await principalById(claims.sub)) ?? (await principalForUser(claims.sub));
   if (!principal || principal.suspendedAt) return { ok: false, status: 403 };
   const grant = await getGrant(principal.id);
-  if (!grant || !grant.scopes.includes(EVIDENCE_READ)) return { ok: false, status: 403 };
-  return { ok: true, tenant: claims.tenant };
+  if (!grant || !grant.scopes.includes(scope)) return { ok: false, status: 403 };
+  return { ok: true, tenant: claims.tenant, principalId: principal.id };
 }
 
 const refusal = (status: 401 | 403) => ({ error: status === 401 ? "unauthorized" : "forbidden" });
@@ -86,13 +110,61 @@ async function principalIdFor(segment: string): Promise<string | null> {
   return row?.principalId ?? null;
 }
 
+/** `X-On-Behalf-Of`, kept only when it is a principal id. Recorded, never used to authorise. */
+function onBehalfOf(header: string | undefined): string | null {
+  const v = header?.trim() ?? "";
+  return PrincipalId.safeParse(v).success ? v : null;
+}
+
+/**
+ * One `station_audit` row per transcript read. Ids and counts only — `sanitizeParams` in
+ * `services/audit.ts` drops any key it does not list, so content cannot ride along by accident.
+ * A session outlives its station, so a deleted station's row names the session's station id.
+ */
+async function auditTranscriptRead(args: {
+  principalId: string;
+  onBehalfOf: string | null;
+  session: SessionRef;
+  seqFrom: number;
+  seqTo: number;
+  items: number;
+  redactions: number;
+  full: boolean;
+  /** The item route's `:seqFrom`: which item was read. Absent on a page read. */
+  itemSeq?: number;
+  error?: string;
+}): Promise<void> {
+  const [station] = await db
+    .select({ nodeId: stations.nodeId, stationKey: stations.stationKey })
+    .from(stations)
+    .where(eq(stations.id, args.session.stationId))
+    .limit(1);
+  const audit = await recordAudit(db, {
+    userId: args.principalId,
+    nodeId: station?.nodeId ?? "unknown",
+    stationKey: station?.stationKey ?? args.session.stationId,
+    verb: "evidence.transcript.read",
+    params: {
+      sessionId: args.session.id,
+      seq_from: args.seqFrom,
+      seq_to: args.seqTo,
+      items: args.items,
+      redactions: args.redactions,
+      full: args.full,
+      ...(args.itemSeq !== undefined ? { item_seq: args.itemSeq } : {}),
+      ...(args.onBehalfOf ? { on_behalf_of: args.onBehalfOf } : {}),
+    },
+  });
+  await audit.done(args.error ? "error" : "ok", args.error);
+}
+
 export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
   const jwks = deps.jwks ?? publishedJwks;
   const now = deps.now ?? (() => new Date());
 
   return new Hono()
     .get("/api/evidence/runs/:source/:externalRunId", async (c) => {
-      const auth = await authorize(c.req.header("authorization"), jwks);
+      const auth = await authorize(c.req.header("authorization"), jwks, EVIDENCE_READ);
       if (!auth.ok) return c.json(refusal(auth.status), auth.status);
       const source = c.req.param("source");
       const runId = c.req.param("externalRunId");
@@ -130,7 +202,7 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
       });
     })
     .get("/api/evidence/attempts/:attemptId", async (c) => {
-      const auth = await authorize(c.req.header("authorization"), jwks);
+      const auth = await authorize(c.req.header("authorization"), jwks, EVIDENCE_READ);
       if (!auth.ok) return c.json(refusal(auth.status), auth.status);
       const [row] = await db
         .select({ externalSource: acpRuns.externalSource, externalRunId: acpRuns.externalRunId })
@@ -159,7 +231,7 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
      * is still answered: a decision made before the suspension is still that principal's.
      */
     .get("/api/evidence/principals/:principalId", async (c) => {
-      const auth = await authorize(c.req.header("authorization"), jwks);
+      const auth = await authorize(c.req.header("authorization"), jwks, EVIDENCE_READ);
       if (!auth.ok) return c.json(refusal(auth.status), auth.status);
       const id = await principalIdFor(c.req.param("principalId"));
       if (!id) return c.json({ error: "not_found" }, 404);
@@ -170,6 +242,107 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
         .limit(1);
       if (!p) return c.json({ error: "not_found" }, 404);
       return c.json({ id: p.id, kind: p.kind, handle: p.handle, suspended: p.suspendedAt !== null });
+    })
+    /**
+     * A session's transcript, one page of items (superwitness transcripts spec §3.3). Needs
+     * `transcripts:read`. Another tenant's session, or none, is 404 — never 403, which would
+     * confirm it exists.
+     */
+    .get("/api/evidence/sessions/:sessionId/transcript", async (c) => {
+      const auth = await authorize(c.req.header("authorization"), jwks, TRANSCRIPTS_READ);
+      if (!auth.ok) return c.json(refusal(auth.status), auth.status);
+      const session = await findSession(auth.tenant, c.req.param("sessionId"));
+      if (!session) return c.json({ error: "not_found" }, 404);
+
+      const range = parseRange(
+        { seq_from: c.req.query("seq_from"), seq_to: c.req.query("seq_to") },
+        await sessionBounds(auth.tenant, session.id),
+      );
+      if (!range) return c.json({ error: "bad_range" }, 400);
+      let start = range.from;
+      const cursor = c.req.query("cursor");
+      if (cursor !== undefined) {
+        const seq = decodeCursor(cursor);
+        if (seq === null || seq < range.from || seq > range.to) return c.json({ error: "bad_range" }, 400);
+        start = seq;
+      }
+
+      const folded = await foldRange(auth.tenant, session.id, range.from, range.to);
+      const { page, nextSeq } = selectPage(folded, start, parseLimit(c.req.query("limit")));
+      const redactor = contentRedactor();
+      let redactions = 0;
+      let truncatedFields = 0;
+      const items: WireItem[] = page.map((it) => {
+        const redacted = redactItem(it, redactor);
+        const { item, truncated } = truncateItem(redacted);
+        redactions += redacted.redactions;
+        truncatedFields += truncated;
+        return item;
+      });
+
+      await auditTranscriptRead({
+        principalId: auth.principalId,
+        onBehalfOf: onBehalfOf(c.req.header("x-on-behalf-of")),
+        session,
+        seqFrom: range.from,
+        seqTo: range.to,
+        items: items.length,
+        redactions,
+        full: false,
+      });
+      return c.json({
+        session_id: session.id,
+        seq_from: range.from,
+        seq_to: range.to,
+        items,
+        next_cursor: nextSeq === null ? null : encodeCursor(nextSeq),
+        redactions,
+        truncated_fields: truncatedFields,
+      });
+    })
+    /**
+     * One item, by the seq it starts at within the range (`seq_from`/`seq_to`, the same as the
+     * page it came from; default the whole session). `full=1` returns it uncut up to 1 MiB
+     * serialised, else 413; without it, the item is cut exactly as its page cut it.
+     */
+    .get("/api/evidence/sessions/:sessionId/transcript/items/:seqFrom", async (c) => {
+      const auth = await authorize(c.req.header("authorization"), jwks, TRANSCRIPTS_READ);
+      if (!auth.ok) return c.json(refusal(auth.status), auth.status);
+      const session = await findSession(auth.tenant, c.req.param("sessionId"));
+      if (!session) return c.json({ error: "not_found" }, 404);
+      const range = parseRange(
+        { seq_from: c.req.query("seq_from"), seq_to: c.req.query("seq_to") },
+        await sessionBounds(auth.tenant, session.id),
+      );
+      if (!range) return c.json({ error: "bad_range" }, 400);
+      const at = c.req.param("seqFrom");
+      if (!/^\d{1,9}$/.test(at)) return c.json({ error: "not_found" }, 404);
+
+      const found = (await foldRange(auth.tenant, session.id, range.from, range.to)).find(
+        (it) => itemFirstSeq(it) === Number(at),
+      );
+      if (!found) return c.json({ error: "not_found" }, 404);
+
+      const full = c.req.query("full") === "1";
+      const redacted = redactItem(found, contentRedactor());
+      const item = full ? redacted : truncateItem(redacted).item;
+      const audit = {
+        principalId: auth.principalId,
+        onBehalfOf: onBehalfOf(c.req.header("x-on-behalf-of")),
+        session,
+        seqFrom: range.from,
+        seqTo: range.to,
+        items: 1,
+        redactions: redacted.redactions,
+        full,
+        itemSeq: Number(at),
+      };
+      if (byteLength(JSON.stringify(item)) > ITEM_LIMIT_BYTES) {
+        await auditTranscriptRead({ ...audit, items: 0, error: "item_too_large" });
+        return c.json({ error: "item_too_large" }, 413);
+      }
+      await auditTranscriptRead(audit);
+      return c.json({ session_id: session.id, item });
     });
 }
 

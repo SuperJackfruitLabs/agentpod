@@ -79,7 +79,7 @@ import {
   type ChatItem,
   type SessionPreamble,
   type Transcript,
-} from "./transcript";
+} from "@agentpod/contract";
 
 export type ChatConnection = "idle" | "connecting" | "connected" | "reconnecting" | "disconnected";
 

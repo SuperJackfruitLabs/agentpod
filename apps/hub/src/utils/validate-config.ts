@@ -8,6 +8,7 @@ import {
 } from "../services/runtimes-image";
 import { resolveDockerDaemon } from "../services/provisioner/docker-daemon";
 import { loadBridgeConfig } from "../services/bridge/config";
+import { loadOperatorRules } from "../services/redact-content";
 
 export interface ValidationError {
   field: string;
@@ -448,6 +449,18 @@ export function collectConfigErrors(
         message: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  // The operator's transcript redaction rules. Not scoped by any flag: a rule an operator wrote
+  // is one they believe is applied, so a hub that cannot apply it must not serve transcripts —
+  // and refusing the boot is the one refusal nobody can miss. A path with no file is no rules.
+  try {
+    loadOperatorRules(cfg.redaction.rulesFile);
+  } catch (err) {
+    errors.push({
+      field: "HUB_REDACTION_RULES_FILE",
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
 
   return errors;

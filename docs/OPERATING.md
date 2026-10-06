@@ -200,11 +200,14 @@ endpoint, not these verbs.
 
 A service principal is a program with no person behind it. It holds a `svc_…:<secret>`
 credential, exchanges it at `POST /api/auth/service-token` for a five-minute token, and its grant
-holds scopes only, never dispatch or reach. Two scopes exist:
+holds scopes only, never dispatch or reach. Three scopes exist:
 
 - `evidence:read` — read run evidence from the hub and superpipeline (superwitness reads this way);
 - `runs:write` — report runs to superwitness's run registry. The hub mints it and no hub route
   honours it; superwitness checks it.
+- `transcripts:read` — read a session's transcript (prompts, messages, tool inputs and outputs,
+  redacted) from the hub's evidence routes. It does not include `evidence:read`, and
+  `evidence:read` does not include it.
 
 The token's audiences are its client's, from `HUB_OAUTH_CLIENTS` (edit them with estate's
 `bin/hub-audiences`, never by hand). Give a service only the planes it calls: superpipeline's run
@@ -247,6 +250,34 @@ Setting up superwitness itself (`evidence:read`):
 
 `fleet grants set` on a service principal keeps its scopes: a grant write that does not mention
 `scopes` leaves them as stored.
+
+### Transcripts
+
+`GET /api/evidence/sessions/:sessionId/transcript` (and `…/transcript/items/:seqFrom`) return what a
+session said — prompts, messages, reasoning, tool inputs and outputs, permissions — for a principal
+whose grant holds `transcripts:read`. `evidence:read` is not enough, and `transcripts:read` grants
+nothing else. Another tenant's session answers 404.
+
+- **Redaction.** Every string is redacted before it leaves: this hub's own secrets (exact values,
+  12+ characters), common credential formats (including `redis://:password@…` URLs), the value of
+  an environment assignment to a credential-named variable (`export AWS_SECRET_ACCESS_KEY=…`
+  keeps the name), the whole value of credential-named JSON keys (`password`, `token`, `api_key`,
+  `access_key`, `authorization`, `cookie`, `session_id`, and camelCase ones such as `accessToken`,
+  `clientSecret`, `dbPassword`, …) and the operator's rules (`HUB_REDACTION_RULES_FILE`, see
+  `docs/DEPLOYMENT.md`). A hit reads `[redacted:<rule>]`.
+  Stored events are never changed. Pages cut each field at 16 KiB; one item can be read whole up
+  to 1 MiB (`?full=1`), else 413.
+- **Audit.** Every read writes a `station_audit` row with verb `evidence.transcript.read`: the
+  caller's principal, the session, the range, the item and redaction counts, `full`, the item's
+  seq (`item_seq`) on an item read, and
+  `on_behalf_of` when the caller named the person it acts for (`X-On-Behalf-Of: prn_…`). Never content.
+- **Granting it** keeps the grant's other scopes, because `fleet grants set` replaces `scopes` when
+  the document names them:
+
+  ```sh
+  fleet grants show prn_… | jq '.grant | .scopes = ((.scopes + ["transcripts:read"]) | unique)' \
+    | fleet grants set prn_… --file -
+  ```
 
 ## 2. Adopt stations
 
