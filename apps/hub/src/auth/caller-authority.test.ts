@@ -27,6 +27,7 @@ function downPlane() {
   const dir: PrincipalDirectory = {
     principal: (id) => fail(`principal:${id}`),
     identity: (s, e) => fail(`identity:${s}:${e}`),
+    identitiesOf: (id, s) => fail(`identitiesOf:${id}:${s}`),
     list: () => fail("list"),
     invalidate: () => {},
   };

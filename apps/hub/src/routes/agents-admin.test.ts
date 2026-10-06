@@ -260,6 +260,7 @@ describe("under the org plane", () => {
       agentToken: unexpected,
       assertionToken: unexpected,
       lookupIdentity: unexpected,
+      identitiesOf: unexpected,
       getPrincipal: unexpected,
       listPrincipals: unexpected,
       unsuspend: unexpected,
@@ -277,6 +278,7 @@ describe("under the org plane", () => {
     const directory: PrincipalDirectory = {
       principal: async (id) => known.get(id) ?? null,
       identity: unexpected,
+      identitiesOf: unexpected,
       list: async () => [...known.values()],
       invalidate: () => {},
     };

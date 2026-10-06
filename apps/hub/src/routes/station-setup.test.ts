@@ -374,6 +374,7 @@ function fakePlane(
     agentToken: unexpected,
     assertionToken: unexpected,
     lookupIdentity: unexpected,
+    identitiesOf: unexpected,
     getPrincipal: unexpected,
     listPrincipals: unexpected,
     unsuspend: unexpected,
@@ -399,6 +400,7 @@ function fakePlane(
   const directory: PrincipalDirectory = {
     principal: async (id) => known.get(id) ?? null,
     identity: unexpected,
+    identitiesOf: unexpected,
     list: async (kind) => [...known.values()].filter((p) => !kind || p.kind === kind),
     invalidate: () => {},
   };

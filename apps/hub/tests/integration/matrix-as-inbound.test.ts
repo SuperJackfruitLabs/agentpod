@@ -906,6 +906,7 @@ describe("an inbound room message under the org plane, while the plane is unreac
             ? { id, kind: "agent", handle: "mx-inbound-it-agent", displayName: null, organizationId: null, suspended: false, grant: null }
             : null,
         identity: async (_s, ext) => (ext === OWNER_MXID ? { principalId: OWNER_PRINCIPAL, kind: "human", suspended: false } : null),
+        identitiesOf: async () => null,
         list: async () => [],
         invalidate: () => {},
         ...over,
