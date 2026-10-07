@@ -56,6 +56,11 @@ export interface ElicitationSweepResult {
   settled: number;
   /** Boards that did not answer. Their questions are NOT therefore closed. */
   boardsUnread: number;
+  /**
+   * Questions held because nobody has joined their board room yet. Waiting on a person,
+   * not stuck; posted by the next pass, or at once by the join (`sweepElicitationBoardNow`).
+   */
+  awaitingJoin: number;
 }
 
 /**
@@ -64,11 +69,17 @@ export interface ElicitationSweepResult {
  * not a delivery and not `already` is a question nobody can see.
  */
 function countsAsStuck(status: ElicitationProjectionOutcome["status"]): boolean {
-  return status !== "posted" && status !== "already";
+  return status !== "posted" && status !== "already" && status !== "awaiting-join";
 }
 
 export async function sweepElicitations(deps: ElicitationSweepDeps): Promise<ElicitationSweepResult> {
-  const result: ElicitationSweepResult = { projected: 0, stuck: 0, settled: 0, boardsUnread: 0 };
+  const result: ElicitationSweepResult = {
+    projected: 0,
+    stuck: 0,
+    settled: 0,
+    boardsUnread: 0,
+    awaitingJoin: 0,
+  };
 
   for (const boardId of await deps.boards()) {
     const tenantId = await deps.tenantIdFor(boardId);
@@ -93,6 +104,7 @@ export async function sweepElicitations(deps: ElicitationSweepDeps): Promise<Eli
       try {
         const outcome = await deps.project(tenantId, d);
         if (outcome.status === "posted") result.projected += 1;
+        else if (outcome.status === "awaiting-join") result.awaitingJoin += 1;
         else if (countsAsStuck(outcome.status)) {
           result.stuck += 1;
           log.warn("question could not be put in a room", {
@@ -196,6 +208,7 @@ export function startElicitationSweeper(
   if (!config) return null;
 
   const deps = bridgeElicitationSweepDeps(config, rest, fetchAdapter, opts.roster);
+  running = deps;
   const intervalMs = opts.intervalMs ?? ELICITATION_SWEEP_INTERVAL_MS;
   const timer = setInterval(() => {
     void sweepElicitations(deps).catch((err) =>
@@ -206,7 +219,27 @@ export function startElicitationSweeper(
   }, intervalMs);
 
   log.info("elicitation sweep started", { intervalMs });
-  return () => clearInterval(timer);
+  return () => {
+    clearInterval(timer);
+    if (running === deps) running = null;
+  };
+}
+
+/** The deps of the sweeper this process started, so a join can borrow them. */
+let running: ElicitationSweepDeps | null = null;
+
+/**
+ * Sweep one board's questions now, with the running sweeper's own deps; null when none
+ * is running. The join half of the hold (`board-projection.ts`): a question held because
+ * nobody had joined its board room is posted the moment somebody does.
+ */
+export async function sweepElicitationBoardNow(boardId: string): Promise<ElicitationSweepResult | null> {
+  const deps = running;
+  if (!deps) return null;
+  return sweepElicitations({
+    ...deps,
+    boards: async () => (await deps.boards()).filter((b) => b === boardId),
+  });
 }
 
 /** The rostered agents, read from the table the console edits. */

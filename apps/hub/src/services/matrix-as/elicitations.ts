@@ -42,7 +42,14 @@ export type ElicitationProjectionOutcome =
   | { status: "posted"; roomId: string; eventId: string }
   | { status: "already" }
   | { status: "no-room" }
-  | { status: "not-accepted" };
+  | { status: "not-accepted" }
+  /**
+   * The board room exists but no human has joined it yet, so the question is held rather
+   * than encrypted to the speaker alone — the rule a gate follows (`gates.ts`,
+   * 2026-10-07). No claim is taken: the hold lives in the board's pending list, which the
+   * sweep and the join trigger re-read, so neither a late join nor a restart loses it.
+   */
+  | { status: "awaiting-join"; roomId: string };
 
 export interface ElicitationProjectionDeps {
   /**
@@ -67,6 +74,13 @@ export interface ElicitationProjectionDeps {
     body: string,
     extra?: Record<string, unknown>,
   ): Promise<string | null>;
+  /**
+   * Whether anybody but the board's speaker has JOINED the room. The same dependency
+   * the gate path takes (`GateProjectionDeps.humanJoined`); optional so a caller that
+   * builds no board room keeps working, and wired in production by
+   * `board-projection.ts`, which a test holds to it.
+   */
+  humanJoined?(roomId: string, speakerMxid: string): Promise<boolean>;
   boardBaseUrl?: string;
   /** Marks an event as one this hub sent, so its own push does not echo back. */
   noteHubEvent?(eventId: string | null, kind: string): void;
@@ -119,6 +133,24 @@ export async function projectElicitation(
       boardId: d.boardId,
     });
     return { status: "no-room" };
+  }
+
+  // Held, not posted, until a human has joined to receive the room key. Asked before the
+  // claim so a held question leaves no row — and with no row it is nobody's "open
+  // question", so no reply in the room can be taken as its answer.
+  if (deps.humanJoined && !(await deps.humanJoined(found.roomId, found.speakerMxid))) {
+    const [posted] = await db
+      .select({ elicitationId: matrixElicitationEvents.elicitationId })
+      .from(matrixElicitationEvents)
+      .where(eq(matrixElicitationEvents.elicitationId, d.elicitationId))
+      .limit(1);
+    if (posted) return { status: "already" };
+    log.info("question held until a human joins its board room", {
+      elicitationId: d.elicitationId,
+      boardId: d.boardId,
+      roomId: found.roomId,
+    });
+    return { status: "awaiting-join", roomId: found.roomId };
   }
 
   const claimed = await db

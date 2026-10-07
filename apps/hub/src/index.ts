@@ -16,14 +16,10 @@ import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
 import { createSuperpipelinePushRoutes } from './routes/superpipeline-push.ts';
 import { projectGate, projectionForGate, tenantForBoard } from './services/matrix-as/gates.ts';
-import { noteGatePosted, reconcileBoardGates } from './services/matrix-as/fleet-gates.ts';
-import {
-  boardForHumanJoin,
-  boardRoomHasJoinedHuman,
-  ensureBoardRoom,
-  matrixIdsForBoardHumans,
-} from './services/matrix-as/board-room.ts';
-import { startGateSweeper, sweepBoardNow } from './services/matrix-as/gate-sweep.ts';
+import { reconcileBoardGates } from './services/matrix-as/fleet-gates.ts';
+import { matrixIdsForBoardHumans } from './services/matrix-as/board-room.ts';
+import { boardProjectionDeps, withJoinWake } from './services/matrix-as/board-projection.ts';
+import { startGateSweeper } from './services/matrix-as/gate-sweep.ts';
 import { startElicitationSweeper } from './services/matrix-as/elicitation-sweep.ts';
 import { projectElicitation, postedElicitationsAwaitingOutcome } from './services/matrix-as/elicitations.ts';
 import { createLogger } from './utils/logger.ts';
@@ -364,67 +360,7 @@ if (matrixBridge) {
   // How a gate reaches a room, however it got here. Shared by the push
   // receiver and the sweep beneath it, so a swept gate and a pushed one cannot
   // be posted by two slightly different projections.
-  const gateProjection = {
-    domain: matrixBridge.config.domain,
-    boardBaseUrl: process.env.SUPERPIPELINE_BOARD_URL,
-    // `extra` is the gate itself, embedded in the prose (`dev.superpipeline.gate`).
-    sendText: (userId: string, roomId: string, body: string, extra?: Record<string, unknown>) =>
-      matrixBridge.client.sendText(userId, roomId, body, extra),
-    sendCustomEvent: (
-      userId: string,
-      roomId: string,
-      eventType: string,
-      content: Record<string, unknown>,
-    ) => matrixBridge.client.sendCustomEvent(userId, roomId, eventType, content),
-    /**
-     * The board's room, made on first use.
-     *
-     * `charter → decisions/2026-09-28-a-gate-belongs-to-its-board-not-to-an-agents-room.md`.
-     * A gate used to go to the station's room, which this hub encrypts for but must
-     * never decrypt for — so it could be delivered and never answered.
-     */
-    // `boardOpts`, not `opts`: the `ensureRoom` lambda below already binds `opts` to
-    // the ROOM's creation options, and two different `opts` in one expression is how
-    // the wrong one gets passed.
-    boardRoom: (boardId: string, tenantId: string, boardOpts?: { boardName?: string }) =>
-      ensureBoardRoom(boardId, tenantId, {
-        domain: matrixBridge.config.domain,
-        ensureUser: (localpart, displayName) =>
-          matrixBridge.client.ensureUser(localpart, displayName),
-        ensureRoom: (alias, opts) => matrixBridge.client.ensureRoom(alias, opts),
-        invite: (asUserId, roomId, invitee) =>
-          matrixBridge.client.invite(asUserId, roomId, invitee),
-        enableEncryption: (asUserId: string, roomId: string) =>
-          matrixBridge.client.enableRoomEncryption(asUserId, roomId),
-        setName: (asUserId: string, roomId: string, name: string) =>
-          matrixBridge.client.setRoomName(asUserId, roomId, name),
-        /**
-         * The humans who may answer this board's gates.
-         *
-         * A list from the first day though it holds one today. superpipeline owns
-         * board membership, but its `/v1/members` route resolves a user SESSION —
-         * the same restriction that stops the hub minting agent tokens — so the hub
-         * cannot ask it with the credentials it holds. Until superpipeline exposes
-         * membership to a service credential, this is the one human the bridge
-         * roster already names, resolved through `principal_identities` to the
-         * Matrix id they actually read on.
-         */
-        humansFor: async () => matrixIdsForBoardHumans(boardId),
-      }, boardOpts),
-    /**
-     * A gate waits until a human has JOINED its board room (2026-10-07): posted while
-     * they were only invited, the first gate was encrypted to the speaker alone and
-     * could never be read. The join wakes it (`onEvent` below); the sweep is the floor.
-     */
-    humanJoined: (roomId: string, speakerMxid: string) =>
-      boardRoomHasJoinedHuman(roomId, speakerMxid, {
-        homeserverUrl: matrixBridge.config.homeserverUrl,
-        asToken: matrixBridge.config.asToken,
-      }),
-    /** A posted gate is a pending decision on each of the board's humans' fleet card. */
-    onPosted: (d: Parameters<typeof noteGatePosted>[0], posted: Parameters<typeof noteGatePosted>[1]) =>
-      noteGatePosted(d, posted, { humansFor: matrixIdsForBoardHumans }),
-  };
+  const gateProjection = boardProjectionDeps(matrixBridge);
 
   // POST /public/bridge/superpipeline/push — a board telling us a gate is open.
   //
@@ -484,20 +420,8 @@ if (matrixBridge) {
     createMatrixAsRoutes({
       hsToken: matrixBridge.config.hsToken,
       domain: matrixBridge.config.domain,
-      onEvent: async (event) => {
-        // A human accepting a board room's invite is what a held gate waits on. Not
-        // awaited: the sweep reads superpipeline, and the homeserver's transaction
-        // must not wait on another service. Its failures are the sweep's to report.
-        void boardForHumanJoin(event)
-          .then((boardId) => (boardId ? sweepBoardNow(boardId) : null))
-          .catch((err) =>
-            errorLogger.warn('could not wake gates held for a board room join', {
-              roomId: event.room_id,
-              error: err instanceof Error ? err.message : String(err),
-            }),
-          );
-        await matrixBridge.onEvent(event);
-      },
+      // A human joining a board room is what a held gate or question waits on.
+      onEvent: withJoinWake((event) => matrixBridge.onEvent(event)),
       onProvisionAlias: (alias) => matrixBridge.onProvisionAlias(alias),
       // Null unless a crypto store is configured, in which case the route
       // skips the step entirely — a deployment that has not opted in pays
