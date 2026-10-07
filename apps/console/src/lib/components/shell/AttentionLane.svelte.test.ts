@@ -105,3 +105,17 @@ test("the item list is its own horizontal scroll container, never the page's", (
   expect(getByTestId("attention-items").className).toContain("overflow-x-auto");
   expect(getByTestId("attention-items").className).toContain("min-w-0");
 });
+
+test("on a phone or a touch screen each item is a 44px target, and the lane says it holds more", async () => {
+  const { render: r } = await import("@testing-library/svelte");
+  const { default: Lane } = await import("./AttentionLane.svelte");
+  const { getAllByTestId, getByTestId } = r(Lane, {
+    items: [
+      { kind: "node-offline", token: "error", what: "Node offline", who: "vega", detail: "2 agents", href: "/nodes/n" },
+    ] as never,
+  });
+  expect(getByTestId("attention-items").className).toContain("scroll-strip");
+  const cls = getAllByTestId("attention-item")[0].className;
+  expect(cls).toContain("max-[900px]:min-h-11");
+  expect(cls).toContain("pointer-coarse:min-h-11");
+});

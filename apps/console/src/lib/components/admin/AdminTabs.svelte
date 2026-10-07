@@ -12,6 +12,7 @@
    * tooltip context that only exists inside the app shell.
    */
   import { cn } from "$lib/utils";
+  import { scrollStrip } from "$lib/actions/scroll-strip";
 
   interface Props {
     /** The section this page is. */
@@ -29,13 +30,20 @@
   ] as const;
 </script>
 
-<nav class="flex gap-1 border-b" aria-label="Admin sections">
+<!-- A scroll strip, and min-w-0 so it can be narrower than its tabs: five
+     sections are 406px, and at 390 the strip used to widen <main> and pan the
+     whole page sideways. -->
+<nav
+  class="scroll-strip flex min-w-0 gap-1 border-b"
+  aria-label="Admin sections"
+  use:scrollStrip={active}
+>
   {#each sections as section (section.id)}
     <a
       href={section.href}
       aria-current={active === section.id ? "page" : undefined}
       class={cn(
-        "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+        "-mb-px inline-flex shrink-0 items-center whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors max-[900px]:min-h-11 pointer-coarse:min-h-11",
         active === section.id
           ? "border-primary text-foreground"
           : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"

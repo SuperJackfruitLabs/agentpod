@@ -73,20 +73,27 @@
     return connection.reachable ? STATE.running : STATE.error;
   });
 
+  /**
+   * 32px for a mouse at desktop widths; 44px — a fingertip — below 901px and
+   * on any coarse pointer (an iPad in landscape is wide but still a finger).
+   * The audit measured these at 32×32 on a 390px phone.
+   */
+  const touch = "max-[900px]:size-11 pointer-coarse:size-11";
+
   const controlClass =
     "inline-flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground";
 </script>
 
 <header
   data-testid="top-bar"
-  class="flex min-w-0 items-center gap-2 border-b border-border bg-card px-2"
+  class="flex min-w-0 items-center gap-2 border-b border-border bg-card px-2 max-[900px]:gap-1"
 >
   <!-- Only reachable in the one-column layout, where roster and stage are two
        views rather than two columns. -->
   <button
     type="button"
     data-testid="roster-toggle"
-    class="{controlClass} size-8 shrink-0 min-[901px]:hidden"
+    class="{controlClass} size-8 {touch} shrink-0 min-[901px]:hidden"
     aria-label="Show the roster"
     onclick={() => onToggleRoster?.()}
   >
@@ -99,17 +106,20 @@
   <a
     href="/"
     data-testid="wordmark"
-    class="flex shrink-0 items-center gap-2 rounded px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+    aria-label="AgentPod home"
+    class="flex shrink-0 items-center gap-2 rounded px-1 max-[900px]:min-h-11 max-[900px]:min-w-11 max-[900px]:justify-center pointer-coarse:min-h-11 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
   >
     <Mark class="size-[18px]" />
-    <span class="text-sm font-semibold text-foreground">AgentPod</span>
+    <!-- The name gives way first on a phone: the mark still links home, and
+         the hub pill — the bar's one load-bearing fact — keeps its room. -->
+    <span class="text-sm font-semibold text-foreground max-[479px]:hidden">AgentPod</span>
   </a>
 
   <a
     href="/settings"
     data-testid="hub-pill"
     title={connection.apiUrl ?? "No hub configured"}
-    class="flex min-w-0 items-center gap-1.5 rounded-md border border-border px-2 py-1 transition-colors hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+    class="flex min-w-0 items-center gap-1.5 rounded-md border border-border px-2 py-1 max-[900px]:min-h-11 pointer-coarse:min-h-11 transition-colors hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
   >
     <StateDot state={hubState} size="sm" />
     <span
@@ -123,7 +133,7 @@
   <button
     type="button"
     data-testid="palette-cue"
-    class="{controlClass} h-8 min-w-0 gap-2 border border-border px-2 max-[900px]:size-8 max-[900px]:border-0 max-[900px]:px-0"
+    class="{controlClass} h-8 min-w-0 gap-2 border border-border px-2 pointer-coarse:h-11 max-[900px]:size-11 max-[900px]:border-0 max-[900px]:px-0"
     aria-label="Message an agent, or run a command"
     onclick={() => commandPalette.toggle()}
   >
@@ -137,7 +147,7 @@
   <a
     href="/settings"
     data-testid="appearance-link"
-    class="{controlClass} size-8 shrink-0"
+    class="{controlClass} size-8 {touch} shrink-0"
     aria-label="Appearance"
   >
     <SunMoon class="size-4" aria-hidden="true" />
@@ -152,7 +162,7 @@
   <button
     type="button"
     data-testid="topbar-sign-out"
-    class="{controlClass} size-8 shrink-0"
+    class="{controlClass} size-8 {touch} shrink-0"
     aria-label="Sign out"
     title="Sign out"
     disabled={signingOut}

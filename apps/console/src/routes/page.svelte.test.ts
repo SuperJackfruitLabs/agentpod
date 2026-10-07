@@ -225,6 +225,44 @@ test("the nodes table scrolls inside its own box, never the page", () => {
   expect(getByTestId("nodes-table-scroller").className).toContain("overflow-x-auto");
 });
 
+// --- narrow screens ---------------------------------------------------------
+// At 390px "Where they run" showed Node, Link and half of Agents; version and
+// Update were off the edge with no cue (responsive audit, 2026-10-07).
+
+function viewport(width: number) {
+  window.matchMedia = ((query: string) => {
+    const max = /\(max-width:\s*(\d+)px\)/.exec(query);
+    const min = /\(min-width:\s*(\d+)px\)/.exec(query);
+    const matches = max ? width <= Number(max[1]) : min ? width >= Number(min[1]) : false;
+    return {
+      matches, media: query, onchange: null,
+      addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {},
+      dispatchEvent: () => false,
+    };
+  }) as unknown as typeof window.matchMedia;
+}
+
+test("below 768px each node is a card with its agents, version drift and Update", async () => {
+  const realMatchMedia = window.matchMedia;
+  viewport(390);
+  try {
+    const { getByTestId, getAllByTestId, container } = render(Muster);
+
+    expect(container.querySelector("table")).toBeNull();
+    const cards = getByTestId("nodes-cards");
+    expect(getAllByTestId("node-row")).toHaveLength(2);
+    expect(cards.contains(getByTestId("node-agents-n_orion"))).toBe(true);
+    expect(getByTestId("node-agents-n_orion").textContent).toContain("3");
+    expect(getByTestId("node-drift-n_orion").textContent).toContain("v0.1.27 → v0.1.32");
+    expect(getByTestId("node-link-n_vega").textContent).toContain("Offline");
+
+    getByTestId("node-update-n_orion").click();
+    await waitFor(() => expect(updateNode).toHaveBeenCalledWith("n_orion"));
+  } finally {
+    window.matchMedia = realMatchMedia;
+  }
+});
+
 // --- activity ---------------------------------------------------------------
 
 test("the muster loads activity once and hands it to the feed", async () => {

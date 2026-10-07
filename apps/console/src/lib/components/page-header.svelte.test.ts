@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/svelte";
 import PageHeader from "./page-header-test-host.svelte";
 
@@ -58,5 +58,66 @@ describe("PageHeader", () => {
     await fireEvent.keyDown(beta, { key: "ArrowRight" });
     await fireEvent.keyDown(document.activeElement as Element, { key: "Enter" });
     expect(onTabChange).toHaveBeenCalledWith("c");
+  });
+});
+
+// ─── narrow screens ─────────────────────────────────────────────────────────
+// At 390px a header with three actions wrapped to 163px — 19% of the screen,
+// stuck to the top (responsive audit, 2026-10-07). Below 640px the secondary
+// actions fold into one "More actions" menu so the header stays one row.
+
+function viewport(width: number) {
+  window.matchMedia = ((query: string) => {
+    const max = /\(max-width:\s*(\d+)px\)/.exec(query);
+    const min = /\(min-width:\s*(\d+)px\)/.exec(query);
+    const matches = max ? width <= Number(max[1]) : min ? width >= Number(min[1]) : false;
+    return {
+      matches, media: query, onchange: null,
+      addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {},
+      dispatchEvent: () => false,
+    };
+  }) as unknown as typeof window.matchMedia;
+}
+
+describe("PageHeader secondary actions", () => {
+  const realMatchMedia = window.matchMedia;
+  afterEach(() => {
+    window.matchMedia = realMatchMedia;
+  });
+
+  it("sit inline as buttons on a wide screen", () => {
+    viewport(1280);
+    const onSelect = vi.fn();
+    render(PageHeader, { title: "Nodes", secondaryActions: [{ label: "New runtime", onSelect }] });
+    expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
+    screen.getByRole("button", { name: "New runtime" }).click();
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("fold into a More actions menu on a phone, and still run from there", async () => {
+    viewport(390);
+    const onSelect = vi.fn();
+    render(PageHeader, {
+      title: "Nodes",
+      secondaryActions: [
+        { label: "Update 2 nodes", onSelect: vi.fn() },
+        { label: "New runtime", onSelect },
+      ],
+    });
+    expect(screen.queryByRole("button", { name: "New runtime" })).toBeNull();
+    const more = screen.getByRole("button", { name: "More actions" });
+
+    await fireEvent.pointerDown(more, { button: 0, pointerType: "mouse" });
+    await fireEvent.keyDown(more, { key: "Enter" });
+    const item = await screen.findByRole("menuitem", { name: "New runtime" });
+    await fireEvent.click(item);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("puts the title and the actions on one row, wrapping only if they cannot fit", () => {
+    viewport(390);
+    const { container } = render(PageHeader, { title: "Nodes", secondaryActions: [] });
+    const row = container.querySelector("[data-testid='page-header-row']")!;
+    expect(row.className).not.toContain("flex-col");
   });
 });

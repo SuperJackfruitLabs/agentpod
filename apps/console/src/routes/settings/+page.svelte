@@ -30,7 +30,7 @@
 
 <PageHeader title="Settings" />
 
-<div class="container mx-auto max-w-7xl px-4 sm:px-6 py-6 space-y-6">
+<div class="page-width py-6 space-y-6">
 
   <!-- Appearance -->
   <div class="rounded-lg border bg-card p-6 space-y-4">

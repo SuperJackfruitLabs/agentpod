@@ -927,7 +927,54 @@ nav,
   display: none;
 }
 
+/* A horizontal strip that may hold more than it shows (tabs, the attention
+   lane). The scrollStrip action sets data-more-start / data-more-end while
+   content is hidden on that side; the edge fades so it reads as "keep going"
+   instead of as the end. A mask, not an overlay: it fades whatever the strip
+   sits on, in every theme, without a colour of its own. */
+.scroll-strip {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  --strip-fade: 2.5rem;
+}
+.scroll-strip::-webkit-scrollbar {
+  display: none;
+}
+.scroll-strip[data-more-end] {
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--strip-fade)), transparent);
+}
+.scroll-strip[data-more-start] {
+  mask-image: linear-gradient(to left, #000 calc(100% - var(--strip-fade)), transparent);
+}
+.scroll-strip[data-more-start][data-more-end] {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--strip-fade),
+    #000 calc(100% - var(--strip-fade)),
+    transparent
+  );
+}
+
 /* Improve touch responsiveness */
 .touch-manipulation {
   touch-action: manipulation;
+}
+/* ============================================
+   PAGE WIDTH
+   One content width for every page and its header, so moving between pages
+   never shifts the left edge (the audit measured 5xl, 6xl and 7xl side by
+   side at 1920). Wide enough for the nodes and agents tables; anything
+   narrower — a form, a feed — caps itself inside it.
+   ============================================ */
+@utility page-width {
+  margin-inline: auto;
+  width: 100%;
+  max-width: var(--container-7xl);
+  padding-inline: 1rem;
+  @media (width >= 40rem) {
+    padding-inline: 1.5rem;
+  }
 }

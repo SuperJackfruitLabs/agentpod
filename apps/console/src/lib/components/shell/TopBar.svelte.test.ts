@@ -164,3 +164,24 @@ test("appearance leads to settings", () => {
 
   expect(getByTestId("appearance-link").getAttribute("href")).toBe("/settings");
 });
+
+test("below 901px, and on any touch screen, every control in the bar is a 44px target", () => {
+  // Measured at 390: the controls were 32×32 and the hub pill 78×26
+  // (responsive audit, 2026-10-07). 44px is the floor for a fingertip.
+  const { getByTestId } = render(TopBar);
+  // The palette cue is a wide labelled button on a desktop: it grows taller
+  // under a finger, and becomes a 44px square below 901px.
+  const cue = getByTestId("palette-cue").className;
+  expect(cue).toContain("max-[900px]:size-11");
+  expect(cue).toContain("pointer-coarse:h-11");
+  for (const id of ["roster-toggle", "appearance-link", "topbar-sign-out"]) {
+    const cls = getByTestId(id).className;
+    expect(cls, id).toContain("max-[900px]:size-11");
+    expect(cls, id).toContain("pointer-coarse:size-11");
+  }
+  for (const id of ["hub-pill", "wordmark"]) {
+    const cls = getByTestId(id).className;
+    expect(cls, id).toContain("max-[900px]:min-h-11");
+    expect(cls, id).toContain("pointer-coarse:min-h-11");
+  }
+});

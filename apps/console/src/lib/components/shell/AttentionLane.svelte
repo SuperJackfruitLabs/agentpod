@@ -11,6 +11,7 @@
   import { STATE } from "$lib/fleet/state";
   import { cn } from "$lib/utils";
   import StateDot from "./StateDot.svelte";
+  import { scrollStrip } from "$lib/actions/scroll-strip";
 
   interface Props {
     items: AttentionItem[];
@@ -47,7 +48,8 @@
          its own content width and shoving the context rail off screen. -->
     <div
       data-testid="attention-items"
-      class="flex min-w-0 flex-1 overflow-x-auto"
+      class="scroll-strip flex min-w-0 flex-1 overflow-x-auto"
+      use:scrollStrip={items.length}
     >
       {#each items as item (item.kind + item.who)}
         <!--
@@ -62,7 +64,7 @@
         <a
           data-testid="attention-item"
           href={item.href}
-          class="relative flex shrink-0 items-center gap-2 whitespace-nowrap border-r border-border px-3 py-1.5 transition-colors hover:bg-muted focus-visible:outline focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-foreground"
+          class="relative flex shrink-0 items-center gap-2 whitespace-nowrap border-r border-border px-3 py-1.5 max-[900px]:min-h-11 pointer-coarse:min-h-11 transition-colors hover:bg-muted focus-visible:outline focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-foreground"
         >
           <StateDot state={STATE[item.token]} size="sm" />
           <span class="text-sm text-foreground">{item.what}</span>

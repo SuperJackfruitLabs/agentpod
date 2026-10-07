@@ -723,3 +723,27 @@ test("a station whose node has not enabled configuration management says so", as
   expect(getByText(/has not enabled configuration management/i)).toBeTruthy();
   expect(getByRole("button", { name: "Settings" })).toBeTruthy();
 });
+
+// ─── narrow screens ─────────────────────────────────────────────────────────
+// At 390px the strip shows four and a half of its tabs (responsive audit,
+// 2026-10-07): it must say more exist, and keep the selected one on screen.
+
+test("the tab strip is a scroll strip that brings the selected tab into view", async () => {
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "logs", "acp"])]);
+  setUrl("?tab=logs");
+  const scrolled: Element[] = [];
+  const spy = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
+    scrolled.push(this);
+  });
+
+  const { getByRole } = render(StationPage);
+  await waitFor(() => expect(getByRole("tab", { name: "Chat" })).toBeTruthy());
+
+  const tablist = getByRole("tablist");
+  expect(tablist.className).toContain("scroll-strip");
+  await waitFor(() => expect(scrolled).toContain(getByRole("tab", { name: "Logs" })));
+
+  setUrl("?tab=health");
+  await waitFor(() => expect(scrolled.at(-1)).toBe(getByRole("tab", { name: "Health" })));
+  spy.mockRestore();
+});
