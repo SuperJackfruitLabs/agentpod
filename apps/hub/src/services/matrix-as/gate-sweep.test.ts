@@ -16,7 +16,7 @@
 
 import { describe, expect, spyOn, test } from "bun:test";
 
-import { bridgeGateSweepDeps, startGateSweeper, sweepGates, type GateSweepDeps } from "./gate-sweep";
+import { bridgeGateSweepDeps, startGateSweeper, sweepBoardNow, sweepGates, type GateSweepDeps } from "./gate-sweep";
 import type { GatePendingDelivery, ProjectionOutcome } from "./gates";
 
 function gate(gateId: string, boardId: string): GatePendingDelivery {
@@ -188,6 +188,7 @@ describe("the gate sweep", () => {
       "no-room": 1,
       "no-agent": 1,
       "no-speaker": 1,
+      "awaiting-join": 0,
       failed: 0,
     });
     // Every gate it looked at is accounted for somewhere — nothing falls
@@ -462,6 +463,59 @@ describe("starting the sweeper", () => {
     stop!();
 
     expect(passes).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A gate held until its board room has a human in it (2026-10-07) is not stuck — it is
+ * waiting on a person — and it is re-offered the moment they join rather than at the
+ * next five-minute pass.
+ */
+describe("a gate held until somebody joins its board room", () => {
+  test("is tallied as awaiting-join, not as stuck and not as delivered", async () => {
+    const f = fake({}, { gate_1: { status: "awaiting-join", roomId: "!board:h" } });
+    const result = await sweepGates(f.deps);
+    expect(result.byStatus["awaiting-join"]).toBe(1);
+    expect(result.projected).toBe(0);
+    expect(result.byStatus.failed).toBe(0);
+  });
+
+  test("a join sweeps that one board at once, with the running sweeper's own deps", async () => {
+    const config = { baseUrl: "https://board.test", source: "superpipeline" } as unknown as Parameters<
+      typeof bridgeGateSweepDeps
+    >[0];
+    const offeredFor: string[] = [];
+    const stop = startGateSweeper(
+      {
+        tenantIdFor: async (boardId) => {
+          offeredFor.push(boardId);
+          return null;
+        },
+        project: async () => ({ status: "already" }),
+      },
+      {
+        config,
+        intervalMs: 60_000,
+        roster: async () => [
+          { boardId: "brd_one", token: `spa_${"a".repeat(48)}` },
+          { boardId: "brd_two", token: `spa_${"b".repeat(48)}` },
+        ],
+      },
+    );
+    try {
+      expect(await sweepBoardNow("brd_two")).not.toBeNull();
+      expect(offeredFor).toEqual(["brd_two"]);
+      // A board this hub does not work is not swept at all.
+      offeredFor.length = 0;
+      await sweepBoardNow("brd_elsewhere");
+      expect(offeredFor).toEqual([]);
+    } finally {
+      stop!();
+    }
+  });
+
+  test("with no sweeper running there is nothing to wake", async () => {
+    expect(await sweepBoardNow("brd_one")).toBeNull();
   });
 });
 
