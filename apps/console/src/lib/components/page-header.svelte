@@ -4,6 +4,11 @@
   import * as Tooltip from "$lib/components/ui/tooltip";
   import { Status } from "$lib/components/ui/status";
   import LockIcon from "@lucide/svelte/icons/lock";
+  import EllipsisIcon from "@lucide/svelte/icons/ellipsis";
+  import { MediaQuery } from "svelte/reactivity";
+  import { Button } from "$lib/components/ui/button";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
+  import { scrollStrip } from "$lib/actions/scroll-strip";
 
   export interface Tab {
     id: string;
@@ -11,6 +16,19 @@
     icon?: Component;
     disabled?: boolean;
     disabledReason?: string;
+  }
+
+  /**
+   * An action that matters less than the page's primary one. Inline outline
+   * buttons on a wide screen; on a phone they fold into one "More actions"
+   * menu, because three buttons wrapped the sticky header to 19% of a 390px
+   * screen (responsive audit, 2026-10-07).
+   */
+  export interface SecondaryAction {
+    label: string;
+    icon?: Component;
+    onSelect: () => void;
+    disabled?: boolean;
   }
 
   // Any raw status string — normalized by the shared <Status> component.
@@ -25,6 +43,8 @@
     onTabChange?: (tabId: string) => void;
     sticky?: boolean;
     actions?: Snippet;
+    /** Folded into an overflow menu below 640px. Rendered before `actions`. */
+    secondaryActions?: SecondaryAction[];
     leading?: Snippet;
     /** Signature status strip rendered flush under the header border
      *  (pass a 3px `<StatusRibbon size="xs">` scoped to this page). */
@@ -42,12 +62,17 @@
     onTabChange = undefined,
     sticky = true,
     actions = undefined,
+    secondaryActions = [],
     leading = undefined,
     ribbon = undefined,
     tabsId = "page-tabs",
   }: Props = $props();
 
   const Icon = $derived(icon);
+
+  // The same 640px as Tailwind's `sm`, asked in JS so exactly one copy of each
+  // action exists: CSS-hiding a second copy would leave it in the a11y tree.
+  const phone = new MediaQuery("(max-width: 639px)");
 
   let tabRefs = $state<(HTMLButtonElement | null)[]>([]);
 
@@ -106,9 +131,14 @@
     sticky && "sticky top-0",
   )}
 >
-  <div class="container mx-auto max-w-7xl px-4 sm:px-6">
-    <div class="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-      <div class="flex min-w-0 items-center gap-3">
+  <div class="page-width">
+    <!-- One row at every width: title on the left, actions on the right.
+         It wraps only if the actions truly cannot fit beside the title. -->
+    <div data-testid="page-header-row" class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-3 sm:py-4">
+      <!-- An 8rem basis, not the title's full width: the row wraps only when
+           the actions would leave the title less than that, and otherwise the
+           subtitle truncates beside them. -->
+      <div class="flex min-w-0 flex-[1_1_8rem] items-center gap-3">
         {#if leading}
           {@render leading()}
           <div class="hidden h-6 w-px bg-border sm:block"></div>
@@ -132,9 +162,39 @@
           {/if}
         </div>
       </div>
-      {#if actions}
-        <div class="flex shrink-0 items-center gap-2">
-          {@render actions()}
+      {#if actions || secondaryActions.length > 0}
+        <div class="ml-auto flex shrink-0 items-center gap-2">
+          {#if secondaryActions.length > 0}
+            {#if phone.current}
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger>
+                  {#snippet child({ props })}
+                    <Button {...props} variant="outline" size="icon" class="size-11" aria-label="More actions">
+                      <EllipsisIcon class="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  {/snippet}
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content align="end" class="min-w-52">
+                  {#each secondaryActions as action (action.label)}
+                    {@const ActionIcon = action.icon}
+                    <DropdownMenu.Item class="min-h-11" disabled={action.disabled} onSelect={action.onSelect}>
+                      {#if ActionIcon}<ActionIcon class="h-4 w-4" aria-hidden="true" />{/if}
+                      {action.label}
+                    </DropdownMenu.Item>
+                  {/each}
+                </DropdownMenu.Content>
+              </DropdownMenu.Root>
+            {:else}
+              {#each secondaryActions as action (action.label)}
+                {@const ActionIcon = action.icon}
+                <Button variant="outline" disabled={action.disabled} onclick={action.onSelect}>
+                  {#if ActionIcon}<ActionIcon class="h-4 w-4 mr-2" aria-hidden="true" />{/if}
+                  {action.label}
+                </Button>
+              {/each}
+            {/if}
+          {/if}
+          {@render actions?.()}
         </div>
       {/if}
     </div>
@@ -142,9 +202,10 @@
     {#if tabs.length > 0}
       <!-- svelte-ignore a11y_interactive_supports_focus -- roving tabindex lives on the individual tab buttons, not the tablist container -->
       <div
-        class="scrollbar-hide -mb-px flex gap-1 overflow-x-auto"
+        class="scroll-strip -mb-px flex min-w-0 gap-1"
         role="tablist"
         onkeydown={handleTablistKeydown}
+        use:scrollStrip={activeTab}
       >
         {#each tabs as tab, i (tab.id)}
           <Tooltip.Root>
@@ -162,7 +223,7 @@
                   aria-label={tab.label}
                   tabindex={activeTab === tab.id ? 0 : -1}
                   class={cn(
-                    "flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+                    "flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors max-[900px]:min-h-11 pointer-coarse:min-h-11",
                     tab.disabled
                       ? "cursor-not-allowed border-transparent text-muted-foreground/50"
                       : activeTab === tab.id

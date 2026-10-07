@@ -180,10 +180,22 @@ test("every row is `relative` — a StateDot's sr-only label must not escape the
   }
 });
 
-test("the feed scrolls horizontally inside itself, never the page", () => {
-  const { getByTestId } = render(ActivityFeed, { props: { rows: [row(0)] } });
+test("a long row wraps its detail, so the result stays on screen", () => {
+  // At 390 a one-line row pushed ok/error past the right edge, behind a
+  // horizontal scroll nobody would find (responsive audit, 2026-10-07). The
+  // detail wraps; the result is its own column that never shrinks.
+  const { getAllByTestId, getByTestId } = render(ActivityFeed, {
+    props: { rows: [row(0, { stationKey: "claude-code:a-very-long-station-key-indeed" })] },
+  });
 
-  expect(getByTestId("activity-feed").className).toContain("overflow-x-auto");
+  expect(getByTestId("activity-feed").className).not.toContain("overflow-x-auto");
+  const detail = getByTestId("activity-detail");
+  expect(detail.className).toContain("flex-wrap");
+  expect(detail.className).toContain("min-w-0");
+  const result = getByTestId("activity-result");
+  expect(result.className).toContain("shrink-0");
+  expect(result.parentElement).toBe(getAllByTestId("activity-row")[0]);
+  expect(detail.contains(result)).toBe(false);
 });
 
 test("a node-level row names the node instead of showing its id", () => {

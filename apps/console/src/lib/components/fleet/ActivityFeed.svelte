@@ -121,11 +121,11 @@
 </script>
 
 <!--
-  overflow-x-auto: a long station key plus a long verb can exceed a narrow
-  stage, and wide content scrolls in its own box rather than dragging the page
-  sideways.
+  No horizontal scroller: at 390 a one-line row pushed the result off the edge
+  behind a scroll nobody would find. The detail wraps instead, and the result
+  is a column of its own that never shrinks.
 -->
-<div data-testid="activity-feed" class="overflow-x-auto">
+<div data-testid="activity-feed">
   {#if groups.length === 0}
     <p data-testid="activity-empty" class="py-6 text-sm text-muted-foreground">
       No activity yet. What the fleet does will show up here.
@@ -142,7 +142,7 @@
         -->
         <li
           data-testid="activity-row"
-          class="relative flex items-center gap-3 border-b border-border/50 py-1.5 text-xs last:border-b-0"
+          class="relative flex items-baseline gap-3 border-b border-border/50 py-1.5 text-xs last:border-b-0"
         >
           <span class="w-16 shrink-0 font-mono text-muted-foreground">
             {relativeTime(group.head.createdAt)}
@@ -152,30 +152,32 @@
             <StateDot {state} size="sm" />
           </span>
 
-          <span class="shrink-0 font-mono text-foreground">{group.verb}</span>
+          <span data-testid="activity-detail" class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+            <span class="font-mono text-foreground">{group.verb}</span>
 
-          {#if group.count > 1}
-            <span
-              data-testid="activity-repeat"
-              class="shrink-0 rounded-sm bg-muted px-1 font-mono text-[10px] text-muted-foreground"
-              title="{group.count} in a row"
-            >
-              ×{group.count}
-            </span>
-          {/if}
+            {#if group.count > 1}
+              <span
+                data-testid="activity-repeat"
+                class="rounded-sm bg-muted px-1 font-mono text-[10px] text-muted-foreground"
+                title="{group.count} in a row"
+              >
+                ×{group.count}
+              </span>
+            {/if}
 
-          <span class="shrink-0 truncate font-mono text-muted-foreground">{subject(group.head)}</span>
+            <span class="min-w-0 break-all font-mono text-muted-foreground">{subject(group.head)}</span>
 
-          <!-- The detail: which node it happened on, when the subject was a
-               station and so did not already say. GET /api/activity returns
-               no free-text detail of its own — see the task report. -->
-          {#if group.head.stationKey && group.head.nodeId}
-            <span class="shrink-0 font-mono text-muted-foreground/60">
-              on {nodeName(group.head.nodeId)}
-            </span>
-          {/if}
+            <!-- The detail: which node it happened on, when the subject was a
+                 station and so did not already say. GET /api/activity returns
+                 no free-text detail of its own — see the task report. -->
+            {#if group.head.stationKey && group.head.nodeId}
+              <span class="min-w-0 break-all font-mono text-muted-foreground/60">
+                on {nodeName(group.head.nodeId)}
+              </span>
+            {/if}
+          </span>
 
-          <span class={cn("ml-auto shrink-0 pl-3", STATE_TEXT_CLASS[state.token])}>
+          <span data-testid="activity-result" class={cn("shrink-0 pl-1", STATE_TEXT_CLASS[state.token])}>
             {group.result}
           </span>
         </li>

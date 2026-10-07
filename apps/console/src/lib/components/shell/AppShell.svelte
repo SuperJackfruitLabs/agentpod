@@ -59,7 +59,7 @@
 -->
 <div
   data-testid="app-shell"
-  class="grid h-screen grid-cols-[minmax(0,1fr)] grid-rows-[46px_auto_1fr] overflow-hidden bg-background text-foreground"
+  class="grid h-screen grid-cols-[minmax(0,1fr)] grid-rows-[46px_auto_1fr] overflow-hidden max-[900px]:grid-rows-[52px_auto_1fr] bg-background text-foreground"
 >
   <TopBar onToggleRoster={() => (view = view === "roster" ? "stage" : "roster")} />
 

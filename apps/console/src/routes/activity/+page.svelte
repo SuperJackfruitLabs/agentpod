@@ -60,7 +60,7 @@
 
 <PageHeader title="Activity" subtitle="Fleet event log" />
 
-<div class="container mx-auto max-w-5xl space-y-3 px-4 py-6 sm:px-6">
+<div class="page-width py-6 space-y-3">
   {#if isLoading}
     <div class="space-y-2">
       {#each [1, 2, 3, 4, 5] as _}

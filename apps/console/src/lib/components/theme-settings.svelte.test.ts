@@ -104,3 +104,12 @@ test("deleting a custom theme opens a confirm dialog and only deletes after conf
 
   expect(themeStoreMock.deleteCustomTheme).toHaveBeenCalledWith(customTheme.id);
 });
+
+test("the scheme grid is not a scroller inside the scrolling page", () => {
+  // A 350px inner scroller on a phone traps the thumb and hid its last row
+  // under the page's edge (responsive audit, 2026-10-07).
+  const { getAllByTestId } = render(ThemeSettings);
+  for (const grid of getAllByTestId("theme-grid")) {
+    expect(grid.className).not.toMatch(/overflow-y-auto|max-h-/);
+  }
+});

@@ -320,7 +320,7 @@
 
 <PageHeader title="Admin" subtitle="Who may dispatch which agent" />
 
-<div class="container mx-auto max-w-5xl space-y-6 px-4 py-6">
+<div class="page-width py-6 space-y-6">
   <AdminTabs active="grants" />
 
   {#if !isLoading && !error}

@@ -28,6 +28,8 @@
   import EnrollmentCommand from "./EnrollmentCommand.svelte";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import ArrowUpCircleIcon from "@lucide/svelte/icons/arrow-up-circle";
+  import { MediaQuery } from "svelte/reactivity";
+  import type { SecondaryAction } from "$lib/components/page-header.svelte";
   import NewRuntimeDialog from "./NewRuntimeDialog.svelte";
   import ConnectBanner from "./connect-banner.svelte";
 
@@ -288,47 +290,65 @@
       }, 2000);
     });
   }
+
+  const headerActions = $derived<SecondaryAction[]>([
+    ...(nodesBehind.length > 0
+      ? [{
+          label: isRollingOut
+            ? "Updating fleet…"
+            : `Update ${nodesBehind.length} node${nodesBehind.length === 1 ? "" : "s"}`,
+          icon: ArrowUpCircleIcon,
+          onSelect: handleUpdateAll,
+          disabled: isRollingOut,
+        }]
+      : []),
+    { label: "New runtime", icon: PlusIcon, onSelect: () => (showNewRuntimeDialog = true) },
+  ]);
+
+  /**
+   * Seven columns do not fit a phone: at 390 only Node and Link showed, with
+   * agents, version and Update off the edge. Below 768px each node is a card.
+   * Asked in JS so exactly one variant is in the DOM (and the a11y tree).
+   */
+  const narrow = new MediaQuery("(max-width: 767px)");
 </script>
 
-<PageHeader title="Nodes" subtitle="Connected machines">
+<!--
+  "Update N nodes" is only offered when there is drift to clear (#295). Nodes
+  never update themselves — there is no timer anywhere — so after a release the
+  fleet sits where it is until someone rolls it. This is that someone's button.
+  It and New runtime are secondary: on a phone they fold into "More actions",
+  so the sticky header stays one row instead of 19% of the screen.
+-->
+<PageHeader title="Nodes" subtitle="Connected machines" secondaryActions={headerActions}>
   {#snippet actions()}
-    <div class="flex flex-col items-end gap-1.5">
-      <div class="flex gap-2 flex-wrap justify-end">
-        <!--
-          Only offered when there is drift to clear (#295). Nodes never update
-          themselves — there is no timer anywhere — so after a release the fleet
-          sits where it is until someone rolls it. This is that someone's button.
-        -->
-        {#if nodesBehind.length > 0}
-          <Button onclick={handleUpdateAll} disabled={isRollingOut} variant="outline">
-            <ArrowUpCircleIcon class="h-4 w-4 mr-2" />
-            {isRollingOut
-              ? "Updating fleet…"
-              : `Update ${nodesBehind.length} node${nodesBehind.length === 1 ? "" : "s"}`}
-          </Button>
+    <!--
+      Show the "Create enrollment token" header button only when nodes are present
+      (or while loading). When nodes=0 the ConnectBanner below supplies the same CTA
+      to avoid duplicate accessible buttons.
+    -->
+    {#if isLoading || nodes.length > 0 || provisioningRuntimes.length > 0}
+      <Button
+        onclick={handleCreateToken}
+        disabled={isMinting}
+        aria-label={isMinting ? "Creating…" : "Create enrollment token"}
+        class="max-[900px]:min-h-11"
+      >
+        <PlusIcon class="h-4 w-4 mr-2" />
+        <!-- Shorter on a phone so the header stays one row; the accessible
+             name is the full one at every width. -->
+        {#if isMinting}
+          Creating…
+        {:else}
+          <span class="sm:hidden">Enroll a node</span><span class="hidden sm:inline">Create enrollment token</span>
         {/if}
-        <Button onclick={() => (showNewRuntimeDialog = true)} variant="outline">
-          <PlusIcon class="h-4 w-4 mr-2" />
-          New runtime
-        </Button>
-        <!--
-          Show the "Create enrollment token" header button only when nodes are present
-          (or while loading). When nodes=0 the ConnectBanner below supplies the same CTA
-          to avoid duplicate accessible buttons.
-        -->
-        {#if isLoading || nodes.length > 0 || provisioningRuntimes.length > 0}
-          <Button onclick={handleCreateToken} disabled={isMinting}>
-            <PlusIcon class="h-4 w-4 mr-2" />
-            {isMinting ? "Creating…" : "Create enrollment token"}
-          </Button>
-        {/if}
-      </div>
-      {#if mintError}<p class="text-xs text-status-error">{mintError}</p>{/if}
-    </div>
+      </Button>
+    {/if}
   {/snippet}
 </PageHeader>
 
-<div class="container mx-auto max-w-7xl px-4 sm:px-6 py-6 space-y-6">
+<div class="page-width py-6 space-y-6">
+  {#if mintError}<p class="text-xs text-status-error" role="alert">{mintError}</p>{/if}
   <!-- Enrollment command block (only when nodes/runtimes already exist; in empty state it shows in-place) -->
   {#if lastToken && (nodes.length > 0 || provisioningRuntimes.length > 0)}
     <div class="space-y-2">
@@ -398,8 +418,87 @@
         </ul>
       {/if}
 
-      <!-- Seven columns do not fit a phone; they scroll in here rather than
-           dragging the document sideways. Same shape as the muster's table. -->
+      {#if narrow.current}
+        <ul data-testid="nodes-cards" class="divide-y divide-border/50 rounded-lg border border-border">
+          {#each nodes as node (node.id)}
+            {@const nodeAgents = agentsByNode.get(node.id) ?? []}
+            {@const runningCount = nodeAgents.filter((a) => stationState(a.status).id === "running").length}
+            <!-- `relative`: the StateDot's sr-only label is position:absolute. -->
+            <li data-testid="node-row" class="relative space-y-2 px-3 py-3">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <a
+                    href="/nodes/{node.id}"
+                    title={node.name}
+                    class="block truncate font-mono text-sm text-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                  >
+                    {node.name}
+                  </a>
+                  <span class="block truncate text-xs text-muted-foreground" title={node.hostname}>
+                    {node.hostname}
+                  </span>
+                  <span class="block truncate text-xs text-muted-foreground">
+                    {node.os} · {node.arch} · {node.cpuCount} CPU{node.cpuCount === 1 ? "" : "s"}
+                    {#if node.provisioned}
+                      · provisioned · {node.provisioned.provider}
+                    {/if}
+                  </span>
+                </div>
+                <span data-testid="node-link-{node.id}" class="relative shrink-0 text-sm">
+                  <StateDot state={nodeState(node.status)} withLabel size="sm" />
+                </span>
+              </div>
+
+              <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                <dt class="text-muted-foreground">Agents</dt>
+                <dd data-testid="node-agents-{node.id}" class="font-mono tabular-nums">
+                  {#if nodeAgents.length > 0}
+                    {runningCount}/{nodeAgents.length} <span class="font-sans text-muted-foreground">running</span>
+                  {:else}
+                    <span class="text-muted-foreground">—</span>
+                  {/if}
+                </dd>
+                <dt class="text-muted-foreground">Last seen</dt>
+                <dd class="font-mono text-muted-foreground">{relativeTime(node.lastSeenAt)}</dd>
+                <dt class="text-muted-foreground">Node agent</dt>
+                <dd>
+                  {#if node.updateAvailable}
+                    <span data-testid="node-drift-{node.id}" class="font-mono text-status-unknown">
+                      {node.agentVersion} → {node.latestVersion}
+                    </span>
+                  {:else}
+                    <span class="font-mono text-muted-foreground">{node.agentVersion ?? "—"}</span>
+                  {/if}
+                </dd>
+              </dl>
+
+              {#if node.updateAvailable || node.capabilities?.includes("posture")}
+                <div class="flex flex-wrap items-center gap-2">
+                  {#if node.updateAvailable}
+                    <Button
+                      data-testid="node-update-{node.id}"
+                      variant="outline"
+                      class="min-h-11"
+                      disabled={!!updatingNodes[node.id]}
+                      onclick={() => handleUpdate(node.id)}
+                    >
+                      <ArrowUpCircleIcon class="h-4 w-4 mr-2" aria-hidden="true" />
+                      {updatingNodes[node.id] ? "Updating…" : "Update"}
+                    </Button>
+                  {/if}
+                  {#if node.capabilities?.includes("posture")}
+                    <Button href="/nodes/{node.id}" variant="ghost" class="min-h-11 text-muted-foreground">
+                      Scan posture
+                    </Button>
+                  {/if}
+                </div>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {:else}
+      <!-- Seven columns at 768px and up; should they still not fit, they
+           scroll in here rather than dragging the document sideways. -->
       <div data-testid="nodes-table-scroller" class="overflow-x-auto rounded-lg border border-border">
         <table class="w-full min-w-[820px] text-sm">
           <thead>
@@ -518,6 +617,7 @@
           </tbody>
         </table>
       </div>
+      {/if}
     </div>
   {/if}
 </div>

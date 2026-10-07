@@ -593,3 +593,66 @@ test("a node whose agent doesn't report posture says so, rather than showing a g
   expect(getByText("Scan")).toBeTruthy();
   expect(getByText("Scan").getAttribute("href")).toBe("/nodes/node_1");
 });
+
+// ── Narrow screens ───────────────────────────────────────────────────────────
+// At 390px the table showed Node and Link and nothing else: the agents count,
+// the version drift and the Update button were off the right edge with no cue
+// (responsive audit, 2026-10-07). Below 768px each node is a card instead.
+
+function viewport(width: number) {
+  window.matchMedia = ((query: string) => {
+    const max = /\(max-width:\s*(\d+)px\)/.exec(query);
+    const min = /\(min-width:\s*(\d+)px\)/.exec(query);
+    const matches = max ? width <= Number(max[1]) : min ? width >= Number(min[1]) : false;
+    return {
+      matches, media: query, onchange: null,
+      addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {},
+      dispatchEvent: () => false,
+    };
+  }) as unknown as typeof window.matchMedia;
+}
+
+test("below 768px each node is a card carrying its agents, its version drift and its Update button", async () => {
+  const realMatchMedia = window.matchMedia;
+  viewport(390);
+  try {
+    vi.spyOn(api, "listNodes").mockResolvedValue([behindNode, mockNodes[1]!]);
+    vi.spyOn(api, "getFleet").mockResolvedValue({
+      agents: [
+        { stationId: "s1", nodeId: "node_behind", agentName: "a", status: "running" },
+        { stationId: "s2", nodeId: "node_behind", agentName: "b", status: "stopped" },
+      ],
+      stats: null,
+    } as never);
+    const updateNode = vi.spyOn(api, "updateNode").mockResolvedValue({ ok: true, updating: true, tag: "v0.1.26" });
+
+    const { getByTestId, queryByTestId, container, getAllByTestId } = render(NodesOverview);
+
+    const cards = await waitFor(() => getByTestId("nodes-cards"));
+    expect(container.querySelector("table")).toBeNull();
+    expect(queryByTestId("nodes-table-scroller")).toBeNull();
+    expect(getAllByTestId("node-row").length).toBe(2);
+
+    await waitFor(() => expect(getByTestId("node-agents-node_behind").textContent).toMatch(/1\/2/));
+    expect(getByTestId("node-drift-node_behind").textContent).toMatch(/v0\.1\.22.*v0\.1\.26/);
+    expect(cards.contains(getByTestId("node-link-node_behind"))).toBe(true);
+
+    await fireEvent.click(getByTestId("node-update-node_behind"));
+    expect(updateNode).toHaveBeenCalledWith("node_behind");
+  } finally {
+    window.matchMedia = realMatchMedia;
+  }
+});
+
+test("at 768px and up the nodes stay a table", async () => {
+  const realMatchMedia = window.matchMedia;
+  viewport(768);
+  try {
+    vi.spyOn(api, "listNodes").mockResolvedValue(mockNodes);
+    const { getByTestId, queryByTestId } = render(NodesOverview);
+    await waitFor(() => expect(getByTestId("nodes-table-scroller").querySelector("table")).toBeTruthy());
+    expect(queryByTestId("nodes-cards")).toBeNull();
+  } finally {
+    window.matchMedia = realMatchMedia;
+  }
+});

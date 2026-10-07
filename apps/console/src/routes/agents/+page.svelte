@@ -323,7 +323,7 @@
   {/snippet}
 </PageHeader>
 
-<div class="container mx-auto px-4 sm:px-6 max-w-7xl py-6 space-y-4">
+<div class="page-width py-6 space-y-4">
   {#if isLoading}
     <div class="space-y-3">
       {#each [1, 2, 3] as _}
@@ -382,12 +382,12 @@
           </div>
           <ul class="mt-3 space-y-2">
             {#each unassignedStations as station (station.id)}
-              <li class="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2">
-                <div class="min-w-0">
+              <li class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md border bg-background px-3 py-2">
+                <div class="min-w-[min(14rem,100%)] flex-1">
                   <p class="truncate text-sm font-medium">{station.displayName}</p>
                   <p class="text-xs text-muted-foreground">{station.nodeName} · no agent</p>
                 </div>
-                <div class="flex shrink-0 items-center gap-2">
+                <div class="flex shrink-0 flex-wrap items-center gap-2">
                   <Button
                     variant="outline"
                     size="sm"
@@ -414,8 +414,8 @@
               </li>
             {/each}
             {#each suspendedStations as station (station.id)}
-              <li class="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2">
-                <div class="min-w-0">
+              <li class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md border bg-background px-3 py-2">
+                <div class="min-w-[min(14rem,100%)] flex-1">
                   <p class="truncate text-sm font-medium">{station.displayName}</p>
                   <p class="flex items-center gap-1 text-xs text-destructive">
                     <BanIcon class="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -466,8 +466,12 @@
           </p>
           <ul class="space-y-1.5">
             {#each activeStations as station (station.id)}
-              <li class="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 hover:bg-muted/50">
-                <div class="flex min-w-0 items-center gap-2">
+              <!-- The name column is a fixed width from sm up, so the actions sit
+                   beside the name they act on — at 1920 they were ~1000px
+                   away. On a phone the actions wrap under the name rather
+                   than squeezing it to its first letter. -->
+              <li class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-1.5 hover:bg-muted/50">
+                <div class="flex min-w-[min(12rem,100%)] flex-1 items-center gap-2 sm:w-72 sm:flex-none">
                   <span class="truncate text-sm">{station.displayName}</span>
                   <Badge variant="outline" class="shrink-0 font-mono text-[11px]">{station.principal.handle}</Badge>
                 </div>

@@ -106,7 +106,7 @@
 
   <!-- Content -->
   <div class="flex-1 overflow-y-auto">
-    <div class="container mx-auto max-w-3xl space-y-6 px-4 py-6">
+    <div class="page-width space-y-6 py-6 *:max-w-3xl">
       {#if isLoading}
         <div class="space-y-2">
           {#each [1, 2, 3] as _}

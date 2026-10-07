@@ -27,6 +27,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import { relativeTime } from "$lib/utils/relative-time";
+  import { MediaQuery } from "svelte/reactivity";
 
   // ── The fleet in words ──────────────────────────────────────────────────────
 
@@ -138,13 +139,16 @@
 
   /** True only while we have never had data — a refresh must not flash a skeleton. */
   const showSkeleton = $derived(fleet.isLoading && fleet.loadedAt === null);
+
+  /** Below 768px a node is a card: the table's seven columns showed two at 390. */
+  const narrow = new MediaQuery("(max-width: 767px)");
 </script>
 
 <svelte:head>
   <title>Overview · AgentPod</title>
 </svelte:head>
 
-<div class="mx-auto w-full max-w-5xl space-y-8 px-4 py-8 sm:px-6">
+<div class="page-width space-y-8 py-8">
   {#if showSkeleton}
     <Skeleton class="h-16 w-2/3 rounded-lg" />
     <Skeleton class="h-3 w-full rounded-full" />
@@ -200,8 +204,59 @@
     <section class="space-y-2">
       <h2 class="text-sm font-medium text-muted-foreground">Where they run</h2>
 
-      <!-- Seven columns do not fit a phone; they scroll in here rather than
-           dragging the document sideways. -->
+      {#if narrow.current}
+        <ul data-testid="nodes-cards" class="divide-y divide-border/50 rounded-lg border border-border">
+          {#each fleet.nodes as node (node.id)}
+            <!-- `relative`: the StateDot's sr-only label is position:absolute. -->
+            <li data-testid="node-row" class="relative space-y-2 px-3 py-3">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <a
+                    href="/nodes/{node.id}"
+                    title={node.name}
+                    class="block truncate font-mono text-sm text-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                  >
+                    {node.name}
+                  </a>
+                  <span class="block truncate text-xs text-muted-foreground">{node.os} · {node.arch}</span>
+                </div>
+                <span data-testid="node-link-{node.id}" class="relative shrink-0 text-sm">
+                  <StateDot state={nodeState(node.status)} withLabel size="sm" />
+                </span>
+              </div>
+              <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                <dt class="text-muted-foreground">Agents</dt>
+                <dd data-testid="node-agents-{node.id}" class="font-mono tabular-nums">{agentsPerNode.get(node.id) ?? 0}</dd>
+                <dt class="text-muted-foreground">Last seen</dt>
+                <dd class="font-mono text-muted-foreground">{relativeTime(node.lastSeenAt)}</dd>
+                <dt class="text-muted-foreground">Node agent</dt>
+                <dd>
+                  {#if node.updateAvailable}
+                    <span data-testid="node-drift-{node.id}" class="font-mono text-status-unknown">
+                      {node.agentVersion} → {node.latestVersion}
+                    </span>
+                  {:else}
+                    <span class="font-mono text-muted-foreground">{node.agentVersion ?? "—"}</span>
+                  {/if}
+                </dd>
+              </dl>
+              {#if node.updateAvailable}
+                <Button
+                  data-testid="node-update-{node.id}"
+                  variant="outline"
+                  class="min-h-11"
+                  disabled={updating[node.id]}
+                  onclick={() => handleUpdate(node.id)}
+                >
+                  {updating[node.id] ? "Updating…" : "Update"}
+                </Button>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {:else}
+      <!-- Seven columns at 768px and up; should they still not fit, they
+           scroll in here rather than dragging the document sideways. -->
       <div data-testid="nodes-table-scroller" class="overflow-x-auto rounded-lg border border-border">
         <table class="w-full min-w-[720px] text-sm">
           <thead>
@@ -299,6 +354,7 @@
           </tbody>
         </table>
       </div>
+      {/if}
     </section>
 
     <!-- ── What it has been doing ─────────────────────────────────────────── -->

@@ -17,6 +17,7 @@
   import type { Component, Snippet } from "svelte";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
+  import { scrollStrip } from "$lib/actions/scroll-strip";
   import HealthPanel from "$lib/components/stations/HealthPanel.svelte";
   import LogTail from "$lib/components/stations/LogTail.svelte";
   import FileBrowser from "$lib/components/stations/FileBrowser.svelte";
@@ -598,9 +599,10 @@
     {#if stationLoad !== "notFound" && stationLoad !== "error"}
       <!-- svelte-ignore a11y_interactive_supports_focus -- the roving tabindex lives on the tab buttons, not the tablist -->
       <div
-        class="scrollbar-hide flex gap-1 overflow-x-auto px-4 sm:px-6"
+        class="scroll-strip flex min-w-0 gap-1 px-4 sm:px-6"
         role="tablist"
         onkeydown={handleTablistKeydown}
+        use:scrollStrip={`${activeTab}:${tabs.length}`}
       >
         {#each tabs as tab, i (tab.id)}
           {@const TabIcon = tab.icon}
@@ -616,7 +618,7 @@
             title={tab.disabled ? tab.disabledReason : tab.label}
             tabindex={activeTab === tab.id ? 0 : -1}
             class={cn(
-              "flex items-center gap-2 border-b-2 px-2.5 py-2 text-sm whitespace-nowrap transition-colors",
+              "flex shrink-0 items-center gap-2 border-b-2 px-2.5 py-2 text-sm whitespace-nowrap transition-colors max-[900px]:min-h-11 pointer-coarse:min-h-11",
               tab.disabled
                 ? "cursor-not-allowed border-transparent text-muted-foreground/50"
                 : activeTab === tab.id
