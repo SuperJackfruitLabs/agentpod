@@ -8,14 +8,7 @@ import (
 	"os"
 )
 
-// fleet stations — the adoption surface the Console already had and this CLI
-// did not. A station the node detects is not yet an agent: it becomes one when
-// it is adopted, and only adopted stations carry the ID every skills verb
-// needs. Without these verbs an operator could detect a station on the host,
-// see it nowhere in the fleet, and have no way to find out why.
-func fleetStations(args []string) {
-	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(`Usage: fleet stations <verb>
+const stationsUsage = `Usage: fleet stations <verb>
 
   fleet stations detected --node NODE_ID     what the node reports right now
   fleet stations list --node NODE_ID         adopted stations, with their IDs
@@ -32,7 +25,16 @@ the node first, so a key that has gone away is not adopted from a stale list.
 Push access is granted per station and never by adopting one: most stations
 never touch git, and a forge key for every station is an account nobody uses
 and a key nobody revokes. The keypair is generated ON THE NODE and the private
-half never leaves it — grant-push asks for the public half and registers that.`)
+half never leaves it — grant-push asks for the public half and registers that.`
+
+// fleet stations — the adoption surface the Console already had and this CLI
+// did not. A station the node detects is not yet an agent: it becomes one when
+// it is adopted, and only adopted stations carry the ID every skills verb
+// needs. Without these verbs an operator could detect a station on the host,
+// see it nowhere in the fleet, and have no way to find out why.
+func fleetStations(args []string) {
+	if len(args) == 0 || helpRequested(args) {
+		fmt.Println(stationsUsage)
 		return
 	}
 	fs := flag.NewFlagSet("fleet stations", flag.ExitOnError)

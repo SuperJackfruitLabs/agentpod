@@ -11,7 +11,7 @@ import (
 const bridgeUsage = `usage:
   fleet bridge list
   fleet bridge add --key K --board B --station S --token T [--mcp-token M]
-                   [--mode M] [--concurrency N] [--profile P] [--wait-ms N]
+                   [--mode M] [--concurrency N] [--profile P] [--wait-ms N] [--enabled true|false]
   fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                    [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
   fleet bridge rm KEY`

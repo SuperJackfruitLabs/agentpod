@@ -7,15 +7,19 @@ AgentPod ships two command-line binaries. `apn` (`agentpod-node`) is the residen
 installed on an enrolled host. `fleet` (`agentpod-fleet`) is a separate client you run
 anywhere that is **not** an enrolled node — a laptop, CI, an agent's own workspace.
 
+Every command, subcommand, flag and environment variable is in the generated references:
+[`apn` reference](/reference/apn/) and [`fleet` reference](/reference/fleet/). This page is
+the why; those are the what.
+
 ## Two binaries, not two modes
 
-`apn` acts on **this machine**: `status`, `start`, `stop`, `logs`, `enroll`, `run`, `detect`,
-`scan`, `service`, `acp`, `update`. Those that talk to the hub use the credential `apn enroll`
+`apn` acts on **this machine**: `status`, `start`, `stop`, `logs`, `service`, `telemetry`,
+`enroll`, `run`, the harness plugin installers, `detect`, `scan`, `acp`, `update`. Those that talk to the hub use the credential `apn enroll`
 stored on this host, which says *"I am this host."*
 
 `fleet` acts on the fleet **as you** — everything from `whoami` to rolling a release to editing a
-grant. It uses a hub-issued token held by a person or an agent: the one `fleet login` writes, or
-`$AGENTPOD_TOKEN`.
+grant. It uses a token held by a person or an agent: the one `fleet login` obtains from your
+workspace's account service, or `$AGENTPOD_TOKEN`.
 
 ```sh
 apn status          # how is this machine?
@@ -49,15 +53,28 @@ installer; see [Enrolling a node](/use/nodes/).
 fleet login
 ```
 
-The browser opens **once** — not once per lapse. A hub token lasts five minutes, and `fleet login`
-also registers this machine as a **device**; every later command exchanges that credential for a
-fresh token without a browser. The device credential lasts 90 days and renews whenever it is used.
+`fleet login` signs in through your workspace's **account service**. It prints a page and a
+code, opens the page if it can, and waits while you confirm the code in a browser. Any browser
+will do — the one on your laptop works for a `fleet` running over SSH — and `BROWSER=none`
+stops it trying to open one.
+
+The browser opens **once**, not once per lapse. A token lasts five minutes; approving the code
+also stores a **device credential** for this machine, and every later command exchanges it for a
+fresh token without a browser. The account service issues, lists and revokes device
+credentials, so that is where you manage them:
 
 ```sh
-fleet devices                 # machines that may act as you
-fleet devices revoke <id>     # revoke one
-fleet logout                  # revoke this device and forget both credentials
+fleet devices      # says where this machine's devices are listed: the account service's Devices page
+fleet logout       # signs this machine out: deletes the stored token and device credential
 ```
+
+`fleet logout` is **local**. It deletes both files but does not revoke the device credential,
+which belongs to the account service — it prints the Devices page where you can. Revoke a
+machine you no longer have from that page, from any browser. `fleet devices revoke` does not
+revoke there either: it points at the same page and exits 1, because nothing was revoked.
+
+(A hub old enough to issue its own tokens signs you in through its own browser page instead,
+and there `fleet devices` and `fleet devices revoke` list and revoke at the hub.)
 
 Then:
 
@@ -99,6 +116,7 @@ a console's job rather than a script's.
 ```sh
 fleet nodes                                  # the fleet's nodes
 fleet nodes update [--node <name>]           # roll the newest release to every node
+fleet nodes telemetry [--endpoint <url>|--off]  # each node's OpenTelemetry export (admin)
 fleet invite                                 # mint a token a machine presents to `apn enroll`
 
 fleet stations detected --node <nodeId>      # what the node reports right now
@@ -179,12 +197,15 @@ sends only the digest you reviewed. **Nothing here restarts a station.** These a
 ### Authority
 
 ```sh
-fleet grants list|show|set|rm            # dispatch authority, as a document
-fleet principals list|suspend|restore    # identities
-fleet users list|show|role|ban|unban     # people
+fleet principals list                    # who exists in this workspace
 ```
 
-See [Dispatch and grants](/use/grants/).
+People, roles, bans, signup, grants and service principals are **managed by your workspace's
+account service**. The `fleet users`, `fleet grants`, `fleet settings signup` and
+`fleet principals suspend|restore|add-service|add-credential|revoke-credential` verbs remain for
+hubs that predate it; a current hub answers them with `410` and the account service's URL. See
+the [`fleet` reference](/reference/fleet/#fleet-principals) and
+[Dispatch and grants](/use/grants/).
 
 ### The board bridge
 
@@ -205,8 +226,8 @@ fleet settings signup|transcription|speech …
 fleet runtimes list|providers|create|start|stop|rm
 ```
 
-`settings` is hub-wide configuration — whether signup is open, and the
-[voice](/use/voice/) defaults. `runtimes` is the substrate nodes run on.
+`settings` is hub-wide configuration: the [voice](/use/voice/) defaults for transcription and
+speech. `runtimes` is the substrate nodes run on.
 
 ### Keeping it current
 
@@ -255,8 +276,10 @@ fleet -h            # the same text
 ```
 
 `apn`'s help text is generated from a single table in the binary, so `apn help <cmd>` and
-`apn <cmd> -h` cannot disagree with each other. `fleet` has one command group — everything it
-does acts as a principal — so `fleet`, `fleet help` and `fleet -h` all print the same block.
+`apn <cmd> -h` cannot disagree with each other. `fleet`, `fleet help` and `fleet -h` all print
+the same block, and `fleet <verb> -h` prints that verb's usage. Both binaries' verb lists come
+from the same tables the [`apn`](/reference/apn/) and [`fleet`](/reference/fleet/) reference
+pages are generated from, and a test fails when a command or flag has no entry.
 
 Help flags are checked **before** anything happens: `apn stop -h` prints help and does not
 stop the service, `apn service -h` cannot install or uninstall anything, and `fleet login -h`

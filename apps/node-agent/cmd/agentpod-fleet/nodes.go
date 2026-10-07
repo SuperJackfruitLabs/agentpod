@@ -20,24 +20,7 @@ import (
 // operator guessing which nodes moved.
 const rolloutTimeout = 15 * time.Minute
 
-// fleet nodes — list the fleet, or roll a release across it.
-//
-// The rollout is the hub's own (POST /api/nodes/update-all, issue #295): one
-// node at a time, in name order, skipping nodes whose binary comes from an
-// image. This verb only asks for it. Before it existed the only callers were
-// the Console button and a curl with the hub's root API_TOKEN, which is the
-// credential this CLI exists to keep out of an operator's shell.
-func fleetNodes(args []string) {
-	if len(args) == 0 {
-		fleetGet("/api/nodes", nil)
-		return
-	}
-	if args[0] == "telemetry" {
-		fleetNodesTelemetry(args[1:])
-		return
-	}
-	if helpRequested(args) || args[0] != "update" {
-		fmt.Println(`Usage: fleet nodes [update|telemetry]
+const nodesUsage = `Usage: fleet nodes [update|telemetry]
 
   fleet nodes                               the fleet's nodes, with versions
   fleet nodes update [--node NAME|ID …] [--force]
@@ -58,7 +41,26 @@ exports traces to, with no SSH. Without flags it lists the setting per node
 http or https URL; --off disables export. A node restarts itself only if its
 setting changed. A node too old to know the verb says "unsupported" until
 ` + "`fleet nodes update`" + `. The exit status is 1 if any node failed, was
-unsupported, or (when setting) was offline and so did not apply the change.`)
+unsupported, or (when setting) was offline and so did not apply the change.`
+
+// fleet nodes — list the fleet, or roll a release across it.
+//
+// The rollout is the hub's own (POST /api/nodes/update-all, issue #295): one
+// node at a time, in name order, skipping nodes whose binary comes from an
+// image. This verb only asks for it. Before it existed the only callers were
+// the Console button and a curl with the hub's root API_TOKEN, which is the
+// credential this CLI exists to keep out of an operator's shell.
+func fleetNodes(args []string) {
+	if len(args) == 0 {
+		fleetGet("/api/nodes", nil)
+		return
+	}
+	if args[0] == "telemetry" {
+		fleetNodesTelemetry(args[1:])
+		return
+	}
+	if helpRequested(args) || args[0] != "update" {
+		fmt.Println(nodesUsage)
 		if !helpRequested(args) {
 			os.Exit(2)
 		}
@@ -209,15 +211,17 @@ func (r telemetryRow) detail() string {
 	return strings.Join(parts, " ")
 }
 
+const nodesTelemetryUsage = `Usage: fleet nodes telemetry [--node NAME|ID …] [--endpoint <url> | --off]
+
+With no flags, lists each node's telemetry setting. With --endpoint <url> (http
+or https) or --off, sets it on every node, or only the --node ones. Admin role
+required. Exit 1 if any node failed, was unsupported, or (when setting) offline.`
+
 // fleetNodesTelemetry lists (no flags) or sets (--endpoint | --off) the
 // OpenTelemetry endpoint on nodes, through the admin-only hub routes.
 func fleetNodesTelemetry(args []string) {
 	if helpRequested(args) {
-		fmt.Println(`Usage: fleet nodes telemetry [--node NAME|ID …] [--endpoint <url> | --off]
-
-With no flags, lists each node's telemetry setting. With --endpoint <url> (http
-or https) or --off, sets it on every node, or only the --node ones. Admin role
-required. Exit 1 if any node failed, was unsupported, or (when setting) offline.`)
+		fmt.Println(nodesTelemetryUsage)
 		return
 	}
 	fs := flag.NewFlagSet("fleet nodes telemetry", flag.ExitOnError)

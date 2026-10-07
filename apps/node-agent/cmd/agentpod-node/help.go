@@ -217,6 +217,13 @@ var commands = []struct {
 			"manual-restart hint.",
 	},
 	{
+		name: "help", group: "Maintenance",
+		oneline: "Show this list, or one command in detail",
+		detail: "apn help [command] — with no argument, the commands grouped by purpose; with one,\n" +
+			"that command's detail. 'apn <command> -h' prints the same detail, plus the\n" +
+			"command's flags and their defaults where it has any.",
+	},
+	{
 		name: "version", group: "Maintenance",
 		oneline: "Print version and platform",
 		detail:  "apn version — print the binary version and platform (GOOS/GOARCH).",

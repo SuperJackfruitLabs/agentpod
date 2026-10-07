@@ -225,7 +225,10 @@ describe("published docs", () => {
         if (fenced) candidates.push(line.trim());
       }
       for (const raw of candidates) {
-        const match = /^fleet\s+([a-z][a-z-]*)(?:\s+([a-z][a-z-]*))?/.exec(
+        // One space before the subcommand, not any run of them: a usage block aligns its
+        // descriptions in a column (`fleet nodes      the fleet's nodes`), and the first word of
+        // a description is not a subcommand.
+        const match = /^fleet\s+([a-z][a-z-]*)(?: ([a-z][a-z-]*))?/.exec(
           raw.replace(/^\$\s*/, "").trim(),
         );
         if (match) out.push({ page: page.file, verb: match[1]!, sub: match[2] });
