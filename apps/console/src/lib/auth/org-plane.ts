@@ -228,14 +228,30 @@ export function reauthorizeIfSignedIn(
   return true;
 }
 
-/** Forget the tokens and the signed-in flag, here only. `signOut` also revokes at the plane. */
+/**
+ * Forget the tokens and the signed-in flag, here only. `signOut` also revokes at the plane.
+ *
+ * It does NOT touch a sign-in that is under way. This runs on every 401 (`handleUnauthorized`),
+ * and on a fresh load the panes fetch before any token exists — so it fired while the guard's
+ * redirect to the plane was in flight, deleted the pending state, and the callback refused the
+ * plane's answer ("Sign-in state did not match", production 2026-10-07). The pending sign-in is
+ * consumed by `completeSignIn` and abandoned only by an explicit `signOut`.
+ */
 export function signOutLocal(storage?: Storage): void {
-  signingIn = null;
   generation++;
   tokens = null;
   refreshing = null;
   try {
     store(storage).removeItem(SIGNED_IN);
+  } catch {
+    // storage unavailable: nothing to clear
+  }
+}
+
+/** Drop a sign-in under way (its saved state and the in-flight redirect). Explicit sign-out only. */
+export function abandonPendingSignIn(storage?: Storage): void {
+  signingIn = null;
+  try {
     store(storage).removeItem(PENDING);
   } catch {
     // storage unavailable: nothing to clear
@@ -265,6 +281,7 @@ export async function signOut(
 ): Promise<void> {
   const refresh = tokens?.refresh ?? null;
   signOutLocal(opts.storage);
+  abandonPendingSignIn(opts.storage); // a sign-out the person chose ends any sign-in under way
   if (!plane || !refresh) return;
   const origin = planeOrigin(plane.url);
   if (!origin) return;

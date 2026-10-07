@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { beginSignIn, completeSignIn, discoverPlane, planeAccessToken, reauthorizeIfSignedIn, signOut, signOutLocal, wasSignedIn } from "./org-plane";
+import { abandonPendingSignIn, beginSignIn, completeSignIn, discoverPlane, planeAccessToken, reauthorizeIfSignedIn, signOut, signOutLocal, wasSignedIn } from "./org-plane";
 
 const PLANE = { issuer: "https://accounts.test", url: "https://accounts.test", audience: "https://hub.test" };
 const ORIGIN = "https://console.test";
@@ -8,6 +8,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 beforeEach(() => {
   sessionStorage.clear();
   signOutLocal();
+  abandonPendingSignIn();
 });
 
 describe("discoverPlane", () => {
@@ -168,6 +169,32 @@ describe("only one sign-in redirect per page", () => {
     const fetchFn = vi.fn(async () => json(200, { access_token: "at1", expires_in: 300, refresh_token: "rt1" }));
     const out = await completeSignIn(new URLSearchParams({ code: "c", state }), PLANE, { origin: ORIGIN, fetchFn: fetchFn as never, now: () => 0 });
     expect(out).toEqual({ returnTo: "/settings" });
+  });
+});
+
+// Found in production on 2026-10-07, after the single-flight fix: on a fresh load the panes fetch
+// before any token exists, the hub answers 401, and handleUnauthorized() -> clearAuthSession() ->
+// signOutLocal() deleted the pending sign-in the guard had just saved. The plane came back with a
+// code and a state, and the callback said "Sign-in state did not match".
+describe("a 401 during sign-in does not abandon it", () => {
+  test("signOutLocal (the 401 path) keeps the pending sign-in, so the callback still completes", async () => {
+    let went = "";
+    await beginSignIn(PLANE, { returnTo: "/", origin: ORIGIN, navigate: (u) => (went = u) });
+    signOutLocal(); // a pane's 401 while the redirect is under way
+    const state = new URL(went).searchParams.get("state")!;
+    const fetchFn = vi.fn(async () => json(200, { access_token: "at1", expires_in: 300, refresh_token: "rt1" }));
+    const out = await completeSignIn(new URLSearchParams({ code: "c", state }), PLANE, { origin: ORIGIN, fetchFn: fetchFn as never, now: () => 0 });
+    expect(out).toEqual({ returnTo: "/" });
+  });
+
+  test("an explicit sign-out does abandon it: a late callback is refused", async () => {
+    let went = "";
+    await beginSignIn(PLANE, { returnTo: "/", origin: ORIGIN, navigate: (u) => (went = u) });
+    await signOut(PLANE);
+    const state = new URL(went).searchParams.get("state")!;
+    const fetchFn = vi.fn();
+    await expect(completeSignIn(new URLSearchParams({ code: "c", state }), PLANE, { origin: ORIGIN, fetchFn: fetchFn as never })).rejects.toThrow(/state/);
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 });
 
