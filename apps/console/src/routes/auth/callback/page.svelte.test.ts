@@ -15,6 +15,7 @@ test("completes the sign-in and goes to where the user was going", async () => {
   vi.spyOn(authStore, "currentPlane").mockReturnValue({ issuer: "i", url: "u", audience: "a" });
   vi.spyOn(plane, "completeSignIn").mockResolvedValue({ returnTo: "/nodes" });
   const init = vi.spyOn(authStore, "initAuth").mockResolvedValue();
+  vi.spyOn(authStore.auth, "isAuthenticated", "get").mockReturnValue(true);
   window.history.replaceState({}, "", "/auth/callback?code=c&state=s");
   render(Page);
   await waitFor(() => expect(goto).toHaveBeenCalledWith("/nodes", { replaceState: true }));
@@ -36,4 +37,33 @@ test("a hub without a plane says so instead of trying to sign in", async () => {
   const { findByText } = render(Page);
   expect(await findByText(/does not use an account service/)).toBeTruthy();
   expect(complete).not.toHaveBeenCalled();
+});
+
+test("a silent authorize the plane could not answer silently goes on to an interactive one", async () => {
+  const P = { issuer: "i", url: "https://accounts.test", audience: "a" };
+  vi.spyOn(authStore, "currentPlane").mockReturnValue(P);
+  vi.spyOn(plane, "completeSignIn").mockResolvedValue({ returnTo: "/nodes", interactive: true });
+  const begin = vi.spyOn(plane, "beginSignIn").mockResolvedValue();
+  const init = vi.spyOn(authStore, "initAuth").mockResolvedValue();
+  window.history.replaceState({}, "", "/auth/callback?error=login_required&state=s");
+  render(Page);
+  await waitFor(() => expect(begin).toHaveBeenCalledWith(P, { returnTo: "/nodes" }));
+  expect(init).not.toHaveBeenCalled();
+  expect(goto).not.toHaveBeenCalled();
+});
+
+// product_not_enabled (403) and the like: the token was issued but the hub will not have it. Going
+// on to the protected page would send the guard straight back to the plane, in a loop.
+test("a hub that refuses the new token shows the error here instead of going on", async () => {
+  vi.spyOn(authStore, "currentPlane").mockReturnValue({ issuer: "i", url: "u", audience: "a" });
+  vi.spyOn(plane, "completeSignIn").mockResolvedValue({ returnTo: "/nodes" });
+  vi.spyOn(authStore, "initAuth").mockResolvedValue();
+  vi.spyOn(authStore.auth, "isAuthenticated", "get").mockReturnValue(false);
+  vi.spyOn(authStore.auth, "error", "get").mockReturnValue("The hub refused your sign-in (HTTP 403).");
+  const suppress = vi.spyOn(plane, "suppressAutoSignIn");
+  window.history.replaceState({}, "", "/auth/callback?code=c&state=s");
+  const { findByText } = render(Page);
+  expect(await findByText(/HTTP 403/)).toBeTruthy();
+  expect(goto).not.toHaveBeenCalled();
+  expect(suppress).toHaveBeenCalled();
 });

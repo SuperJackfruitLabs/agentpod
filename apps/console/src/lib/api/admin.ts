@@ -62,7 +62,7 @@ async function apiRequest<T>(
   }
 
   if (response.status === 401) {
-    handleUnauthorized();
+    handleUnauthorized(response);
     throw await apiError(response, requestLine);
   }
 

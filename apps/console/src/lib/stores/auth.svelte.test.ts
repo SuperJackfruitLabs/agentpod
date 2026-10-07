@@ -481,6 +481,37 @@ describe("under the org plane", () => {
     expect(out).toHaveBeenCalled();
   });
 
+  test("a hub that refuses the token also stops automatic sign-in for this page load (no loop)", async () => {
+    setPlane(P);
+    vi.spyOn(plane, "planeAccessToken").mockResolvedValue("at1");
+    const suppress = vi.spyOn(plane, "suppressAutoSignIn");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 403 }));
+    await initAuth();
+    expect(suppress).toHaveBeenCalled();
+  });
+
+  test("planeSessionLost (a 401) forgets the user only once no tokens remain, and is not a sign-out", async () => {
+    setPlane(P);
+    vi.spyOn(plane, "planeAccessToken").mockResolvedValue("at1");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ id: "prn_x", email: "op@example.com", isAdmin: false }), { status: 200 }),
+    );
+    await initAuth();
+    expect(auth.isAuthenticated).toBe(true);
+    const discard = vi.spyOn(plane, "discardToken");
+    const signOutSpy = vi.spyOn(plane, "signOut");
+    const held = vi.spyOn(plane, "hasTokens").mockReturnValue(true);
+    staticAuth.planeSessionLost(null);
+    expect(discard).toHaveBeenCalledWith(null);
+    expect(auth.isAuthenticated).toBe(true); // a refresh token is still held: not lost yet
+    held.mockReturnValue(false);
+    staticAuth.planeSessionLost("at1");
+    expect(auth.isAuthenticated).toBe(false);
+    expect(auth.isInitialized).toBe(true); // the guard decides now, and re-authorizes
+    expect(signOutSpy).not.toHaveBeenCalled();
+    expect(staticAuth.currentPlane()).toEqual(P); // unlike clearAuthSession, the plane is kept
+  });
+
   test("resetAuthInit lets initAuth run again after the callback", async () => {
     setPlane(P);
     const tok = vi.spyOn(plane, "planeAccessToken").mockResolvedValue(null);

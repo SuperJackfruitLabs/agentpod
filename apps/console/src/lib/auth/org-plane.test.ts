@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { abandonPendingSignIn, beginSignIn, completeSignIn, discoverPlane, planeAccessToken, reauthorizeIfSignedIn, signOut, signOutLocal, wasSignedIn } from "./org-plane";
+import { afterEach } from "vitest";
+import { abandonPendingSignIn, autoSignIn, beginSignIn, completeSignIn, discardToken, discoverPlane, hasTokens, planeAccessToken, resetPageLoadState, signOut, signOutLocal, suppressAutoSignIn, userSignedOut, watchSession } from "./org-plane";
 
 const PLANE = { issuer: "https://accounts.test", url: "https://accounts.test", audience: "https://hub.test" };
 const ORIGIN = "https://console.test";
@@ -7,9 +8,26 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 
 beforeEach(() => {
   sessionStorage.clear();
+  localStorage.clear();
   signOutLocal();
   abandonPendingSignIn();
+  resetPageLoadState();
 });
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+/** Signed in through a full authorize + callback, with tokens issued at t=0 for 300 s. */
+async function signIn(tokens = { access_token: "at1", expires_in: 300, refresh_token: "rt1" }) {
+  let went = "";
+  await beginSignIn(PLANE, { returnTo: "/", origin: ORIGIN, navigate: (u) => (went = u) });
+  const state = new URL(went).searchParams.get("state")!;
+  resetPageLoadState(); // the plane sends the browser back: /auth/callback is a new page load
+  await completeSignIn(new URLSearchParams({ code: "c", state }), PLANE, {
+    origin: ORIGIN, now: () => 0,
+    fetchFn: (async () => json(200, tokens)) as never,
+  });
+}
 
 describe("discoverPlane", () => {
   test("null issuer and a 404 (older hub) both mean legacy", async () => {
@@ -63,7 +81,6 @@ describe("authorization code + PKCE", () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
     expect(out).toEqual({ returnTo: "/nodes" });
     expect(await planeAccessToken(PLANE, { now: () => 0 })).toBe("at1");
-    expect(wasSignedIn()).toBe(true);
     expect(JSON.stringify(sessionStorage)).not.toContain("rt1"); // the refresh token never leaves memory
     expect(Object.keys(sessionStorage).map((k) => sessionStorage.getItem(k)).join()).not.toMatch(/rt1|at1/);
     expect(Object.keys(localStorage).map((k) => localStorage.getItem(k)).join()).not.toMatch(/rt1|at1/);
@@ -72,10 +89,8 @@ describe("authorization code + PKCE", () => {
   test("a state mismatch is refused and no token request is made", async () => {
     await beginSignIn(PLANE, { returnTo: "/", origin: ORIGIN, navigate: () => {} });
     const fetchFn = vi.fn();
-    sessionStorage.setItem("agentpod.planeSignedIn", "1");
     await expect(completeSignIn(new URLSearchParams({ code: "c", state: "forged" }), PLANE, { fetchFn: fetchFn as never })).rejects.toThrow(/state/);
     expect(fetchFn).not.toHaveBeenCalled();
-    expect(wasSignedIn()).toBe(false); // so the layout goes to /login, not into another authorize
   });
 
   test("a callback with no sign-in pending is refused", async () => {
@@ -133,10 +148,10 @@ describe("authorization code + PKCE", () => {
     expect(await planeAccessToken(PLANE, { now: () => 0 })).toBeNull();
   });
 
-  test("signOutLocal forgets tokens and the signed-in flag", async () => {
+  test("signOutLocal forgets the tokens", async () => {
+    await signIn();
     signOutLocal();
-    expect(await planeAccessToken(PLANE)).toBeNull();
-    expect(wasSignedIn()).toBe(false);
+    expect(await planeAccessToken(PLANE, { now: () => 0 })).toBeNull();
   });
 });
 
@@ -158,13 +173,13 @@ describe("only one sign-in redirect per page", () => {
   });
 
   test("the guard firing twice still completes: the callback's state matches", async () => {
-    sessionStorage.setItem("agentpod.planeSignedIn", "1");
     const went: string[] = [];
     const navigate = (u: string) => void went.push(u);
-    reauthorizeIfSignedIn(PLANE, "/settings", { origin: ORIGIN, navigate });
-    reauthorizeIfSignedIn(PLANE, "/settings", { origin: ORIGIN, navigate });
+    expect(autoSignIn(PLANE, "/settings", { origin: ORIGIN, navigate })).toBe(true);
+    expect(autoSignIn(PLANE, "/settings", { origin: ORIGIN, navigate })).toBe(true); // still under way: not /login
     await vi.waitFor(() => expect(went.length).toBeGreaterThan(0));
     await new Promise((r) => setTimeout(r, 20));
+    expect(went).toHaveLength(1);
     const state = new URL(went[0]!).searchParams.get("state")!;
     const fetchFn = vi.fn(async () => json(200, { access_token: "at1", expires_in: 300, refresh_token: "rt1" }));
     const out = await completeSignIn(new URLSearchParams({ code: "c", state }), PLANE, { origin: ORIGIN, fetchFn: fetchFn as never, now: () => 0 });
@@ -198,21 +213,222 @@ describe("a 401 during sign-in does not abandon it", () => {
   });
 });
 
-describe("reauthorizeIfSignedIn (the layout's guard, after a reload)", () => {
-  test("a tab that had signed in goes back to authorize, silently, keeping where it was", async () => {
-    sessionStorage.setItem("agentpod.planeSignedIn", "1");
+// Operator report, 2026-10-07: "I see the login screen most of the time even though
+// accounts.superjackfruit.com is already logged in." The guard re-authorized only when a
+// sessionStorage flag said THIS tab had signed in, so a new tab, a bookmark or a discarded mobile
+// tab rendered /login; and every 401 cleared the flag.
+describe("autoSignIn (the layout's guard, for a visitor with no token)", () => {
+  test("a new tab with nothing stored goes straight to authorize, prompt=none, keeping where it was", async () => {
     let went = "";
-    expect(reauthorizeIfSignedIn(PLANE, "/nodes/n1", { origin: ORIGIN, navigate: (u) => (went = u) })).toBe(true);
+    expect(autoSignIn(PLANE, "/nodes/n1", { origin: ORIGIN, navigate: (u) => (went = u) })).toBe(true);
     await vi.waitFor(() => expect(went).toContain("https://accounts.test/api/auth/oauth2/authorize?"));
-    expect(JSON.parse(sessionStorage.getItem("agentpod.pkce")!).returnTo).toBe("/nodes/n1");
+    expect(new URL(went).searchParams.get("prompt")).toBe("none");
+    expect(JSON.parse(sessionStorage.getItem("agentpod.pkce")!)).toMatchObject({ returnTo: "/nodes/n1", silent: true });
   });
 
-  test("a tab that never signed in, or legacy mode, goes to /login instead", () => {
+  test("legacy mode (no plane) does not", () => {
     const navigate = vi.fn();
-    expect(reauthorizeIfSignedIn(PLANE, "/", { origin: ORIGIN, navigate })).toBe(false);
-    sessionStorage.setItem("agentpod.planeSignedIn", "1");
-    expect(reauthorizeIfSignedIn(null, "/", { origin: ORIGIN, navigate })).toBe(false);
+    expect(autoSignIn(null, "/", { origin: ORIGIN, navigate })).toBe(false);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  test("after an explicit sign-out in this browser it does not: /login is shown", async () => {
+    await signIn();
+    await signOut(PLANE, { fetchFn: (async () => json(404, {})) as never });
+    expect(localStorage.getItem("agentpod.planeSignedOut")).toBe("1");
+    resetPageLoadState(); // a later page load, or another tab
+    const navigate = vi.fn();
+    expect(autoSignIn(PLANE, "/", { origin: ORIGIN, navigate })).toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  test("an interactive sign-in afterwards clears the signed-out marker", async () => {
+    localStorage.setItem("agentpod.planeSignedOut", "1");
+    await signIn();
+    expect(userSignedOut()).toBe(false);
+    expect(localStorage.getItem("agentpod.planeSignedOut")).toBeNull();
+  });
+
+  test("a 401 (signOutLocal / discardToken) is not a sign-out: no marker, and the guard still re-authorizes", async () => {
+    await signIn();
+    discardToken("at1");
+    signOutLocal();
+    expect(localStorage.getItem("agentpod.planeSignedOut")).toBeNull();
+    const navigate = vi.fn();
+    expect(autoSignIn(PLANE, "/", { origin: ORIGIN, navigate })).toBe(true);
+    await vi.waitFor(() => expect(navigate).toHaveBeenCalledOnce());
+  });
+
+  test("a failed callback suppresses it for the rest of the page load: no redirect loop", () => {
+    suppressAutoSignIn();
+    const navigate = vi.fn();
+    expect(autoSignIn(PLANE, "/", { origin: ORIGIN, navigate })).toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  test("a failed callback (state mismatch, plane error) suppresses it", async () => {
+    await expect(completeSignIn(new URLSearchParams({ error: "access_denied" }), PLANE, { fetchFn: vi.fn() as never })).rejects.toThrow(/access_denied/);
+    expect(autoSignIn(PLANE, "/", { origin: ORIGIN, navigate: vi.fn() })).toBe(false);
+    resetPageLoadState();
+    await expect(completeSignIn(new URLSearchParams({ code: "c", state: "forged" }), PLANE, { fetchFn: vi.fn() as never })).rejects.toThrow(/state/);
+    expect(autoSignIn(PLANE, "/", { origin: ORIGIN, navigate: vi.fn() })).toBe(false);
+  });
+
+  test("an attempt that cannot even start reports failure once and does not retry this page load", async () => {
+    const onError = vi.fn();
+    const navigate = vi.fn(() => { throw new Error("blocked"); });
+    expect(autoSignIn(PLANE, "/", { origin: ORIGIN, navigate, onError })).toBe(true);
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledOnce());
+    expect(autoSignIn(PLANE, "/", { origin: ORIGIN, navigate })).toBe(false);
+    expect(navigate).toHaveBeenCalledOnce();
+  });
+
+  test("a guard that re-runs while the attempt is under way is not counted as another attempt", () => {
+    for (let i = 0; i < 5; i++) expect(autoSignIn(PLANE, "/", { origin: ORIGIN, navigate: () => {} })).toBe(true);
+    resetPageLoadState(); // the next page load is still allowed its automatic attempt
+    expect(autoSignIn(PLANE, "/", { origin: ORIGIN, navigate: () => {} })).toBe(true);
+  });
+
+  test("across page loads, three automatic attempts inside a minute stop the fourth (a loop)", () => {
+    let t = 1_000_000;
+    const now = () => t;
+    for (let i = 0; i < 3; i++) {
+      resetPageLoadState();
+      expect(autoSignIn(PLANE, "/", { origin: ORIGIN, navigate: () => {}, now })).toBe(true);
+      t += 5_000;
+    }
+    resetPageLoadState();
+    expect(autoSignIn(PLANE, "/", { origin: ORIGIN, navigate: () => {}, now })).toBe(false);
+    t += 60_000; // the loop has stopped; a later reload tries again
+    resetPageLoadState();
+    expect(autoSignIn(PLANE, "/", { origin: ORIGIN, navigate: () => {}, now })).toBe(true);
+  });
+});
+
+describe("a silent authorize the plane cannot answer silently", () => {
+  for (const error of ["login_required", "interaction_required", "consent_required"]) {
+    test(`${error} asks for an interactive authorize instead of failing`, async () => {
+      let went = "";
+      autoSignIn(PLANE, "/runtimes", { origin: ORIGIN, navigate: (u) => (went = u) });
+      await vi.waitFor(() => expect(went).toBeTruthy());
+      const state = new URL(went).searchParams.get("state")!;
+      resetPageLoadState(); // the callback is a new page load
+      const out = await completeSignIn(new URLSearchParams({ error, state }), PLANE, { origin: ORIGIN, fetchFn: vi.fn() as never });
+      expect(out).toEqual({ returnTo: "/runtimes", interactive: true });
+      // The interactive authorize carries no prompt=none, so the plane shows its sign-in page.
+      let again = "";
+      await beginSignIn(PLANE, { returnTo: out.returnTo, origin: ORIGIN, navigate: (u) => (again = u) });
+      expect(new URL(again).searchParams.get("prompt")).toBeNull();
+    });
+  }
+
+  test("login_required on an INTERACTIVE authorize is an error, not another redirect", async () => {
+    let went = "";
+    await beginSignIn(PLANE, { returnTo: "/", origin: ORIGIN, navigate: (u) => (went = u) });
+    const state = new URL(went).searchParams.get("state")!;
+    await expect(completeSignIn(new URLSearchParams({ error: "login_required", state }), PLANE, { origin: ORIGIN })).rejects.toThrow(/login_required/);
+  });
+
+  test("login_required with a forged state is refused", async () => {
+    autoSignIn(PLANE, "/", { origin: ORIGIN, navigate: () => {} });
+    await vi.waitFor(() => expect(sessionStorage.getItem("agentpod.pkce")).toBeTruthy());
+    await expect(completeSignIn(new URLSearchParams({ error: "login_required", state: "forged" }), PLANE, { origin: ORIGIN })).rejects.toThrow();
+  });
+});
+
+describe("refresh survives a bad network; only a refusal ends the session", () => {
+  test("a network error near expiry keeps the still-valid token and retries with backoff", async () => {
+    vi.useFakeTimers();
+    await signIn();
+    const fetchFn = vi.fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue(json(200, { access_token: "at2", expires_in: 300, refresh_token: "rt2" }));
+    const now = () => 290_000; // 10 s left
+    expect(await planeAccessToken(PLANE, { now, fetchFn: fetchFn as never })).toBe("at1");
+    expect(hasTokens()).toBe(true);
+    // Inside the backoff, a caller gets the valid token without another request.
+    expect(await planeAccessToken(PLANE, { now, fetchFn: fetchFn as never })).toBe("at1");
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    const body = new URLSearchParams(String(fetchFn.mock.calls[1]![1].body));
+    expect(body.get("refresh_token")).toBe("rt1");
+    expect(await planeAccessToken(PLANE, { now })).toBe("at2");
+  });
+
+  test("a 5xx is transient too", async () => {
+    await signIn();
+    expect(await planeAccessToken(PLANE, { now: () => 290_000, fetchFn: (async () => json(503, {})) as never })).toBe("at1");
+    expect(hasTokens()).toBe(true);
+  });
+
+  test("an expired token with the network down answers null but keeps the refresh token for later", async () => {
+    await signIn();
+    expect(await planeAccessToken(PLANE, { now: () => 400_000, fetchFn: (async () => { throw new TypeError("offline"); }) as never })).toBeNull();
+    expect(hasTokens()).toBe(true);
+    // An expired token is refreshed at once, backoff or not: the caller has nothing else to send.
+    const ok = vi.fn(async () => json(200, { access_token: "at2", expires_in: 300, refresh_token: "rt2" }));
+    expect(await planeAccessToken(PLANE, { now: () => 400_500, fetchFn: ok as never })).toBe("at2"); // inside the 1 s backoff
+  });
+
+  for (const [status, error] of [[400, "invalid_grant"], [401, "invalid_client"]] as const) {
+    test(`HTTP ${status} ${error} ends the session and is never retried`, async () => {
+      vi.useFakeTimers();
+      await signIn();
+      const fetchFn = vi.fn(async () => json(status, { error }));
+      expect(await planeAccessToken(PLANE, { now: () => 290_000, fetchFn: fetchFn as never })).toBeNull();
+      expect(hasTokens()).toBe(false);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+      expect(userSignedOut()).toBe(false); // a dead grant is not the person signing out
+    });
+  }
+
+  for (const event of ["online", "visibilitychange"] as const) {
+    test(`${event} refreshes a token near expiry at once, skipping the backoff`, async () => {
+      vi.useFakeTimers();
+      await signIn();
+      const now = () => 290_000;
+      expect(await planeAccessToken(PLANE, { now, fetchFn: (async () => { throw new TypeError("offline"); }) as never })).toBe("at1");
+      const fetchFn = vi.fn(async () => json(200, { access_token: "at2", expires_in: 300, refresh_token: "rt2" }));
+      const stop = watchSession(() => PLANE, { target: window, now, fetchFn: fetchFn as never });
+      try {
+        (event === "online" ? window : document).dispatchEvent(new Event(event));
+        await vi.advanceTimersByTimeAsync(0); // well inside the 1 s backoff
+        expect(fetchFn).toHaveBeenCalledTimes(1);
+        expect(await planeAccessToken(PLANE, { now })).toBe("at2");
+      } finally {
+        stop();
+      }
+    });
+  }
+
+  test("another tab's explicit sign-out signs this tab out too", async () => {
+    await signIn();
+    const onSignedOut = vi.fn();
+    const stop = watchSession(() => PLANE, { target: window, onSignedOut });
+    try {
+      window.dispatchEvent(new StorageEvent("storage", { key: "agentpod.planeSignedOut", newValue: "1" }));
+      expect(onSignedOut).toHaveBeenCalledOnce();
+      expect(hasTokens()).toBe(false);
+    } finally {
+      stop();
+    }
+  });
+});
+
+describe("discardToken (a 401 from the hub)", () => {
+  test("drops the tokens when the hub refused the one this tab holds", async () => {
+    await signIn();
+    discardToken("at1");
+    expect(hasTokens()).toBe(false);
+  });
+
+  test("keeps them when the refused request carried no token or an older one", async () => {
+    await signIn();
+    discardToken(null); // sent while a refresh was failing: the refresh token is still good
+    discardToken("at0");
+    expect(hasTokens()).toBe(true);
   });
 });
 
@@ -268,7 +484,7 @@ describe("signOut", () => {
     const body = new URLSearchParams(calls[1]!.body!);
     expect(Object.fromEntries(body)).toEqual({ token: "rt1", token_type_hint: "refresh_token", client_id: "agentpod-console" });
     expect(await planeAccessToken(PLANE, { now: () => 0 })).toBeNull();
-    expect(wasSignedIn()).toBe(false);
+    expect(userSignedOut()).toBe(true); // the person chose it: no silent sign-in straight back
   });
 
   test("memory is cleared even when the plane is unreachable", async () => {

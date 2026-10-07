@@ -6,8 +6,8 @@
    */
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { completeSignIn } from "$lib/auth/org-plane";
-  import { currentPlane, getAuthApiUrl, initAuth, resetAuthInit } from "$lib/stores/auth.svelte";
+  import { beginSignIn, completeSignIn, suppressAutoSignIn } from "$lib/auth/org-plane";
+  import { auth, currentPlane, getAuthApiUrl, initAuth, resetAuthInit } from "$lib/stores/auth.svelte";
   import { hardNavigate, resolveReturnTo } from "$lib/utils/return-to";
 
   let message = $state("Signing you in…");
@@ -21,10 +21,25 @@
       return;
     }
     try {
-      const { returnTo } = await completeSignIn(new URLSearchParams(window.location.search), p);
+      const { returnTo, interactive } = await completeSignIn(new URLSearchParams(window.location.search), p);
+      if (interactive) {
+        // The automatic (prompt=none) authorize found no plane session, or the plane needs the
+        // person for something (a workspace, consent): ask again, and let the plane show its page.
+        message = "Taking you to sign in…";
+        await beginSignIn(p, { returnTo });
+        return;
+      }
       // The layout's initAuth already ran, signed out, before the plane sent us back.
       resetAuthInit();
       await initAuth();
+      if (!auth.isAuthenticated) {
+        // The hub would not have the new token (e.g. 403 product_not_enabled). Going on would send
+        // the guard straight back to the plane for another token the hub refuses: stop here.
+        suppressAutoSignIn();
+        failed = true;
+        message = auth.error ?? "The hub did not accept the sign-in.";
+        return;
+      }
       // The return path was ours to begin with, but it went through sessionStorage: same allowlist
       // as the password sign-in (this origin, or the connected hub's).
       const target = resolveReturnTo(returnTo, getAuthApiUrl(), window.location.origin);

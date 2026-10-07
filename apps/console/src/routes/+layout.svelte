@@ -4,8 +4,8 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { connection, initConnection, startReachabilityProbe } from "$lib/stores/connection.svelte";
-  import { auth, currentPlane, initAuth } from "$lib/stores/auth.svelte";
-  import { reauthorizeIfSignedIn } from "$lib/auth/org-plane";
+  import { auth, currentPlane, initAuth, planeSessionLost } from "$lib/stores/auth.svelte";
+  import { autoSignIn, watchSession } from "$lib/auth/org-plane";
   import { themeStore } from "$lib/themes/store.svelte";
   import { commandPalette } from "$lib/stores/command-palette.svelte";
   import { Toaster } from "$lib/components/ui/sonner";
@@ -17,6 +17,8 @@
 
   let { children } = $props();
   let isInitializing = $state(true);
+  // An automatic sign-in is on its way to the plane: show the spinner, not the shell or /login.
+  let autoSigningIn = $state(false);
 
   // Reactive current path (tracks SvelteKit client navigations — using
   // window.location.pathname imperatively goes stale across goto()).
@@ -32,7 +34,7 @@
   // Derived: should we show the loading spinner?
   // Only show loading during initial app startup
   // Don't show loading during redirects (e.g., after logout) - just let the redirect happen
-  let shouldShowLoading = $derived(isInitializing);
+  let shouldShowLoading = $derived(isInitializing || autoSigningIn);
 
   // Derived: should we show the AppShell with bottom navigation?
   // Hide on public routes (login) and show on all authenticated routes
@@ -46,6 +48,7 @@
   }
 
   let stopReachabilityProbe: (() => void) | undefined;
+  let stopWatchingSession: (() => void) | undefined;
 
   onMount(async () => {
     themeStore.initialize();
@@ -56,12 +59,15 @@
 
     // Keep connection.reachable honest for the whole session (shell banner).
     stopReachabilityProbe = startReachabilityProbe();
+    // Refresh the plane token on wake / reconnect; follow another tab's sign-out.
+    stopWatchingSession = watchSession(currentPlane, { onSignedOut: () => planeSessionLost(null) });
 
     window.addEventListener("keydown", handleGlobalKeydown);
   });
 
   onDestroy(() => {
     stopReachabilityProbe?.();
+    stopWatchingSession?.();
     if (typeof window !== "undefined") {
       window.removeEventListener("keydown", handleGlobalKeydown);
     }
@@ -84,10 +90,19 @@
       : !connection.isConnected;
 
     if (definitelyNotAuthenticated) {
-      // Under the plane, tokens are memory-only, so a reload signs the tab out. If it had signed
-      // in, go back through authorize (silent while the plane's session is alive) instead.
-      if (reauthorizeIfSignedIn(currentPlane(), `${page.url.pathname}${page.url.search}`)) return;
-      goto("/login");
+      // Under the plane, tokens are memory-only: a new tab, a reload or a 401 leaves none. Go
+      // straight to authorize (silent while the plane's session is alive) rather than /login,
+      // which is for after an explicit sign-out and for a sign-in that failed (autoSignIn says).
+      const started = autoSignIn(currentPlane(), `${page.url.pathname}${page.url.search}`, {
+        onError: () => {
+          autoSigningIn = false;
+          goto("/login");
+        },
+      });
+      autoSigningIn = started;
+      if (!started) goto("/login");
+    } else {
+      autoSigningIn = false;
     }
   });
 </script>

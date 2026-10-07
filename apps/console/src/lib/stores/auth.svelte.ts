@@ -8,7 +8,7 @@
  */
 
 import { createAuthClient } from "better-auth/svelte";
-import { planeAccessToken, signOut, signOutLocal, type PlaneDiscovery } from "$lib/auth/org-plane";
+import { discardToken, hasTokens, planeAccessToken, signOut, signOutLocal, suppressAutoSignIn, type PlaneDiscovery } from "$lib/auth/org-plane";
 import { forgetMyReach } from "$lib/api/my-grant";
 
 // =============================================================================
@@ -154,8 +154,8 @@ export async function initAuth(): Promise<void> {
   if (isInitialized) return;
 
   // Under the plane the console holds a bearer token in memory and asks the hub who it is. Better
-  // Auth is never consulted. No token (a fresh tab or a reload) is simply signed out; the layout
-  // re-runs authorize, silently when the plane's session is alive.
+  // Auth is never consulted. No token (a new tab or a reload) is simply signed out; the layout's
+  // guard goes to authorize, silently when the plane's session is alive.
   if (plane && currentApiUrl) {
     isLoading = true;
     error = null;
@@ -169,10 +169,12 @@ export async function initAuth(): Promise<void> {
             user: { id: me.id, email: me.email ?? "", name: null, image: null, role: me.isAdmin ? "admin" : null },
           };
         } else {
-          // The hub will not have this token (e.g. 403 product_not_enabled). Forget it, so the
-          // layout sends the user to /login with this message rather than straight back to the
-          // plane, which would hand over another token the hub refuses, in a loop.
+          // The hub will not have this token (e.g. 403 product_not_enabled). Forget it, and stop
+          // automatic sign-in for this page load, so the layout sends the user to /login with this
+          // message rather than straight back to the plane, which would hand over another token
+          // the hub refuses, in a loop.
           signOutLocal();
+          suppressAutoSignIn();
           error = `The hub refused your sign-in (HTTP ${res.status}).`;
         }
       }
@@ -416,6 +418,18 @@ export function resetAuthInit(): void {
  */
 export function clearError(): void {
   error = null;
+}
+
+/**
+ * Under the plane, the hub answered 401 to a request that carried `sent` (null: none), or another
+ * tab signed out. Not a sign-out: the refused tokens are dropped, and once none remain the user is
+ * forgotten here, so the layout's guard re-authorizes — silently while the plane's session is
+ * alive. The plane, the hub URL and the signed-out marker are left alone (unlike
+ * `clearAuthSession`, which is for switching hubs).
+ */
+export function planeSessionLost(sent: string | null): void {
+  discardToken(sent);
+  if (!hasTokens()) sessionData = null;
 }
 
 /**

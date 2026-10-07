@@ -1,6 +1,6 @@
 import type { NodeSummary, DetectedStation, StationHealth, FsEntry, ProvisionedRuntime, RuntimeProviderManifest, FleetAgent, FleetStats, SkillInventory, RemoveNodeResponse } from "@agentpod/contract";
 import { goto } from "$app/navigation";
-import { clearAuthSession, currentPlane, getToken } from "$lib/stores/auth.svelte";
+import { clearAuthSession, currentPlane, getToken, planeSessionLost } from "$lib/stores/auth.svelte";
 import { apiError, networkError } from "./http-error";
 
 /** Resolves the hub base URL at call time so it reflects the runtime connection. */
@@ -10,13 +10,26 @@ export function hubUrl(): string {
   return stored ?? import.meta.env.PUBLIC_HUB_URL ?? "http://localhost:3001";
 }
 
+/** The plane token each response's request carried (null: none), for `handleUnauthorized`. */
+const sentWith = new WeakMap<Response, string | null>();
+
 /**
- * Handle a 401 Unauthorized response by clearing the local auth session and
- * redirecting to /login.  Guards against redirect loops: does nothing when the
- * current path is already a public route (/login) or when running
+ * Handle a 401 Unauthorized response.
+ *
+ * Under the organization plane a 401 is not a sign-out: the token the hub refused is dropped and
+ * the layout's guard re-authorizes, silently while the plane's session is alive. Going to /login
+ * here (and forgetting the plane) put the operator on the login screen while still signed in at
+ * the plane (2026-10-07).
+ *
+ * Legacy: clear the local auth session and redirect to /login. Guards against redirect loops:
+ * does nothing when the current path is already a public route (/login) or when running
  * server-side (typeof window === "undefined").
  */
-export function handleUnauthorized(): void {
+export function handleUnauthorized(res?: Response): void {
+  if (typeof window !== "undefined" && currentPlane()) {
+    planeSessionLost(res ? (sentWith.get(res) ?? null) : null);
+    return;
+  }
   if (
     typeof window !== "undefined" &&
     !window.location.pathname.startsWith("/login")
@@ -40,10 +53,20 @@ export const SOCKET_MIN_VALIDITY_SEC = 60;
  */
 export async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const token = await getToken();
-  if (!token) return fetch(url, { credentials: "include", ...init });
+  if (!token) {
+    const res = await fetch(url, { credentials: "include", ...init });
+    remember(res, null);
+    return res;
+  }
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
-  return fetch(url, { ...init, headers, credentials: "omit" });
+  const res = await fetch(url, { ...init, headers, credentials: "omit" });
+  remember(res, token);
+  return res;
+}
+
+function remember(res: Response, token: string | null): void {
+  if (res && typeof res === "object") sentWith.set(res, token);
 }
 
 /**
@@ -74,7 +97,7 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
     throw networkError(requestLine, err);
   }
   if (res.status === 401) {
-    handleUnauthorized();
+    handleUnauthorized(res);
     throw await apiError(res, requestLine);
   }
   if (!res.ok) throw await apiError(res, requestLine);
