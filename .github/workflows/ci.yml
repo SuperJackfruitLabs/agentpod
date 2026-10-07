@@ -315,6 +315,20 @@ jobs:
         working-directory: docs-site
         run: npm ci
 
+      # starlight-llms-txt ships TypeScript, which Node will not strip inside
+      # node_modules, so Astro falls back to loading astro.config.mjs through a
+      # minimal Vite server that forces resolve.tsconfigPaths on (the config's own
+      # `tsconfigPaths: false` cannot reach it). That resolver follows the root
+      # tsconfig's references into apps/console, whose tsconfig extends a file
+      # `svelte-kit sync` generates. Any machine that has built the console has it;
+      # this checkout does not, and the config fails to load with
+      # "Tsconfig not found apps/console/.svelte-kit/tsconfig.json". An empty one
+      # is enough: the docs site uses nothing from it.
+      - name: Stand in for the console's generated tsconfig
+        run: |
+          mkdir -p apps/console/.svelte-kit
+          [ -f apps/console/.svelte-kit/tsconfig.json ] || echo '{}' > apps/console/.svelte-kit/tsconfig.json
+
       - name: Build
         working-directory: docs-site
         run: npm run build
