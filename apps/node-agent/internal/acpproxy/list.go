@@ -125,7 +125,7 @@ func truncate(s string, n int) string {
 // ListStations fetches the caller's stations from the hub.
 func ListStations(ctx context.Context, hub, token string) ([]Station, error) {
 	if token == "" {
-		return nil, fmt.Errorf("no hub token: set AGENTPOD_TOKEN or pass --token")
+		return nil, fmt.Errorf("no token: set AGENTPOD_TOKEN or pass --token")
 	}
 
 	url := strings.TrimSuffix(hub, "/") + "/api/fleet/agents"

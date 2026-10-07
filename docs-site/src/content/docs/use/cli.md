@@ -251,7 +251,7 @@ hub, no token, no network. It runs from a downloaded binary on a machine that ha
 near AgentPod. See [Checking for exposure](/use/scan/).
 
 `apn acp` attaches a local ACP editor to a station on another machine. Like `fleet`, it takes
-a hub token rather than this host's credential, so a laptop can use `apn`'s `acp` command
+a person's token rather than this host's credential, so a laptop can use `apn`'s `acp` command
 purely as a client without being enrolled. See [Attaching an editor](/use/acp/).
 
 ## Tokens on the command line
@@ -264,7 +264,7 @@ argument lands in your shell history and in the process list. Prefer `$AGENTPOD_
 which is what the flag defaults to anyway.
 
 (`apn enroll --token` is a different thing — that is a single-use *enrollment* token for
-the machine, not a principal's hub token.)
+the machine, not a principal's token.)
 
 ## Getting help
 

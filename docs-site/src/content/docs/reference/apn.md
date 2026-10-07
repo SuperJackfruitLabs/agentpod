@@ -56,7 +56,7 @@ Each command's text below is what `apn help <command>` prints, from the same tab
 | `$AGENTPOD_HUB_URL` | `apn enroll`: the hub, when `--hub` is not given. |
 | `$AGENTPOD_ENROLL_TOKEN` | `apn enroll`: the one-time enrollment token, when `--token` is not given. |
 | `$AGENTPOD_HUB` | `apn acp`: the hub, when `--hub` is not given. Default `https://hub.agentpod.dev`. |
-| `$AGENTPOD_TOKEN` | `apn acp`: a person's hub token. Prefer it to `--token`, which lands in shell history. |
+| `$AGENTPOD_TOKEN` | `apn acp`: a person's access token. Prefer it to `--token`, which lands in shell history. |
 | `$OTEL_EXPORTER_OTLP_ENDPOINT` | `apn run`: the OTLP/HTTP collector to export traces to; unset exports nothing. Normally written to `otel.env` by `apn telemetry enable`. |
 | `$OTEL_SDK_DISABLED` | `apn run`: `true` turns export off even with an endpoint set. |
 
@@ -1022,7 +1022,7 @@ See [Attaching an editor](/use/acp/).
 | `--station ID` | string | — | Station to attach to; required unless `--list`. |
 | `--session ID` | string | — | Specific session to resume. |
 | `--hub URL` | string | `$AGENTPOD_HUB`, else `https://hub.agentpod.dev` | Hub base URL. |
-| `--token TOKEN` | string | `$AGENTPOD_TOKEN` | Hub token (prefer the AGENTPOD_TOKEN env var). |
+| `--token TOKEN` | string | `$AGENTPOD_TOKEN` | A person's access token (prefer the AGENTPOD_TOKEN env var). |
 
 `apn help acp` prints:
 
@@ -1044,7 +1044,7 @@ This is the one command that needs no enrolled node — a laptop can
 install apn purely as a client.
 ```
 
-**Needs:** A person's hub token, from `$AGENTPOD_TOKEN` or `--token` — never this host's credential, and never the file `fleet login` writes. Needs no enrolled node.
+**Needs:** A person's access token, from `$AGENTPOD_TOKEN` or `--token` — never this host's credential, and never the file `fleet login` writes. Needs no enrolled node.
 
 **Exit status:** 0 when the editor closes the session. 1 when the hub refuses or drops it. 2 without `--station` or `--list`.
 

@@ -2,7 +2,7 @@ package fleetcred
 
 // The device credential — what makes `fleet` usable for sustained work.
 //
-// A hub token lives five minutes. An agent re-mints by exchanging the credential it already
+// An access token lives five minutes. An agent re-mints by exchanging the credential it already
 // holds; a browser re-mints silently from its session cookie. A human at a terminal held
 // NEITHER, so every lapse cost a browser, a person and a click — four times in one session on
 // 2026-09-20, twice landing between minting a token and using it.

@@ -132,6 +132,10 @@ jobs:
       - name: Checkout
         if: steps.gate.outputs.run == 'true'
         uses: actions/checkout@v7
+        with:
+          # The tags, so `git describe` can stamp the version of the agent the
+          # base image compiles from this checkout.
+          fetch-depth: 0
 
       - name: Set up Buildx
         if: steps.gate.outputs.run == 'true'
@@ -189,8 +193,12 @@ jobs:
       - name: Build the base image
         if: steps.gate.outputs.run == 'true' && matrix.local_base != 'none'
         run: |
+          # Stamped with the checkout's `git describe`: without it the compiled
+          # agent reports "dev", and every node from the image reads as needing
+          # an update while saying nothing about which source it runs.
           docker build \
             --platform linux/amd64 \
+            --build-arg "AGENTPOD_VERSION=$(git describe --tags --always)" \
             -f apps/node-agent/deploy/Dockerfile.base \
             -t agentpod-node:base \
             apps/node-agent
@@ -253,6 +261,11 @@ jobs:
 
           # Every image: the node-agent binary is there and runs.
           agent_version_out="$(docker run --rm --entrypoint /agentpod-node "$ref" version)"
+
+          # An image that compiles the agent must carry a version stamp.
+          case "$agent_version_out" in
+            "agentpod-node dev "*) echo "image reports an unstamped agent: $agent_version_out"; exit 1 ;;
+          esac
 
           if [ "${{ matrix.agent_pin }}" = "yes" ]; then
             # And for the Fly images, that it is the release this run resolved.

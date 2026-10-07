@@ -55,6 +55,9 @@ func stubSQLite3(t *testing.T, dir, script string) string {
 // per cycle. The fallback must still work.
 func TestOpenCodeDetect_UnchangingDBFailureLogsOnce(t *testing.T) {
 	dataDir, projPath := buildOpenCodeFixture(t) // no opencode.db in the fixture
+	// sqlite3 is installed (stubbed, so the host's own does not decide the outcome): a missing
+	// db is then a real, reportable condition. Without sqlite3 the fallback is silent.
+	stubSQLite3(t, "", "#!/bin/sh\nexit 5\n")
 	buf := captureLog(t)
 
 	d := NewOpenCode(dataDir)
@@ -81,6 +84,7 @@ func TestOpenCodeDetect_UnchangingDBFailureLogsOnce(t *testing.T) {
 func TestOpenCodeDetect_ChangedDBFailureReasonLogsAgain(t *testing.T) {
 	dataDir, _ := buildOpenCodeFixture(t)
 	buf := captureLog(t)
+	stubDir := stubSQLite3(t, "", "#!/bin/sh\nexit 5\n")
 
 	d := NewOpenCode(dataDir)
 
@@ -98,7 +102,7 @@ func TestOpenCodeDetect_ChangedDBFailureReasonLogsAgain(t *testing.T) {
 	}
 
 	// Phase 2: the db now exists but the query fails — a different reason.
-	stubSQLite3(t, "", "#!/bin/sh\nexit 5\n")
+	stubSQLite3(t, stubDir, "#!/bin/sh\nexit 5\n")
 	if err := os.WriteFile(filepath.Join(dataDir, "opencode.db"), []byte("not-sqlite"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -175,5 +179,40 @@ func TestOpenCodeDetect_RecoveryIsLogged(t *testing.T) {
 	}
 	if n := strings.Count(buf.String(), openCodeFallbackMarker); n != 2 {
 		t.Errorf("relapse after recovery: got %d fallback lines, want 2\n--- log ---\n%s", n, buf.String())
+	}
+}
+
+// TestOpenCodeDetect_NoSQLite3IsNotAWarning: a host with no sqlite3 binary at all — the
+// provisioned opencode image, by design (deploy/Dockerfile.opencode) — has nothing wrong with
+// it. Directory enumeration is that host's discovery path, so detection must say nothing,
+// whether or not opencode has created its opencode.db yet. A runtime's node log used to open
+// with "could not read …/opencode.db (… executable file not found in $PATH)", which reads as
+// a fault on a node that is working as designed.
+func TestOpenCodeDetect_NoSQLite3IsNotAWarning(t *testing.T) {
+	dataDir, projPath := buildOpenCodeFixture(t)
+	t.Setenv("PATH", t.TempDir()) // no sqlite3 anywhere on PATH
+	buf := captureLog(t)
+
+	d := NewOpenCode(dataDir)
+	detect := func(phase string) {
+		t.Helper()
+		stations, err := d.Detect()
+		if err != nil {
+			t.Fatalf("Detect (%s): %v", phase, err)
+		}
+		if len(stations) != 1 || *stations[0].WorkspacePath != projPath {
+			t.Fatalf("Detect (%s): directory enumeration did not find the project: %+v", phase, stations)
+		}
+	}
+
+	detect("before opencode created its db")
+	// opencode creates and owns its own db once `opencode serve` starts.
+	if err := os.WriteFile(filepath.Join(dataDir, "opencode.db"), []byte("SQLite format 3\x00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	detect("after opencode created its db")
+
+	if strings.Contains(buf.String(), "opencode") {
+		t.Errorf("a host without sqlite3 logged about opencode.db:\n%s", buf.String())
 	}
 }

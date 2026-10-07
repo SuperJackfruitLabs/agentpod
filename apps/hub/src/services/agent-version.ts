@@ -89,16 +89,26 @@ export async function getLatestAgentVersion(
  * spurious "update available" (which would read as a downgrade in the UI).
  */
 export function isNewerVersion(latest: string, current: string): boolean {
-  const parse = (v: string): [number, number, number] | null => {
-    const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v.trim());
-    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
-  };
-  const a = parse(latest);
-  const b = parse(current);
+  const a = parseVersion(latest);
+  const b = parseVersion(current);
   if (!a || !b) return false;
   // Compare major, then minor, then patch. Literal tuple indices keep each
   // element typed as a definite number (no noUncheckedIndexedAccess widening).
   if (a[0] !== b[0]) return a[0] > b[0];
   if (a[1] !== b[1]) return a[1] > b[1];
   return a[2] > b[2];
+}
+
+function parseVersion(v: string): [number, number, number] | null {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v.trim());
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+/**
+ * True iff `v` names a release (or a `git describe` stamp of one, e.g.
+ * "v0.1.9-3-gabc1234"). False for a build stamped with no version — the
+ * literal "dev" a plain `go build` reports.
+ */
+export function isReleaseVersion(v: string): boolean {
+  return parseVersion(v) !== null;
 }

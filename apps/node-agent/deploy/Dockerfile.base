@@ -8,7 +8,8 @@
 # This image must be built FIRST — the harness Dockerfiles will not resolve
 # without it:
 #
-#   docker build -f apps/node-agent/deploy/Dockerfile.base -t agentpod-node:base apps/node-agent
+#   docker build -f apps/node-agent/deploy/Dockerfile.base -t agentpod-node:base \
+#     --build-arg AGENTPOD_VERSION="$(git describe --tags --always)" apps/node-agent
 #
 # It sets no ENTRYPOINT on purpose: each harness layer chooses its own (the
 # generic enrol-then-run script, or a harness supervision loop).
@@ -17,7 +18,17 @@
 FROM golang:1.26 AS builder
 WORKDIR /src
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /agentpod-node ./cmd/agentpod-node
+# The version the binary reports (`agentpod-node version`, and to the hub on
+# every connection). Pass it — the release workflow links the same value in:
+#
+#   --build-arg AGENTPOD_VERSION="$(git describe --tags --always)"
+#
+# Left at "dev", the hub reads the node as "not a release" and flags it as
+# needing an update, which is the truth about a build nobody stamped.
+ARG AGENTPOD_VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags "-X main.version=${AGENTPOD_VERSION}" \
+    -o /agentpod-node ./cmd/agentpod-node
 
 # Stage 2: Runtime base
 # Debian rather than alpine because the harness layers install glibc-linked

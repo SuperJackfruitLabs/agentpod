@@ -365,11 +365,17 @@ test("a station without the capability is 403 and the node is never called", asy
 
     const status = await post(ctx.baseUrl, `/api/stations/${ctx.station.id}/changeset/status`, {});
     expect(status.status).toBe(403);
+    // The refusal names the usual cause. A node advertises changeset only for
+    // a workspace that is a git repository, and a fresh runtime's /workspace is
+    // an empty directory, so "does not advertise" alone left the reader
+    // guessing at a fault that is not there.
+    expect(((await status.json()) as { error: string }).error).toMatch(/not a git repository/);
 
     const diff = await post(ctx.baseUrl, `/api/stations/${ctx.station.id}/changeset/diff`, {
       side: "uncommitted",
     });
     expect(diff.status).toBe(403);
+    expect(((await diff.json()) as { error: string }).error).toMatch(/not a git repository/);
 
     await new Promise((r) => setTimeout(r, 200));
     const after = ctx.capturedMsgs.slice(before);

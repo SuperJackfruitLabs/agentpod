@@ -37,10 +37,11 @@ import (
 // Project path discovery: opencode.db is the preferred source (table "project",
 // column "worktree", skip row where id="global"). If the DB is absent or the
 // sqlite3 binary is unavailable, Detect falls back to enumerating
-// <dataDir>/project/ dirs and decoding the sanitised names. On hosts where the
-// DB is permanently unreadable — provisioned opencode containers ship no
-// sqlite3 on purpose — that fallback IS the normal path, so it is logged on
-// change of condition only, never per detect cycle (see noteDBUnreadable).
+// <dataDir>/project/ dirs and decoding the sanitised names. On a host with no
+// sqlite3 — provisioned opencode containers ship none on purpose — that
+// fallback IS the normal path and is taken silently; a DB that exists but
+// cannot be read is logged on change of condition only, never per detect
+// cycle (see noteDBUnreadable).
 //
 // Decode ambiguity (fallback only): OpenCode sanitises project paths by
 // stripping the leading '/' and replacing remaining '/' with '-'. When
@@ -182,6 +183,16 @@ func (o *openCodeDescriptor) Detect() ([]Station, error) {
 // if the DB is absent or the sqlite3 binary is unavailable.
 func (o *openCodeDescriptor) loadProjectPaths() ([]string, error) {
 	dbPath := filepath.Join(o.dataDir, "opencode.db")
+
+	// No sqlite3 binary at all is a property of the host, not a failure: the provisioned
+	// opencode image omits it on purpose (deploy/Dockerfile.opencode), which makes directory
+	// enumeration that host's discovery path. Saying nothing here is deliberate — reporting it
+	// read as a fault on every runtime that was working as designed. The condition is checked
+	// before the db's existence, so a fresh container (no db until `opencode serve` creates
+	// one) is equally quiet.
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		return o.projectPathsFromDirs()
+	}
 
 	paths, err := o.projectPathsFromDB(dbPath)
 	if err == nil {

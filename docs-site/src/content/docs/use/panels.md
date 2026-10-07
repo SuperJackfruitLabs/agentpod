@@ -80,6 +80,13 @@ The plan is shown to you first. Nothing on disk is touched until you apply it. R
 What the agent has actually changed in its working tree — `status` for the summary, `diff`
 for the detail. Requires the `changeset` capability.
 
+A node advertises `changeset` only for a station whose workspace is a **git repository**.
+A newly provisioned runtime's `/workspace` is an empty directory, so it has no Changes
+panel, and `fleet station changeset` is refused with 403 and "its workspace is not a git
+repository". That is the design, not a fault: clone or `git init` into the workspace, and
+the hub picks the capability up the next time the station is adopted or its node
+reconnects.
+
 This is the panel for the question "what has this thing been doing", answered from the
 files rather than from what the agent says about itself.
 
