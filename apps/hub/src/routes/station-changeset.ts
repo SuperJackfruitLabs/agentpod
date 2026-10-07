@@ -34,6 +34,14 @@ function brokerErrorStatus(error: string | undefined): 409 | 502 {
   return 502;
 }
 
+// A node advertises "changeset" only for a station whose workspace is a git
+// repository (descriptor.AppendChangesetCap). Its absence almost always means
+// that — a fresh runtime's /workspace is an empty directory — so the refusal
+// says so instead of leaving the reader to guess at a missing feature.
+const NO_CHANGESET =
+  "Forbidden: station does not advertise changeset capability: its workspace is " +
+  "not a git repository (a node offers changeset only for one)";
+
 // ─── Route schemas ────────────────────────────────────────────────────────────
 
 const StatusBody = z.object({
@@ -73,7 +81,7 @@ export const stationChangesetRoutes = new Hono()
     // ── 3. Capability gate (before any node call) ────────────────────────────
     if (!gateCapability(station, "changeset")) {
       return c.json(
-        { error: "Forbidden: station does not advertise changeset capability" },
+        { error: NO_CHANGESET },
         403
       );
     }
@@ -119,7 +127,7 @@ export const stationChangesetRoutes = new Hono()
     // ── 3. Capability gate ───────────────────────────────────────────────────
     if (!gateCapability(station, "changeset")) {
       return c.json(
-        { error: "Forbidden: station does not advertise changeset capability" },
+        { error: NO_CHANGESET },
         403
       );
     }

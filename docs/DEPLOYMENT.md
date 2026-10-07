@@ -61,12 +61,15 @@ Build the images on the Docker host from the repo root. The context path is `app
 
 `Dockerfile.base` carries everything shared — the Go build stage, the runtime distro, `ca-certificates curl git procps`, and the `agentpod-node` binary — and every harness image is `FROM agentpod-node:base`. **Build the base first**, or the harness builds fail to resolve their `FROM`. Rebuild it (and then the harness images) whenever the node-agent source changes.
 
+Pass `--build-arg AGENTPOD_VERSION` to the base build. The binary is compiled from the checkout, and without it reports `dev`; the hub reads that as "not a release" and shows every runtime from the image as needing an update, so a real stamp is what lets `fleet nodes` tell you which source a runtime was built from.
+
 ```bash
 cd /opt/agentpod
 
 # Shared base image — build this first
 docker build \
   -t agentpod-node:base \
+  --build-arg AGENTPOD_VERSION="$(git describe --tags --always)" \
   -f apps/node-agent/deploy/Dockerfile.base \
   apps/node-agent
 

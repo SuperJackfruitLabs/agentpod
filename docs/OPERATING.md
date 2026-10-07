@@ -672,6 +672,7 @@ Three things are non-negotiable, each fatal on its own and each failing quietly:
 # amd64 base (Apple Silicon: this runs under emulation and is slow — wait it out)
 docker buildx build --platform linux/amd64 \
   -f apps/node-agent/deploy/Dockerfile.base \
+  --build-arg AGENTPOD_VERSION="$(git describe --tags --always)" \
   -t agentpod-node:base-amd64 --load apps/node-agent
 
 # the Modal layer, pushed to a PUBLIC repository
@@ -685,7 +686,7 @@ docker buildx build --platform linux/amd64 \
 
 **Prefer the CI pipeline over the hand-build above.** `.github/workflows/publish-images.yml` (Actions → publish-images → Run workflow, choose `all` or one of `fly`, `fly-pi`, `modal`, `modal-opencode`, `modal-pi`, and a tag) builds natively on an amd64 runner, pushes to GHCR, and verifies what it published:
 
-- every image — `agentpod-node version` runs;
+- every image — `agentpod-node version` runs, and an image that compiles the agent reports the `git describe` version it was built from, not `dev`;
 - Modal images — `python3` and `pip` exist and `ENTRYPOINT` is empty;
 - harness images — the harness binary is resolvable **from a minimal service PATH** with the image's own `ENV` discarded (`env -i PATH=/usr/local/sbin:…:/bin`), which is the shape of the environment the node-agent spawns an ACP adapter in;
 - the harness-less image — no harness binary is present, so a "Generic" runtime does not quietly detect stations nobody asked for.

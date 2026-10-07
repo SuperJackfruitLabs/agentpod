@@ -38,3 +38,16 @@ test("version ordering is numeric, not lexical (v0.1.10 is newer than v0.1.9)", 
   const out = annotateWithVersion([{ agentVersion: "v0.1.9" }], "v0.1.10");
   expect(out.map((n) => n.updateAvailable)).toEqual([true]);
 });
+
+test("a build that reports no release version ('dev') is NOT current", () => {
+  // A node built without a version stamp reports the literal "dev". The node's
+  // own updater treats an unreadable version as not up to date (selfupdate's
+  // upToDate), so the hub saying "up to date" both hid the drift and made a
+  // rollout skip a node that would have accepted the update.
+  const out = annotateWithVersion(
+    [{ agentVersion: "dev" }, { agentVersion: "v0.1.9-3-gabc1234" }, { agentVersion: null }],
+    "v0.1.9"
+  );
+  // A `git describe` stamp is a real version: v0.1.9 plus commits, not behind.
+  expect(out.map((n) => n.updateAvailable)).toEqual([true, false, false]);
+});

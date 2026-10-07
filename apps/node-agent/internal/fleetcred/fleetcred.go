@@ -5,7 +5,7 @@
 // AgentPod ships two binaries, and the boundary between them is the CREDENTIAL, not the verb
 // list. `apn node` (agentpod-node) acts as this machine, with `<nodeId>:<nodeSecret>` from the
 // node's own config. `fleet` (agentpod-fleet) acts as a principal — a person, or an agent — with
-// a hub-issued token.
+// a token issued by the workspace's account service (an older hub issues its own).
 //
 // The rule that makes the split safe: **neither binary may ever read the other's credential.**
 // A fleet command with no token fails and says how to get one. It must never fall back to the

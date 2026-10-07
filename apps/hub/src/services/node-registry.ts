@@ -4,7 +4,7 @@ import { tenantScope } from "../db/tenant-scope";
 import { resolveTenantForUser } from "../auth/tenant";
 import { nodes, provisionedRuntimes } from "../db/schema/nodes";
 import type { NodeSummary } from "@agentpod/contract";
-import { getLatestAgentVersion, isNewerVersion } from "./agent-version";
+import { getLatestAgentVersion, isNewerVersion, isReleaseVersion } from "./agent-version";
 
 export type NodeWithProvisioning = NodeSummary & {
   provisioned: { runtimeId: string; provider: string } | null;
@@ -22,13 +22,18 @@ export function annotateWithVersion<
   rows: T[],
   latestVersion: string | null
 ): (T & { latestVersion: string | null; updateAvailable: boolean })[] {
+  // A reported version that names no release ("dev": built without a version
+  // stamp) is not current. The node's own updater reads it the same way
+  // (selfupdate.upToDate), and calling it current hid the drift and made a
+  // rollout skip a node that would have taken the update. A null version —
+  // an agent too old to report one — stays "unknown", not "update available".
   return rows.map((n) => ({
     ...n,
     latestVersion,
     updateAvailable:
       n.agentVersion != null &&
       latestVersion != null &&
-      isNewerVersion(latestVersion, n.agentVersion),
+      (!isReleaseVersion(n.agentVersion) || isNewerVersion(latestVersion, n.agentVersion)),
   }));
 }
 

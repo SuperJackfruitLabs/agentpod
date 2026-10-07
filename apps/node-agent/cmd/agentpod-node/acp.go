@@ -30,7 +30,7 @@ func acpCmd(args []string) {
 	station := fs.String("station", "", "station to attach to")
 	session := fs.String("session", "", "specific session to resume")
 	hub := fs.String("hub", envOr("AGENTPOD_HUB", "https://hub.agentpod.dev"), "hub base URL")
-	token := fs.String("token", os.Getenv("AGENTPOD_TOKEN"), "hub token (prefer the AGENTPOD_TOKEN env var)")
+	token := fs.String("token", os.Getenv("AGENTPOD_TOKEN"), "a person's access token (prefer the AGENTPOD_TOKEN env var)")
 	_ = fs.Parse(args)
 
 	// Discovery first: someone who has never used this has no station id, and

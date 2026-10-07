@@ -4,7 +4,8 @@ package main
 //
 // The split between this and `apn node …` is the credential, not the verb list. Everything in
 // `node` authenticates as `<nodeId>:<nodeSecret>` from the node's own config; everything here
-// authenticates with a hub-issued token that a person or an agent holds.
+// authenticates with a token that a person or an agent holds, issued by the workspace's
+// account service (or, on an older hub, by the hub itself).
 //
 // **A fleet command never falls back to the node's secret.** That rule lives in
 // `internal/fleetcred` with the test that pins it.

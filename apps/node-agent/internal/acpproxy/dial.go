@@ -60,7 +60,7 @@ func Dial(ctx context.Context, hub, token, station, session string) (*websocket.
 		return nil, err
 	}
 	if token == "" {
-		return nil, errors.New("no hub token: set AGENTPOD_TOKEN or pass --token")
+		return nil, errors.New("no token: set AGENTPOD_TOKEN or pass --token")
 	}
 
 	c, resp, err := websocket.Dial(ctx, ProxyURL(hub, station, session), &websocket.DialOptions{

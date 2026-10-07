@@ -21,6 +21,8 @@ ENV BUN_INSTALL_BIN=/usr/local/bin
 # path unavailable to the descriptor in-container, so it always falls back to
 # the directory-enumeration path instead — opencode's self-managed
 # opencode.db (whatever its current schema) is then irrelevant to detection.
+# The descriptor takes that path silently when sqlite3 is absent: it is this
+# image's design, not a fault worth a log line.
 
 # Install the opencode CLI (pinned to fleet version 1.18.15 — the newest
 # published version as of 2026-08-09, confirmed to ship the `acp` subcommand
