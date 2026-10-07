@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ElicitationPendingDelivery } from "./elicitation-card";
-import { sweepElicitations, type ElicitationSweepDeps } from "./elicitation-sweep";
+import {
+  bridgeElicitationSweepDeps,
+  startElicitationSweeper,
+  sweepElicitationBoardNow,
+  sweepElicitations,
+  type ElicitationSweepDeps,
+} from "./elicitation-sweep";
 
 /**
  * The floor beneath push, both ways.
@@ -190,5 +196,71 @@ describe("what is over", () => {
     });
 
     expect((await sweepElicitations(deps)).settled).toBe(0);
+  });
+});
+
+/**
+ * A question held until a human has joined its board room (2026-10-07) is waiting on a
+ * person, not stuck; it is not a delivery either. A join re-offers it at once.
+ */
+describe("a question held until somebody joins its board room", () => {
+  test("is neither projected nor stuck", async () => {
+    const { deps } = rig({
+      pendingElicitations: async () => [question("eli_held")],
+      project: async () => ({ status: "awaiting-join", roomId: "!board:x" }),
+    });
+    const result = await sweepElicitations(deps);
+    expect(result.projected).toBe(0);
+    expect(result.stuck).toBe(0);
+    expect(result.awaitingJoin).toBe(1);
+  });
+
+  test("is never settled while held — it has no room card to close", async () => {
+    const { deps, settled } = rig({
+      pendingElicitations: async () => [question("eli_held")],
+      project: async () => ({ status: "awaiting-join", roomId: "!board:x" }),
+      postedAwaitingOutcome: async () => [],
+    });
+    await sweepElicitations(deps);
+    expect(settled).toEqual([]);
+  });
+
+  test("a join sweeps that one board at once, with the running sweeper's own deps", async () => {
+    const config = { baseUrl: "https://board.test", source: "superpipeline" } as unknown as Parameters<
+      typeof bridgeElicitationSweepDeps
+    >[0];
+    const asked: string[] = [];
+    const stop = startElicitationSweeper(
+      {
+        tenantIdFor: async (boardId) => {
+          asked.push(boardId);
+          return null;
+        },
+        project: async () => ({ status: "already" }),
+        postedAwaitingOutcome: async () => [],
+        settle: async () => false,
+      },
+      {
+        config,
+        intervalMs: 60_000,
+        roster: async () => [
+          { boardId: "brd_one", token: `spa_${"a".repeat(48)}` },
+          { boardId: "brd_two", token: `spa_${"b".repeat(48)}` },
+        ],
+      },
+    );
+    try {
+      expect(await sweepElicitationBoardNow("brd_two")).not.toBeNull();
+      expect(asked).toEqual(["brd_two"]);
+      asked.length = 0;
+      await sweepElicitationBoardNow("brd_elsewhere");
+      expect(asked).toEqual([]);
+    } finally {
+      stop!();
+    }
+  });
+
+  test("with no sweeper running there is nothing to wake", async () => {
+    expect(await sweepElicitationBoardNow("brd_one")).toBeNull();
   });
 });
