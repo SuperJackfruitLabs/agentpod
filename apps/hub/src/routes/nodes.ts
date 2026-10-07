@@ -14,6 +14,10 @@ import { request as brokerRequest } from "../services/broker";
 import { isUserAdmin } from "../models/admin-users";
 import { logAdminAction, type LogAdminActionInput } from "../models/admin-audit-log";
 import { createLogger } from "../utils/logger";
+import { removeNode, ownsNode } from "../services/node-removal";
+import { requireFleetGrantReach } from "../services/grant-reach";
+import { isControlPairEnforced, isGrantReachDenied, GrantReachDenied } from "../services/control-pair";
+import { callerPrincipal } from "../auth/caller-authority";
 
 const log = createLogger("nodes-routes");
 
@@ -368,6 +372,88 @@ export function createNodeRoutes(deps?: {
           summary: summarise(results),
           results,
         });
+      })
+      /**
+       * DELETE /api/nodes/:id  [?force=1  |  body {"force":true}]
+       *
+       * Remove a node from the fleet — `services/node-removal.ts` says what goes
+       * and what stays. Who may: the node's OWNER, and — where the control pair
+       * is enforced — only an owner who may also grow the fleet. Shrinking a
+       * fleet is the same authority as growing it (`POST /api/enrollment-tokens`
+       * asks `requireFleetGrantReach`), and it fails closed the same way: an
+       * unmapped caller is refused, never let through.
+       *
+       *   200 RemoveNodeResponse
+       *   403 the control pair refuses the caller
+       *   404 no such node, or not the caller's (indistinguishable on purpose)
+       *   409 RemoveNodeRefusal — provisioned | bridged | online (needs force)
+       *
+       * Ownership is asked before the admin check, so a non-owner learns nothing
+       * about whether the id exists.
+       */
+      .delete("/:id", async (c) => {
+        const user = c.get("user");
+        const nodeId = c.req.param("id");
+        const force = await readForce(c);
+
+        try {
+          if (isControlPairEnforced()) {
+            const principal = await callerPrincipal(user);
+            if (!principal) {
+              log.warn("node removal refused: no principal for this caller", { principalId: user.id });
+              throw new GrantReachDenied(user.id, "fleet", null);
+            }
+            await requireFleetGrantReach(principal.id);
+          }
+        } catch (e) {
+          if (!isGrantReachDenied(e)) throw e;
+          // Still a 404 for a node that is not theirs: the refusal must not
+          // become a way to probe for ids.
+          if (!(await ownsNode(user.id, nodeId))) return c.json({ ok: false as const, error: "Not Found" }, 404);
+          return c.json(
+            { ok: false as const, error: "You do not have permission to remove machines from this fleet." },
+            403
+          );
+        }
+
+        const outcome = await removeNode(user.id, nodeId, { force });
+        if (outcome.kind === "not_found") {
+          return c.json({ ok: false as const, error: "Not Found" }, 404);
+        }
+        if (outcome.kind === "refused") {
+          const { kind: _k, ...refusal } = outcome;
+          return c.json({ ok: false as const, ...refusal }, 409);
+        }
+
+        const { result } = outcome;
+        try {
+          await _audit({
+            adminUserId: user.id,
+            action: "node_remove",
+            targetResourceType: "node",
+            targetResourceId: result.node.id,
+            details: {
+              name: result.node.name,
+              force,
+              disconnected: result.disconnected,
+              stations: result.stationsRemoved.map((s) => s.stationKey),
+            },
+          });
+        } catch (e) {
+          // The node is already gone; a failed audit write must not report the
+          // removal as failed, or the caller retries into a 404.
+          log.error("Failed to write node_remove audit entry", {
+            nodeId: result.node.id,
+            error: (e as Error).message,
+          });
+        }
+        log.info("node removed", {
+          nodeId: result.node.id,
+          name: result.node.name,
+          stations: result.stationsRemoved.length,
+          disconnected: result.disconnected,
+        });
+        return c.json(result);
       })
       /**
        * POST /api/nodes/:id/update  [?force=1  |  body {"force":true}]

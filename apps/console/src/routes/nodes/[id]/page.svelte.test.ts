@@ -247,3 +247,26 @@ test("StationTree renders adopted stations", async () => {
     expect(getByText("Workspace")).toBeTruthy();
   });
 });
+
+test("an enrolled node offers Remove node", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([mockNode]);
+  vi.spyOn(api, "listDetected").mockResolvedValue([]);
+  vi.spyOn(api, "listStations").mockResolvedValue([]);
+
+  const { findByRole } = render(NodeDetailPage);
+
+  expect(await findByRole("button", { name: /remove node/i })).toBeTruthy();
+});
+
+test("a provisioned runtime's node does not: it is destroyed with its runtime", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([
+    { ...mockNode, provisioned: { runtimeId: "rt_1", provider: "docker" } },
+  ]);
+  vi.spyOn(api, "listDetected").mockResolvedValue([]);
+  vi.spyOn(api, "listStations").mockResolvedValue([]);
+
+  const { findByRole, queryByRole } = render(NodeDetailPage);
+
+  await findByRole("button", { name: /destroy/i });
+  expect(queryByRole("button", { name: /remove node/i })).toBeNull();
+});

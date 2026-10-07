@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -20,10 +21,11 @@ import (
 // operator guessing which nodes moved.
 const rolloutTimeout = 15 * time.Minute
 
-const nodesUsage = `Usage: fleet nodes [update|telemetry]
+const nodesUsage = `Usage: fleet nodes [update|telemetry|rm]
 
   fleet nodes                               the fleet's nodes, with versions
   fleet nodes update [--node NAME|ID …] [--force]
+  fleet nodes rm NAME|ID [--force]          remove a retired machine from the fleet
   fleet nodes telemetry                     each node's OpenTelemetry setting
   fleet nodes telemetry [--node NAME|ID …] --endpoint <url> | --off
 
@@ -31,6 +33,11 @@ update asks the hub to roll the newest release to your nodes, one at a time,
 and prints what happened to each. With --node it touches only those nodes
 (repeatable; a name or an ID from ` + "`fleet nodes`" + `). --force re-applies the current
 release to a node that already has it — the escape hatch for a corrupt binary.
+
+rm removes an enrolled node: its stations are unregistered and its credential is
+revoked, so the machine cannot reconnect; to rejoin it needs a fresh
+` + "`fleet invite`" + ` token. A connected node is refused unless --force, which
+disconnects it. A provisioned runtime's node is removed with ` + "`fleet runtimes rm`" + `.
 
 Only the node-agent restarts; the harnesses it serves keep running. The exit
 status is 1 if any node was asked and did not update.
@@ -57,6 +64,10 @@ func fleetNodes(args []string) {
 	}
 	if args[0] == "telemetry" {
 		fleetNodesTelemetry(args[1:])
+		return
+	}
+	if args[0] == "rm" {
+		fleetNodesRemove(args[1:])
 		return
 	}
 	if helpRequested(args) || args[0] != "update" {
@@ -326,4 +337,104 @@ func telemetryRequest(method string, body io.Reader) []byte {
 		os.Exit(1)
 	}
 	return response
+}
+
+const nodesRmUsage = `Usage: fleet nodes rm NAME|ID [--force]
+
+Removes an enrolled node from the fleet. Its stations are unregistered (as
+` + "`fleet stations unadopt`" + ` would), and its credential is revoked, so the machine
+cannot reconnect; to rejoin it must be enrolled again with a fresh
+` + "`fleet invite`" + ` token. Workspace files on the machine are not touched, and the
+node-agent keeps running until it is uninstalled there.
+
+A connected node is refused unless --force, which disconnects it. A provisioned
+runtime's node is refused: ` + "`fleet runtimes rm`" + ` removes the runtime and its node.`
+
+// fleet nodes rm — DELETE /api/nodes/:id.
+//
+// A name is resolved to an id from the node list; anything the list does not
+// know is sent as an id unchanged, so the hub's 404 is what an operator sees
+// for a node that is not there or not theirs.
+func fleetNodesRemove(args []string) {
+	if helpRequested(args) {
+		fmt.Println(nodesRmUsage)
+		return
+	}
+	fs := flag.NewFlagSet("fleet nodes rm", flag.ExitOnError)
+	force := fs.Bool("force", false, "disconnect and remove a node that is connected")
+	fs.Usage = func() { fmt.Fprintln(fs.Output(), nodesRmUsage) }
+	// The flag may come before or after the node: parse, take the node, parse
+	// what follows it.
+	fs.Parse(args)
+	var positional []string
+	for fs.NArg() > 0 {
+		positional = append(positional, fs.Arg(0))
+		fs.Parse(fs.Args()[1:])
+	}
+	if len(positional) != 1 {
+		fmt.Fprintln(os.Stderr, nodesRmUsage)
+		os.Exit(2)
+	}
+	id := nodeIDFor(positional[0])
+
+	path := "/api/nodes/" + url.PathEscape(id)
+	if *force {
+		path += "?force=1"
+	}
+	c := requireCredential()
+	req, err := http.NewRequest(http.MethodDelete, hubBase()+path, nil)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	res, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "could not reach %s: %v\n", hubBase(), err)
+		os.Exit(1)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode == http.StatusConflict {
+		var refusal struct {
+			Code  string `json:"code"`
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(body, &refusal) == nil && refusal.Error != "" {
+			fmt.Fprintln(os.Stderr, "not removed:", refusal.Error)
+			if refusal.Code == "online" {
+				fmt.Fprintf(os.Stderr, "\n  fleet nodes rm %s --force\n", positional[0])
+			}
+			os.Exit(1)
+		}
+	}
+	if res.StatusCode >= 400 {
+		fmt.Fprintf(os.Stderr, "hub returned %d: %s\n", res.StatusCode, bytes.TrimSpace(body))
+		os.Exit(1)
+	}
+	fmt.Println(string(bytes.TrimSpace(body)))
+}
+
+// nodeIDFor maps a node name to its id, or returns the argument unchanged when
+// no node is named that (it may be an id, or nothing the hub knows).
+func nodeIDFor(nameOrID string) string {
+	var nodes []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(fleetRequestBytes(http.MethodGet, "/api/nodes", nil, "", 30*time.Second), &nodes); err != nil {
+		fmt.Fprintln(os.Stderr, "could not read the node list:", err)
+		os.Exit(1)
+	}
+	for _, n := range nodes {
+		if n.ID == nameOrID {
+			return n.ID
+		}
+	}
+	for _, n := range nodes {
+		if n.Name == nameOrID {
+			return n.ID
+		}
+	}
+	return nameOrID
 }

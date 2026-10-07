@@ -41,3 +41,29 @@ test("isCurrent is true only for the currently registered send fn", () => {
   cm.unregister("node_x");
   expect(cm.isCurrent("node_x", sendB)).toBe(false);
 });
+
+test("disconnect closes the registered socket and forgets the node", () => {
+  // Removing a node has to cut its live session: deleting the row alone leaves
+  // an authenticated socket that keeps heartbeating, and a heartbeat on an
+  // unregistered socket re-registers it.
+  const cm = new InMemoryConnectionManager();
+  const closed: Array<[number, string]> = [];
+  cm.register("node_r", () => {}, (code, reason) => closed.push([code, reason]));
+  expect(cm.disconnect("node_r", 4004, "node removed")).toBe(true);
+  expect(closed).toEqual([[4004, "node removed"]]);
+  expect(cm.isOnline("node_r")).toBe(false);
+});
+
+test("disconnect on a node with no session reports false and closes nothing", () => {
+  const cm = new InMemoryConnectionManager();
+  expect(cm.disconnect("node_none", 4004, "node removed")).toBe(false);
+});
+
+test("a reconnect replaces the closer, so disconnect closes the current socket only", () => {
+  const cm = new InMemoryConnectionManager();
+  const closed: string[] = [];
+  cm.register("node_x", () => {}, () => closed.push("old"));
+  cm.register("node_x", () => {}, () => closed.push("new"));
+  cm.disconnect("node_x", 4004, "node removed");
+  expect(closed).toEqual(["new"]);
+});

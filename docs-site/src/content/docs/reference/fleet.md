@@ -249,15 +249,16 @@ The fleet's nodes, with versions.
 fleet nodes
 ```
 
-Subcommands: [`update`](#fleet-nodes-update), [`telemetry`](#fleet-nodes-telemetry).
+Subcommands: [`update`](#fleet-nodes-update), [`telemetry`](#fleet-nodes-telemetry), [`rm`](#fleet-nodes-rm).
 
 `fleet nodes -h` prints:
 
 ```text
-Usage: fleet nodes [update|telemetry]
+Usage: fleet nodes [update|telemetry|rm]
 
   fleet nodes                               the fleet's nodes, with versions
   fleet nodes update [--node NAME|ID …] [--force]
+  fleet nodes rm NAME|ID [--force]          remove a retired machine from the fleet
   fleet nodes telemetry                     each node's OpenTelemetry setting
   fleet nodes telemetry [--node NAME|ID …] --endpoint <url> | --off
 
@@ -265,6 +266,11 @@ update asks the hub to roll the newest release to your nodes, one at a time,
 and prints what happened to each. With --node it touches only those nodes
 (repeatable; a name or an ID from `fleet nodes`). --force re-applies the current
 release to a node that already has it — the escape hatch for a corrupt binary.
+
+rm removes an enrolled node: its stations are unregistered and its credential is
+revoked, so the machine cannot reconnect; to rejoin it needs a fresh
+`fleet invite` token. A connected node is refused unless --force, which
+disconnects it. A provisioned runtime's node is removed with `fleet runtimes rm`.
 
 Only the node-agent restarts; the harnesses it serves keep running. The exit
 status is 1 if any node was asked and did not update.
@@ -342,6 +348,48 @@ required. Exit 1 if any node failed, was unsupported, or (when setting) offline.
 fleet nodes telemetry
 fleet nodes telemetry --endpoint https://otel.example.com:4318
 fleet nodes telemetry --node build-01 --off
+```
+
+### fleet nodes rm
+
+Remove a retired machine from the fleet.
+
+```text
+fleet nodes rm NAME|ID [--force]
+```
+
+Unregisters every station on the node, the way [`fleet stations unadopt`](#fleet-stations-unadopt) does, and revokes the node's credential: a machine that dials back is refused, and rejoining takes a fresh [`fleet invite`](#fleet-invite) token. Workspace files, agent identities and Matrix rooms are kept. A connected node is refused unless `--force`, which disconnects it. A provisioned runtime's node is refused with the [`fleet runtimes rm`](#fleet-runtimes-rm) that removes both, and a node with a bridge-roster row on one of its stations is refused until [`fleet bridge rm`](#fleet-bridge-rm) removes the row. A name is resolved from `fleet nodes`; anything else is sent as an id, so a node that is not there, or not yours, is the hub's 404.
+
+| Argument | Meaning |
+|---|---|
+| `NAME|ID` | a node's name or id, from `fleet nodes` |
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--force` | bool | `false` | Disconnect and remove a node that is connected. |
+
+`fleet nodes rm -h` prints:
+
+```text
+Usage: fleet nodes rm NAME|ID [--force]
+
+Removes an enrolled node from the fleet. Its stations are unregistered (as
+`fleet stations unadopt` would), and its credential is revoked, so the machine
+cannot reconnect; to rejoin it must be enrolled again with a fresh
+`fleet invite` token. Workspace files on the machine are not touched, and the
+node-agent keeps running until it is uninstalled there.
+
+A connected node is refused unless --force, which disconnects it. A provisioned
+runtime's node is refused: `fleet runtimes rm` removes the runtime and its node.
+```
+
+**Needs:** The node's owner. Where the workspace enforces who may grow the fleet, also a workspace admin — the same authority `fleet invite` needs.
+
+**Exit status:** 0 when the node was removed. 1 when the hub refused (the reason is printed; for a connected node, with the `--force` command) or answered 404. 2 without exactly one node.
+
+```sh
+fleet nodes rm build-01
+fleet nodes rm build-01 --force
 ```
 
 ## fleet invite

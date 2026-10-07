@@ -1,6 +1,6 @@
 ---
 title: Nodes
-description: Running the node agent day to day — service control, logs, status and updates.
+description: Running the node agent day to day — service control, logs, status, updates, and removing a node from the fleet.
 ---
 
 A node runs one background service. These are the commands that manage it.
@@ -96,6 +96,32 @@ Falls back to `$AGENTPOD_HUB_URL` and `$AGENTPOD_ENROLL_TOKEN` when the flags ar
 
 Running it on a machine that is already enrolled is a no-op, unless the stored credential
 has stopped being valid or you pass `--force`.
+
+## Removing a node from the fleet
+
+A machine you retire does not leave the fleet on its own; uninstalling the service only
+stops it. To take it off the list, remove it from the hub — from the node's page in the
+Console (**Remove node**, confirmed by typing its name), or with `fleet`:
+
+```sh
+fleet nodes rm build-01           # a node that is offline
+fleet nodes rm build-01 --force   # a node that is still connected: disconnect it too
+```
+
+Removal unregisters every station on the node, the same way **Remove station** does, and
+revokes the node's credential. If the machine dials back, the hub refuses it, and
+`apn enroll` with its old token fails too: to join again it needs a fresh token from
+`fleet invite`. Nothing on the machine itself is touched — workspace files stay, and the
+node agent keeps running until you `apn service uninstall` it.
+
+Two kinds of node are refused, each with the command that does apply:
+
+- **A provisioned runtime's node** goes with its runtime: `fleet runtimes rm <id>` destroys
+  the container and removes the node.
+- **A node where a bridge agent runs** keeps its roster row, which holds a credential, until
+  you remove it on purpose with `fleet bridge rm <key>`.
+
+The hub records each removal in its admin audit log.
 
 ## Next
 

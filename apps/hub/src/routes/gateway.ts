@@ -15,7 +15,7 @@ import { GatewayClientMessage } from "@agentpod/contract";
 import { verifyNodeCredential } from "../services/enrollment";
 import { setNodeStatus, setNodeAgentVersion, setNodeCapabilities } from "../services/node-registry";
 import { connectionManager } from "../services/connection-manager";
-import type { Send } from "../services/connection-manager";
+import type { Send, Close } from "../services/connection-manager";
 import { handleNodeMessage, dropNode } from "../services/broker";
 import { upgradeWebSocket } from "../ws";
 import { autoAdoptProvisionedHarness } from "../services/runtime-autoadopt";
@@ -37,6 +37,11 @@ export const gatewayRoutes = new Hono().get(
     let authed: string | null = null;
     // This connection's send fn — its identity is the connection epoch.
     let send: Send | null = null;
+    // How the hub ends this session itself (a removed node). Once it has been
+    // called the socket speaks for nobody: a heartbeat already in flight must
+    // not re-register it in the gap before the close lands.
+    let close: Close | null = null;
+    let revoked = false;
     // Resolves true once auth completes, false if the connection is rejected or
     // closed first. onMessage awaits this so an early frame — notably the
     // one-shot `hello` the agent sends immediately on connect, which carries the
@@ -84,7 +89,11 @@ export const gatewayRoutes = new Hono().get(
         }
         authed = nodeId;
         send = (m) => ws.send(JSON.stringify(m));
-        connectionManager.register(nodeId, send);
+        close = (code, reason) => {
+          revoked = true;
+          ws.close(code, reason);
+        };
+        connectionManager.register(nodeId, send, close);
         await setNodeStatus(nodeId, "online");
         // A node the hub already knows dialling in is evidence its container is
         // up — the same evidence enrolment carries. A resumed instance (Fly)
@@ -152,6 +161,7 @@ export const gatewayRoutes = new Hono().get(
           const ok = await authReady;
           if (!ok || !authed) return;
         }
+        if (revoked) return;
         let parsed;
         try {
           parsed = GatewayClientMessage.safeParse(JSON.parse(String(evt.data)));
@@ -170,7 +180,7 @@ export const gatewayRoutes = new Hono().get(
           // close race) re-registers itself — server→node send must work for
           // any node that is heartbeating. Never steal an existing entry.
           if (send && !connectionManager.isOnline(authed)) {
-            connectionManager.register(authed, send);
+            connectionManager.register(authed, send, close ?? undefined);
           }
           await setNodeStatus(authed, "online");
           // Same evidence as a connect, for the case onOpen cannot cover:
