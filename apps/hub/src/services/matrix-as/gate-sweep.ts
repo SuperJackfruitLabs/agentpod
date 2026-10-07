@@ -42,6 +42,7 @@
 
 import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge/superpipeline";
 import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig } from "../bridge/config";
+import { subscribeBoardsToPush } from "../bridge/push-subscription";
 import { createLogger } from "../../utils/logger";
 import { isGatePending } from "./gates";
 import type { GatePendingDelivery, ProjectionOutcome } from "./gates";
@@ -326,13 +327,7 @@ export function bridgeGateSweepDeps(
    * refused with a 401 that arrives as "this board could not be reached". Five minutes apart, one
    * small query, and the sweep is always asking with what the bridge is actually claiming with.
    */
-  const tokensForBoards = async () => {
-    const map = new Map<string, string>();
-    for (const agent of await (roster ?? defaultRoster)()) {
-      if (!map.has(agent.boardId)) map.set(agent.boardId, agent.token);
-    }
-    return map;
-  };
+  const tokensForBoards = () => boardCredentials(roster ?? defaultRoster);
 
   return {
     ...rest,
@@ -378,6 +373,21 @@ export function bridgeGateSweepDeps(
   };
 }
 
+/**
+ * Board → the credential to ask it with: the first rostered agent on each board.
+ *
+ * Shared by the sweep and the push subscription so both speak to a board as the same agent.
+ */
+async function boardCredentials(
+  roster: () => Promise<Array<{ boardId: string; token: string }>>,
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  for (const agent of await roster()) {
+    if (!map.has(agent.boardId)) map.set(agent.boardId, agent.token);
+  }
+  return map;
+}
+
 /** The rostered agents, decrypted. Separated so a test can supply its own without a database. */
 async function defaultRoster(): Promise<Array<{ boardId: string; token: string }>> {
   const { readBridgeRoster } = await import("../bridge/roster");
@@ -411,15 +421,27 @@ export function startGateSweeper(
     intervalMs?: number;
     /** Test seam: the rostered agents, in place of the table. */
     roster?: () => Promise<Array<{ boardId: string; token: string }>>;
+    /** Test seam: how superpipeline is reached. */
+    fetch?: Fetcher;
+    /**
+     * Subscribe every board to this hub's signed push route — at start and on every pass, so a
+     * board added, rebuilt, or a rotated secret is repaired within one interval. Without it no
+     * board pushes and every gate waits for the sweep. See `bridge/push-subscription.ts`.
+     */
+    push?: { secret: string | undefined; publicUrl: string };
   } = {},
 ): (() => void) | null {
   const config =
     opts.config !== undefined ? opts.config : isBridgeEnabled() ? loadBridgeConfig() : null;
   if (!config) return null;
 
-  const deps = bridgeGateSweepDeps(config, rest, fetchAdapter, opts.roster);
+  const fetchImpl = opts.fetch ?? fetchAdapter;
+  const deps = bridgeGateSweepDeps(config, rest, fetchImpl, opts.roster);
   running = deps;
+  const subscribe = pushSubscriber(config, fetchImpl, opts.roster ?? defaultRoster, opts.push);
+  void subscribe();
   const timer = setInterval(() => {
+    void subscribe();
     void sweepGates(deps).catch((err) =>
       log.error("gate sweep failed", { error: err instanceof Error ? err.message : String(err) }),
     );
@@ -452,4 +474,46 @@ export async function sweepBoardNow(boardId: string): Promise<GateSweepResult | 
     ...deps,
     boards: async () => (await deps.boards()).filter((b) => b === boardId),
   });
+}
+
+/**
+ * One push-subscription pass, logged so an operator can tell "subscribed" from "never tried".
+ *
+ * Logs a board's subscription when it first succeeds (or recovers), and every refusal — not a
+ * line per board per five minutes forever. A missing secret is said once: the push route refuses
+ * every delivery without it, so registering would only queue pushes that are bound to fail.
+ */
+function pushSubscriber(
+  config: BridgeConfig,
+  fetchImpl: Fetcher,
+  roster: () => Promise<Array<{ boardId: string; token: string }>>,
+  push: { secret: string | undefined; publicUrl: string } | undefined,
+): () => Promise<void> {
+  if (!push) return async () => {};
+  if (!push.secret) {
+    log.warn("push subscription skipped: SUPERPIPELINE_PUSH_SECRET is unset; gates arrive by sweep only");
+    return async () => {};
+  }
+  const subscribed = new Set<string>();
+  return async () => {
+    try {
+      const result = await subscribeBoardsToPush({
+        baseUrl: config.baseUrl,
+        publicUrl: push.publicUrl,
+        secret: push.secret,
+        fetch: fetchImpl,
+        boards: () => boardCredentials(roster),
+      });
+      for (const boardId of result.subscribed) {
+        if (!subscribed.has(boardId)) log.info("push subscription registered", { boardId });
+        subscribed.add(boardId);
+      }
+      for (const f of result.failed) {
+        subscribed.delete(f.boardId);
+        log.warn("push subscription refused", { boardId: f.boardId, error: f.error });
+      }
+    } catch (err) {
+      log.error("push subscription failed", { error: err instanceof Error ? err.message : String(err) });
+    }
+  };
 }

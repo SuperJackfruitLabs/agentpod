@@ -462,6 +462,10 @@ if (matrixBridge) {
     // board, and shows again the ones a restart forgot.
     onBoardPending: (boardId, gates) =>
       reconcileBoardGates(boardId, gates, { humansFor: matrixIdsForBoardHumans, projectionFor: projectionForGate }),
+  }, {
+    // Each board is told to push its gates and questions here, so they reach the room in seconds
+    // and the sweep is the floor it was designed to be rather than the only path.
+    push: { secret: process.env.SUPERPIPELINE_PUSH_SECRET, publicUrl: config.publicUrl },
   });
 
   // The same floor, for an agent's questions. `projectElicitation` is idempotent on

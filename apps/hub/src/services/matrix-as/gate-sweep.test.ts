@@ -466,6 +466,57 @@ describe("starting the sweeper", () => {
   });
 });
 
+describe("subscribing the boards to push when the sweeper starts", () => {
+  const config = {
+    baseUrl: "https://board.test",
+    source: "superpipeline",
+  } as unknown as Parameters<typeof bridgeGateSweepDeps>[0];
+
+  test("registers the hub's push route on each board at once, not five minutes later", async () => {
+    // The defect this closes: no board ever had a push config, so every gate reached its room on
+    // the sweep. Registering only on the interval would leave a fresh hub on sweep latency for
+    // its first five minutes — the interval here is an hour so only the start can satisfy it.
+    const posted: Array<{ url: string; auth: string; body: Record<string, unknown> }> = [];
+    let resolveFirst: () => void;
+    const first = new Promise<void>((r) => (resolveFirst = r));
+    const fetchImpl = async (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => {
+      if (init.method === "POST") {
+        posted.push({ url, auth: init.headers.Authorization ?? "", body: JSON.parse(init.body ?? "{}") });
+        resolveFirst!();
+      }
+      return { status: 201, ok: true, json: async () => ({ configId: "push_1" }) };
+    };
+
+    const stop = startGateSweeper(
+      { tenantIdFor: async () => null, project: async () => ({ status: "already" }) },
+      {
+        config,
+        intervalMs: 3_600_000,
+        fetch: fetchImpl,
+        push: { secret: "shh", publicUrl: "https://hub.test" },
+        roster: async () => [
+          { boardId: "brd_one", token: "spa_one" },
+          { boardId: "brd_one", token: "spa_other" },
+        ],
+      },
+    );
+    await first;
+    stop!();
+
+    expect(posted).toEqual([
+      {
+        url: "https://board.test/v1/boards/brd_one/push-configs",
+        auth: "Bearer spa_one",
+        body: {
+          url: "https://hub.test/public/bridge/superpipeline/push",
+          token: "shh",
+          events: ["gate.pending", "elicitation.pending"],
+        },
+      },
+    ]);
+  });
+});
+
 /**
  * A gate held until its board room has a human in it (2026-10-07) is not stuck — it is
  * waiting on a person — and it is re-offered the moment they join rather than at the

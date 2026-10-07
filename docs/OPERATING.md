@@ -1610,6 +1610,23 @@ The agent stops claiming and only a hub restart resumes it — there is no route
 reports this, so `grep 'halting: a run belonged to another agent'` in the hub log is the only
 signal. A lost lease (409 `STALE_LEASE`) is *not* a halt; it is ordinary and the loop claims again.
 
+### Gates arrive by push; the sweep is the floor
+
+Each board the roster names is subscribed to the hub's signed push route
+(`$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/push`, events `gate.pending` and
+`elicitation.pending`, signed with `SUPERPIPELINE_PUSH_SECRET`) by the gate sweeper — at hub start and
+again every five minutes, with the board's first rostered credential. Registration is an upsert, so
+the refresh repairs a rebuilt board or a rotated secret. Nothing to run by hand:
+
+```bash
+journalctl -u agentpod-hub | grep 'push subscription'   # registered / refused, per board
+journalctl -u agentpod-hub | grep 'gate projected'      # a push arriving, seconds after a gate opens
+```
+
+`push subscription skipped` means the secret is unset and every gate waits for the sweep (≤ 5 min).
+Until 2026-10-07 no board was ever subscribed — superpipeline accepted the registration from a
+person only — so every gate came by sweep.
+
 ### When the agent reports for itself
 
 Give a roster entry an `mcpToken` and its harness gets superpipeline's own MCP tools inside the
