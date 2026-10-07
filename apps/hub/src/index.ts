@@ -17,8 +17,13 @@ import { csrfMiddleware } from './middleware/csrf.ts';
 import { createSuperpipelinePushRoutes } from './routes/superpipeline-push.ts';
 import { projectGate, projectionForGate, tenantForBoard } from './services/matrix-as/gates.ts';
 import { noteGatePosted, reconcileBoardGates } from './services/matrix-as/fleet-gates.ts';
-import { ensureBoardRoom, matrixIdsForBoardHumans } from './services/matrix-as/board-room.ts';
-import { startGateSweeper } from './services/matrix-as/gate-sweep.ts';
+import {
+  boardForHumanJoin,
+  boardRoomHasJoinedHuman,
+  ensureBoardRoom,
+  matrixIdsForBoardHumans,
+} from './services/matrix-as/board-room.ts';
+import { startGateSweeper, sweepBoardNow } from './services/matrix-as/gate-sweep.ts';
 import { startElicitationSweeper } from './services/matrix-as/elicitation-sweep.ts';
 import { projectElicitation, postedElicitationsAwaitingOutcome } from './services/matrix-as/elicitations.ts';
 import { createLogger } from './utils/logger.ts';
@@ -406,6 +411,16 @@ if (matrixBridge) {
          */
         humansFor: async () => matrixIdsForBoardHumans(boardId),
       }, boardOpts),
+    /**
+     * A gate waits until a human has JOINED its board room (2026-10-07): posted while
+     * they were only invited, the first gate was encrypted to the speaker alone and
+     * could never be read. The join wakes it (`onEvent` below); the sweep is the floor.
+     */
+    humanJoined: (roomId: string, speakerMxid: string) =>
+      boardRoomHasJoinedHuman(roomId, speakerMxid, {
+        homeserverUrl: matrixBridge.config.homeserverUrl,
+        asToken: matrixBridge.config.asToken,
+      }),
     /** A posted gate is a pending decision on each of the board's humans' fleet card. */
     onPosted: (d: Parameters<typeof noteGatePosted>[0], posted: Parameters<typeof noteGatePosted>[1]) =>
       noteGatePosted(d, posted, { humansFor: matrixIdsForBoardHumans }),
@@ -465,7 +480,20 @@ if (matrixBridge) {
     createMatrixAsRoutes({
       hsToken: matrixBridge.config.hsToken,
       domain: matrixBridge.config.domain,
-      onEvent: (event) => matrixBridge.onEvent(event),
+      onEvent: async (event) => {
+        // A human accepting a board room's invite is what a held gate waits on. Not
+        // awaited: the sweep reads superpipeline, and the homeserver's transaction
+        // must not wait on another service. Its failures are the sweep's to report.
+        void boardForHumanJoin(event)
+          .then((boardId) => (boardId ? sweepBoardNow(boardId) : null))
+          .catch((err) =>
+            errorLogger.warn('could not wake gates held for a board room join', {
+              roomId: event.room_id,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        await matrixBridge.onEvent(event);
+      },
       onProvisionAlias: (alias) => matrixBridge.onProvisionAlias(alias),
       // Null unless a crypto store is configured, in which case the route
       // skips the step entirely — a deployment that has not opted in pays

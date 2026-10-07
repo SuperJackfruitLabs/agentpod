@@ -162,6 +162,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
     "no-room": 0,
     "no-agent": 0,
     "no-speaker": 0,
+    "awaiting-join": 0,
     failed: 0,
   };
   const failedBoards: string[] = [];
@@ -417,6 +418,7 @@ export function startGateSweeper(
   if (!config) return null;
 
   const deps = bridgeGateSweepDeps(config, rest, fetchAdapter, opts.roster);
+  running = deps;
   const timer = setInterval(() => {
     void sweepGates(deps).catch((err) =>
       log.error("gate sweep failed", { error: err instanceof Error ? err.message : String(err) }),
@@ -426,5 +428,28 @@ export function startGateSweeper(
   // No board count: the roster is read per sweep now, so there is no number to report here that
   // would still be true five minutes later.
   log.info("gate sweep started", { intervalMs: opts.intervalMs ?? GATE_SWEEP_INTERVAL_MS });
-  return () => clearInterval(timer);
+  return () => {
+    clearInterval(timer);
+    if (running === deps) running = null;
+  };
+}
+
+/** The deps of the sweeper this process started, so a join can borrow them. */
+let running: GateSweepDeps | null = null;
+
+/**
+ * Sweep one board now, with the running sweeper's own deps; null when none is running.
+ *
+ * Called when a human joins a board room (`board-room.ts`, `boardForHumanJoin`): a gate
+ * held because nobody had joined yet (`awaiting-join`, 2026-10-07) is posted the moment
+ * they do, rather than at the next five-minute pass. A board this hub does not work is
+ * filtered out by the same roster the periodic pass reads.
+ */
+export async function sweepBoardNow(boardId: string): Promise<GateSweepResult | null> {
+  const deps = running;
+  if (!deps) return null;
+  return sweepGates({
+    ...deps,
+    boards: async () => (await deps.boards()).filter((b) => b === boardId),
+  });
 }
