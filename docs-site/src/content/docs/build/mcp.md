@@ -11,7 +11,7 @@ The hub speaks MCP over Streamable HTTP at **`/mcp`**.
 fleet login
 ```
 
-The endpoint takes a hub-issued token in `Authorization: Bearer`, and only there. There is
+The endpoint takes a token from the account service in `Authorization: Bearer`, and only there. There is
 no `?token=` fallback — a credential in a URL is a credential in a log.
 
 ## What an agent gets
