@@ -139,6 +139,38 @@ describe("authorization code + PKCE", () => {
   });
 });
 
+// Found in production on 2026-10-07: opening Settings on a phone reloaded the tab, the layout's
+// guard (a $effect, which re-runs) started a second sign-in while the first was still awaiting its
+// PKCE challenge, the second overwrote the saved state, the browser followed the FIRST redirect,
+// and the callback said "Sign-in state did not match".
+describe("only one sign-in redirect per page", () => {
+  test("two overlapping beginSignIn calls navigate once, and that redirect's state is the saved one", async () => {
+    const went: string[] = [];
+    const navigate = (u: string) => void went.push(u);
+    await Promise.all([
+      beginSignIn(PLANE, { returnTo: "/settings", origin: ORIGIN, navigate }),
+      beginSignIn(PLANE, { returnTo: "/settings", origin: ORIGIN, navigate }),
+    ]);
+    expect(went).toHaveLength(1);
+    const state = new URL(went[0]!).searchParams.get("state");
+    expect(JSON.parse(sessionStorage.getItem("agentpod.pkce")!).state).toBe(state);
+  });
+
+  test("the guard firing twice still completes: the callback's state matches", async () => {
+    sessionStorage.setItem("agentpod.planeSignedIn", "1");
+    const went: string[] = [];
+    const navigate = (u: string) => void went.push(u);
+    reauthorizeIfSignedIn(PLANE, "/settings", { origin: ORIGIN, navigate });
+    reauthorizeIfSignedIn(PLANE, "/settings", { origin: ORIGIN, navigate });
+    await vi.waitFor(() => expect(went.length).toBeGreaterThan(0));
+    await new Promise((r) => setTimeout(r, 20));
+    const state = new URL(went[0]!).searchParams.get("state")!;
+    const fetchFn = vi.fn(async () => json(200, { access_token: "at1", expires_in: 300, refresh_token: "rt1" }));
+    const out = await completeSignIn(new URLSearchParams({ code: "c", state }), PLANE, { origin: ORIGIN, fetchFn: fetchFn as never, now: () => 0 });
+    expect(out).toEqual({ returnTo: "/settings" });
+  });
+});
+
 describe("reauthorizeIfSignedIn (the layout's guard, after a reload)", () => {
   test("a tab that had signed in goes back to authorize, silently, keeping where it was", async () => {
     sessionStorage.setItem("agentpod.planeSignedIn", "1");
