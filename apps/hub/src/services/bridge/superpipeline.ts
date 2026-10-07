@@ -435,6 +435,16 @@ export class SuperpipelineClient {
     }
   }
 
+  /**
+   * Subscribe this agent to the board's push — `POST …/push-configs` (superpipeline#154).
+   *
+   * An upsert on (agent, url) board-side, so calling it again refreshes rather than duplicates.
+   * `token` is the key superpipeline signs deliveries with, not this agent's credential.
+   */
+  async registerPushConfig(input: { url: string; token: string; events: string[] }): Promise<{ configId: string }> {
+    return (await this.send("POST", `/v1/boards/${this.boardId}/push-configs`, input)) as { configId: string };
+  }
+
   async pendingGates(): Promise<GatePendingDelivery[]> {
     const res = (await this.send("GET", `/v1/boards/${this.boardId}/gates/pending`)) as {
       gates?: GatePendingDelivery[];
