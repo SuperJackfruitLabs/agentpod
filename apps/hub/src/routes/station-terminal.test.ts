@@ -22,18 +22,19 @@ import { Hono } from "hono";
 
 // src/ imports — DB URL is already set above
 import { rawSql } from "../db/drizzle";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { waitForNodeOnline } from "../../tests/helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
 import { setGrant } from "../services/grants";
-import { createPrincipal } from "../services/principals";
+import { createPrincipal } from "../../tests/helpers/principals";
 import { gatewayRoutes } from "./gateway";
 import { stationTerminalRoutes } from "./station-terminal";
 import { stationRoutes } from "./stations";
 import { websocket } from "../ws";
 import type { AuthUser } from "../auth/middleware";
 import type { StationRow } from "../services/station-registry";
+import { clearGrant, forgetPrincipals } from "../../tests/helpers/principals";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -97,8 +98,8 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations          WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM nodes             WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${TEST_USER}`;
-    await rawSql`DELETE FROM principals        WHERE handle IN (${USER_HANDLE}, ${AGENT_HANDLE})`;
-    await rawSql`DELETE FROM "user"            WHERE id = ${TEST_USER}`;
+    await forgetPrincipals({ handles: [USER_HANDLE, AGENT_HANDLE] });
+    await deleteTestUser(TEST_USER);
   } catch {
     // Ignore cleanup errors
   }
@@ -693,7 +694,7 @@ test(
       fakeNode.close();
     } finally {
       delete process.env.ENFORCE_CONTROL_PAIR;
-      await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER_PRINCIPAL}`;
+      clearGrant(USER_PRINCIPAL);
       server.stop(true);
     }
   },
@@ -751,7 +752,7 @@ test(
       fakeNode.close();
     } finally {
       delete process.env.ENFORCE_CONTROL_PAIR;
-      await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER_PRINCIPAL}`;
+      clearGrant(USER_PRINCIPAL);
       server.stop(true);
     }
   },

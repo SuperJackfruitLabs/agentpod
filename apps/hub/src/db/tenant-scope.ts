@@ -38,8 +38,6 @@ import { matrixBoardRooms } from "./schema/board-rooms";
 import { bridgeAgents, bridgeDispatches } from "./schema/bridge";
 import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
-import { account, session, user, verification, jwks } from "./schema/auth";
-import { serviceSigningKeys } from "./schema/service-keys";
 import {
   matrixAsTransactions,
   matrixElicitationEvents,
@@ -49,21 +47,16 @@ import {
   matrixMissionMembers,
   matrixSpaces,
 } from "./schema/matrix";
-import { principalIdentities } from "./schema/identities";
 import { legacyUserPrincipals } from "./schema/legacy-user-principals";
 import { userIdRewrites } from "./schema/user-id-rewrites";
 import { hubOperators } from "./schema/operators";
 import { liveActivityTokens } from "./schema/live-activity";
-import { principalGrants } from "./schema/grants";
 import { matrixCredentialAuthorizations } from "./schema/matrix-credentials";
 import { stationGitIdentities } from "./schema/git-identities";
 import { declaredHarnessConfig } from "./schema/harness-config";
 import { appliedHarnessConfig, harnessConfigOptOut } from "./schema/harness-config-ops";
-import { oauthCodes } from "./schema/oauth";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
-import { deviceCredentials } from "./schema/devices";
-import { serviceCredentials } from "./schema/service-credentials";
 import { stations } from "./schema/stations";
 import { stationSetups } from "./schema/station-setup";
 import { stationTranscription } from "./schema/transcription";
@@ -76,7 +69,6 @@ import {
   skillReleaseCohorts,
 } from "./schema/skills";
 import { tenants } from "./schema/tenants";
-import { organizations, principals } from "./schema/organization";
 
 export { BOOTSTRAP_TENANT_ID } from "./schema/tenants";
 
@@ -125,8 +117,6 @@ export type TenantScopedTable = Table & { tenantId: Parameters<typeof eq>[0] };
  */
 export const TENANT_SCOPED_TABLES = {
   nodes,
-  deviceCredentials,
-  serviceCredentials,
   provisionedRuntimes,
   enrollmentTokens,
   stations,
@@ -175,119 +165,39 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "Organization plane owns, and building it here is what MT-1 (#145) was rewritten to avoid.",
   },
 
-  // ── The Organization plane, living in the hub before extraction ─────────────
+  // ── People, whose accounts and principals live at the organization plane ─────
   //
-  // `tenants.externalId` maps a tenant to the organisation it stands for; these
-  // two tables ARE that organisation, not a tenant's contents. Scoping either by
-  // tenant_id would put the boundary's own referent inside the boundary — the
-  // same shape the `tenants` exemption above refuses, one level out.
-  organizations: {
-    table: organizations,
-    reason:
-      "The real thing `tenants.externalId` points at, not a row belonging to a tenant. An " +
-      "organisation is not inside a fleet — a fleet optionally names one via its external " +
-      "mapping — so a tenant_id column here would have the referent carry a pointer back to " +
-      "one of its own referrers, which is backwards. Same shape as the `tenants` exemption " +
-      "above, one level out.",
-  },
-  principals: {
-    table: principals,
-    reason:
-      "Belongs to an organization (orgId), not a fleet, for the same reason `user` and " +
-      "`principal_identities` are exempt above: a principal is not inside a tenant, it reaches " +
-      "one. This is the Organization-plane table `user`'s exemption comment already points at — " +
-      "'principals belong to the Organization plane, which owns Principal, Team, Role, " +
-      "identity mappings, authority' — now given a home instead of only a forward reference.",
-  },
-
-  // ── The Better Auth family ────────────────────────────────────────────────
-  //
-  // AgentPod declares these four tables but does not own them: Better Auth
-  // inserts, updates and deletes them through its own adapter, so a NOT NULL
-  // `tenant_id` here is a column AgentPod would have to populate on writes it
-  // does not make. Every such write is a signup, a login or a token refresh.
-  //
-  // The deeper reason is the strategy's, not convenience: principals belong to
-  // the Organization plane, which owns "Principal, Team, Role, objective,
-  // identity mappings, authority". Pinning a user to an AgentPod-local tenant
-  // models the org in the wrong plane and would have to be migrated out — the
-  // exact objection that reshaped MT-1. AgentPod scopes its own rows and
-  // consumes principals; it does not own them.
-  //
-  // What a user is *allowed to reach* is therefore not answered here. It is
-  // answered today by the bootstrap constant in the auth middleware, and later
-  // by a membership lookup at the same layer — see `resolveTenantId`.
-  principal_grants: {
-    table: principalGrants,
-    reason:
-      "Authority attaches to the PRINCIPAL, which is exempt for the same reason `user` is — a " +
-      "principal is not inside a fleet, it reaches one. A tenant column here would imply a person " +
-      "could hold different authority in different fleets, which is a question the Organization " +
-      "plane will answer, not a column this table should pre-empt. " +
-      "Isolation is not weakened by the exemption: enforcement resolves the station through " +
-      "getStation(userId, …) FIRST, so a grant naming a station the caller cannot see can never " +
-      "match one. The grant is the second gate, never the first.",
-  },
-
-  principal_identities: {
-    table: principalIdentities,
-    reason:
-      "Hangs off `user`, which is exempt for the same reason: a principal is not INSIDE a fleet, " +
-      "it reaches one. The mapping says a person here is the same person on Matrix or superpipeline, " +
-      "which is true regardless of which fleet they reach — a tenant column would imply an " +
-      "identity could differ per fleet, and it cannot. " +
-      "REVISIT IF THIS BECOMES REACHABLE OVER AN API: nothing today lists these rows, and every " +
-      "lookup is by principal id or by an external id the caller already holds. A route that " +
-      "listed them would leak one tenant's people to another, and that route would need scoping " +
-      "this table does not have.",
-  },
-
+  // The hub's own `user`, `principals`, `principal_identities` and `principal_grants` were
+  // dropped after the rollback window (P3 plan, Task 17). What is left here keys on a person's
+  // `prn_`, and a person is not inside a fleet — they reach one.
   legacy_user_principals: {
     table: legacyUserPrincipals,
     reason:
-      "The permanent copy of `principal_identities`' better-auth rows, kept after the org-plane " +
-      "cutover so a pre-cutover hub user id (superpipeline's `decided_by_hub_sub`) still resolves. " +
-      "Exempt for the reason that table is: a person is not inside a fleet, they reach one. Read " +
+      "The permanent copy of the old `principal_identities` better-auth rows, kept after the " +
+      "org-plane cutover so a pre-cutover hub user id (superpipeline's `decided_by_hub_sub`) still " +
+      "resolves. A person is not inside a fleet, they reach one. Read " +
       "only by `GET /api/evidence/principals/:id`, by an id the caller already holds; nothing lists it.",
   },
 
   user_id_rewrites: {
     table: userIdRewrites,
     reason:
-      "The cutover script's per-row record of which user id it rewrote to which prn_, so " +
-      "`--reverse` restores the exact value. Written and read only by `scripts/rewrite-user-ids.ts` " +
-      "against a stopped hub; no route reads it. Its rows name rows of tenant-scoped tables, but " +
-      "the script rewrites the whole hub at once, never one fleet.",
+      "The cutover script's per-row record of which user id it rewrote to which prn_. Written " +
+      "only by that script (removed with the auth tables), read only by migration 0096's guard; " +
+      "no route reads it. Its rows name rows of tenant-scoped tables, but the rewrite covered the " +
+      "whole hub at once, never one fleet.",
   },
 
   hub_operators: {
     table: hubOperators,
     reason:
       "Who may operate this hub, by principal id (decision D4) — the hub's own seat, what " +
-      "`user.role = 'admin'` was before the org plane. Exempt for the reason `user` is: an " +
-      "operator operates the hub, not one fleet inside it, and admin was never tenant-scoped. Read " +
+      "`user.role = 'admin'` was before the org plane. An operator operates the hub, not one " +
+      "fleet inside it, and admin was never tenant-scoped. Read " +
       "only by `isUserAdmin` for an id the caller already holds; nothing lists it.",
   },
 
-  user: {
-    table: user,
-    reason:
-      "Better Auth owns the lifecycle of this table; the Organization plane owns principals. " +
-      "A user is not inside an AgentPod fleet — it reaches one, which is a membership question " +
-      "and not this plane's to answer.",
-  },
-  session: {
-    table: session,
-    reason:
-      "Better Auth writes this on every login and refresh. Belongs to a user, and a user " +
-      "belongs to no AgentPod tenant.",
-  },
-  account: {
-    table: account,
-    reason:
-      "OAuth provider linkage, written by Better Auth. A GitHub identity is a property of a " +
-      "principal, not of a fleet.",
-  },
+
   matrix_as_transactions: {
     table: matrixAsTransactions,
     reason:
@@ -302,52 +212,12 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
   live_activity_tokens: {
     table: liveActivityTokens,
     reason:
-      "A PERSON's phone, keyed by the Matrix id the homeserver vouched for — exempt for the reason " +
-      "`principal_identities` is: a person is not inside a fleet, they reach one. The card these " +
+      "A PERSON's phone, keyed by the Matrix id the homeserver vouched for — a person is not " +
+      "inside a fleet, they reach one. The card these " +
       "tokens receive is built per reader from the rooms that reader owns (`readerForRoom`), so " +
       "which fleet's work reaches the phone is decided where the content is built, not here. " +
       "Nothing lists these rows over an API: the only routes write and delete the caller's own, " +
       "by the user id whoami returned.",
-  },
-
-  service_signing_keys: {
-    table: serviceSigningKeys,
-    reason:
-      "The key this deployment signs service assertions with. A signing key belongs to the " +
-      "installation, not to a fleet — scoping it would mean asking which tenant a key belongs " +
-      "to before verifying a token that names one, which is backwards. Same reasoning as jwks " +
-      "below, and it sits beside it for that reason.",
-  },
-
-  jwks: {
-    table: jwks,
-    reason:
-      "The issuer's signing keys. Deliberately instance-wide, not per-tenant: the hub signs " +
-      "every token with one key set, and peers verify against ONE published JWKS — a per-tenant " +
-      "key would mean a verifier had to know which tenant a token belonged to before it could " +
-      "check the signature that tells it, which is backwards. The tenant a token names travels " +
-      "INSIDE it, as the `tenant` claim " +
-      "(src/auth/testdata/token_claims.v7.json; the organization plane's tokens carry `org` instead).",
-  },
-
-  oauth_codes: {
-    table: oauthCodes,
-    reason:
-      "A 60-second claim ticket for the cross-domain handoff, exempt for the same reason `user` " +
-      "and `principal_identities` are: it records that a PERSON authorized a plane to be handed " +
-      "a token, and a person is not inside a fleet — they reach one. Which tenant the resulting " +
-      "token names is answered where it has always been answered, by buildTokenPayload from the " +
-      "principal at mint time; putting a tenant on the ticket would mean deciding that before " +
-      "the exchange asks, and would imply a code could mean different things in different " +
-      "fleets. Isolation is not weakened: the code carries no authority of its own, and the " +
-      "token it is exchanged for is the same one GET /api/auth/token already issues.",
-  },
-
-  verification: {
-    table: verification,
-    reason:
-      "Email-verification and password-reset challenges, written by Better Auth and keyed by " +
-      "an email address that no tenant owns.",
   },
 
   // ── Instance-wide ─────────────────────────────────────────────────────────
@@ -361,8 +231,8 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
   admin_audit_log: {
     table: adminAuditLog,
     reason:
-      "Records instance-admin actions, which cross tenants by definition: banning a user or " +
-      "changing a role is not an act performed inside a fleet. Scoping it would either lose " +
+      "Records instance-admin actions, which cross tenants by definition: changing a hub-wide " +
+      "setting is not an act performed inside a fleet. Scoping it would either lose " +
       "those rows or force them into a tenant that did not perform them. Per-tenant activity " +
       "is station_audit, which IS scoped.",
   },

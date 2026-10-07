@@ -37,7 +37,7 @@ import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../../tests/helpers/database";
 import { db, rawSql } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
@@ -54,6 +54,7 @@ import { roomForStation } from "./station-room";
 import { projectGate } from "./gates";
 import { bridgeUserId } from "./names";
 import type { GatePendingDelivery } from "./gates";
+import { forgetPrincipals } from "../../../tests/helpers/principals";
 
 const DOMAIN = "id.agentpod.dev";
 const RUN = crypto.randomUUID().slice(0, 8);
@@ -242,8 +243,8 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations WHERE user_id = ${ACTOR}`;
     await rawSql`DELETE FROM nodes WHERE user_id = ${ACTOR}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${ACTOR}`;
-    await rawSql`DELETE FROM principals WHERE handle LIKE ${HANDLE + "%"}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${ACTOR}`;
+    await forgetPrincipals({ handleLike: HANDLE + "%" });
+    await deleteTestUser(ACTOR);
   } catch {
     // cleanup only
   }

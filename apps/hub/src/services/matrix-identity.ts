@@ -10,8 +10,8 @@
  *   - **agents** carry their mxid on `stations.matrix_id`, read off the host by
  *     the node agent from a harness profile. AgentPod owns that fact because it
  *     owns the station.
- *   - **people** are mapped in `principal_identities`, because the Organization
- *     plane owns principals and does not exist yet.
+ *   - **people** are mapped at the organization plane, which owns principals and
+ *     their identities (`GET /api/identities/matrix/:mxid`, contract §3.5).
  *
  * The answer distinguishes them rather than merely saying "known", because
  * everything downstream treats them differently: a human's approval must carry
@@ -21,11 +21,9 @@
  * distinction away at the one point where keeping it is free.
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
-import { principalIdentities } from "../db/schema/identities";
-import { orgPlane } from "../auth/org-plane/config";
 import { principalDirectory } from "./org-plane/directory";
 
 export type MatrixIdentity =
@@ -51,28 +49,17 @@ export const IDENTITY_UNAVAILABLE_TEXT =
 const MXID = /^@[^:]+:.+$/;
 
 /**
- * Under the org plane the person half is the plane's `GET /api/identities/matrix/:mxid` — the one
- * plane call design §5.7 allows on an authorization path — through the directory's 60 s cache with
- * last-good. A plane that cannot be reached with nothing cached throws `OrgPlaneError` out of here:
- * "down" must never read as "unlinked". The station half stays local; stations are the hub's.
+ * The person half is the plane's `GET /api/identities/matrix/:mxid` — the one plane call design
+ * §5.7 allows on an authorization path — through the directory's 60 s cache with last-good. A plane
+ * that cannot be reached with nothing cached throws `OrgPlaneError` out of here: "down" must never
+ * read as "unlinked". The station half stays local; stations are the hub's.
  */
 export async function resolveMatrixId(mxid: string): Promise<MatrixIdentity> {
   if (!mxid || !MXID.test(mxid)) return null;
 
-  const principalLookup: Promise<Array<{ principalId: string }>> = orgPlane()
-    ? principalDirectory()
-        .identity("matrix", mxid)
-        .then((r) => (r ? [{ principalId: r.principalId }] : []))
-    : db
-        .select({ principalId: principalIdentities.principalId })
-        .from(principalIdentities)
-        .where(
-          and(
-            eq(principalIdentities.system, "matrix"),
-            eq(principalIdentities.externalId, mxid)
-          )
-        )
-        .limit(2);
+  const principalLookup: Promise<Array<{ principalId: string }>> = principalDirectory()
+    .identity("matrix", mxid)
+    .then((r) => (r ? [{ principalId: r.principalId }] : []));
 
   const [stationRows, principalRows] = await Promise.all([
     db
@@ -87,7 +74,7 @@ export async function resolveMatrixId(mxid: string): Promise<MatrixIdentity> {
     principalLookup,
   ]);
 
-  // Filtered to `system = 'matrix'` above, deliberately. An external id is
+  // Asked of the plane as `system = 'matrix'`, deliberately. An external id is
   // opaque per system, so a superpipeline or org-plane id that happened to be shaped
   // like an mxid must not answer "who is this Matrix sender" — it names the same
   // person in a different namespace, which is not the same claim.

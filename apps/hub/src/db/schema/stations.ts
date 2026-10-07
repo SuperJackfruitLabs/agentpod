@@ -1,14 +1,12 @@
 import { pgTable, text, timestamp, index, uniqueIndex, jsonb, foreignKey, AnyPgColumn } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { user } from "./auth";
 import { nodes } from "./nodes";
 import { tenants } from "./tenants";
-import { principals } from "./organization";
 
 export const stations = pgTable("stations", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
-  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull(),
   nodeId: text("node_id").notNull().references(() => nodes.id, { onDelete: "cascade" }),
   harness: text("harness").notNull(),
   stationKey: text("station_key").notNull(),
@@ -71,7 +69,7 @@ export const stations = pgTable("stations", {
    * `matrix_rooms_principal_idx` already allowed a principal only one room —
    * a contradiction the code silently carried both sides of.
    */
-  principalId: text("principal_id").references(() => principals.id, { onDelete: "set null" }),
+  principalId: text("principal_id"),
   adoptedAt: timestamp("adopted_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [

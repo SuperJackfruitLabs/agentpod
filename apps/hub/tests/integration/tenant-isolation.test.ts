@@ -36,6 +36,7 @@ import { rawSql } from "../../src/db/drizzle";
 import { BOOTSTRAP_TENANT_ID, TENANT_SCOPED_TABLES } from "../../src/db/tenant-scope";
 import { listNodes } from "../../src/services/node-registry";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
+import { deleteTestUser, createTestUser } from "../helpers/database";
 
 const OTHER_TENANT = "fleet_11111111111111111111";
 const SHARED_USER = "tenant-isolation-user";
@@ -48,9 +49,8 @@ beforeAll(async () => {
   await ensurePgMigrations();
   await rawSql`DELETE FROM nodes WHERE id IN (${OWN_NODE}, ${FOREIGN_NODE})`;
   await rawSql`DELETE FROM tenants WHERE id = ${OTHER_TENANT}`;
-  await rawSql`DELETE FROM "user" WHERE id = ${SHARED_USER}`;
-  await rawSql`INSERT INTO "user" (id, name, email, email_verified)
-               VALUES (${SHARED_USER}, 'Shared', 'shared@tenant-isolation.test', true)`;
+  await deleteTestUser(SHARED_USER);
+  await createTestUser({ id: SHARED_USER, name: "Shared", email: "shared@tenant-isolation.test" });
   await rawSql`INSERT INTO tenants (id, name) VALUES (${OTHER_TENANT}, 'Other')`;
 
   // The same user id, the same everything — except the tenant. This is the row
@@ -69,7 +69,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await rawSql`DELETE FROM nodes WHERE id IN (${OWN_NODE}, ${FOREIGN_NODE})`;
   await rawSql`DELETE FROM tenants WHERE id = ${OTHER_TENANT}`;
-  await rawSql`DELETE FROM "user" WHERE id = ${SHARED_USER}`;
+  await deleteTestUser(SHARED_USER);
 });
 
 describe("the boundary reached the database", () => {

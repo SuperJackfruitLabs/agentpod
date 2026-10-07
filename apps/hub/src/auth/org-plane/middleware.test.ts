@@ -1,7 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { createAuthMiddleware } from "../middleware";
-import { TEST_PLANE } from "./config";
 import type { PlaneBearerResult } from "../hub-token";
 import { config } from "../../config";
 
@@ -25,7 +24,6 @@ const human: PlaneBearerResult = {
 function app(result: PlaneBearerResult, seen: string[] = []) {
   return new Hono()
     .use("/api/*", createAuthMiddleware({
-      plane: () => TEST_PLANE,
       verifyPlane: async (t) => {
         seen.push(t);
         return result;
@@ -34,7 +32,7 @@ function app(result: PlaneBearerResult, seen: string[] = []) {
     .get("/api/whoami", (c) => c.json(c.get("user")));
 }
 
-describe("authMiddleware with ORG_PLANE_* set", () => {
+describe("authMiddleware (the org plane is the only issuer)", () => {
   test("a human plane token is admitted as its prn_, in the tenant its org maps to", async () => {
     const res = await app(human).request("/api/whoami", { headers: { Authorization: "Bearer t" } });
     expect(res.status).toBe(200);
@@ -79,7 +77,7 @@ describe("authMiddleware with ORG_PLANE_* set", () => {
   ])("?token= on %s is verified as a plane token, as legacy reads it there", async (_name, path) => {
     const seen: string[] = [];
     const a = new Hono()
-      .use("/api/*", createAuthMiddleware({ plane: () => TEST_PLANE, verifyPlane: async (t) => (seen.push(t), human) }))
+      .use("/api/*", createAuthMiddleware({ verifyPlane: async (t) => (seen.push(t), human) }))
       .get(path, (c) => c.json(c.get("user")));
     const res = await a.request(`${path}?token=fresh`);
     expect(res.status).toBe(200);
@@ -109,10 +107,10 @@ describe("authMiddleware with ORG_PLANE_* set", () => {
   test("no dual-accept: a context already holding a Better Auth user is not trusted", async () => {
     const a = new Hono()
       .use("/api/*", async (c, next) => {
-        c.set("user", { id: "ba-user", authType: "better_auth", tenantId: "fleet_x" });
+        c.set("user", { id: "ba-user", authType: "better_auth", tenantId: "fleet_x" } as never);
         await next();
       })
-      .use("/api/*", createAuthMiddleware({ plane: () => TEST_PLANE, verifyPlane: async () => ({ ok: false, status: 401 }) }))
+      .use("/api/*", createAuthMiddleware({ verifyPlane: async () => ({ ok: false, status: 401 }) }))
       .get("/api/whoami", (c) => c.json(c.get("user")));
     expect((await a.request("/api/whoami")).status).toBe(401);
   });
@@ -131,14 +129,5 @@ describe("authMiddleware with ORG_PLANE_* set", () => {
       headers: { Authorization: `Bearer ${config.auth.token}` },
     });
     expect(res.status).toBe(200);
-  });
-
-  test("legacy mode is today's middleware: no plane call at all", async () => {
-    const seen: string[] = [];
-    const a = new Hono()
-      .use("/api/*", createAuthMiddleware({ plane: () => null, verifyPlane: async (t) => (seen.push(t), human) }))
-      .get("/api/whoami", (c) => c.json(c.get("user")));
-    await a.request("/api/whoami", { headers: { Authorization: "Bearer not-a-hub-token" } });
-    expect(seen).toEqual([]);
   });
 });

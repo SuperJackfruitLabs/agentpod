@@ -51,13 +51,11 @@ export interface Redactor {
  */
 export const HUB_SECRET_ENV = [
   "API_TOKEN",
-  "BETTER_AUTH_SECRET", // signs sessions and encrypts the JWT signing keys at rest
   "CLOUDFLARE_API_TOKEN",
   "CLOUDFLARE_WORKER_TOKEN",
   "ENCRYPTION_KEY",
   "FLY_API_TOKEN",
   "FORGE_ADMIN_TOKEN",
-  "GITHUB_CLIENT_SECRET", // the hub's one OAuth client secret; HUB_OAUTH_CLIENTS entries are public clients
   "MATRIX_AS_TOKEN",
   "MATRIX_HS_TOKEN",
   "MODAL_TOKEN_ID",

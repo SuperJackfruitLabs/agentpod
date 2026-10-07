@@ -256,6 +256,66 @@ export async function boardRoomFor(roomId: string) {
 }
 
 /**
+ * Whether anybody but the speaker — and not another of this hub's own users — has
+ * JOINED the board room.
+ *
+ * The question a gate is held on (`gates.ts`, `humanJoined`). An invited human holds
+ * no room key for what is sent before they accept: on 2026-10-07 a board's first gate
+ * was posted the moment the room was made and encrypted to the speaker alone. Joined,
+ * not invited, is the operator's rule. Asked as the speaker, who is always in the room.
+ *
+ * Throws when the homeserver does not answer: "could not ask" is neither yes (which
+ * would post a card nobody can read) nor no (which would hold one silently); a throw
+ * is a counted sweep failure and a 5xx to push, and both retry.
+ */
+export async function boardRoomHasJoinedHuman(
+  roomId: string,
+  speakerMxid: string,
+  deps: { homeserverUrl: string; asToken: string; fetch?: typeof fetch },
+): Promise<boolean> {
+  const url = new URL(
+    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`,
+    deps.homeserverUrl,
+  );
+  url.searchParams.set("user_id", speakerMxid);
+  const res = await (deps.fetch ?? fetch)(url, {
+    headers: { Authorization: `Bearer ${deps.asToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`joined members of ${roomId} unreadable (${res.status})`);
+  }
+  const body = (await res.json()) as { joined?: Record<string, unknown> };
+  return Object.keys(body.joined ?? {}).some(
+    (m) => m !== speakerMxid && !m.startsWith("@agent_"),
+  );
+}
+
+/**
+ * The board whose held gates a membership event should wake, or null.
+ *
+ * Only a JOIN, only into a board room, and only by somebody other than its speaker.
+ * The sweep would post a held gate within five minutes anyway; this is what makes a
+ * person who just accepted the invite see the question now.
+ */
+export async function boardForHumanJoin(
+  event: {
+    type: string;
+    sender: string;
+    room_id?: string;
+    state_key?: string;
+    content?: Record<string, unknown>;
+  },
+  lookup: (roomId: string) => Promise<{ boardId: string; speakerMxid: string } | null> = boardRoomFor,
+): Promise<string | null> {
+  if (event.type !== "m.room.member" || !event.room_id) return null;
+  if (event.content?.membership !== "join") return null;
+  const who = event.state_key ?? event.sender;
+  const board = await lookup(event.room_id);
+  if (!board || who === board.speakerMxid || who.startsWith("@agent_")) return null;
+  return board.boardId;
+}
+
+/**
  * The Matrix ids of the humans who may answer a board's gates.
  *
  * **One entry today, and a list by construction.** superpipeline owns board
@@ -265,8 +325,8 @@ export async function boardRoomFor(roomId: string) {
  * superpipeline exposes membership to a service credential, the bridge roster is
  * the only place that names a board's human at all.
  *
- * Resolved the long way round on purpose: roster `hubUserId` → principal →
- * `principal_identities`. A Matrix id is never guessed from a localpart or a
+ * Resolved the long way round on purpose: roster `hubUserId` (a `prn_`) → the
+ * plane's `GET /api/principals/:id/identities?system=matrix`. A Matrix id is never guessed from a localpart or a
  * matching email (charter `2026-08-13-ecosystem-identity` Decision 2), so a board
  * whose human has never linked an account yields nobody rather than somebody wrong.
  */

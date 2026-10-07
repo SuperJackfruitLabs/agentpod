@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
-import { createPrincipal } from "../../src/services/principals";
+import { createPrincipal, forgetPrincipals, linkMatrixId } from "../helpers/principals";
 import { provisionStation } from "../../src/services/matrix-as/provision";
 
 /**
@@ -106,10 +106,7 @@ beforeAll(async () => {
       INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, adopted_at, created_at)
       VALUES (${id}, ${tenant}, ${OWNER}, ${NODE}, 'openclaw', ${key}, 'leaf', ${key}, '["acp"]'::jsonb, ${agentFor[id!]!}, now(), now())`;
   }
-  await rawSql`
-    INSERT INTO principal_identities (id, principal_id, system, external_id, created_at)
-    VALUES ('pi_ps', ${OWNER_PRINCIPAL}, 'matrix', ${"@owner-ps:" + DOMAIN}, now())
-    ON CONFLICT DO NOTHING`;
+  await linkMatrixId(OWNER_PRINCIPAL, "@owner-ps:" + DOMAIN);
 });
 
 beforeEach(async () => {
@@ -133,8 +130,8 @@ afterAll(async () => {
     await rawSql`DELETE FROM matrix_spaces WHERE tenant_id = ${tenant}`;
     await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`DELETE FROM principals WHERE handle IN ('ps-owner', 'ps-agent-a', 'ps-agent-b')`;
-    await rawSql`DELETE FROM "user" WHERE id = ${OWNER}`;
+    await forgetPrincipals({ handles: ["ps-owner", "ps-agent-a", "ps-agent-b"] });
+    await deleteTestUser(OWNER);
   } catch {
     // cleanup only
   }

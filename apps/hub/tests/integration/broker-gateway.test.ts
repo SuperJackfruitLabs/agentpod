@@ -21,7 +21,7 @@ import { Hono } from "hono";
 
 // src/ imports — DB URL is already set above
 import { rawSql } from "../../src/db/drizzle";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { waitForNodeOnline } from "../helpers/wait";
 import {
@@ -53,7 +53,7 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM nodes             WHERE user_id = ${TEST_USER_ID}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${TEST_USER_ID}`;
-    await rawSql`DELETE FROM "user"            WHERE id      = ${TEST_USER_ID}`;
+    await deleteTestUser(TEST_USER_ID);
   } catch {
     // Ignore cleanup errors
   }

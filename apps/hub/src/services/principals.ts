@@ -1,12 +1,13 @@
-import { and, eq, isNull } from "drizzle-orm";
-
-import { db, type DbExecutor } from "../db/drizzle";
-import { user } from "../db/schema/auth";
-import { principalIdentities } from "../db/schema/identities";
-import { BOOTSTRAP_ORG_ID, principals, type PrincipalKind } from "../db/schema/organization";
-import { prefixedId } from "../utils/ids";
+/**
+ * Principals, read from (and, for agents, created at) the organization plane (contract §3.5).
+ *
+ * The hub kept its own `principals`, `principal_identities` and `principal_grants` until the
+ * rollback window after P4 closed; they were dropped in P3 plan Task 17. Every read here goes
+ * through the directory (`./org-plane/directory.ts`): cached 60 s, last-good while the plane is
+ * unreachable, and an `OrgPlaneError` when there is nothing to serve — callers fail closed.
+ */
 import { PrincipalId } from "@agentpod/contract";
-import { orgPlane } from "../auth/org-plane/config";
+import type { PrincipalKind } from "../db/schema/organization";
 import { principalDirectory } from "./org-plane/directory";
 import { orgPlaneClient, type PlanePrincipal } from "./org-plane/client";
 
@@ -17,22 +18,10 @@ import { orgPlaneClient, type PlanePrincipal } from "./org-plane/client";
  */
 export const SUSPENDED_AT_UNKNOWN = new Date(0);
 
-/** The plane's principal in this module's shape. No email: nothing under the plane needs it. */
-function fromPlane(p: PlanePrincipal): ResolvedPrincipal {
-  return { id: p.id, kind: p.kind, suspendedAt: p.suspended ? SUSPENDED_AT_UNKNOWN : null, email: null, emailVerified: null };
-}
-
 /**
- * The shape `principalForUser` and `principalById` both resolve to: a
- * principal plus the Better Auth `email`/`emailVerified` of whichever user is
- * linked to it, if any — joined in the same query rather than fetched
- * separately, because `buildTokenPayload` needs both to answer "who is this"
- * in one round trip, the same reasoning `listPrincipals`'s `userId` follows.
- *
- * `email`/`emailVerified` are `null`, not absent, when no `user` row matches —
- * an agent or a service has no Better Auth identity by construction, and this
- * is a plain lookup result, not the token claim itself. `buildTokenPayload` is
- * where "no email" becomes "no claim".
+ * A principal, as the hub's callers use it. `email`/`emailVerified` are always null: the plane's
+ * principal reads carry no email (contract §3.5), and nothing in the hub needs one any more — it
+ * only fed the hub's own token minting.
  */
 export interface ResolvedPrincipal {
   id: string;
@@ -42,216 +31,56 @@ export interface ResolvedPrincipal {
   emailVerified: boolean | null;
 }
 
-export async function createPrincipal(input: {
-  kind: PrincipalKind;
-  handle: string;
-  displayName?: string;
-  /** When present, links the Better Auth user as this principal's login identity. */
-  userId?: string;
-}, exec: DbExecutor = db): Promise<string> {
-  if (orgPlane()) {
-    // The plane creates agents only (contract §3.5); humans are created by signing up there,
-    // services by the operator's `scripts/service.ts`.
-    if (input.kind !== "agent") throw new Error(`the org plane creates ${input.kind} principals itself`);
-    const { id } = await orgPlaneClient().createAgent({ handle: input.handle, displayName: input.displayName ?? input.handle });
-    principalDirectory().invalidate();
-    return id;
-  }
-  const id = prefixedId("prn");
-  await exec.insert(principals).values({
-    id,
-    kind: input.kind,
-    orgId: BOOTSTRAP_ORG_ID,
-    handle: input.handle,
-    displayName: input.displayName ?? null,
-  });
-  if (input.userId) {
-    await exec.insert(principalIdentities).values({
-      id: crypto.randomUUID(),
-      principalId: id,
-      system: "better-auth",
-      externalId: input.userId,
-    });
-  }
+function fromPlane(p: PlanePrincipal): ResolvedPrincipal {
+  return { id: p.id, kind: p.kind, suspendedAt: p.suspended ? SUSPENDED_AT_UNKNOWN : null, email: null, emailVerified: null };
+}
+
+/**
+ * Create an agent principal at the plane. The plane creates agents only (contract §3.5); humans
+ * are created by signing up there, services by the plane's operator.
+ */
+export async function createPrincipal(input: { kind: PrincipalKind; handle: string; displayName?: string }): Promise<string> {
+  if (input.kind !== "agent") throw new Error(`the org plane creates ${input.kind} principals itself`);
+  const { id } = await orgPlaneClient().createAgent({ handle: input.handle, displayName: input.displayName ?? input.handle });
+  principalDirectory().invalidate();
   return id;
 }
 
 /**
- * The principal behind a Better Auth user, or null.
- *
- * Returns the id together with the kind, not the bare id: Task 4 uses this as
- * its default principal resolver and needs both to answer "who is this and
- * what is it" in one round trip — a second query for kind would be two round
- * trips answering one question.
- *
- * Null rather than a fallback: an unmapped caller must fail closed, for the same
- * reason `buildTokenPayload` refuses to mint a token when no tenant resolves.
- *
- * Left-joined to `user` on the same `userId` this was called with, so the
- * email `buildTokenPayload` needs is already in this row rather than a second
- * query — a LEFT join, not inner, because a principal can be linked before the
- * `user` row backing it exists (see `principals.test.ts`'s "finds the
- * principal" case, which never inserts one).
+ * The human principal behind an `AuthUser.id`, or null. An account id IS the human's `prn_`
+ * (contract §2, "Migrated humans"). Null rather than a fallback: an unmapped caller must fail
+ * closed.
  */
 export async function principalForUser(userId: string): Promise<ResolvedPrincipal | null> {
-  if (orgPlane()) {
-    // Under the plane an AuthUser.id IS the human's prn_ (contract §2, "Migrated humans").
-    const p = await principalDirectory().principal(userId);
-    return p && p.kind === "human" ? fromPlane(p) : null;
-  }
-  const [row] = await db
-    .select({
-      id: principals.id,
-      kind: principals.kind,
-      suspendedAt: principals.suspendedAt,
-      email: user.email,
-      emailVerified: user.emailVerified,
-    })
-    .from(principalIdentities)
-    .innerJoin(principals, eq(principals.id, principalIdentities.principalId))
-    .leftJoin(user, eq(user.id, principalIdentities.externalId))
-    .where(
-      and(eq(principalIdentities.system, "better-auth"), eq(principalIdentities.externalId, userId))
-    )
-    .limit(1);
-  return row
-    ? {
-        id: row.id,
-        kind: row.kind as PrincipalKind,
-        suspendedAt: row.suspendedAt,
-        email: row.email ?? null,
-        emailVerified: row.emailVerified ?? null,
-      }
-    : null;
+  const p = await principalDirectory().principal(userId);
+  return p && p.kind === "human" ? fromPlane(p) : null;
 }
 
-/**
- * A principal by its own id, or null.
- *
- * For a caller that already holds a `prn_…` id it obtained by an explicit
- * lookup elsewhere — `mintPrincipalAssertion` reading `principal_identities`
- * by mxid, for instance — and must never have that id re-resolved through
- * Better Auth: `principalForUser` looks for a Better Auth external id, which
- * a principal id is not, and would answer null for every one of these
- * callers regardless of whether the principal exists.
- *
- * Null rather than a fallback, for the same reason `principalForUser` is:
- * an id that names nobody must fail closed, not mint for a default.
- *
- * Left-joined through `principal_identities` (the same `system: "better-auth"`
- * link `userIdForPrincipal` reads) to `user`, so a caller on this path —
- * `mintPrincipalAssertion`, `station-token.ts` — gets the linked human's email
- * in the same round trip when there is one, and both left joins simply yield
- * no match for an agent or a service, which has neither.
- */
+/** A principal by its own id, or null. */
 export async function principalById(id: string): Promise<ResolvedPrincipal | null> {
-  if (orgPlane()) {
-    const p = await principalDirectory().principal(id);
-    return p ? fromPlane(p) : null;
-  }
-  const [row] = await db
-    .select({
-      id: principals.id,
-      kind: principals.kind,
-      suspendedAt: principals.suspendedAt,
-      email: user.email,
-      emailVerified: user.emailVerified,
-    })
-    .from(principals)
-    .leftJoin(
-      principalIdentities,
-      and(
-        eq(principalIdentities.principalId, principals.id),
-        eq(principalIdentities.system, "better-auth")
-      )
-    )
-    .leftJoin(user, eq(user.id, principalIdentities.externalId))
-    .where(eq(principals.id, id))
-    .limit(1);
-  return row
-    ? {
-        id: row.id,
-        kind: row.kind as PrincipalKind,
-        suspendedAt: row.suspendedAt,
-        email: row.email ?? null,
-        emailVerified: row.emailVerified ?? null,
-      }
-    : null;
-}
-
-/**
- * Stop a principal from being allowed to act, from now.
- *
- * Suspension rather than deletion: deleting a principal cascades its
- * identities and grants away, destroying the audit trail exactly when someone
- * wants to read it. `buildTokenPayload` refuses to mint for a suspended
- * principal on both subject paths — a session caller whose principal is
- * suspended is exactly as suspended as an agent.
- *
- * Guarded by `suspendedAt IS NULL` rather than an unconditional write: the
- * column exists to answer "since when" (see its comment in
- * `db/schema/organization.ts`), and a stray second suspend — a stale tab, a
- * retried request, a race between two admins — must not silently replace the
- * real answer with the time of the click. Idempotent either way: a
- * re-suspend still succeeds, it just leaves the original timestamp alone.
- */
-export async function suspendPrincipal(id: string): Promise<void> {
-  if (orgPlane()) throw new Error("principal suspension is managed by the org plane");
-  await db
-    .update(principals)
-    .set({ suspendedAt: new Date() })
-    .where(and(eq(principals.id, id), isNull(principals.suspendedAt)));
-}
-
-/** Lift a suspension. The principal can be minted for again. */
-export async function restorePrincipal(id: string): Promise<void> {
-  if (orgPlane()) throw new Error("principal suspension is managed by the org plane");
-  await db.update(principals).set({ suspendedAt: null }).where(eq(principals.id, id));
+  const p = await principalDirectory().principal(id);
+  return p ? fromPlane(p) : null;
 }
 
 /**
  * A principal's immutable `handle`, or null.
  *
- * This is what an agent's Matrix identity is now built from
+ * This is what an agent's Matrix identity is built from
  * (`charter` → decisions/2026-08-30-an-agent-is-a-principal.md): `names.ts`'s
- * `bridgeUserId`/`bridgeLocalpart` take a handle, not a station, so every
- * caller that used to derive an agent's mxid from `(nodeName, stationKey)`
- * resolves the station's occupying principal to this instead. Kept here
- * rather than let the matrix modules query `principals` themselves, so schema
- * access to that table stays in the one service that owns it.
+ * `bridgeUserId`/`bridgeLocalpart` take a handle, not a station.
  *
- * Null both when the id names nobody and when a station has none — the two
- * cases a caller must treat alike: fail closed, never invent an address.
+ * Null both when the id names nobody and when a station has none — the two cases a caller must
+ * treat alike: fail closed, never invent an address.
  */
 export async function principalHandle(id: string): Promise<string | null> {
-  if (orgPlane()) return (await principalDirectory().principal(id))?.handle ?? null;
-  const [row] = await db
-    .select({ handle: principals.handle })
-    .from(principals)
-    .where(eq(principals.id, id))
-    .limit(1);
-  return row?.handle ?? null;
+  return (await principalDirectory().principal(id))?.handle ?? null;
 }
 
 /**
- * Every principal, with the Better Auth login each one has if any.
+ * Every principal in the hub's workspace, for the admin surface and the dispatchable picker.
  *
- * For the admin surface, and for one reason: a grant now names a principal id
- * on both sides — the row is keyed by one and every value in `mayDispatch` is
- * one — and a `prn_` id is not something a person can type from memory or
- * recognise on sight. Without this the console can only offer a text box and
- * hope, which is how an authorization surface stops being one people use.
- *
- * `userId` travels with the row so the console can put a name and an email
- * against a human principal without a second call and a second guess about
- * how to join the two id spaces. It is null for an agent or a service, which
- * is the ordinary case and not a gap.
- *
- * Unpaginated, deliberately: this is one row per person and per agent in one
- * organisation, which is the same order of magnitude as the fleet — and a
- * paginated picker that silently stopped at page one would offer a narrower
- * choice than exists, which on an authorization surface reads as "that agent
- * cannot be granted".
+ * `userId` is the account id a human signs in as — under the plane, the principal's own id
+ * (contract §2). It is null for an agent or a service, which is the ordinary case and not a gap.
  */
 export async function listPrincipals(): Promise<
   Array<{
@@ -260,141 +89,23 @@ export async function listPrincipals(): Promise<
     handle: string;
     displayName: string | null;
     userId: string | null;
-    /**
-     * Whether this principal is suspended right now, and since when. Carried
-     * here rather than left for a second call per row: an admin surface that
-     * had to ask separately for every principal's state would either be slow
-     * enough nobody used it, or would render the list before the state and
-     * flash a wrong answer first.
-     */
     suspendedAt: Date | null;
   }>
 > {
-  if (orgPlane()) {
-    return (await principalDirectory().list()).map((p) => ({
-      id: p.id,
-      kind: p.kind,
-      handle: p.handle,
-      displayName: p.displayName,
-      // Under the plane a human's account id is its prn_ (contract §2).
-      userId: p.kind === "human" ? p.id : null,
-      suspendedAt: p.suspended ? SUSPENDED_AT_UNKNOWN : null,
-    }));
-  }
-  const rows = await db
-    .select({
-      id: principals.id,
-      kind: principals.kind,
-      handle: principals.handle,
-      displayName: principals.displayName,
-      suspendedAt: principals.suspendedAt,
-      externalId: principalIdentities.externalId,
-    })
-    .from(principals)
-    .leftJoin(
-      principalIdentities,
-      and(
-        eq(principalIdentities.principalId, principals.id),
-        eq(principalIdentities.system, "better-auth")
-      )
-    );
-
-  return rows.map((r) => ({
-    id: r.id,
-    kind: r.kind as PrincipalKind,
-    handle: r.handle,
-    displayName: r.displayName,
-    userId: r.externalId ?? null,
-    suspendedAt: r.suspendedAt,
+  return (await principalDirectory().list()).map((p) => ({
+    id: p.id,
+    kind: p.kind,
+    handle: p.handle,
+    displayName: p.displayName,
+    userId: p.kind === "human" ? p.id : null,
+    suspendedAt: p.suspended ? SUSPENDED_AT_UNKNOWN : null,
   }));
 }
 
 /**
- * The human principal behind an `AuthUser.id`, or null. Under the plane they are the same string
- * (contract §2), so no read is needed; in legacy mode it is `principalForUser`'s answer.
+ * The human principal behind an `AuthUser.id`, or null. They are the same string (contract §2),
+ * so no read is needed.
  */
 export async function humanPrincipalIdForUser(userId: string): Promise<string | null> {
-  if (orgPlane()) return PrincipalId.safeParse(userId).success ? userId : null;
-  return (await principalForUser(userId))?.id ?? null;
-}
-
-/**
- * The Better Auth user a principal acts as, or null.
- *
- * The inverse of `principalForUser`, and the reason it is needed: a hub token's `sub` is a
- * `prn_…`, while every station-scoped call in this hub resolves on a Better Auth id —
- * `getStation(userId, …)`, `requireLive(userId, …)`. Handing a principal id to those is exactly
- * the defect that killed every bridge-mode room on 2026-08-31 (agentpod#399, #400): it matched
- * no row, for any room, for any sender, and the suite stayed green because the fakes accepted
- * any id.
- *
- * So a hub token is translated to a Better Auth id **once, at the edge**, and everything below
- * that layer keeps the meaning of `user.id` it already had.
- *
- * Null for an agent or a service, which have no Better Auth identity by construction. That is a
- * refusal at the caller, not an error here.
- */
-/**
- * Resolve the `sub` of a hub-issued token to a Better Auth user id.
- *
- * **Both shapes are real, and assuming one of them was a live 403.** A token's `sub` is:
- *
- *   - a `prn_…` principal id, when the token was minted by a service signing key —
- *     `station-token.ts`, `mintPrincipalAssertion`, the bridge; or
- *   - a **Better Auth user id**, for every token that came out of a session or the
- *     authorization-code exchange, because Better Auth's jwt plugin overwrites `sub` with
- *     `session.user.id` after `definePayload` has run.
- *
- * `authMiddleware` resolved only the first, so every token a person obtained through
- * `fleet login` was refused with "That principal has no account on this hub" — `fleet nodes`,
- * `agents`, `stats` and `activity`, all of them, since the middleware learned to read hub
- * tokens at all. The test that should have caught it minted its own token with a `prn_` subject,
- * so it exercised a shape the hub does not actually produce.
- *
- * The principal mapping is tried FIRST and the user table second. Both are lookups against rows
- * that exist; nothing here trusts the token's own claim about which kind it carries, so a
- * `prn_` that names no identity stays refused rather than falling through to be read as a user
- * id that happens not to exist either.
- */
-export async function userIdForTokenSubject(sub: string): Promise<string | null> {
-  const viaPrincipal = await userIdForPrincipal(sub);
-  if (viaPrincipal) return viaPrincipal;
-
-  // The second shape, answered from the SAME table rather than from `user`.
-  //
-  // "Is this a Better Auth user id?" is not the question — `user` would answer that, and would
-  // admit somebody who has an account here but is not a principal. The question the refusal
-  // below actually asks is "does this subject have a principal on this hub", and a
-  // `better-auth` identity row IS that fact, read in the other direction. Any token this hub
-  // mints for a human already implies one, because `buildTokenPayload` refuses to mint without
-  // a principal.
-  //
-  // Keeping both directions on one table also keeps them consistent: an identity unlinked from
-  // a principal stops resolving by either route at the same moment, rather than one path
-  // outliving the other.
-  const [identity] = await db
-    .select({ externalId: principalIdentities.externalId })
-    .from(principalIdentities)
-    .where(
-      and(
-        eq(principalIdentities.externalId, sub),
-        eq(principalIdentities.system, "better-auth")
-      )
-    )
-    .limit(1);
-  return identity?.externalId ?? null;
-}
-
-export async function userIdForPrincipal(principalId: string): Promise<string | null> {
-  const [identity] = await db
-    .select({ externalId: principalIdentities.externalId })
-    .from(principalIdentities)
-    .where(
-      and(
-        eq(principalIdentities.principalId, principalId),
-        eq(principalIdentities.system, "better-auth")
-      )
-    )
-    .limit(1);
-  return identity?.externalId ?? null;
+  return PrincipalId.safeParse(userId).success ? userId : null;
 }

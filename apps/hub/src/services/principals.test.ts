@@ -1,206 +1,87 @@
 /**
- * Service Test: principals (mint + Better Auth lookup)
+ * Service Test: principals, read from and (for agents) created at the organization plane.
  *
- * Uses the local Docker test-postgres (localhost:5434).
- * DATABASE_URL must be set before any src/ modules are imported.
+ * The run's fake plane (`tests/helpers/fake-plane.ts`) stands behind the real client and
+ * directory seams, so these go through the production functions end to end.
  */
 
-// ─── Set env vars BEFORE any src/ imports ─────────────────────────────────────
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ||
   "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
 process.env.NODE_ENV = "test";
 
-import { describe, expect, test, beforeAll, afterAll } from "bun:test";
-import { eq } from "drizzle-orm";
-import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../tests/helpers/database";
-import { resolveTenantForUser } from "../auth/tenant";
-import { db, rawSql } from "../db/drizzle";
-import { stations } from "../db/schema/stations";
-import { seedAgentPrincipals } from "../../scripts/seed-agent-principals";
+import { describe, expect, test } from "bun:test";
 import {
   createPrincipal,
+  humanPrincipalIdForUser,
+  listPrincipals,
   principalById,
   principalForUser,
-  suspendPrincipal,
-  restorePrincipal,
+  principalHandle,
+  SUSPENDED_AT_UNKNOWN,
 } from "./principals";
-import { buildTokenPayload } from "../auth/jwt-claims";
+import { fakePlane } from "../../tests/helpers/fake-plane";
 
-// Fixed handles, cleaned up below: running this suite twice against the same
-// database (no reset between runs, unlike CI) previously hit
-// "principals_org_handle_idx" on the second pass because nothing deleted
-// these rows — the same reason every DB-bound fixture in this slice cleans up
-// its own fixed handles in `afterAll`.
-const HANDLES = ["writer-quill", "analyst-echo", "rakesh"];
-
-beforeAll(async () => {
-  await ensurePgMigrations();
-  await rawSql`DELETE FROM principals WHERE handle = ANY(${HANDLES})`;
-});
-
-afterAll(async () => {
-  try {
-    await rawSql`DELETE FROM principals WHERE handle = ANY(${HANDLES})`;
-  } catch {
-    // cleanup only
-  }
-});
+const RUN = crypto.randomUUID().slice(0, 8);
 
 describe("principals", () => {
-  test("mints an agent principal with a grammar-valid id", async () => {
-    const id = await createPrincipal({ kind: "agent", handle: "writer-quill" });
+  test("mints an agent principal at the plane, with a grammar-valid id", async () => {
+    const id = await createPrincipal({ kind: "agent", handle: `writer-quill-${RUN}` });
     expect(id).toMatch(/^prn_[0-9a-f]{20}$/);
+    expect(fakePlane.principals.get(id)?.kind).toBe("agent");
   });
 
-  test("refuses a second principal on the same handle", async () => {
-    await createPrincipal({ kind: "agent", handle: "analyst-echo" });
+  test("refuses a second principal on the same handle (the plane's 409)", async () => {
+    await createPrincipal({ kind: "agent", handle: `analyst-echo-${RUN}` });
     // A handle is an address: two claimants make the mxid it produces ambiguous.
-    expect(createPrincipal({ kind: "agent", handle: "analyst-echo" })).rejects.toThrow();
+    await expect(createPrincipal({ kind: "agent", handle: `analyst-echo-${RUN}` })).rejects.toThrow();
   });
 
-  test("finds the principal behind a Better Auth user", async () => {
-    const id = await createPrincipal({ kind: "human", handle: "rakesh", userId: "usr-uuid-here" });
-    const found = await principalForUser("usr-uuid-here");
+  test("humans and services are made at the plane, never by the hub", async () => {
+    await expect(createPrincipal({ kind: "human", handle: `h-${RUN}` })).rejects.toThrow(/org plane/);
+    await expect(createPrincipal({ kind: "service", handle: `s-${RUN}` })).rejects.toThrow(/org plane/);
+  });
+
+  test("an account id IS the human's principal (contract §2)", async () => {
+    const id = fakePlane.addHuman({ handle: `rakesh-${RUN}` });
+    const found = await principalForUser(id);
     expect(found?.id).toBe(id);
     expect(found?.kind).toBe("human");
+    expect(await humanPrincipalIdForUser(id)).toBe(id);
   });
 
   test("a user with no principal resolves to null, never to a default", async () => {
     // Falling back would hand one principal's authority to an unmapped caller.
-    expect(await principalForUser("usr-nobody")).toBeNull();
+    expect(await principalForUser("prn_ffffffffffffffffffff")).toBeNull();
+    expect(await humanPrincipalIdForUser("not-a-principal-id")).toBeNull();
   });
 
-  test("both resolvers carry the linked user's email and verification state", async () => {
-    // The join `buildTokenPayload` relies on to mint `email`/`email_verified` —
-    // proven here against a real `user` row, not an injected resolver, since
-    // the resolver-injecting tests in jwt-claims.test.ts prove what
-    // buildTokenPayload does with a result, never that this query produces one.
-    const userId = `usr-email-${crypto.randomUUID().slice(0, 8)}`;
-    const email = `${userId}@example.com`;
-    await createTestUser({ id: userId, email, emailVerified: false });
-    const id = await createPrincipal({
-      kind: "human",
-      handle: `t-${crypto.randomUUID().slice(0, 8)}`,
-      userId,
-    });
-
-    try {
-      const byUser = await principalForUser(userId);
-      expect(byUser?.email).toBe(email);
-      expect(byUser?.emailVerified).toBe(false);
-
-      const byId = await principalById(id);
-      expect(byId?.email).toBe(email);
-      expect(byId?.emailVerified).toBe(false);
-    } finally {
-      await rawSql`DELETE FROM "user" WHERE id = ${userId}`;
-    }
+  test("an agent is not a user", async () => {
+    const id = await createPrincipal({ kind: "agent", handle: `agent-not-user-${RUN}` });
+    expect(await principalForUser(id)).toBeNull();
+    expect((await principalById(id))?.kind).toBe("agent");
   });
 
-  test("an agent has no Better Auth identity, so both resolvers return no email", async () => {
-    const id = await createPrincipal({ kind: "agent", handle: `t-${crypto.randomUUID().slice(0, 8)}` });
-    const byId = await principalById(id);
-    expect(byId?.email).toBeNull();
-    expect(byId?.emailVerified).toBeNull();
-  });
-});
-
-describe("a principal can be suspended", () => {
-  test("a suspended principal cannot be minted for", async () => {
-    const id = await createPrincipal({ kind: "agent", handle: `t-${crypto.randomUUID().slice(0, 8)}` });
-    await suspendPrincipal(id);
-    // Fail closed, and for a reason a reader can act on — not the same message
-    // as "no principal", which means something different.
-    expect(buildTokenPayload({ principalId: id })).rejects.toThrow(/suspended/);
+  test("no email: the plane's principal reads carry none and nothing in the hub needs one", async () => {
+    const id = fakePlane.addHuman({ handle: `mail-${RUN}` });
+    const p = await principalById(id);
+    expect(p?.email).toBeNull();
+    expect(p?.emailVerified).toBeNull();
   });
 
-  test("restoring lets it mint again", async () => {
-    const id = await createPrincipal({ kind: "agent", handle: `t-${crypto.randomUUID().slice(0, 8)}` });
-    await suspendPrincipal(id);
-    await restorePrincipal(id);
-    const payload = await buildTokenPayload({ principalId: id });
-    expect(payload.sub).toBe(id);
+  test("a suspended principal reads as suspended, and a handle as its handle", async () => {
+    const id = await createPrincipal({ kind: "agent", handle: `susp-${RUN}` });
+    await fakePlane.suspend(id);
+    expect((await principalById(id))?.suspendedAt).toBe(SUSPENDED_AT_UNKNOWN);
+    expect(await principalHandle(id)).toBe(`susp-${RUN}`);
+    expect((await listPrincipals()).find((p) => p.id === id)?.suspendedAt).toBe(SUSPENDED_AT_UNKNOWN);
   });
 
-  test("a suspended principal's own session cannot mint either, through the real user lookup", async () => {
-    // The two subject paths in buildTokenPayload merge before the suspension
-    // check, so proving the principalId path (above) does not prove the user
-    // path — a later refactor that special-cased either branch could pass
-    // every other test while a suspended human kept minting tokens. This goes
-    // through the real principalForUser, not an injected resolver, so it
-    // fails if that merge is ever undone.
-    const userId = `usr-${crypto.randomUUID()}`;
-    const id = await createPrincipal({
-      kind: "human",
-      handle: `t-${crypto.randomUUID().slice(0, 8)}`,
-      userId,
-    });
-    await suspendPrincipal(id);
-    expect(buildTokenPayload({ user: { id: userId } })).rejects.toThrow(/suspended/);
-  });
-});
-
-// ─── stations record which agent occupies them ────────────────────────────────
-
-const STATION_USER = "test-user-station-occupancy";
-const STATION_NODE = "node_station_occupancy";
-const UNOCCUPIED_STATION_ID = "station_unoccupied_test";
-
-const stationRow = async (id: string) => {
-  const [row] = await db.select().from(stations).where(eq(stations.id, id));
-  if (!row) throw new Error(`no station row for ${id}`);
-  return row;
-};
-
-beforeAll(async () => {
-  await createTestUser({
-    id: STATION_USER,
-    email: "station-occupancy@example.com",
-    name: "Station Occupancy",
-  });
-  const tenant = await resolveTenantForUser(STATION_USER);
-  await rawSql`DELETE FROM stations WHERE node_id = ${STATION_NODE}`;
-  await rawSql`DELETE FROM nodes WHERE id = ${STATION_NODE}`;
-  await rawSql`
-    INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
-    VALUES (${STATION_NODE}, ${tenant}, ${STATION_USER}, 'occupancy-box', 'occupancy-box', 'linux', 'amd64', 2, 'online', 'x', now())`;
-  await rawSql`
-    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, created_at)
-    VALUES (${UNOCCUPIED_STATION_ID}, ${tenant}, ${STATION_USER}, ${STATION_NODE}, 'openclaw', 'openclaw:unoccupied', 'leaf', 'unoccupied', now())`;
-});
-
-afterAll(async () => {
-  try {
-    await rawSql`DELETE FROM stations WHERE node_id = ${STATION_NODE}`;
-    await rawSql`DELETE FROM nodes WHERE id = ${STATION_NODE}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${STATION_USER}`;
-  } catch {
-    // cleanup only
-  }
-});
-
-describe("stations record which agent occupies them", () => {
-  test("a station with no agent has no principal, and that is legal", async () => {
-    const s = await stationRow(UNOCCUPIED_STATION_ID);
-    expect(s.principalId).toBeNull();
-  });
-
-  test("seeding gives every adopted station an agent principal, and is idempotent", async () => {
-    const first = await seedAgentPrincipals();
-    const second = await seedAgentPrincipals();
-    expect(first.created).toBeGreaterThan(0);
-    expect(second.created).toBe(0); // re-running must not mint a second identity
-    // The second run's "nothing to do" must be a reported number, not silence
-    // — everything the first run touched now counts as skipped.
-    expect(second.skipped).toBeGreaterThanOrEqual(first.created);
-
-    // The station this suite set up is one of the ones seeding must have
-    // reached — otherwise `first.created > 0` could be satisfied by some
-    // other suite's leftover row and this test would prove nothing about
-    // the station above.
-    const s = await stationRow(UNOCCUPIED_STATION_ID);
-    expect(s.principalId).toMatch(/^prn_[0-9a-f]{20}$/);
+  test("the list names a human's account id, and none for an agent", async () => {
+    const human = fakePlane.addHuman({ handle: `list-h-${RUN}` });
+    const agent = await createPrincipal({ kind: "agent", handle: `list-a-${RUN}` });
+    const all = await listPrincipals();
+    expect(all.find((p) => p.id === human)?.userId).toBe(human);
+    expect(all.find((p) => p.id === agent)?.userId).toBeNull();
   });
 });

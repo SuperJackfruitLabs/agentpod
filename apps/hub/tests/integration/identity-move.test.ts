@@ -46,11 +46,17 @@ process.env.NODE_ENV = "test";
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
-import { createPrincipal } from "../../src/services/principals";
-import { identitiesFor } from "../../src/services/principal-identities";
+import { createPrincipal, forgetPrincipals } from "../helpers/principals";
+import { fakePlane } from "../helpers/fake-plane";
+
+/** The Matrix ids the org plane links to a principal — one at most (PUT replaces). */
+const planeMatrixIds = (principalId: string) =>
+  [...fakePlane.identities]
+    .filter(([k, v]) => v === principalId && k.startsWith("matrix\u0000"))
+    .map(([k]) => k.slice("matrix\u0000".length));
 import { createMatrixClient, type MatrixClient } from "../../src/services/matrix-as/client";
 import { bridgeLocalpart, bridgeUserId, stationSpeaker } from "../../src/services/matrix-as/names";
 import { projectGate, type GatePendingDelivery } from "../../src/services/matrix-as/gates";
@@ -252,7 +258,6 @@ async function stationMidFleet(label: string): Promise<{ roomId: string; oldMxid
            bridge_matrix_id = ${issued.userId},
            matrix_identity_mode = 'harness'
      WHERE id = ${STATION}`;
-  await rawSql`DELETE FROM principal_identities WHERE principal_id = ${AGENT_PRINCIPAL}`;
 
   return { roomId, oldMxid: issued.userId };
 }
@@ -290,9 +295,8 @@ afterAll(async () => {
     await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
     await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${AGENT_PRINCIPAL}`;
-    await rawSql`DELETE FROM principals WHERE id IN (${AGENT_PRINCIPAL}, ${OWNER_PRINCIPAL})`;
-    await rawSql`DELETE FROM "user" WHERE id = ${OWNER}`;
+    await forgetPrincipals({ ids: [AGENT_PRINCIPAL, OWNER_PRINCIPAL] });
+    await deleteTestUser(OWNER);
   } catch {
     // cleanup only
   }
@@ -436,7 +440,7 @@ live("the ordered move, against a real homeserver", () => {
     expect(await speakerFor(STATION)).toBe(oldMxid);
   });
 
-  test("retiring records the old mxid against the same principal, then retires its credential", async () => {
+  test("retiring retires the old credential, and never re-links the old mxid at the plane", async () => {
     const { oldMxid } = await stationMidFleet("retire");
     await preJoinNewIdentity(STATION, deps());
     // Convergence first, and only then retirement — the order this file
@@ -445,8 +449,9 @@ live("the ordered move, against a real homeserver", () => {
     // order in which it can be called at all.
     await onNodeReportedMatrixId(STATION, NEW_MXID, deps());
 
-    const ids = await identitiesFor(AGENT_PRINCIPAL);
-    expect(ids).toContainEqual({ system: "matrix", externalId: oldMxid });
+    // The plane holds one Matrix id per principal, the live one; writing the old one there would
+    // un-link the live one (P3 Task 17). The retirement is in the hub's log instead.
+    expect(planeMatrixIds(AGENT_PRINCIPAL)).not.toContain(oldMxid);
     // §5: history stays readable and attributable, and the credential stops
     // being a live login. See `accountIsActive` for what this homeserver does
     // and does not let an appservice do about the account itself.
@@ -488,7 +493,7 @@ live("the ordered move, against a real homeserver", () => {
     // credential an operator would put the harness back on still works.
     expect(await roomMembers(roomId, oldMxid)).toContain(oldMxid);
     expect(await accountIsActive(oldMxid)).toBe(true);
-    expect(await identitiesFor(AGENT_PRINCIPAL)).toEqual([]);
+    expect(planeMatrixIds(AGENT_PRINCIPAL)).not.toContain(oldMxid);
   });
 
   test("a gate for a station mid-move lands in the room, as the identity that holds it", async () => {
@@ -617,7 +622,7 @@ describe("a station whose room choice is ambiguous refuses the move", () => {
     await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
   });
 
-  test("but retirement still records the identity and revokes its credential", async () => {
+  test("but retirement still revokes its credential", async () => {
     // Fix round 1's Minor. An ambiguous room set says only that this cannot
     // choose which room the old identity should LEAVE. Recording who it was —
     // the thing that keeps a room's history attributable — and revoking its
@@ -625,7 +630,6 @@ describe("a station whose room choice is ambiguous refuses the move", () => {
     // somewhere else left an unattributable history and a live credential on
     // a node. No membership is asserted here, so no homeserver is involved.
     await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
-    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${AGENT_PRINCIPAL}`;
     await rawSql`
       INSERT INTO matrix_rooms (room_id, tenant_id, station_id, alias, created_at)
       VALUES (${"!amb2-a-" + RUN}, ${TENANT}, ${STATION}, ${"#amb2-a-" + RUN}, now() - interval '2 days'),
@@ -666,15 +670,13 @@ describe("a station whose room choice is ambiguous refuses the move", () => {
       },
     });
 
-    expect(outcome).toMatchObject({ status: "retired", roomId: null, left: false, recorded: true });
+    // `recorded` is false since the org plane owns identities: it holds one Matrix id per
+    // principal, and that one is the live address (P3 Task 17).
+    expect(outcome).toMatchObject({ status: "retired", roomId: null, left: false, recorded: false });
     expect(revoked).toEqual([stale]);
-    expect(await identitiesFor(AGENT_PRINCIPAL)).toContainEqual({
-      system: "matrix",
-      externalId: stale,
-    });
+    expect(planeMatrixIds(AGENT_PRINCIPAL)).not.toContain(stale);
 
     await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
-    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${AGENT_PRINCIPAL}`;
   });
 });
 

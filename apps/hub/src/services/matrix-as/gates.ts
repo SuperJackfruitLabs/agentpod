@@ -44,7 +44,7 @@ import { GATE_REQUEST_CONTENT_KEY, type GateRequestCard } from "@agentpod/contra
 import { noteHubEvent } from "../push/hub-events";
 import { legacyRequestEvents } from "./legacy-events";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix-identity";
-import { assertionFailureCode, type AssertionSubject } from "../../auth/service-signing";
+import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plane/assertion";
 import { stationSpeaker } from "./names";
 import { principalHandle } from "../principals";
 import { roomForStation } from "./station-room";
@@ -156,6 +156,18 @@ export interface GateProjectionDeps {
     opts?: { boardName?: string },
   ): Promise<{ roomId: string; speakerMxid: string } | null>;
 
+  /**
+   * Whether anybody but the board's speaker has JOINED the room — not merely been invited.
+   *
+   * 2026-10-07, room !LEug4KhmCbPF9HMHqY: a board's first gate made the board room,
+   * invited the human and posted at once. They had not accepted yet, so the card was
+   * encrypted to the speaker alone and could never be read on their devices. A gate is
+   * therefore held until this answers true (operator decision: the gate arrives after
+   * the human has joined). Optional so a caller that builds no board room keeps working;
+   * production wires it (`src/index.ts`). A throw is a send failure like any other.
+   */
+  humanJoined?(roomId: string, speakerMxid: string): Promise<boolean>;
+
   /** Sends as a station's own virtual user. Returns the event id, or null. */
   sendCustomEvent(
     userId: string,
@@ -185,6 +197,13 @@ export interface GateProjectionDeps {
 export type ProjectionOutcome =
   | { status: "sent"; eventId: string; roomId: string }
   | { status: "already" }
+  /**
+   * The board room exists but nobody has joined it yet, so the gate is held rather
+   * than encrypted to the speaker alone. No claim is taken: the hold lives in
+   * superpipeline's pending list, which the sweep and the join trigger both re-read,
+   * so neither a late join nor a hub restart can lose it.
+   */
+  | { status: "awaiting-join"; roomId: string }
   /**
    * There is no room to post into at all. `midMove` for the same reason
    * `no-agent` and `no-speaker` carry it (spec §6 names all three): a station
@@ -454,6 +473,24 @@ export async function projectGate(
       boardId: d.boardId,
     });
     return { status: "no-room" };
+  }
+
+  // Held, not posted, until somebody has joined to receive the room key — see
+  // `humanJoined`. Asked before the claim so a held gate leaves no row behind. A gate
+  // that already has a row is `already`, whatever the room's membership is now.
+  if (deps.humanJoined && !(await deps.humanJoined(found.roomId, found.speakerMxid))) {
+    const [posted] = await db
+      .select({ gateId: matrixGateEvents.gateId })
+      .from(matrixGateEvents)
+      .where(eq(matrixGateEvents.gateId, d.gateId))
+      .limit(1);
+    if (posted) return { status: "already" };
+    log.info("gate held until a human joins its board room", {
+      gateId: d.gateId,
+      boardId: d.boardId,
+      roomId: found.roomId,
+    });
+    return { status: "awaiting-join", roomId: found.roomId };
   }
 
   // Claim the gate before sending. See this function's doc comment.

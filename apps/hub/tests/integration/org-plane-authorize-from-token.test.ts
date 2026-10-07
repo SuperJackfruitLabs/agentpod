@@ -2,10 +2,10 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || "postgres://agentpod:agen
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
-import { createPrincipal } from "../../src/services/principals";
+import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { setOrgPlaneForTests, TEST_PLANE } from "../../src/auth/org-plane/config";
 import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../../src/services/org-plane/directory";
 import { OrgPlaneError, type PlanePrincipal } from "../../src/services/org-plane/client";
@@ -127,9 +127,9 @@ afterAll(async () => {
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${ME}`;
     await rawSql`DELETE FROM hub_operators WHERE principal_id = ${ME}`;
     await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
-    await rawSql`DELETE FROM principals WHERE handle = 'plane-authz-agent'`;
+    await forgetPrincipals({ handles: ["plane-authz-agent"] });
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${ME}`;
+    await deleteTestUser(ME);
   } catch {
     // cleanup only
   }

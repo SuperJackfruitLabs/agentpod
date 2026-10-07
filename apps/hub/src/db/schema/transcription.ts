@@ -14,7 +14,6 @@
 
 import { pgTable, text, integer, timestamp, foreignKey } from "drizzle-orm/pg-core";
 import { stations } from "./stations";
-import { user } from "./auth";
 import { tenants } from "./tenants";
 
 export const stationTranscription = pgTable("station_transcription", {
@@ -33,7 +32,7 @@ export const stationTranscription = pgTable("station_transcription", {
   apiKeyEncrypted: text("api_key_encrypted"),
   maxSeconds: integer("max_seconds"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+  updatedBy: text("updated_by"),
 }, (t) => [
   // The tenant is the station's, copied — held honest by a composite FK onto
   // `stations_id_tenant_idx` (migration 0046), as `matrix_rooms` is.

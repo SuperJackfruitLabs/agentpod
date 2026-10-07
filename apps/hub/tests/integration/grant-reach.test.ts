@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Capability } from "@agentpod/contract";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { setGrant, deleteGrant } from "../../src/services/grants";
-import { createPrincipal } from "../../src/services/principals";
+import { setGrant } from "../../src/services/grants";
+import { createPrincipal, forgetPrincipals, clearGrant } from "../helpers/principals";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import {
   REACH_BEARING,
@@ -71,12 +71,10 @@ beforeAll(async () => {
 afterAll(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
   try {
-    await rawSql`DELETE FROM principal_grants WHERE principal_id IN (${USER_PRINCIPAL}, ${ADMIN_PRINCIPAL})`;
-    await rawSql`DELETE FROM principal_identities WHERE external_id IN (${USER}, ${ADMIN_USER})`;
     await rawSql`DELETE FROM stations WHERE id = ${STATION_ID}`;
-    await rawSql`DELETE FROM principals WHERE handle IN ('grant-reach-it-user', 'grant-reach-it-admin', 'grant-reach-it-agent')`;
+    await forgetPrincipals({ handles: ["grant-reach-it-user", "grant-reach-it-admin", "grant-reach-it-agent"] });
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`DELETE FROM "user" WHERE id IN (${USER}, ${ADMIN_USER})`;
+    await deleteTestUsers([USER, ADMIN_USER]);
   } catch {
     // cleanup only
   }
@@ -158,7 +156,7 @@ describe("requireGrantReach", () => {
   });
 
   test("refuses a principal with no grant at all", async () => {
-    await deleteGrant(USER_PRINCIPAL);
+    clearGrant(USER_PRINCIPAL);
     const e = await denial(() => requireGrantReach(USER, STATION, "terminal", "mutate"));
     expect(isGrantReachDenied(e)).toBe(true);
   });
@@ -194,7 +192,7 @@ describe("requireFleetGrantReach", () => {
   // is what is left, so these two facts are the whole rule now.
 
   test("an admin may, even with no grant at all", async () => {
-    await deleteGrant(ADMIN_PRINCIPAL); // NO_GRANT is legal, and irrelevant to an admin
+    clearGrant(ADMIN_PRINCIPAL); // NO_GRANT is legal, and irrelevant to an admin
     expect(await denial(() => requireFleetGrantReach(ADMIN_PRINCIPAL))).toBeNull();
   });
 

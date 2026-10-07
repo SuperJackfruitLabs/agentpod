@@ -9,7 +9,6 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { stations } from "./stations";
-import { principals } from "./organization";
 
 /**
  * Applied Application Service transactions.
@@ -106,7 +105,7 @@ export const matrixRooms = pgTable(
      * binding does not un-bind just because its station's current occupant
      * changed — so it would stay nullable even with a writer in place.
      */
-    principalId: text("principal_id").references(() => principals.id, { onDelete: "set null" }),
+    principalId: text("principal_id"),
     alias: text("alias").notNull(),
     /** The ACP session this room is talking to, if one is open. */
     acpSessionId: text("acp_session_id"),

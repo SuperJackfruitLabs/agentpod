@@ -46,12 +46,12 @@ import type { DetectedStation } from "@agentpod/contract";
 
 // src/ imports — DB URL is already set above
 import { rawSql } from "../../src/db/drizzle";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { waitForNodeOnline } from "../helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { adoptStations } from "../../src/services/station-registry";
-import { createPrincipal } from "../../src/services/principals";
+import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/tenant-scope";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { harnessConfigRoutes } from "../../src/routes/harness-config";
@@ -130,14 +130,13 @@ afterAll(async () => {
     await rawSql`DELETE FROM applied_harness_config WHERE tenant_id IN (${BOOTSTRAP_TENANT_ID}, ${OTHER_TENANT})
                    AND station_id IN (SELECT id FROM stations WHERE user_id IN (${TEST_USER}, ${AGENT_USER}))`;
     await rawSql`DELETE FROM declared_harness_config WHERE declared_by IN (${TEST_USER}, ${AGENT_USER})`;
-    await rawSql`DELETE FROM principal_identities    WHERE principal_id = ${agentPrincipalId}`;
-    await rawSql`DELETE FROM principals              WHERE id = ${agentPrincipalId}`;
+    await forgetPrincipals({ ids: [agentPrincipalId] });
     await rawSql`DELETE FROM station_audit           WHERE user_id IN (${TEST_USER}, ${AGENT_USER})`;
     await rawSql`DELETE FROM stations                WHERE user_id IN (${TEST_USER}, ${AGENT_USER})`;
     await rawSql`DELETE FROM nodes                   WHERE user_id IN (${TEST_USER}, ${AGENT_USER})`;
     await rawSql`DELETE FROM enrollment_tokens        WHERE user_id IN (${TEST_USER}, ${AGENT_USER})`;
     await rawSql`DELETE FROM tenants                 WHERE id = ${OTHER_TENANT}`;
-    await rawSql`DELETE FROM "user"                  WHERE id IN (${TEST_USER}, ${AGENT_USER})`;
+    await deleteTestUsers([TEST_USER, AGENT_USER]);
   } catch {
     // Ignore cleanup errors
   }

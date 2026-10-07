@@ -1,89 +1,35 @@
 /**
- * `GET /api/fleet/dispatchable` — the agents a hub token's holder may actually
+ * `GET /api/fleet/dispatchable` — the agents a plane token's holder may actually
  * dispatch, with the handles a person recognises.
  *
- * This exists because the obvious answer does not work and could not be made
- * to work safely. superpipeline's agent picker used to ask
- * `GET /api/admin/principals` with `credentials: "include"`, which fails twice
- * over from `superpipeline.dev`: the hub's session cookie is `SameSite=Lax` so a
- * cross-site `fetch` never carries it, and `authMiddleware` accepts a Better
- * Auth session, a session-token Bearer or the static API_TOKEN — never a
- * hub-issued JWT. Teaching that middleware about JWTs would change how EVERY
- * route authenticates for one screen's benefit, and `/api/admin/*` is
- * admin-gated for reasons that have nothing to do with adding an agent to a
- * board. So this is a purpose-built endpoint instead, and it is narrower than
- * the admin list in both directions: it needs no admin role, and it returns
- * only what the caller may use rather than every principal in the fleet.
+ * Built for superpipeline's agent picker, from another registrable domain. It is
+ * narrower than the admin list in both directions: it needs no admin role, and it
+ * returns only what the caller may use rather than every principal in the fleet.
  *
  * **The authorization decision is read from the verified token and from
- * nowhere else.** `mayDispatch` is a claim this hub signed; it is not a query
+ * nowhere else.** `mayDispatch` is a claim the org plane signed; it is not a query
  * parameter, not a header, and not derived from anything the caller sent
  * alongside the token. That is the whole endpoint. If the answer could be
  * influenced by the request, this would hand any authenticated caller the
  * whole fleet — which is precisely the list it was built to avoid returning.
  *
  * It authenticates itself, so it is registered ahead of `authMiddleware` in
- * `index.ts`, beside the other self-authenticating routes — see the comment
- * there, and `auth-authorize.ts` for the same structural note.
+ * `index.ts`, beside the other self-authenticating routes.
  */
 
 import { Hono } from "hono";
-import { createLocalJWKSet, jwtVerify, type JSONWebKeySet } from "jose";
 
-import { ALG, publishedJwks, verifyPlaneBearer } from "../auth/hub-token";
-import { orgPlane } from "../auth/org-plane/config";
-import { config } from "../config";
+import { verifyPlaneBearer } from "../auth/hub-token";
 import { listPrincipals as defaultListPrincipals } from "../services/principals";
 
 /**
- * The one algorithm this hub signs with, on both key sets — Better Auth's
- * `jwt` plugin defaults to it and `service-signing.ts` pins it explicitly.
- *
- * Named here so verification cannot be talked into another one by a token's
- * own header. `jose` would otherwise accept whatever the matched key admits,
- * and "the token says which algorithm to check it with" is the shape of every
- * classic JWT confusion bug.
- */
-
-/**
- * The key set `GET /api/auth/jwks` publishes: Better Auth's keys plus this
- * hub's service signing keys.
- *
- * Both halves, deliberately, because both halves are what a consumer is told
- * to verify against — superpipeline fetches that one URL and accepts anything in
- * it. A token signed by a service key is a hub token by the ecosystem's own
- * definition (`charter → decisions/2026-08-15-one-issuer-and-offline-
- * verification.md`), and accepting it here widens nothing: what it may
- * enumerate is still exactly the `mayDispatch` the hub put inside it. The
- * bridge's assertion of a human carries that human's grant; a station's own
- * agent token is refused below for being an agent, not for its key.
- *
- * Assembled from the same two sources as the jwks route in `index.ts`. They
- * must agree: a key published there and not accepted here is a token that
- * verifies everywhere in the suite except at this endpoint, which reads as
- * "you have no permission" and is the hardest kind of failure to trace.
- *
- * Not cached. Both reads are local — the hub is the issuer — and a cache would
- * mean a service key minted a second ago (they are created lazily, on first
- * use) verifying as a forgery until it expired.
- */
-// `publishedJwks` now lives in `auth/hub-token.ts`, shared with `authMiddleware`, so a key
-// this hub publishes cannot be accepted in one place and refused in the other.
-
-
-/**
- * What the route needs from the rest of the hub.
- *
- * Injectable for the same reason `AuthorizeDeps` is: so a test can state a
- * principal list or a key set directly instead of arranging the world that
- * produces one. Real callers pass nothing.
+ * What the route needs from the rest of the hub. Injectable so a test can state a principal list
+ * or a verification result directly. Real callers pass nothing.
  */
 export interface DispatchableDeps {
-  /** The keys a token may be signed with. Defaults to the published set. */
-  jwks?: () => Promise<JSONWebKeySet>;
   /** Every principal, for resolving ids to handles. Defaults to the real one. */
   listPrincipals?: typeof defaultListPrincipals;
-  /** The org-plane door, used only while ORG_PLANE_* is set. */
+  /** The one verifying door every route shares. */
   verifyPlane?: typeof verifyPlaneBearer;
 }
 
@@ -96,7 +42,6 @@ function refuse(description: string) {
 }
 
 export function createDispatchableRoutes(deps: DispatchableDeps = {}) {
-  const jwks = deps.jwks ?? publishedJwks;
   const listPrincipals = deps.listPrincipals ?? defaultListPrincipals;
   const verifyPlane = deps.verifyPlane ?? verifyPlaneBearer;
 
@@ -107,50 +52,29 @@ export function createDispatchableRoutes(deps: DispatchableDeps = {}) {
     if (!match) {
       return c.json(
         refuse(
-          "This endpoint takes a hub-issued token in `Authorization: Bearer`. It does not read the hub's session cookie, which a browser on another registrable domain would not send anyway."
+          "This endpoint takes an organization-plane token in `Authorization: Bearer`. It does not read a session cookie, which a browser on another registrable domain would not send anyway."
         ),
         401
       );
     }
 
-    let claims: Record<string, unknown>;
-    if (orgPlane()) {
-      // Under the plane, its tokens only. Any first-party client's human token for this hub's
-      // audience is accepted — superpipeline-web asks for one for its picker (contract §3.1).
-      const r = await verifyPlane(match[1]!);
-      if (!r.ok) {
-        return r.status === 403
-          ? c.json(r.body, 403)
-          : c.json(
-              refuse(
-                "That token is not one this hub will accept: it is unknown, expired, signed by somebody else, or was not issued for this hub."
-              ),
-              401
-            );
-      }
-      claims = r.caller.claims as Record<string, unknown>;
-    } else {
-      try {
-        const verified = await jwtVerify(match[1]!, createLocalJWKSet(await jwks()), {
-          issuer: config.publicUrl,
-          audience: config.publicUrl,
-          algorithms: [ALG],
-        });
-        claims = verified.payload as Record<string, unknown>;
-      } catch {
-        // One sentence for all of: an unknown key, a foreign signature, an
-        // expired token, a wrong issuer or audience, a mangled token. A caller
-        // holding none of them learns nothing about which; the legitimate caller
-        // does not need to be told, because its next move is the same either way
-        // — go back through the authorize flow and get a live one.
-        return c.json(
-          refuse(
-            "That token is not one this hub will accept: it is unknown, expired, signed by somebody else, or was not issued for this hub."
-          ),
-          401
-        );
-      }
+    // Any first-party client's human token for this hub's audience is accepted —
+    // superpipeline-web asks for one for its picker (contract §3.1).
+    const r = await verifyPlane(match[1]!);
+    if (!r.ok) {
+      // One sentence for all of: an unknown key, a foreign signature, an expired token, a wrong
+      // issuer or audience, a mangled token. The legitimate caller's next move is the same either
+      // way — get a live one.
+      return r.status === 403
+        ? c.json(r.body, 403)
+        : c.json(
+            refuse(
+              "That token is not one this hub will accept: it is unknown, expired, signed by somebody else, or was not issued for this hub."
+            ),
+            401
+          );
     }
+    const claims = r.caller.claims as Record<string, unknown>;
 
     // An agent's token must not be able to read the fleet. `mayDispatch` is
     // the authority to ASK an agent to work; it was never the authority to
@@ -171,7 +95,7 @@ export function createDispatchableRoutes(deps: DispatchableDeps = {}) {
     // comment: this line is the endpoint's reason for existing.
     //
     // A non-array claim is read as "permitted nothing" rather than trusted:
-    // per `jwt-claims.ts` an absent control pair means "this issuer does not
+    // per contract §2 an absent control pair means "this issuer does not
     // speak it", and reading that as "everything" is the one mistake that
     // cannot be walked back.
     const granted = Array.isArray(claims.mayDispatch)
@@ -219,5 +143,5 @@ export function createDispatchableRoutes(deps: DispatchableDeps = {}) {
   });
 }
 
-/** The real endpoint, reading the hub's own keys and its own principals. */
+/** The real endpoint: the plane's tokens, and principals read through the plane. */
 export const dispatchableRoutes = createDispatchableRoutes();

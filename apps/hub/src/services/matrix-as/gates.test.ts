@@ -331,7 +331,7 @@ describe("acting on a decision", () => {
 });
 
 import { resolveGateAtSuperpipeline } from "./gates";
-import { AssertionMismatch } from "../../auth/service-signing";
+import { AssertionMismatch } from "../../auth/org-plane/assertion";
 
 /**
  * Calling superpipeline as the person, not as this service.

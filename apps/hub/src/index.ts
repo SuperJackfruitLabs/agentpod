@@ -8,23 +8,22 @@ import { describeDatabase } from './utils/describe-database.ts';
 import { connectionString, initDatabase } from './db/drizzle.ts';
 import { holdHubRunningLock } from './db/hub-running-lock.ts';
 import { resetOrphanedOnlineNodes } from './services/node-registry.ts';
-import { auth } from './auth/drizzle-auth.ts';
 import { authMiddleware } from './auth/middleware.ts';
 import { orgPlaneOutageBody } from './auth/caller-authority.ts';
 // A human at a terminal exchanging a device credential for a short-lived token
-import { deviceRoutes } from './routes/devices.ts';
-import { serviceTokenRoutes } from './routes/service-token.ts';
 import { securityHeadersMiddleware } from './middleware/security-headers.ts';
 import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
 import { createSuperpipelinePushRoutes } from './routes/superpipeline-push.ts';
-import { servicePublicJwks } from './auth/service-signing.ts';
-// GET /api/auth/authorize — the cross-domain handoff's front door (see below)
-import { authorizeRoutes } from './routes/auth-authorize.ts';
 import { projectGate, projectionForGate, tenantForBoard } from './services/matrix-as/gates.ts';
 import { noteGatePosted, reconcileBoardGates } from './services/matrix-as/fleet-gates.ts';
-import { ensureBoardRoom, matrixIdsForBoardHumans } from './services/matrix-as/board-room.ts';
-import { startGateSweeper } from './services/matrix-as/gate-sweep.ts';
+import {
+  boardForHumanJoin,
+  boardRoomHasJoinedHuman,
+  ensureBoardRoom,
+  matrixIdsForBoardHumans,
+} from './services/matrix-as/board-room.ts';
+import { startGateSweeper, sweepBoardNow } from './services/matrix-as/gate-sweep.ts';
 import { startElicitationSweeper } from './services/matrix-as/elicitation-sweep.ts';
 import { projectElicitation, postedElicitationsAwaitingOutcome } from './services/matrix-as/elicitations.ts';
 import { createLogger } from './utils/logger.ts';
@@ -36,7 +35,6 @@ import { websocket } from './ws.ts';
 // Admin routes
 import { adminRouter } from './routes/admin.ts';
 import { meRoutes } from './routes/me.ts';
-import { banCheckMiddleware, signupCheckMiddleware } from './auth/admin-middleware.ts';
 // Cloudflare webhook integration
 import { cloudflareWebhookRoutes } from './routes/cloudflare-webhook.ts';
 // Node fleet enrollment & registry
@@ -120,7 +118,7 @@ const telemetry = await initTelemetry(telemetryConfig);
 console.log('telemetry:', telemetry ? `exporting OTLP to ${telemetryConfig.endpoint}` : '(disabled)');
 
 // Held for the life of the process, from before migrations: operator scripts that must not run
-// under a live hub (scripts/rewrite-user-ids.ts --apply) check for it. src/db/hub-running-lock.ts.
+// under a live hub (the cutover script did; any future one should) check for it. src/db/hub-running-lock.ts.
 await holdHubRunningLock(connectionString);
 
 console.log('Initializing database...');
@@ -152,7 +150,7 @@ const app = new Hono()
   // Matrix event wrote a live credential into journald in clear. Redacting here closes the
   // recurrence; rotating the token alone would not (estate BACKLOG, 2026-09-01).
   .use('*', logger((message, ...rest) => console.log(redactUrlSecrets(message), ...rest)))
-  // CORS configuration - allow credentials for Better Auth cookies
+  // CORS configuration
   .use('*', cors({
     // Origin list lives in config.ts (corsAllowedOrigins) so station-terminal.ts
     // can re-use it for CSWSH defence without duplicating it here.
@@ -174,100 +172,21 @@ const app = new Hono()
   .route('/public/nodes', nodeEnrollRoutes)  // POST /public/nodes/enroll
   // Public node gateway (no session — node authenticates with long-term credentials)
   .route('/public/nodes', gatewayRoutes)     // GET /public/nodes/gateway (WSS)
-  // Which issuer the console and `fleet login` should use (`{ issuer: null }` until ORG_PLANE_* is set)
+  // Which issuer the console and `fleet login` should use: the org plane's (D5).
   .route('/public', createOrgPlaneDiscoveryRoutes())  // GET /public/org-plane
-  // Under ORG_PLANE_* the hub is a pure resource server: every issuer route answers 410
-  // (`issuer_moved`; the device inventory `managed_by_org_plane`). Legacy mode: next().
+  // The hub is a pure resource server: it mints nothing and serves no key set. Every route that
+  // used to live under /api/auth answers 410 (`issuer_moved`; the device inventory
+  // `managed_by_org_plane`), so an old client is told where to go.
   .use('/api/auth/*', retiredIssuerRoutes())
-  // Signup check middleware - block signup if disabled (runs before auth handler)
-  .use('/api/auth/*', signupCheckMiddleware)
-  /**
-   * GET /api/auth/jwks — Better Auth's key set, plus this hub's service
-   * signing keys.
-   *
-   * Registered BEFORE the catch-all below, because Hono matches in
-   * registration order and the catch-all would otherwise swallow it.
-   *
-   * Merged here rather than published separately so consumers keep fetching
-   * exactly one URL. superpipeline asks for `${issuer}/api/auth/jwks` and verifies
-   * against whatever comes back; teaching it about a second endpoint would put
-   * a deployment detail of this hub into another repository's code.
-   *
-   * If the plugin's own response cannot be parsed, this returns it untouched
-   * rather than substituting a set of its own — a JWKS endpoint that starts
-   * serving only half the keys would fail as "not authorized" at every
-   * consumer, which is the least diagnosable outcome available.
-   */
-  .get('/api/auth/jwks', async (c) => {
-    const upstream = await auth.handler(c.req.raw);
-    try {
-      const body = (await upstream.clone().json()) as { keys?: unknown[] };
-      if (!Array.isArray(body.keys)) return upstream;
-      return c.json({ ...body, keys: [...body.keys, ...(await servicePublicJwks())] });
-    } catch {
-      return upstream;
-    }
-  })
-  /**
-   * GET /api/auth/authorize — the door a browser on another registrable domain
-   * walks through to get a hub token
-   * (docs/superpowers/specs/2026-09-02-cross-domain-token-handoff-design.md).
-   *
-   * Registered HERE, beside the jwks route above, for both of the reasons that
-   * route is: Hono matches in registration order, so the Better Auth catch-all
-   * immediately below would otherwise swallow every `/api/auth/*` path this
-   * hub adds of its own; and `authMiddleware` further down 401s anything that
-   * is not a session or the static API_TOKEN, before a route's own logic runs.
-   *
-   * This route authenticates itself — it reads the caller's Better Auth
-   * session and answers a browser that has none with a redirect to sign in
-   * rather than a 401, which is the entire point of it. `stationTokenRoutes`
-   * below sits ahead of the middleware for the same structural reason.
-   */
-  .route('/', authorizeRoutes)
-  /**
-   * /api/auth/devices* — the device credential a human exchanges at a terminal
-   * (`charter → decisions/2026-09-18-a-human-at-a-terminal-has-nothing-to-exchange.md`,
-   * accepted 2026-09-20; `docs/superpowers/specs/2026-09-20-device-credential-design.md`).
-   *
-   * **HERE, above the Better Auth catch-all, and this position is the whole
-   * route.** It shipped below it on 2026-09-20 and every one of these paths
-   * answered 404 in production: Hono matches in registration order, and the
-   * `.on(['GET','POST'], '/api/auth/*', …)` immediately below swallows every
-   * `/api/auth/*` path this hub adds of its own. That is precisely what the
-   * `authorizeRoutes` comment above warns about, and the first version of this
-   * block cited that warning while sitting on the wrong side of it.
-   *
-   * Above `authMiddleware` too, for two reasons rather than one: the exchange
-   * route's credential is `dev_…:secret`, which is no kind of session; and the
-   * three management routes have to accept a hub JWT, because `fleet login`
-   * holds exactly that at the moment it creates a device. They resolve a
-   * session OR a verified hub token themselves, refusing an agent, a bridge
-   * assertion, and — the one that matters — a token that was itself minted
-   * from a device, so a stolen credential cannot mint a replacement that
-   * outlives its revocation.
-   */
-  .route('/api/auth', deviceRoutes)
-  /**
-   * POST /api/auth/service-token — a service principal's credential exchange (superwitness
-   * contract C6). Self-authenticating like the device exchange above, and for the same reason it
-   * must sit ahead of Better Auth's `/api/auth/*` catch-all below.
-   */
-  .route('/api/auth', serviceTokenRoutes)
-  // Better Auth routes - handle authentication (public, no auth middleware)
-  .on(['GET', 'POST'], '/api/auth/*', (c) => {
-    return auth.handler(c.req.raw);
-  })
   /**
    * POST /api/nodes/:nodeId/stations/:stationId/token — a node exchanging its
    * long-term `<nodeId>:<nodeSecret>` credential for a short-lived agent
-   * token. `Bearer <nodeId>:<nodeSecret>` is not a Better Auth session and is
-   * never the static API_TOKEN either, so `authMiddleware` below would 401 it
-   * before the route's own credential check ever ran — the same reason the
-   * jwks route and `/api/auth/*` above are registered here, ahead of it. The
+   * token (asked of the org plane). `Bearer <nodeId>:<nodeSecret>` is not a
+   * plane token and is never the static API_TOKEN either, so `authMiddleware`
+   * below would 401 it before the route's own credential check ever ran. The
    * route authenticates itself; `/api` is still right for it (Bearer passes
    * CSRF, unlike the HMAC-signed `superpipeline-push` receiver under `/public`),
-   * it just cannot sit behind a middleware built for a session.
+   * it just cannot sit behind a middleware built for a person.
    */
   .route('/api', stationTokenRoutes)
   .route('/api', skillArtifactDownloadRoutes)
@@ -297,16 +216,11 @@ const app = new Hono()
    */
   .route('/api', createNodeSpeechRoutes())
   /**
-   * GET /api/fleet/dispatchable — the agents the holder of a hub-issued token
-   * may dispatch, for superpipeline's agent picker
-   * (docs/superpowers/specs/2026-09-02-cross-domain-token-handoff-design.md).
+   * GET /api/fleet/dispatchable — the agents the holder of a plane token
+   * may dispatch, for superpipeline's agent picker.
    *
-   * Registered HERE, ahead of `authMiddleware`, for the same reason
-   * `stationTokenRoutes` above is: the credential it takes is a hub JWT in
-   * `Authorization: Bearer`, which is neither a Better Auth session nor the
-   * static API_TOKEN, so the middleware would 401 it before the route's own
-   * verification ever ran. The route verifies the token itself, against the
-   * key set `/api/auth/jwks` publishes.
+   * Registered HERE, ahead of `authMiddleware`, because it verifies the token
+   * itself and answers in its own error shape.
    *
    * It shares a prefix with `.route('/api/fleet', fleetRoutes)` further down
    * and does not collide with it today — that router serves `/agents` and
@@ -316,7 +230,7 @@ const app = new Hono()
   .route('/', dispatchableRoutes)
   /**
    * GET /api/evidence/runs/:source/:externalRunId and /api/evidence/attempts/:attemptId —
-   * superwitness's reads (contract C5). A hub JWT, verified by the route itself, so it sits here
+   * superwitness's reads (contract C5). A plane token, verified by the route itself, so it sits here
    * ahead of `authMiddleware`, exactly as `dispatchableRoutes` does above.
    */
   .route('/', evidenceRoutes)
@@ -336,12 +250,11 @@ const app = new Hono()
   })
 
   .use('/api/*', authMiddleware)
-  .use('/api/*', banCheckMiddleware) // Block banned users
   .use('/api/*', csrfMiddleware)
   .use('/api/*', activityLoggerMiddleware)
   // Admin endpoints (require admin role)
   .route('/api/admin', adminRouter)
-  .route('/api', meRoutes)                                 // GET /api/me — who the caller is; isAdmin from the operator seat under the plane
+  .route('/api', meRoutes)                                 // GET /api/me — who the caller is; isAdmin from the operator seat
   // Cloudflare webhook integration
   .route('/api/v2/cloudflare', cloudflareWebhookRoutes)
   // Node fleet management (authenticated)
@@ -498,6 +411,16 @@ if (matrixBridge) {
          */
         humansFor: async () => matrixIdsForBoardHumans(boardId),
       }, boardOpts),
+    /**
+     * A gate waits until a human has JOINED its board room (2026-10-07): posted while
+     * they were only invited, the first gate was encrypted to the speaker alone and
+     * could never be read. The join wakes it (`onEvent` below); the sweep is the floor.
+     */
+    humanJoined: (roomId: string, speakerMxid: string) =>
+      boardRoomHasJoinedHuman(roomId, speakerMxid, {
+        homeserverUrl: matrixBridge.config.homeserverUrl,
+        asToken: matrixBridge.config.asToken,
+      }),
     /** A posted gate is a pending decision on each of the board's humans' fleet card. */
     onPosted: (d: Parameters<typeof noteGatePosted>[0], posted: Parameters<typeof noteGatePosted>[1]) =>
       noteGatePosted(d, posted, { humansFor: matrixIdsForBoardHumans }),
@@ -561,7 +484,20 @@ if (matrixBridge) {
     createMatrixAsRoutes({
       hsToken: matrixBridge.config.hsToken,
       domain: matrixBridge.config.domain,
-      onEvent: (event) => matrixBridge.onEvent(event),
+      onEvent: async (event) => {
+        // A human accepting a board room's invite is what a held gate waits on. Not
+        // awaited: the sweep reads superpipeline, and the homeserver's transaction
+        // must not wait on another service. Its failures are the sweep's to report.
+        void boardForHumanJoin(event)
+          .then((boardId) => (boardId ? sweepBoardNow(boardId) : null))
+          .catch((err) =>
+            errorLogger.warn('could not wake gates held for a board room join', {
+              roomId: event.room_id,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        await matrixBridge.onEvent(event);
+      },
       onProvisionAlias: (alias) => matrixBridge.onProvisionAlias(alias),
       // Null unless a crypto store is configured, in which case the route
       // skips the step entirely — a deployment that has not opted in pays
@@ -737,20 +673,11 @@ console.log(`
 ║  Environment: ${config.nodeEnv.padEnd(46)}║
 ║  Database:    ${describeDatabase(config.database.url).padEnd(46)}║
 ╠═══════════════════════════════════════════════════════════════╣
-║  Auth Endpoints (Better Auth):                                ║
-║  - POST /api/auth/sign-in/email       Email/password sign-in  ║
-║  - POST /api/auth/sign-up/email       Email/password sign-up  ║
-║  - POST /api/auth/sign-in/social      GitHub OAuth sign-in    ║
-║  - GET  /api/auth/callback/github     OAuth callback          ║
-║  - GET  /api/auth/session             Get current session     ║
-║  - POST /api/auth/sign-out            Sign out                ║
+║  Auth: the organization plane (ORG_PLANE_ISSUER) issues every ║
+║  token; GET /public/org-plane says where. /api/auth/* is 410. ║
 ╠═══════════════════════════════════════════════════════════════╣
-║  Admin Endpoints (require admin role):                        ║
-║  - GET  /api/admin/users                List all users        ║
-║  - GET  /api/admin/users/:id            Get user details      ║
-║  - POST /api/admin/users/:id/ban        Ban user              ║
-║  - POST /api/admin/users/:id/unban      Unban user            ║
-║  - PUT  /api/admin/users/:id/role       Update user role      ║
+║  Admin Endpoints (operator seat):                             ║
+║  - GET  /api/admin/principals          Workspace principals   ║
 ║  - GET  /api/admin/audit-log            Admin audit log       ║
 ╠═══════════════════════════════════════════════════════════════╣
 ║  Node Fleet Endpoints:                                        ║

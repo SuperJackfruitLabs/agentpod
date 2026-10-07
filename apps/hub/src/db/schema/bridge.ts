@@ -32,7 +32,6 @@ import { pgTable, text, integer, timestamp, jsonb, primaryKey, index, check, boo
 import { acpRuns } from "./acp";
 import { tenants } from "./tenants";
 import { stations } from "./stations";
-import { user } from "./auth";
 
 /**
  * What the bridge knows about a dispatched run, in the order it learns it.
@@ -182,7 +181,7 @@ export const bridgeAgents = pgTable(
     mcpTokenEncrypted: text("mcp_token_encrypted"),
     /** Stop an agent without destroying the row, and the credential a human pasted into it. */
     enabled: boolean("enabled").notNull().default(true),
-    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     /** The reconciler restarts a loop when this moves, which is how an edit takes effect. */
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

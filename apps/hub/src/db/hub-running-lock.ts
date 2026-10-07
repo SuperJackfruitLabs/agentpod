@@ -3,7 +3,7 @@
  *
  * The hub takes a session-level advisory lock at boot, on a connection of its own, and holds it
  * until it exits. Operator scripts that must not run under a live hub
- * (`scripts/rewrite-user-ids.ts --apply`) ask for the same lock exclusively with
+ * (the cutover's `scripts/rewrite-user-ids.ts --apply`, removed with the auth tables) ask for the same lock exclusively with
  * `pg_try_advisory_lock` and refuse when they cannot have it.
  *
  * The key is fixed and documented here and in docs/OPERATING.md: the two-int form
@@ -50,7 +50,7 @@ export async function holdHubRunningLock(url: string, log: (msg: string) => void
   if (!ok) {
     await sql.end();
     throw new Error(
-      "a maintenance script holds this database's hub-running lock (scripts/rewrite-user-ids.ts --apply?); " +
+      "a maintenance script holds this database's hub-running lock; " +
         "refusing to start until it finishes",
     );
   }

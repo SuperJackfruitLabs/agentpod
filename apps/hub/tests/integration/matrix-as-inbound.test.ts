@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
-import { setGrant, deleteGrant } from "../../src/services/grants";
-import { createPrincipal } from "../../src/services/principals";
+import { setGrant } from "../../src/services/grants";
+import { createPrincipal, forgetPrincipals, linkMatrixId, clearGrant } from "../helpers/principals";
 import { handleRoomMessage } from "../../src/services/matrix-as/inbound";
 import { SESSION_BUSY_MESSAGE } from "../../src/services/acp-sessions";
 import { pollUntil } from "../helpers/wait";
@@ -147,14 +147,9 @@ beforeAll(async () => {
     VALUES (${STATION}, ${tenant}, ${OWNER}, ${NODE}, 'openclaw', 'openclaw:krishna', 'leaf', 'krishna',
             '["acp"]'::jsonb, ${AGENT_PRINCIPAL}, now(), now())`;
 
-  // Both principals are known to this hub by their Matrix ids. Keyed by the
-  // real principal id now — `principal_identities.principal_id` is a foreign
-  // key onto `principals.id`, not the Better Auth user id.
+  // Both people are linked to their Matrix ids at the plane.
   for (const [p, mxid] of [[OWNER_PRINCIPAL, OWNER_MXID], [OTHER_PRINCIPAL, OTHER_MXID]] as const) {
-    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${p}`;
-    await rawSql`
-      INSERT INTO principal_identities (id, principal_id, system, external_id, created_at)
-      VALUES (${`pid_${p}`}, ${p}, 'matrix', ${mxid}, now())`;
+    await linkMatrixId(p, mxid);
   }
 
 
@@ -184,12 +179,10 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM acp_sessions WHERE id LIKE 'acps_mx_inbound_%'`;
     await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${ROOM}`;
-    await rawSql`DELETE FROM principal_identities WHERE principal_id IN (${OWNER_PRINCIPAL}, ${OTHER_PRINCIPAL})`;
-    await rawSql`DELETE FROM principal_grants WHERE principal_id IN (${OWNER_PRINCIPAL}, ${OTHER_PRINCIPAL})`;
     await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
-    await rawSql`DELETE FROM principals WHERE handle IN ('mx-inbound-it-owner', 'mx-inbound-it-other', 'mx-inbound-it-agent')`;
+    await forgetPrincipals({ handles: ["mx-inbound-it-owner", "mx-inbound-it-other", "mx-inbound-it-agent"] });
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`DELETE FROM "user" WHERE id IN (${OWNER}, ${OTHER})`;
+    await deleteTestUsers([OWNER, OTHER]);
   } catch {
     // cleanup only
   }
@@ -202,12 +195,11 @@ describe("an inbound room message", () => {
     await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
 
     expect(created).toHaveLength(1);
-    // The station is scoped on `stations.user_id`, a Better Auth id. Asserting
-    // only that A session was created is what let the bridge pass a `prn_…`
-    // here and fail on every real room: `getStation` matched nothing, and the
-    // hub reported "Station not found." for a message it had just authorised.
+    // The station is scoped on `stations.user_id`. Asserting only that A
+    // session was created is what once let the bridge pass the wrong id here
+    // and fail on every real room. (Since the org-plane cutover a user id IS
+    // the person's prn_, so the two ids this used to tell apart are one.)
     expect(created[0]!.userId).toBe(OWNER);
-    expect(created[0]!.userId).not.toBe(OWNER_PRINCIPAL);
     expect(prompts).toHaveLength(1);
     expect(prompts[0]!.text).toBe("status?");
     // `promptSession` scopes on the session's user the same way the station
@@ -215,7 +207,6 @@ describe("an inbound room message", () => {
     // asserted it, so the bridge could create a session correctly and then be
     // unable to prompt it.
     expect(prompts[0]!.userId).toBe(OWNER);
-    expect(prompts[0]!.userId).not.toBe(OWNER_PRINCIPAL);
   });
 
 
@@ -275,7 +266,7 @@ describe("an inbound room message", () => {
     await handleRoomMessage(message(OWNER_MXID, "first"), deps());
     expect(prompts).toHaveLength(1);
 
-    await deleteGrant(OTHER_PRINCIPAL);
+    clearGrant(OTHER_PRINCIPAL);
     await handleRoomMessage(message(OTHER_MXID, "and me"), deps());
 
     expect(prompts).toHaveLength(1);

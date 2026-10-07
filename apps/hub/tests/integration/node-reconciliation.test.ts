@@ -9,7 +9,7 @@ process.env.NODE_ENV = "test";
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
 import { rawSql } from "../../src/db/drizzle";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import {
@@ -42,7 +42,7 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM nodes             WHERE user_id = ${TEST_USER_ID}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${TEST_USER_ID}`;
-    await rawSql`DELETE FROM "user"            WHERE id      = ${TEST_USER_ID}`;
+    await deleteTestUser(TEST_USER_ID);
   } catch {
     // Ignore cleanup errors
   }

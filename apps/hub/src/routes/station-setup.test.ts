@@ -6,13 +6,11 @@ import { test, expect, beforeAll, afterAll } from "bun:test";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUsers, deleteTestUser } from "../../tests/helpers/database";
 import { db, rawSql } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
-import { BOOTSTRAP_ORG_ID, principals } from "../db/schema/organization";
-import { principalGrants } from "../db/schema/grants";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
-import { createPrincipal } from "../services/principals";
+import { createPrincipal } from "../../tests/helpers/principals";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
 import { adminMiddleware } from "../auth/admin-middleware";
 import { agentsAdminRouter } from "./agents-admin";
@@ -29,12 +27,17 @@ import {
   setPrincipalDirectoryForTests,
   type PrincipalDirectory,
 } from "../services/org-plane/directory";
-import { stationSetups } from "../db/schema/station-setup";
 import { hubOperators } from "../db/schema/operators";
+import { setGrant } from "../services/grants";
+import { fakePlane as runPlane } from "../../tests/helpers/fake-plane";
+import { forgetPrincipals } from "../../tests/helpers/principals";
 const run = crypto.randomUUID().slice(0, 8);
-const actor = `setup-admin-${run}`;
-/** Under the plane an AuthUser.id is the human's prn_ (contract §2). */
+/** An AuthUser.id is the human's prn_ (contract §2). */
+const actor = `prn_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+/** The caller the custom planes below know; a different person from `actor`. */
 const planeActor = `prn_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+/** An operator whose id is not a principal's — a pre-cutover id nothing mapped. */
+const unmappedActor = `setup-admin-${run}`;
 let nodeId: string;
 let operatorId: string;
 function app(userId = actor, tenantId = BOOTSTRAP_TENANT_ID) {
@@ -82,21 +85,15 @@ const input = () => ({
 });
 beforeAll(async () => {
   await ensurePgMigrations();
+  // Admin is a seat in hub_operators (decision D4): `role: "admin"` takes one.
   await createTestUser({ id: actor, role: "admin" });
   await createTestUser({ id: `setup-user-${run}` });
   await createTestUser({ id: planeActor, role: "admin" });
-  // Under the plane admin is a seat in hub_operators (decision D4), not user.role.
-  await db.insert(hubOperators).values([{ principalId: planeActor }, { principalId: actor }]);
-  operatorId = await createPrincipal({
-    kind: "human",
-    handle: `setup-${run}-operator`,
-    userId: actor,
-  });
-  await db.insert(principalGrants).values({
-    principalId: operatorId,
-    mayDispatch: '["prn_00000000000000000099"]',
-    mayGrantReach: true,
-  });
+  await createTestUser({ id: unmappedActor, role: "admin" });
+  await db.insert(hubOperators).values([{ principalId: planeActor }, { principalId: actor }]).onConflictDoNothing();
+  // The operator IS the caller: an account id is the human's principal (contract §2).
+  operatorId = actor;
+  await setGrant(operatorId, { mayDispatch: ["prn_00000000000000000099"], mayGrantReach: true, scopes: [] });
   const { token } = await mintEnrollmentToken(actor);
   ({ nodeId } = await enrollNode(token, {
     hostname: "setup-test",
@@ -108,9 +105,8 @@ beforeAll(async () => {
 afterAll(async () => {
   onProvisionStation(null);
   await rawSql`DELETE FROM nodes WHERE id=${nodeId}`;
-  await rawSql`DELETE FROM principals WHERE handle LIKE ${`setup-${run}-%`}`;
-  await rawSql`DELETE FROM hub_operators WHERE principal_id IN (${actor},${planeActor})`;
-  await rawSql`DELETE FROM "user" WHERE id IN (${actor},${`setup-user-${run}`},${planeActor})`;
+  await forgetPrincipals({ handleLike: `setup-${run}-%` });
+  await deleteTestUsers([actor, `setup-user-${run}`, planeActor, unmappedActor]);
 });
 test("setup creates and assigns once; response-loss retry never regrants revoked access", async () => {
   const id = await station(),
@@ -119,27 +115,17 @@ test("setup creates and assigns once; response-loss retry never regrants revoked
   expect(first.status).toBe(200);
   const result = (await first.json()) as { principalId: string };
   expect(result.principalId).toMatch(/^prn_[a-f0-9]{20}$/);
-  const [grant] = await db
-    .select()
-    .from(principalGrants)
-    .where(eq(principalGrants.principalId, operatorId));
-  expect(JSON.parse(grant!.mayDispatch)).toContain(result.principalId);
-  expect(JSON.parse(grant!.mayDispatch)).toContain("prn_00000000000000000099");
-  expect(grant!.mayGrantReach).toBe(true);
-  await db
-    .update(principalGrants)
-    .set({ mayDispatch: "[]" })
-    .where(eq(principalGrants.principalId, operatorId));
+  const grant = runPlane.principals.get(operatorId)!.grant!;
+  expect(grant.mayDispatch).toContain(result.principalId);
+  expect(grant.mayDispatch).toContain("prn_00000000000000000099");
+  expect(grant.mayGrantReach).toBe(true);
+  await setGrant(operatorId, { mayDispatch: [], mayGrantReach: true });
   const retry = await request(id, body);
   expect(retry.status).toBe(200);
   expect(((await retry.json()) as { principalId: string }).principalId).toBe(
     result.principalId,
   );
-  const [after] = await db
-    .select()
-    .from(principalGrants)
-    .where(eq(principalGrants.principalId, operatorId));
-  expect(after!.mayDispatch).toBe("[]");
+  expect(runPlane.principals.get(operatorId)!.grant!.mayDispatch).toEqual([]);
   expect((await request(id, { ...body, dispatch: "none" })).status).toBe(409);
 });
 test("occupied station refuses setup without minting a second identity", async () => {
@@ -147,12 +133,7 @@ test("occupied station refuses setup without minting a second identity", async (
   expect((await request(id, input())).status).toBe(200);
   const second = input();
   expect((await request(id, second)).status).toBe(409);
-  expect(
-    await db
-      .select()
-      .from(principals)
-      .where(eq(principals.handle, second.agent.handle)),
-  ).toHaveLength(0);
+  expect([...runPlane.principals.values()].filter((p) => p.handle === second.agent.handle)).toHaveLength(0);
 });
 test("existing assigned agents cannot be moved by setup", async () => {
   const id = await station();
@@ -202,22 +183,6 @@ test("Matrix failure leaves assignment and exposes a retry without changing iden
   onProvisionStation(null);
 });
 
-test("concurrent retries create exactly one identity", async () => {
-  const id = await station(),
-    body = { ...input(), dispatch: "none" };
-  const responses = await Promise.all([request(id, body), request(id, body)]);
-  expect(responses.map((r) => r.status)).toEqual([200, 200]);
-  const results = await Promise.all(
-    responses.map((r) => r.json() as Promise<{ principalId: string }>),
-  );
-  expect(results[0]!.principalId).toBe(results[1]!.principalId);
-  expect(
-    await db
-      .select()
-      .from(principals)
-      .where(eq(principals.handle, body.agent.handle)),
-  ).toHaveLength(1);
-});
 test("invalid handles and non-agent identities are refused", async () => {
   const id = await station();
   expect(
@@ -244,10 +209,7 @@ test("existing unassigned identity does not gain dispatchers without consent", a
     kind: "agent",
     handle: `setup-${run}-spare`,
   });
-  const before = await db
-    .select()
-    .from(principalGrants)
-    .where(eq(principalGrants.principalId, operatorId));
+  const before = structuredClone(runPlane.principals.get(operatorId)!.grant);
   expect(
     (
       await request(await station(), {
@@ -257,22 +219,14 @@ test("existing unassigned identity does not gain dispatchers without consent", a
       })
     ).status,
   ).toBe(200);
-  expect(
-    await db
-      .select()
-      .from(principalGrants)
-      .where(eq(principalGrants.principalId, operatorId)),
-  ).toEqual(before);
+  expect(runPlane.principals.get(operatorId)!.grant).toEqual(before);
 });
 test("suspended agents are neither offered nor assigned", async () => {
   const existing = await createPrincipal({
     kind: "agent",
     handle: `setup-${run}-suspended`,
   });
-  await db
-    .update(principals)
-    .set({ suspendedAt: new Date() })
-    .where(eq(principals.id, existing));
+  await runPlane.suspend(existing);
   const options = (await (
     await app().request("/station-setup/options")
   ).json()) as { agents: { id: string }[] };
@@ -334,12 +288,12 @@ test("setup endpoints reject another owner and a mismatched tenant", async () =>
       }
     }
   } finally {
-    await rawSql`DELETE FROM "user" WHERE id=${stranger}`;
+    await deleteTestUser(stranger);
   }
 });
 
 // ---------------------------------------------------------------------------
-// Under ORG_PLANE_*: the agent is created at the plane (decision D3).
+// The agent is created at the plane (decision D3). Planes scripted per test.
 // ---------------------------------------------------------------------------
 
 const hex20 = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
@@ -421,27 +375,18 @@ const planeAgent = (handle: string, suspended = false): PlanePrincipal => ({
   grant: null,
 });
 const planeRequest = (id: string, body: unknown) => request(id, body, planeActor);
-const localPrincipalCount = async () => (await db.select().from(principals)).length;
 
-test("under the plane, a new agent is created and linked remotely; the hub mints no principal of its own", async () => {
+test("a new agent is created and linked remotely; the hub mints no principal of its own", async () => {
   onProvisionStation(async () => {}, "matrix.example");
   const plane = fakePlane();
   try {
     const id = await station(planeActor);
-    const before = await localPrincipalCount();
     const body = { ...input(), dispatch: "none" };
     const res = await planeRequest(id, body);
     expect(res.status).toBe(200);
     const result = (await res.json()) as { principalId: string; matrix: { address: string | null } };
     expect(result.principalId).toBe(plane.created[0]!);
-    // Deviation from the plan's "never inserts into principals": stations.principal_id is a
-    // foreign key into principals until Task 17, so placement writes one mirror row carrying the
-    // PLANE's id. Nothing is minted locally, and no identity or grant is written here.
-    expect(await localPrincipalCount()).toBe(before + 1);
-    expect(await db.select({ id: principals.id }).from(principals).where(eq(principals.handle, body.agent.handle))).toEqual([
-      { id: result.principalId },
-    ]);
-    expect(await db.select().from(principalGrants).where(eq(principalGrants.principalId, result.principalId))).toEqual([]);
+    // The hub has no principals table to write to (Task 17): the plane's calls are all there is.
     expect(plane.calls).toEqual([
       `create ${body.agent.handle}`,
       `link ${result.principalId} matrix @agent_${body.agent.handle}:matrix.example`,
@@ -456,7 +401,7 @@ test("under the plane, a new agent is created and linked remotely; the hub mints
   }
 });
 
-test("under the plane, dispatch me appends the agent to the placing human's grant once; a retry never regrants", async () => {
+test("dispatch me appends the agent to the placing human's grant once; a retry never regrants", async () => {
   const plane = fakePlane({ humanGrant: { mayDispatch: ["prn_00000000000000000099"], mayGrantReach: true, scopes: ["runs:write"] } });
   try {
     const id = await station(planeActor);
@@ -478,7 +423,7 @@ test("under the plane, dispatch me appends the agent to the placing human's gran
   }
 });
 
-test("under the plane, a dispatch grant the plane did not record is a 502 naming the placed agent, which stays placed and active", async () => {
+test("a dispatch grant the plane did not record is a 502 naming the placed agent, which stays placed and active", async () => {
   const plane = fakePlane({ grantFails: () => new OrgPlaneError(0, "unreachable") });
   try {
     const id = await station(planeActor);
@@ -494,7 +439,7 @@ test("under the plane, a dispatch grant the plane did not record is a 502 naming
   }
 });
 
-test("under the plane, a failure after the commit never suspends the agent the station now holds", async () => {
+test("a failure after the commit never suspends the agent the station now holds", async () => {
   const plane = fakePlane({ grantFails: () => new TypeError("a bug, not a refusal") });
   try {
     const id = await station(planeActor);
@@ -507,7 +452,7 @@ test("under the plane, a failure after the commit never suspends the agent the s
   }
 });
 
-test("under the plane, an occupied station refuses setup without creating an agent at the plane", async () => {
+test("an occupied station refuses setup without creating an agent at the plane", async () => {
   const plane = fakePlane();
   try {
     const id = await station(planeActor);
@@ -519,10 +464,9 @@ test("under the plane, an occupied station refuses setup without creating an age
   }
 });
 
-test("under the plane, a placement that fails after the agent was created suspends that agent", async () => {
+test("a placement that fails after the agent was created suspends that agent", async () => {
   let id = "";
   const occupant = `prn_${hex20()}`;
-  await db.insert(principals).values({ id: occupant, kind: "agent", orgId: BOOTSTRAP_ORG_ID, handle: `setup-${run}-occupant` });
   // The station is taken between the hub's pre-check and its transaction.
   const plane = fakePlane({
     onCreate: async () => {
@@ -540,7 +484,7 @@ test("under the plane, a placement that fails after the agent was created suspen
   }
 });
 
-test("under the plane, concurrent retries place one agent and suspend the one that lost", async () => {
+test("concurrent retries place one agent and suspend the one that lost", async () => {
   const plane = fakePlane();
   try {
     const id = await station(planeActor);
@@ -559,7 +503,7 @@ test("under the plane, concurrent retries place one agent and suspend the one th
   }
 });
 
-test("under the plane, an existing agent is checked at the plane, not in the local tables", async () => {
+test("an existing agent is checked at the plane, not in the local tables", async () => {
   const ok = planeAgent(`setup-${run}-plane-spare`);
   const susp = planeAgent(`setup-${run}-plane-susp`, true);
   const plane = fakePlane({ agents: [ok, susp] });
@@ -582,11 +526,11 @@ test("under the plane, an existing agent is checked at the plane, not in the loc
   }
 });
 
-test("under the plane, dispatch me needs the caller to be a principal, and is refused before any agent is created", async () => {
+test("dispatch me needs the caller to be a principal, and is refused before any agent is created", async () => {
   const plane = fakePlane();
   try {
-    // `actor` is a legacy user id, not a prn_: under the plane it names no human principal.
-    const res = await request(await station(), input());
+    // A pre-cutover user id, not a prn_: it names no human principal.
+    const res = await request(await station(unmappedActor), input(), unmappedActor);
     expect(res.status).toBe(403);
     expect(((await res.json()) as { error: string }).error).toBe(
       "Your active operator identity is required to grant dispatch access",
@@ -597,14 +541,13 @@ test("under the plane, dispatch me needs the caller to be a principal, and is re
   }
 });
 
-test("under the plane, the options list unplaced, unsuspended agents from the plane with their dispatchers", async () => {
+test("the options list unplaced, unsuspended agents from the plane with their dispatchers", async () => {
   const free = planeAgent(`setup-${run}-plane-free`);
   const susp = planeAgent(`setup-${run}-plane-off`, true);
   const placed = planeAgent(`setup-${run}-plane-placed`);
   const plane = fakePlane({ agents: [free, susp, placed], humanGrant: { mayDispatch: [free.id], mayGrantReach: false, scopes: [] } });
   try {
     const id = await station(planeActor);
-    await db.insert(principals).values({ id: placed.id, kind: "agent", orgId: BOOTSTRAP_ORG_ID, handle: placed.handle });
     await db.update(stations).set({ principalId: placed.id }).where(eq(stations.id, id));
     const options = (await (await app(planeActor).request("/station-setup/options")).json()) as {
       agents: { id: string; handle: string; displayName: string | null; dispatchers: string[] }[];
@@ -613,14 +556,4 @@ test("under the plane, the options list unplaced, unsuspended agents from the pl
   } finally {
     plane.restore();
   }
-});
-
-test("legacy setup still writes the local principal and receipt (no plane call)", async () => {
-  const id = await station();
-  const body = { ...input(), dispatch: "none" };
-  const res = await request(id, body);
-  expect(res.status).toBe(200);
-  const { principalId } = (await res.json()) as { principalId: string };
-  expect(await db.select().from(principals).where(eq(principals.id, principalId))).toHaveLength(1);
-  expect(await db.select().from(stationSetups).where(eq(stationSetups.requestId, body.requestId))).toHaveLength(1);
 });

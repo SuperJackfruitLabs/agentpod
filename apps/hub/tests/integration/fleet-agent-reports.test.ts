@@ -15,12 +15,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 
 import { rawSql } from "../../src/db/drizzle";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { pollUntil, waitForNodeOnline } from "../helpers/wait";
 import { resolveTenantForUser } from "../../src/auth/tenant";
-import { createPrincipal } from "../../src/services/principals";
-import { linkIdentity } from "../../src/services/principal-identities";
+import { createPrincipal, forgetPrincipals, linkMatrixId } from "../helpers/principals";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
@@ -49,7 +48,7 @@ beforeAll(async () => {
   await createTestUser({ id: OTHER_OWNER, email: `fleet-reports-other-${RUN}@example.com`, name: "Other" });
   const owner = await createPrincipal({ kind: "human", handle: `fleet-reports-owner-${RUN}`, userId: OWNER });
   principals.push(owner);
-  await linkIdentity(owner, "matrix", READER);
+  await linkMatrixId(owner, READER);
   principals.push(await createPrincipal({ kind: "human", handle: `fleet-reports-other-${RUN}`, userId: OTHER_OWNER }));
 
   const { token } = await mintEnrollmentToken(OWNER);
@@ -92,51 +91,12 @@ afterAll(async () => {
     await rawSql`DELETE FROM nodes WHERE id IN (${NODE}, ${OTHER_NODE})`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id IN (${OWNER}, ${OTHER_OWNER})`;
     for (const p of principals) {
-      await rawSql`DELETE FROM principal_identities WHERE principal_id = ${p}`;
-      await rawSql`DELETE FROM principals WHERE id = ${p}`;
+      await forgetPrincipals({ ids: [p] });
     }
-    await rawSql`DELETE FROM "user" WHERE id IN (${OWNER}, ${OTHER_OWNER})`;
+    await deleteTestUsers([OWNER, OTHER_OWNER]);
   } catch {
     // cleanup only
   }
-});
-
-describe("reportingAgentFor under the organization plane", () => {
-  // Under the plane a station's user_id IS its owner's prn_ (contract §2), and the owner's Matrix id
-  // is the plane's (GET /api/principals/:id/identities?system=matrix); the hub's table has no row.
-  const PLANE_OWNER = `prn_${RUN.padEnd(20, "0")}`;
-  const PLANE_AGENT = `@agent_plane_${RUN}:hs.test`;
-  const PLANE_STATION = `station_fleet_reports_plane_${RUN}`;
-
-  test("the owner's Matrix id comes from the plane", async () => {
-    const { setOrgPlaneForTests, TEST_PLANE } = await import("../../src/auth/org-plane/config");
-    const { setPrincipalDirectoryForTests } = await import("../../src/services/org-plane/directory");
-    await createTestUser({ id: PLANE_OWNER, email: `fleet-reports-plane-${RUN}@example.com`, name: "Plane Owner" });
-    const tenant = await resolveTenantForUser(OWNER);
-    await rawSql`
-      INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name,
-                            matrix_id, matrix_identity_mode, created_at)
-      VALUES (${PLANE_STATION}, ${tenant}, ${PLANE_OWNER}, ${NODE}, 'hermes', ${"hermes:plane-" + RUN}, 'leaf', 'Planed',
-              ${PLANE_AGENT}, 'harness', now())`;
-    const human = { id: PLANE_OWNER, kind: "human" as const, handle: "po", displayName: "Po", organizationId: null, suspended: false, grant: null };
-    const restore = [
-      setOrgPlaneForTests(TEST_PLANE),
-      setPrincipalDirectoryForTests({
-        principal: async (id) => (id === PLANE_OWNER ? human : null),
-        identity: async () => null,
-        identitiesOf: async (id, system) => (id === PLANE_OWNER && system === "matrix" ? [{ system, externalId: `@po_${RUN}:hs.test` }] : null),
-        list: async () => [human],
-        invalidate: () => {},
-      }),
-    ];
-    try {
-      expect(await reportingAgentFor(NODE, PLANE_AGENT, ROOM)).toEqual({ reader: `@po_${RUN}:hs.test`, name: "Planed" });
-    } finally {
-      restore.reverse().forEach((r) => r());
-      await rawSql`DELETE FROM stations WHERE id = ${PLANE_STATION}`;
-      await rawSql`DELETE FROM "user" WHERE id = ${PLANE_OWNER}`;
-    }
-  });
 });
 
 describe("reportingAgentFor — who a report is from", () => {

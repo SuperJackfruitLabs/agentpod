@@ -112,20 +112,11 @@ async function context(stationId: string) {
 }
 
 /**
- * The owner's Matrix id, so the room is not a locked door.
+ * The owner's Matrix id, so the room is not a locked door. `stations.userId` is the owner's `prn_`
+ * (contract §2), and the plane holds a person's Matrix id (`matrixIdForPrincipal`).
  *
- * Two lookups rather than one, and for the same reason `readerForRoom` in
- * `index.ts` does it this way: `stations.userId` is a Better Auth id and
- * `principal_identities.principal_id` holds `prn_…` values now, so handing
- * this a user id and querying that column directly answers null for every
- * station in the fleet. It did — the parameter was already named
- * `principalId` while both call sites passed `s.userId`, and the only visible
- * symptom was that `ensureRoom` quietly dropped `invite` and `isDirect`, so
- * every room this created at boot was a room nobody was in but the agent.
- *
- * `null` — an owner with no principal, or a principal with no Matrix identity
- * mapped — is an ordinary answer: the room is still made, so the agent has
- * somewhere to be, and somebody can be invited later.
+ * `null` — an owner with no Matrix identity known — is an ordinary answer: the room is still made,
+ * so the agent has somewhere to be, and somebody can be invited later.
  */
 async function ownerMxid(userId: string): Promise<string | null> {
   const principal = await principalForUser(userId);

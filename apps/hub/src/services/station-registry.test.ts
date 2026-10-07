@@ -21,7 +21,7 @@ process.env.NODE_ENV = "test";
 import { test, expect, beforeAll, afterAll, describe, spyOn } from "bun:test";
 import { rawSql } from "../db/drizzle";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { mintEnrollmentToken, enrollNode } from "./enrollment";
 import {
   adoptStations,
@@ -65,7 +65,7 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations          WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM nodes             WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${TEST_USER}`;
-    await rawSql`DELETE FROM "user"            WHERE id      = ${TEST_USER}`;
+    await deleteTestUser(TEST_USER);
   } catch {
     // Ignore cleanup errors
   }

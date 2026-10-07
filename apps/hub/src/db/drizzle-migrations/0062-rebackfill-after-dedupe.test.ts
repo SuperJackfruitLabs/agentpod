@@ -41,12 +41,13 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../../tests/helpers/database";
 import { rawSql } from "../drizzle";
 import { resolveTenantForUser } from "../../auth/tenant";
-import { createPrincipal } from "../../services/principals";
+import { createPrincipal } from "../../../tests/helpers/principals";
 import { roomAgentUser } from "../../services/matrix-as/gates";
 import { bridgeUserId } from "../../services/matrix-as/names";
+import { forgetPrincipals } from "../../../tests/helpers/principals";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -94,8 +95,8 @@ afterAll(async () => {
     await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
     await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`DELETE FROM principals WHERE handle = ${HANDLE}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
+    await forgetPrincipals({ handles: [HANDLE] });
+    await deleteTestUser(USER);
   } catch {
     // cleanup only
   }

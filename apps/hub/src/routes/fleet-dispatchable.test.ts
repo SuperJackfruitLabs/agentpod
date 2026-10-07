@@ -12,13 +12,11 @@
  * **2. An agent may not enumerate the fleet.** `mayDispatch` is the authority
  * to ask an agent to work, never the authority to discover what else exists.
  *
- * Tokens are minted with `auth.api.signJWT`, the hub's own signer — the same
- * call `auth-authorize.ts`'s exchange makes — so every token here is signed
- * with the real key, carries the real issuer and audience, and would be
- * accepted by any consumer in the suite. The refusals are therefore about the
- * claims, not about a fixture the endpoint happens not to like. The two that
- * ARE about the signature say so: one is signed with a key generated in this
- * file, the other with the hub's service key.
+ * Tokens are signed by the test run's organization plane (`signPlaneToken`),
+ * whose key set the hub's real verifier trusts, with the real issuer and
+ * audience — so the refusals are about the claims, not about a fixture the
+ * endpoint happens not to like. The one that IS about the signature says so:
+ * it is signed with a key generated in this file.
  *
  * Uses the local Docker test-postgres (localhost:5434).
  * DATABASE_URL must be set before any src/ modules are imported.
@@ -34,13 +32,13 @@ import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { SignJWT, generateKeyPair } from "jose";
 
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { rawSql } from "../db/drizzle";
-import { auth } from "../auth/drizzle-auth";
-import { config } from "../config";
-import { createPrincipal, suspendPrincipal } from "../services/principals";
-import { signServiceToken } from "../auth/service-signing";
-import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
+import { fakePlane, signPlaneToken } from "../../tests/helpers/fake-plane";
+import { TEST_PLANE } from "../auth/org-plane/config";
+
+import { createPrincipal } from "../../tests/helpers/principals";
 import { createDispatchableRoutes } from "./fleet-dispatchable";
+import { forgetPrincipals } from "../../tests/helpers/principals";
+import { suspendPrincipal } from "../../tests/helpers/principals";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const HANDLE_PREFIX = `dispatchable-it-${RUN}`;
@@ -58,28 +56,14 @@ let suspendedAgent = "";
 const GHOST = "prn_00000000000000000000000000";
 
 /**
- * A hub token with these claims, signed by the hub's real key.
+ * A plane token with these claims, signed by the plane's key.
  *
- * Claims are supplied whole rather than built through `buildTokenPayload`,
- * because what is under test is what the endpoint does with a claim — an agent
- * kind, an absent control pair, a grant naming a deleted principal — and
- * several of those are states the mint path deliberately will not produce.
+ * Claims are supplied whole, because what is under test is what the endpoint
+ * does with a claim — an agent kind, an absent control pair, a grant naming a
+ * deleted principal — and several of those are states the plane will not mint.
  */
 async function tokenWith(claims: Record<string, unknown>): Promise<string> {
-  const { token } = await auth.api.signJWT({
-    body: {
-      payload: {
-        iat: Math.floor(Date.now() / 1000),
-        sub: humanId,
-        principalKind: "human",
-        tenant: BOOTSTRAP_TENANT_ID,
-        mayDispatch: [],
-        mayGrantReach: false,
-        ...claims,
-      },
-    },
-  });
-  return token;
+  return signPlaneToken({ sub: humanId, principalKind: "human", mayDispatch: [], mayGrantReach: false, ...claims });
 }
 
 /** `GET /api/fleet/dispatchable`, with an optional Bearer and extra bait. */
@@ -115,7 +99,8 @@ beforeAll(async () => {
   });
   // Deliberately no displayName: the response type says it may be null, and a
   // picker that crashed on the ordinary case would be found in production.
-  agentC = await createPrincipal({ kind: "agent", handle: `${HANDLE_PREFIX}-gamma` });
+  // Made at the plane's pages, which allow that; the hub's own create always names one.
+  agentC = fakePlane.addAgent({ handle: `${HANDLE_PREFIX}-gamma`, displayName: null });
   humanId = await createPrincipal({
     kind: "human",
     handle: `${HANDLE_PREFIX}-operator`,
@@ -132,7 +117,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
-    await rawSql`DELETE FROM principals WHERE handle LIKE ${HANDLE_PREFIX + "%"}`;
+    await forgetPrincipals({ handleLike: HANDLE_PREFIX + "%" });
   } catch {
     // cleanup only
   }
@@ -204,10 +189,11 @@ describe("what a valid human token gets back", () => {
   });
 
   test("a token with no mayDispatch claim at all gets nothing, not everything", async () => {
+    // Contract §2 requires the claim; a token without it does not verify, so it is
+    // refused outright rather than read as either "nothing" or "everything".
     const res = await fetchDispatchable(await tokenWith({ mayDispatch: undefined }));
 
-    expect(res.status).toBe(200);
-    expect(await agentsFrom(res)).toEqual([]);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -315,15 +301,17 @@ describe("which tokens verify", () => {
     const { privateKey } = await generateKeyPair("EdDSA", { extractable: true });
     const token = await new SignJWT({
       principalKind: "human",
-      tenant: BOOTSTRAP_TENANT_ID,
+      org: "org_00000000000000000000",
+      ent: ["agentpod"],
       mayDispatch: [agentA, agentB, agentC],
       mayGrantReach: true,
     })
-      .setProtectedHeader({ alg: "EdDSA", kid: "not-a-key-this-hub-has" })
+      .setProtectedHeader({ alg: "EdDSA", kid: "not-a-key-the-plane-has" })
       .setSubject(humanId)
       .setIssuedAt()
-      .setIssuer(config.publicUrl)
-      .setAudience(config.publicUrl)
+      .setJti(crypto.randomUUID())
+      .setIssuer(TEST_PLANE.issuer)
+      .setAudience(TEST_PLANE.audience)
       .setExpirationTime("5m")
       .sign(privateKey);
 
@@ -351,29 +339,5 @@ describe("which tokens verify", () => {
 
   test("garbage in the Bearer is 401, not a 500", async () => {
     expect((await fetchDispatchable("not.a.jwt")).status).toBe(401);
-  });
-
-  test("a token signed with the hub's SERVICE key is accepted", async () => {
-    // The key set this endpoint verifies against is the one `/api/auth/jwks`
-    // publishes, which is both halves — Better Auth's keys and the service
-    // signing keys. This test is what holds the two together: drop the service
-    // keys from `publishedJwks` and only this fails, which is the difference
-    // between "the bridge's assertion of a human works everywhere" and "it
-    // works everywhere except here".
-    const token = await signServiceToken({
-      payload: {
-        sub: humanId,
-        principalKind: "human",
-        tenant: BOOTSTRAP_TENANT_ID,
-        mayDispatch: [agentB],
-        mayGrantReach: false,
-      },
-      subject: humanId,
-      ttl: "120s",
-    });
-
-    const res = await fetchDispatchable(token);
-    expect(res.status).toBe(200);
-    expect((await agentsFrom(res)).map((a) => a.id)).toEqual([agentB]);
   });
 });

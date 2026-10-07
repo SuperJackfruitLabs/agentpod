@@ -12,7 +12,6 @@ import {
   timestamp,
   index,
 } from "drizzle-orm/pg-core";
-import { user } from "./auth";
 
 // =============================================================================
 // System Settings Table
@@ -31,7 +30,7 @@ export const systemSettings = pgTable(
     value: text("value").notNull(),
     description: text("description"),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-    updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+    updatedBy: text("updated_by"),
   }
 );
 
@@ -55,15 +54,13 @@ export const adminAuditLog = pgTable(
     
     // Who performed the action
     adminUserId: text("admin_user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "set null" }),
+      .notNull(),
     
     // What action was performed
     action: text("action").notNull(),
     
     // Who/what was affected
-    targetUserId: text("target_user_id")
-      .references(() => user.id, { onDelete: "set null" }),
+    targetUserId: text("target_user_id"),
     targetResourceId: text("target_resource_id"),
     targetResourceType: text("target_resource_type"),
     

@@ -12,6 +12,10 @@
  * handle forever is at least as sensitive as the grants and suspensions that
  * already live there.
  *
+ * The agent itself is created at the organization plane (decision D3), and its
+ * Matrix id linked there, so the plane's identity lookup can tell this sender
+ * is an agent.
+ *
  * Two refusals this file exists to get right:
  *
  *   - A handle is what an agent's Matrix address is built from
@@ -23,10 +27,8 @@
  *     private to that module, and duplicating a five-character regex is a
  *     smaller risk than reaching into a module this task does not otherwise
  *     touch.
- *   - Two principals cannot share a handle — `principals_org_handle_idx`
- *     enforces it at the database — and a race between two admins hitting
- *     this endpoint at once must still resolve to one winner and a 409, not
- *     a 500 leaking a constraint name.
+ *   - Two principals cannot share a handle — the plane answers 409 — and that
+ *     must reach the admin as a 409, not a 502.
  *
  * Assigning a suspended principal to a station is refused for a third reason
  * that belongs to the station side, not the handle side: a suspended agent
@@ -43,12 +45,11 @@ import { db } from "../db/drizzle";
 import { matrixRooms } from "../db/schema/matrix";
 import { stations } from "../db/schema/stations";
 import { provisionStationNow, stationSetupMatrixDomain } from "../services/matrix-as/hooks";
-import { orgPlane } from "../auth/org-plane/config";
 import { OrgPlaneError } from "../services/org-plane/client";
 import { principalDirectory } from "../services/org-plane/directory";
-import { createPlaneAgent, mirrorPlacedAgent } from "../services/org-plane/agent-placement";
+import { createPlaneAgent } from "../services/org-plane/agent-placement";
 import { unboundRoomsForStation } from "../services/matrix-as/station-room";
-import { createPrincipal, principalById } from "../services/principals";
+import { principalById } from "../services/principals";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("agents-admin");
@@ -64,24 +65,6 @@ const ILLEGAL_HANDLE_CHARS = /[^a-z0-9.=/-]/g;
 
 function wouldBeMangled(handle: string): boolean {
   return handle.toLowerCase().replace(ILLEGAL_HANDLE_CHARS, "-") !== handle;
-}
-
-/**
- * `postgres`'s `PostgresError` isn't re-exported from its ESM entry point
- * (only its CJS build carries it), so this checks shape rather than
- * `instanceof` — the wire-protocol error code for a unique-violation, which
- * is what `principals_org_handle_idx` raises for a repeated handle. Drizzle
- * wraps the driver's error in its own `DrizzleQueryError`, with the original
- * on `.cause`, so both layers are checked.
- */
-function hasCode(err: unknown, code: string): boolean {
-  return typeof err === "object" && err !== null && "code" in err && (err as { code: unknown }).code === code;
-}
-
-function isHandleTaken(err: unknown): boolean {
-  if (hasCode(err, "23505")) return true;
-  const cause = err instanceof Error ? err.cause : undefined;
-  return hasCode(cause, "23505");
 }
 
 const createAgentBody = z.object({
@@ -113,19 +96,14 @@ export const agentsAdminRouter = new Hono()
 
     let id: string;
     try {
-      // Under the plane: created there and its Matrix id linked (decision D3), so the plane's
-      // identity lookup can tell this sender is an agent.
-      id = orgPlane()
-        ? await createPlaneAgent({ handle, displayName: displayName ?? handle, matrixDomain: stationSetupMatrixDomain() })
-        : await createPrincipal({ kind: "agent", handle, displayName });
+      // Created at the plane and its Matrix id linked (decision D3), so the plane's identity
+      // lookup can tell this sender is an agent.
+      id = await createPlaneAgent({ handle, displayName: displayName ?? handle, matrixDomain: stationSetupMatrixDomain() });
     } catch (err) {
       if (err instanceof OrgPlaneError) {
         log.warn("org plane refused to create an agent", { handle, status: err.status, code: err.code });
         if (err.status === 409) return c.json({ error: "handle already taken" }, 409);
         return c.json({ error: "the organization plane could not create this agent" }, 502);
-      }
-      if (isHandleTaken(err)) {
-        return c.json({ error: "handle already taken" }, 409);
       }
       throw err;
     }
@@ -176,11 +154,9 @@ export const agentsAdminRouter = new Hono()
     if (principal.suspendedAt) {
       return c.json({ error: "principal is suspended" }, 403);
     }
-    // Under the plane an agent may exist only there (made at its pages, or by POST /agents
-    // above); the station's foreign key into `principals` needs the mirror row placement writes.
-    const plane = orgPlane();
-    const planeAgent = plane ? await principalDirectory().principal(principalId) : null;
-    if (plane && planeAgent?.kind !== "agent") {
+    // An agent exists at the plane (made at its pages, or by POST /agents above).
+    const planeAgent = await principalDirectory().principal(principalId);
+    if (planeAgent?.kind !== "agent") {
       return c.json({ error: "only an agent can occupy a station" }, 400);
     }
 
@@ -200,8 +176,6 @@ export const agentsAdminRouter = new Hono()
     const candidates = await unboundRoomsForStation(stationId);
 
     await db.transaction(async (tx) => {
-      if (planeAgent) await mirrorPlacedAgent(tx, planeAgent);
-
       // Vacate wherever this principal already is — including this same
       // station, harmlessly — BEFORE placing it here. Done first and in the
       // same transaction so a crash between the two steps cannot leave the

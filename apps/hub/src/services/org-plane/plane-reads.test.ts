@@ -16,7 +16,6 @@ import {
 import { getGrant, setGrant } from "../grants";
 import { resolveMatrixId } from "../matrix-identity";
 import { matrixIdForPrincipal } from "../principal-matrix-id";
-import { linkIdentity } from "../principal-identities";
 import { rawSql } from "../../db/drizzle";
 
 const HUMAN: PlanePrincipal = {
@@ -51,7 +50,7 @@ function plane(d = dir()) {
   restores.push(setOrgPlaneForTests(TEST_PLANE), setPrincipalDirectoryForTests(d));
 }
 
-describe("principal reads under the plane", () => {
+describe("principal reads from the plane", () => {
   test("principalById maps the plane's principal; suspended reads as a truthy suspendedAt", async () => {
     plane();
     // The plane's principal read carries no email; nothing under the plane needs it.
@@ -88,11 +87,10 @@ describe("principal reads under the plane", () => {
     expect(await humanPrincipalIdForUser("8b0c2f6e-1c1d-4e3a-9a57-0d6f3c2b1a90")).toBeNull();
   });
 
-  test("writes the plane owns are refused locally rather than written to frozen tables", async () => {
+  test("writes the plane owns are refused locally, and a grant write goes to the plane", async () => {
     plane();
     await expect(createPrincipal({ kind: "human", handle: "nope" })).rejects.toThrow(/org plane/);
-    const before = await rawSql`SELECT count(*)::int AS n FROM principal_grants`;
-    // setGrant goes to the plane (Task 11 relies on it); with no client it must not touch the table.
+    // setGrant goes to the plane (Task 11 relies on it).
     const { setOrgPlaneClientForTests } = await import("./client");
     const put: unknown[] = [];
     restores.push(
@@ -100,8 +98,6 @@ describe("principal reads under the plane", () => {
     );
     await setGrant(AGENT.id, { mayDispatch: [], mayGrantReach: false });
     expect(put).toEqual([{ id: AGENT.id, g: { mayDispatch: [], mayGrantReach: false, scopes: [] } }]);
-    const after = await rawSql`SELECT count(*)::int AS n FROM principal_grants`;
-    expect(after[0]!.n).toBe(before[0]!.n);
   });
 
   test("setGrant with no scopes keeps the plane's current scopes (PUT replaces)", async () => {
@@ -114,10 +110,15 @@ describe("principal reads under the plane", () => {
   });
 });
 
-describe("Matrix sender under the plane", () => {
+describe("Matrix sender, resolved at the plane", () => {
   test("a linked sender resolves through GET /api/identities/matrix/:mxid", async () => {
     plane();
     expect(await resolveMatrixId("@op:id.test")).toEqual({ kind: "principal", principalId: HUMAN.id });
+  });
+
+  test("an agent sender resolves too", async () => {
+    plane(dir({ identity: async () => ({ principalId: AGENT.id, kind: "agent", suspended: false }) }));
+    expect(await resolveMatrixId("@agent_cody:id.test")).toEqual({ kind: "principal", principalId: AGENT.id });
   });
 
   test("an unlinked sender is null", async () => {
@@ -132,16 +133,6 @@ describe("Matrix sender under the plane", () => {
 });
 
 describe("a person's Matrix id under the plane", () => {
-  test("is the plane's GET /api/principals/:id/identities?system=matrix, never the hub's frozen table", async () => {
-    // A local row that disagrees: reading it instead of the plane would answer "@stale:id.test".
-    const local = await createPrincipal({ kind: "human", handle: `plane-reads-mxid-${Date.now()}` });
-    await linkIdentity(local, "matrix", `@stale-${Date.now()}:id.test`);
-    plane(dir({ identitiesOf: async (id) => (id === local ? [{ system: "matrix", externalId: "@fresh:id.test" }] : null) }));
-    expect(await matrixIdForPrincipal(local)).toBe("@fresh:id.test");
-    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${local}`;
-    await rawSql`DELETE FROM principals WHERE id = ${local}`;
-  });
-
   test("a principal with no Matrix id, or one the plane does not know, is null", async () => {
     plane();
     expect(await matrixIdForPrincipal(HUMAN.id)).toBe("@op:id.test");
@@ -152,29 +143,5 @@ describe("a person's Matrix id under the plane", () => {
   test("a plane outage with nothing cached throws rather than reading as 'no Matrix id'", async () => {
     plane(dir({ identitiesOf: async () => { throw new OrgPlaneError(0, "unreachable"); } }));
     await expect(matrixIdForPrincipal(HUMAN.id)).rejects.toBeInstanceOf(OrgPlaneError);
-  });
-});
-
-describe("legacy mode is unchanged", () => {
-  test("no directory is consulted while ORG_PLANE_* is unset", async () => {
-    let asked = 0;
-    const count = async () => {
-      asked++;
-      return null;
-    };
-    restores.push(
-      setPrincipalDirectoryForTests({ principal: count, identity: count, identitiesOf: count, list: async () => (asked++, []), invalidate: () => {} }),
-    );
-    const id = await createPrincipal({ kind: "agent", handle: `plane-reads-legacy-${Date.now()}` });
-    expect((await principalById(id))?.kind).toBe("agent");
-    expect(await principalHandle(id)).toMatch(/^plane-reads-legacy-/);
-    expect(await getGrant(id)).toBeNull();
-    expect(await resolveMatrixId("@nobody-legacy:id.test")).toBeNull();
-    await linkIdentity(id, "matrix", `@legacy-${id}:id.test`);
-    expect(await matrixIdForPrincipal(id)).toBe(`@legacy-${id}:id.test`);
-    expect((await listPrincipals()).some((p) => p.id === id)).toBe(true);
-    expect(asked).toBe(0);
-    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${id}`;
-    await rawSql`DELETE FROM principals WHERE id = ${id}`;
   });
 });

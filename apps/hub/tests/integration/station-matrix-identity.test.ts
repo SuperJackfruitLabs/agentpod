@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
-import { createPrincipal } from "../../src/services/principals";
+import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { createStationMatrixRoutes } from "../../src/routes/station-matrix";
 import { MatrixUserInUse } from "../../src/services/matrix-as/client";
 import type { PreJoinOutcome } from "../../src/services/matrix-as/identity-move";
@@ -15,6 +15,7 @@ import { onStationMatrixIdReported } from "../../src/services/matrix-as/hooks";
 import { connectionManager } from "../../src/services/connection-manager";
 import { handleNodeMessage } from "../../src/services/broker";
 import type { GatewayServerMessage } from "@agentpod/contract";
+import { fakePlane } from "../helpers/fake-plane";
 
 /**
  * Registering an agent's Matrix identity, without an admin credential on a node.
@@ -160,12 +161,10 @@ afterAll(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
   try {
     await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${OWNER_PRINCIPAL}`;
-    await rawSql`DELETE FROM principal_identities WHERE external_id = ${OWNER}`;
     await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
-    await rawSql`DELETE FROM principals WHERE handle IN ('station-matrix-it-owner', 'station-matrix-it-agent')`;
+    await forgetPrincipals({ handles: ["station-matrix-it-owner", "station-matrix-it-agent"] });
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${OWNER}`;
+    await deleteTestUser(OWNER);
   } catch {
     // cleanup only
   }
@@ -589,7 +588,6 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
         UPDATE stations SET matrix_id = ${OLD_MXID}, bridge_matrix_id = ${OLD_MXID}
         WHERE id = ${STATION}`;
       await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
-      await rawSql`DELETE FROM principal_identities WHERE principal_id = ${AGENT_PRINCIPAL}`;
       await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
     });
 
@@ -597,7 +595,6 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
       onStationMatrixIdReported(null);
       connectionManager.unregister(NODE);
       await rawSql`UPDATE stations SET matrix_id = NULL, bridge_matrix_id = NULL WHERE id = ${STATION}`;
-      await rawSql`DELETE FROM principal_identities WHERE principal_id = ${AGENT_PRINCIPAL}`;
     });
 
     test("the mxid a node reports on matrix.adopt converges the station and retires the old identity", async () => {
@@ -627,14 +624,11 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
         expect(retired).toContainEqual({ userId: OLD_MXID, op: "retire" });
         expect(retired.some((r) => r.userId === NEW_MXID)).toBe(false);
 
-        // …and §5's record, which is what keeps the room's history
-        // attributable once the account is gone.
-        const identities = (await rawSql`
-          SELECT external_id FROM principal_identities
-          WHERE principal_id = ${AGENT_PRINCIPAL} AND system = 'matrix'`) as Array<{
-          external_id: string;
-        }>;
-        expect(identities.map((i) => i.external_id)).toContain(OLD_MXID);
+        // …and the org plane still links the agent to its live address only: the
+        // retired one is never written there (it holds one Matrix id per principal,
+        // and writing the old one would un-link the live one — P3 Task 17).
+        const linked = [...fakePlane.identities].filter(([, v]) => v === AGENT_PRINCIPAL).map(([k]) => k);
+        expect(linked).not.toContain(`matrix\u0000${OLD_MXID}`);
       } finally {
         onStationMatrixIdReported(null);
         connectionManager.unregister(NODE);

@@ -111,13 +111,10 @@ export function createMissionRoutes(deps: MissionDeps) {
     // different day — and the room's creator is visible to everyone in it.
     members.sort((a, b) => stationIds.indexOf(a.id) - stationIds.indexOf(b.id));
 
-    // The grant and `principal_identities` are both keyed by principal id now,
-    // never by the Better Auth user id a session carries — resolved once, up
-    // front, for the control-pair check below and the Matrix invite further
-    // down. A caller with no principal has no grant to hold and no identity to
-    // invite, so both must fail closed on it rather than querying a table with
-    // an id shaped like the wrong plane's. Under the org plane the caller's
-    // token answers (`auth/caller-authority.ts`, design §5.7).
+    // Resolved once, up front, for the control-pair check below and the Matrix
+    // invite further down. A caller with no principal has no grant to hold and
+    // no identity to invite, so both fail closed on it. The caller's token
+    // answers (`auth/caller-authority.ts`, design §5.7).
     const principal = await callerPrincipal(user);
 
     // Putting an agent in a room is putting it to work, so the grant that

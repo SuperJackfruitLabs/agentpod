@@ -27,7 +27,7 @@ import { db, rawSql } from "../../src/db/drizzle";
 import { stations } from "../../src/db/schema/stations";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { createNodeTranscriptionRoutes } from "../../src/routes/station-transcription-node";
 import type { ResolvedTranscription } from "../../src/services/transcription-settings";
@@ -119,7 +119,7 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM nodes WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${TEST_USER}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${TEST_USER}`;
+    await deleteTestUser(TEST_USER);
   } catch {
     // cleanup only
   }

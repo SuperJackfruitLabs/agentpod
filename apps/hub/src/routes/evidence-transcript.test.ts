@@ -10,14 +10,12 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { EvidenceTranscriptItemResponse, EvidenceTranscriptResponse } from "@agentpod/contract";
 
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { auth } from "../auth/drizzle-auth";
-import { buildTokenPayload } from "../auth/jwt-claims";
-import { signServiceToken } from "../auth/service-signing";
+import { fakePlane, signPlaneToken } from "../../tests/helpers/fake-plane";
 import { db, rawSql } from "../db/drizzle";
 import { acpEvents, acpSessions } from "../db/schema/acp";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { setGrant } from "../services/grants";
-import { createPrincipal } from "../services/principals";
+import { createPrincipal, forgetPrincipals } from "../../tests/helpers/principals";
 import { createEvidenceRoutes } from "./evidence";
 
 const RUN = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
@@ -55,8 +53,9 @@ let both = "";
 let evidenceOnly = "";
 let transcriptsOnly = "";
 
+/** What the plane mints for a service: its grant's scopes in `scope` (contract §2). */
 const token = async (principalId: string) =>
-  signServiceToken({ payload: await buildTokenPayload({ principalId }), subject: principalId, ttl: "5m" });
+  signPlaneToken({ sub: principalId, principalKind: "service", scope: (fakePlane.principals.get(principalId)?.grant?.scopes ?? []).join(" ") });
 const get = (path: string, t?: string, headers: Record<string, string> = {}) =>
   app.request(path, { headers: { ...(t ? { Authorization: `Bearer ${t}` } : {}), ...headers } });
 const page = (q = "", sid = SESSION) => `/api/evidence/sessions/${sid}/transcript${q}`;
@@ -97,7 +96,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await rawSql`DELETE FROM station_audit WHERE station_key = ${STATION}`;
   await rawSql`DELETE FROM acp_sessions WHERE station_id = ${STATION}`;
-  await rawSql`DELETE FROM principals WHERE handle LIKE ${`tx-%-${RUN}`}`;
+  await forgetPrincipals({ handleLike: `tx-%-${RUN}` });
 });
 
 describe("each route checks its own scope", () => {
@@ -153,15 +152,13 @@ describe("GET /api/evidence/sessions/:sessionId/transcript", () => {
   });
 
   test("another tenant's session, or no session, is 404", async () => {
-    const { token: foreign } = await auth.api.signJWT({
-      body: {
-        payload: {
-          iat: Math.floor(Date.now() / 1000), sub: both, principalKind: "service",
-          tenant: "fleet_ffffffffffffffffffff", mayDispatch: [], mayGrantReach: false,
-        },
-      },
-    });
-    expect((await get(page(), foreign)).status).toBe(404);
+    const otherOrg = `org_${crypto.randomUUID().replaceAll("-", "").slice(0, 20)}`;
+    try {
+      const foreign = await signPlaneToken({ sub: both, principalKind: "service", org: otherOrg, scope: "evidence:read transcripts:read" });
+      expect((await get(page(), foreign)).status).toBe(404);
+    } finally {
+      await rawSql`DELETE FROM tenants WHERE external_source = 'org-plane' AND external_id = ${otherOrg}`;
+    }
     const res = await get(page("", `acps_${crypto.randomUUID()}`), await token(both));
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "not_found" });

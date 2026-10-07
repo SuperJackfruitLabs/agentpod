@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { adminMiddleware } from "../../src/auth/admin-middleware";
@@ -105,7 +105,7 @@ afterAll(async () => {
     await rawSql`DELETE FROM matrix_rooms WHERE room_id IN (${ROOM}, ${HARNESS_ROOM})`;
     await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`DELETE FROM "user" WHERE id IN (${ADMIN}, ${OWNER}, ${OTHER})`;
+    await deleteTestUsers([ADMIN, OWNER, OTHER]);
   } catch {
     // cleanup only
   }

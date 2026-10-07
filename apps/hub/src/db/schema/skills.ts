@@ -13,7 +13,6 @@ import {
 import { sql } from "drizzle-orm";
 import type { PluginOperationPlan, PluginOperationReceipt, SkillInstallPlan, SkillInstallReceipt, SkillPlacementPlan, SkillPlacementReceipt } from "@agentpod/contract";
 import { tenants } from "./tenants";
-import { user } from "./auth";
 import { stations } from "./stations";
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
@@ -27,8 +26,7 @@ export const skillArtifacts = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
     userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+      .notNull(),
     archiveSHA256: text("archive_sha256").notNull(),
     harness: text("harness").notNull(),
     profile: text("profile").notNull(),
@@ -62,7 +60,7 @@ export const trustedSkillReleases = pgTable(
   {
     id: text("id").primaryKey(),
     tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
-    userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
     version: text("version").notNull(),
     profile: text("profile").notNull(),
     recordDigest: text("record_digest").notNull(),
@@ -104,7 +102,7 @@ export const trustedSkillReleaseArtifacts = pgTable(
 export const skillReleaseCohorts = pgTable("skill_release_cohorts", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
-  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull(),
   releaseId: text("release_id").notNull(),
   recordDigest: text("record_digest").notNull(),
   stationIds: jsonb("station_ids").$type<string[]>().notNull(),
@@ -124,8 +122,7 @@ export const skillOperations = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
     userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+      .notNull(),
     stationId: text("station_id").notNull(),
     nodeId: text("node_id").notNull(),
     stationKey: text("station_key").notNull(),

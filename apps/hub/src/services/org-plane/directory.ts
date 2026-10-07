@@ -75,7 +75,7 @@ export function createPrincipalDirectory(o: {
 let singleton: PrincipalDirectory | null = null;
 let override: PrincipalDirectory | null = null;
 
-/** The directory for the configured plane. Callers check `orgPlane()` first; legacy never gets here. */
+/** The directory for the configured plane. */
 export function principalDirectory(): PrincipalDirectory {
   if (override) return override;
   singleton ??= createPrincipalDirectory({ client: orgPlaneClient });

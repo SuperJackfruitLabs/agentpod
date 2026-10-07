@@ -49,7 +49,7 @@ import type { AcpEvent, DetectedStation } from "@agentpod/contract";
 import { db, rawSql } from "../db/drizzle";
 import { acpSessions, acpEvents } from "../db/schema/acp";
 import { nodes } from "../db/schema/nodes";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUsers } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { waitForNodeUnregistered } from "../../tests/helpers/wait";
 import {
@@ -120,7 +120,7 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations          WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
     await rawSql`DELETE FROM nodes             WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
-    await rawSql`DELETE FROM "user"            WHERE id IN (${TEST_USER}, ${OTHER_USER})`;
+    await deleteTestUsers([TEST_USER, OTHER_USER]);
   } catch {
     // Ignore cleanup errors
   }

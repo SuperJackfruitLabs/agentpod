@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
-import { createPrincipal } from "../../src/services/principals";
+import { createPrincipal, forgetPrincipals, linkMatrixId } from "../helpers/principals";
 import { createMissionRoutes } from "../../src/routes/missions";
 
 /**
@@ -88,18 +88,9 @@ beforeAll(async () => {
       VALUES (${id}, ${tenant}, ${OWNER}, ${NODE}, ${key.split(":")[0]}, ${key}, 'leaf', ${key},
               '["acp"]'::jsonb, ${agent}, now(), now())`;
   }
-  // `principal_identities.principal_id` is a foreign key onto `principals.id`
-  // now, not the Better Auth user id — the row this route reads to invite the
-  // human back into their own mission has to be keyed by the real principal.
-  // Only the 'matrix' row is cleared: `createPrincipal` above already wrote
-  // this principal's 'better-auth' row, and deleting every system's row for
-  // this principal_id would take that one with it — `principalForUser` would
-  // then find nobody, and the route would fail closed for a caller who really
-  // does have a principal.
-  await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER_PRINCIPAL} AND system = 'matrix'`;
-  await rawSql`
-    INSERT INTO principal_identities (id, principal_id, system, external_id, created_at)
-    VALUES ('pid_mission', ${OWNER_PRINCIPAL}, 'matrix', ${OWNER_MXID}, now())`;
+  // The person's Matrix id, which this route reads to invite them back into
+  // their own mission (linked at the plane, keyed by the principal).
+  await linkMatrixId(OWNER_PRINCIPAL, OWNER_MXID);
   process.env.ENFORCE_CONTROL_PAIR = "true";
 });
 
@@ -121,12 +112,10 @@ afterAll(async () => {
     await rawSql`DELETE FROM matrix_mission_members`;
     await rawSql`DELETE FROM matrix_missions`;
     await rawSql`DELETE FROM matrix_spaces`;
-    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER_PRINCIPAL}`;
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${OWNER_PRINCIPAL}`;
     await rawSql`DELETE FROM stations WHERE id IN (${A}, ${B})`;
-    await rawSql`DELETE FROM principals WHERE handle IN ('mission-it-owner', 'mission-it-agent-a', 'mission-it-agent-b')`;
+    await forgetPrincipals({ handles: ["mission-it-owner", "mission-it-agent-a", "mission-it-agent-b"] });
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${OWNER}`;
+    await deleteTestUser(OWNER);
   } catch {
     // cleanup only
   }

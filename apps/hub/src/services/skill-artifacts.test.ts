@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, rawSql } from "../db/drizzle";
 import { skillArtifacts } from "../db/schema/skills";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import {
   storeSkillArtifact,
@@ -22,7 +22,7 @@ beforeAll(async () => {
   await createTestUser({ id: owner.userId });
 });
 afterAll(async () => {
-  await rawSql`DELETE FROM "user" WHERE id=${owner.userId}`;
+  await deleteTestUser(owner.userId);
 });
 
 test("artifact bytes round-trip privately, metadata contains no content, identical uploads are idempotent", async () => {

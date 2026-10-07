@@ -2,7 +2,7 @@
 
 Day-2 operations: enrolling nodes, adopting stations, driving capability panels, and provisioning runtimes.
 
-> **Single-operator note.** AgentPod targets one admin account. The first user to sign up becomes admin; signup is automatically disabled after that (`system_settings`).
+> **Sign-in is the organization plane's.** People, their accounts and service principals are made and managed at the plane; the hub's own sign-up, sessions and token issuer were removed after the P4 cutover (§11). Who operates the hub is `hub_operators`.
 
 ---
 
@@ -137,6 +137,10 @@ binary, comes in.
 
 ### Signing in
 
+> **Since migration 0096 the hub issues no tokens** (§11). `fleet login` uses the organization
+> plane's device flow (the hub's `GET /public/org-plane` says which plane); everything below about
+> the hub's own authorize flow and `HUB_OAUTH_CLIENTS` describes the hub before the cutover.
+
 ```sh
 fleet login          # opens a browser, stores a token
 fleet whoami         # who that token says you are, and when it expires
@@ -197,6 +201,11 @@ not do this**. `fleet` reports them differently on purpose. In particular a hub 
 endpoint, not these verbs.
 
 ## 1b. Service principals
+
+> **Since migration 0096 service principals are the organization plane's** (§11): created with
+> the plane's `scripts/service.ts`, exchanged at the plane's token endpoint. The hub's
+> `/api/auth/service-token` and `/api/admin/service-principals` answer 410. What follows describes
+> the hub before the cutover; the scopes are unchanged.
 
 A service principal is a program with no person behind it. It holds a `svc_…:<secret>`
 credential, exchanges it at `POST /api/auth/service-token` for a five-minute token, and its grant
@@ -1882,83 +1891,45 @@ while spans are flowing); the node keeps working and the queue drops what it can
 
 ---
 
-## 11. Cutover: rewriting user ids
+## 11. The organization plane is the only issuer
 
-Moving the hub onto the organization plane (setting `ORG_PLANE_*`) changes who a human *is* to
-the hub: a Better Auth `user.id` before, the human's `prn_` id after. Twenty-three hub columns
-hold that id (`nodes.user_id`, `stations.user_id`, `station_audit.user_id`, … — the full list is
-`USER_ID_COLUMNS` in `apps/hub/scripts/rewrite-user-ids.ts`). They are rewritten by an operator
-script, never by a migration: the hub applies migrations on boot, and a migration would rewrite
-production while every session still carried a Better Auth id, emptying every operator's fleet.
+The hub moved onto the organization plane at the P4 cutover: `ORG_PLANE_*` set, every
+`user.id` column rewritten to the human's `prn_` by the one-off script `scripts/rewrite-user-ids.ts`,
+and a 7-day rollback window during which the hub's own auth tables stayed, read-only (design §8).
 
-The hub must never run under the plane against un-rewritten columns, or under Better Auth
-against rewritten ones — either way every human's fleet reads as empty. So the order is fixed.
+That window is closed. Migration `0096_drop_hub_auth` dropped the hub's Better Auth tables
+(`user`, `session`, `account`, `verification`, `jwks`), its issuer tables (`device_credentials`,
+`service_credentials`, `service_signing_keys`, `oauth_codes`) and its copy of the principals
+(`principals`, `principal_identities`, `principal_grants`, `organizations`). The rewrite script
+went with them: its `--reverse` needed `"user"` and `principal_identities`, so **there is no
+rollback to the hub's own issuer any more.**
 
-**Cutover (forward):**
+The migration refuses to run, dropping nothing, unless the rewrite ran: it raises if any of the
+23 rewritten columns still holds a non-`prn_` value, or if `legacy_user_principals` is empty
+while `principal_identities` holds Better Auth identities. A hub that boots against a
+database the rewrite missed fails at migration time with the table and column named.
+`user_id_rewrites` (the rewrite's per-row record) stays, frozen.
 
-1. Stop the hub.
-2. `cd apps/hub && DATABASE_URL=<hub database> bun run scripts/rewrite-user-ids.ts --apply` (with
-   any `--map` the dry run asked for).
-3. Set `ORG_PLANE_*` (all of them; `docs/DEPLOYMENT.md`, "Organization plane").
-4. Start the hub.
+What this means for an operator:
 
-**Rollback:**
-
-1. Stop the hub.
-2. Unset `ORG_PLANE_*`.
-3. `DATABASE_URL=<hub database> bun run scripts/rewrite-user-ids.ts --apply --reverse`.
-4. Start the hub.
-
-**Always run the dry run first** (the same command without `--apply`), and read the `UNMAPPED`
-table. Rehearse on a copy first: `pg_dump` the hub database into a scratch database and run the
-dry run and `--apply` against the copy before touching the real one.
-
-What the script does and refuses:
-
-- `DATABASE_URL` must be set explicitly; the script never falls back to a default database.
-  The first line it prints (to stderr) is the host and database it is about to read.
-- **Dry run is the default** and changes nothing. It prints one row per column: `rows` (non-null
-  values), `toRewrite` (values it has a mapping for), `alreadyTarget` (values already in the
-  target form — `prn_…` going forward, anything else going back; a second forward run shows all
-  rows here), and `unmapped`. Then the principals it will seat as hub operators, and whether the
-  bootstrap tenant is mapped to the org. Exit status 2 means `--apply` would refuse; 0 means it
-  would run.
-- The mapping comes from `principal_identities` (`system = 'better-auth'`, human principals) —
-  the same `prn_` the plane gives each migrated human. `--map <from>=<to>` (repeatable) adds or
-  overrides one entry; a forward mapping must name a `prn_` id.
-- **`--apply` refuses, changing nothing,** while any value is unmapped, while a principal has
-  more than one Better Auth id, or (forward) unless the bootstrap tenant
-  `fleet_00000000000000000000` is mapped to `org-plane` / `org_00000000000000000000` (`--org`
-  names a different org if the plane keeps another id). That mapping is what lets the
-  operator's first plane token land on the existing fleet instead of creating an empty one.
-- `DEFAULT_USER_ID` (default `default-user`) is the usual unmapped value: it is not a Better Auth
-  user. Map it to the operator's `prn_` (`--map default-user=prn_…`) and set `DEFAULT_USER_ID` to
-  the same `prn_` before starting the hub under the plane.
-- An admin (`user.role = 'admin'`) with no principal is listed as unmapped too (table `user`):
-  skipping them would leave the hub with no operator under the plane.
-- Everything happens in **one transaction**: a failure part-way leaves the database exactly as
-  it was. The transaction holds `lock_timeout = 10s`; stop the hub first so the script never
-  waits on the hub's own locks.
-- **`--apply` refuses while a hub is running against the database** (exit 2, "the hub is running
-  against this database"). Every hub holds a session-level advisory lock, shared, from boot until
-  it exits — key `(1095782212, 1)` (`0x41504F44`, "APOD"), visible in `pg_locks` as
-  `locktype = 'advisory' AND classid = 1095782212 AND objid = 1`; `apps/hub/src/db/hub-running-lock.ts`.
-  The script takes the same key exclusively for the length of the apply, so a hub started
-  meanwhile refuses to boot until it finishes. A dry run checks the lock and lets go at once; it
-  still reads, and exits 2 with the same reason when a hub holds the lock.
-- Forward drops the 18 foreign keys from those columns to `"user"` (Better Auth ids no longer
-  live there), drops and re-creates the six composite owner foreign keys around the rewrite, and
-  seeds `legacy_user_principals` (old user id → `prn_`, kept permanently so ids other planes
-  recorded before the cutover still resolve) and `hub_operators` (one row per admin).
-- Reverse maps each `prn_` back to its Better Auth id and re-adds the 18 foreign keys
-  `NOT VALID`, so existing rows are not checked but new writes are. A human who first signed in
-  at the plane during the window has no Better Auth id, and the reverse refuses on their rows
-  until you decide: `--map prn_…=<user id>` to hand them to an existing user, or
-  `--map prn_…=prn_…` to keep the row as it is. `legacy_user_principals` and `hub_operators`
-  are left in place (they are read only under the plane).
-- Forward records every value it rewrote, per row, in `user_id_rewrites` (table, column, the
-  row's key, old value, new value — `--map` pairs included). Reverse restores those rows from
-  that record first and then empties it, so a `--map default-user=prn_…` comes back as
-  `default-user` exactly, not as the user id that shares its `prn_`. Rows written after the
-  forward (and so not in the record) go back through the mapping above.
-- Both directions are safe to repeat: a second run finds everything already in place.
+- **`ORG_PLANE_*` is required.** All five (`ORG_PLANE_ISSUER`, `ORG_PLANE_JWKS_URL`,
+  `ORG_PLANE_AUDIENCE`, `ORG_PLANE_URL`, `ORG_PLANE_SERVICE_CREDENTIAL_FILE`); a hub missing any
+  of them refuses to boot and names each one. See `docs/DEPLOYMENT.md`, "Organization plane".
+- **People, agents, grants and suspension are managed at the plane's pages.** The hub's
+  `/api/admin/users*`, `/api/admin/settings/signup*`, `/api/admin/grants*`,
+  `/api/admin/service-principals*` and `/api/admin/principals/:id/{suspend,restore}` answer
+  `410 { error: "managed_by_org_plane", url }`; every `/api/auth/*` route answers
+  `410 { error: "issuer_moved", issuer }` (the device inventory: `managed_by_org_plane`).
+- **Who operates the hub** is the hub's own seat, `hub_operators`. To add an operator:
+  `INSERT INTO hub_operators (principal_id) VALUES ('prn_…');` — their next request is admin.
+- **Whom the hub invites to a person's rooms** is the plane's answer: the hub reads a person's
+  Matrix id with `GET /api/principals/:id/identities?system=matrix` (contract §3.5), cached
+  60 s. A person whose Matrix id is not linked at the plane is not invited until it is.
+- Every hub holds a shared, session-level advisory lock on its database from boot until it
+  exits: key `(1095782212, 1)` (`0x41504F44`, "APOD"), visible in `pg_locks` as
+  `locktype = 'advisory' AND classid = 1095782212 AND objid = 1`
+  (`apps/hub/src/db/hub-running-lock.ts`). A maintenance script that must not run under a live
+  hub takes it exclusively with `pg_try_advisory_lock` and refuses when it cannot; a hub that
+  finds it held exclusively refuses to boot.
+- `legacy_user_principals` (pre-cutover user id → `prn_`) is permanent: other planes recorded
+  hub user ids before the cutover, and `GET /api/evidence/principals/:id` still resolves them.
