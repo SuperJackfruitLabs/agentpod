@@ -12,9 +12,12 @@ import { vi, test, expect, beforeEach, afterEach } from "vitest";
 
 // ─── Hoist mock functions so factory closures can reference them ──────────────
 
-const { mockGoto, mockClearAuthSession } = vi.hoisted(() => ({
+const { mockGoto, mockClearAuthSession, mockPlaneSessionLost, mockCurrentPlane, mockGetToken } = vi.hoisted(() => ({
   mockGoto: vi.fn<(url: string) => Promise<void>>().mockResolvedValue(undefined),
   mockClearAuthSession: vi.fn<() => void>(),
+  mockPlaneSessionLost: vi.fn<(sent: string | null) => void>(),
+  mockCurrentPlane: vi.fn<() => unknown>(() => null),
+  mockGetToken: vi.fn<() => Promise<string | null>>(async () => null),
 }));
 
 // ─── Module mocks (hoisted before imports by Vitest) ─────────────────────────
@@ -33,9 +36,10 @@ vi.mock("$app/navigation", () => ({
 
 vi.mock("$lib/stores/auth.svelte", () => ({
   clearAuthSession: mockClearAuthSession,
-  // Legacy mode: no plane token, so http() sends the cookie as it always did.
-  getToken: vi.fn(async () => null),
-  currentPlane: () => null,
+  planeSessionLost: mockPlaneSessionLost,
+  // Legacy mode by default: no plane token, so http() sends the cookie as it always did.
+  getToken: mockGetToken,
+  currentPlane: mockCurrentPlane,
 }));
 
 // ─── Module under test (imported after mocks are registered) ─────────────────
@@ -59,6 +63,9 @@ function stubFetch(status: number) {
 beforeEach(() => {
   mockGoto.mockReset();
   mockClearAuthSession.mockReset();
+  mockPlaneSessionLost.mockReset();
+  mockCurrentPlane.mockReturnValue(null);
+  mockGetToken.mockResolvedValue(null);
   // Provide a deterministic hub URL so hubUrl() resolves immediately
   localStorage.setItem("agentpod.apiUrl", "http://hub.test:3001");
   // Default: user is on a protected route
@@ -105,4 +112,28 @@ test("non-401 error (403) → goto NOT called, request still rejects", async () 
   await expect(listNodes()).rejects.toThrow("You don't have permission to do that.");
   expect(mockGoto).not.toHaveBeenCalled();
   expect(mockClearAuthSession).not.toHaveBeenCalled();
+});
+
+// Under the organization plane a 401 is not a sign-out: the tokens the hub refused are dropped and
+// the layout's guard re-authorizes (silently while the plane's session is alive). Sending the
+// operator to /login here, and forgetting the plane, was half of "I see the login screen most of
+// the time" (2026-10-07).
+test("under the plane, a 401 reports the token it refused and does not go to /login", async () => {
+  mockCurrentPlane.mockReturnValue({ issuer: "i", url: "https://accounts.test", audience: "a" });
+  mockGetToken.mockResolvedValue("at1");
+  stubFetch(401);
+
+  await expect(listNodes()).rejects.toThrow();
+  expect(mockPlaneSessionLost).toHaveBeenCalledWith("at1");
+  expect(mockClearAuthSession).not.toHaveBeenCalled();
+  expect(mockGoto).not.toHaveBeenCalled();
+});
+
+test("under the plane, a 401 to a request sent without a token reports null", async () => {
+  mockCurrentPlane.mockReturnValue({ issuer: "i", url: "https://accounts.test", audience: "a" });
+  stubFetch(401);
+
+  await expect(listNodes()).rejects.toThrow();
+  expect(mockPlaneSessionLost).toHaveBeenCalledWith(null);
+  expect(mockGoto).not.toHaveBeenCalled();
 });
