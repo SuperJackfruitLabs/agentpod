@@ -9,7 +9,8 @@
    * the hub is unreachable is the same scattered-state defect in miniature.
    */
   import { connection } from "$lib/stores/connection.svelte";
-  import { auth } from "$lib/stores/auth.svelte";
+  import { auth, logout } from "$lib/stores/auth.svelte";
+  import { goto } from "$app/navigation";
   import { commandPalette } from "$lib/stores/command-palette.svelte";
   import { STATE } from "$lib/fleet/state";
   import StateDot from "./StateDot.svelte";
@@ -17,6 +18,7 @@
   import PanelLeft from "@lucide/svelte/icons/panel-left";
   import Search from "@lucide/svelte/icons/search";
   import SunMoon from "@lucide/svelte/icons/sun-moon";
+  import LogOut from "@lucide/svelte/icons/log-out";
 
   interface Props {
     /** Fires the ≤900px one-column view switch. Desktop never calls it. */
@@ -24,6 +26,23 @@
   }
 
   let { onToggleRoster }: Props = $props();
+
+  /**
+   * The same sign-out as Settings: forget the tokens here and revoke the refresh token at the
+   * organization plane, THEN leave. Going to /login first would let the layout find live tokens
+   * and bounce straight back in. It does not end the plane's own session (accounts.…), so
+   * "Sign in" afterwards is silent.
+   */
+  let signingOut = $state(false);
+  async function signOut() {
+    if (signingOut) return;
+    signingOut = true;
+    try {
+      await logout();
+    } finally {
+      await goto("/login");
+    }
+  }
 
   /**
    * Host only — the scheme and path are noise next to "which machine".
@@ -129,4 +148,16 @@
     class="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-foreground"
     aria-label="Signed in as {auth.initials}"
   >{auth.initials}</div>
+
+  <button
+    type="button"
+    data-testid="topbar-sign-out"
+    class="{controlClass} size-8 shrink-0"
+    aria-label="Sign out"
+    title="Sign out"
+    disabled={signingOut}
+    onclick={signOut}
+  >
+    <LogOut class="size-4" aria-hidden="true" />
+  </button>
 </header>
