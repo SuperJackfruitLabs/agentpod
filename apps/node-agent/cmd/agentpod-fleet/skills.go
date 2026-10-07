@@ -18,9 +18,7 @@ import (
 	"time"
 )
 
-func fleetSkills(args []string) {
-	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(`Usage: fleet skills <verb>
+const skillsUsage = `Usage: fleet skills <verb>
 
   fleet skills artifacts
   fleet skills artifact delete --id ARTIFACT_ID
@@ -43,7 +41,11 @@ func fleetSkills(args []string) {
   fleet skills native verify --station ID --profile PROFILE
 
 Every mutation returns the hub's reviewed record. Read that response before an
-apply command; this CLI never turns a plan into an implicit apply.`)
+apply command; this CLI never turns a plan into an implicit apply.`
+
+func fleetSkills(args []string) {
+	if len(args) == 0 || helpRequested(args) {
+		fmt.Println(skillsUsage)
 		return
 	}
 	switch args[0] {

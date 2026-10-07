@@ -20,6 +20,10 @@ const pluginsUsage = `usage:
 // node plans, you read the plan, and apply sends only the digest you reviewed.
 // Nothing here restarts a station.
 func fleetPlugins(args []string) {
+	if helpRequested(args) {
+		fmt.Println(pluginsUsage)
+		return
+	}
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, pluginsUsage)
 		os.Exit(2)

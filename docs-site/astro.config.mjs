@@ -77,6 +77,13 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Reference',
+          items: [
+            { label: 'apn', slug: 'reference/apn' },
+            { label: 'fleet', slug: 'reference/fleet' },
+          ],
+        },
+        {
           label: 'Build on it',
           items: [
             { label: 'MCP tools', slug: 'build/mcp' },
