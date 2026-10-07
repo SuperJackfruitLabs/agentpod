@@ -73,11 +73,31 @@ export async function discoverPlane(hub: string, fetchFn: typeof fetch = fetch):
 }
 
 /** Leave for the plane's authorize page. `returnTo` is where `completeSignIn` sends the user back. */
-export async function beginSignIn(
+/**
+ * The sign-in redirect this page has started, if any. Single-flight: the layout's guard is a
+ * $effect and can fire again while the first call is still awaiting its PKCE challenge. A second
+ * call that saved a fresh state would overwrite the first's while the browser follows the FIRST
+ * redirect, and the callback would refuse it ("Sign-in state did not match"). Seen in production
+ * on 2026-10-07. The page is about to leave, so this is never reset except by signOutLocal.
+ */
+let signingIn: Promise<void> | null = null;
+
+export function beginSignIn(
   plane: PlaneDiscovery,
   opts: { returnTo: string; origin?: string; storage?: Storage; navigate?: (url: string) => void },
 ): Promise<void> {
-  if (!planeOrigin(plane.url)) throw new Error("The account service URL must be https.");
+  if (!planeOrigin(plane.url)) return Promise.reject(new Error("The account service URL must be https."));
+  signingIn ??= startSignIn(plane, opts).catch((err) => {
+    signingIn = null; // nothing navigated: let a retry start over
+    throw err;
+  });
+  return signingIn;
+}
+
+async function startSignIn(
+  plane: PlaneDiscovery,
+  opts: { returnTo: string; origin?: string; storage?: Storage; navigate?: (url: string) => void },
+): Promise<void> {
   const origin = opts.origin ?? window.location.origin;
   const verifier = randomUrlSafe(48);
   const state = randomUrlSafe(24);
@@ -210,6 +230,7 @@ export function reauthorizeIfSignedIn(
 
 /** Forget the tokens and the signed-in flag, here only. `signOut` also revokes at the plane. */
 export function signOutLocal(storage?: Storage): void {
+  signingIn = null;
   generation++;
   tokens = null;
   refreshing = null;
