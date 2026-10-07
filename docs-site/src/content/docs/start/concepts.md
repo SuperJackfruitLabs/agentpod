@@ -55,7 +55,7 @@ default handed to a station at adoption that has none of its own.
 ## Principal
 
 **Who is acting.** Every principal has a `prn_`-prefixed id, a handle, and one of three
-kinds:
+kinds. Principals live in your account service, which issues their ids and their tokens:
 
 | Kind | Is |
 |---|---|
@@ -73,7 +73,7 @@ caller can influence.
 
 **Who may spend an agent's time.** Messaging an agent, approving a tool call for it, and putting a
 card in front of it are all the same act under different names, and all three are checked against a
-`mayDispatch` claim the hub signed into the caller's token.
+`mayDispatch` claim the account service signed into the caller's token.
 
 A grant is read from the signed token and from nothing the caller sent. A missing claim means
 *permitted nothing* — never *permitted everything*. See [Dispatch and grants](/use/grants/).
@@ -90,12 +90,14 @@ console. See [Talking to an agent in a room](/use/rooms/).
 
 ## Hub
 
-The **one place that knows everything**: the registry of nodes and stations, the broker
-that routes a request to the right node, enrollment, authentication, audit, and the
-provisioning drivers.
+The **one place that knows everything about the fleet**: the registry of nodes and stations,
+the broker that routes a request to the right node, enrollment, audit, and the provisioning
+drivers.
 
-It is a Bun service over Postgres, and you host it. It is also the only issuer of identity
-in the suite — see [Authentication](/build/auth/).
+It is a Bun service over Postgres, and you host it. It does not issue identity. People,
+agents, services and workspaces belong to the account service, and the hub checks every
+token it is shown against that service's published keys, without calling it — see
+[Authentication](/build/auth/).
 
 ## How they fit
 
