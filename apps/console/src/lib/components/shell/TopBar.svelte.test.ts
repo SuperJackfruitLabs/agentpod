@@ -7,7 +7,7 @@
 import { test, expect, vi, beforeEach } from "vitest";
 import { render, fireEvent } from "@testing-library/svelte";
 
-const { mockConnection, mockAuth, mockPalette } = vi.hoisted(() => ({
+const { mockConnection, mockAuth, mockPalette, mockLogout, mockGoto } = vi.hoisted(() => ({
   mockConnection: {
     apiUrl: "https://hub.agentpod.dev" as string | null,
     isConnected: true,
@@ -15,10 +15,13 @@ const { mockConnection, mockAuth, mockPalette } = vi.hoisted(() => ({
   },
   mockAuth: { initials: "RG" },
   mockPalette: { toggle: vi.fn() },
+  mockLogout: vi.fn(async () => {}),
+  mockGoto: vi.fn(async () => {}),
 }));
 
 vi.mock("$lib/stores/connection.svelte", () => ({ connection: mockConnection }));
-vi.mock("$lib/stores/auth.svelte", () => ({ auth: mockAuth }));
+vi.mock("$lib/stores/auth.svelte", () => ({ auth: mockAuth, logout: mockLogout }));
+vi.mock("$app/navigation", () => ({ goto: mockGoto }));
 vi.mock("$lib/stores/command-palette.svelte", () => ({ commandPalette: mockPalette }));
 
 import TopBar from "./TopBar.svelte";
@@ -29,6 +32,21 @@ beforeEach(() => {
   mockConnection.reachable = true;
   mockAuth.initials = "RG";
   mockPalette.toggle.mockClear();
+  mockLogout.mockClear();
+  mockGoto.mockClear();
+});
+
+test("the bar has a labelled sign-out button that signs out, then goes to /login", async () => {
+  const { getByTestId } = render(TopBar);
+  const button = getByTestId("topbar-sign-out");
+
+  expect(button.tagName).toBe("BUTTON");
+  expect(button.getAttribute("aria-label")).toBe("Sign out");
+  await fireEvent.click(button);
+  await vi.waitFor(() => expect(mockGoto).toHaveBeenCalledWith("/login"));
+  expect(mockLogout).toHaveBeenCalledTimes(1);
+  // Signed out first: going to /login with live tokens would bounce straight back in.
+  expect(mockLogout.mock.invocationCallOrder[0]).toBeLessThan(mockGoto.mock.invocationCallOrder[0]!);
 });
 
 test("the hub pill shows the host of the API url, in mono", () => {
