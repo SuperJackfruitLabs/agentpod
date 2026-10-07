@@ -32,3 +32,40 @@ export const NodeSummary = z.object({
   provisioned: z.object({ runtimeId: z.string(), provider: z.string() }).nullable().optional(),
 });
 export type NodeSummary = z.infer<typeof NodeSummary>;
+
+/**
+ * DELETE /api/nodes/:id — a retired machine leaving the fleet.
+ *
+ * The node row goes, and with it the credential the machine dials in with, so
+ * it cannot reconnect and quietly re-register; joining again takes a fresh
+ * `fleet invite` token. Its stations are unregistered the way "Remove station"
+ * does it. `disconnected` says whether a live gateway session was cut.
+ */
+export const RemoveNodeResponse = z.object({
+  ok: z.literal(true),
+  node: z.object({ id: z.string(), name: z.string() }),
+  stationsRemoved: z.array(z.object({ id: z.string(), stationKey: z.string() })),
+  disconnected: z.boolean(),
+});
+export type RemoveNodeResponse = z.infer<typeof RemoveNodeResponse>;
+
+/**
+ * Why a removal was refused (409). Each is a different instruction:
+ *   - `provisioned` — a runtime owns this node; `fleet runtimes rm` removes both.
+ *   - `bridged` — a bridge agent's roster row points at a station here; remove
+ *     the row first (`fleet bridge rm`), since it holds a credential.
+ *   - `online` — the node is connected; retry with `force` to disconnect it.
+ */
+export const RemoveNodeRefusalCode = z.enum(["provisioned", "bridged", "online"]);
+export type RemoveNodeRefusalCode = z.infer<typeof RemoveNodeRefusalCode>;
+
+export const RemoveNodeRefusal = z.object({
+  ok: z.literal(false),
+  code: RemoveNodeRefusalCode,
+  error: z.string(),
+  /** Set when `code` is `provisioned`. */
+  runtimeId: z.string().optional(),
+  /** Set when `code` is `bridged`: the roster keys in the way. */
+  bridgeAgents: z.array(z.string()).optional(),
+});
+export type RemoveNodeRefusal = z.infer<typeof RemoveNodeRefusal>;

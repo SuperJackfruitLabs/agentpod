@@ -207,6 +207,26 @@ var reference = clidoc.Binary{
 			Example: "fleet nodes telemetry\nfleet nodes telemetry --endpoint https://otel.example.com:4318\nfleet nodes telemetry --node build-01 --off",
 		},
 		{
+			Path: "nodes rm", TopHelp: true,
+			Summary:  "Remove a retired machine from the fleet.",
+			Synopsis: "fleet nodes rm NAME|ID [--force]",
+			Help:     nodesRmUsage,
+			Detail: "Unregisters every station on the node, the way [`fleet stations unadopt`](#fleet-stations-unadopt) " +
+				"does, and revokes the node's credential: a machine that dials back is refused, and rejoining " +
+				"takes a fresh [`fleet invite`](#fleet-invite) token. Workspace files, agent identities and " +
+				"Matrix rooms are kept. A connected node is refused unless `--force`, which disconnects it. " +
+				"A provisioned runtime's node is refused with the [`fleet runtimes rm`](#fleet-runtimes-rm) " +
+				"that removes both, and a node with a bridge-roster row on one of its stations is refused " +
+				"until [`fleet bridge rm`](#fleet-bridge-rm) removes the row. A name is resolved from " +
+				"`fleet nodes`; anything else is sent as an id, so a node that is not there, or not yours, is the hub's 404.",
+			Handlers: []string{"fleetNodesRemove"},
+			Args:     []clidoc.Arg{{Name: "NAME|ID", Meaning: "a node's name or id, from `fleet nodes`"}},
+			Flags:    []clidoc.Flag{{Name: "force"}},
+			Auth:     "The node's owner. Where the workspace enforces who may grow the fleet, also a workspace admin — the same authority `fleet invite` needs.",
+			Exit:     "0 when the node was removed. 1 when the hub refused (the reason is printed; for a connected node, with the `--force` command) or answered 404. 2 without exactly one node.",
+			Example:  "fleet nodes rm build-01\nfleet nodes rm build-01 --force",
+		},
+		{
 			Path: "invite", Group: "Nodes",
 			Summary:  "Mint the token a machine presents to `apn enroll`.",
 			Synopsis: "fleet invite [--label TEXT] [--ttl-minutes N]",

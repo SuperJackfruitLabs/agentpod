@@ -1,4 +1,4 @@
-import type { NodeSummary, DetectedStation, StationHealth, FsEntry, ProvisionedRuntime, RuntimeProviderManifest, FleetAgent, FleetStats, SkillInventory } from "@agentpod/contract";
+import type { NodeSummary, DetectedStation, StationHealth, FsEntry, ProvisionedRuntime, RuntimeProviderManifest, FleetAgent, FleetStats, SkillInventory, RemoveNodeResponse } from "@agentpod/contract";
 import { goto } from "$app/navigation";
 import { clearAuthSession, currentPlane, getToken } from "$lib/stores/auth.svelte";
 import { apiError, networkError } from "./http-error";
@@ -143,6 +143,18 @@ export const updateNode = (id: string, opts?: { force?: boolean }) =>
     error?: string;
   }>(`/api/nodes/${id}/update${opts?.force ? "?force=1" : ""}`, {
     method: "POST",
+  });
+
+/**
+ * Remove a node from the fleet (DELETE /api/nodes/:id). Its stations are
+ * unregistered and its credential revoked, so the machine has to be enrolled
+ * again with a fresh invite. The hub refuses a connected node unless `force`
+ * says the caller accepts disconnecting it; a provisioned runtime's node is
+ * always refused (destroy the runtime instead).
+ */
+export const removeNode = (id: string, opts: { force: boolean }) =>
+  http<RemoveNodeResponse>(`/api/nodes/${encodeURIComponent(id)}${opts.force ? "?force=1" : ""}`, {
+    method: "DELETE",
   });
 
 // ─── Runtime endpoints ────────────────────────────────────────────────────────

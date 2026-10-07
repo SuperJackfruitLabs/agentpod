@@ -98,4 +98,5 @@ export type AdminAction =
   | "user_role_change"
   | "user_create"
   | "settings_update"
-  | "node_telemetry_update";
+  | "node_telemetry_update"
+  | "node_remove";

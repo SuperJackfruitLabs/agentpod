@@ -11,6 +11,7 @@
   import type { NodeSummary } from "@agentpod/contract";
   import StationTree from "$lib/components/stations/StationTree.svelte";
   import ProvisionedNodeControls from "$lib/components/fleet/ProvisionedNodeControls.svelte";
+  import RemoveNode from "$lib/components/fleet/RemoveNode.svelte";
   import PosturePanel from "$lib/components/fleet/PosturePanel.svelte";
   import * as Card from "$lib/components/ui/card";
   import Empty from "$lib/components/ui/empty/empty.svelte";
@@ -182,6 +183,11 @@
           </Button>
         {:else}
           <span class="font-mono text-xs text-muted-foreground">{node.agentVersion ?? "—"}</span>
+        {/if}
+        <!-- A provisioned runtime's node leaves with its runtime (Destroy,
+             below); this is for a machine somebody enrolled. -->
+        {#if !node.provisioned}
+          <RemoveNode {node} />
         {/if}
       </div>
     {/if}
