@@ -1,9 +1,9 @@
 /**
- * The organization plane's settings, and the one switch every consumer path asks.
+ * The organization plane's settings.
  *
- * Absent (all five unset) is today's hub, unchanged. All five set is the plane. Anything in
- * between refuses to boot: the contract's cutover rule has no dual-accept, and a half-configured
- * hub would be exactly that.
+ * Required. The plane is the only issuer this hub knows: the hub's own auth and principal tables
+ * were dropped after the rollback window (P3 plan, Task 17), so there is no other mode to fall
+ * back to. A hub missing any of the five refuses to boot.
  */
 import { readFileSync } from "node:fs";
 
@@ -17,7 +17,7 @@ export interface OrgPlaneConfig {
 }
 export interface OrgPlaneConfigError { field: string; message: string }
 export type OrgPlaneConfigResult =
-  | { ok: true; config: OrgPlaneConfig | null }
+  | { ok: true; config: OrgPlaneConfig }
   | { ok: false; errors: OrgPlaneConfigError[] };
 
 const KEYS = [
@@ -38,7 +38,10 @@ export function readOrgPlaneConfig(
 ): OrgPlaneConfigResult {
   const value = (k: Key) => (env[k] ?? "").trim();
   const present = KEYS.filter((k) => value(k) !== "");
-  if (present.length === 0) return { ok: true, config: null };
+  if (present.length === 0) {
+    // Nothing set used to mean "the hub is its own issuer". That hub is gone (Task 17).
+    return { ok: false, errors: KEYS.map((field) => ({ field, message: "required" })) };
+  }
 
   const errors: OrgPlaneConfigError[] = [];
   if (present.length !== KEYS.length) {
@@ -46,7 +49,7 @@ export function readOrgPlaneConfig(
       if (value(k) === "") {
         errors.push({
           field: k,
-          message: `missing while ${present.join(", ")} ${present.length === 1 ? "is" : "are"} set — the org-plane settings are all-or-none`,
+          message: `missing while ${present.join(", ")} ${present.length === 1 ? "is" : "are"} set — the org-plane settings are all required`,
         });
       }
     }
@@ -72,7 +75,7 @@ export function readOrgPlaneConfig(
   }
   const m = raw === null ? null : SVC.exec(raw);
   // An empty file is malformed too: without this, the result would be a failure with no errors,
-  // which validateConfig reads as "fine" and orgPlane() as legacy mode.
+  // which validateConfig would read as "fine".
   if (raw !== null && !m) {
     errors.push({
       field: "ORG_PLANE_SERVICE_CREDENTIAL_FILE",
@@ -95,19 +98,24 @@ export function readOrgPlaneConfig(
 }
 
 const fromEnv = readOrgPlaneConfig(process.env);
-let override: OrgPlaneConfig | null | undefined;
+let override: OrgPlaneConfig | undefined;
 
 export function orgPlaneConfigErrors(): OrgPlaneConfigError[] {
   return fromEnv.ok ? [] : fromEnv.errors;
 }
 
-/** Null in legacy mode. The ONLY question later code asks about the mode. */
-export function orgPlane(): OrgPlaneConfig | null {
+/**
+ * The plane's settings. Boot validation (`utils/validate-config.ts`) refuses to start a hub
+ * without them, so a throw here means a code path ran before validation or in a test that did not
+ * set them — never a mode to handle.
+ */
+export function orgPlane(): OrgPlaneConfig {
   if (override !== undefined) return override;
-  return fromEnv.ok ? fromEnv.config : null;
+  if (fromEnv.ok) return fromEnv.config;
+  throw new Error(`ORG_PLANE_* is not configured: ${fromEnv.errors.map((e) => `${e.field} ${e.message}`).join("; ")}`);
 }
 
-export function setOrgPlaneForTests(c: OrgPlaneConfig | null): () => void {
+export function setOrgPlaneForTests(c: OrgPlaneConfig): () => void {
   const previous = override;
   override = c;
   return () => {

@@ -23,9 +23,10 @@ import { db, rawSql, closeDatabase } from "../../src/db/drizzle";
 import { stations } from "../../src/db/schema/stations";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
-import { createPrincipal } from "../../src/services/principals";
+import { createPrincipal, forgetPrincipals } from "../helpers/principals";
+import { installFakePlane } from "../helpers/fake-plane";
 import { setGrant } from "../../src/services/grants";
 import { connectionManager } from "../../src/services/connection-manager";
 import * as broker from "../../src/services/broker";
@@ -35,6 +36,9 @@ import {
 } from "../../src/routes/skill-management";
 import { SkillHubOperation, SkillVerifyResult, type PluginOperationPlan } from "@agentpod/contract";
 
+// Run as a script, not under `bun test`, so the preload that installs the fake org plane did not
+// run: principals and grants live at the plane (P3 plan, Task 17).
+installFakePlane();
 const database = new URL(process.env.DATABASE_URL ?? "http://missing");
 assert(
   ["127.0.0.1", "localhost"].includes(database.hostname) &&
@@ -356,9 +360,8 @@ try {
   else process.env.ENFORCE_CONTROL_PAIR = previousControlPair;
   if (nodeId) await rawSql`DELETE FROM nodes WHERE id=${nodeId}`;
   await rawSql`DELETE FROM station_audit WHERE user_id=${userId}`;
-  for (const principalId of principalIds)
-    await rawSql`DELETE FROM principals WHERE id=${principalId}`;
-  await rawSql`DELETE FROM "user" WHERE id=${userId}`;
+  await forgetPrincipals({ ids: principalIds });
+  await deleteTestUser(userId);
   rmSync(temporary, { recursive: true, force: true });
   await closeDatabase();
 }

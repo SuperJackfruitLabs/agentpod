@@ -143,12 +143,27 @@ export function createPlaneVerifier(o: PlaneVerifierOptions): PlaneVerifier {
   };
 }
 
-let singleton: PlaneVerifier | null = null;
+let singleton: { plane: ReturnType<typeof orgPlane>; verifier: PlaneVerifier } | null = null;
+let override: PlaneVerifier | null = null;
 
-/** Lazy singleton built from `orgPlane()`. Throws in legacy mode: no caller should get here. */
+/** Lazy singleton built from `orgPlane()`, rebuilt if the configured plane changes. */
 export function planeVerifier(): PlaneVerifier {
+  if (override) return override;
   const plane = orgPlane();
-  if (!plane) throw new Error("planeVerifier() called with ORG_PLANE_* unset");
-  singleton ??= createPlaneVerifier({ issuer: plane.issuer, audience: plane.audience, jwksUrl: plane.jwksUrl });
-  return singleton;
+  if (singleton?.plane !== plane) {
+    singleton = {
+      plane,
+      verifier: createPlaneVerifier({ issuer: plane.issuer, audience: plane.audience, jwksUrl: plane.jwksUrl }),
+    };
+  }
+  return singleton.verifier;
+}
+
+/** Tests: verify against a key set the test controls instead of fetching the plane's. */
+export function setPlaneVerifierForTests(v: PlaneVerifier | null): () => void {
+  const previous = override;
+  override = v;
+  return () => {
+    override = previous;
+  };
 }

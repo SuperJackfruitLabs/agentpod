@@ -44,7 +44,7 @@ import { GATE_REQUEST_CONTENT_KEY, type GateRequestCard } from "@agentpod/contra
 import { noteHubEvent } from "../push/hub-events";
 import { legacyRequestEvents } from "./legacy-events";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix-identity";
-import { assertionFailureCode, type AssertionSubject } from "../../auth/service-signing";
+import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plane/assertion";
 import { stationSpeaker } from "./names";
 import { principalHandle } from "../principals";
 import { roomForStation } from "./station-room";

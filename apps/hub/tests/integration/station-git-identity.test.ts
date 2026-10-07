@@ -24,10 +24,10 @@ import { stationGitIdentities } from "../../src/db/schema/git-identities";
 import { stations } from "../../src/db/schema/stations";
 import { stationAudit } from "../../src/db/schema/audit";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { waitForNodeOnline } from "../helpers/wait";
 import { enrollNode, mintEnrollmentToken } from "../../src/services/enrollment";
-import { createPrincipal } from "../../src/services/principals";
+import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { createStationGitIdentityRoutes } from "../../src/routes/station-git-identity";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { stationRoutes } from "../../src/routes/stations";
@@ -311,14 +311,14 @@ afterAll(async () => {
       await rawSql`DELETE FROM stations          WHERE user_id = ${u}`;
       await rawSql`DELETE FROM nodes             WHERE user_id = ${u}`;
       await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${u}`;
-      await rawSql`DELETE FROM "user"            WHERE id = ${u}`;
+      await deleteTestUser(u);
     } catch {
       // ignore
     }
   }
   for (const h of handles) {
     try {
-      await rawSql`DELETE FROM principals WHERE handle = ${h}`;
+      await forgetPrincipals({ handles: [h] });
     } catch {
       // ignore
     }

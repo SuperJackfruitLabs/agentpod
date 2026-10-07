@@ -22,7 +22,7 @@ import { Hono } from "hono";
 
 import { db, rawSql } from "../db/drizzle";
 import { stationAudit } from "../db/schema/audit";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUsers } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import {
   waitForNodeOnline,
@@ -98,7 +98,7 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations          WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM nodes             WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${TEST_USER}`;
-    await rawSql`DELETE FROM "user"            WHERE id      IN (${TEST_USER}, ${OTHER_USER})`;
+    await deleteTestUsers([TEST_USER, OTHER_USER]);
   } catch {
     // Ignore cleanup errors
   }

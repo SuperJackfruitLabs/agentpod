@@ -6,15 +6,13 @@
  * is the endpoint a wrong subject would be minted from, so what is proven
  * here is mostly refusal:
  *
- *   1. Success mints for the station's OCCUPANT, not the node — sub is the
- *      agent principal, not the node id, and claims come from the same
- *      `buildTokenPayload` a human's token uses.
+ *   1. Success returns the org plane's token for the station's OCCUPANT, not
+ *      the node — sub is the agent principal (the hub signs nothing).
  *   2. A station hosted by a DIFFERENT node → 403. The node proves who it
  *      is, not what it may reach.
  *   3. A station with no occupying principal → 409, distinctly — the
  *      ordinary state of an unassigned station, not a fault.
- *   4. A suspended principal → 403 (`buildTokenPayload`'s refusal, surfaced
- *      rather than re-implemented, but not left as the 500 it throws as).
+ *   4. A suspended principal → 403 (the plane's 423, translated).
  *   5. A bad node credential → 401.
  *
  * Uses the local Docker test-postgres (localhost:5434). Every fixture id is
@@ -39,7 +37,8 @@ import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { createTestUser } from "../../tests/helpers/database";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
-import { createPrincipal, suspendPrincipal } from "../services/principals";
+import { createPrincipal } from "../../tests/helpers/principals";
+import { fakePlane } from "../../tests/helpers/fake-plane";
 import { createStationTokenRoutes, stationAudiences, stationTokenRoutes } from "./station-token";
 import { TEST_PLANE } from "../auth/org-plane/config";
 import { OrgPlaneError } from "../services/org-plane/client";
@@ -130,8 +129,8 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM nodes WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${TEST_USER}`;
-    await rawSql`DELETE FROM principals WHERE id = ${agentPrincipalId}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${TEST_USER}`;
+    fakePlane.remove(agentPrincipalId);
+    fakePlane.remove(TEST_USER);
   } catch {
     // cleanup only
   }
@@ -162,31 +161,8 @@ describe("a node exchanges for one of its stations", () => {
     expect((claims.exp as number) - (claims.iat as number)).toBe(body.expiresIn);
     expect(claims.sub).toBe(agentPrincipalId);
     expect(claims.principalKind).toBe("agent");
-    // The node minted this, the agent did not present a credential of its
-    // own — act.sub names the node, so an auditor can tell "the agent
-    // acted" apart from "node N minted for the agent", the fact that scopes
-    // a compromised node's blast radius (service-signing.ts:19-25).
-    expect(claims.act).toEqual({ sub: nodeId });
-    /**
-     * `aud` names the planes this token may be spent at — and it is the CONFIGURED list, not the
-     * hub's own URL.
-     *
-     * Before this, the mint passed no `audiences`, so `signServiceToken` fell back to
-     * `config.publicUrl`. superpipeline demands its own `APP_URL` in `aud` and got the hub's, so it
-     * refused every station token with a 401. The claims were always right; only this was missing.
-     *
-     * Asserted against `STATION_TOKEN_AUDIENCES` rather than a literal, which is the honest split:
-     * this test proves the MINT spends the configured list, and `station-token-audiences.test.ts`
-     * proves the list is built correctly from `WORK_PLANE_AUDIENCES`. Setting the env var here would
-     * not work anyway — a preload imports `config.ts` before this file's body runs, and `config.ts`
-     * reads the environment once, at import time.
-     */
-    const { STATION_TOKEN_AUDIENCES, HUB_AUDIENCE } = await import("../config.ts");
-    expect(claims.aud).toEqual(STATION_TOKEN_AUDIENCES);
-    // The hub is always in it, whatever else is configured: an agent holding a station token talks
-    // to the hub constantly (MCP self-reporting), so a list that omitted it would break its own
-    // agents the moment a work plane was named.
-    expect(claims.aud).toContain(HUB_AUDIENCE);
+    // Spent where the plane was asked to make it spendable: this hub, first.
+    expect(claims.aud).toEqual(stationAudiences(TEST_PLANE).length === 1 ? TEST_PLANE.audience : stationAudiences(TEST_PLANE));
   });
 
   test("refuses a station hosted by a different node", async () => {
@@ -208,7 +184,7 @@ describe("a node exchanges for one of its stations", () => {
   });
 
   test("refuses a suspended principal", async () => {
-    await suspendPrincipal(agentPrincipalId);
+    await fakePlane.suspend(agentPrincipalId);
     const res = await app.request(`/api/nodes/${nodeId}/stations/${stationId}/token`, {
       method: "POST",
       headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
@@ -231,7 +207,7 @@ function planeJwt(claims: Record<string, unknown>): string {
   return `${b64({ alg: "EdDSA", kid: "k1" })}.${b64(claims)}.c2ln`;
 }
 
-describe("under the org plane", () => {
+describe("the org plane's answers", () => {
   const asked: Array<{ principal: string; audience: string | string[] }> = [];
   const planeApp = (agentToken: (p: string, a: string | string[]) => Promise<{ accessToken: string; expiresIn: number }>) =>
     new Hono().route("/api", createStationTokenRoutes({ plane: () => TEST_PLANE, client: () => ({ agentToken }) }));
@@ -341,22 +317,5 @@ describe("under the org plane", () => {
     );
     expect((await post(a, stationId)).status).toBe(200);
     expect(sent).toEqual([[TEST_PLANE.audience, "https://app.test"]]);
-  });
-
-  test("legacy mode never asks the plane and still signs locally", async () => {
-    // The suspension test above leaves the principal suspended; legacy refuses it locally, which
-    // is itself the proof the local path ran. Restore it to see a local mint.
-    const { restorePrincipal } = await import("../services/principals");
-    await restorePrincipal(agentPrincipalId);
-    const flag = { called: false };
-    const a = new Hono().route(
-      "/api",
-      createStationTokenRoutes({ plane: () => null, client: () => ({ agentToken: never(flag) }) }),
-    );
-    const res = await post(a, stationId);
-    expect(res.status).toBe(200);
-    const { token } = (await res.json()) as { token: string };
-    expect(decodeJwt(token).act).toEqual({ sub: nodeId });
-    expect(flag.called).toBe(false);
   });
 });

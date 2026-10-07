@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { purposeRoutes } from "../../src/routes/purpose";
@@ -85,7 +85,7 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`DELETE FROM "user" WHERE id IN (${OWNER}, ${OTHER})`;
+    await deleteTestUsers([OWNER, OTHER]);
   } catch {
     // cleanup only
   }

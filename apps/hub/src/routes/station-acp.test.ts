@@ -36,7 +36,7 @@ import type { AcpEvent, AcpSessionRow, DetectedStation } from "@agentpod/contrac
 
 // src/ imports — DB URL is already set above
 import { rawSql } from "../db/drizzle";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUsers } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import {
   connectFakeAcpNode,
@@ -100,7 +100,7 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations          WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
     await rawSql`DELETE FROM nodes             WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
-    await rawSql`DELETE FROM "user"            WHERE id IN (${TEST_USER}, ${OTHER_USER})`;
+    await deleteTestUsers([TEST_USER, OTHER_USER]);
   } catch {
     // Ignore cleanup errors
   }

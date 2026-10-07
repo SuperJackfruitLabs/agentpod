@@ -32,13 +32,13 @@ import type { DetectedStation } from "@agentpod/contract";
 
 // src/ imports — DB URL is already set above
 import { rawSql } from "../../src/db/drizzle";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUsers, deleteTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { waitForNodeOnline } from "../helpers/wait";
 import { setOptOut, clearOptOut, resolveOptOuts, listOptOuts } from "../../src/services/harness-config";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { adoptStations } from "../../src/services/station-registry";
-import { createPrincipal } from "../../src/services/principals";
+import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/tenant-scope";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { harnessConfigRoutes } from "../../src/routes/harness-config";
@@ -89,11 +89,7 @@ beforeAll(async () => {
     INSERT INTO tenants (id, name) VALUES (${TENANT_ID_2}, 'Opt-out levels test (other tenant)')
     ON CONFLICT (id) DO NOTHING
   `;
-  await rawSql`
-    INSERT INTO "user" (id, email, name, email_verified, role, created_at, updated_at)
-    VALUES (${TEST_USER}, 'cfgoptlvl-test@example.com', 'Opt-out Levels Test User', true, 'user', now(), now())
-    ON CONFLICT (id) DO NOTHING
-  `;
+  await createTestUser({ id: TEST_USER, email: "cfgoptlvl-test@example.com", name: "Opt-out Levels Test User" });
 });
 
 afterAll(async () => {
@@ -102,7 +98,7 @@ afterAll(async () => {
     await rawSql`DELETE FROM harness_config_opt_out  WHERE tenant_id IN (${TENANT_ID}, ${TENANT_ID_2})`;
     await rawSql`DELETE FROM stations                WHERE tenant_id = ${TENANT_ID}`;
     await rawSql`DELETE FROM nodes                    WHERE tenant_id = ${TENANT_ID}`;
-    await rawSql`DELETE FROM "user"                  WHERE id = ${TEST_USER}`;
+    await deleteTestUser(TEST_USER);
     await rawSql`DELETE FROM tenants                  WHERE id IN (${TENANT_ID}, ${TENANT_ID_2})`;
   } catch {
     // Ignore cleanup errors
@@ -442,13 +438,12 @@ describe("the opt-out routes: PUT/DELETE/GET /api/fleet/config/opt-out", () => {
     try {
       await rawSql`DELETE FROM applied_harness_config WHERE station_id IN (SELECT id FROM stations WHERE user_id IN (${ROUTE_USER}, ${ROUTE_AGENT_USER}))`;
       await rawSql`DELETE FROM harness_config_opt_out  WHERE opted_out_by IN (${ROUTE_USER}, ${ROUTE_AGENT_USER})`;
-      await rawSql`DELETE FROM principal_identities    WHERE principal_id = ${agentPrincipalId}`;
-      await rawSql`DELETE FROM principals              WHERE id = ${agentPrincipalId}`;
+      await forgetPrincipals({ ids: [agentPrincipalId] });
       await rawSql`DELETE FROM station_audit           WHERE user_id IN (${ROUTE_USER}, ${ROUTE_AGENT_USER})`;
       await rawSql`DELETE FROM stations                WHERE user_id IN (${ROUTE_USER}, ${ROUTE_AGENT_USER})`;
       await rawSql`DELETE FROM nodes                   WHERE user_id IN (${ROUTE_USER}, ${ROUTE_AGENT_USER})`;
       await rawSql`DELETE FROM enrollment_tokens        WHERE user_id IN (${ROUTE_USER}, ${ROUTE_AGENT_USER})`;
-      await rawSql`DELETE FROM "user"                  WHERE id IN (${ROUTE_USER}, ${ROUTE_AGENT_USER})`;
+      await deleteTestUsers([ROUTE_USER, ROUTE_AGENT_USER]);
     } catch {
       // Ignore cleanup errors
     }

@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
-import { createPrincipal } from "../../src/services/principals";
+import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { stationCleanupRoutes } from "../../src/routes/station-cleanup";
 import { stationChangesetRoutes } from "../../src/routes/station-changeset";
 import { stationLifecycleRoutes } from "../../src/routes/station-lifecycle";
@@ -62,11 +62,9 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM station_audit WHERE user_id = ${USER}`;
     await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER_PRINCIPAL}`;
-    await rawSql`DELETE FROM principal_identities WHERE external_id = ${USER}`;
-    await rawSql`DELETE FROM principals WHERE handle IN ('cleanup-reach-it-user', 'cleanup-reach-it-agent')`;
+    await forgetPrincipals({ handles: ["cleanup-reach-it-user", "cleanup-reach-it-agent"] });
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
+    await deleteTestUser(USER);
   } catch {
     // cleanup only
   }

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { db, rawSql } from "../db/drizzle";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { nodes, stations } from "../db/schema";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { storeSkillArtifact } from "./skill-artifacts";
 import { importTrustedSkillRelease } from "./trusted-skill-catalog";
@@ -36,7 +36,7 @@ afterAll(async () => {
   // A pre-0072 local development database can retain the older restrictive
   // artifact FK; remove mappings explicitly so this fixture works on both.
   await rawSql`DELETE FROM trusted_skill_release_artifacts WHERE user_id=${owner.userId}`;
-  await rawSql`DELETE FROM "user" WHERE id=${owner.userId}`;
+  await deleteTestUser(owner.userId);
 });
 
 test("a canary creates an operation only for the exact pinned cohort member and harness artifact", async () => {

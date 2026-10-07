@@ -15,6 +15,18 @@
 import { afterAll } from "bun:test";
 import { closeOpenMachines } from "../src/services/matrix-as/open-machines";
 import { shutdownTelemetry } from "../src/telemetry/otel";
+import { installFakePlane } from "./helpers/fake-plane";
+
+/**
+ * The organization plane is the hub's only issuer and the only home of its principals (P3 plan,
+ * Task 17), so every test runs against one: `TEST_PLANE`'s settings, and an in-memory plane
+ * (`helpers/fake-plane.ts`) behind the real client, directory and verifier seams. A test that
+ * needs a different plane (one that is down, one that refuses) overrides a seam and restores it.
+ *
+ * The directory has a zero TTL so a test reads its own writes at once; its last-good fallback
+ * still works, which the outage tests rely on.
+ */
+installFakePlane();
 
 afterAll(async () => {
   await closeOpenMachines();

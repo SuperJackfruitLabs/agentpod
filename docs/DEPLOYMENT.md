@@ -110,10 +110,9 @@ DATABASE_URL=postgres://agentpod:<STRONG_PASSWORD>@localhost:5432/agentpod
 NODE_ENV=production
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
-# BETTER_AUTH_SECRET: read by config.ts and passed explicitly to betterAuth().
-# In production it must be ≥32 chars AND mix at least two character classes —
-# 32 lowercase letters is refused (validate-config.ts: hasMinimumEntropy).
-BETTER_AUTH_SECRET=<run: openssl rand -hex 32>
+# Sign-in and tokens are the organization plane's: set ORG_PLANE_* (see
+# "Organization plane" below). BETTER_AUTH_SECRET, COOKIE_DOMAIN, COOKIE_SECURE,
+# GITHUB_CLIENT_* and HUB_OAUTH_CLIENTS are no longer read.
 
 # ENCRYPTION_KEY: exactly 32 characters (AES-256-GCM for stored credentials).
 # `openssl rand -hex 16` gives 32 hex characters. Keep the value alone on its
@@ -136,12 +135,6 @@ API_TOKEN=<run: openssl rand -hex 24>
 # CSRF middleware and the terminal WebSocket fails its CSWSH check — the
 # console loads and cannot log in.
 ALLOWED_ORIGINS=https://console.<your-domain>
-
-# Session cookie attributes (config.ts: sessionCookieOptions). Unset, the
-# cookie is host-only and not Secure, which is right for http://localhost and
-# wrong for a TLS deployment — and the smoke test in §9 cannot pass.
-COOKIE_DOMAIN=.<your-domain>
-COOKIE_SECURE=true
 
 # ── Provisioning ──────────────────────────────────────────────────────────────
 # Enable the Docker provisioner.
@@ -236,8 +229,8 @@ chmod 600 /etc/agentpod/hub.env
 ```
 
 > **Key constraints**
-> - `ALLOWED_ORIGINS`, `COOKIE_DOMAIN`, `COOKIE_SECURE`: required on any domain that is not `agentpod.dev`. The built-in origin allowlist covers only `localhost:5173` and `console.agentpod.dev`; `ALLOWED_ORIGINS` **adds** to that list rather than replacing it. Skip them and the console loads, then fails every mutating request.
-> - `BETTER_AUTH_SECRET`: ≥ 32 characters **and** at least two character classes when `NODE_ENV=production`.
+> - `ALLOWED_ORIGINS`: required on any domain that is not `agentpod.dev`. The built-in origin allowlist covers only `localhost:5173` and `console.agentpod.dev`; `ALLOWED_ORIGINS` **adds** to that list rather than replacing it. Skip it and the console loads, then fails every mutating request.
+> - `ORG_PLANE_*`: all five, or the hub refuses to boot (see "Organization plane").
 > - `ENCRYPTION_KEY`: **exactly** 32 bytes. Using `openssl rand -hex 16` produces 32 hex characters = 32 ASCII bytes.
 > - `CLOUDFLARE_SANDBOX_IMAGE`: required whenever `ENABLE_CLOUDFLARE_SANDBOXES=true`, and it must be the image the worker was deployed with (what `imageForHarness` returns for the harness you provision). The Cloudflare driver advertises a **fixed** image and refuses a spec asking for a different one — but only when it knows this value. Unset, it advertises "fixed" and provisions whatever it is handed. Boot validation now fails instead.
 > - Modal: `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, `NODE_AGENT_MODAL_IMAGE`, `NODE_AGENT_MODAL_OPENCODE_IMAGE`, `NODE_AGENT_MODAL_PI_IMAGE` and `PROVISIONING_HUB_URL` are **all** required whenever `ENABLE_MODAL_PROVISIONING=true`, and the hub exits at startup without them, naming each one. That is deliberate: most of them would otherwise fail silently, later, on somebody else's runtime.
@@ -527,6 +520,11 @@ encryption key.
 
 ### The OAuth client registry
 
+> **Removed with migration 0096.** The hub issues no tokens; `HUB_OAUTH_CLIENTS` is no longer read
+> and `/api/auth/*` answers 410. Clients are registered at the organization plane. Of this
+> section only `WORK_PLANE_AUDIENCES` and the node's `stationTokens` still apply (the hub sends
+> those audiences to the plane's `POST /api/token/agent`).
+
 A plane on its own domain cannot read the hub's session cookie: it is `SameSite=Lax`, and
 `superpipeline.dev` is a different site from `agentpod.dev`. The authorization-code flow
 (`GET /api/auth/authorize` → `POST /api/auth/token/exchange`) exists so a browser can *navigate*
@@ -604,11 +602,12 @@ Operator rules apply to every string in an item, including ids, tool names and s
 
 Stored events are never modified; redaction applies to what the evidence routes return.
 
-### Organization plane (P3, off until P4)
+### Organization plane (required)
 
-These settings switch the hub from its own sign-in and token issuer to the organization plane's
-(the issuer contract, `accounts/docs/superpowers/specs/2026-10-06-issuer-contract.md`). **Leave
-them all unset**: an unset hub behaves exactly as it always has. The cutover (P4) sets them.
+The organization plane is the hub's only sign-in and token issuer (the issuer contract,
+`accounts/docs/superpowers/specs/2026-10-06-issuer-contract.md`). The hub's own Better Auth
+sign-in, token issuer and principal tables were removed after the P4 cutover's rollback window
+(migration `0096_drop_hub_auth`; `docs/OPERATING.md` §11). **All five settings are required.**
 
 | Variable | Meaning |
 |---|---|
@@ -618,13 +617,12 @@ them all unset**: an unset hub behaves exactly as it always has. The cutover (P4
 | `ORG_PLANE_URL` | Base URL of the plane's APIs. A trailing `/` is dropped. |
 | `ORG_PLANE_SERVICE_CREDENTIAL_FILE` | Path to a file holding one line, `svc_<20 hex>:<secret>` — the hub's own service credential, printed once by the plane's `scripts/service.ts create`. Mode `0600`, owned by the hub's user. |
 
-The five are **all-or-none**. A hub with some set and others not, a URL that is not `https`
-(plain `http` is accepted only for a loopback host), or a credential file that is unreadable,
-empty or not `svc_<20 hex>:<secret>` **stops at boot**, naming each variable — never the
-credential's contents. There is no dual mode: set, the hub trusts the plane's tokens only.
+A hub with any of them unset, a URL that is not `https` (plain `http` is accepted only for a
+loopback host), or a credential file that is unreadable, empty or not `svc_<20 hex>:<secret>`
+**stops at boot**, naming each variable — never the credential's contents.
 
-`GET /public/org-plane` tells the console and `fleet login` which issuer to use: `{ "issuer": null }`
-while the settings are unset, `{ issuer, url, audience }` once they are.
+`GET /public/org-plane` tells the console and `fleet login` which issuer to use:
+`{ issuer, url, audience }`.
 
 ## 5. Hub — build + deploy
 
@@ -852,7 +850,7 @@ On the co-hosted Matrix box, also confirm: `curl -sI https://id.<your-domain>` s
 
 ## 9. Smoke test
 
-1. Open `https://console.<your-domain>` in a browser (the custom domain — not `*.pages.dev`); sign up (first user auto-becomes admin; signup closes immediately after).
+1. Open `https://console.<your-domain>` in a browser (the custom domain — not `*.pages.dev`); sign in through the organization plane. An operator is a row in `hub_operators` (`docs/OPERATING.md` §11).
 2. Confirm the session cookie is `Domain=.<your-domain>; Secure; SameSite=Lax` in DevTools.
 3. Navigate to **Settings → Nodes** and generate an enrollment token.
 4. Enroll a real host (curl one-liner — see [docs/OPERATING.md](./OPERATING.md) Option A).

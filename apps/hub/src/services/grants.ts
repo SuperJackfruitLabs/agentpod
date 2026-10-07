@@ -14,10 +14,6 @@
  * skipped: nothing is in production, so the destination is built directly.
  */
 
-import { eq } from "drizzle-orm";
-import { db, type DbExecutor } from "../db/drizzle";
-import { principalGrants } from "../db/schema/grants";
-import { orgPlane } from "../auth/org-plane/config";
 import { principalDirectory } from "./org-plane/directory";
 import { orgPlaneClient } from "./org-plane/client";
 
@@ -59,43 +55,19 @@ export type GrantInput = { mayDispatch: string[]; mayGrantReach: boolean; scopes
 /** A principal with no row has no grant — not an unrestricted one. */
 export const NO_GRANT: Grant = { mayDispatch: [], mayGrantReach: false, scopes: [] };
 
-function parseStringArray(raw: string, what: string, principalId: string): string[] {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.every((v) => typeof v === "string")) return parsed as string[];
-    throw new Error(`grant ${what} for ${principalId} is not an array of strings`);
-  } catch (e) {
-    throw new Error(
-      `refusing to interpret a malformed grant for ${principalId}: ${e instanceof Error ? e.message : String(e)}`,
-    );
-  }
-}
-
+/**
+ * The grant held by `principalId`, or null. It lives at the plane (contract §3.5), read through
+ * the directory's 60 s cache.
+ */
 export async function getGrant(principalId: string): Promise<Grant | null> {
-  // Under the plane the grant lives there (contract §3.5), read through the 60 s cache.
-  if (orgPlane()) return (await principalDirectory().principal(principalId))?.grant ?? null;
-  const rows = await db
-    .select({
-      mayDispatch: principalGrants.mayDispatch,
-      mayGrantReach: principalGrants.mayGrantReach,
-      scopes: principalGrants.scopes,
-    })
-    .from(principalGrants)
-    .where(eq(principalGrants.principalId, principalId))
-    .limit(1);
-
-  const row = rows[0];
-  if (!row) return null;
-
-  // A corrupt value is neither "everything" (catastrophic) nor "nothing" (silent): it is loud.
-  return {
-    mayDispatch: parseStringArray(row.mayDispatch, "mayDispatch", principalId),
-    mayGrantReach: row.mayGrantReach,
-    scopes: parseStringArray(row.scopes, "scopes", principalId),
-  };
+  return (await principalDirectory().principal(principalId))?.grant ?? null;
 }
 
-export async function setGrant(principalId: string, grant: GrantInput, exec: DbExecutor = db): Promise<void> {
+/**
+ * Write a grant at the plane. Kept for the one write the hub still makes (decision D3): adding a
+ * newly placed agent to the placing human's `mayDispatch` — see `org-plane/agent-placement.ts`.
+ */
+export async function setGrant(principalId: string, grant: GrantInput): Promise<void> {
   if (!Array.isArray(grant.mayDispatch) || grant.mayDispatch.some((v) => typeof v !== "string")) {
     throw new Error("mayDispatch must be an array of principal ids");
   }
@@ -110,56 +82,14 @@ export async function setGrant(principalId: string, grant: GrantInput, exec: DbE
     if (unknown.length > 0) throw new Error(`unknown scope: ${unknown.join(", ")}`);
   }
 
-  if (orgPlane()) {
-    // PUT replaces, so scopes this caller did not name are kept from the plane's current grant.
-    const current = grant.scopes === undefined ? (await principalDirectory().principal(principalId))?.grant : null;
-    await orgPlaneClient().putGrant(principalId, {
-      mayDispatch: grant.mayDispatch,
-      mayGrantReach: grant.mayGrantReach,
-      scopes: grant.scopes !== undefined ? [...new Set(grant.scopes)] : (current?.scopes ?? []),
-    });
-    principalDirectory().invalidate(principalId);
-    return;
-  }
-
-  const now = new Date();
-  const scopes = grant.scopes !== undefined ? JSON.stringify([...new Set(grant.scopes)]) : undefined;
-  await exec
-    .insert(principalGrants)
-    .values({
-      principalId,
-      mayDispatch: JSON.stringify(grant.mayDispatch),
-      mayGrantReach: grant.mayGrantReach,
-      scopes: scopes ?? "[]",
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: principalGrants.principalId,
-      set: {
-        mayDispatch: JSON.stringify(grant.mayDispatch),
-        mayGrantReach: grant.mayGrantReach,
-        ...(scopes !== undefined ? { scopes } : {}),
-        updatedAt: now,
-      },
-    });
-}
-
-export async function deleteGrant(principalId: string): Promise<void> {
-  if (orgPlane()) throw new Error("grants are managed by the org plane");
-  await db.delete(principalGrants).where(eq(principalGrants.principalId, principalId));
-}
-
-/** Every grant, for the admin surface. */
-export async function listGrants(): Promise<Array<{ principalId: string } & Grant>> {
-  if (orgPlane()) throw new Error("grants are managed by the org plane");
-  const rows = await db.select().from(principalGrants);
-  return rows.map((r) => ({
-    principalId: r.principalId,
-    mayDispatch: JSON.parse(r.mayDispatch) as string[],
-    mayGrantReach: r.mayGrantReach,
-    scopes: JSON.parse(r.scopes) as string[],
-  }));
+  // PUT replaces, so scopes this caller did not name are kept from the plane's current grant.
+  const current = grant.scopes === undefined ? (await principalDirectory().principal(principalId))?.grant : null;
+  await orgPlaneClient().putGrant(principalId, {
+    mayDispatch: grant.mayDispatch,
+    mayGrantReach: grant.mayGrantReach,
+    scopes: grant.scopes !== undefined ? [...new Set(grant.scopes)] : (current?.scopes ?? []),
+  });
+  principalDirectory().invalidate(principalId);
 }
 
 /**

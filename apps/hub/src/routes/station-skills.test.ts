@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { db, rawSql } from "../db/drizzle";
 import { nodes } from "../db/schema/nodes";
 import { stations } from "../db/schema/stations";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { connectionManager } from "../services/connection-manager";
@@ -39,7 +39,7 @@ afterEach(async () => {
   }
 });
 afterAll(async () => {
-  await rawSql`DELETE FROM "user" WHERE id = ${userId}`;
+  await deleteTestUser(userId);
 });
 
 async function setup(

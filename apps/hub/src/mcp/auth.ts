@@ -5,11 +5,10 @@
  * `dispatchableRoutes` is: `authMiddleware` refuses any non-human principal, which is right for
  * the operator API and wrong for a surface whose whole point is agents.
  *
- * The verification itself is `verifyHubToken` — the one shared verifier, so a key this hub
- * publishes cannot be accepted at one door and refused at another.
+ * The verification itself is `verifyPlaneBearer` — the one shared verifier, so a key accepted at
+ * one door cannot be refused at another.
  */
-import { verifyHubToken, verifyPlaneBearer } from "../auth/hub-token.ts";
-import { orgPlane } from "../auth/org-plane/config.ts";
+import { verifyPlaneBearer } from "../auth/hub-token.ts";
 
 export interface McpCaller {
   /** The principal id from `sub`. For an agent, this is what its station is derived from. */
@@ -37,20 +36,11 @@ export async function resolveMcpCaller(
   const match = /^Bearer +(\S+)$/i.exec(header.trim());
   if (!match) return null;
 
-  // Under the plane, its tokens only — no dual-accept. Agents and services are admitted here,
-  // as hub tokens are below: what an agent may reach is decided by the tools it is offered.
-  if (orgPlane()) {
-    const r = await (deps.verifyPlane ?? verifyPlaneBearer)(match[1]!);
-    if (r.ok) return { principalId: r.caller.sub, kind: r.caller.principalKind };
-    return r.status === 403 ? { refusal: r.body } : null;
-  }
-
-  const claims = await verifyHubToken(match[1]!);
-  if (!claims) return null;
-
-  const kind = claims.principalKind;
-  if (kind !== "human" && kind !== "agent" && kind !== "service") return null;
-  return { principalId: claims.sub, kind };
+  // Agents and services are admitted here: what an agent may reach is decided by the tools it
+  // is offered.
+  const r = await (deps.verifyPlane ?? verifyPlaneBearer)(match[1]!);
+  if (r.ok) return { principalId: r.caller.sub, kind: r.caller.principalKind };
+  return r.status === 403 ? { refusal: r.body } : null;
 }
 
 /** The refusal, in the shape an MCP client can read. */
@@ -61,7 +51,7 @@ export function mcpUnauthorized(): Response {
       error: {
         code: -32001,
         message:
-          "This endpoint takes a hub-issued token in `Authorization: Bearer`. Get one with `fleet login`.",
+          "This endpoint takes an organization-plane token in `Authorization: Bearer`. Get one with `fleet login`.",
       },
       id: null,
     }),

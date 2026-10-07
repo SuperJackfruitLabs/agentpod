@@ -37,7 +37,7 @@ import { eq } from "drizzle-orm";
 import { db, rawSql } from "../db/drizzle";
 import { provisionedRuntimes, enrollmentTokens, nodes } from "../db/schema/nodes";
 import { stations } from "../db/schema/stations";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUsers } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { registerProvisioner, resetProvisioners } from "../services/provisioner/registry";
 import type {
@@ -273,7 +273,7 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM enrollment_tokens    WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
     await rawSql`DELETE FROM provisioned_runtimes WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
-    await rawSql`DELETE FROM "user"               WHERE id IN (${TEST_USER}, ${OTHER_USER})`;
+    await deleteTestUsers([TEST_USER, OTHER_USER]);
   } catch {
     // Ignore cleanup errors
   }

@@ -53,7 +53,6 @@
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
     "@types/dockerode": "^4.0.1",
-    "better-auth": "^1.7.7",
     "dockerode": "^4.0.12",
     "drizzle-orm": "^0.45.2",
     "gray-matter": "^4.0.3",

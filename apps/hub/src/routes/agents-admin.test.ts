@@ -9,8 +9,7 @@
  *
  *   1. A handle that would be silently mangled into a different mxid → 400,
  *      not a quietly different address than the one typed.
- *   2. A handle already claimed → 409, not the 500 a bare unique-index
- *      violation would leak — `principals_org_handle_idx` exists because two
+ *   2. A handle already claimed → 409 (the plane's answer), because two
  *      claimants make the mxid it produces ambiguous.
  *   3. Assigning a suspended principal to a station → 403. A suspended agent
  *      that can still be handed a station is a suspension that does not
@@ -35,20 +34,22 @@ import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUsers } from "../../tests/helpers/database";
 import { db, rawSql } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
-import { createPrincipal, suspendPrincipal } from "../services/principals";
+
+import { createPrincipal } from "../../tests/helpers/principals";
 import { adminMiddleware } from "../auth/admin-middleware";
 import { agentsAdminRouter } from "./agents-admin";
-import { principals } from "../db/schema/organization";
 import { hubOperators } from "../db/schema/operators";
 import { onProvisionStation } from "../services/matrix-as/hooks";
 import { setOrgPlaneForTests, TEST_PLANE } from "../auth/org-plane/config";
 import { OrgPlaneError, setOrgPlaneClientForTests, type OrgPlaneClient, type PlanePrincipal } from "../services/org-plane/client";
 import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../services/org-plane/directory";
+import { forgetPrincipals } from "../../tests/helpers/principals";
+import { suspendPrincipal } from "../../tests/helpers/principals";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const HANDLE_PREFIX = `agents-admin-it-${RUN}`;
@@ -107,7 +108,7 @@ beforeAll(async () => {
   });
 
   // Under the plane admin is a seat in hub_operators (decision D4), not user.role.
-  await db.insert(hubOperators).values({ principalId: ADMIN_ACTOR });
+  await db.insert(hubOperators).values({ principalId: ADMIN_ACTOR }).onConflictDoNothing();
 
   stationId = `st_agtadm_${RUN}`;
   await db.insert(stations).values({
@@ -131,9 +132,9 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations WHERE user_id = ${ADMIN_ACTOR}`;
     await rawSql`DELETE FROM nodes WHERE user_id = ${ADMIN_ACTOR}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${ADMIN_ACTOR}`;
-    await rawSql`DELETE FROM principals WHERE handle LIKE ${HANDLE_PREFIX + "%"}`;
+    await forgetPrincipals({ handleLike: HANDLE_PREFIX + "%" });
     await rawSql`DELETE FROM hub_operators WHERE principal_id = ${ADMIN_ACTOR}`;
-    await rawSql`DELETE FROM "user" WHERE id IN (${ADMIN_ACTOR}, ${NON_ADMIN_ACTOR})`;
+    await deleteTestUsers([ADMIN_ACTOR, NON_ADMIN_ACTOR]);
   } catch {
     // cleanup only
   }
@@ -244,7 +245,7 @@ describe("PUT/DELETE /api/admin/stations/:stationId/agent", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Under ORG_PLANE_*: the agent is created and linked at the plane (decision D3).
+// The agent is created and linked at the plane (decision D3).
 // ---------------------------------------------------------------------------
 
 describe("under the org plane", () => {
@@ -300,7 +301,6 @@ describe("under the org plane", () => {
       const body = (await res.json()) as { id: string; kind: string; handle: string };
       expect(body).toMatchObject({ kind: "agent", handle });
       expect(plane.calls).toEqual([`create ${handle} Plane Made`, `link ${body.id} matrix @agent_${handle}:matrix.example`]);
-      expect(await db.select().from(principals).where(eq(principals.handle, handle))).toEqual([]);
     } finally {
       plane.restore();
       onProvisionStation(null);
@@ -321,7 +321,7 @@ describe("under the org plane", () => {
     }
   });
 
-  test("PUT /stations/:id/agent places a plane-made agent (a mirror row keeps the station's foreign key)", async () => {
+  test("PUT /stations/:id/agent places a plane-made agent (no local row: the hub has no principals table)", async () => {
     const plane = fakePlane();
     try {
       const { id } = await orgPlaneClientForAssign(plane, `${HANDLE_PREFIX}-plane-placed`);
@@ -332,7 +332,8 @@ describe("under the org plane", () => {
       });
       expect(res.status).toBe(200);
       expect((await stationRow(stationId))!.principalId).toBe(id);
-      expect(await db.select({ id: principals.id }).from(principals).where(eq(principals.id, id))).toEqual([{ id }]);
+      const tables = await rawSql<{ n: number }[]>`SELECT count(*)::int AS n FROM information_schema.tables WHERE table_name = 'principals'`;
+      expect(tables[0]!.n).toBe(0);
       await adminApp.request(`/stations/${stationId}/agent`, { method: "DELETE" });
     } finally {
       plane.restore();

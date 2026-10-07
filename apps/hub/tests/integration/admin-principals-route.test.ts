@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { adminPrincipalsRouter } from "../../src/routes/admin-principals";
 import { adminMiddleware } from "../../src/auth/admin-middleware";
-import { createPrincipal, principalById } from "../../src/services/principals";
+import { principalById } from "../../src/services/principals";
+import { createPrincipal, forgetPrincipals, restorePrincipal, suspendPrincipal } from "../helpers/principals";
 
 /**
  * The directory a grant is written against.
@@ -49,13 +50,7 @@ function app() {
   return a;
 }
 
-/**
- * The real guard, not the stub above. `app()` fakes an already-admin context
- * so the other tests in this file can exercise the router in isolation; the
- * suspend/restore tests below need the actual `adminMiddleware` in the chain,
- * because "a non-admin cannot suspend" is a claim about that middleware, not
- * about the router.
- */
+/** The real guard, not the stub above. */
 function guardedApp(actorId: string) {
   const a = new Hono();
   a.use("*", async (c, next) => {
@@ -75,7 +70,7 @@ async function list(): Promise<Row[]> {
 
 beforeAll(async () => {
   await ensurePgMigrations();
-  await rawSql`DELETE FROM principals WHERE handle IN (${HUMAN_HANDLE}, ${AGENT_HANDLE})`;
+  await forgetPrincipals({ handles: [HUMAN_HANDLE, AGENT_HANDLE] });
   await createTestUser({ id: USER, email: "admin-principals@example.com", name: "Directory" });
   await createTestUser({
     id: ADMIN_ACTOR,
@@ -99,8 +94,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
-    await rawSql`DELETE FROM principals WHERE handle IN (${HUMAN_HANDLE}, ${AGENT_HANDLE})`;
-    await rawSql`DELETE FROM "user" WHERE id IN (${USER}, ${ADMIN_ACTOR}, ${NON_ADMIN_ACTOR})`;
+    await forgetPrincipals({ handles: [HUMAN_HANDLE, AGENT_HANDLE] });
+    await deleteTestUsers([USER, ADMIN_ACTOR, NON_ADMIN_ACTOR]);
   } catch {
     // cleanup only
   }
@@ -108,10 +103,9 @@ afterAll(async () => {
 
 describe("/api/admin/principals", () => {
   test("lists an agent, which is the thing a grant's values name", async () => {
-    // The half of the vocabulary that has no other source. A human principal
-    // can at least be found through `/api/admin/users`; an agent appears in no
-    // other admin list at all, so before this there was no way to discover the
-    // id you were meant to type into `mayDispatch`.
+    // The half of the vocabulary that has no other source in this API: an
+    // agent appears in no other admin list, so without this there is no way to
+    // discover the id a grant's `mayDispatch` names.
     const found = (await list()).find((p) => p.id === AGENT);
 
     expect(found).toBeDefined();
@@ -119,7 +113,7 @@ describe("/api/admin/principals", () => {
     expect(found!.handle).toBe(AGENT_HANDLE);
   });
 
-  test("an agent has no Better Auth login, and that is not a gap", async () => {
+  test("an agent has no login, and that is not a gap", async () => {
     // A console must be able to tell "this principal is a person you can look
     // up" from "this principal is an agent". Reading a missing login as a
     // missing row would drop every agent off the picker.
@@ -146,90 +140,21 @@ describe("/api/admin/principals", () => {
   });
 });
 
-describe("POST /api/admin/principals/:id/suspend and /restore", () => {
-  test("a non-admin cannot suspend a principal", async () => {
-    const res = await guardedApp(NON_ADMIN_ACTOR).request(`/principals/${AGENT}/suspend`, {
-      method: "POST",
-    });
-    expect(res.status).toBe(403);
+describe("suspend and restore moved to the plane (decision D3)", () => {
+  test("the router no longer has them; adminRouter answers 410 for both (retired.test.ts)", async () => {
+    for (const verb of ["suspend", "restore"]) {
+      const res = await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/${verb}`, { method: "POST" });
+      expect(res.status).toBe(404);
+    }
     expect((await principalById(AGENT))!.suspendedAt).toBeNull();
   });
 
-  test("a non-admin cannot restore a principal", async () => {
-    const res = await guardedApp(NON_ADMIN_ACTOR).request(`/principals/${AGENT}/restore`, {
-      method: "POST",
-    });
-    expect(res.status).toBe(403);
-  });
-
-  test("an admin can suspend, and the directory reflects it in the same call", async () => {
-    const res = await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/suspend`, {
-      method: "POST",
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { id: string; suspendedAt: string | null };
-    expect(body.id).toBe(AGENT);
-    expect(body.suspendedAt).not.toBeNull();
-
-    const found = (await list()).find((p) => p.id === AGENT);
-    expect(found!.suspendedAt).not.toBeNull();
-  });
-
-  test("suspending an already-suspended principal does not error", async () => {
-    // An operator double-clicking is ordinary, not a fault.
-    const res = await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/suspend`, {
-      method: "POST",
-    });
-    expect(res.status).toBe(200);
-  });
-
-  test("a re-suspend does not overwrite the original suspension time", async () => {
-    // The column's own reason for existing (`db/schema/organization.ts`): "a
-    // timestamp rather than a boolean, because 'since when' is the first
-    // question asked of a suspension, and a boolean cannot answer it." An
-    // unconditional UPDATE would answer that question with the time of the
-    // *second* click — a stale tab, a retry, a race between two admins — and
-    // nothing about the wrong answer would look wrong. Asserting only that the
-    // second call doesn't error, as the test above does, is exactly what let
-    // that through.
-    const first = (await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/suspend`, {
-      method: "POST",
-    }).then((r) => r.json())) as { suspendedAt: string | null };
-    expect(first.suspendedAt).not.toBeNull();
-
-    await new Promise((resolve) => setTimeout(resolve, 5));
-
-    const second = (await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/suspend`, {
-      method: "POST",
-    }).then((r) => r.json())) as { suspendedAt: string | null };
-
-    expect(second.suspendedAt).toBe(first.suspendedAt);
-  });
-
-  test("suspension is reversible from the same surface", async () => {
-    const res = await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/restore`, {
-      method: "POST",
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { id: string; suspendedAt: string | null };
-    expect(body.suspendedAt).toBeNull();
-
-    const found = (await list()).find((p) => p.id === AGENT);
-    expect(found!.suspendedAt).toBeNull();
-  });
-
-  test("restoring a principal that is not suspended does not error", async () => {
-    const res = await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/restore`, {
-      method: "POST",
-    });
-    expect(res.status).toBe(200);
-  });
-
-  test("suspending an unknown principal id answers 404, not a silent no-op", async () => {
-    const res = await guardedApp(ADMIN_ACTOR).request(
-      "/principals/prn_ffffffffffffffffff00/suspend",
-      { method: "POST" }
-    );
-    expect(res.status).toBe(404);
+  test("a suspension made at the plane shows in the list", async () => {
+    await suspendPrincipal(AGENT);
+    try {
+      expect((await list()).find((p) => p.id === AGENT)!.suspendedAt).not.toBeNull();
+    } finally {
+      await restorePrincipal(AGENT);
+    }
   });
 });

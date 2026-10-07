@@ -28,18 +28,19 @@ import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { db, rawSql } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { matrixRooms } from "../db/schema/matrix";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
-import { createPrincipal } from "../services/principals";
+import { createPrincipal } from "../../tests/helpers/principals";
 import { adminMiddleware } from "../auth/admin-middleware";
 import { agentsAdminRouter } from "./agents-admin";
 import { createStationSayRoutes } from "./station-say";
 import { bridgeUserId } from "../services/matrix-as/names";
 import type { AuthUser } from "../auth/middleware";
+import { forgetPrincipals } from "../../tests/helpers/principals";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const HANDLE_PREFIX = `station-say-it-${RUN}`;
@@ -143,8 +144,8 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations WHERE user_id = ${OWNER}`;
     await rawSql`DELETE FROM nodes WHERE user_id = ${OWNER}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${OWNER}`;
-    await rawSql`DELETE FROM principals WHERE handle LIKE ${HANDLE_PREFIX + "%"}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${OWNER}`;
+    await forgetPrincipals({ handleLike: HANDLE_PREFIX + "%" });
+    await deleteTestUser(OWNER);
   } catch {
     // cleanup only
   }

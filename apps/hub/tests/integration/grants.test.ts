@@ -1,55 +1,35 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
-import { rawSql } from "../../src/db/drizzle";
-import { getGrant, setGrant, deleteGrant, listGrants, grantAllowsPrincipal, NO_GRANT } from "../../src/services/grants";
-import { createPrincipal } from "../../src/services/principals";
-import { buildTokenPayload } from "../../src/auth/jwt-claims";
+import { createTestUser, deleteTestUsers } from "../helpers/database";
+import { getGrant, setGrant, grantAllowsPrincipal, NO_GRANT } from "../../src/services/grants";
+import { createPrincipal, forgetPrincipals } from "../helpers/principals";
+import { fakePlane } from "../helpers/fake-plane";
 
 /**
- * Grants as data — the source of authority replacing `CONTROL_PAIR_GRANTS`.
- *
- * The env var was the interim the 2026-08-13 decision blessed: static
- * configuration **in the shape of the eventual claim**, so that this change
- * would be a data move rather than a redesign. These assert the shape survived
- * the move, and that the dangerous readings are all refused.
+ * Grants as data — the source of authority that replaced `CONTROL_PAIR_GRANTS`, now held by the
+ * organization plane (contract §3.5; the hub's `principal_grants` was dropped in P3 Task 17).
+ * `getGrant` reads it through the directory, `setGrant` writes it with `PUT …/grants`. These assert
+ * the shape survived, and that the dangerous readings are all refused at the hub's writer.
  */
 
-const ALICE_USER = "test-user-grants-alice";
-const BOB_USER = "test-user-grants-bob";
-
-/**
- * `principal_grants.principal_id` is a foreign key onto `principals.id` now,
- * not a raw Better Auth user id — every row this suite writes has to be keyed
- * by a real principal, the same as the store's own writer.
- */
-let ALICE: string;
-let BOB: string;
+const ALICE = `prn_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+const BOB = `prn_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
 
 beforeAll(async () => {
   await ensurePgMigrations();
-  await createTestUser({ id: ALICE_USER, email: "grants-alice@example.com", name: "Alice" });
-  await createTestUser({ id: BOB_USER, email: "grants-bob@example.com", name: "Bob" });
-  await rawSql`DELETE FROM principals WHERE handle IN ('grants-it-alice', 'grants-it-bob')`;
-  ALICE = await createPrincipal({ kind: "human", handle: "grants-it-alice", userId: ALICE_USER });
-  BOB = await createPrincipal({ kind: "human", handle: "grants-it-bob", userId: BOB_USER });
+  await createTestUser({ id: ALICE, email: "grants-alice@example.com", name: "Alice" });
+  await createTestUser({ id: BOB, email: "grants-bob@example.com", name: "Bob" });
 });
 
 afterAll(async () => {
-  try {
-    await rawSql`DELETE FROM principal_grants WHERE principal_id IN (SELECT id FROM principals WHERE handle LIKE 'scopes-it-%' OR handle LIKE 'scopes-bad-%')`;
-    await rawSql`DELETE FROM principals WHERE handle LIKE 'scopes-it-%' OR handle LIKE 'scopes-bad-%'`;
-    await rawSql`DELETE FROM principal_grants WHERE principal_id IN (${ALICE}, ${BOB})`;
-    await rawSql`DELETE FROM principals WHERE handle IN ('grants-it-alice', 'grants-it-bob')`;
-    await rawSql`DELETE FROM "user" WHERE id IN (${ALICE_USER}, ${BOB_USER})`;
-  } catch {
-    // cleanup only
-  }
+  await forgetPrincipals({ handleLike: "scopes-%" });
+  await deleteTestUsers([ALICE, BOB]);
 });
 
 describe("the grant store", () => {
-  test("a principal with no row has no grant, which is not an unrestricted one", async () => {
+  test("a principal with no grant has none, which is not an unrestricted one", async () => {
     expect(await getGrant(BOB)).toBeNull();
+    expect(await getGrant("prn_0000000000000000dead")).toBeNull();
     expect(grantAllowsPrincipal(null, "prn_0123456789abcdef0123")).toBe(false);
     expect(grantAllowsPrincipal(NO_GRANT, "prn_0123456789abcdef0123")).toBe(false);
   });
@@ -60,32 +40,27 @@ describe("the grant store", () => {
       mayGrantReach: true,
     });
 
-    const grant = await getGrant(ALICE);
-    expect(grant).toEqual({
+    expect(await getGrant(ALICE)).toEqual({
       mayDispatch: ["prn_0123456789abcdef0123", "prn_ffffffffffffffffffff"],
       mayGrantReach: true,
       scopes: [],
     });
   });
 
-  test("updates in place rather than accumulating rows", async () => {
-    // One principal, one grant. Two rows would be two answers to a question that
-    // must have one, and "which row wins" is not a question an authorization
-    // check should ever ask.
+  test("a write replaces the grant: one principal, one answer", async () => {
     await setGrant(ALICE, { mayDispatch: ["prn_0123456789abcdef0123"], mayGrantReach: false });
 
     const grant = await getGrant(ALICE);
     expect(grant!.mayDispatch).toEqual(["prn_0123456789abcdef0123"]);
     expect(grant!.mayGrantReach).toBe(false);
-
-    const all = await listGrants();
-    expect(all.filter((g) => g.principalId === ALICE)).toHaveLength(1);
   });
 
-  test("refuses a grant missing half the pair", async () => {
+  test("refuses a grant missing half the pair, and sends nothing to the plane", async () => {
+    const before = structuredClone(fakePlane.principals.get(BOB)!.grant);
     await expect(
       setGrant(BOB, { mayDispatch: ["prn_0123456789abcdef0123"] } as never)
     ).rejects.toThrow(/both halves/i);
+    expect(fakePlane.principals.get(BOB)!.grant).toEqual(before);
   });
 
   test("refuses a mayDispatch that is not an array of strings", async () => {
@@ -93,31 +68,11 @@ describe("the grant store", () => {
       setGrant(BOB, { mayDispatch: "prn_0123456789abcdef0123" as never, mayGrantReach: false })
     ).rejects.toThrow(/array/i);
   });
-
-  test("refuses to interpret a corrupt stored grant", async () => {
-    // Neither "everything" nor "nothing": a corrupt grant is loud. Reading it
-    // generously would be catastrophic and reading it as empty would be silent,
-    // and silence is how a broken authorization control looks exactly like a
-    // working one.
-    await rawSql`
-      INSERT INTO principal_grants (principal_id, may_dispatch, may_grant_reach)
-      VALUES (${BOB}, '[1, 2, 3]', false)
-      ON CONFLICT (principal_id) DO UPDATE SET may_dispatch = '[1, 2, 3]'`;
-
-    await expect(getGrant(BOB)).rejects.toThrow(/malformed|array of strings/i);
-    await deleteGrant(BOB);
-  });
-
-  test("deleting is idempotent", async () => {
-    await deleteGrant(BOB);
-    await deleteGrant(BOB);
-    expect(await getGrant(BOB)).toBeNull();
-  });
 });
 
 // The matcher itself — equality, no patterns, no namespace — is pure logic
 // with no database dependency, so its tests live beside it in
-// `src/services/grants.test.ts` rather than here among the DB-bound ones.
+// `src/services/grants.test.ts` rather than here.
 
 describe("scopes", () => {
   test("a grant stores scopes, and an update that does not mention them keeps them", async () => {
@@ -125,7 +80,8 @@ describe("scopes", () => {
     await setGrant(id, { mayDispatch: [], mayGrantReach: false, scopes: ["evidence:read"] });
     expect((await getGrant(id))!.scopes).toEqual(["evidence:read"]);
 
-    // An older client (`fleet grants set`) speaks only the control pair. Absent is not empty.
+    // A caller that speaks only the control pair. Absent is not empty: the plane's PUT replaces,
+    // so the hub carries the current scopes over.
     await setGrant(id, { mayDispatch: [], mayGrantReach: true });
     expect(await getGrant(id)).toEqual({ mayDispatch: [], mayGrantReach: true, scopes: ["evidence:read"] });
 
@@ -148,24 +104,9 @@ describe("scopes", () => {
     expect((await getGrant(id))!.scopes).toEqual(["evidence:read", "runs:write"]);
   });
 
-  test("a grant written before runs:write existed keeps exactly its scopes, and mints no runs:write", async () => {
-    const reader = await createPrincipal({ kind: "service", handle: `scopes-it-${crypto.randomUUID().slice(0, 8)}` });
-    const bare = await createPrincipal({ kind: "service", handle: `scopes-it-${crypto.randomUUID().slice(0, 8)}` });
-    // Rows as the previous code left them, written by SQL so no writer of this version touches them:
-    // one with evidence:read, one from before migration 0086's column had anything in it.
-    await rawSql`INSERT INTO principal_grants (principal_id, may_dispatch, may_grant_reach, scopes)
-                 VALUES (${reader}, '[]', false, '["evidence:read"]')`;
-    await rawSql`INSERT INTO principal_grants (principal_id, may_dispatch, may_grant_reach)
-                 VALUES (${bare}, '[]', false)`;
-    expect(await getGrant(reader)).toEqual({ mayDispatch: [], mayGrantReach: false, scopes: ["evidence:read"] });
-    expect(await getGrant(bare)).toEqual({ mayDispatch: [], mayGrantReach: false, scopes: [] });
-
-    // `fleet grants set` speaks only the control pair; it still leaves the scopes as stored.
-    await setGrant(reader, { mayDispatch: [], mayGrantReach: true });
-    expect((await getGrant(reader))!.scopes).toEqual(["evidence:read"]);
-
-    const tenant = async () => "fleet_0123456789abcdef0123";
-    expect((await buildTokenPayload({ principalId: reader, resolveTenant: tenant })).scope).toBe("evidence:read");
-    expect("scope" in (await buildTokenPayload({ principalId: bare, resolveTenant: tenant }))).toBe(false);
+  test("a repeated scope is written once", async () => {
+    const id = await createPrincipal({ kind: "service", handle: `scopes-it-${crypto.randomUUID().slice(0, 8)}` });
+    await setGrant(id, { mayDispatch: [], mayGrantReach: false, scopes: ["evidence:read", "evidence:read"] });
+    expect((await getGrant(id))!.scopes).toEqual(["evidence:read"]);
   });
 });

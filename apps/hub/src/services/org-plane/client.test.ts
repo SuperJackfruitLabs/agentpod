@@ -186,15 +186,6 @@ describe("OrgPlaneClient", () => {
 });
 
 describe("orgPlaneClient()", () => {
-  test("refuses in legacy mode", () => {
-    const restore = setOrgPlaneForTests(null);
-    try {
-      expect(() => orgPlaneClient()).toThrow(/ORG_PLANE_\* unset/);
-    } finally {
-      restore();
-    }
-  });
-
   test("a test override wins", () => {
     const stub = {} as OrgPlaneClient;
     const restore = setOrgPlaneClientForTests(stub);

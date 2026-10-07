@@ -10,8 +10,7 @@ import {
   adminAuditLog,
   type AdminAction,
 } from "../db/schema/admin";
-import { user } from "../db/schema/auth";
-import { eq, desc, and, gte, lte, sql, inArray } from "drizzle-orm";
+import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("admin-audit-log");
@@ -104,65 +103,6 @@ export async function logAdminAction(input: LogAdminActionInput): Promise<string
 }
 
 /**
- * Helper to log user ban action
- */
-export async function logUserBan(
-  adminUserId: string,
-  targetUserId: string,
-  reason: string,
-  ipAddress?: string,
-  userAgent?: string
-): Promise<string> {
-  return logAdminAction({
-    adminUserId,
-    action: "user_ban",
-    targetUserId,
-    details: { reason },
-    ipAddress,
-    userAgent,
-  });
-}
-
-/**
- * Helper to log user unban action
- */
-export async function logUserUnban(
-  adminUserId: string,
-  targetUserId: string,
-  ipAddress?: string,
-  userAgent?: string
-): Promise<string> {
-  return logAdminAction({
-    adminUserId,
-    action: "user_unban",
-    targetUserId,
-    ipAddress,
-    userAgent,
-  });
-}
-
-/**
- * Helper to log role change action
- */
-export async function logRoleChange(
-  adminUserId: string,
-  targetUserId: string,
-  oldRole: string,
-  newRole: string,
-  ipAddress?: string,
-  userAgent?: string
-): Promise<string> {
-  return logAdminAction({
-    adminUserId,
-    action: "user_role_change",
-    targetUserId,
-    details: { oldRole, newRole },
-    ipAddress,
-    userAgent,
-  });
-}
-
-/**
  * Helper to log settings update
  */
 export async function logSettingsUpdate(
@@ -178,27 +118,6 @@ export async function logSettingsUpdate(
     targetResourceId: settingKey,
     targetResourceType: "setting",
     details: { settingKey, newValue },
-    ipAddress,
-    userAgent,
-  });
-}
-
-/**
- * Helper to log user creation by admin
- */
-export async function logUserCreate(
-  adminUserId: string,
-  targetUserId: string,
-  email: string,
-  role: string,
-  ipAddress?: string,
-  userAgent?: string
-): Promise<string> {
-  return logAdminAction({
-    adminUserId,
-    action: "user_create",
-    targetUserId,
-    details: { email, role },
     ipAddress,
     userAgent,
   });
@@ -273,42 +192,20 @@ export async function getAuditLogs(
     .limit(limit)
     .offset(offset);
 
-  // Fetch user info for entries
-  const adminUserIds = [...new Set(rows.map(r => r.adminUserId))];
-  const targetUserIds = [...new Set(rows.map(r => r.targetUserId).filter(Boolean))] as string[];
-
-  const allUserIds = [...new Set([...adminUserIds, ...targetUserIds])];
-  
-  const users = allUserIds.length > 0
-    ? await db
-        .select({ id: user.id, email: user.email, name: user.name })
-        .from(user)
-        .where(inArray(user.id, allUserIds))
-    : [];
-
-  const userMap = new Map(users.map(u => [u.id, u]));
-
-  const entries: AdminAuditLogEntry[] = rows.map(row => {
-    const adminInfo = userMap.get(row.adminUserId);
-    const targetInfo = row.targetUserId ? userMap.get(row.targetUserId) : undefined;
-
-    return {
-      id: row.id,
-      adminUserId: row.adminUserId,
-      adminEmail: adminInfo?.email,
-      adminName: adminInfo?.name,
-      action: row.action as AdminAction,
-      targetUserId: row.targetUserId,
-      targetEmail: targetInfo?.email,
-      targetName: targetInfo?.name,
-      targetResourceId: row.targetResourceId,
-      targetResourceType: row.targetResourceType,
-      details: parseDetails(row.details),
-      ipAddress: row.ipAddress,
-      userAgent: row.userAgent,
-      createdAt: row.createdAt,
-    };
-  });
+  // No names or emails: people's accounts live at the org plane, and the hub's `user` table that
+  // used to fill these in was dropped (P3 plan, Task 17). The ids are `prn_`s.
+  const entries: AdminAuditLogEntry[] = rows.map(row => ({
+    id: row.id,
+    adminUserId: row.adminUserId,
+    action: row.action as AdminAction,
+    targetUserId: row.targetUserId,
+    targetResourceId: row.targetResourceId,
+    targetResourceType: row.targetResourceType,
+    details: parseDetails(row.details),
+    ipAddress: row.ipAddress,
+    userAgent: row.userAgent,
+    createdAt: row.createdAt,
+  }));
 
   return { entries, total };
 }

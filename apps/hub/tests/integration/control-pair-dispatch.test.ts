@@ -1,14 +1,14 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { adoptStations, listAdopted } from "../../src/services/station-registry";
 import { Hono } from "hono";
 import { createSession } from "../../src/services/acp-sessions";
 import { stationAcpRoutes } from "../../src/routes/station-acp";
-import { setGrant, deleteGrant } from "../../src/services/grants";
-import { createPrincipal } from "../../src/services/principals";
+import { setGrant } from "../../src/services/grants";
+import { createPrincipal, forgetPrincipals, clearGrant } from "../helpers/principals";
 
 /**
  * The control pair, enforced where dispatch actually happens.
@@ -100,19 +100,17 @@ beforeAll(async () => {
 
 afterEach(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
-  await deleteGrant(USER_PRINCIPAL).catch(() => {});
+  clearGrant(USER_PRINCIPAL);
 });
 
 afterAll(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
   try {
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER_PRINCIPAL}`;
-    await rawSql`DELETE FROM principal_identities WHERE external_id = ${USER}`;
     await rawSql`DELETE FROM stations WHERE node_id IN (${nodeId}, ${OTHER_NODE})`;
     await rawSql`DELETE FROM nodes WHERE id IN (${nodeId}, ${OTHER_NODE})`;
-    await rawSql`DELETE FROM principals WHERE handle IN ('controlpair-it-user', 'controlpair-it-agent', 'controlpair-it-other-agent')`;
+    await forgetPrincipals({ handles: ["controlpair-it-user", "controlpair-it-agent", "controlpair-it-other-agent"] });
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${USER}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
+    await deleteTestUser(USER);
   } catch {
     // cleanup only
   }
@@ -241,7 +239,7 @@ describe("the route reports a denial as a refusal, not a gateway failure", () =>
     // will retry something that can never succeed — an authorization decision
     // hidden behind an infrastructure one.
     process.env.ENFORCE_CONTROL_PAIR = "true";
-    await deleteGrant(USER_PRINCIPAL).catch(() => {});
+    clearGrant(USER_PRINCIPAL);
 
     const app = new Hono();
     app.use("*", async (c, next) => {

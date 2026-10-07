@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 
@@ -32,7 +32,7 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM nodes WHERE user_id = ${USER}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${USER}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
+    await deleteTestUser(USER);
   } catch {
     // cleanup only
   }

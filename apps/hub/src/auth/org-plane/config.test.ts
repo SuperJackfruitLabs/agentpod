@@ -11,12 +11,25 @@ const FULL = {
 const file = (body: string) => () => body;
 
 describe("readOrgPlaneConfig", () => {
-  test("nothing set is the legacy mode: config null, no errors", () => {
-    expect(readOrgPlaneConfig({})).toEqual({ ok: true, config: null });
+  // P3 plan Task 17: the hub's own issuer is gone, so nothing set is no longer a mode.
+  test("nothing set refuses to boot and names all five settings as required", () => {
+    const r = readOrgPlaneConfig({});
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors).toEqual([
+      { field: "ORG_PLANE_ISSUER", message: "required" },
+      { field: "ORG_PLANE_JWKS_URL", message: "required" },
+      { field: "ORG_PLANE_AUDIENCE", message: "required" },
+      { field: "ORG_PLANE_URL", message: "required" },
+      { field: "ORG_PLANE_SERVICE_CREDENTIAL_FILE", message: "required" },
+    ]);
   });
 
   test("blank values count as unset", () => {
-    expect(readOrgPlaneConfig({ ORG_PLANE_ISSUER: "  " })).toEqual({ ok: true, config: null });
+    const r = readOrgPlaneConfig({ ORG_PLANE_ISSUER: "  " });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.every((e) => e.message === "required")).toBe(true);
   });
 
   test("all five set yields the config, the issuer kept exactly as written", () => {
@@ -39,8 +52,8 @@ describe("readOrgPlaneConfig", () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.errors.map((e) => e.field).sort()).toEqual(["ORG_PLANE_AUDIENCE", "ORG_PLANE_URL"]);
-    // The refusal is the all-or-none rule, not a downstream symptom (an empty URL is "not a URL").
-    for (const e of r.errors) expect(e.message).toContain("all-or-none");
+    // The refusal is the all-required rule, not a downstream symptom (an empty URL is "not a URL").
+    for (const e of r.errors) expect(e.message).toContain("all required");
   });
 
   test("an unreadable credential file is an error, and the error never echoes file contents", () => {
@@ -59,7 +72,7 @@ describe("readOrgPlaneConfig", () => {
     expect(JSON.stringify(r.errors)).not.toContain("leaky");
   });
 
-  test("an empty credential file is an error, not a silent fall back to legacy mode", () => {
+  test("an empty credential file is an error, never an empty error list", () => {
     const r = readOrgPlaneConfig(FULL, file("\n"));
     expect(r.ok).toBe(false);
     if (r.ok) return;

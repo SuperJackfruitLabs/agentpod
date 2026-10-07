@@ -673,6 +673,13 @@
       "when": 1791316122616,
       "tag": "0095_user_id_rewrites",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1791318571926,
+      "tag": "0096_drop_hub_auth",
+      "breakpoints": true
     }
   ]
 }

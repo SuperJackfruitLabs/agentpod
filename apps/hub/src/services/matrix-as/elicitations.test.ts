@@ -6,7 +6,7 @@ process.env.NODE_ENV = "test";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { OrgPlaneError } from "../org-plane/client";
-import { AssertionMismatch } from "../../auth/service-signing";
+import { AssertionMismatch } from "../../auth/org-plane/assertion";
 
 import { db, rawSql } from "../../db/drizzle";
 import { matrixElicitationEvents } from "../../db/schema/matrix";

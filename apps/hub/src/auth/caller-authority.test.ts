@@ -1,12 +1,10 @@
 process.env.DATABASE_URL = process.env.DATABASE_URL || "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../tests/helpers/database";
-import { rawSql } from "../db/drizzle";
+import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { setOrgPlaneForTests, TEST_PLANE } from "./org-plane/config";
 import { createPrincipalDirectory, setPrincipalDirectoryForTests, type PrincipalDirectory } from "../services/org-plane/directory";
 import { OrgPlaneError } from "../services/org-plane/client";
-import { createPrincipal } from "../services/principals";
 import { setGrant } from "../services/grants";
 import {
   authorityFromClaims,
@@ -55,7 +53,7 @@ describe("authorityFromClaims", () => {
   });
 });
 
-describe("under the plane, with the plane unreachable and nothing cached", () => {
+describe("with the plane unreachable and nothing cached", () => {
   test("the caller's principal and grant come from their token, and the plane is never read", async () => {
     const { dir, reads } = downPlane();
     restores.push(setOrgPlaneForTests(TEST_PLANE), setPrincipalDirectoryForTests(dir));
@@ -112,28 +110,21 @@ describe("under the plane, after a long outage (security review finding 7c)", ()
   });
 });
 
-describe("legacy mode is principalForUser and getGrant, unchanged", () => {
-  const USER = "test-user-caller-authority";
-  let PRN: string;
+describe("a caller with no token authority reads the directory", () => {
+  const USER = "prn_caca0000000000000000";
   beforeAll(async () => {
     await ensurePgMigrations();
     await createTestUser({ id: USER, email: "caller-authority@example.com", name: "CA" });
-    PRN = await createPrincipal({ kind: "human", handle: "caller-authority-it", userId: USER });
-    await setGrant(PRN, { mayDispatch: [AGENT], mayGrantReach: false, scopes: [] });
+    await setGrant(USER, { mayDispatch: [AGENT], mayGrantReach: false, scopes: [] });
   });
   afterAll(async () => {
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${PRN}`;
-    await rawSql`DELETE FROM principal_identities WHERE external_id = ${USER}`;
-    await rawSql`DELETE FROM principals WHERE handle = 'caller-authority-it'`;
-    await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
+    await deleteTestUser(USER);
   });
 
-  test("an authority on the caller is ignored: the hub's own tables answer", async () => {
-    // Never set in legacy mode by the middleware; if one were, it must not count.
-    const caller = { id: USER, authority: { ...AUTH, mayGrantReach: true, mayDispatch: ["prn_eeeeeeeeeeeeeeeeeeee"] } };
-    expect((await callerPrincipal(caller))?.id).toBe(PRN);
-    expect(await callerGrant(caller, PRN)).toEqual({ mayDispatch: [AGENT], mayGrantReach: false, scopes: [] });
-    expect(await callerPrincipal("nobody-at-all")).toBeNull();
+  test("the static API_TOKEN or a background path: principal and grant from the plane", async () => {
+    expect(await callerPrincipal(USER)).toEqual(expect.objectContaining({ id: USER, kind: "human" }));
+    expect(await callerGrant(USER, USER)).toEqual({ mayDispatch: [AGENT], mayGrantReach: false, scopes: [] });
+    expect(await callerPrincipal("prn_0000000000000000dead")).toBeNull();
   });
 });
 

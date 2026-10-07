@@ -99,14 +99,15 @@ describe("tenant guard — unscoped tables are legitimate, and stay refusable", 
   // must be scoped" replaced the classification. Some tables genuinely belong to
   // no tenant, and a guard that cannot say so would force a meaningless tenant
   // onto them.
-  test("the Better Auth family is exempt, not forgotten", () => {
-    // AgentPod declares these tables but Better Auth owns their lifecycle: it
-    // inserts and deletes them through its own adapter, so a NOT NULL column
-    // AgentPod has to populate is a column Better Auth will not populate. The
-    // strategy also assigns principals to the Organization plane, so pinning a
-    // user to an AgentPod-local tenant would model the org in the wrong plane —
-    // exactly what MT-1 (#145) was rewritten to avoid.
-    for (const t of ["user", "session", "account", "verification"]) {
+  test("the Better Auth family and the hub's principals are gone, not merely exempt", () => {
+    // They live at the organization plane now (P3 plan, Task 17). An exemption
+    // left behind for a table the schema no longer has would be a reason for
+    // nothing; the people-keyed tables that remain are exempt on their own terms.
+    for (const t of ["user", "session", "account", "verification", "principals", "principal_identities", "principal_grants"]) {
+      expect(allSchemaTables(), `${t} must not be in the schema`).not.toContain(t);
+      expect(TENANT_EXEMPT_TABLES[t], `${t} must not keep an exemption`).toBeUndefined();
+    }
+    for (const t of ["hub_operators", "legacy_user_principals"]) {
       expect(TENANT_EXEMPT_TABLES[t], `${t} must be an explicit exemption`).toBeDefined();
     }
   });
@@ -135,9 +136,9 @@ describe("tenant guard — a scoped predicate cannot be built without a tenant",
 
   test("refuses a table that is not registered as tenant-scoped", () => {
     // The superpipeline principle, transferred: the helper is not a convenience that
-    // also happens to filter. Asking it to scope `user` is a bug, and it says so
-    // rather than quietly building a predicate against a column that is absent.
-    expect(() => tenantScope(schema.user as never, TENANT)).toThrow(TenantIsolationError);
+    // also happens to filter. Asking it to scope `hub_operators` is a bug, and it says
+    // so rather than quietly building a predicate against a column that is absent.
+    expect(() => tenantScope(schema.hubOperators as never, TENANT)).toThrow(TenantIsolationError);
     expect(() => tenantScope(schema.systemSettings as never, TENANT)).toThrow(/not registered/);
   });
 

@@ -31,7 +31,7 @@ import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../../tests/helpers/database";
 import { db, rawSql } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
@@ -39,7 +39,7 @@ import { matrixRooms } from "../../db/schema/matrix";
 import { bridgeDispatches } from "../../db/schema/bridge";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { mintEnrollmentToken, enrollNode } from "../enrollment";
-import { createPrincipal } from "../principals";
+import { createPrincipal } from "../../../tests/helpers/principals";
 import { adminMiddleware } from "../../auth/admin-middleware";
 import { agentsAdminRouter } from "../../routes/agents-admin";
 import { projectGate, roomAgentUser } from "./gates";
@@ -47,6 +47,7 @@ import { roomForStation } from "./station-room";
 import { bridgeUserId, bridgeAlias } from "./names";
 import { provisionStation } from "./provision";
 import type { GatePendingDelivery } from "./gates";
+import { forgetPrincipals } from "../../../tests/helpers/principals";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const HANDLE_PREFIX = `gates-reassign-${RUN}`;
@@ -171,8 +172,8 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations WHERE user_id = ${ADMIN_ACTOR}`;
     await rawSql`DELETE FROM nodes WHERE user_id = ${ADMIN_ACTOR}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${ADMIN_ACTOR}`;
-    await rawSql`DELETE FROM principals WHERE handle LIKE ${HANDLE_PREFIX + "%"}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${ADMIN_ACTOR}`;
+    await forgetPrincipals({ handleLike: HANDLE_PREFIX + "%" });
+    await deleteTestUser(ADMIN_ACTOR);
   } catch {
     // cleanup only
   }

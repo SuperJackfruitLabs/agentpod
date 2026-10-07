@@ -12,7 +12,7 @@ import { eq, like } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { nodes } from "../db/schema/nodes";
 import { stations } from "../db/schema/stations";
-import { createPrincipal } from "./principals";
+import { createPrincipal } from "../../tests/helpers/principals";
 import { principalOccupies, stationForPrincipal } from "./self-station";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { createTestUser } from "../../tests/helpers/database";

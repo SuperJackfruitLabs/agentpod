@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
-import { createPrincipal } from "../../src/services/principals";
+import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { createStationSayRoutes } from "../../src/routes/station-say";
 
 /**
@@ -97,12 +97,10 @@ afterAll(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
   try {
     await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${ROOM}`;
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${OWNER_PRINCIPAL}`;
-    await rawSql`DELETE FROM principal_identities WHERE external_id = ${OWNER}`;
     await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
-    await rawSql`DELETE FROM principals WHERE handle IN ('station-say-it-owner', 'station-say-it-agent')`;
+    await forgetPrincipals({ handles: ["station-say-it-owner", "station-say-it-agent"] });
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${OWNER}`;
+    await deleteTestUser(OWNER);
   } catch {
     // cleanup only
   }

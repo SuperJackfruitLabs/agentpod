@@ -23,7 +23,7 @@ import { Hono } from "hono";
 
 import { db, rawSql } from "../db/drizzle";
 import { stationAudit } from "../db/schema/audit";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUsers } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { fleetActivityRoutes } from "./activity-fleet";
 import type { AuthUser } from "../auth/middleware";
@@ -71,7 +71,7 @@ beforeAll(async () => {
 afterAll(async () => {
   try {
     await rawSql`DELETE FROM station_audit WHERE user_id IN (${USER_A}, ${USER_B})`;
-    await rawSql`DELETE FROM "user"          WHERE id      IN (${USER_A}, ${USER_B})`;
+    await deleteTestUsers([USER_A, USER_B]);
   } catch {
     // Ignore cleanup errors
   }

@@ -9,8 +9,9 @@ import { stations } from "../db/schema/stations";
 import { skillOperations } from "../db/schema/skills";
 import { stationAudit } from "../db/schema/audit";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUsers } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
+import { fakePlane } from "../../tests/helpers/fake-plane";
 import { connectionManager } from "../services/connection-manager";
 import * as broker from "../services/broker";
 import {
@@ -60,7 +61,7 @@ afterEach(async () => {
 });
 afterAll(async () => {
   await rawSql`DELETE FROM station_audit WHERE user_id=${userId}`;
-  await rawSql`DELETE FROM "user" WHERE id IN (${userId},${otherUser})`;
+  await deleteTestUsers([userId, otherUser]);
 });
 const json = (body: unknown, headers: Record<string, string> = {}) => ({
   method: "POST",
@@ -477,6 +478,21 @@ test("cross-station node replies cannot become a valid plan", async () => {
   const op = SkillHubOperation.parse(await res.json());
   expect(op.state).toBe("unknown");
   expect(op.plan).toBeNull();
+});
+
+test("a node cannot download for an owner the org plane has suspended (what user.banned guarded)", async () => {
+  const c = await setup();
+  const artifact = await upload();
+  await fakePlane.suspend(userId);
+  try {
+    await app.request(
+      `/api/stations/${c.station.id}/skills/plan`,
+      json({ requestId: crypto.randomUUID(), artifactId: artifact.id }),
+    );
+    expect(c.state.downloadStatus).toBe(403);
+  } finally {
+    await fakePlane.unsuspend(userId);
+  }
 });
 
 test("download needs the node secret and a live matching station operation", async () => {

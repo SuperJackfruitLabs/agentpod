@@ -21,7 +21,7 @@ import { eq } from "drizzle-orm";
 
 import { db, rawSql } from "../db/drizzle";
 import { provisionedRuntimes } from "../db/schema/nodes";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { runtimeCallbackRoutes } from "./runtime-callback";
 
@@ -41,7 +41,7 @@ beforeAll(async () => {
 afterAll(async () => {
   try {
     await rawSql`DELETE FROM provisioned_runtimes WHERE user_id = ${TEST_USER}`;
-    await rawSql`DELETE FROM "user"              WHERE id      = ${TEST_USER}`;
+    await deleteTestUser(TEST_USER);
   } catch {
     // ignore
   }

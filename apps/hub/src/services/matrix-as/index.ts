@@ -33,7 +33,7 @@ import {
   GATE_OUTCOME_TYPE,
   settleGateOutcome,
 } from "./gates";
-import { assertPrincipal } from "../../auth/service-signing";
+import { assertPrincipal } from "../../auth/org-plane/assertion";
 import { resolveMatrixId } from "../matrix-identity";
 import { boardRoomFor } from "./board-room";
 import { answerElicitationAtSuperpipeline, claimElicitationOutcome, handleElicitationAnswer } from "./elicitations";
@@ -97,11 +97,8 @@ export interface MatrixBridgeConfig {
  * whose owner has no principal, or a principal with no Matrix identity mapped —
  * simply means no live view; the room still gets its message.
  *
- * Two lookups rather than one join, because `stations.userId` is a Better Auth
- * id and `principal_identities.principal_id` is a `prn_…` value now — joining
- * them directly would silently match nothing for every station. Still looked
- * up once per attachment rather than per chunk: an agent can emit hundreds of
- * chunks in a turn.
+ * Looked up once per attachment rather than per chunk: an agent can emit
+ * hundreds of chunks in a turn.
  */
 async function readerForRoom(roomId: string): Promise<string | null> {
   const [row] = await db

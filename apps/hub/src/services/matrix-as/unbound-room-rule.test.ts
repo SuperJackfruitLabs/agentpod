@@ -34,7 +34,7 @@ import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../../tests/helpers/database";
 import { db, rawSql } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { matrixRooms } from "../../db/schema/matrix";
@@ -43,10 +43,11 @@ import { mintEnrollmentToken, enrollNode } from "../enrollment";
 import { adoptStations } from "../station-registry";
 import { adminMiddleware } from "../../auth/admin-middleware";
 import { agentsAdminRouter } from "../../routes/agents-admin";
-import { createPrincipal } from "../principals";
+import { createPrincipal } from "../../../tests/helpers/principals";
 import { onProvisionStation } from "./hooks";
 import { provisionStation } from "./provision";
 import { roomForStation, roomAliasForStation } from "./station-room";
+import { forgetPrincipals } from "../../../tests/helpers/principals";
 
 const DOMAIN = "id.agentpod.dev";
 const RUN = crypto.randomUUID().slice(0, 8);
@@ -173,8 +174,8 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations WHERE user_id = ${ACTOR}`;
     await rawSql`DELETE FROM nodes WHERE user_id = ${ACTOR}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${ACTOR}`;
-    await rawSql`DELETE FROM principals WHERE handle LIKE ${HANDLE + "%"}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${ACTOR}`;
+    await forgetPrincipals({ handleLike: HANDLE + "%" });
+    await deleteTestUser(ACTOR);
   } catch {
     // cleanup only
   }

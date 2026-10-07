@@ -1,7 +1,7 @@
 import { jsonb, pgTable, primaryKey, text } from "drizzle-orm/pg-core";
 
 /**
- * Every value `scripts/rewrite-user-ids.ts` rewrote, per row: which column of which row went from
+ * Every value the cutover script (`scripts/rewrite-user-ids.ts`, removed by migration 0096) rewrote, per row: which column of which row went from
  * `old_value` to `new_value`. Forward writes it in the same transaction as the rewrite; `--reverse`
  * restores those rows from it first and then empties it.
  *
@@ -12,7 +12,8 @@ import { jsonb, pgTable, primaryKey, text } from "drizzle-orm/pg-core";
  * is not a user→principal map (security review finding 3).
  *
  * `row_key` is the row's primary key as JSON (or, for a table without one, its first unique index
- * minus the rewritten columns). Empty while `ORG_PLANE_*` is unset: only the cutover script writes it.
+ * minus the rewritten columns). Frozen after the cutover: migration 0096's guard reads `new_value` as
+ * the record of what the rewrite wrote, and nothing writes it any more.
  */
 export const userIdRewrites = pgTable(
   "user_id_rewrites",

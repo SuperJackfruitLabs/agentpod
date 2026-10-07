@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { setGrant } from "../../src/services/grants";
-import { createPrincipal } from "../../src/services/principals";
+import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { enrollmentTokenRoutes } from "../../src/routes/enrollment-tokens";
 
 /**
@@ -54,10 +54,8 @@ afterAll(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
   try {
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id IN (${USER}, ${ADMIN_USER})`;
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER_PRINCIPAL}`;
-    await rawSql`DELETE FROM principal_identities WHERE external_id IN (${USER}, ${ADMIN_USER})`;
-    await rawSql`DELETE FROM principals WHERE handle IN ('enroll-reach-user', 'enroll-reach-admin')`;
-    await rawSql`DELETE FROM "user" WHERE id IN (${USER}, ${ADMIN_USER})`;
+    await forgetPrincipals({ handles: ["enroll-reach-user", "enroll-reach-admin"] });
+    await deleteTestUsers([USER, ADMIN_USER]);
   } catch {
     // cleanup only
   }

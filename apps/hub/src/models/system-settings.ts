@@ -92,39 +92,6 @@ export async function setSetting(
 }
 
 /**
- * Check if signup is enabled
- */
-export async function isSignupEnabled(): Promise<boolean> {
-  return getSettingBool(SETTING_KEYS.SIGNUP_ENABLED);
-}
-
-/**
- * Disable signup (called after first user is created)
- */
-export async function disableSignup(updatedBy?: string): Promise<void> {
-  await setSetting(
-    SETTING_KEYS.SIGNUP_ENABLED, 
-    "false", 
-    updatedBy,
-    "Public signup disabled after first user creation"
-  );
-  log.info("Public signup disabled", { updatedBy });
-}
-
-/**
- * Enable signup (admin action)
- */
-export async function enableSignup(updatedBy: string): Promise<void> {
-  await setSetting(
-    SETTING_KEYS.SIGNUP_ENABLED, 
-    "true", 
-    updatedBy,
-    "Public signup enabled by admin"
-  );
-  log.info("Public signup enabled", { updatedBy });
-}
-
-/**
  * Settings that are not dumped by `getAllSettings`: they carry a secret (an
  * encrypted API key), and have their own write-only endpoints instead.
  * `transcription` — see `services/transcription-settings.ts`; `speech` — see
