@@ -80,27 +80,62 @@ expect_body() {
   fi
 }
 
+# `expect_gone METHOD PATH CODE` — 410 whose body names CODE (apps/hub/src/auth/org-plane/retired.ts):
+# `issuer_moved` for a route that issued tokens or keys, `managed_by_org_plane` for a record the
+# plane now owns. Each route's code is checked, not just "some 410".
+expect_gone() {
+  method=$1; path=$2; code=$3
+  out=$(curl -s -w '\n%{http_code}' -X "$method" "$BASE$path" 2>/dev/null) || out=""
+  got=$(printf '%s\n' "$out" | tail -n 1)
+  text=$(printf '%s\n' "$out" | sed '$d')
+  [ -n "$got" ] || got=000
+  case "$got:$text" in
+    410:*"\"$code\""*) echo "ok    $method $path -> 410 $code   (retired: the organization plane owns this)" ;;
+    *) echo "FAIL  $method $path -> $got $text — wanted 410 $code: under the plane the hub must not issue or keep this"
+       FAILURES=$((FAILURES + 1)) ;;
+  esac
+}
+
 echo "smoke: $BASE"
 
 # ── Liveness, which is necessary and nowhere near sufficient ────────────────
 expect GET /health 200 "the process is up"
 
-# ── The issuer's own surface ────────────────────────────────────────────────
-# Everything downstream verifies against this key set. It is served by a route
-# registered ahead of Better Auth's catch-all; if that ordering ever breaks,
-# this is where it shows.
-expect GET /api/auth/jwks 200 "the published key set superpipeline verifies against"
+# ── Which issuer this hub trusts ─────────────────────────────────────────────
+# Since the organization-plane cutover (2026-10-07) the hub issues nothing: every
+# /api/auth/* route answers 410 issuer_moved, and tokens come from the plane. The
+# discovery route says which mode the hub is in; each mode has its own contract.
+PLANE=$(curl -s "$BASE/public/org-plane" 2>/dev/null | sed -n 's/.*"issuer":"\([^"]*\)".*/\1/p')
 
-# ── Device credentials (charter 2026-09-18, accepted 2026-09-20) ────────────
-# The routes that shipped 404ing. Each must refuse an anonymous caller rather
-# than not exist.
-expect POST /api/auth/devices/token 401 "exchange refuses a missing device credential"
-expect GET  /api/auth/devices       401 "the inventory refuses an anonymous caller"
-expect POST /api/auth/devices       401 "creation refuses an anonymous caller"
+if [ -n "$PLANE" ]; then
+  echo "mode: organization plane ($PLANE)"
+  # Retired, and saying why. A 200 here would mean the hub is still issuing
+  # beside the plane (dual-accept); a 404 that a route moved; a 410 with the
+  # wrong code that the route was retired for the wrong reason.
+  expect_gone GET  /api/auth/jwks           issuer_moved
+  expect_gone POST /api/auth/devices/token  issuer_moved
+  expect_gone POST /api/auth/token/exchange issuer_moved
+  expect_gone GET  /api/auth/devices        managed_by_org_plane
+  expect_gone POST /api/auth/devices        managed_by_org_plane
+else
+  echo "mode: legacy (the hub is its own issuer)"
+  # ── The issuer's own surface ──────────────────────────────────────────────
+  # Everything downstream verifies against this key set. It is served by a route
+  # registered ahead of Better Auth's catch-all; if that ordering ever breaks,
+  # this is where it shows.
+  expect GET /api/auth/jwks 200 "the published key set superpipeline verifies against"
 
-# ── The cross-domain handoff ────────────────────────────────────────────────
-# Also registered ahead of the catch-all, and also invisible to /health.
-expect POST /api/auth/token/exchange 400,401 "the code exchange refuses an empty body"
+  # ── Device credentials (charter 2026-09-18, accepted 2026-09-20) ──────────
+  # The routes that shipped 404ing. Each must refuse an anonymous caller rather
+  # than not exist.
+  expect POST /api/auth/devices/token 401 "exchange refuses a missing device credential"
+  expect GET  /api/auth/devices       401 "the inventory refuses an anonymous caller"
+  expect POST /api/auth/devices       401 "creation refuses an anonymous caller"
+
+  # ── The cross-domain handoff ──────────────────────────────────────────────
+  # Also registered ahead of the catch-all, and also invisible to /health.
+  expect POST /api/auth/token/exchange 400,401 "the code exchange refuses an empty body"
+fi
 
 # ── A route behind the auth middleware ──────────────────────────────────────
 # Proves the middleware is mounted and refusing, not that it is absent.
