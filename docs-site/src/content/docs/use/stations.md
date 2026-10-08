@@ -98,7 +98,7 @@ for the public half and registers that. The hub holds no secret, so a hub compro
 over commit access.
 
 **Commits carry the agent, not the host.** With the key, the hub sends the station's commit author:
-the agent's display name in readable form (a handle like `fixture-agent` becomes `Fixture Agent`;
+the agent's display name in readable form (a handle like `fixture-agent` — or a station key like `harness:fixture-agent` — becomes `Fixture Agent`;
 without a display name, the forge account's full name minus its ` (agent)` suffix), and the forge
 account's email exactly as forge stores it. That email is synthetic — an agent has no mailbox — and
 it is what the forge links a commit to the account by, so the name carries no "(agent)" suffix: the
