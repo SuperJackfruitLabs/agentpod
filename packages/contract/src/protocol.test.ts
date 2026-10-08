@@ -205,6 +205,26 @@ describe("git identity verbs", () => {
     ).toBe(true);
   });
 
+  it("ensure may carry the commit author, and stays valid without one so older hubs still work", () => {
+    const base = { stationId: "stn_a", stationKey: "hermes:a" };
+    const author = { name: "Fixture Agent", email: "fixture-agent@agents.example" };
+    expect(VERB_PARAMS["git.identity.ensure"].parse({ ...base, author }).author).toEqual(author);
+    expect(VERB_PARAMS["git.identity.ensure"].parse(base).author).toBeUndefined();
+  });
+
+  it("an author is both a name and an email, never half of one", () => {
+    // A commit with an author name and the host's email (or the reverse) is attributed to nobody.
+    const base = { stationId: "stn_a", stationKey: "hermes:a" };
+    for (const author of [
+      { name: "Fixture Agent" },
+      { email: "fixture-agent@agents.example" },
+      { name: "", email: "fixture-agent@agents.example" },
+      { name: "Fixture Agent", email: "" },
+    ]) {
+      expect(VERB_PARAMS["git.identity.ensure"].safeParse({ ...base, author }).success).toBe(false);
+    }
+  });
+
   it("remove is keyed by id alone, so a rename cannot make it miss", () => {
     expect(VERB_PARAMS["git.identity.remove"].safeParse({ stationId: "stn_a" }).success).toBe(true);
   });

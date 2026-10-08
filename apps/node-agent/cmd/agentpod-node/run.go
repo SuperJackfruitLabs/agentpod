@@ -98,7 +98,13 @@ func runCmd() {
 		}
 	})
 
-	h := gateway.NewTerminalHandler(descriptor.NewHandler(reg), resolver, mgr, lifecycleFn)
+	// Where each station's git identity (push key, commit author) lives. The config directory,
+	// NOT a workspace — see internal/gitidentity for why.
+	gitIdentityRoot := filepath.Dir(config.DefaultPath())
+	// A station's terminal commits as the same author its harness does.
+	h := gateway.NewTerminalHandlerWithEnv(descriptor.NewHandler(reg), resolver, mgr, func(key string) []string {
+		return gitidentity.Env(gitIdentityRoot, key)
+	}, lifecycleFn)
 	if fetch, err := gateway.NewHTTPArtifactFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret); err == nil {
 		h = gateway.NewSkillManagementHandler(h, gateway.SkillManagementDeps{
 			NodeID: cfg.NodeID, Resolve: reg.ManagedSkillWorkspace, Fetch: fetch,
@@ -241,12 +247,12 @@ func runCmd() {
 		},
 	})
 	h = gateway.NewChangesetHandler(h, resolver)
-	gitIdentityRoot := filepath.Dir(config.DefaultPath())
-	// git.identity.ensure: the public half of a station's push key, generated on first ask.
-	// Rooted at the config directory, NOT a workspace — see internal/gitidentity for why.
+	// git.identity.ensure: the public half of a station's push key, generated on first ask, and
+	// the author its commits are by.
 	h = gateway.NewGitIdentityHandler(h, gitIdentityRoot)
 	h = gateway.NewPostureHandler(h, func() int { return len(reg.DetectAll()) })
-	// A station with a provisioned git identity gets GIT_SSH_COMMAND in its harness's environment.
+	// A station with a provisioned git identity gets GIT_SSH_COMMAND — and GIT_AUTHOR_* /
+	// GIT_COMMITTER_* once the hub has sent its author — in its harness's environment.
 	// This is what makes the key do anything: without it the key is on disk, the account is on
 	// forge, and `git push` still uses whatever ssh would have used anyway.
 	h = gateway.NewACPHandler(h, acpMgr, gateway.ACPCommandFunc(gitidentity.WithSSHCommand(

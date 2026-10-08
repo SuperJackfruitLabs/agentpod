@@ -44,6 +44,9 @@ type terminalHandler struct {
 	resolver    WorkspaceResolver
 	mgr         *terminal.Manager
 	lifecycleFn LifecycleFunc // nil if lifecycle not configured
+	// envFn is the extra environment a station's shell starts with (its git identity, today).
+	// nil means none.
+	envFn func(key string) []string
 
 	attachMu sync.Mutex
 	attaches map[string]*attachState // keyed by attach request ID
@@ -68,6 +71,15 @@ func NewTerminalHandler(inner Handler, resolver WorkspaceResolver, mgr *terminal
 		lifecycleFn: lcFn,
 		attaches:    make(map[string]*attachState),
 	}
+}
+
+// NewTerminalHandlerWithEnv is NewTerminalHandler whose shells start with envFn(stationKey) in
+// their environment — so a commit made by hand in a station's terminal carries the same author as
+// one its harness makes.
+func NewTerminalHandlerWithEnv(inner Handler, resolver WorkspaceResolver, mgr *terminal.Manager, envFn func(key string) []string, lifecycleFn ...LifecycleFunc) Handler {
+	h := NewTerminalHandler(inner, resolver, mgr, lifecycleFn...).(*terminalHandler)
+	h.envFn = envFn
+	return h
 }
 
 // Handle routes term.* verbs to the local handlers and delegates everything
@@ -122,7 +134,11 @@ func (h *terminalHandler) handleTermOpen(params json.RawMessage) (any, bool, err
 		shell = "/bin/sh"
 	}
 
-	sess, err := h.mgr.Open(p.Key, shell, workspace, p.Cols, p.Rows)
+	var env []string
+	if h.envFn != nil {
+		env = h.envFn(p.Key)
+	}
+	sess, err := h.mgr.OpenWithEnv(p.Key, shell, workspace, p.Cols, p.Rows, env)
 	if err != nil {
 		return nil, false, fmt.Errorf("term.open: %w", err)
 	}

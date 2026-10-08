@@ -680,6 +680,13 @@
       "when": 1791318571926,
       "tag": "0096_drop_hub_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1791491607957,
+      "tag": "0097_station_git_author",
+      "breakpoints": true
     }
   ]
 }

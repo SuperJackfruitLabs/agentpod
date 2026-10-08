@@ -58,6 +58,17 @@ export const stationGitIdentities = pgTable(
 
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 
+    /**
+     * Who this station's commits are by, as last sent to the node (GIT_AUTHOR_* / GIT_COMMITTER_*
+     * in the harness's environment). Null on a row provisioned before authors were sent; the next
+     * time the node connects, the hub fills it in and tells the node — no key is touched.
+     *
+     * The email is forge's, as forge stores it — never constructed here — because it is what forge
+     * links a commit to the account by. It is synthetic; an agent has no mailbox.
+     */
+    authorName: text("author_name"),
+    authorEmail: text("author_email"),
+
     /** Set when a station re-registers — a new key replacing an old one, rather than a first. */
     rotatedAt: timestamp("rotated_at", { withTimezone: true }),
   },

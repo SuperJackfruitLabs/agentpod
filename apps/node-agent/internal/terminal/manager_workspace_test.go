@@ -28,10 +28,10 @@ func TestPendingTerminalReservesWorkspaceAndShutdownReapsIt(t *testing.T) {
 	unblock := func() { once.Do(func() { close(proceed) }) }
 	defer m.Shutdown()
 	defer unblock()
-	m.spawn = func(id, shell, cwd string, cols, rows uint16) (*Session, error) {
+	m.spawn = func(id, shell, cwd string, cols, rows uint16, env []string) (*Session, error) {
 		close(entered)
 		<-proceed
-		return newSession(id, shell, cwd, cols, rows)
+		return newSession(id, shell, cwd, cols, rows, env)
 	}
 	result := make(chan error, 1)
 	go func() { _, err := m.Open("codex:test", "/bin/cat", dir, 80, 24); result <- err }()

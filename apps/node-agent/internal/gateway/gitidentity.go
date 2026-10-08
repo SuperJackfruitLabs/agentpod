@@ -52,6 +52,9 @@ func (h *gitIdentityHandler) Handle(
 		// are the hub's. Recorded beside the key so the spawn path can find it. See
 		// `gitidentity.stationFile`.
 		StationKey string `json:"stationKey"`
+		// Who this station's commits are by. Absent from an older hub, and from nothing else: an
+		// ensure without it leaves a recorded author alone rather than erasing it.
+		Author *gitidentity.Author `json:"author,omitempty"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, false, fmt.Errorf("%s: bad params: %w", verb, err)
@@ -76,6 +79,12 @@ func (h *gitIdentityHandler) Handle(
 	pub, _, created, err := gitidentity.EnsureKey(h.root, p.StationID, p.StationKey)
 	if err != nil {
 		return nil, false, fmt.Errorf("git.identity.ensure: %w", err)
+	}
+	if p.Author != nil {
+		// After the key, because an author is recorded only beside a key that exists.
+		if err := gitidentity.RecordAuthor(h.root, p.StationID, *p.Author); err != nil {
+			return nil, false, fmt.Errorf("git.identity.ensure: %w", err)
+		}
 	}
 
 	// The path is deliberately not returned. The hub has no use for it and a path in a hub log is

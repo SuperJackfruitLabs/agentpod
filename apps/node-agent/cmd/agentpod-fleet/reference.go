@@ -325,6 +325,9 @@ var reference = clidoc.Binary{
 		{
 			Path: "stations git-identity", Summary: "What a station can push to the forge as.",
 			Synopsis: "fleet stations git-identity --station STATION_ID",
+			Detail: "Shows the forge account, its key id, and authorName/authorEmail — who the station's " +
+				"commits are by (GIT_AUTHOR_* and GIT_COMMITTER_* in its harness and terminal environment). " +
+				"The author is null for an identity provisioned before authors existed, until its node next connects.",
 			Handlers: []string{"fleetStations"},
 			Flags:    []clidoc.Flag{{Name: "station", Arg: "STATION_ID", Required: true}},
 			Example:  "fleet stations git-identity --station stn_123",

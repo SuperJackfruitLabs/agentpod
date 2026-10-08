@@ -680,6 +680,8 @@ What a station can push to the forge as.
 fleet stations git-identity --station STATION_ID
 ```
 
+Shows the forge account, its key id, and authorName/authorEmail — who the station's commits are by (GIT_AUTHOR_* and GIT_COMMITTER_* in its harness and terminal environment). The author is null for an identity provisioned before authors existed, until its node next connects.
+
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
 | `--station STATION_ID` | string | — | Station ID. **Required.** |

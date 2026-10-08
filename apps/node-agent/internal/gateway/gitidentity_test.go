@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
 )
 
 func gitIdentityPassthrough() Handler {
@@ -171,5 +173,51 @@ func TestGitIdentityRemoveIsIdempotent(t *testing.T) {
 	h := NewGitIdentityHandler(gitIdentityPassthrough(), t.TempDir())
 	if _, _, err := h.Handle(t.Context(), "git.identity.remove", json.RawMessage(`{"stationId":"stn_none","stationKey":"hermes:gone"}`), nil); err != nil {
 		t.Fatalf("remove of an absent key: %v", err)
+	}
+}
+
+// The hub names the station's author in the ensure; the node keeps it beside the key, where the
+// spawn path reads it.
+func TestGitIdentityEnsureRecordsTheAuthor(t *testing.T) {
+	root := t.TempDir()
+	h := NewGitIdentityHandler(gitIdentityPassthrough(), root)
+	params := json.RawMessage(`{"stationId":"stn_abc","stationKey":"hermes:press","author":{"name":"Fixture Agent","email":"fixture-agent@agents.example"}}`)
+	if _, _, err := h.Handle(t.Context(), "git.identity.ensure", params, nil); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	id, ok := gitidentity.IdentityForStationKey(root, "hermes:press")
+	if !ok || id.Author == nil {
+		t.Fatalf("no author recorded: %+v", id)
+	}
+	if id.Author.Name != "Fixture Agent" || id.Author.Email != "fixture-agent@agents.example" {
+		t.Errorf("author = %+v", id.Author)
+	}
+}
+
+// An ensure without an author (an older hub, or the key-only first ask) must not erase one.
+func TestGitIdentityEnsureWithoutAnAuthorKeepsTheRecordedOne(t *testing.T) {
+	root := t.TempDir()
+	h := NewGitIdentityHandler(gitIdentityPassthrough(), root)
+	with := json.RawMessage(`{"stationId":"stn_abc","stationKey":"hermes:press","author":{"name":"Fixture Agent","email":"fixture-agent@agents.example"}}`)
+	without := json.RawMessage(`{"stationId":"stn_abc","stationKey":"hermes:press"}`)
+	if _, _, err := h.Handle(t.Context(), "git.identity.ensure", with, nil); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if _, _, err := h.Handle(t.Context(), "git.identity.ensure", without, nil); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	id, _ := gitidentity.IdentityForStationKey(root, "hermes:press")
+	if id.Author == nil || id.Author.Name != "Fixture Agent" {
+		t.Errorf("author = %+v, want the recorded one kept", id.Author)
+	}
+}
+
+// A malformed author is the hub's bug; refusing it says so, where recording it would commit as
+// nobody.
+func TestGitIdentityEnsureRefusesHalfAnAuthor(t *testing.T) {
+	h := NewGitIdentityHandler(gitIdentityPassthrough(), t.TempDir())
+	params := json.RawMessage(`{"stationId":"stn_abc","stationKey":"hermes:press","author":{"name":"Fixture Agent"}}`)
+	if _, _, err := h.Handle(t.Context(), "git.identity.ensure", params, nil); err == nil {
+		t.Fatal("accepted an author with no email")
 	}
 }

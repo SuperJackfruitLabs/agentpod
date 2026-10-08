@@ -142,3 +142,87 @@ func contains(list []string, want string) bool {
 	}
 	return false
 }
+
+// The point of the author: a commit made by the harness is the agent's, not the host's.
+func TestWithSSHCommandGivesAProvisionedStationItsAuthor(t *testing.T) {
+	root := t.TempDir()
+	if _, _, _, err := EnsureKey(root, "stn_abc", "hermes:press"); err != nil {
+		t.Fatalf("EnsureKey: %v", err)
+	}
+	if err := RecordAuthor(root, "stn_abc", Author{Name: "Fixture Agent", Email: "fixture-agent@agents.example"}); err != nil {
+		t.Fatalf("RecordAuthor: %v", err)
+	}
+	_, _, env, err := WithSSHCommand(root, staticCommand([]string{"FOO=1"}))("hermes:press")
+	if err != nil {
+		t.Fatalf("WithSSHCommand: %v", err)
+	}
+	for _, want := range []string{
+		"GIT_AUTHOR_NAME=Fixture Agent",
+		"GIT_AUTHOR_EMAIL=fixture-agent@agents.example",
+		"GIT_COMMITTER_NAME=Fixture Agent",
+		"GIT_COMMITTER_EMAIL=fixture-agent@agents.example",
+		"FOO=1",
+	} {
+		if !contains(env, want) {
+			t.Errorf("env lacks %s: %v", want, env)
+		}
+	}
+}
+
+// A key provisioned before authors existed: the push key, and no invented author.
+func TestWithSSHCommandInventsNoAuthor(t *testing.T) {
+	root := t.TempDir()
+	if _, _, _, err := EnsureKey(root, "stn_abc", "hermes:press"); err != nil {
+		t.Fatalf("EnsureKey: %v", err)
+	}
+	_, _, env, err := WithSSHCommand(root, staticCommand(nil))("hermes:press")
+	if err != nil {
+		t.Fatalf("WithSSHCommand: %v", err)
+	}
+	if len(env) != 1 || !strings.HasPrefix(env[0], "GIT_SSH_COMMAND=") {
+		t.Errorf("env = %v, want only GIT_SSH_COMMAND", env)
+	}
+}
+
+// A station with no identity keeps whatever the host's git would use; nothing is overridden.
+func TestWithSSHCommandOverridesNothingWithoutAnIdentity(t *testing.T) {
+	root := t.TempDir()
+	// Another station's identity, with an author, must not leak onto this one.
+	if _, _, _, err := EnsureKey(root, "stn_abc", "hermes:press"); err != nil {
+		t.Fatalf("EnsureKey: %v", err)
+	}
+	if err := RecordAuthor(root, "stn_abc", Author{Name: "Fixture Agent", Email: "fixture-agent@agents.example"}); err != nil {
+		t.Fatalf("RecordAuthor: %v", err)
+	}
+	_, _, env, err := WithSSHCommand(root, staticCommand([]string{"FOO=1"}))("hermes:other")
+	if err != nil {
+		t.Fatalf("WithSSHCommand: %v", err)
+	}
+	for _, e := range env {
+		if strings.HasPrefix(e, "GIT_") {
+			t.Errorf("a station with no identity got %s", strings.SplitN(e, "=", 2)[0])
+		}
+	}
+}
+
+// The environment is appended to os.Environ() and the last duplicate wins, so a descriptor that
+// set one of these itself would be silently overridden. It knows its harness; it keeps its value.
+func TestWithSSHCommandLeavesTheDescriptorsOwnValues(t *testing.T) {
+	root := t.TempDir()
+	if _, _, _, err := EnsureKey(root, "stn_abc", "hermes:press"); err != nil {
+		t.Fatalf("EnsureKey: %v", err)
+	}
+	if err := RecordAuthor(root, "stn_abc", Author{Name: "Fixture Agent", Email: "fixture-agent@agents.example"}); err != nil {
+		t.Fatalf("RecordAuthor: %v", err)
+	}
+	_, _, env, err := WithSSHCommand(root, staticCommand([]string{"GIT_AUTHOR_NAME=Descriptor's Own"}))("hermes:press")
+	if err != nil {
+		t.Fatalf("WithSSHCommand: %v", err)
+	}
+	if contains(env, "GIT_AUTHOR_NAME=Fixture Agent") {
+		t.Errorf("the descriptor's GIT_AUTHOR_NAME was overridden: %v", env)
+	}
+	if !contains(env, "GIT_COMMITTER_NAME=Fixture Agent") {
+		t.Errorf("the variables the descriptor did not set were dropped: %v", env)
+	}
+}

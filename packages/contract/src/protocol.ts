@@ -103,7 +103,20 @@ export const VERB_PARAMS = {
    * rides in a frame — and here the SECRET NEVER MOVES AT ALL: the private half is generated on the
    * node and stays there, and the hub registers only what comes back.
    */
-  "git.identity.ensure": z.object({ stationId: z.string(), stationKey: z.string() }),
+  "git.identity.ensure": z.object({
+    stationId: z.string(),
+    stationKey: z.string(),
+    /**
+     * Who the station's commits are by. The node records it beside the key and puts it in the
+     * harness's environment as GIT_AUTHOR_* / GIT_COMMITTER_*, so a commit carries the agent's
+     * own name rather than whatever the host's git config says.
+     *
+     * Optional so a hub that predates it, and a node that predates it, keep working: an older node
+     * ignores the field, and an ensure without it leaves an already-recorded author as it was.
+     * Both halves or neither — a name with the host's email is attributed to nobody.
+     */
+    author: z.object({ name: z.string().min(1), email: z.string().min(1) }).optional(),
+  }),
   // Withdrawal. By id alone: a rename must not be able to miss the key it meant to delete. The
   // forge side is the hub's own to revoke; this only deletes the node's copy, so that a station
   // reassigned to another agent cannot be handed the previous occupant's key.

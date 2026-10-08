@@ -42,13 +42,16 @@ type Session struct {
 // When using a PTY, the child becomes a session leader automatically
 // (the PTY slave is its controlling terminal), so we do NOT set Setpgid —
 // it conflicts with the PTY allocation on macOS.
-func newSession(id, shell, cwd string, cols, rows uint16) (*Session, error) {
+func newSession(id, shell, cwd string, cols, rows uint16, env []string) (*Session, error) {
 	if shell == "" {
 		shell = "/bin/sh"
 	}
 
 	cmd := exec.Command(shell)
 	cmd.Dir = cwd
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 
 	size := &pty.Winsize{Cols: cols, Rows: rows}
 	ptm, err := pty.StartWithSize(cmd, size)
