@@ -47,7 +47,10 @@ export interface ForgeConfig {
 export interface ForgeUser {
   id: number;
   login: string;
+  /** As forge stores it. An admin token sees it even on a private account. */
   email: string;
+  /** What `ensureAgentUser` set: `<login> (agent)`. Absent from older stubs and older forges. */
+  full_name?: string;
 }
 
 export interface MintedToken {
@@ -140,6 +143,18 @@ export async function ensureAgentUser(
 
   log.info("forge account created", { username });
   return { user: created.body as ForgeUser, created: true };
+}
+
+/** The account, or null when forge has none. Read only — never creates. */
+export async function readAgentUser(
+  cfg: ForgeConfig,
+  username: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<ForgeUser | null> {
+  const res = await call(cfg, "GET", `/users/${encodeURIComponent(username)}`, fetchImpl);
+  if (res.status === 404) return null;
+  if (res.status !== 200) refuse(`reading the account ${username}`, res.status);
+  return res.body as ForgeUser;
 }
 
 export interface MintOptions {

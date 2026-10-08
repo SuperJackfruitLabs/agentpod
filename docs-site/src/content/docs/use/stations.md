@@ -97,6 +97,19 @@ The keypair is generated **on the node** and the private half never leaves it: `
 for the public half and registers that. The hub holds no secret, so a hub compromise does not hand
 over commit access.
 
+**Commits carry the agent, not the host.** With the key, the hub sends the station's commit author:
+the agent's display name in readable form (a handle like `fixture-agent` becomes `Fixture Agent`;
+without a display name, the forge account's full name minus its ` (agent)` suffix), and the forge
+account's email exactly as forge stores it. That email is synthetic — an agent has no mailbox — and
+it is what the forge links a commit to the account by, so the name carries no "(agent)" suffix: the
+email's domain already says it. The node records the author beside the key and starts the station's
+harness and terminal with `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and
+`GIT_COMMITTER_EMAIL` — environment, never git config, so nothing is written to any repository or
+to the host. A station with no identity gets none of these and keeps the host's git config.
+`git-identity` shows the author as `authorName`/`authorEmail`. An identity provisioned before
+authors existed gets one the next time its node connects (a node update reconnects it), with no key
+regenerated. A harness or terminal already running keeps the environment it started with.
+
 ## Staffing
 
 Putting an agent in a station, or taking it out:

@@ -53,6 +53,7 @@ import { stationTokenRoutes } from './routes/station-token.ts';
 // A node redeeming a human's authorization for a station's Matrix credential
 import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-credential.ts';
 import { createStationGitIdentityRoutes } from './routes/station-git-identity.ts';
+import { configureGitAuthorSync } from './services/station-git-identity.ts';
 // A node reading its station's voice-note setting (transcription.apply)
 import { createNodeTranscriptionRoutes } from './routes/station-transcription-node.ts';
 // ... and its spoken-reply setting (speech.apply)
@@ -135,6 +136,15 @@ const errorLogger = createLogger('error-handler');
 // neither is mounted, and a homeserver talking to us gets a 404 rather than a
 // half-built bridge.
 const matrixBridge = createMatrixBridge();
+
+/** The forge admin credential, or null when this hub has none (push provisioning then answers 503). */
+const forgeConfig = config.forge.url && config.forge.adminToken
+  ? { baseUrl: config.forge.url.replace(/\/+$/, ''), adminToken: config.forge.adminToken }
+  : null;
+
+// Each station's commit author is re-sent when its node connects: that is how identities provisioned
+// before authors existed get one, and how a renamed agent's commits follow the rename.
+configureGitAuthorSync({ forge: forgeConfig });
 
 const app = new Hono()
   // Before the request logger, so a span covers every later middleware too.
@@ -289,11 +299,7 @@ const app = new Hono()
    * station they own, so it wants the same `getStation` ownership check every other station route
    * uses. The predecessor in #594 was a node calling in with its own credential and sat above.
    */
-  .route('/api', createStationGitIdentityRoutes({
-    forge: config.forge.url && config.forge.adminToken
-      ? { baseUrl: config.forge.url.replace(/\/+$/, ''), adminToken: config.forge.adminToken }
-      : null,
-  }))
+  .route('/api', createStationGitIdentityRoutes({ forge: forgeConfig }))
   .route('/api', nodePostureRoutes)                        // POST /api/nodes/:id/posture/scan
   .route('/public', runtimeCallbackRoutes)                 // POST /public/runtimes/:id/state
   .route('/api', stationAcpRoutes)                         // POST/GET /api/stations/:id/acp/sessions, WS /api/acp/sessions/:sessionId/ws

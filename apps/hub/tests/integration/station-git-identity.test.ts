@@ -31,7 +31,7 @@ import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { createStationGitIdentityRoutes } from "../../src/routes/station-git-identity";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { stationRoutes } from "../../src/routes/stations";
-import { keyTitleFor } from "../../src/services/station-git-identity";
+import { configureGitAuthorSync, keyTitleFor } from "../../src/services/station-git-identity";
 import { websocket } from "../../src/ws";
 import type { ForgeConfig } from "../../src/services/forge";
 import type { AuthUser } from "../../src/auth/middleware";
@@ -49,12 +49,16 @@ const OTHER_USER = `usr_gitid_other_${RUN}`;
  * insert rather than on anything it meant to assert.
  */
 const handles: string[] = [];
-async function freshAgent(): Promise<{ id: string; handle: string }> {
+async function freshAgent(displayName?: string): Promise<{ id: string; handle: string }> {
   const handle = `coder-kai-${RUN}-${handles.length}`;
   handles.push(handle);
   // createPrincipal returns the id itself, not a row.
-  return { id: await createPrincipal({ kind: "agent", handle }), handle };
+  return { id: await createPrincipal({ kind: "agent", handle, displayName }), handle };
 }
+
+/** The address the forge stub gives an account — deliberately NOT the hub's own convention, so a
+ * test can tell the email forge returned from one the hub made up. */
+const forgeEmail = (login: string) => `${login}@forge-assigned.example`;
 
 /** What the fake node hands back. Two, so rotation can be seen to change something. */
 const KEY_A =
@@ -83,7 +87,10 @@ function forgeStub(startId = 100) {
       // Echo the login that was asked for. A stub answering with a FIXED name once hid that the
       // account is derived from the station's principal, not from the request.
       const login = decodeURIComponent(url.split("/users/")[1]!.split("/")[0]!);
-      return new Response(JSON.stringify({ id: 3, login, email: "x@y" }), { status: 200 });
+      return new Response(
+        JSON.stringify({ id: 3, login, email: forgeEmail(login), full_name: `${login} (agent)` }),
+        { status: 200 },
+      );
     }
     return new Response("{}", { status: 204 });
   };
@@ -135,6 +142,7 @@ async function connectFakeNode(opts: {
   });
 
   const queue = [...opts.keys];
+  let held: string | undefined;
   ws.onmessage = (e) => {
     const raw = String(e.data);
     opts.captured.push(raw);
@@ -171,7 +179,11 @@ async function connectFakeNode(opts: {
         break;
       case "git.identity.ensure": {
         if (opts.refuse) return fail();
-        const key = queue.shift() ?? KEY_A;
+        // An ensure that only delivers an author gets the key the node already holds, as a real
+        // node's would; the queue models what a provisioning ensure hands back.
+        const carriesAuthor = Boolean((msg.params as { author?: unknown } | undefined)?.author);
+        const key = carriesAuthor ? (held ?? KEY_A) : (queue.shift() ?? KEY_A);
+        held = key;
         ws.send(
           JSON.stringify({
             type: "res",
@@ -216,6 +228,7 @@ async function withStation(opts: {
   keys?: string[];
   refuse?: string;
   withoutPrincipal?: boolean;
+  displayName?: string;
 }) {
   const server = Bun.serve({
     fetch: appFor({
@@ -250,12 +263,15 @@ async function withStation(opts: {
   const station = await adoptStation(baseUrl, nodeId, stationKey);
   let handle = "";
   if (!opts.withoutPrincipal) {
-    const agent = await freshAgent();
+    const agent = await freshAgent(opts.displayName);
     handle = agent.handle;
     await db.update(stations).set({ principalId: agent.id }).where(eq(stations.id, station.id));
   }
 
-  return { server, baseUrl, station, stationKey, captured, fakeNode, nodeId, handle };
+  const reconnect = async (captured2: string[]) =>
+    connectFakeNode({ port: server.port!, nodeId, nodeSecret, stationKey, keys: opts.keys ?? [KEY_A], captured: captured2 });
+
+  return { server, baseUrl, station, stationKey, captured, fakeNode, nodeId, handle, reconnect };
 }
 
 function sawVerb(msgs: string[], verb: string): boolean {
@@ -267,6 +283,28 @@ function sawVerb(msgs: string[], verb: string): boolean {
       return false;
     }
   });
+}
+
+function reqsFor(msgs: string[], verb: string): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const raw of msgs) {
+    try {
+      const m = JSON.parse(raw);
+      if (m?.type === "req" && m?.verb === verb) out.push(m.params as Record<string, unknown>);
+    } catch {
+      // not JSON — skip
+    }
+  }
+  return out;
+}
+
+async function until(cond: () => boolean | Promise<boolean>, ms = 3000): Promise<boolean> {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (await cond()) return true;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return false;
 }
 
 function reqFor(msgs: string[], verb: string): Record<string, unknown> | undefined {
@@ -597,6 +635,132 @@ describe("withdrawal", () => {
       expect(((await res.json()) as { revoked: boolean }).revoked).toBe(false);
     } finally {
       ctx.fakeNode.close();
+      ctx.server.stop(true);
+    }
+  });
+});
+
+// ─── Commit author ────────────────────────────────────────────────────────────
+
+describe("commit author", () => {
+  test("after registering, the node is told who the station's commits are by", async () => {
+    const forge = forgeStub();
+    const ctx = await withStation({
+      fetchImpl: forge.fetchImpl as unknown as typeof fetch,
+      displayName: "fixture-agent",
+    });
+    try {
+      const res = await call(ctx.baseUrl, ctx.station.id, "POST");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { author: { name: string; email: string } | null; authorDelivered: boolean };
+      const want = { name: "Fixture Agent", email: forgeEmail(ctx.handle) };
+      expect(body.author).toEqual(want);
+      expect(body.authorDelivered).toBe(true);
+
+      // The author rides in an ensure, so a node that predates it ignores the field and keeps working.
+      const withAuthor = reqsFor(ctx.captured, "git.identity.ensure").filter((p) => p.author);
+      expect(withAuthor).toHaveLength(1);
+      expect(withAuthor[0]).toEqual({ stationId: ctx.station.id, stationKey: ctx.stationKey, author: want });
+
+      const [row] = await db
+        .select()
+        .from(stationGitIdentities)
+        .where(eq(stationGitIdentities.stationId, ctx.station.id));
+      expect(row!.authorName).toBe(want.name);
+      expect(row!.authorEmail).toBe(want.email);
+
+      // And the operator can see it.
+      const shown = (await (await call(ctx.baseUrl, ctx.station.id, "GET")).json()) as {
+        identity: { authorName: string; authorEmail: string };
+      };
+      expect(shown.identity.authorName).toBe(want.name);
+      expect(shown.identity.authorEmail).toBe(want.email);
+    } finally {
+      ctx.fakeNode.close();
+      ctx.server.stop(true);
+    }
+  });
+
+  test("an identity from before authors existed is backfilled on reconnect, without touching its key", async () => {
+    const forge = forgeStub();
+    configureGitAuthorSync({ forge: cfg, fetchImpl: forge.fetchImpl as unknown as typeof fetch });
+    const ctx = await withStation({
+      fetchImpl: forge.fetchImpl as unknown as typeof fetch,
+      displayName: "fixture-agent",
+    });
+    try {
+      expect((await call(ctx.baseUrl, ctx.station.id, "POST")).status).toBe(200);
+      // What a row provisioned by the previous release looks like.
+      await db
+        .update(stationGitIdentities)
+        .set({ authorName: null, authorEmail: null })
+        .where(eq(stationGitIdentities.stationId, ctx.station.id));
+      const [before] = await db
+        .select()
+        .from(stationGitIdentities)
+        .where(eq(stationGitIdentities.stationId, ctx.station.id));
+
+      ctx.fakeNode.close();
+      const forgeCallsBefore = forge.calls.length;
+      const captured2: string[] = [];
+      const node2 = await ctx.reconnect(captured2);
+      try {
+        const delivered = await until(() =>
+          reqsFor(captured2, "git.identity.ensure").some((p) => p.author),
+        );
+        expect(delivered).toBe(true);
+        const [sent] = reqsFor(captured2, "git.identity.ensure").filter((p) => p.author);
+        expect(sent).toEqual({
+          stationId: ctx.station.id,
+          stationKey: ctx.stationKey,
+          author: { name: "Fixture Agent", email: forgeEmail(ctx.handle) },
+        });
+
+        expect(
+          await until(async () => {
+            const [r] = await db
+              .select()
+              .from(stationGitIdentities)
+              .where(eq(stationGitIdentities.stationId, ctx.station.id));
+            return r!.authorEmail === forgeEmail(ctx.handle);
+          }),
+        ).toBe(true);
+
+        // No re-provisioning: forge was only READ, and the row still names the same key.
+        const since = forge.calls.slice(forgeCallsBefore);
+        expect(since.every((c) => c.startsWith("GET "))).toBe(true);
+        const [after] = await db
+          .select()
+          .from(stationGitIdentities)
+          .where(eq(stationGitIdentities.stationId, ctx.station.id));
+        expect(after!.keyId).toBe(before!.keyId);
+        expect(after!.publicKey).toBe(before!.publicKey);
+      } finally {
+        node2.close();
+      }
+    } finally {
+      configureGitAuthorSync(null);
+      ctx.server.stop(true);
+    }
+  });
+
+  test("a reconnecting node whose stations have no identity is asked nothing", async () => {
+    const forge = forgeStub();
+    configureGitAuthorSync({ forge: cfg, fetchImpl: forge.fetchImpl as unknown as typeof fetch });
+    const ctx = await withStation({ fetchImpl: forge.fetchImpl as unknown as typeof fetch });
+    try {
+      ctx.fakeNode.close();
+      const captured2: string[] = [];
+      const node2 = await ctx.reconnect(captured2);
+      try {
+        await new Promise((r) => setTimeout(r, 300));
+        expect(sawVerb(captured2, "git.identity.ensure")).toBe(false);
+        expect(forge.calls).toHaveLength(0);
+      } finally {
+        node2.close();
+      }
+    } finally {
+      configureGitAuthorSync(null);
       ctx.server.stop(true);
     }
   });

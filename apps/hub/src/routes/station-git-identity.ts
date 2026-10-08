@@ -34,9 +34,10 @@ import { db } from "../db/drizzle";
 import { stationGitIdentities } from "../db/schema/git-identities";
 import * as broker from "../services/broker";
 import { getStation } from "../services/station-registry";
-import { principalHandle } from "../services/principals";
+import { principalHandle, principalNames } from "../services/principals";
 import { recordAudit } from "../services/audit";
 import {
+  deliverCommitAuthor,
   registerStationGitIdentity,
   revokeStationGitIdentity,
 } from "../services/station-git-identity";
@@ -96,6 +97,10 @@ export function createStationGitIdentityRoutes(deps: StationGitIdentityDeps) {
             username: row.username,
             keyId: row.keyId,
             publicKey: row.publicKey,
+            // Who its commits are by. Null on an identity the node has not reconnected since
+            // authors were introduced.
+            authorName: row.authorName,
+            authorEmail: row.authorEmail,
             rotatedAt: row.rotatedAt,
           },
         });
@@ -167,6 +172,7 @@ export function createStationGitIdentityRoutes(deps: StationGitIdentityDeps) {
               tenantId: station.tenantId,
               username: handle,
               publicKey,
+              displayName: (await principalNames(station.principalId!))?.displayName ?? null,
             },
             deps.fetchImpl,
           );
@@ -176,6 +182,12 @@ export function createStationGitIdentityRoutes(deps: StationGitIdentityDeps) {
           // 502: forge is upstream of this hub, and its refusals are not the caller's mistake.
           return c.json({ error: message }, 502);
         }
+
+        // Second, because the author's email is forge's and forge has only now been asked. An
+        // undelivered author is not a failed grant: the key works, and the next reconnect sends it.
+        const authorDelivered = identity.author
+          ? await deliverCommitAuthor(station, identity.author, publicKey)
+          : false;
 
         await audit.done("ok").catch(() => {});
         log.info("station git identity provisioned", {
@@ -188,6 +200,8 @@ export function createStationGitIdentityRoutes(deps: StationGitIdentityDeps) {
           keyId: identity.keyId,
           rotated: identity.rotated,
           publicKey,
+          author: identity.author,
+          authorDelivered,
         });
       })
 

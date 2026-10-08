@@ -29,7 +29,7 @@ type Manager struct {
 	closed     bool
 	children   sync.WaitGroup
 	workspaces *workspacegate.Coordinator
-	spawn      func(string, string, string, uint16, uint16) (*Session, error)
+	spawn      func(string, string, string, uint16, uint16, []string) (*Session, error)
 }
 
 func NewManager() *Manager { return NewManagerWithWorkspaces(workspacegate.New()) }
@@ -50,6 +50,13 @@ func NewManagerWithWorkspaces(g *workspacegate.Coordinator) *Manager {
 // spawning. The reservation lasts through child reaping. Empty shell defaults
 // to /bin/sh. Shutdown permanently closes admission and waits for starts.
 func (m *Manager) Open(key, shell, cwd string, cols, rows uint16) (*Session, error) {
+	return m.OpenWithEnv(key, shell, cwd, cols, rows, nil)
+}
+
+// OpenWithEnv is Open with extra environment for the shell, appended to the node's own. It applies
+// only when a session is spawned: reusing a live session for key keeps the environment it started
+// with.
+func (m *Manager) OpenWithEnv(key, shell, cwd string, cols, rows uint16, env []string) (*Session, error) {
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -95,7 +102,7 @@ func (m *Manager) Open(key, shell, cwd string, cols, rows uint16) (*Session, err
 		finish()
 		return complete(nil, ErrClosed)
 	}
-	s, err := m.spawn(id, shell, lease.Path(), cols, rows)
+	s, err := m.spawn(id, shell, lease.Path(), cols, rows, env)
 	if err != nil {
 		finish()
 		return complete(nil, err)

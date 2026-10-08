@@ -76,6 +76,12 @@ export async function principalHandle(id: string): Promise<string | null> {
   return (await principalDirectory().principal(id))?.handle ?? null;
 }
 
+/** A principal's handle and display name, or null. The display name is null when none was set. */
+export async function principalNames(id: string): Promise<{ handle: string; displayName: string | null } | null> {
+  const p = await principalDirectory().principal(id);
+  return p ? { handle: p.handle, displayName: p.displayName } : null;
+}
+
 /**
  * Every principal in the hub's workspace, for the admin surface and the dispatchable picker.
  *

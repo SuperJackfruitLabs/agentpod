@@ -166,3 +166,27 @@ func TestStationsPushAccessVerbsRequireAStation(t *testing.T) {
 		})
 	}
 }
+
+// An operator checking why a commit is attributed to the host needs to see who the station's
+// commits are SUPPOSED to be by — so the author the hub reports must reach the output.
+func TestStationsGitIdentityShowsTheCommitAuthor(t *testing.T) {
+	bin := build(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"identity":{"provider":"forge","username":"fixture-agent","keyId":7,` +
+			`"publicKey":"ssh-ed25519 AAAA","authorName":"Fixture Agent","authorEmail":"fixture-agent@agents.example","rotatedAt":null}}`))
+	}))
+	defer srv.Close()
+	out, code := run(t, bin, []string{
+		"AGENTPOD_HUB=" + srv.URL,
+		"AGENTPOD_TOKEN=" + jwtish("prn_operator", "human"),
+	}, "stations", "git-identity", "--station", "station_fixture")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	for _, want := range []string{"Fixture Agent", "fixture-agent@agents.example"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q: %s", want, out)
+		}
+	}
+}

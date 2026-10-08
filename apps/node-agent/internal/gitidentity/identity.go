@@ -172,7 +172,7 @@ func KeyPathForStationKey(root, stationKey string) (string, bool) {
 // Remove deletes a station's key from this node. The forge side is the hub's to withdraw.
 func Remove(root, stationID string) error {
 	keyPath := KeyPath(root, stationID)
-	for _, p := range []string{keyPath, keyPath + ".pub", stationFile(root, stationID)} {
+	for _, p := range []string{keyPath, keyPath + ".pub", stationFile(root, stationID), authorFile(root, stationID)} {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("gitidentity: remove %s: %w", p, err)
 		}
