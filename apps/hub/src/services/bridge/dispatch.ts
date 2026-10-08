@@ -66,7 +66,7 @@
  */
 
 import { context, trace } from "@opentelemetry/api";
-import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt, type AcpEvent, type AcpMcpServer, type AcpSessionMode } from "@agentpod/contract";
+import { CARD_PROMPT_VERSION, CardPrompt, CardPromptComment, renderCardPrompt, type AcpEvent, type AcpMcpServer, type AcpSessionMode } from "@agentpod/contract";
 
 import { ActivityCoalescer, type BoardActivity } from "./coalesce";
 import type { AgentSpanRecorder } from "../../telemetry/agent-spans";
@@ -82,6 +82,7 @@ import {
   isLeaseSuperseded,
   SuperpipelineClient,
   type ClaimedWork,
+  type RunContext,
   type RunElicitation,
 } from "./superpipeline";
 import {
@@ -1131,7 +1132,32 @@ async function assemblePrompt(deps: DispatchDeps, work: ClaimedWork): Promise<Ca
     // Told which run it holds ONLY when it has the tools to address it. A
     // prompt naming verbs the harness cannot call is an instruction to fail.
     run: boardTools(deps) ? { id: work.runId } : null,
+    // Absent from a board that predates comments, and passed through as absent:
+    // that is what keeps the prompt from naming comment tools such a board lacks.
+    ...promptComments(ctx),
   });
+}
+
+/**
+ * The card's comments, narrowed to what the prompt contract carries.
+ *
+ * The context is a cast, not a parse, so each comment is checked here: one malformed row is
+ * dropped rather than failing `CardPrompt.parse` and with it the whole dispatch. A tombstone
+ * (`deletedAt` set) is dropped too — its text is gone and an empty quote tells the agent nothing.
+ */
+function promptComments(ctx: RunContext): { comments?: CardPromptComment[]; commentsOmitted?: number } {
+  if (!Array.isArray(ctx.comments)) return {};
+  const comments: CardPromptComment[] = [];
+  for (const c of ctx.comments as unknown[]) {
+    if (c && typeof c === "object" && (c as { deletedAt?: unknown }).deletedAt) continue;
+    const parsed = CardPromptComment.safeParse(c);
+    if (parsed.success) comments.push(parsed.data);
+  }
+  const omitted = ctx.commentsOmitted;
+  return {
+    comments,
+    commentsOmitted: typeof omitted === "number" && Number.isInteger(omitted) && omitted > 0 ? omitted : 0,
+  };
 }
 
 /**

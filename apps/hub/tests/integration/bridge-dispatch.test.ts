@@ -684,6 +684,95 @@ describe("an agent that can address the board itself", () => {
   });
 });
 
+describe("the card's comment thread", () => {
+  const withMcp = { ...agent, mcpToken: `spa_${"c0ffee00".repeat(6)}` };
+  const withComments: Handler = (path, body) => {
+    if (path.endsWith(`/runs/${RUN_ID}`)) {
+      return {
+        status: 200,
+        body: {
+          ...contextBody,
+          // superpipeline's CommentView, as the run context carries it.
+          comments: [
+            {
+              id: "cmt_1",
+              cardId: CARD_ID,
+              author: { kind: "human", id: "usr_a", name: "Asha" },
+              body: "Skip the archived folder.",
+              createdAt: "2026-10-08T10:00:00.000Z",
+              deletedAt: null,
+            },
+            {
+              id: "cmt_2",
+              cardId: CARD_ID,
+              author: { kind: "human", id: "usr_a", name: "Asha" },
+              body: "",
+              createdAt: "2026-10-08T10:01:00.000Z",
+              deletedAt: "2026-10-08T10:02:00.000Z",
+            },
+          ],
+          commentsOmitted: 3,
+        },
+      };
+    }
+    return happyBoard(path, body);
+  };
+
+  test("reaches the harness at claim, quoted under its author, without a deleted comment", async () => {
+    const board = fakeBoard(withComments);
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+
+    await runOnce(deps(board.client, acp.port, undefined, { agent: withMcp, mcpUrl: "https://board.test/mcp" }));
+
+    const prompt = acp.state.prompts[0]!;
+    expect(prompt).toContain("## Comments on this card");
+    expect(prompt).toContain("Asha (person), 2026-10-08 10:00 UTC:\n\n> Skip the archived folder.");
+    expect(prompt).toContain("3 older comments are not shown");
+    expect(prompt.match(/Asha \(person\)/g)).toHaveLength(1);
+    // Nothing pushes a mid-run comment into the session, so the agent is told to look.
+    expect(prompt).toContain("superpipeline_list_comments");
+  });
+
+  test("a board that predates comments renders the prompt it always did", async () => {
+    // The superpipeline deployed before card comments sends no `comments` at all. The prompt must
+    // not gain a section, nor name a tool that server does not offer.
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+
+    await runOnce(deps(board.client, acp.port, undefined, { agent: withMcp, mcpUrl: "https://board.test/mcp" }));
+
+    const prompt = acp.state.prompts[0]!;
+    expect(prompt).not.toContain("Comments on this card");
+    expect(prompt).not.toContain("superpipeline_list_comments");
+    expect(prompt).toContain("superpipeline_get_run");
+  });
+
+  test("an agent with no board tools still reads the thread, and is not told to call a tool it lacks", async () => {
+    const board = fakeBoard(withComments);
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+
+    await runOnce(deps(board.client, acp.port));
+
+    const prompt = acp.state.prompts[0]!;
+    expect(prompt).toContain("> Skip the archived folder.");
+    expect(prompt).not.toContain("superpipeline_list_comments");
+  });
+
+  test("a malformed comment from the board is dropped rather than failing the dispatch", async () => {
+    const board = fakeBoard((path, body) =>
+      path.endsWith(`/runs/${RUN_ID}`)
+        ? { status: 200, body: { ...contextBody, comments: [{ author: { kind: "robot" }, body: 5 }, null] } }
+        : happyBoard(path, body),
+    );
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+
+    await runOnce(deps(board.client, acp.port));
+
+    expect(acp.state.prompts).toHaveLength(1);
+    expect(acp.state.prompts[0]).not.toContain("Comments on this card");
+  });
+});
+
 describe("403 NOT_RUN_OWNER — a different fact, and never a retry", () => {
   const foreignBoard: Handler = (path) => {
     if (path.endsWith("/claims")) return { status: 200, body: claimBody };

@@ -20,7 +20,7 @@ repo boundary instead of a language boundary.
 | `id_grammar.json` | What each repo mints and validates for every entity id, plus the full prefix registry and the collisions in it — open (`knownConflicts`) and settled (`resolvedConflicts`). |
 | `run_join_key.json` | The run join key: *superpipeline mints the work run; AgentPod executes it; no competing run id for dispatched work.* |
 | `matrix_gate_events.json` | The two events a superpipeline approval gate crosses Matrix on: the gate the board asks, and the decision a human sends back. Pins the option ids against superpipeline's `GateDecision`, and records the four fields superpipeline#34 proposed that do not exist. |
-| `card_prompt.json` | The prompt contract: what a card becomes when it is handed to a harness, assembled from the card, the previous stage's handoff and the card's references. Pins the **rendered text**, not only the shape. |
+| `card_prompt.json` | The prompt contract: what a card becomes when it is handed to a harness, assembled from the card, the previous stage's handoff, the card's references and (since `card-prompt/4`) its comment thread. Pins the **rendered text**, not only the shape. |
 | `token_claims.json` | The access-token claims every product verifies — **v8**, the organization plane's shape (`org`, `ent`, `jti`; `aud` a string or an array; no `tenant`). Pinned by `packages/contract/src/token-claims.ts`. AgentPod's hub keeps minting the v7 shape until its issuer is removed; that copy is frozen at `apps/hub/src/auth/testdata/token_claims.v7.json`. |
 
 All of them are plain JSON and depend on no type from any repo. That is deliberate — a corpus that
