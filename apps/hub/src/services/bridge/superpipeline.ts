@@ -181,6 +181,23 @@ export interface RunContext {
   references: RunReference[];
   /** Every question this run asked, oldest first. Absent on older deployments. */
   elicitations?: RunElicitation[];
+  /**
+   * The newest comments on the card, oldest first (superpipeline card comments). Absent on a
+   * deployment that predates comments — and the prompt must then not mention them.
+   */
+  comments?: RunComment[];
+  /** How many older comments were left out of `comments`. */
+  commentsOmitted?: number;
+}
+
+/** superpipeline's `CommentView`, as the run context carries it. */
+export interface RunComment {
+  id: string;
+  cardId: string;
+  author: { kind: "human" | "agent"; id: string; name: string | null };
+  body: string;
+  createdAt: string;
+  deletedAt: string | null;
 }
 
 /** The lease a run verb is authorized by. */

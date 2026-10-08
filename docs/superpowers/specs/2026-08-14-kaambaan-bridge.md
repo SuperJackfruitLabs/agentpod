@@ -79,6 +79,15 @@ process and comes back in a transcript the board renders.
 Versioned, and it refuses a version it cannot render. A `card-prompt/2` parsed
 as v1 is how a section goes missing on one side of a seam with nobody noticing.
 
+> **Since written (2026-10-08): the contract is `card-prompt/4`.** Version 2 added the stage's
+> `instructions`, version 3 the `run` an agent may report against, and version 4 the card's
+> comment thread — an optional `comments` array (author kind and name, body, time) and
+> `commentsOmitted`, rendered as a quoted *Comments on this card* section between the handoff and
+> the references. `comments` absent (a board that predates comments) renders exactly as version 3.
+> With a `run`, the closing section also tells the agent to re-read the thread with
+> `superpipeline_list_comments` before reporting, because a comment posted mid-run is not pushed
+> into the session. The corpus is the authority on the rendered text.
+
 ---
 
 ## 403 and 409

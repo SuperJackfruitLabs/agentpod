@@ -1656,6 +1656,25 @@ Mint the token **run-only**, from superpipeline's Workspace → Agents tab. See
 [DEPLOYMENT.md → superpipeline bridge](./DEPLOYMENT.md#superpipeline-bridge) for why it must not
 be the roster `token`.
 
+### Card comments in the prompt
+
+A board with card comments carries the card's newest comments (at most 20, at most 16 KB of
+text, oldest first) on `GET /runs/:runId`, and the bridge renders them into the prompt
+(`card-prompt/4`) as **Comments on this card**: each one quoted under its author, whether a
+person or an agent wrote it, and its UTC time, with a count of older comments left out. Deleted
+comments and any row the bridge cannot read are dropped, never fatal to the dispatch.
+
+**At claim only.** The prompt is assembled once, when the card is claimed. A comment posted while
+the agent works is **not** delivered into the running session — a dispatch is one ACP turn and the
+bridge has no channel into a turn in progress. Instead, an agent with board tools (an `mcpToken`)
+is told in the prompt to call `superpipeline_list_comments` before it reports its outcome, and to
+answer with `superpipeline_post_comment`. An agent without board tools reads only what was there
+at claim.
+
+**Older boards.** A superpipeline that predates comments sends no `comments` field; the prompt then
+renders exactly as `card-prompt/3` did — no section, and no mention of the comment tools that
+server does not have. Nothing to configure in either direction.
+
 ### Reading `bridge_dispatches`
 
 There is no API for the ledger — Postgres is the read path. One row per claimed run, keyed
