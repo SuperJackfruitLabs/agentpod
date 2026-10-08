@@ -49,12 +49,15 @@ const IDENT_UNSAFE = /[<>\r\n\0]/g;
 
 /**
  * A name for `git log`. A handle-shaped name (`fixture-agent`) becomes words (`Fixture Agent`); one
- * somebody already wrote for people — it has a space or a capital — is left as they wrote it.
+ * somebody already wrote for people — it has a space or a capital — is left as they wrote it. A
+ * station key used as a display name (`harness:fixture-agent`) loses its harness prefix.
  */
 export function readableName(raw: string): string {
   const clean = raw.replace(IDENT_UNSAFE, "").replace(/\s+/g, " ").trim();
   if (clean === "" || /\s/.test(clean) || /[A-Z]/.test(clean)) return clean;
-  return clean
+  // A station key (`harness:name`) used as a display name: the part after the harness is the agent.
+  const local = clean.slice(clean.lastIndexOf(":") + 1);
+  return local
     .split(/[-_.]+/)
     .filter(Boolean)
     .map((w) => w[0]!.toUpperCase() + w.slice(1))

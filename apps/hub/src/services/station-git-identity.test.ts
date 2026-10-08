@@ -9,6 +9,11 @@ describe("readableName", () => {
     expect(readableName("fixture")).toBe("Fixture");
   });
 
+  test("a display name that is a station key names the agent, not the harness", () => {
+    // Agents adopted from a station have been given its key (`harness:name`) as their display name.
+    expect(readableName("fixture-harness:fixture-agent")).toBe("Fixture Agent");
+  });
+
   test("a name somebody already wrote for people is left as they wrote it", () => {
     expect(readableName("Fixture Agent")).toBe("Fixture Agent");
     expect(readableName("McFixture")).toBe("McFixture");
