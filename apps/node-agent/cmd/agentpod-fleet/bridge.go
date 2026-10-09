@@ -14,7 +14,8 @@ const bridgeUsage = `usage:
                    [--mode M] [--concurrency N] [--profile P] [--wait-ms N] [--enabled true|false]
   fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                    [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
-  fleet bridge rm KEY`
+  fleet bridge rm KEY
+  fleet bridge related-work BOARD on|off`
 
 // fleetBridge manages the superpipeline roster: which agent claims work from which
 // board, onto which station.
@@ -99,6 +100,8 @@ func fleetBridge(args []string) {
 			os.Exit(2)
 		}
 		fleetSkillJSON(http.MethodDelete, base+"/"+url.PathEscape(args[1]), nil)
+	case "related-work":
+		fleetBridgeRelatedWork(args[1:])
 	default:
 		fmt.Fprintln(os.Stderr, bridgeUsage)
 		os.Exit(2)

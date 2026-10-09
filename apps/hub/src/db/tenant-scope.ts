@@ -35,7 +35,7 @@ import { TenantId } from "@agentpod/contract";
 import { db } from "./drizzle";
 import { acpEvents, acpRuns, acpSessions } from "./schema/acp";
 import { matrixBoardRooms } from "./schema/board-rooms";
-import { bridgeAgents, bridgeDispatches } from "./schema/bridge";
+import { bridgeAgents, bridgeBoardSettings, bridgeDispatches } from "./schema/bridge";
 import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
 import {
@@ -133,6 +133,7 @@ export const TENANT_SCOPED_TABLES = {
   acpEvents,
   acpRuns,
   bridgeAgents,
+  bridgeBoardSettings,
   bridgeDispatches,
   agentTasks,
   cloudflareSandboxes,

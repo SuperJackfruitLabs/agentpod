@@ -20,6 +20,7 @@ import { retiredUnderPlane } from "../auth/org-plane/retired";
 import { adminPrincipalsRouter } from "./admin-principals";
 import { agentsAdminRouter } from "./agents-admin";
 import { adminBridgeAgentsRouter } from "./admin-bridge-agents";
+import { adminBridgeBoardsRouter } from "./admin-bridge-boards";
 import { adminTranscriptionRoutes } from "./transcription-settings";
 import { adminSpeechRoutes } from "./speech-settings";
 
@@ -54,6 +55,8 @@ adminRouter.route("/principals", adminPrincipalsRouter);
 // this fleet claims and whose credential it spends. Replaces editing SUPERPIPELINE_BRIDGE_AGENTS
 // in hub.env and restarting.
 adminRouter.route("/bridge/agents", adminBridgeAgentsRouter);
+// Per-board bridge settings: today the "Related prior work" switch. Same guard, same reason.
+adminRouter.route("/bridge/boards", adminBridgeBoardsRouter);
 
 // Creating an agent, and putting it in a station. Mounted at the root of
 // `/api/admin` because it owns two path families — `/agents` and

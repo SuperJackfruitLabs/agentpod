@@ -66,7 +66,7 @@
  */
 
 import { context, trace } from "@opentelemetry/api";
-import { CARD_PROMPT_VERSION, CardPrompt, CardPromptComment, renderCardPrompt, type AcpEvent, type AcpMcpServer, type AcpSessionMode } from "@agentpod/contract";
+import { CARD_PROMPT_VERSION, CardPrompt, CardPromptComment, renderCardPrompt, type AcpEvent, type AcpMcpServer, type AcpSessionMode, type CardPromptRelated } from "@agentpod/contract";
 
 import { ActivityCoalescer, type BoardActivity } from "./coalesce";
 import type { AgentSpanRecorder } from "../../telemetry/agent-spans";
@@ -75,6 +75,7 @@ import { inDispatchSpan } from "../../telemetry/dispatch-span";
 import { isControlPairDenied } from "../control-pair";
 import type { Fingerprint } from "../evidence/fingerprint";
 import { fingerprintWithin, resolveStationFingerprint, resolveStationOccupant, within } from "../evidence/station-fingerprint";
+import { fetchRelatedWork } from "../superlibrary/related";
 import { DEFAULT_PERMISSION_WAIT_MS, type BridgeAgentConfig } from "./config";
 import { isAutoAnswered, selectedOptionId } from "./permission";
 import {
@@ -154,6 +155,12 @@ export interface DispatchDeps {
   fingerprint?: (input: { tenantId: string; stationId: string }) => Promise<Fingerprint>;
   /** Who the station runs as (contract C5). A seam; defaults to `resolveStationOccupant`, bounded by `within`. */
   occupant?: (input: { tenantId: string; stationId: string }) => Promise<string | null>;
+  /**
+   * Superlibrary's related prior work for the card, as the station's agent may see it. A seam;
+   * defaults to `fetchRelatedWork`, which answers `undefined` whenever the section should be left
+   * out (Superlibrary unconfigured, the board switched off, no principal, any failure or lateness).
+   */
+  relatedWork?: (input: { tenantId: string; boardId: string; cardId: string; principal: string | null }) => Promise<CardPromptRelated[] | undefined>;
   log?: (message: string, meta?: Record<string, unknown>) => void;
 }
 
@@ -347,6 +354,14 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
   // holds and has not begun. A throw anywhere in it used to escape to the loop,
   // which logged and backed off — leaving the card `working` with a delegate
   // assigned and a run that would never do anything. It is handed back instead.
+  // Who the station runs as, looked up at most once per dispatch: the prompt needs it first (the
+  // related section is fetched with the agent's own token) and the attempt row reuses the answer.
+  // Bounded by `within`, so a late or failed lookup is null and never holds the claim.
+  const resolveOccupant = deps.occupant ?? ((i) => resolveStationOccupant(i.tenantId, i.stationId));
+  let occupantLookup: Promise<string | null> | null = null;
+  const occupant = (): Promise<string | null> =>
+    (occupantLookup ??= within(() => resolveOccupant({ tenantId, stationId: agent.stationId }), null));
+
   let text: string;
   let session: { id: string };
   try {
@@ -357,7 +372,7 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
     if (prior) return await replay(deps, key, work, prior);
 
     // ─── the prompt contract ────────────────────────────────────────────────
-    text = renderCardPrompt(await assemblePrompt(deps, work));
+    text = renderCardPrompt(await assemblePrompt(deps, work, occupant));
 
     // ─── the session ────────────────────────────────────────────────────────
     session = await acp.createSession({
@@ -485,12 +500,8 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
         // The run join, written as soon as the attempt has a first seq.
         queue(async () => {
           const resolve = deps.fingerprint ?? ((i) => resolveStationFingerprint(i.tenantId, i.stationId));
-          const resolveOccupant = deps.occupant ?? ((i) => resolveStationOccupant(i.tenantId, i.stationId));
           const at = { tenantId, stationId: agent.stationId };
-          const [fingerprint, agentPrincipalId] = await Promise.all([
-            fingerprintWithin(() => resolve(at)),
-            within(() => resolveOccupant(at), null),
-          ]);
+          const [fingerprint, agentPrincipalId] = await Promise.all([fingerprintWithin(() => resolve(at)), occupant()]);
           if (agentPrincipalId === null) {
             // Null covers no occupant, a lookup that timed out and one that threw; the resolver logs
             // a throw itself. Say so here so an operator can tell why agent_principal_id is empty.
@@ -1110,16 +1121,30 @@ async function abort(
  * The context read is what makes this possible at all: `GET /runs/:runId`
  * returns the references and the card's `spec`, neither of which the claim
  * carries. The spike had no such endpoint and sent the title.
+ *
+ * Exported for its unit test; `runOnce` is the only production caller.
  */
-async function assemblePrompt(deps: DispatchDeps, work: ClaimedWork): Promise<CardPrompt> {
+export async function assemblePrompt(
+  deps: DispatchDeps,
+  work: ClaimedWork,
+  occupant: () => Promise<string | null>,
+): Promise<CardPrompt> {
   const ctx = await deps.client.context(work.runId);
+  const cardId = ctx.card.id ?? work.card.id;
+  // Never throws by contract; the catch is for a seam that does anyway, so the claim still goes ahead.
+  const relatedWork = await (deps.relatedWork ?? fetchRelatedWork)({
+    tenantId: deps.tenantId,
+    boardId: deps.agent.boardId,
+    cardId,
+    principal: await occupant(),
+  }).catch(() => undefined);
   return CardPrompt.parse({
     version: CARD_PROMPT_VERSION,
     source: deps.source,
     boardId: deps.agent.boardId,
     externalRunId: work.runId,
     card: {
-      id: ctx.card.id ?? work.card.id,
+      id: cardId,
       title: ctx.card.title ?? work.card.title,
       spec: ctx.card.spec,
     },
@@ -1135,6 +1160,9 @@ async function assemblePrompt(deps: DispatchDeps, work: ClaimedWork): Promise<Ca
     // Absent from a board that predates comments, and passed through as absent:
     // that is what keeps the prompt from naming comment tools such a board lacks.
     ...promptComments(ctx),
+    // Passed whenever Superlibrary answered, an empty list included: "it answered and found nothing"
+    // is not "it was not asked". The renderer shows no section for an empty list.
+    ...(relatedWork !== undefined ? { relatedWork } : {}),
   });
 }
 

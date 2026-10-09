@@ -914,7 +914,7 @@ var reference = clidoc.Binary{
 		{
 			Path: "bridge", Group: "Administration",
 			Summary:  "The board roster: which agent claims from which board.",
-			Synopsis: "fleet bridge <list|add|set|rm> ...",
+			Synopsis: "fleet bridge <list|add|set|rm|related-work> ...",
 			Help:     bridgeUsage,
 			Detail: "This table is the gate on an agent doing anything at all: a staffed, online agent " +
 				"claims no card until a row points it at a board. No verb here prints a credential. " +
@@ -954,6 +954,19 @@ var reference = clidoc.Binary{
 		{
 			Path: "bridge rm", Summary: "Remove a roster row.", Synopsis: "fleet bridge rm KEY",
 			Args: []clidoc.Arg{{Name: "KEY", Meaning: "the roster key"}}, Example: "fleet bridge rm reviewer",
+		},
+		{
+			Path: "bridge related-work", Summary: "Switch a board's Related prior work section on or off.",
+			Synopsis: "fleet bridge related-work BOARD on|off",
+			Detail: "The earlier work Superlibrary finds for a claimed card, put into the card's prompt as " +
+				"reference material. On for every board until switched off; the next claim on the board " +
+				"reads the new value. Anything but `on` or `off` exits 2 without calling the hub.",
+			Args: []clidoc.Arg{
+				{Name: "BOARD", Meaning: "a superpipeline `brd_` id"},
+				{Name: "STATE", Meaning: "`on` or `off`"},
+			},
+			Handlers: []string{"fleetBridge"},
+			Example:  "fleet bridge related-work brd_0000000000000001 off",
 		},
 		{
 			Path: "principals", Group: "Administration",

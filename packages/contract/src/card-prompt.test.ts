@@ -66,6 +66,12 @@ test("the section holds at most 5 items and about 1,500 tokens", () => {
   expect(Math.ceil(section.length / 4)).toBeLessThanOrEqual(1500 + 100); // the caps plus the heading and preface
 });
 
+test("nine small items render exactly five blocks: the item cap holds when the token cap does not bite", () => {
+  const nine = Array.from({ length: 9 }, (_, i) => item(i + 1, "tiny"));
+  const out = renderCardPrompt(CardPrompt.parse({ ...base, relatedWork: nine }));
+  expect(out.match(/<library-item /g)).toHaveLength(5);
+});
+
 test("an item cannot break out of its block or forge another", () => {
   const out = renderCardPrompt(
     CardPrompt.parse({
