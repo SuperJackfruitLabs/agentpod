@@ -40,6 +40,8 @@ env:
 jobs:
   unit:
     name: pi-extension unit
+    # The nightly run belongs to GitHub; on the forge only pushes and pull requests run.
+    if: github.event_name != 'schedule' || github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -61,6 +63,8 @@ jobs:
 
   contract:
     name: pi-extension contract (${{ matrix.target }})
+    # The nightly run belongs to GitHub; on the forge only pushes and pull requests run.
+    if: github.event_name != 'schedule' || github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -88,7 +92,7 @@ jobs:
   report:
     name: pi-extension nightly report
     needs: contract
-    if: failure() && github.event_name == 'schedule'
+    if: github.server_url == 'https://github.com' && failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       issues: write

@@ -16,6 +16,9 @@ permissions:
 jobs:
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    # GitHub only. The forge pushes the tag to GitHub through its push mirror, and this
+    # workflow runs there: it publishes with `gh` and GitHub's token, which the forge lacks.
+    if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     strategy:
       # Don't let one arch's transient runner failure cancel the others and skip
@@ -85,7 +88,7 @@ jobs:
     needs: build
     # Run even when an arch failed — a partial release must still carry
     # install.sh/.service (and sha256sums below needs this job).
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && github.server_url == 'https://github.com' }}
 
     steps:
       - name: Checkout
@@ -116,7 +119,7 @@ jobs:
     name: Publish SHA256SUMS
     runs-on: ubuntu-latest
     needs: static-assets
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && github.server_url == 'https://github.com' }}
 
     steps:
       - name: Download all release assets
