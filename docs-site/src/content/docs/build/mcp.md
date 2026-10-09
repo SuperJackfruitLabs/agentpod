@@ -64,13 +64,14 @@ attaches the returned url to its card with `superpipeline_add_reference`.
 
 ### The rules agents are given
 
-The server's `initialize` instructions tell an agent three things:
+The server's `initialize` instructions always carry rule 3. Rules 1 and 2 appear only when the hub is configured
+for Superlibrary, because that is when `agentpod_link_artifact` exists:
 
 1. If it also has Superlibrary's MCP server (`library_search`), search it before non-trivial work.
 2. Link files it produces with `agentpod_link_artifact`, from its own workspace only, and attach the url to its card with `superpipeline_add_reference`.
 3. Never publish through gists, pastebins or personal accounts.
 
-The card prompt repeats the third rule whenever the agent can report for itself. It names `agentpod_link_artifact`
+The card prompt states the third rule on every card, whether the agent reports for itself or the bridge reports for it. It names `agentpod_link_artifact`
 and `library_search` only when the prompt's `libraryTools` is true.
 
 **A claim's session does not yet carry either server.** The bridge's `session/new` passes only the superpipeline
