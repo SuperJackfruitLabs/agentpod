@@ -103,6 +103,9 @@ export function createFakePlane(): FakePlane {
         expiresIn: 300,
       };
     },
+    async serviceToken(audience) {
+      return { accessToken: await signPlaneToken({ sub: "prn_0000000000000000c0b1", principalKind: "service", aud: audience, mayDispatch: [] }), expiresIn: 300 };
+    },
     async assertionToken(identity, audience) {
       const id = identities.get(key(identity.system, identity.externalId));
       if (!id) throw new OrgPlaneError(404, "unknown_identity");
