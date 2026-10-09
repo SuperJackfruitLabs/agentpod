@@ -161,7 +161,10 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
 /** The hub's real ACP machinery, behind the port a dispatch talks to. */
 const hubAcpPort: AcpPort = {
   stationReady: ({ stationId, userId }) => acpSessions.stationReadiness(userId, stationId),
-  createSession: (input) => acpSessions.createSession(input),
+  createSession: async (input) => {
+    const row = await acpSessions.createSession(input);
+    return { id: row.id, libraryTools: acpSessions.sessionHasLibraryTools(row.id) };
+  },
   promptSession: (userId, sessionId, text) => acpSessions.promptSession(userId, sessionId, text),
   subscribe: (sessionId, fn) => acpSessions.subscribe(sessionId, fn),
   endSession: (userId, sessionId, reason) => acpSessions.endSession(userId, sessionId, reason),

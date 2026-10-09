@@ -80,3 +80,7 @@ test("the posture verb is registered", () => {
   expect(VERB_PARAMS["posture.scan"].parse({})).toEqual({});
   expect(VERB_RESULTS["posture.scan"]).toBeDefined();
 });
+
+test("a node running the local MCP proxy advertises mcp.proxy", () => {
+  expect(NodeCapabilityList.parse(["mcp.proxy", "posture"])).toEqual(["mcp.proxy", "posture"]);
+});

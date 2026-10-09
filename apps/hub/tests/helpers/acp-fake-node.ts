@@ -81,6 +81,12 @@ export interface FakeAcpNodeOpts {
   /** Respond to acp.open with ok:false and this error. */
   failOpen?: string;
   /**
+   * What the node answers on an acp.open that asks for its MCP proxy (`mcpProxy`): the names
+   * of the servers it injected. Absent: it injects nothing (a node that does not serve the
+   * station, or a harness without HTTP MCP).
+   */
+  mcpProxyEcho?: string[];
+  /**
    * What `acp.transport` answers — the node's verdict on whether the harness can
    * still reach the thing it talks THROUGH.
    *
@@ -503,8 +509,9 @@ export async function connectFakeAcpNode(
               JSON.stringify({ type: "res", id, ok: false, error: opts.failOpen })
             );
           } else {
-            const params = msg.params as { instance?: string } | undefined;
+            const params = msg.params as { instance?: string; mcpProxy?: { stationId: string } } | undefined;
             const instance = params?.instance ?? null;
+            const proxied = params?.mcpProxy && opts.mcpProxyEcho ? { mcpProxy: opts.mcpProxyEcho } : {};
             const echo = !opts.legacyOpen && instance !== null;
             // Modern node: (key, instance) → its own process. Legacy node: ONE
             // process per station key, handed back for every instance — the
@@ -520,8 +527,8 @@ export async function connectFakeAcpNode(
                 id,
                 ok: true,
                 data: echo
-                  ? { sessionId: proc.sessionId, instance }
-                  : { sessionId: proc.sessionId },
+                  ? { sessionId: proc.sessionId, instance, ...proxied }
+                  : { sessionId: proc.sessionId, ...proxied },
               })
             );
           }

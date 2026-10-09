@@ -18,6 +18,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/mcpproxy"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stationtoken"
@@ -255,19 +256,58 @@ func runCmd() {
 	// GIT_COMMITTER_* once the hub has sent its author — in its harness's environment.
 	// This is what makes the key do anything: without it the key is on disk, the account is on
 	// forge, and `git push` still uses whatever ssh would have used anyway.
-	h = gateway.NewACPHandler(h, acpMgr, gateway.ACPCommandFunc(gitidentity.WithSSHCommand(
+	mcpProxy, proxyStop := startMCPProxy(cfg, reg)
+	defer proxyStop()
+	h = gateway.NewACPHandlerWithMCPProxy(h, acpMgr, gateway.ACPCommandFunc(gitidentity.WithSSHCommand(
 		gitIdentityRoot,
 		descriptor.NewCapabilityHandler(reg).ACPCommand,
-	)))
+	)), mcpProxy)
 	// The daemon's otel.env comes from its own cgroup (otelenv.DaemonPath), not from uid: a
 	// system unit with User= still reads the system file, and a node that is not the
 	// systemd service at all (container, `apn run`) answers unsupported instead of exiting.
 	h = gateway.NewTelemetryHandler(h, otelenv.DaemonPath, daemonUnitChecker())
 	h = gateway.NewUpdateHandler(h, version)
 	startStationTokens(ctx, cfg)
+	extras := startIntakes(ctx)
+	if mcpProxy != nil {
+		extras.Capabilities = append(extras.Capabilities, "mcp.proxy")
+	}
 	gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
 		return gatherHealthReports(reg)
-	}, startIntakes(ctx))
+	}, extras)
+}
+
+// startMCPProxy runs the loopback MCP proxy for the stations `mcpProxy.stations` names, and
+// returns how a session finds its servers — nil (and no "mcp.proxy" capability) when it is off
+// or failed to start. Not essential: a node whose proxy cannot start runs as before, and its
+// sessions get no proxied servers and prompts that name none of their tools.
+func startMCPProxy(cfg config.Config, reg *descriptor.Registry) (gateway.MCPProxyFunc, func()) {
+	noop := func() {}
+	if cfg.MCPProxy == nil || len(cfg.MCPProxy.Stations) == 0 {
+		return nil, noop
+	}
+	lib := strings.TrimSpace(cfg.MCPProxy.SuperlibraryURL)
+	if lib == "" {
+		lib = mcpproxy.DefaultSuperlibraryURL
+	}
+	p, err := mcpproxy.Start(mcpproxy.Config{
+		Stations:        cfg.MCPProxy.Stations,
+		HubURL:          strings.TrimRight(cfg.Hub, "/") + "/mcp",
+		SuperlibraryURL: lib,
+		Tokens:          &stationtoken.Source{Hub: cfg.Hub, NodeID: cfg.NodeID, NodeSecret: cfg.NodeSecret},
+	})
+	if err != nil {
+		log.Printf("mcp proxy disabled: %v", err)
+		return nil, noop
+	}
+	log.Printf("mcp proxy: serving %d station(s) on loopback", len(cfg.MCPProxy.Stations))
+	return func(stationID, key string) []mcpproxy.Server {
+		d, err := reg.For(key)
+		if err != nil {
+			return nil
+		}
+		return p.ServersForHarness(stationID, d.Harness())
+	}, func() { _ = p.Close() }
 }
 
 // startIntakes opens the sockets harness plugins report into. Both feed one

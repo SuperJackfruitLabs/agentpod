@@ -54,6 +54,16 @@ export interface AcpWire {
    *  processes on (key, instance) and can host concurrent sessions. False means
    *  an older node: one process per station key, whatever instance we asked for. */
   instanceEchoed: boolean;
+  /**
+   * The MCP servers the node said it injected into this process's `session/new` — its loopback
+   * proxy (contract `acp.open`). Empty when not asked, not served, or an older node.
+   */
+  mcpProxy: string[];
+}
+
+export interface OpenAcpWireOptions {
+  /** Ask the node to add its loopback MCP proxy for this station. */
+  mcpProxy?: { stationId: string };
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -99,11 +109,13 @@ function parseExitReason(bytes: Uint8Array): string | null {
 export async function openAcpWire(
   nodeId: string,
   stationKey: string,
-  instance: string
+  instance: string,
+  options: OpenAcpWireOptions = {}
 ): Promise<AcpWire> {
   const opened = await broker.request(nodeId, "acp.open", {
     key: stationKey,
     instance,
+    ...(options.mcpProxy ? { mcpProxy: options.mcpProxy } : {}),
   });
   if (!opened.ok) {
     throw new Error(
@@ -120,6 +132,8 @@ export async function openAcpWire(
   // A missing (or, defensively, mismatched) echo means the node did not honour
   // the instance — valid, and the caller degrades to one session per station.
   const instanceEchoed = parsedOpen.data.instance === instance;
+  // Believed only when it was asked for: a node never injects unasked, so an unasked echo is noise.
+  const mcpProxy = options.mcpProxy ? (parsedOpen.data.mcpProxy ?? []) : [];
 
   let resolveClosed!: (reason: string) => void;
   const closed = new Promise<string>((resolve) => {
@@ -244,5 +258,6 @@ export async function openAcpWire(
     nodeSessionId: sessionId,
     instance,
     instanceEchoed,
+    mcpProxy,
   };
 }

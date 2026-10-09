@@ -112,7 +112,19 @@ export interface AcpPort {
    * because a claim the bridge cannot execute strands a card on the board.
    */
   stationReady(input: { stationId: string; userId: string }): Promise<{ ready: boolean; reason?: string }>;
-  createSession(input: { stationId: string; userId: string; mode: AcpSessionMode }): Promise<{ id: string }>;
+  /**
+   * `mcpProxy` asks the station's node to add its loopback MCP proxy — the hub's MCP server and
+   * Superlibrary's, reached as the station's own agent — to the session. `libraryTools` in the
+   * answer is true only when the node said it injected both; the card prompt names their tools
+   * on that alone.
+   */
+  createSession(input: {
+    stationId: string;
+    userId: string;
+    mode: AcpSessionMode;
+    mcpServers?: AcpMcpServer[];
+    mcpProxy?: boolean;
+  }): Promise<{ id: string; libraryTools?: boolean }>;
   promptSession(userId: string, sessionId: string, text: string): Promise<void>;
   subscribe(sessionId: string, fn: (e: AcpEvent) => void): () => void;
   endSession(userId: string, sessionId: string, reason: string): Promise<void>;
@@ -381,7 +393,7 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
     (promptLookup ? await promptLookup : null) ?? lookUpOccupant();
 
   let text: string;
-  let session: { id: string };
+  let session: { id: string; libraryTools?: boolean };
   try {
     await openDispatch({ ...key, agentKey: agent.key, stationId: agent.stationId, leaseEpoch: work.leaseEpoch });
 
@@ -390,15 +402,20 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
     if (prior) return await replay(deps, key, work, prior);
 
     // ─── the prompt contract ────────────────────────────────────────────────
-    text = renderCardPrompt(await assemblePrompt(deps, work, occupantForPrompt));
+    const prompt = await assemblePrompt(deps, work, occupantForPrompt);
 
     // ─── the session ────────────────────────────────────────────────────────
+    // Always asks for the node's MCP proxy: the node decides (a station its operator named, a
+    // harness that takes HTTP MCP servers) and says what it injected.
     session = await acp.createSession({
       stationId: agent.stationId,
       userId: agent.hubUserId,
       mode: agent.mode,
       ...(boardTools(deps) ? { mcpServers: boardTools(deps)! } : {}),
+      mcpProxy: true,
     });
+    // Rendered after the session opens, because only the open says which tools it carries (S3-R12).
+    text = renderCardPrompt({ ...prompt, libraryTools: session.libraryTools === true });
   } catch (err) {
     return await handBack(deps, key, work, err);
   }

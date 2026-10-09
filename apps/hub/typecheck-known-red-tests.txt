@@ -30,7 +30,7 @@ tests/helpers/assertions.ts	2
 tests/integration/acp-runs-id-space.test.ts	1
 tests/integration/admin-bridge-agents-route.test.ts	5
 tests/integration/admin-principals-route.test.ts	1
-tests/integration/bridge-dispatch.test.ts	6
+tests/integration/bridge-dispatch.test.ts	4
 tests/integration/control-pair-dispatch.test.ts	10
 tests/integration/enrollment-token-reach.test.ts	1
 tests/integration/gateway-runtime-resume.test.ts	3

@@ -106,6 +106,8 @@ interface FakeAcpOpts {
    * resumes the turn; the option it was given decides what it resumes doing.
    */
   onAnswer?: (optionId: string) => AcpEvent[];
+  /** What the opened session says it carries: true when the node injected its MCP proxy. */
+  libraryTools?: boolean;
 }
 
 /** An ACP port that scripts a turn instead of talking to a station. */
@@ -130,7 +132,7 @@ function fakeAcp(script: () => AcpEvent[], opts: FakeAcpOpts = {}) {
       if (opts.failCreate) throw new Error(opts.failCreate);
       state.created++;
       state.createdWith.push(input);
-      return { id: SESSION_ID };
+      return opts.libraryTools === undefined ? { id: SESSION_ID } : { id: SESSION_ID, libraryTools: opts.libraryTools };
     },
     async promptSession(_u, _s, text) {
       if (opts.failPrompt) throw new Error(opts.failPrompt);
@@ -681,6 +683,34 @@ describe("an agent that can address the board itself", () => {
     expect(acp.state.createdWith[0]!.mcpServers).toBeUndefined();
     expect(acp.state.prompts[0]).not.toContain("superpipeline_get_run");
     expect(acp.state.prompts[0]).not.toContain(RUN_ID);
+  });
+});
+
+describe("the node's MCP proxy (hub + Superlibrary tools)", () => {
+  const withMcp = { ...agent, mcpToken: `spa_${"abcd0123".repeat(6)}` };
+
+  test("every dispatch asks for the proxy; the node decides", async () => {
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+    await runOnce(deps(fakeBoard(happyBoard).client, acp.port, undefined, { agent: withMcp, mcpUrl: "https://board.test/mcp" }));
+    expect(acp.state.createdWith[0]!.mcpProxy).toBe(true);
+  });
+
+  test("a session that carries the servers gets the link bullet and the search block", async () => {
+    const acp = fakeAcp(() => [chunk("done"), idle()], { libraryTools: true });
+    await runOnce(deps(fakeBoard(happyBoard).client, acp.port, undefined, { agent: withMcp, mcpUrl: "https://board.test/mcp" }));
+    expect(acp.state.prompts[0]).toContain("`agentpod_link_artifact`");
+    expect(acp.state.prompts[0]).toContain("## Before you start");
+    expect(acp.state.prompts[0]).toContain("`library_search`");
+  });
+
+  test("a session without them — not injected, or an older node — names neither", async () => {
+    for (const libraryTools of [false, undefined]) {
+      const acp = fakeAcp(() => [chunk("done"), idle()], { libraryTools });
+      await runOnce(deps(fakeBoard(happyBoard).client, acp.port, undefined, { agent: withMcp, mcpUrl: "https://board.test/mcp" }));
+      expect(acp.state.prompts[0]).not.toContain("agentpod_link_artifact");
+      expect(acp.state.prompts[0]).not.toContain("library_search");
+      expect(acp.state.prompts[0]).not.toContain("## Before you start");
+    }
   });
 });
 

@@ -78,7 +78,16 @@ export const VERB_PARAMS = {
   // instance is an opaque, caller-chosen discriminator for a distinct ACP process
   // under the same station key. Omitted means "legacy: reuse any existing process
   // for this key".
-  "acp.open":   z.object({ key: z.string(), instance: z.string().optional() }),
+  // mcpProxy asks the node to add its loopback MCP proxy (the hub's MCP and Superlibrary's, each
+  // reached as the station's own agent) to the session's `session/new`. Optional: an old hub never
+  // sends it, and an old node ignores it and does not echo it. The node decides — it injects only
+  // for a station its operator named and a harness that takes HTTP MCP servers — and says so in
+  // the result. The proxy's per-station secret never leaves the node; the hub learns only names.
+  "acp.open":   z.object({
+    key: z.string(),
+    instance: z.string().optional(),
+    mcpProxy: z.object({ stationId: z.string().min(1) }).optional(),
+  }),
   "acp.attach": z.object({ sessionId: z.string() }),
   "acp.close":  z.object({ sessionId: z.string() }),
   // base affects the COMMITTED side only; uncommitted is always vs HEAD.
@@ -213,7 +222,14 @@ export const VERB_RESULTS = {
   // instance echoes the request's instance when the node understands it. A
   // result missing instance is how the hub detects an older node and degrades
   // safely (single-process-per-key behavior).
-  "acp.open":  z.object({ sessionId: z.string(), instance: z.string().optional() }),
+  // mcpProxy names the MCP servers the node injected into this session's `session/new` — absent
+  // when it injected nothing (not asked, not configured, a harness without HTTP MCP, an old node).
+  // It is the ONLY evidence the session has them, and the card prompt names their tools only then.
+  "acp.open":  z.object({
+    sessionId: z.string(),
+    instance: z.string().optional(),
+    mcpProxy: z.array(z.string()).optional(),
+  }),
   "acp.close": z.object({ ok: z.boolean() }),
   // acp.attach streams; no entry needed (same as term.attach).
   "changeset.status": ChangesetStatus,
