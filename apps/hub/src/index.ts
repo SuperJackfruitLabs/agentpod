@@ -53,6 +53,7 @@ import { stationTokenRoutes } from './routes/station-token.ts';
 // A node redeeming a human's authorization for a station's Matrix credential
 import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-credential.ts';
 import { createStationGitIdentityRoutes } from './routes/station-git-identity.ts';
+import { createMcpProxyRoutes } from './routes/mcp-proxy.ts';
 import { configureGitAuthorSync } from './services/station-git-identity.ts';
 // A node reading its station's voice-note setting (transcription.apply)
 import { createNodeTranscriptionRoutes } from './routes/station-transcription-node.ts';
@@ -283,6 +284,7 @@ const app = new Hono()
   .route('/api', createSkillManagementRoutes())
   .route('/api', stationChangesetRoutes)                   // POST /api/stations/:id/changeset/{status,diff}
   .route('/api', harnessConfigRoutes)                       // GET/PUT/DELETE /api/fleet/config/*, GET /api/stations/:id/config
+  .route('/api', createMcpProxyRoutes())                     // GET/POST /api/fleet/mcp-proxy[/rotate], GET /api/stations/:id/mcp-proxy
   /**
    * Giving one station a forge push key, and taking it away.
    *

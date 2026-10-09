@@ -613,6 +613,69 @@ var reference = clidoc.Binary{
 			Example: "fleet config apply --station stn_123 --operation op_123 --plan-digest 3f2a…",
 		},
 
+		{
+			Path: "mcp-proxy", Group: "Stations",
+			Summary:  "Which stations each node's loopback MCP proxy serves, and their secrets.",
+			Synopsis: "fleet mcp-proxy <list|enable|disable|rotate> ...",
+			Help:     mcpProxyUsage,
+			Detail: "The proxy gives a station's harness sessions the hub's and Superlibrary's MCP tools as " +
+				"the station's own agent, through a loopback URL and a per-station secret that never leave " +
+				"the node. A change is written to the node's config (`mcpProxy.stations`) and applied " +
+				"without a restart; every change and rotation leaves an audit row per station. The hub " +
+				"records what was **declared** here; `list` compares it with what each node **serves**. " +
+				"With nothing declared, whatever the node's config says stands, so a hand-edited config " +
+				"needs no migration. Needs a node at v0.1.96 or later; an older one answers `unknown`. " +
+				"The node side is [`apn mcp-proxy`](/reference/apn/#apn-mcp-proxy).",
+			Dispatch: []clidoc.Dispatch{{Func: "fleetMCPProxy", Tag: "args[0]"}},
+			Exit:     "As below for each verb; with no verb, prints the usage and exits 2.",
+			Example:  "fleet mcp-proxy list",
+		},
+		{
+			Path: "mcp-proxy list", Summary: "Every station: eligible, declared, served, and its state.",
+			Synopsis: "fleet mcp-proxy list [--node ID]",
+			Detail: "`state` is `on` or `off`; `drifted` when the declaration and the node disagree (a hand edit, a " +
+				"reset config); `ineffective` when a station is served but its harness takes no HTTP MCP servers; " +
+				"`unknown` when the node could not be asked. `unadoptedStations` are ids the node's config names " +
+				"that are not adopted stations of that node. `drifted` at the top counts all three kinds.",
+			Handlers: []string{"fleetMCPProxy/fleet mcp-proxy list"},
+			Flags:    []clidoc.Flag{{Name: "node", Arg: "ID"}},
+			Example:  "fleet mcp-proxy list --node node_123",
+		},
+		{
+			Path: "mcp-proxy enable", Summary: "Serve the named stations, or every eligible one.",
+			Synopsis: "fleet mcp-proxy enable STATION_ID...\nfleet mcp-proxy enable --all-eligible [--node ID]",
+			Detail: "Only Hermes, Claude Code, Codex and opencode stations are eligible. Naming an OpenClaw or Pi " +
+				"station refuses the whole request (422) and changes nothing: their ACP adapters take no HTTP MCP " +
+				"servers in `session/new`. `--all-eligible` skips them and lists them under `skipped`. A station " +
+				"already served keeps its secret, so its open sessions keep working.",
+			Args:     []clidoc.Arg{{Name: "STATION_ID", Meaning: "a station id from `fleet stations`; several may be named"}},
+			Handlers: []string{"fleetMCPProxy/fleet mcp-proxy enable"},
+			Flags:    []clidoc.Flag{{Name: "all-eligible"}, {Name: "node", Arg: "ID"}},
+			Exit:     "0 when every station is served; 1 otherwise — 404 an unknown station, 422 an ineligible one, 409 a node offline or too old, 502 a node that failed.",
+			Example:  "fleet mcp-proxy enable stn_123 stn_456\nfleet mcp-proxy enable --all-eligible",
+		},
+		{
+			Path: "mcp-proxy disable", Summary: "Stop serving the named stations.",
+			Synopsis: "fleet mcp-proxy disable STATION_ID...",
+			Detail:   "Applied at once: the station's next proxied request is refused, and its next session gets no proxied servers.",
+			Args:     []clidoc.Arg{{Name: "STATION_ID", Meaning: "a station id; several may be named"}},
+			Handlers: []string{"fleetMCPProxy/fleet mcp-proxy disable"},
+			Exit:     "As `enable`.",
+			Example:  "fleet mcp-proxy disable stn_123",
+		},
+		{
+			Path: "mcp-proxy rotate", Summary: "New secrets for the named stations, or every station a node serves.",
+			Synopsis: "fleet mcp-proxy rotate STATION_ID...\nfleet mcp-proxy rotate --node ID",
+			Detail: "Secrets otherwise persist across node restarts, so a session kept open across one keeps " +
+				"working. Rotate when that is not wanted: a session holding an old secret is refused (401) " +
+				"from its next request, and new sessions get the new one. The secrets are never sent to the hub.",
+			Args:     []clidoc.Arg{{Name: "STATION_ID", Meaning: "a served station's id; several may be named"}},
+			Handlers: []string{"fleetMCPProxy/fleet mcp-proxy rotate"},
+			Flags:    []clidoc.Flag{{Name: "node", Arg: "ID"}},
+			Exit:     "As `enable`; 409 also when the node's proxy does not serve a named station.",
+			Example:  "fleet mcp-proxy rotate stn_123\nfleet mcp-proxy rotate --node node_123",
+		},
+
 		// ---- Skills and plugins --------------------------------------------------------
 		{
 			Path: "skills", Group: "Skills and plugins",

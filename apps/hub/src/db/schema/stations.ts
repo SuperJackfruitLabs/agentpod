@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, index, uniqueIndex, jsonb, foreignKey, AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, index, uniqueIndex, jsonb, foreignKey, boolean, AnyPgColumn } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { nodes } from "./nodes";
 import { tenants } from "./tenants";
@@ -51,6 +51,13 @@ export const stations = pgTable("stations", {
    * `services/harness-config-apply.ts`.
    */
   configReason: text("config_reason"),
+  /**
+   * Whether an operator declared that the node's loopback MCP proxy serves this station
+   * (`fleet mcp-proxy enable|disable`). Null: nobody has declared, and whatever the node's own
+   * `mcpProxy.stations` says stands — which is how a hand-edited config migrates without a step.
+   * The node's answer is the truth of what is served; this disagreeing with it is drift.
+   */
+  mcpProxy: boolean("mcp_proxy"),
   /**
    * The agent that occupies this station, if any.
    *

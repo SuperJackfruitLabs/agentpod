@@ -6,6 +6,7 @@ import { SkillInventory, SkillInventoryParams } from "./skills";
 import { SkillPlanParams, SkillApplyParams, SkillOperationParams, SkillVerifyParams, SkillRetentionParams, SkillInstallPlan, SkillInstallReceipt, SkillOperationResult, SkillVerifyResult, SkillRetentionResult, SkillMaintenanceResult, SkillMaintenanceApplyParams } from "./skill-install";
 import { SkillNativePlanParams, SkillNativeApplyParams, SkillNativeOperationParams, SkillNativeVerifyParams, SkillNativeOperationResult, SkillNativeVerifyResult } from "./skill-native";
 import { SkillPlacementPlan, SkillPlacementReceipt } from "./skill-placement";
+import { McpProxyStatusParams, McpProxyStatusResult, McpProxySetParams, McpProxySetResult, McpProxyRotateParams, McpProxyRotateResult } from "./mcp-proxy";
 import { PluginPlanParams, PluginApplyParams, PluginInspectParams, PluginOperationPlan, PluginOperationReceipt, PluginOperationResult } from "./plugin-operation";
 
 /**
@@ -133,6 +134,11 @@ export const VERB_PARAMS = {
   // forge side is the hub's own to revoke; this only deletes the node's copy, so that a station
   // reassigned to another agent cannot be handed the previous occupant's key.
   "git.identity.remove": z.object({ stationId: z.string() }),
+  // The node's loopback MCP proxy: what it serves, which stations it serves, new secrets. Station
+  // ids only — a proxy secret never rides in a frame. See mcp-proxy.ts.
+  "mcp.proxy.status": McpProxyStatusParams,
+  "mcp.proxy.set": McpProxySetParams,
+  "mcp.proxy.rotate": McpProxyRotateParams,
   // key is the station key (e.g. "hermes:writer-quill") — what the node
   // uses to resolve the profile directory. stationId is the station's
   // database id — what the hub's redemption endpoint
@@ -244,6 +250,9 @@ export const VERB_RESULTS = {
    */
   "git.identity.ensure": z.object({ publicKey: z.string(), created: z.boolean() }),
   "git.identity.remove": z.object({ removed: z.boolean() }),
+  "mcp.proxy.status": McpProxyStatusResult,
+  "mcp.proxy.set": McpProxySetResult,
+  "mcp.proxy.rotate": McpProxyRotateResult,
   /**
    * `matrixId` is what closes the move.
    *

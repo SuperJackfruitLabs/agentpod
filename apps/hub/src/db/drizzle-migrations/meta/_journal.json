@@ -694,6 +694,13 @@
       "when": 1791540144140,
       "tag": "0098_bridge_board_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1791551918559,
+      "tag": "0099_station_mcp_proxy",
+      "breakpoints": true
     }
   ]
 }

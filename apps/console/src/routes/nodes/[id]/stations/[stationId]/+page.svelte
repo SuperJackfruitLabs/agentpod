@@ -29,6 +29,7 @@
   import SkillManagementPanel from "$lib/components/stations/SkillManagementPanel.svelte";
   import PluginManagementPanel from "$lib/components/stations/PluginManagementPanel.svelte";
   import HarnessConfigPanel from "$lib/components/stations/HarnessConfigPanel.svelte";
+  import McpProxyStatus from "$lib/components/stations/McpProxyStatus.svelte";
   import ChangesetPanel from "$lib/components/stations/ChangesetPanel.svelte";
   import PostureBanner from "$lib/components/stations/PostureBanner.svelte";
   import ActivityPanel from "$lib/components/stations/ActivityPanel.svelte";
@@ -777,6 +778,7 @@
              a plan and its digest once and never re-fetches them, so a section
              switch must not be able to tear it down mid-review. -->
         <div data-config-section="settings" class={configSection === "settings" ? "contents" : "hidden"}>
+          <McpProxyStatus {stationId} />
           {#if hasConfigManagement}
             <HarnessConfigPanel
               {stationId}

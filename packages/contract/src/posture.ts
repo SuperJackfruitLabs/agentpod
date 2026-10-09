@@ -68,7 +68,9 @@ export type PostureReport = z.infer<typeof PostureReport>;
 // (see fleet-report.ts).
 // "mcp.proxy": the node runs its loopback MCP proxy (apps/node-agent/internal/mcpproxy), so a
 // session opened with `acp.open { mcpProxy }` may be given the hub's and Superlibrary's MCP servers.
-export const NodeCapability = z.enum(["posture", "frames.large", "turn.errors", "fleet.reports", "mcp.proxy"]);
+// "mcp.proxy.manage": the node answers `mcp.proxy.status|set|rotate`, so which stations its proxy
+// serves can be changed from the hub, without a restart (fleet mcp-proxy).
+export const NodeCapability = z.enum(["posture", "frames.large", "turn.errors", "fleet.reports", "mcp.proxy", "mcp.proxy.manage"]);
 export type NodeCapability = z.infer<typeof NodeCapability>;
 
 /**

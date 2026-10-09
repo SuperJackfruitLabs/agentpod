@@ -4,8 +4,10 @@
 //
 // **What it is.** An HTTP server bound to a loopback address only. Each station the operator
 // named gets two paths, `/stations/<stationId>/mcp/hub` and `/stations/<stationId>/mcp/superlibrary`,
-// and an unguessable per-station secret, generated when the proxy starts (so a node restart
-// rotates every one). A request must carry its station's secret in `X-Agentpod-Proxy-Key`; any
+// and an unguessable per-station secret. With a state file (Config.StatePath, the node's own
+// config directory) the secrets and the bound port persist across node restarts — a session kept
+// open across one keeps a working URL — and change only when rotated (Proxy.Rotate,
+// `apn mcp-proxy rotate`, `fleet mcp-proxy rotate`). Without one they are new at every start. A request must carry its station's secret in `X-Agentpod-Proxy-Key`; any
 // other request is refused and logged — with the station and the reason, never the secret.
 //
 // For an accepted request the proxy asks a TokenSource for that station's current token — the
@@ -46,7 +48,9 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -78,8 +82,12 @@ type Config struct {
 	Tokens          TokenSource
 	// Logf receives refusals and upstream failures. nil means log.Printf.
 	Logf func(format string, args ...any)
-	// Listen is the loopback address to bind; empty means 127.0.0.1 on a free port.
+	// Listen is the loopback address to bind; empty means the address the state file recorded,
+	// else 127.0.0.1 on a free port.
 	Listen string
+	// StatePath is the owner-only file the secrets and the bound address persist in. Empty: in
+	// memory only, so every start has new secrets and a new port.
+	StatePath string
 }
 
 // Header is one HTTP header of an ACP MCP server entry.
@@ -98,9 +106,13 @@ type Server struct {
 
 // Proxy is a running loopback MCP proxy.
 type Proxy struct {
-	ln        net.Listener
-	srv       *http.Server
-	secrets   map[string]string // station id → secret
+	ln    net.Listener
+	srv   *http.Server
+	store *Store
+
+	mu       sync.RWMutex
+	stations map[string]bool // the stations served now
+
 	upstreams map[string]*url.URL
 	tokens    TokenSource
 	logf      func(format string, args ...any)
@@ -131,34 +143,103 @@ func Start(cfg Config) (*Proxy, error) {
 	if ups["hub"] == nil {
 		return nil, errors.New("mcpproxy: no hub upstream")
 	}
-	secrets := map[string]string{}
-	for _, id := range cfg.Stations {
-		id = strings.TrimSpace(id)
-		if id == "" || strings.ContainsAny(id, "/?#") {
-			continue
-		}
-		s, err := newSecret()
-		if err != nil {
-			return nil, err
-		}
-		secrets[id] = s
-	}
-	addr := cfg.Listen
-	if addr == "" {
-		addr = "127.0.0.1:0"
-	}
-	ln, err := listenLoopback(addr)
-	if err != nil {
-		return nil, err
-	}
 	logf := cfg.Logf
 	if logf == nil {
 		logf = log.Printf
 	}
-	p := &Proxy{ln: ln, secrets: secrets, upstreams: ups, tokens: cfg.Tokens, logf: logf}
+	store := OpenStore(cfg.StatePath)
+	p := &Proxy{store: store, stations: map[string]bool{}, upstreams: ups, tokens: cfg.Tokens, logf: logf}
+	if err := p.SetStations(cfg.Stations); err != nil {
+		return nil, err
+	}
+	ln, err := p.listen(cfg.Listen)
+	if err != nil {
+		return nil, err
+	}
+	p.ln = ln
+	if err := store.SetListen(ln.Addr().String()); err != nil {
+		ln.Close()
+		return nil, err
+	}
 	p.srv = &http.Server{Handler: p, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = p.srv.Serve(ln) }()
 	return p, nil
+}
+
+// listen binds the configured address, else the one the state file recorded — so a session's
+// URL outlives a restart — falling back to a free loopback port when that one is taken.
+func (p *Proxy) listen(addr string) (net.Listener, error) {
+	if addr != "" {
+		return listenLoopback(addr)
+	}
+	if prev := p.store.Listen(); prev != "" {
+		ln, err := listenLoopback(prev)
+		if err == nil {
+			return ln, nil
+		}
+		p.logf("mcp proxy: %s is no longer free (%v); sessions opened before this start need re-opening", prev, err)
+	}
+	return listenLoopback("127.0.0.1:0")
+}
+
+// validStation is an id the proxy can put in a path.
+func validStation(id string) bool { return id != "" && !strings.ContainsAny(id, "/?#") }
+
+// SetStations replaces the stations served, without a restart. A station that stays keeps its
+// secret, so its open sessions keep working; a new one gets a secret (persisted); a dropped one is
+// refused from its next request. Its secret stays in the state file, so enabling it again later
+// hands an old session back the URL it had.
+func (p *Proxy) SetStations(ids []string) error {
+	next := map[string]bool{}
+	var list []string
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if !validStation(id) || next[id] {
+			continue
+		}
+		next[id] = true
+		list = append(list, id)
+	}
+	if err := p.store.Ensure(list); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.stations = next
+	p.mu.Unlock()
+	return nil
+}
+
+// Stations are the stations served now, sorted.
+func (p *Proxy) Stations() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make([]string, 0, len(p.stations))
+	for id := range p.stations {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Rotate gives the named stations new secrets — every served station when none are named — and
+// returns which it rotated. A session holding an old secret is refused from its next request.
+// Stations the proxy does not serve are skipped.
+func (p *Proxy) Rotate(ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		ids = p.Stations()
+	} else {
+		var served []string
+		for _, id := range ids {
+			if p.Serves(id) {
+				served = append(served, id)
+			}
+		}
+		ids = served
+	}
+	if len(ids) == 0 {
+		return []string{}, nil
+	}
+	return p.store.Rotate(ids)
 }
 
 // listenLoopback binds addr only when its host is a loopback IP literal. A hostname is refused —
@@ -186,15 +267,39 @@ func newSecret() (string, error) {
 // Addr is the bound host:port.
 func (p *Proxy) Addr() string { return p.ln.Addr().String() }
 
-// Close stops serving.
-func (p *Proxy) Close() error { return p.srv.Close() }
+// Close stops serving, and has released the port when it returns — the server's own Close only
+// reaches a listener its Serve goroutine has already taken up.
+func (p *Proxy) Close() error {
+	err := p.srv.Close()
+	if cerr := p.ln.Close(); err == nil && cerr != nil && !errors.Is(cerr, net.ErrClosed) {
+		err = cerr
+	}
+	return err
+}
 
 // Serves reports whether the proxy serves a station.
-func (p *Proxy) Serves(stationID string) bool { _, ok := p.secrets[stationID]; return ok }
+func (p *Proxy) Serves(stationID string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.stations[stationID]
+}
+
+// secretFor is a served station's current secret.
+func (p *Proxy) secretFor(stationID string) (string, bool) {
+	if !p.Serves(stationID) {
+		return "", false
+	}
+	secret, ok, err := p.store.Secret(stationID)
+	if err != nil {
+		p.logf("mcp proxy: reading its state file: %v", err)
+		return "", false
+	}
+	return secret, ok
+}
 
 // Servers are the ACP MCP entries for a station's session — nil for a station not served.
 func (p *Proxy) Servers(stationID string) []Server {
-	secret, ok := p.secrets[stationID]
+	secret, ok := p.secretFor(stationID)
 	if !ok {
 		return nil
 	}
@@ -236,7 +341,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	want, served := p.secrets[stationID]
+	want, served := p.secretFor(stationID)
 	got := r.Header.Get(SecretHeader)
 	// Constant time, and the same answer for an unknown station as for a wrong secret, so a
 	// caller cannot probe which stations this node serves.
