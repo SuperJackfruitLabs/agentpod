@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { cors } from 'hono/cors';
+import { corsMiddleware } from './middleware/cors.ts';
 import { logger } from 'hono/logger';
 import { redactUrlSecrets } from './utils/redact-url-secrets.ts';
 import { config, allowedOrigins, isAllowedOrigin } from './config.ts';
@@ -158,20 +158,7 @@ const app = new Hono()
   // recurrence; rotating the token alone would not (estate BACKLOG, 2026-09-01).
   .use('*', logger((message, ...rest) => console.log(redactUrlSecrets(message), ...rest)))
   // CORS configuration
-  .use('*', cors({
-    // Origin list lives in config.ts (corsAllowedOrigins) so station-terminal.ts
-    // can re-use it for CSWSH defence without duplicating it here.
-    origin: (origin) => {
-      if (!origin) return allowedOrigins[0]!;
-      if (isAllowedOrigin(origin)) return origin;
-      return allowedOrigins[0]!;
-    },
-    credentials: true,
-    allowHeaders: ['Content-Type', 'Authorization'],
-    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    exposeHeaders: ['Content-Length', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
-    maxAge: 600,
-  }))
+  .use('*', corsMiddleware)
   .use('*', securityHeadersMiddleware)
   .use('*', rateLimitMiddleware)
   .route('/', healthRoutes)
