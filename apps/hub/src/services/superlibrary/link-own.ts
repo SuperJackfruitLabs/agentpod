@@ -29,8 +29,8 @@ export async function linkFromOwnStation(
       // An unknown node state is not online.
       nodeStatus: station.nodeStatus ?? "offline",
       tenantId: station.tenantId,
-      // Node-level (hello frame). Null stays null: a node that never said is not refused here.
-      capabilities: station.nodeCapabilities,
+      // The station's own capability list. Null (unknown, pre-adoption) stays null and is not refused here.
+      capabilities: station.capabilities,
     },
     actor: { principal: principalId, kind: "agent" },
   });
