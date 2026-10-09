@@ -56,6 +56,12 @@ jobs:
   hub:
     name: hub
     runs-on: ubuntu-latest
+    env:
+      # GitHub runs the job on the VM, so the service's mapped port is on localhost:5434 (the
+      # integration-test default). The forge's runner puts the job in its own container on a
+      # bridge network, where localhost is the job itself and the service answers by its name,
+      # on its own port. Same database either way.
+      DATABASE_URL: ${{ github.server_url == 'https://github.com' && 'postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod' || 'postgres://agentpod:agentpod-dev-password@postgres:5432/agentpod' }}
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -111,16 +117,13 @@ jobs:
         run: bun -e 'import("./tests/helpers/pg-migrations").then((m) => m.ensurePgMigrations())'
         env:
           NODE_ENV: test
-          DATABASE_URL: postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod
 
       - name: Run tests
         working-directory: apps/hub
         run: bun test
         env:
           NODE_ENV: test
-          # Matches the host port mapped above (service container internal 5432 →
-          # host 5434) and the integration-test default DATABASE_URL fallback.
-          DATABASE_URL: postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod
+          # DATABASE_URL comes from the job's env above.
           API_TOKEN: test-token
           SESSION_SECRET: test-session-secret-32-chars-long
           ENCRYPTION_KEY: test-encryption-key-32-bytes!!!!
@@ -137,7 +140,6 @@ jobs:
         run: bun tests/integration/skills-node-e2e.ts
         env:
           NODE_ENV: test
-          DATABASE_URL: postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod
           API_TOKEN: test-token
           SESSION_SECRET: test-session-secret-32-chars-long
           ENCRYPTION_KEY: test-encryption-key-32-bytes!!!!
