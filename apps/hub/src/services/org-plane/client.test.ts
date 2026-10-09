@@ -33,6 +33,17 @@ describe("OrgPlaneClient", () => {
     });
   });
 
+  test("serviceToken posts only the audience with the hub's svc_ credential (contract §3.3)", async () => {
+    const { seen, client } = fake(() => json(200, { access_token: "tok", token_type: "Bearer", expires_in: 300 }));
+    expect(await client.serviceToken("https://lib.test")).toEqual({ accessToken: "tok", expiresIn: 300 });
+    expect(seen[0]).toEqual({
+      url: "https://accounts.test/api/token/service",
+      method: "POST",
+      auth: "Bearer svc_0123456789abcdef0123:s3cret",
+      body: { audience: "https://lib.test" },
+    });
+  });
+
   test("agentToken sends an array audience as an array (contract §3.4)", async () => {
     const { seen, client } = fake(() => json(200, { access_token: "tok", token_type: "Bearer", expires_in: 300 }));
     await client.agentToken("prn_aaaaaaaaaaaaaaaaaaaa", ["https://hub.test", "https://app.test"]);

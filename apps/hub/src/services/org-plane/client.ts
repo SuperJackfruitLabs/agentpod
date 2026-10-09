@@ -54,6 +54,8 @@ export interface PlaneToken {
 export interface OrgPlaneClient {
   /** Contract §3.4. `audience` is a string or an array of resources. */
   agentToken(principal: string, audience: string | string[]): Promise<PlaneToken>;
+  /** The hub's own token for another product (contract §3.3). `sub` is the hub's service; no `act`. */
+  serviceToken(audience: string | string[]): Promise<PlaneToken>;
   /** Contract §3.4b. The plane resolves the human from the identity; the hub never names a prn_. */
   assertionToken(identity: { system: string; externalId: string }, audience: string): Promise<PlaneToken>;
   createAgent(input: { handle: string; displayName: string }): Promise<{ id: string }>;
@@ -129,6 +131,7 @@ export function createOrgPlaneClient(o: {
 
   return {
     agentToken: async (principal, audience) => token(await call("POST", "/api/token/agent", { principal, audience })),
+    serviceToken: async (audience) => token(await call("POST", "/api/token/service", { audience })),
     assertionToken: async (identity, audience) =>
       token(
         await call("POST", "/api/token/assertion", {

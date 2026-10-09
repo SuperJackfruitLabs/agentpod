@@ -259,6 +259,7 @@ describe("under the org plane", () => {
     };
     const client: OrgPlaneClient = {
       agentToken: unexpected,
+      serviceToken: unexpected,
       assertionToken: unexpected,
       lookupIdentity: unexpected,
       identitiesOf: unexpected,
