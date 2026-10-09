@@ -71,13 +71,17 @@ export function newTransport(): WebStandardStreamableHTTPServerTransport {
   });
 }
 
-export async function handleMcpRequest(request: Request, caller: McpCaller): Promise<Response> {
+/** `opts.link` replaces the configured link, for tests that drive the real handler. */
+export async function handleMcpRequest(request: Request, caller: McpCaller, opts: { link?: ToolDeps["link"] } = {}): Promise<Response> {
   const server = new McpServer(SERVER_INFO, {
     instructions: caller.kind === "agent" ? AGENT_INSTRUCTIONS : HUMAN_INSTRUCTIONS,
   });
-  registerHubTools(server, { caller, link: ownStationLink() });
+  registerHubTools(server, { caller, link: opts.link ?? ownStationLink() });
 
   const transport = newTransport();
+  // Stateless: nothing else closes this transport, so a client that hangs up would never abort the
+  // tool's `extra.signal`. Closing it on the request's own abort is what makes cancellation real.
+  request.signal.addEventListener("abort", () => void transport.close(), { once: true });
   await server.connect(transport);
   return transport.handleRequest(request);
 }

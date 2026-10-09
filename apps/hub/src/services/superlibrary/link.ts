@@ -174,6 +174,7 @@ let active = 0;
 const waiting: Array<() => void> = [];
 /** Waits for one of `MAX_CONCURRENT_LINKS` slots, until the link's deadline or its cancellation. */
 function acquire(b: Budget, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false);
   if (active < MAX_CONCURRENT_LINKS) {
     active++;
     return Promise.resolve(true);
@@ -361,13 +362,13 @@ async function linkHeld(deps: LinkDeps, input: LinkInput, b: Budget, path: strin
   const preCommit = b.stop();
   if (preCommit) return preCommit;
   // Once the commit is sent it runs to its own timeout, not the link's deadline: stopping it half way
-  // would leave the agent not knowing. A commit that gets no answer is retried once (Superlibrary
-  // commits a session once; a second commit of a committed one answers 409 already_committed).
+  // would leave the agent not knowing. A commit that gets no answer is retried once: Superlibrary's
+  // commit is idempotent per session, so a retry of a committed one answers 200 with the first
+  // result. A 409 from commit (`incomplete`, `version_conflict`) means NOT committed and is relayed.
   let commit = await call(lib, "POST", `/api/v1/uploads/${uploadId}/commit`, { timeoutMs: LIBRARY_TIMEOUT_MS });
   if (!commit) {
     commit = await call(lib, "POST", `/api/v1/uploads/${uploadId}/commit`, { timeoutMs: LIBRARY_TIMEOUT_MS });
     if (!commit) return refuse(503, "commit_unconfirmed", "Superlibrary did not confirm the link, so it may or may not have been made. Look for it in the library before linking again.");
-    if (commit.status === 409) return refuse(502, "commit_unconfirmed", "The link was made, but Superlibrary's answer was lost. Find it in the library on this card's board.");
   }
   if (!commit.ok) return fromLibrary(commit);
   const c = (await commit.json()) as { itemId: string; version: number; url: string; sha256: string; mediaType: string; bytes: number };

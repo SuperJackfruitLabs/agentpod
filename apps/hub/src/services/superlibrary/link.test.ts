@@ -467,8 +467,13 @@ test("a commit with no answer is retried once; a second silence is reported hone
   const ok = Response.json({ itemId: "itm_0000000000000001", version: 1, url: "u", sha256: "x", mediaType: "m", bytes: 1 }, { status: 201 });
   expect(await run(["throw", ok])).toMatchObject({ ok: true, itemId: "itm_0000000000000001" });
   expect(await run(["throw", "throw"])).toMatchObject({ ok: false, status: 503, error: "commit_unconfirmed" });
-  expect(await run(["throw", Response.json({ error: "already_committed" }, { status: 409 })])).toMatchObject({ ok: false, error: "commit_unconfirmed", message: expect.stringContaining("was made") });
-  expect(commits.length).toBe(6);
+  // A retry of a session that did commit answers 200 with the first result (Superlibrary's committed()).
+  expect(await run(["throw", Response.json({ itemId: "itm_0000000000000001", version: 1, url: "u", sha256: "x", mediaType: "m", bytes: 1 }, { status: 200 })])).toMatchObject({ ok: true, itemId: "itm_0000000000000001" });
+  // A 409 from commit means it did not commit: relayed as such, never "the link was made".
+  const notMade = await run(["throw", Response.json({ error: "incomplete", missing: ["data.bin"] }, { status: 409 })]);
+  expect(notMade).toMatchObject({ ok: false, status: 409, error: "incomplete" });
+  expect((notMade as { message: string }).message).not.toContain("was made");
+  expect(commits.length).toBe(8);
 });
 
 test("the tooMany sentence says what stopped the walk", async () => {
@@ -518,4 +523,30 @@ test(`at most ${MAX_CONCURRENT_LINKS} links run at once; the next waits, and giv
   const all = await Promise.all([...held, fourth]);
   expect(all.every((r) => r.ok)).toBe(true);
   expect(walks.length).toBe(MAX_CONCURRENT_LINKS + 1);
+});
+
+test("an already-cancelled link is refused at once, without touching the node", async () => {
+  const { d, verbs } = deps();
+  const ctl = new AbortController();
+  ctl.abort();
+  expect(await link(d, { signal: ctl.signal })).toMatchObject({ ok: false, error: "cancelled" });
+  expect(verbs).toEqual([]);
+});
+
+test("an already-cancelled link waiting for a slot is refused at once, not at its deadline", async () => {
+  let open!: () => void;
+  const gate = new Promise<void>((r) => { open = r; });
+  const gated = () => {
+    const { d } = deps();
+    const inner = d.broker;
+    d.broker = { async request(n, verb, p, o) { if (verb === "fs.walk") await gate; return inner.request(n, verb, p, o); } };
+    return d;
+  };
+  const held = Array.from({ length: MAX_CONCURRENT_LINKS }, () => link(gated()));
+  const ctl = new AbortController();
+  ctl.abort();
+  const r = await Promise.race([link(gated(), { signal: ctl.signal }), pause(200).then(() => "still waiting")]);
+  expect(r).toMatchObject({ ok: false, error: "cancelled" });
+  open();
+  await Promise.all(held);
 });

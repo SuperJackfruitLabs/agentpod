@@ -40,3 +40,35 @@ test("a tool call's SSE stream keeps alive more often than Bun closes an idle co
   // The SDK's own field: if the option is dropped, it falls back to its 15 s default.
   expect((newTransport() as unknown as { _keepAliveMs: number })._keepAliveMs).toBe(MCP_SSE_KEEPALIVE_MS);
 });
+
+test("a client that hangs up aborts the link it started (the stateless transport is closed on the request's abort)", async () => {
+  const ctl = new AbortController();
+  let linkSignal: AbortSignal | undefined;
+  let started!: () => void;
+  const running = new Promise<void>((r) => { started = r; });
+  const aborted = new Promise<void>((resolve) => {
+    void handleMcpRequest(
+      new Request("http://hub.test/mcp", {
+        method: "POST",
+        signal: ctl.signal,
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "agentpod_link_artifact", arguments: { path: "a.md" } } }),
+      }),
+      { principalId: "prn_000000000000000000a7", kind: "agent" },
+      {
+        link: (i) => {
+          linkSignal = i.signal;
+          started();
+          return new Promise((done) => {
+            i.signal?.addEventListener("abort", () => { resolve(); done({ ok: false, status: 503, error: "cancelled", message: "x" }); }, { once: true });
+          });
+        },
+      },
+    ).then((res) => res.text().catch(() => ""));
+  });
+  await running;
+  expect(linkSignal?.aborted).toBe(false);
+  ctl.abort();
+  await Promise.race([aborted, new Promise((_, no) => setTimeout(() => no(new Error("the link's signal never aborted")), 2_000))]);
+  expect(linkSignal?.aborted).toBe(true);
+});
