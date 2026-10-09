@@ -104,7 +104,7 @@ export function createFakePlane(): FakePlane {
       };
     },
     async serviceToken(audience) {
-      return { accessToken: await signPlaneToken({ sub: "svc_fake", principalKind: "service", aud: audience, mayDispatch: [] }), expiresIn: 300 };
+      return { accessToken: await signPlaneToken({ sub: "prn_0000000000000000c0b1", principalKind: "service", aud: audience, mayDispatch: [] }), expiresIn: 300 };
     },
     async assertionToken(identity, audience) {
       const id = identities.get(key(identity.system, identity.externalId));
