@@ -93,6 +93,7 @@ import { httpServerSpans } from './telemetry/http-middleware.ts';
 import { initTelemetry, readTelemetryConfig, shutdownTelemetry } from './telemetry/otel.ts';
 import { mcpUnauthorized, resolveMcpCaller } from './mcp/auth.ts';
 import { handleMcpRequest } from './mcp/server.ts';
+import { createBridgeRosterRoute } from './routes/bridge-roster.ts';
 import { createMatrixBridge, matrixBridgeConfig, startMatrixBridge } from './services/matrix-as/index.ts';
 import { onStationsAdopted, onProvisionStation } from './services/matrix-as/hooks.ts';
 import { preJoinNewIdentity, moveState, wireConvergenceListener } from './services/matrix-as/identity-move.ts';
@@ -254,6 +255,9 @@ const app = new Hono()
     if ('refusal' in caller) return c.json(caller.refusal, 403);
     return handleMcpRequest(c.req.raw, caller);
   })
+
+  /** Superlibrary's roster read: its own service-token auth, so ahead of `authMiddleware` like `/mcp`. */
+  .route('/', createBridgeRosterRoute())
 
   .use('/api/*', authMiddleware)
   .use('/api/*', csrfMiddleware)
