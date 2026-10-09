@@ -15,10 +15,10 @@ import { db } from "../../src/db/drizzle";
 import { bridgeAgents } from "../../src/db/schema/bridge";
 import { stations } from "../../src/db/schema/stations";
 import { nodes } from "../../src/db/schema/nodes";
-import { BOOTSTRAP_TENANT_ID as TENANT } from "../../src/db/schema/tenants";
+import { BOOTSTRAP_TENANT_ID as TENANT, tenants } from "../../src/db/schema/tenants";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
-import { rosterBoardsFor } from "../../src/routes/bridge-roster";
+import { rosterBoardsFor, stationOwnerFor } from "../../src/routes/bridge-roster";
 import {
   createBridgeAgent,
   deleteBridgeAgent,
@@ -30,6 +30,9 @@ import { setSuperlibraryClientForTests } from "../../src/services/superlibrary/c
 const NODE_ID = "node_roster_endpoint_test";
 const S1 = "station_roster_endpoint_1";
 const S2 = "station_roster_endpoint_2";
+const S3 = "station_roster_endpoint_3";
+const OTHER_TENANT = "fleet_0000000000000000c0d1";
+const OTHER_NODE = "node_roster_endpoint_other";
 const AGENT = "prn_000000000000000000a2";
 const OTHER = "prn_000000000000000000a3";
 const B1 = "brd_00000000000000b1";
@@ -38,6 +41,7 @@ const B3 = "brd_00000000000000b3";
 const TOKEN = `spa_${"a1b2c3d4".repeat(6)}`;
 
 let userId: string;
+let ownerId: string;
 let seen: string[];
 let restore: () => void;
 
@@ -59,6 +63,22 @@ beforeAll(async () => {
     .values({
       id: NODE_ID, tenantId: TENANT, userId, name: "roster-endpoint-node",
       hostname: "roster-endpoint.test", os: "linux", arch: "arm64", status: "offline", secretHash: "x",
+    })
+    .onConflictDoNothing();
+  ownerId = userId;
+  await db.insert(tenants).values({ id: OTHER_TENANT, name: "roster endpoint other tenant" }).onConflictDoNothing();
+  await db
+    .insert(nodes)
+    .values({
+      id: OTHER_NODE, tenantId: OTHER_TENANT, userId, name: "roster-endpoint-other-node",
+      hostname: "roster-endpoint-other.test", os: "linux", arch: "arm64", status: "offline", secretHash: "x",
+    })
+    .onConflictDoNothing();
+  await db
+    .insert(stations)
+    .values({
+      id: S3, tenantId: OTHER_TENANT, userId, nodeId: OTHER_NODE, harness: "hermes",
+      stationKey: `${S3}-key`, kind: "service", displayName: S3,
     })
     .onConflictDoNothing();
   for (const [id, principalId] of [[S1, AGENT], [S2, OTHER]] as const) {
@@ -86,7 +106,9 @@ afterEach(() => restore());
 afterAll(async () => {
   await db.delete(bridgeAgents).where(inArray(bridgeAgents.stationId, [S1, S2]));
   await db.delete(stations).where(inArray(stations.id, [S1, S2]));
-  await db.delete(nodes).where(eq(nodes.id, NODE_ID));
+  await db.delete(stations).where(eq(stations.id, S3));
+  await db.delete(nodes).where(inArray(nodes.id, [NODE_ID, OTHER_NODE]));
+  await db.delete(tenants).where(eq(tenants.id, OTHER_TENANT));
 });
 
 test("enabled rows on the principal's station only", async () => {
@@ -142,4 +164,11 @@ test("creating, updating and deleting a bridge row each invalidate", async () =>
   expect(await deleteBridgeAgent(TENANT, "w1")).toBe(false);
   await flush();
   expect(seen).toEqual([]);
+});
+
+test("stationOwnerFor reads only the caller's tenant", async () => {
+  expect(await stationOwnerFor(TENANT, S1)).toEqual({ id: S1, key: `${S1}-key`, owner: ownerId });
+  expect(await stationOwnerFor(OTHER_TENANT, S1)).toBeNull();
+  expect(await stationOwnerFor(TENANT, S3)).toBeNull();
+  expect(await stationOwnerFor(OTHER_TENANT, S3)).toEqual({ id: S3, key: `${S3}-key`, owner: ownerId });
 });
