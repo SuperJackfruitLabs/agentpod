@@ -75,7 +75,7 @@ import { inDispatchSpan } from "../../telemetry/dispatch-span";
 import { isControlPairDenied } from "../control-pair";
 import type { Fingerprint } from "../evidence/fingerprint";
 import { fingerprintWithin, resolveStationFingerprint, resolveStationOccupant, within } from "../evidence/station-fingerprint";
-import { fetchRelatedWork, prefetchRelatedWork } from "../superlibrary/related";
+import { fetchRelatedWork, prefetchRelatedWork, relatedWorkEnabled } from "../superlibrary/related";
 import { DEFAULT_PERMISSION_WAIT_MS, type BridgeAgentConfig } from "./config";
 import { isAutoAnswered, selectedOptionId } from "./permission";
 import {
@@ -184,6 +184,7 @@ export interface DispatchDeps {
     cardId: string;
     /** A lookup, awaited only if related work will actually be fetched. */
     principal: string | null | (() => Promise<string | null>);
+    enabled?: () => Promise<boolean>;
   }) => Promise<CardPromptRelated[] | undefined>;
   /** Starts minting the agent's Superlibrary token. A seam; defaults to `prefetchRelatedWork`. Fire-and-forget. */
   prefetchRelated?: (input: {
@@ -191,6 +192,7 @@ export interface DispatchDeps {
     boardId: string;
     cardId: string;
     principal: string | null | (() => Promise<string | null>);
+    enabled?: () => Promise<boolean>;
   }) => void;
   log?: (message: string, meta?: Record<string, unknown>) => void;
 }
@@ -1171,9 +1173,12 @@ export async function assemblePrompt(
   work: ClaimedWork,
   occupant: () => Promise<string | null>,
 ): Promise<CardPrompt> {
+  // The board's switch is read once per claim, by whichever of the prefetch and the fetch asks first.
+  let switchRead: Promise<boolean> | null = null;
+  const enabled = (): Promise<boolean> => (switchRead ??= relatedWorkEnabled(deps.tenantId, deps.agent.boardId));
   // Gap S4: the agent's token is minted while the run context is read, so the related call finds it cached.
   try {
-    (deps.prefetchRelated ?? prefetchRelatedWork)({ tenantId: deps.tenantId, boardId: deps.agent.boardId, cardId: work.card.id, principal: occupant });
+    (deps.prefetchRelated ?? prefetchRelatedWork)({ tenantId: deps.tenantId, boardId: deps.agent.boardId, cardId: work.card.id, principal: occupant, enabled });
   } catch {
     // Never part of the claim.
   }
@@ -1185,6 +1190,7 @@ export async function assemblePrompt(
     boardId: deps.agent.boardId,
     cardId,
     principal: occupant,
+    enabled,
   }).catch(() => undefined);
   return CardPrompt.parse({
     version: CARD_PROMPT_VERSION,

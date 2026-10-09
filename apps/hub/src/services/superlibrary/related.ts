@@ -40,6 +40,8 @@ export type RelatedWorkInput = {
   boardId: string;
   cardId: string;
   principal: string | null | (() => Promise<string | null>);
+  /** The board's switch, read once per claim by the caller and shared by the prefetch and the fetch. */
+  enabled?: () => Promise<boolean>;
 };
 type Log = {
   info(message: string, meta?: Record<string, unknown>): void;
@@ -62,12 +64,13 @@ const str = (v: unknown): string | undefined => (typeof v === "string" && v !== 
 
 /** Superlibrary's own stage timings (its Server-Timing), names and numbers only. */
 export function stageTimings(h: string | null): string {
-  return (h ?? "")
+  const kept = (h ?? "")
     .split(",")
     .map((s) => s.trim())
-    .filter((s) => /^[a-z0-9]+;(dur=\d+|desc="\d+")$/.test(s))
-    .join(", ")
-    .slice(0, 400);
+    .filter((s) => /^[a-z0-9]+;(dur=\d+|desc="\d+")$/.test(s));
+  // Whole entries only: drop from the end until it fits.
+  while (kept.length > 0 && kept.join(", ").length > 400) kept.pop();
+  return kept.join(", ");
 }
 
 /** Gap S4: mint the agent's token while the claim reads its run context, so the related call finds it cached. */
@@ -79,7 +82,7 @@ export function createPrefetchRelatedWork(deps: {
     const lib = deps.client();
     if (!lib || i.principal === null) return;
     void (async () => {
-      if (!(await deps.enabled(i.tenantId, i.boardId))) return;
+      if (!(await (i.enabled ?? (() => deps.enabled(i.tenantId, i.boardId)))())) return;
       const principal = typeof i.principal === "function" ? await i.principal() : i.principal;
       if (principal) await lib.warmAgent(principal);
     })().catch(() => {});
@@ -98,7 +101,7 @@ export function createFetchRelatedWork(deps: {
   const deadline = deps.deadlineMs ?? RELATED_TIMEOUT_MS;
 
   async function attempt(lib: SuperlibraryClient, i: RelatedWorkInput): Promise<{ items: CardPromptRelated[]; serverTiming: string } | null> {
-    if (!(await deps.enabled(i.tenantId, i.boardId))) return null;
+    if (!(await (i.enabled ?? (() => deps.enabled(i.tenantId, i.boardId)))())) return null;
     const principal = typeof i.principal === "function" ? await i.principal() : i.principal;
     if (!principal) return null;
     // The agent's own token: the section shows what this agent's roster may see, and nothing more.

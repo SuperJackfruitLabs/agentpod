@@ -35,12 +35,24 @@ export function createSuperlibraryClient(o: {
 }): SuperlibraryClient {
   const doFetch = o.fetch ?? ((r: Request) => fetch(r));
   const tokens = new Map<string, { token: string; until: number }>();
-  async function tokenFor(key: string, mint: () => Promise<{ accessToken: string; expiresIn: number }>): Promise<string> {
+  // Mints in flight, by key: a warm-up and the call that follows it join one mint instead of two.
+  const minting = new Map<string, Promise<string>>();
+  function tokenFor(key: string, mint: () => Promise<{ accessToken: string; expiresIn: number }>): Promise<string> {
     const hit = tokens.get(key);
-    if (hit && hit.until > Date.now()) return hit.token;
-    const t = await mint();
-    tokens.set(key, { token: t.accessToken, until: Date.now() + (t.expiresIn - 30) * 1000 });
-    return t.accessToken;
+    if (hit && hit.until > Date.now()) return Promise.resolve(hit.token);
+    const pending = minting.get(key);
+    if (pending) return pending;
+    const p = (async () => {
+      try {
+        const t = await mint();
+        tokens.set(key, { token: t.accessToken, until: Date.now() + (t.expiresIn - 30) * 1000 });
+        return t.accessToken;
+      } finally {
+        minting.delete(key);
+      }
+    })();
+    minting.set(key, p);
+    return p;
   }
   const service = () => tokenFor("service", () => o.plane.serviceToken(o.audience));
   const agent = (prn: string) => tokenFor(`agent ${prn}`, () => o.plane.agentToken(prn, o.audience));

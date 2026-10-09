@@ -289,3 +289,25 @@ test("the prefetch warms the agent's token when enabled, and swallows a failing 
   process.off("unhandledRejection", h);
   expect(unhandled).toEqual([]);
 });
+
+test("stage timings are cut at whole entries, never mid-entry", async () => {
+  const { stageTimings } = await import("./related");
+  const entry = "stage0;dur=1234567";
+  const h = Array.from({ length: 40 }, () => entry).join(", ");
+  const out = stageTimings(h);
+  expect(out.length).toBeLessThanOrEqual(400);
+  expect(out.split(", ").every((e) => e === entry)).toBe(true);
+});
+
+test("the prefetch uses the claim's shared switch read when given one", async () => {
+  let own = 0;
+  let shared = 0;
+  const warmed: string[] = [];
+  const client = { warmAgent: async (p: string) => { warmed.push(p); } } as never;
+  createPrefetchRelatedWork({ client: () => client, enabled: async () => { own++; return true; } })({
+    ...input,
+    enabled: async () => { shared++; return true; },
+  });
+  await new Promise((r) => setTimeout(r, 20));
+  expect([own, shared, warmed.length]).toEqual([0, 1, 1]);
+});

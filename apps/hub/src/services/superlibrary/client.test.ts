@@ -103,3 +103,20 @@ test("warmAgent mints the agent's token once, the next call reuses it, and a fai
   const bad = createSuperlibraryClient({ ...base, plane: { ...plane, agentToken: async () => { throw new Error("down"); } }, fetch: async () => new Response("{}") });
   await bad.warmAgent(A2);
 });
+
+test("a warm-up in flight and the call that follows it share one mint, and a failed mint is not cached", async () => {
+  const { plane, calls } = fakePlane();
+  const slow = { ...plane, agentToken: async (prn: string, aud: string | string[]) => { await new Promise((r) => setTimeout(r, 50)); return plane.agentToken(prn, aud); } };
+  const c = createSuperlibraryClient({ ...base, plane: slow, fetch: async () => new Response("{}") });
+  const warm = c.warmAgent(A1);
+  await c.asAgent(A1).request("POST", "/api/v1/related", { json: {} });
+  await warm;
+  expect(calls).toEqual([`agent ${A1} https://lib.test`]);
+
+  let n = 0;
+  const flaky = { ...plane, agentToken: async () => { if (n++ === 0) throw new Error("down"); return { accessToken: "t", expiresIn: 300 }; } };
+  const f = createSuperlibraryClient({ ...base, plane: flaky, fetch: async () => new Response("{}") });
+  await f.warmAgent(A2);
+  expect((await f.asAgent(A2).request("POST", "/x", { json: {} })).ok).toBe(true);
+  expect(n).toBe(2);
+});

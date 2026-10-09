@@ -210,7 +210,7 @@ test("the prompt section is the agent's related call", async () => {
   const prompt = await runOneDispatch({
     occupant: async () => PRINCIPAL,
     relatedWork: async (input) => {
-      seen.push({ ...input, principal: typeof input.principal === "function" ? await input.principal() : input.principal });
+      seen.push({ ...input, principal: typeof input.principal === "function" ? await input.principal() : input.principal, enabled: typeof input.enabled });
       const r: CardPromptRelated = {
         itemId: "itm_0000000000000001", kind: "work-record", title: "Pricing v1", outcome: "rejected",
         url: "https://app.superlibrary.dev/a/itm_0000000000000001", text: "Tried a toggle; rejected.",
@@ -218,7 +218,7 @@ test("the prompt section is the agent's related call", async () => {
       return [r];
     },
   });
-  expect(seen).toEqual([{ tenantId: TENANT, boardId: BOARD, cardId: CARD, principal: PRINCIPAL }]);
+  expect(seen).toEqual([{ tenantId: TENANT, boardId: BOARD, cardId: CARD, principal: PRINCIPAL, enabled: "function" }]);
   expect(prompt).toContain("## Related prior work");
   expect(prompt).toContain("Tried a toggle; rejected.");
 });
