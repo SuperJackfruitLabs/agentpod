@@ -43,6 +43,8 @@ env:
 jobs:
   unit:
     name: hermes-plugin unit
+    # The nightly run belongs to GitHub; on the forge only pushes and pull requests run.
+    if: github.event_name != 'schedule' || github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -68,6 +70,8 @@ jobs:
 
   contract:
     name: hermes-plugin contract (${{ matrix.target }})
+    # The nightly run belongs to GitHub; on the forge only pushes and pull requests run.
+    if: github.event_name != 'schedule' || github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -117,7 +121,7 @@ jobs:
   report:
     name: hermes-plugin nightly report
     needs: contract
-    if: failure() && github.event_name == 'schedule'
+    if: github.server_url == 'https://github.com' && failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       issues: write

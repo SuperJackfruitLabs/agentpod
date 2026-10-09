@@ -20,6 +20,11 @@ concurrency:
 env:
   DO_NOT_TRACK: 1
 
+# This file runs on GitHub and on the forge (Forgejo Actions reads .github/workflows). The
+# forge is the primary repository and runs the test jobs; anything that deploys or reports on
+# a deployment is gated on `github.server_url == 'https://github.com'`, because the forge holds
+# no Cloudflare credential and never should. On GitHub every condition evaluates as before.
+
 jobs:
   contract:
     name: contract
@@ -203,7 +208,7 @@ jobs:
   hub-smoke:
     name: hub smoke (production)
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.server_url == 'https://github.com' && github.ref == 'refs/heads/main' && github.event_name == 'push'
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
@@ -288,7 +293,7 @@ jobs:
   # Pages project named `agentpod-docs`. One-time setup is in docs-site/README.md.
   deploy-docs:
     needs: [hub]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.server_url == 'https://github.com' && github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-docs
@@ -414,7 +419,7 @@ jobs:
   # environment exposes nothing the token did not already reach.
   deploy-landing:
     needs: [landing]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.server_url == 'https://github.com' && github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-landing
@@ -472,7 +477,7 @@ jobs:
   # deploy-landing.
   deploy-console:
     needs: [console]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.server_url == 'https://github.com' && github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-console
