@@ -43,6 +43,14 @@ export interface SelfStation {
    * (#399, #400), and it is why the translation happens here, once, rather than in each caller.
    */
   ownerUserId: string;
+  /** The station's tenant, from its own row: what a Superlibrary link is scoped to. */
+  tenantId: string;
+  /**
+   * The station's own capabilities (the station-level `Capability` enum, which holds `fs.walk`),
+   * as its descriptors declared them. NOT the node's hello-frame list, a different enum. Null
+   * before adoption, i.e. unknown.
+   */
+  capabilities: string[] | null;
 }
 
 /**
@@ -66,6 +74,8 @@ export async function stationForPrincipal(principalId: string): Promise<SelfStat
       matrixId: stations.matrixId,
       identityMode: stations.matrixIdentityMode,
       ownerUserId: stations.userId,
+      tenantId: stations.tenantId,
+      capabilities: stations.capabilities,
     })
     .from(stations)
     .leftJoin(nodes, eq(nodes.id, stations.nodeId))
