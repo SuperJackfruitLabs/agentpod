@@ -28,8 +28,12 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { bridgeAgents, type BridgeAgentRow } from "../../db/schema/bridge";
 import { stations } from "../../db/schema/stations";
+import { createLogger } from "../../utils/logger";
+import { superlibraryClient } from "../superlibrary/client";
 import { decrypt, encrypt } from "../../utils/encryption";
 import type { AcpSessionMode } from "@agentpod/contract";
+
+const log = createLogger("bridge-roster");
 
 /** One roster entry as a human sees it. Deliberately carries no credential. */
 export interface BridgeAgentView {
@@ -227,6 +231,32 @@ export async function createBridgeAgent(input: CreateBridgeAgentInput): Promise<
     ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
     createdBy: input.createdBy ?? null,
   });
+  void notifyRosterChanged(input.tenantId, input.stationId);
+}
+
+/** Superlibrary caches a roster for five minutes; a change clears it now. Never throws. */
+export async function notifyRosterChanged(tenantId: string, stationId: string): Promise<void> {
+  try {
+    const lib = superlibraryClient();
+    if (!lib) return;
+    const [s] = await db
+      .select({ principalId: stations.principalId })
+      .from(stations)
+      .where(and(eq(stations.id, stationId), eq(stations.tenantId, tenantId)))
+      .limit(1);
+    if (s?.principalId) await lib.invalidateRoster(s.principalId);
+  } catch (err) {
+    log.warn("roster change not sent to Superlibrary", { stationId, error: String(err) });
+  }
+}
+
+async function stationOf(tenantId: string, key: string): Promise<string | null> {
+  const [r] = await db
+    .select({ stationId: bridgeAgents.stationId })
+    .from(bridgeAgents)
+    .where(and(eq(bridgeAgents.tenantId, tenantId), eq(bridgeAgents.key, key)))
+    .limit(1);
+  return r?.stationId ?? null;
 }
 
 /**
@@ -240,6 +270,7 @@ export async function updateBridgeAgent(
   patch: UpdateBridgeAgentInput,
 ): Promise<boolean> {
   const set: Record<string, unknown> = { updatedAt: new Date() };
+  const before = await stationOf(tenantId, key);
 
   if (patch.boardId !== undefined) set.boardId = patch.boardId;
   if (patch.stationId !== undefined) set.stationId = patch.stationId;
@@ -259,14 +290,22 @@ export async function updateBridgeAgent(
     .where(and(eq(bridgeAgents.tenantId, tenantId), eq(bridgeAgents.key, key)))
     .returning({ key: bridgeAgents.key });
 
+  if (done.length > 0) {
+    // A row moved to another station changes both stations' principals.
+    for (const id of new Set([before, patch.stationId])) {
+      if (id) void notifyRosterChanged(tenantId, id);
+    }
+  }
   return done.length > 0;
 }
 
 export async function deleteBridgeAgent(tenantId: string, key: string): Promise<boolean> {
+  const before = await stationOf(tenantId, key);
   const done = await db
     .delete(bridgeAgents)
     .where(and(eq(bridgeAgents.tenantId, tenantId), eq(bridgeAgents.key, key)))
     .returning({ key: bridgeAgents.key });
 
+  if (done.length > 0 && before) void notifyRosterChanged(tenantId, before);
   return done.length > 0;
 }
