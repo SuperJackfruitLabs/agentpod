@@ -75,7 +75,7 @@ import { inDispatchSpan } from "../../telemetry/dispatch-span";
 import { isControlPairDenied } from "../control-pair";
 import type { Fingerprint } from "../evidence/fingerprint";
 import { fingerprintWithin, resolveStationFingerprint, resolveStationOccupant, within } from "../evidence/station-fingerprint";
-import { fetchRelatedWork } from "../superlibrary/related";
+import { fetchRelatedWork, prefetchRelatedWork } from "../superlibrary/related";
 import { DEFAULT_PERMISSION_WAIT_MS, type BridgeAgentConfig } from "./config";
 import { isAutoAnswered, selectedOptionId } from "./permission";
 import {
@@ -185,6 +185,13 @@ export interface DispatchDeps {
     /** A lookup, awaited only if related work will actually be fetched. */
     principal: string | null | (() => Promise<string | null>);
   }) => Promise<CardPromptRelated[] | undefined>;
+  /** Starts minting the agent's Superlibrary token. A seam; defaults to `prefetchRelatedWork`. Fire-and-forget. */
+  prefetchRelated?: (input: {
+    tenantId: string;
+    boardId: string;
+    cardId: string;
+    principal: string | null | (() => Promise<string | null>);
+  }) => void;
   log?: (message: string, meta?: Record<string, unknown>) => void;
 }
 
@@ -1164,6 +1171,12 @@ export async function assemblePrompt(
   work: ClaimedWork,
   occupant: () => Promise<string | null>,
 ): Promise<CardPrompt> {
+  // Gap S4: the agent's token is minted while the run context is read, so the related call finds it cached.
+  try {
+    (deps.prefetchRelated ?? prefetchRelatedWork)({ tenantId: deps.tenantId, boardId: deps.agent.boardId, cardId: work.card.id, principal: occupant });
+  } catch {
+    // Never part of the claim.
+  }
   const ctx = await deps.client.context(work.runId);
   const cardId = ctx.card.id ?? work.card.id;
   // Never throws by contract; the catch is for a seam that does anyway, so the claim still goes ahead.

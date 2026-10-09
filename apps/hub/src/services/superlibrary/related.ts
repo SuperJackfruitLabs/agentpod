@@ -60,6 +60,33 @@ interface RelatedItem {
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
 
+/** Superlibrary's own stage timings (its Server-Timing), names and numbers only. */
+export function stageTimings(h: string | null): string {
+  return (h ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => /^[a-z0-9]+;(dur=\d+|desc="\d+")$/.test(s))
+    .join(", ")
+    .slice(0, 400);
+}
+
+/** Gap S4: mint the agent's token while the claim reads its run context, so the related call finds it cached. */
+export function createPrefetchRelatedWork(deps: {
+  client: () => SuperlibraryClient | null;
+  enabled: (tenantId: string, boardId: string) => Promise<boolean>;
+}) {
+  return function prefetchRelatedWork(i: RelatedWorkInput): void {
+    const lib = deps.client();
+    if (!lib || i.principal === null) return;
+    void (async () => {
+      if (!(await deps.enabled(i.tenantId, i.boardId))) return;
+      const principal = typeof i.principal === "function" ? await i.principal() : i.principal;
+      if (principal) await lib.warmAgent(principal);
+    })().catch(() => {});
+  };
+}
+export const prefetchRelatedWork = createPrefetchRelatedWork({ client: superlibraryClient, enabled: relatedWorkEnabled });
+
 export function createFetchRelatedWork(deps: {
   client: () => SuperlibraryClient | null;
   enabled: (tenantId: string, boardId: string) => Promise<boolean>;
@@ -70,7 +97,7 @@ export function createFetchRelatedWork(deps: {
   const log = deps.log ?? createLogger("related-work");
   const deadline = deps.deadlineMs ?? RELATED_TIMEOUT_MS;
 
-  async function attempt(lib: SuperlibraryClient, i: RelatedWorkInput): Promise<CardPromptRelated[] | null> {
+  async function attempt(lib: SuperlibraryClient, i: RelatedWorkInput): Promise<{ items: CardPromptRelated[]; serverTiming: string } | null> {
     if (!(await deps.enabled(i.tenantId, i.boardId))) return null;
     const principal = typeof i.principal === "function" ? await i.principal() : i.principal;
     if (!principal) return null;
@@ -105,12 +132,13 @@ export function createFetchRelatedWork(deps: {
       // One malformed item is dropped rather than failing the prompt's parse, and with it the claim.
       if (parsed.success) out.push(parsed.data);
     }
-    return out;
+    return { items: out, serverTiming: stageTimings(res.headers.get("server-timing")) };
   }
 
   return async function fetchRelatedWork(i: RelatedWorkInput): Promise<CardPromptRelated[] | undefined> {
     const lib = deps.client();
     if (!lib || i.principal === null) return undefined;
+    const t0 = Date.now();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<"late">((done) => {
       timer = setTimeout(() => done("late"), deadline);
@@ -119,19 +147,22 @@ export function createFetchRelatedWork(deps: {
       const r = await Promise.race([attempt(lib, i), late]);
       if (r === "late") throw new Error(`no answer within ${deadline} ms`);
       if (r === null) return undefined;
+      const { items, serverTiming } = r;
       // One line per dispatch, so an operator can see from the journal that the section went out.
       // Ids, boards and outcomes only: never a title, a body or a token.
       log.info("related prior work attached", {
         cardId: i.cardId,
         boardId: i.boardId,
-        count: r.length,
-        items: r.map((x) => ({ itemId: x.itemId, board: x.board ?? null, outcome: x.outcome })),
+        count: items.length,
+        elapsedMs: Date.now() - t0,
+        serverTiming,
+        items: items.map((x) => ({ itemId: x.itemId, board: x.board ?? null, outcome: x.outcome })),
       });
-      return r;
+      return items;
     } catch (err) {
       // Spec §10: if Superlibrary is unreachable, the section is left out and the claim goes ahead.
       const error = err instanceof Error ? `${err.name}: ${err.message}`.slice(0, 200) : "unknown error";
-      log.warn("related prior work skipped", { cardId: i.cardId, boardId: i.boardId, error });
+      log.warn("related prior work skipped", { cardId: i.cardId, boardId: i.boardId, elapsedMs: Date.now() - t0, error });
       return undefined;
     } finally {
       clearTimeout(timer);

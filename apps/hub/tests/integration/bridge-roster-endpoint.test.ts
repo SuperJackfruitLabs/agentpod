@@ -98,6 +98,7 @@ beforeEach(async () => {
   restore = setSuperlibraryClientForTests({
     asService: () => { throw new Error("unused"); },
     asAgent: () => { throw new Error("unused"); },
+    warmAgent: async () => {},
     invalidateRoster: async (p) => { seen.push(p); },
   });
 });
@@ -132,6 +133,7 @@ test("notifyRosterChanged never throws, and does nothing without a client", asyn
   restore = setSuperlibraryClientForTests({
     asService: () => { throw new Error("unused"); },
     asAgent: () => { throw new Error("unused"); },
+    warmAgent: async () => {},
     invalidateRoster: async () => { throw new Error("down"); },
   });
   await notifyRosterChanged(TENANT, S1);

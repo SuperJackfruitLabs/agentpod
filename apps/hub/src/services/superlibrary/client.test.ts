@@ -93,3 +93,13 @@ test("invalidateRoster is a service call for itself and never throws", async () 
   const down = createSuperlibraryClient({ ...base, plane, fetch: async () => { throw new Error("down"); } });
   await expect(down.invalidateRoster(A2)).resolves.toBeUndefined();
 });
+
+test("warmAgent mints the agent's token once, the next call reuses it, and a failing mint never throws", async () => {
+  const { plane, calls } = fakePlane();
+  const c = createSuperlibraryClient({ ...base, plane, fetch: async () => new Response("{}") });
+  await c.warmAgent(A1);
+  await c.asAgent(A1).request("POST", "/api/v1/related", { json: {} });
+  expect(calls).toEqual([`agent ${A1} https://lib.test`]);
+  const bad = createSuperlibraryClient({ ...base, plane: { ...plane, agentToken: async () => { throw new Error("down"); } }, fetch: async () => new Response("{}") });
+  await bad.warmAgent(A2);
+});

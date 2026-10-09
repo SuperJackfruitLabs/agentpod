@@ -106,3 +106,26 @@ test("Superlibrary unconfigured: the occupant is never looked up while the promp
   expect(looked).toBe(0);
   expect(p.relatedWork).toBeUndefined();
 });
+
+test("the agent token is warmed while the run context is read", async () => {
+  const events: string[] = [];
+  let lookups = 0;
+  const lookup = async () => { lookups++; return PRINCIPAL; };
+  await assemblePrompt(
+    deps({
+      client: {
+        context: async () => {
+          await new Promise((r) => setTimeout(r, 100));
+          events.push("context:end");
+          return { card: { id: CARD, title: "Ship the pricing page", spec: "Build it." }, references: [] };
+        },
+      } as never,
+      prefetchRelated: () => { events.push("prefetch"); },
+      relatedWork: async (i) => { await principalOf(i.principal); return undefined; },
+    }),
+    work,
+    lookup,
+  );
+  expect(events).toEqual(["prefetch", "context:end"]);
+  expect(lookups).toBe(1);
+});

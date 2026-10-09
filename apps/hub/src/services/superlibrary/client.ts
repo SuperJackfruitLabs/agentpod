@@ -19,6 +19,8 @@ export interface SuperlibraryClient {
   asService(onBehalfOf: { principal: string; kind: "agent" }): SuperlibraryCaller;
   /** The agent's own token: what the agent itself may see. */
   asAgent(agentPrincipal: string): SuperlibraryCaller;
+  /** Mint and cache the agent's token ahead of its first call. Never throws. */
+  warmAgent(agentPrincipal: string): Promise<void>;
   /** Tell Superlibrary a principal's roster changed. Best effort, never throws. */
   invalidateRoster(principal: string): Promise<void>;
 }
@@ -78,6 +80,13 @@ export function createSuperlibraryClient(o: {
         "x-on-behalf-token": await agent(who.principal),
       })),
     asAgent: (prn) => caller(() => agent(prn), none),
+    async warmAgent(prn) {
+      try {
+        await agent(prn);
+      } catch (err) {
+        log.warn("superlibrary token warm-up failed", { principal: prn, error: String(err) });
+      }
+    },
     async invalidateRoster(principal) {
       try {
         const res = await caller(service, none).request("POST", "/api/v1/roster/invalidate", {
