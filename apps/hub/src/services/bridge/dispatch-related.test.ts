@@ -62,12 +62,12 @@ test("the prompt section is the agent's related call", async () => {
   const seen: unknown[] = [];
   const prompt = renderCardPrompt(
     await assemblePrompt(
-      deps({ relatedWork: async (input) => { seen.push({ ...input, principal: await principalOf(input.principal) }); return [related]; } }),
+      deps({ relatedWork: async (input) => { seen.push({ ...input, principal: await principalOf(input.principal), enabled: typeof input.enabled }); return [related]; } }),
       work,
       prn,
     ),
   );
-  expect(seen).toEqual([{ tenantId: TENANT, boardId: BOARD, cardId: CARD, principal: PRINCIPAL }]);
+  expect(seen).toEqual([{ tenantId: TENANT, boardId: BOARD, cardId: CARD, principal: PRINCIPAL, enabled: "function" }]);
   expect(prompt).toContain("## Related prior work");
   expect(prompt).toContain("Tried a toggle; rejected.");
 });
@@ -105,4 +105,47 @@ test("Superlibrary unconfigured: the occupant is never looked up while the promp
   const p = await assemblePrompt(deps({}), work, async () => { looked++; return PRINCIPAL; });
   expect(looked).toBe(0);
   expect(p.relatedWork).toBeUndefined();
+});
+
+test("the agent token is warmed while the run context is read", async () => {
+  const events: string[] = [];
+  let lookups = 0;
+  const lookup = async () => { lookups++; return PRINCIPAL; };
+  await assemblePrompt(
+    deps({
+      client: {
+        context: async () => {
+          await new Promise((r) => setTimeout(r, 100));
+          events.push("context:end");
+          return { card: { id: CARD, title: "Ship the pricing page", spec: "Build it." }, references: [] };
+        },
+      } as never,
+      prefetchRelated: () => { events.push("prefetch"); },
+      relatedWork: async (i) => { await principalOf(i.principal); return undefined; },
+    }),
+    work,
+    lookup,
+  );
+  expect(events).toEqual(["prefetch", "context:end"]);
+  expect(lookups).toBe(1);
+});
+
+test("the prefetch and the related call share one occupant lookup, and one switch read", async () => {
+  let looked = 0;
+  let promptLookup: Promise<string | null> | null = null;
+  // The shape workClaimed hands assemblePrompt: one memoised lookup.
+  const memo = () => (promptLookup ??= (async () => { looked++; return PRINCIPAL; })());
+  const switches: Array<(() => Promise<boolean>) | undefined> = [];
+  await assemblePrompt(
+    deps({
+      prefetchRelated: async (i) => { switches.push(i.enabled); await principalOf(i.principal); },
+      relatedWork: async (i) => { switches.push(i.enabled); await principalOf(i.principal); return undefined; },
+    }),
+    work,
+    memo,
+  );
+  await new Promise((r) => setTimeout(r, 10));
+  expect(looked).toBe(1);
+  expect(switches[0]).toBeDefined();
+  expect(switches[0]).toBe(switches[1]);
 });

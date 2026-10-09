@@ -58,6 +58,7 @@ function deps(
         },
       }),
       asAgent: () => { throw new Error("not used"); },
+      warmAgent: async () => {},
       invalidateRoster: async () => {},
     },
     provenance: async () => ({ board: BOARD, card: "card_00000000000000c1", run: "run_00000000000000d1" }),

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { createSuperlibraryClient } from "./client";
-import { RELATED_TIMEOUT_MS, createFetchRelatedWork } from "./related";
+import { RELATED_TIMEOUT_MS, createFetchRelatedWork, createPrefetchRelatedWork } from "./related";
 
 const ok = {
   items: [
@@ -208,6 +208,8 @@ test("one info line when the section is attached: ids, boards and outcomes, neve
         cardId: "card_00000000000000c1",
         boardId: "brd_00000000000000b1",
         count: 1,
+        elapsedMs: expect.any(Number),
+        serverTiming: "",
         items: [{ itemId: "itm_0000000000000001", board: "brd_00000000000000b1", outcome: "rejected" }],
       },
     ],
@@ -227,4 +229,85 @@ test("one warning per failure, naming no body and no token", async () => {
   expect(warns).toHaveLength(1);
   expect(warns[0]![0]).toBe("related prior work skipped");
   expect(JSON.stringify(warns)).not.toContain("SECRET");
+});
+
+test("the attached line carries the elapsed time and Superlibrary's stage timings", async () => {
+  const infos: Array<[string, Record<string, unknown>]> = [];
+  const f = createFetchRelatedWork({
+    client: () =>
+      lib(async () =>
+        Response.json(ok, {
+          headers: { "server-timing": 'auth;dur=5, embed;dur=200, app;dur=310, x;desc="itm_0000000000000001"' },
+        }),
+      ),
+    enabled: async () => true,
+    log: { info: (m, meta) => infos.push([m, meta as Record<string, unknown>]), warn: () => {} },
+  });
+  await f(input);
+  const meta = infos[0]![1];
+  expect(meta.serverTiming).toBe("auth;dur=5, embed;dur=200, app;dur=310");
+  expect(typeof meta.elapsedMs).toBe("number");
+});
+
+test("the skipped line carries the elapsed time", async () => {
+  const warns: Array<[string, Record<string, unknown>]> = [];
+  const f = createFetchRelatedWork({
+    client: () => lib(async () => new Response(null, { status: 503 })),
+    enabled: async () => true,
+    log: { info: () => {}, warn: (m, meta) => warns.push([m, meta as Record<string, unknown>]) },
+  });
+  await f(input);
+  expect(typeof warns[0]![1].elapsedMs).toBe("number");
+});
+
+test("no prefetch when Superlibrary is unconfigured or the board is off", async () => {
+  let enabledCalls = 0;
+  let principalCalls = 0;
+  let warmed = 0;
+  const principal = async () => { principalCalls++; return "prn_000000000000000000a2"; };
+  const client = { warmAgent: async () => { warmed++; } } as never;
+  createPrefetchRelatedWork({ client: () => null, enabled: async () => { enabledCalls++; return true; } })({ ...input, principal });
+  createPrefetchRelatedWork({ client: () => client, enabled: async () => false })({ ...input, principal });
+  await new Promise((r) => setTimeout(r, 20));
+  expect(enabledCalls).toBe(0);
+  expect(principalCalls).toBe(0);
+  expect(warmed).toBe(0);
+});
+
+test("the prefetch warms the agent's token when enabled, and swallows a failing warm-up", async () => {
+  const warmed: string[] = [];
+  const ok1 = { warmAgent: async (p: string) => { warmed.push(p); } } as never;
+  createPrefetchRelatedWork({ client: () => ok1, enabled: async () => true })({ ...input, principal: async () => "prn_000000000000000000a2" });
+  await new Promise((r) => setTimeout(r, 20));
+  expect(warmed).toEqual(["prn_000000000000000000a2"]);
+  const bad = { warmAgent: async () => { throw new Error("boom"); } } as never;
+  const unhandled: unknown[] = [];
+  const h = (e: unknown) => unhandled.push(e);
+  process.on("unhandledRejection", h);
+  createPrefetchRelatedWork({ client: () => bad, enabled: async () => true })(input);
+  await new Promise((r) => setTimeout(r, 20));
+  process.off("unhandledRejection", h);
+  expect(unhandled).toEqual([]);
+});
+
+test("stage timings are cut at whole entries, never mid-entry", async () => {
+  const { stageTimings } = await import("./related");
+  const entry = "stage0;dur=1234567";
+  const h = Array.from({ length: 40 }, () => entry).join(", ");
+  const out = stageTimings(h);
+  expect(out.length).toBeLessThanOrEqual(400);
+  expect(out.split(", ").every((e) => e === entry)).toBe(true);
+});
+
+test("the prefetch uses the claim's shared switch read when given one", async () => {
+  let own = 0;
+  let shared = 0;
+  const warmed: string[] = [];
+  const client = { warmAgent: async (p: string) => { warmed.push(p); } } as never;
+  createPrefetchRelatedWork({ client: () => client, enabled: async () => { own++; return true; } })({
+    ...input,
+    enabled: async () => { shared++; return true; },
+  });
+  await new Promise((r) => setTimeout(r, 20));
+  expect([own, shared, warmed.length]).toEqual([0, 1, 1]);
 });
