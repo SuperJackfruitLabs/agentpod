@@ -67,7 +67,7 @@ test("the prompt section is the agent's related call", async () => {
       prn,
     ),
   );
-  expect(seen).toEqual([{ tenantId: TENANT, boardId: BOARD, cardId: CARD, principal: PRINCIPAL, enabled: "function" }]);
+  expect(seen).toEqual([{ tenantId: TENANT, boardId: BOARD, cardId: CARD, principal: PRINCIPAL, enabled: "function", text: "Ship the pricing page\nBuild it." }]);
   expect(prompt).toContain("## Related prior work");
   expect(prompt).toContain("Tried a toggle; rejected.");
 });
