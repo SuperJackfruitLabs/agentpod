@@ -156,6 +156,12 @@ jobs:
         with:
           go-version-file: apps/node-agent/go.mod
 
+      # GitHub's ubuntu-latest ships lsof; the forge runner's job image does not, and the
+      # claude-code process-detection tests shell out to it.
+      - name: Install lsof (forge runner image)
+        if: github.server_url != 'https://github.com'
+        run: apt-get update -qq && apt-get install -y -qq lsof
+
       - name: Vet
         working-directory: apps/node-agent
         run: go vet ./...
@@ -246,6 +252,11 @@ jobs:
 
       - name: Build
         working-directory: apps/console
+        env:
+          # The default Node heap is sized from the machine's memory, and the forge's runner VM
+          # gave the build ~2 GB, which it exhausted ("heap out of memory"). GitHub's larger
+          # runners never hit it. Raising the ceiling is harmless there.
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm build
 
   # The Cloudflare worker had no CI at all until now: its suite only ever ran in

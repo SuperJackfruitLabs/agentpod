@@ -88,7 +88,15 @@ jobs:
         run: |
           case "${{ matrix.target }}" in
             fleet)   ref="$(tr -d '[:space:]' < "$PLUGIN_DIR/hermes-fleet.ref")" ;;
-            release) ref="$(gh api repos/NousResearch/hermes-agent/releases/latest --jq .tag_name)" ;;
+            release)
+              if command -v gh >/dev/null 2>&1; then
+                ref="$(gh api repos/NousResearch/hermes-agent/releases/latest --jq .tag_name)"
+              else
+                # The forge's runner image has no `gh` (and no GitHub token). The endpoint is public.
+                ref="$(curl -fsSL https://api.github.com/repos/NousResearch/hermes-agent/releases/latest \
+                  | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+              fi
+              ;;
             main)    ref="main" ;;
           esac
           test -n "$ref"
