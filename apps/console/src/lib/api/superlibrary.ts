@@ -2,8 +2,9 @@
  * Superlibrary, called by the console itself (Task A9R, operator ruling R-H1: the hub never acts
  * for a person). The person reads their own file through the hub's person route, then uploads it
  * to Superlibrary as an ordinary person upload — declare, send, commit — with their own
- * Superlibrary-audience token (a grant of its own: $lib/auth/superlibrary-grant). No `source`:
- * Superlibrary takes provenance only from the hub linking for an agent, and refuses it from a person.
+ * Superlibrary-audience token (a grant of its own: $lib/auth/superlibrary-grant). No `source`
+ * (that is only the hub's, linking for an agent): a `stationFile`, which Superlibrary records after
+ * asking the hub itself that the station is this person's (gap S1, R-H1 unchanged).
  *
  * Tokens never cross: the hub's token goes only to the hub (`readFileBytes`), Superlibrary's only
  * to Superlibrary (`library`), and neither request carries a cookie to Superlibrary.
@@ -41,6 +42,8 @@ const SAID: Record<string, string> = {
   file_too_large: "This file is over Superlibrary's size limit.",
   quota_exceeded: "The workspace's Superlibrary storage is full.",
   path_refused: "Superlibrary does not take files with this name.",
+  station_not_yours: "This station is not yours, so its link was not recorded.",
+  hub_unreachable: "AgentPod could not confirm the station — try again.",
 };
 
 /** The sentence for a refusal: the file, line and rule for a secret; else the server's own words. */
@@ -109,7 +112,7 @@ export async function linkFileToLibrary(stationId: string, path: string): Promis
 
   const declared = await library(token, "POST", "/api/v1/uploads", {
     type: "application/json",
-    body: JSON.stringify({ title: name.slice(0, 200), files: [{ path: name, bytes: bytes.byteLength, sha256 }] }),
+    body: JSON.stringify({ title: name.slice(0, 200), files: [{ path: name, bytes: bytes.byteLength, sha256 }], stationFile: { station: stationId, path } }),
   });
   const { uploadId } = (await declared.json()) as { uploadId: string };
   const upload = `/api/v1/uploads/${encodeURIComponent(uploadId)}`;

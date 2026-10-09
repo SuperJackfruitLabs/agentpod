@@ -115,7 +115,9 @@ describe("linkFileToLibrary", () => {
     const net = network({ file: { bytes } });
     await linkFileToLibrary(STATION, "art/logo.png");
     const declare = net.toLibrary()[0]!;
-    expect(declare.body).toEqual({ title: "logo.png", files: [{ path: "logo.png", bytes: 8, sha256: await sha256Hex(bytes) }] });
+    expect(declare.body).toEqual({ title: "logo.png", files: [{ path: "logo.png", bytes: 8, sha256: await sha256Hex(bytes) }],
+      stationFile: { station: STATION, path: "art/logo.png" },
+    });
     expect(declare.body).not.toHaveProperty("source");
     expect(declare.body).not.toHaveProperty("scope"); // the person's default, as Superlibrary's own upload page sends
     // The bytes go out unchanged: binary is never decoded as text.
@@ -175,6 +177,24 @@ describe("linkFileToLibrary", () => {
     vi.spyOn(authStore, "superlibraryToken").mockResolvedValue("library-token");
     network({ declare: () => json(403, { error: "product_not_enabled" }) });
     await expect(linkFileToLibrary(STATION, "a.txt")).rejects.toThrow("Superlibrary is not enabled for this workspace.");
+  });
+
+  test("the link names its station and the path it came from", async () => {
+    const net = network();
+    await linkFileToLibrary(STATION, "out/report.md");
+    const body = net.toLibrary()[0]!.body as Record<string, unknown>;
+    expect(body.stationFile).toEqual({ station: STATION, path: "out/report.md" });
+    expect(body).not.toHaveProperty("source");
+  });
+
+  test("a station Superlibrary will not record reads as a sentence", async () => {
+    network({ declare: () => json(403, { error: "station_not_yours" }) });
+    await expect(linkFileToLibrary(STATION, "a.txt")).rejects.toThrow("This station is not yours, so its link was not recorded.");
+    vi.restoreAllMocks();
+    vi.spyOn(authStore, "getToken").mockResolvedValue("hub-token");
+    vi.spyOn(authStore, "superlibraryToken").mockResolvedValue("library-token");
+    network({ declare: () => json(502, { error: "hub_unreachable" }) });
+    await expect(linkFileToLibrary(STATION, "a.txt")).rejects.toThrow("AgentPod could not confirm the station — try again.");
   });
 
   test("a 401 from Superlibrary drops that token, so the next link asks for a fresh one", async () => {
