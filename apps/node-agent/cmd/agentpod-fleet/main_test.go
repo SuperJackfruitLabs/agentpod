@@ -23,7 +23,7 @@ func dispatchedVerbs(t *testing.T) map[string]bool {
 		t.Fatalf("read fleet.go: %v", err)
 	}
 	got := map[string]bool{}
-	for _, m := range regexp.MustCompile(`(?m)^\tcase "([a-z]+)":`).FindAllStringSubmatch(string(src), -1) {
+	for _, m := range regexp.MustCompile(`(?m)^\tcase "([a-z][a-z-]*)":`).FindAllStringSubmatch(string(src), -1) {
 		got[m[1]] = true
 	}
 	return got
@@ -40,7 +40,7 @@ func listedVerbs(t *testing.T) map[string]bool {
 	help := helpText("test")
 	listed := map[string]bool{}
 	for _, line := range strings.Split(help, "\n") {
-		m := regexp.MustCompile(`^  fleet ([a-z]+)`).FindStringSubmatch(line)
+		m := regexp.MustCompile(`^  fleet ([a-z][a-z-]*)`).FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}

@@ -1625,21 +1625,39 @@ failure. Unconfigured, switched off or no principal logs nothing: nothing was as
 A claiming agent can call the hub's MCP tools (`agentpod_link_artifact`, `agentpod_my_station`, …)
 and Superlibrary's (`library_search`, `library_get`, `library_related`) for its whole session, as
 **its own agent** (a station token, never a person), when its node runs the **loopback MCP proxy**
-for its station. Turn it on per station in the node's `~/.config/agentpod-node/config.json`:
+for its station. Turn it on per station from the hub — audited, applied without a restart, and
+written back to the node's `mcpProxy.stations` so it survives one:
 
-```json
-"mcpProxy": { "stations": ["station_…"] }
+```bash
+fleet mcp-proxy list                         # every station: eligible, declared, served, state
+fleet mcp-proxy enable station_…             # or: enable --all-eligible [--node ID]
+fleet mcp-proxy disable station_…
 ```
 
-then `apn restart`. The node binds `127.0.0.1` on a free port (never another interface), serves
-`/stations/<stationId>/mcp/{hub,superlibrary}`, and gives each named station a random secret,
-regenerated at every node start. On each request it mints (or reuses, until two minutes before
+A node's config edited by hand (`"mcpProxy": { "stations": ["station_…"] }`) still works and needs
+no migration: with nothing declared on the hub, what the node serves reads as `on`. A declaration
+the node disagrees with reads as `drifted`; a served OpenClaw or Pi station as `ineffective`; ids the
+node names that are not its adopted stations are listed under `unadoptedStations`.
+
+The node binds `127.0.0.1` (never another interface), serves
+`/stations/<stationId>/mcp/{hub,superlibrary}`, and gives each served station a random secret. The
+secrets and the bound port persist in `mcp-proxy.json` beside the node config — owner-only (0600),
+written by atomic rename, never logged and never sent to the hub — so a session kept open across a
+node restart keeps a working URL. Rotate when that is not wanted; the old secret is refused (401)
+from its next request, with no restart:
+
+```bash
+fleet mcp-proxy rotate station_…             # or: rotate --node ID; on the host: apn mcp-proxy rotate [station_…]
+```
+
+On each request the node mints (or reuses, until two minutes before
 expiry) that station's token through the station-token exchange and forwards with it; the harness
 holds only the loopback URL and the secret, which are worthless off the machine. A request with a
 missing or wrong secret — including another station's — is refused and logged without it:
 
 ```bash
 apn logs | grep 'mcp proxy'   # serving N station(s); refused …; no station token …
+apn mcp-proxy status          # the stations served, and whether each has a persisted secret
 ```
 
 The bridge asks for the proxy on every claim; the node injects the two servers into the harness's
@@ -1648,7 +1666,9 @@ Code, Codex and opencode**; OpenClaw and Pi do not (their adapters declare `mcpC
 false`) — and tells the hub which it injected. The card prompt names `agentpod_link_artifact` and
 the **Before you start … `library_search`** block exactly when both servers are in the session.
 Requires `WORK_PLANE_AUDIENCES` to include Superlibrary's audience (DEPLOYMENT.md), or Superlibrary
-refuses the token. A node advertises `mcp.proxy` in its hello while the proxy is running.
+refuses the token. A node advertises `mcp.proxy` (and, from v0.1.96, `mcp.proxy.manage`, which
+`fleet mcp-proxy` needs) in its hello while the proxy is running — from v0.1.96 it runs even with no
+stations, so one can be enabled without a restart.
 
 ### What the loop does, and how fast
 

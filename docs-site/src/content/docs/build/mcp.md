@@ -105,6 +105,24 @@ AgentPod is the **execution** side: where you run, and what ran there. Claiming 
 reporting progress and finishing work live in [superpipeline's MCP server](https://docs.superpipeline.dev/build/mcp/),
 not this one.
 
+## Inside a station's own session: the node's MCP proxy
+
+An agent running in a station does not need a token of its own to reach these tools. Its node can
+run a **loopback MCP proxy** that adds two servers to the harness's `session/new` — this endpoint as
+`agentpod` and Superlibrary's as `superlibrary` — reached as the station's own agent through a
+`127.0.0.1` URL and a per-station secret that never leave the machine. Only Hermes, Claude Code,
+Codex and opencode stations can use it; OpenClaw's and Pi's ACP adapters take no HTTP MCP servers.
+
+```sh
+fleet mcp-proxy list                  # which stations each node serves, and any drift
+fleet mcp-proxy enable --all-eligible # or name stations; applied without a node restart
+fleet mcp-proxy rotate stn_123        # a new secret; a session holding the old one is refused
+```
+
+The secrets persist across node restarts, so a session kept open across one keeps its tools. See
+[`fleet mcp-proxy`](/reference/fleet/#fleet-mcp-proxy) and
+[`apn mcp-proxy`](/reference/apn/#apn-mcp-proxy).
+
 ## Next
 
 - [Authentication](/build/auth/) — where the token comes from and how it is verified

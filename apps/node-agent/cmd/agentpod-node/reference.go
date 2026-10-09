@@ -144,6 +144,26 @@ var apnRef = []clidoc.Command{
 	{Path: "plugin-management enable", Summary: "Allow console plugin management; restart the service afterwards.", Synopsis: "apn plugin-management enable", Example: "apn plugin-management enable && apn restart"},
 	{Path: "plugin-management disable", Summary: "Refuse console plugin management; restart the service afterwards.", Synopsis: "apn plugin-management disable", Example: "apn plugin-management disable && apn restart"},
 	{
+		Path: "mcp-proxy", Synopsis: "apn mcp-proxy <status|rotate [STATION_ID...]>",
+		Detail: "The proxy's per-station secrets and its loopback port persist in `mcp-proxy.json` " +
+			"(owner-only, 0600) beside the node config, so a session kept open across a node restart " +
+			"keeps working. Which stations it serves is changed from the hub, audited: " +
+			"[`fleet mcp-proxy`](/reference/fleet/#fleet-mcp-proxy).",
+		Dispatch: []clidoc.Dispatch{{Func: "mcpProxyCmd", Tag: "args[0]"}},
+		Auth:     apnNeedsLocal,
+		Example:  "apn mcp-proxy status",
+	},
+	{Path: "mcp-proxy status", Summary: "The stations the proxy serves, and whether each has a persisted secret. No secret is printed.", Synopsis: "apn mcp-proxy status", Exit: "0; 1 when the node is not enrolled.", Example: "apn mcp-proxy status"},
+	{
+		Path: "mcp-proxy rotate", Summary: "Replace the named stations' secrets — every served station when none are named.",
+		Synopsis: "apn mcp-proxy rotate [STATION_ID...]",
+		Detail: "The running node re-reads the state file at the next request: a session holding an old " +
+			"secret is refused (401) from then on, with no restart, and new sessions get the new one. " +
+			"The fleet side is [`fleet mcp-proxy rotate`](/reference/fleet/#fleet-mcp-proxy-rotate).",
+		Exit:    "0; 1 when the node is not enrolled or a named station is not served (nothing is rotated then).",
+		Example: "apn mcp-proxy rotate station_123",
+	},
+	{
 		Path: "hermes-skills", Synopsis: "apn hermes-skills <status|register|unregister> --profile NAME [--apply]",
 		Dispatch: []clidoc.Dispatch{{Func: "hermesSkillsCmd", Tag: "action"}},
 		Auth:     apnNeedsLocal,

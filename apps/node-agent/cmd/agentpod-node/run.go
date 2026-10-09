@@ -256,7 +256,7 @@ func runCmd() {
 	// GIT_COMMITTER_* once the hub has sent its author — in its harness's environment.
 	// This is what makes the key do anything: without it the key is on disk, the account is on
 	// forge, and `git push` still uses whatever ssh would have used anyway.
-	mcpProxy, proxyStop := startMCPProxy(cfg, reg)
+	mcpProxy, proxy, proxyStop := startMCPProxy(cfg, reg, gitIdentityRoot)
 	defer proxyStop()
 	h = gateway.NewACPHandlerWithMCPProxy(h, acpMgr, gateway.ACPCommandFunc(gitidentity.WithSSHCommand(
 		gitIdentityRoot,
@@ -265,12 +265,19 @@ func runCmd() {
 	// The daemon's otel.env comes from its own cgroup (otelenv.DaemonPath), not from uid: a
 	// system unit with User= still reads the system file, and a node that is not the
 	// systemd service at all (container, `apn run`) answers unsupported instead of exiting.
+	if proxy != nil {
+		// mcp.proxy.status|set|rotate: which stations the proxy serves, changed without a restart
+		// and written back to `mcpProxy.stations` so it survives one (fleet mcp-proxy).
+		h = gateway.NewMCPProxyManageHandler(h, proxy, func(stations []string) error {
+			return config.SetMCPProxyStations(config.DefaultPath(), stations)
+		})
+	}
 	h = gateway.NewTelemetryHandler(h, otelenv.DaemonPath, daemonUnitChecker())
 	h = gateway.NewUpdateHandler(h, version)
 	startStationTokens(ctx, cfg)
 	extras := startIntakes(ctx)
 	if mcpProxy != nil {
-		extras.Capabilities = append(extras.Capabilities, "mcp.proxy")
+		extras.Capabilities = append(extras.Capabilities, "mcp.proxy", "mcp.proxy.manage")
 	}
 	gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
 		return gatherHealthReports(reg)
@@ -278,36 +285,41 @@ func runCmd() {
 }
 
 // startMCPProxy runs the loopback MCP proxy for the stations `mcpProxy.stations` names, and
-// returns how a session finds its servers — nil (and no "mcp.proxy" capability) when it is off
-// or failed to start. Not essential: a node whose proxy cannot start runs as before, and its
-// sessions get no proxied servers and prompts that name none of their tools.
-func startMCPProxy(cfg config.Config, reg *descriptor.Registry) (gateway.MCPProxyFunc, func()) {
+// returns how a session finds its servers — nil (and no "mcp.proxy" capability) when it failed to
+// start. It runs with no stations too, so `fleet mcp-proxy enable` can add one without a restart.
+// Its secrets and port persist in stateDir (mcpproxy.StateFileName, 0600), so a session kept open
+// across a node restart keeps working. Not essential: a node whose proxy cannot start runs as
+// before, and its sessions get no proxied servers and prompts that name none of their tools.
+func startMCPProxy(cfg config.Config, reg *descriptor.Registry, stateDir string) (gateway.MCPProxyFunc, *mcpproxy.Proxy, func()) {
 	noop := func() {}
-	if cfg.MCPProxy == nil || len(cfg.MCPProxy.Stations) == 0 {
-		return nil, noop
+	var stations []string
+	lib := ""
+	if cfg.MCPProxy != nil {
+		stations = cfg.MCPProxy.Stations
+		lib = strings.TrimSpace(cfg.MCPProxy.SuperlibraryURL)
 	}
-	lib := strings.TrimSpace(cfg.MCPProxy.SuperlibraryURL)
 	if lib == "" {
 		lib = mcpproxy.DefaultSuperlibraryURL
 	}
 	p, err := mcpproxy.Start(mcpproxy.Config{
-		Stations:        cfg.MCPProxy.Stations,
+		Stations:        stations,
 		HubURL:          strings.TrimRight(cfg.Hub, "/") + "/mcp",
 		SuperlibraryURL: lib,
 		Tokens:          &stationtoken.Source{Hub: cfg.Hub, NodeID: cfg.NodeID, NodeSecret: cfg.NodeSecret},
+		StatePath:       filepath.Join(stateDir, mcpproxy.StateFileName),
 	})
 	if err != nil {
 		log.Printf("mcp proxy disabled: %v", err)
-		return nil, noop
+		return nil, nil, noop
 	}
-	log.Printf("mcp proxy: serving %d station(s) on loopback", len(cfg.MCPProxy.Stations))
+	log.Printf("mcp proxy: serving %d station(s) on loopback", len(p.Stations()))
 	return func(stationID, key string) []mcpproxy.Server {
 		d, err := reg.For(key)
 		if err != nil {
 			return nil
 		}
 		return p.ServersForHarness(stationID, d.Harness())
-	}, func() { _ = p.Close() }
+	}, p, func() { _ = p.Close() }
 }
 
 // startIntakes opens the sockets harness plugins report into. Both feed one

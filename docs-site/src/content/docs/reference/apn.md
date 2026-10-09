@@ -33,6 +33,7 @@ Each command's text below is what `apn help <command>` prints, from the same tab
 | [`apn run`](#apn-run) | Run the agent in the foreground. |
 | [`apn native-skills`](#apn-native-skills) | Show, enable or disable native skill placement on this node. |
 | [`apn plugin-management`](#apn-plugin-management) | Show, enable or disable Console plugin management on this node. |
+| [`apn mcp-proxy`](#apn-mcp-proxy) | Show the stations the loopback MCP proxy serves, or rotate their secrets. |
 | [`apn hermes-skills`](#apn-hermes-skills) | Register or remove the managed skills directory in a Hermes profile. |
 | [`apn hermes-live`](#apn-hermes-live) | Install, enable or remove the agentpod-live streaming plugin in a Hermes profile. |
 | [`apn openclaw-errors`](#apn-openclaw-errors) | Install, enable or remove the agentpod-errors plugin in OpenClaw. |
@@ -603,6 +604,72 @@ apn plugin-management disable
 
 ```sh
 apn plugin-management disable && apn restart
+```
+
+## apn mcp-proxy
+
+Show the stations the loopback MCP proxy serves, or rotate their secrets.
+
+```text
+apn mcp-proxy <status|rotate [STATION_ID...]>
+```
+
+The proxy's per-station secrets and its loopback port persist in `mcp-proxy.json` (owner-only, 0600) beside the node config, so a session kept open across a node restart keeps working. Which stations it serves is changed from the hub, audited: [`fleet mcp-proxy`](/reference/fleet/#fleet-mcp-proxy).
+
+Subcommands: [`status`](#apn-mcp-proxy-status), [`rotate`](#apn-mcp-proxy-rotate).
+
+`apn help mcp-proxy` prints:
+
+```text
+apn mcp-proxy <status|rotate [STATION_ID...]> — the node's loopback MCP proxy
+gives a station's harness sessions the hub's and Superlibrary's MCP tools.
+
+Each station's secret persists in mcp-proxy.json (0600) beside the node config,
+so a session kept open across a node restart keeps working. `rotate` replaces
+the named stations' secrets (every served station when none are named); the
+running node refuses the old ones from their next request, without a restart.
+Secrets are never printed. Which stations are served is changed from the hub:
+fleet mcp-proxy enable|disable.
+```
+
+**Needs:** The user the node service runs as, editing its own files. No hub contact.
+
+```sh
+apn mcp-proxy status
+```
+
+### apn mcp-proxy status
+
+The stations the proxy serves, and whether each has a persisted secret. No secret is printed.
+
+```text
+apn mcp-proxy status
+```
+
+**Needs:** The user the node service runs as, editing its own files. No hub contact.
+
+**Exit status:** 0; 1 when the node is not enrolled.
+
+```sh
+apn mcp-proxy status
+```
+
+### apn mcp-proxy rotate
+
+Replace the named stations' secrets — every served station when none are named.
+
+```text
+apn mcp-proxy rotate [STATION_ID...]
+```
+
+The running node re-reads the state file at the next request: a session holding an old secret is refused (401) from then on, with no restart, and new sessions get the new one. The fleet side is [`fleet mcp-proxy rotate`](/reference/fleet/#fleet-mcp-proxy-rotate).
+
+**Needs:** The user the node service runs as, editing its own files. No hub contact.
+
+**Exit status:** 0; 1 when the node is not enrolled or a named station is not served (nothing is rotated then).
+
+```sh
+apn mcp-proxy rotate station_123
 ```
 
 ## apn hermes-skills

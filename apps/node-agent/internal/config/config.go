@@ -123,3 +123,64 @@ func Load(path string) (Config, error) {
 	}
 	return c, json.Unmarshal(b, &c)
 }
+
+// SetMCPProxyStations sets `mcpProxy.stations` in the config at path and leaves every other key
+// exactly as it was — including keys this binary does not model, which a Load/Save round trip
+// would silently drop. The write is atomic (a 0600 temporary renamed over the file), so a crash
+// cannot leave a node with half a config and no credential.
+func SetMCPProxyStations(path string, stations []string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	section := map[string]json.RawMessage{}
+	if prev, ok := raw["mcpProxy"]; ok && string(prev) != "null" {
+		if err := json.Unmarshal(prev, &section); err != nil {
+			return err
+		}
+	}
+	if stations == nil {
+		stations = []string{}
+	}
+	if section["stations"], err = json.Marshal(stations); err != nil {
+		return err
+	}
+	if raw["mcpProxy"], err = json.Marshal(section); err != nil {
+		return err
+	}
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomic(path, out)
+}
+
+func writeAtomic(path string, b []byte) error {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}

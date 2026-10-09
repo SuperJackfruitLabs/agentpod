@@ -136,6 +136,18 @@ var commands = []struct {
 			"Nothing here restarts a gateway.",
 	},
 	{
+		name: "mcp-proxy", group: "Node",
+		oneline: "Show the stations the loopback MCP proxy serves, or rotate their secrets",
+		detail: "apn mcp-proxy <status|rotate [STATION_ID...]> — the node's loopback MCP proxy\n" +
+			"gives a station's harness sessions the hub's and Superlibrary's MCP tools.\n\n" +
+			"Each station's secret persists in mcp-proxy.json (0600) beside the node config,\n" +
+			"so a session kept open across a node restart keeps working. `rotate` replaces\n" +
+			"the named stations' secrets (every served station when none are named); the\n" +
+			"running node refuses the old ones from their next request, without a restart.\n" +
+			"Secrets are never printed. Which stations are served is changed from the hub:\n" +
+			"fleet mcp-proxy enable|disable.",
+	},
+	{
 		name: "hermes-skills", group: "Node",
 		oneline: "Register or remove the managed skills directory in a Hermes profile",
 		detail: "apn hermes-skills <status|register|unregister> --profile NAME [--apply] —\n" +

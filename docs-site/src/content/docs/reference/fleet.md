@@ -45,6 +45,7 @@ This page is generated from the binary's own command table and source, and a tes
 | [`fleet station`](#fleet-station) | One station: lifecycle, cleanup, changeset, files. |
 | [`fleet staff`](#fleet-staff) | Put an agent in a station, or take it out. |
 | [`fleet config`](#fleet-config) | Declare what a harness setting should be, and see what it is. |
+| [`fleet mcp-proxy`](#fleet-mcp-proxy) | Which stations each node's loopback MCP proxy serves, and their secrets. |
 
 **Skills and plugins**
 
@@ -1405,6 +1406,146 @@ Refuses to run without the digest `plan` printed, so what is written is exactly 
 
 ```sh
 fleet config apply --station stn_123 --operation op_123 --plan-digest 3f2a…
+```
+
+## fleet mcp-proxy
+
+Which stations each node's loopback MCP proxy serves, and their secrets.
+
+```text
+fleet mcp-proxy <list|enable|disable|rotate> ...
+```
+
+The proxy gives a station's harness sessions the hub's and Superlibrary's MCP tools as the station's own agent, through a loopback URL and a per-station secret that never leave the node. A change is written to the node's config (`mcpProxy.stations`) and applied without a restart; every change and rotation leaves an audit row per station. The hub records what was **declared** here; `list` compares it with what each node **serves**. With nothing declared, whatever the node's config says stands, so a hand-edited config needs no migration. Needs a node at v0.1.96 or later; an older one answers `unknown`. The node side is [`apn mcp-proxy`](/reference/apn/#apn-mcp-proxy).
+
+Subcommands: [`list`](#fleet-mcp-proxy-list), [`enable`](#fleet-mcp-proxy-enable), [`disable`](#fleet-mcp-proxy-disable), [`rotate`](#fleet-mcp-proxy-rotate).
+
+`fleet mcp-proxy -h` prints:
+
+```text
+usage:
+  fleet mcp-proxy list [--node ID]                            every station: declared, served, state
+  fleet mcp-proxy enable STATION_ID...                        serve these stations
+  fleet mcp-proxy enable --all-eligible [--node ID]           serve every station whose harness can use it
+  fleet mcp-proxy disable STATION_ID...                       stop serving these stations
+  fleet mcp-proxy rotate STATION_ID... | --node ID            new secrets; sessions holding old ones are refused
+
+The node's loopback MCP proxy gives a station's harness sessions the hub's and
+Superlibrary's MCP tools, as the station's own agent. Only Hermes, Claude Code,
+Codex and opencode stations can use it: OpenClaw's and Pi's ACP adapters take
+no HTTP MCP servers in session/new, and enabling one is refused.
+
+A change is written to the node's config and applied without a restart, and
+leaves an audit row per station. A state of "drifted" means what was declared
+here and what the node serves disagree — re-run enable or disable to settle it.
+Secrets never leave the node.
+```
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+**Exit status:** As below for each verb; with no verb, prints the usage and exits 2.
+
+```sh
+fleet mcp-proxy list
+```
+
+### fleet mcp-proxy list
+
+Every station: eligible, declared, served, and its state.
+
+```text
+fleet mcp-proxy list [--node ID]
+```
+
+`state` is `on` or `off`; `drifted` when the declaration and the node disagree (a hand edit, a reset config); `ineffective` when a station is served but its harness takes no HTTP MCP servers; `unknown` when the node could not be asked. `unadoptedStations` are ids the node's config names that are not adopted stations of that node. `drifted` at the top counts all three kinds.
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--node ID` | string | — | Only this node. |
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+```sh
+fleet mcp-proxy list --node node_123
+```
+
+### fleet mcp-proxy enable
+
+Serve the named stations, or every eligible one.
+
+```text
+fleet mcp-proxy enable STATION_ID...
+fleet mcp-proxy enable --all-eligible [--node ID]
+```
+
+Only Hermes, Claude Code, Codex and opencode stations are eligible. Naming an OpenClaw or Pi station refuses the whole request (422) and changes nothing: their ACP adapters take no HTTP MCP servers in `session/new`. `--all-eligible` skips them and lists them under `skipped`. A station already served keeps its secret, so its open sessions keep working.
+
+| Argument | Meaning |
+|---|---|
+| `STATION_ID` | a station id from `fleet stations`; several may be named |
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--all-eligible` | bool | `false` | Every adopted station whose harness takes HTTP MCP servers (Hermes, Claude Code, Codex, opencode). |
+| `--node ID` | string | — | With `--all-eligible`: only this node's stations. |
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+**Exit status:** 0 when every station is served; 1 otherwise — 404 an unknown station, 422 an ineligible one, 409 a node offline or too old, 502 a node that failed.
+
+```sh
+fleet mcp-proxy enable stn_123 stn_456
+fleet mcp-proxy enable --all-eligible
+```
+
+### fleet mcp-proxy disable
+
+Stop serving the named stations.
+
+```text
+fleet mcp-proxy disable STATION_ID...
+```
+
+Applied at once: the station's next proxied request is refused, and its next session gets no proxied servers.
+
+| Argument | Meaning |
+|---|---|
+| `STATION_ID` | a station id; several may be named |
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+**Exit status:** As `enable`.
+
+```sh
+fleet mcp-proxy disable stn_123
+```
+
+### fleet mcp-proxy rotate
+
+New secrets for the named stations, or every station a node serves.
+
+```text
+fleet mcp-proxy rotate STATION_ID...
+fleet mcp-proxy rotate --node ID
+```
+
+Secrets otherwise persist across node restarts, so a session kept open across one keeps working. Rotate when that is not wanted: a session holding an old secret is refused (401) from its next request, and new sessions get the new one. The secrets are never sent to the hub.
+
+| Argument | Meaning |
+|---|---|
+| `STATION_ID` | a served station's id; several may be named |
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--node ID` | string | — | Every station this node's proxy serves. |
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+**Exit status:** As `enable`; 409 also when the node's proxy does not serve a named station.
+
+```sh
+fleet mcp-proxy rotate stn_123
+fleet mcp-proxy rotate --node node_123
 ```
 
 ## fleet skills
