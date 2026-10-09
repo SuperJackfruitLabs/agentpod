@@ -136,7 +136,7 @@ func (c *claudeCodeDescriptor) Detect() ([]Station, error) {
 
 	// "acp" is advertised because *claudeCodeDescriptor implements ACPCommander
 	// (via the external claude-agent-acp adapter — see ACPCommand).
-	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.walk", "fs.write", "terminal", "cleanup", "acp"}
 	var stations []Station
 
 	for _, projPath := range paths {
@@ -669,4 +669,9 @@ func collectJsonlFiles(dir string) []string {
 		return nil
 	})
 	return files
+}
+
+// WorkspaceRoot is the root ReadFile jails reads to (WorkspaceRooter).
+func (c *claudeCodeDescriptor) WorkspaceRoot(key string) (string, error) {
+	return c.projectPathForKey(key)
 }

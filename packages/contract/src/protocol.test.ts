@@ -245,3 +245,26 @@ it("RequestMsg carries an optional trace _meta (C2), and stays valid without one
   });
   expect(RequestMsg.parse({ type: "req", id: "1", verb: "x", params: {} })._meta).toBeUndefined();
 });
+it("fs.read takes an offset and echoes offset/size/eof; an old result still parses", () => {
+  expect(VERB_PARAMS["fs.read"].parse({ key: "k", path: "a", offset: 4 }).offset).toBe(4);
+  expect(() => VERB_PARAMS["fs.read"].parse({ key: "k", path: "a", offset: -1 })).toThrow();
+  const r = VERB_RESULTS["fs.read"].parse({ content: "AA==", encoding: "base64", truncated: true, offset: 4, size: 10, eof: false });
+  expect([r.offset, r.size, r.eof]).toEqual([4, 10, false]);
+  expect(VERB_RESULTS["fs.read"].parse({ content: "x", encoding: "utf8", truncated: false }).offset).toBeUndefined();
+});
+
+it("fs.walk takes caps within the folder limits and returns a manifest", () => {
+  expect(VERB_PARAMS["fs.walk"].parse({ key: "k", path: "site", maxFiles: 500 }).maxFiles).toBe(500);
+  expect(() => VERB_PARAMS["fs.walk"].parse({ key: "k", path: "site", maxFiles: 501 })).toThrow();
+  expect(() => VERB_PARAMS["fs.walk"].parse({ key: "k", path: "site", maxBytes: 100 * 1024 * 1024 + 1 })).toThrow();
+  const r = VERB_RESULTS["fs.walk"].parse({ root: "site", files: [{ path: "", size: 3 }], skipped: [{ path: "x", reason: "symlink" }, { path: "y", reason: "unreadable" }], tooMany: false, tooLarge: false });
+  expect(r.files[0]!.size).toBe(3);
+  expect(() => VERB_RESULTS["fs.walk"].parse({ root: "s", files: [], skipped: [{ path: "x", reason: "other" }], tooMany: false, tooLarge: false })).toThrow();
+});
+
+it("fs.walk says which limit truncated it, and an old result without the field still parses", () => {
+  const base = { root: "s", files: [], skipped: [], tooMany: true, tooLarge: false };
+  expect(VERB_RESULTS["fs.walk"].parse({ ...base, truncatedBy: "skipped" }).truncatedBy).toBe("skipped");
+  expect(VERB_RESULTS["fs.walk"].parse(base).truncatedBy).toBeUndefined();
+  expect(() => VERB_RESULTS["fs.walk"].parse({ ...base, truncatedBy: "other" })).toThrow();
+});

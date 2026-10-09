@@ -56,6 +56,7 @@ export const REACH_BEARING: Record<Capability, boolean> = {
   health: false,
   logs: false,
   "fs.read": false,
+  "fs.walk": false, // a manifest of names and sizes: a read
 };
 
 export function isReachBearing(cap: Capability): boolean {

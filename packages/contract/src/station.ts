@@ -1,5 +1,5 @@
 import { z } from "zod";
-export const Capability = z.enum(["inventory","health","logs","fs.read","fs.write","terminal","lifecycle","cleanup","acp","changeset","skills.inventory","skills.manage","skills.native","plugins.manage","config.manage","matrix.avatar"]);
+export const Capability = z.enum(["inventory","health","logs","fs.read","fs.walk","fs.write","terminal","lifecycle","cleanup","acp","changeset","skills.inventory","skills.manage","skills.native","plugins.manage","config.manage","matrix.avatar"]);
 export type Capability = z.infer<typeof Capability>;
 /**
  * Splits raw capability strings into the ones this build knows and the ones it
