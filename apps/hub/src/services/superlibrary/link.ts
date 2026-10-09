@@ -41,7 +41,11 @@ export interface LinkInput {
 }
 export type LinkStatus = 400 | 403 | 409 | 413 | 422 | 502 | 503;
 export type LinkResult =
-  | { ok: true; itemId: string; version: number; url: string; sha256: string; mediaType: string; bytes: number }
+  | {
+      ok: true; itemId: string; version: number; url: string; sha256: string; mediaType: string; bytes: number;
+      /** What the node's walk left out (denied, symlink, special, unreadable), relative to the linked folder. */
+      skipped?: Array<{ path: string; reason: string }>;
+    }
   | { ok: false; status: LinkStatus; error: string; message: string };
 
 /** One offset read. The node clamps at 4 MiB; 1 MiB keeps each base64 frame small. */
@@ -51,9 +55,10 @@ export const MAX_FILE = 25 * 1024 * 1024;
 export const MAX_FOLDER_BYTES = 100 * 1024 * 1024;
 export const MAX_FOLDER_FILES = 500;
 const READ_TIMEOUT_MS = 60_000;
+const MESSAGE_CAP = 500;
 
 const refuse = (status: LinkStatus, error: string, message: string): LinkResult => ({ ok: false, status, error, message });
-const TOO_OLD = "This station's node is too old to link files; update the node and try again.";
+const TOO_OLD = "This node is too old to link files; update it and try again.";
 const changed = (p: string) => refuse(409, "file_changed", `${p} changed while it was being read; link it again.`);
 
 // ─── The denylist (spec §8) ───────────────────────────────────────────────────
@@ -150,7 +155,8 @@ async function readWhole(deps: LinkDeps, input: LinkInput, path: string, size: n
       const e = r.error ?? "fs.read failed";
       if (isUnavailable(e)) return refuse(503, "station_unavailable", "This station became unavailable while the file was read; link it again.");
       if (isTooOld(e)) return refuse(409, "node_too_old", TOO_OLD);
-      return refuse(502, "read_failed", `Could not read ${path}: ${e}`);
+      // Never relay the node's read error: ReadAt returns raw OS errors that carry host-absolute paths.
+      return refuse(502, "read_failed", `Could not read ${path}; link it again.`);
     }
     const parsed = VERB_RESULTS["fs.read"].safeParse(r.data);
     if (!parsed.success) return refuse(502, "read_failed", `The node answered an unreadable result for ${path}.`);
@@ -158,6 +164,8 @@ async function readWhole(deps: LinkDeps, input: LinkInput, path: string, size: n
     // A node that ignores `offset` reads from 0 every time and echoes nothing: refuse, never splice.
     if (res.offset !== offset || res.encoding !== "base64") return refuse(409, "node_too_old", TOO_OLD);
     // Every chunk must report the size the walk listed: a file edited mid-read is torn, not linked.
+    // Torn-read detection is size-only: an edit that keeps the size (an in-place rewrite) is not
+    // seen here. Superlibrary hashes what it receives, so the item is at least self-consistent.
     if (res.size !== size) return changed(path);
     const bytes = Buffer.from(res.content, "base64");
     if (bytes.length === 0 || offset + bytes.length > size) return changed(path);
@@ -205,7 +213,9 @@ export async function linkArtifact(deps: LinkDeps, input: LinkInput): Promise<Li
   if (input.kind === "folder" && single) return refuse(400, "not_a_folder", `${path} is a file.`);
   for (const f of w.files) {
     const shown = single ? name : f.path;
-    const why = uploadNameRefusal(shown);
+    // The denylist is judged from the workspace too: `.config` + `gcloud/x` is `.config/gcloud/x`.
+    const wsRule = single ? null : deniedRule(`${path}/${f.path}`);
+    const why = uploadNameRefusal(shown) ?? (wsRule ? `it matches the ${wsRule} rule` : null);
     if (why) return refuse(400, "path_refused", `${single ? path : `${path}/${JSON.stringify(f.path).slice(1, -1)}`} cannot be linked: ${why}.`);
   }
   const big = w.files.find((f) => f.size > MAX_FILE);
@@ -241,7 +251,10 @@ export async function linkArtifact(deps: LinkDeps, input: LinkInput): Promise<Li
   const commit = await lib.request("POST", `/api/v1/uploads/${uploadId}/commit`);
   if (!commit.ok) return fromLibrary(commit);
   const c = (await commit.json()) as { itemId: string; version: number; url: string; sha256: string; mediaType: string; bytes: number };
-  return { ok: true, itemId: c.itemId, version: c.version, url: c.url, sha256: c.sha256, mediaType: c.mediaType, bytes: c.bytes };
+  return {
+    ok: true, itemId: c.itemId, version: c.version, url: c.url, sha256: c.sha256, mediaType: c.mediaType, bytes: c.bytes,
+    ...(w.skipped.length ? { skipped: w.skipped } : {}),
+  };
 }
 
 async function fromLibrary(res: Response): Promise<LinkResult> {
@@ -252,6 +265,9 @@ async function fromLibrary(res: Response): Promise<LinkResult> {
   }
   const status = ([400, 403, 409, 413, 422] as const).find((s) => s === res.status) ?? 502;
   const error = status === 502 ? "library_refused" : (body.error ?? "library_refused");
-  const message = body.path ? `${body.path}: ${body.reason ?? "refused"}` : (body.message ?? `Superlibrary refused the link (${res.status}${body.error ? `, ${body.error}` : ""}).`);
+  // `message` is Superlibrary's own sentence, relayed deliberately so the agent sees why; capped so
+  // a misbehaving server cannot flood the agent's context.
+  const relayed = typeof body.message === "string" ? body.message.slice(0, MESSAGE_CAP) : undefined;
+  const message = body.path ? `${body.path}: ${body.reason ?? "refused"}`.slice(0, MESSAGE_CAP) : (relayed ?? `Superlibrary refused the link (${res.status}${body.error ? `, ${body.error}` : ""}).`);
   return refuse(status, error, message);
 }
