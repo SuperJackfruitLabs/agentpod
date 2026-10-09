@@ -8,7 +8,7 @@
  */
 
 import { createAuthClient } from "better-auth/svelte";
-import { discardToken, hasTokens, planeAccessToken, signOut, signOutLocal, suppressAutoSignIn, type PlaneDiscovery } from "$lib/auth/org-plane";
+import { discardSuperlibraryToken, discardToken, hasTokens, planeAccessToken, signOut, signOutLocal, superlibraryAccessToken, suppressAutoSignIn, type PlaneDiscovery } from "$lib/auth/org-plane";
 import { forgetMyReach } from "$lib/api/my-grant";
 
 // =============================================================================
@@ -396,6 +396,24 @@ export async function refreshToken(): Promise<boolean> {
  */
 export async function getToken(minValiditySec?: number): Promise<string | null> {
   return plane ? planeAccessToken(plane, minValiditySec ? { minValiditySec } : {}) : null;
+}
+
+/**
+ * The signed-in person's own access token for Superlibrary, which the console calls directly (the
+ * hub never acts for a person). Bought with the same rotating refresh token as the hub's, one grant
+ * at a time. Throws a sentence when there is none to be had: legacy mode (no plane), signed out,
+ * or the plane would not give one.
+ */
+export async function superlibraryToken(): Promise<string> {
+  if (!plane) throw new Error("Linking to Superlibrary needs a sign-in through your Super Jackfruit account.");
+  const token = await superlibraryAccessToken(plane);
+  if (!token) throw new Error("Your session has expired — sign in again.");
+  return token;
+}
+
+/** Superlibrary answered 401 to a request that carried `sent`: the next link asks for a fresh token. */
+export function superlibraryTokenRefused(sent: string): void {
+  discardSuperlibraryToken(sent);
 }
 
 /**

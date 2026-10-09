@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { afterEach } from "vitest";
-import { abandonPendingSignIn, autoSignIn, beginSignIn, completeSignIn, discardToken, discoverPlane, hasTokens, planeAccessToken, resetPageLoadState, signOut, signOutLocal, suppressAutoSignIn, userSignedOut, watchSession } from "./org-plane";
+import { abandonPendingSignIn, autoSignIn, beginSignIn, completeSignIn, discardSuperlibraryToken, discardToken, discoverPlane, hasTokens, planeAccessToken, resetPageLoadState, signOut, signOutLocal, superlibraryAccessToken, suppressAutoSignIn, userSignedOut, watchSession } from "./org-plane";
 
 const PLANE = { issuer: "https://accounts.test", url: "https://accounts.test", audience: "https://hub.test" };
 const ORIGIN = "https://console.test";
@@ -513,5 +513,130 @@ describe("signOut", () => {
     finish(json(200, { access_token: "at2", expires_in: 300, refresh_token: "rt2" }));
     await pending;
     expect(await planeAccessToken(PLANE, { now: () => 0 })).toBeNull();
+  });
+});
+
+// Task A9R: the console's second audience. Superlibrary is called with the person's own token for
+// it, minted from the same rotating refresh token as the hub's — so the two refreshes must never
+// spend that token at the same time.
+describe("a Superlibrary-audience token from the same refresh token", () => {
+  const SL = "https://app.superlibrary.dev";
+
+  /**
+   * A plane that rotates refresh tokens: `rtN` buys `rtN+1`, and a token spent once is refused
+   * (400 invalid_grant), as a reuse-detecting plane does. Every answer waits 5 ms, so two
+   * requests that are not serialised really are in flight together.
+   */
+  function rotatingPlane() {
+    const spent = new Set<string>();
+    const seen: { refresh: string; resource: string }[] = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const fetchFn = vi.fn(async (_u: string, init?: RequestInit) => {
+      const body = new URLSearchParams(String(init!.body));
+      const refresh = body.get("refresh_token")!;
+      const resource = body.get("resource")!;
+      seen.push({ refresh, resource });
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      if (spent.has(refresh)) return json(400, { error: "invalid_grant" });
+      spent.add(refresh);
+      const n = Number(refresh.slice(2)) + 1;
+      const access = resource === SL ? `sl${n}` : `at${n}`;
+      return json(200, { access_token: access, expires_in: 300, refresh_token: `rt${n}` });
+    });
+    return { fetchFn, seen, maxInFlight: () => maxInFlight };
+  }
+
+  test("asks for the Superlibrary audience with the refresh token, and keeps the rotated one", async () => {
+    await signIn();
+    const plane = rotatingPlane();
+    const got = await superlibraryAccessToken(PLANE, { now: () => 1_000, fetchFn: plane.fetchFn as never });
+    expect(got).toBe("sl2");
+    expect(plane.seen).toEqual([{ refresh: "rt1", resource: SL }]);
+    const body = new URLSearchParams(String(plane.fetchFn.mock.calls[0]![1]!.body));
+    expect([body.get("grant_type"), body.get("client_id")]).toEqual(["refresh_token", "agentpod-console"]);
+    // The hub's token is untouched: the Superlibrary token is never handed to the hub.
+    expect(await planeAccessToken(PLANE, { now: () => 1_000 })).toBe("at1");
+    // The rotated refresh token is what the hub's next refresh spends.
+    expect(await planeAccessToken(PLANE, { now: () => 290_000, fetchFn: plane.fetchFn as never })).toBe("at3");
+    expect(plane.seen[1]).toEqual({ refresh: "rt2", resource: "https://hub.test" });
+  });
+
+  test("is cached until near expiry, then refreshed again", async () => {
+    await signIn();
+    const plane = rotatingPlane();
+    expect(await superlibraryAccessToken(PLANE, { now: () => 1_000, fetchFn: plane.fetchFn as never })).toBe("sl2");
+    expect(await superlibraryAccessToken(PLANE, { now: () => 200_000, fetchFn: plane.fetchFn as never })).toBe("sl2");
+    expect(plane.fetchFn).toHaveBeenCalledTimes(1);
+    expect(await superlibraryAccessToken(PLANE, { now: () => 290_000, fetchFn: plane.fetchFn as never })).toBe("sl3");
+    expect(plane.seen.map((s) => s.refresh)).toEqual(["rt1", "rt2"]);
+  });
+
+  test("a hub refresh and a Superlibrary refresh at once spend the rotating token one at a time", async () => {
+    await signIn();
+    const plane = rotatingPlane();
+    const opts = { now: () => 290_000, fetchFn: plane.fetchFn as never };
+    const [hub, library] = await Promise.all([planeAccessToken(PLANE, opts), superlibraryAccessToken(PLANE, opts)]);
+    expect(hub).toBe("at2");
+    expect(library).toBe("sl3");
+    expect(plane.maxInFlight()).toBe(1);
+    // The second request used the token the first one rotated in, not the spent one.
+    expect(plane.seen.map((s) => s.refresh)).toEqual(["rt1", "rt2"]);
+    expect(await planeAccessToken(PLANE, { now: () => 290_000 })).toBe("at2"); // still signed in
+  });
+
+  test("the other way round as well: Superlibrary first, the hub while it is in flight", async () => {
+    await signIn();
+    const plane = rotatingPlane();
+    const opts = { now: () => 290_000, fetchFn: plane.fetchFn as never };
+    const library = superlibraryAccessToken(PLANE, opts);
+    const hub = planeAccessToken(PLANE, opts);
+    expect(await library).toBe("sl2");
+    expect(await hub).toBe("at3");
+    expect(plane.maxInFlight()).toBe(1);
+    expect(plane.seen).toEqual([{ refresh: "rt1", resource: SL }, { refresh: "rt2", resource: "https://hub.test" }]);
+  });
+
+  test("two Superlibrary needs at once share one refresh", async () => {
+    await signIn();
+    const plane = rotatingPlane();
+    const opts = { now: () => 1_000, fetchFn: plane.fetchFn as never };
+    expect(await Promise.all([superlibraryAccessToken(PLANE, opts), superlibraryAccessToken(PLANE, opts)])).toEqual(["sl2", "sl2"]);
+    expect(plane.fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  test("signed out: no token, and no request", async () => {
+    const fetchFn = vi.fn();
+    expect(await superlibraryAccessToken(PLANE, { now: () => 0, fetchFn: fetchFn as never })).toBeNull();
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  test("signing out forgets the Superlibrary token too", async () => {
+    await signIn();
+    const plane = rotatingPlane();
+    expect(await superlibraryAccessToken(PLANE, { now: () => 1_000, fetchFn: plane.fetchFn as never })).toBe("sl2");
+    signOutLocal();
+    expect(await superlibraryAccessToken(PLANE, { now: () => 1_000, fetchFn: plane.fetchFn as never })).toBeNull();
+  });
+
+  test("a refusal for Superlibrary says so and leaves the hub session alone", async () => {
+    await signIn();
+    const fetchFn = vi.fn(async () => json(400, { error: "invalid_target" }));
+    await expect(superlibraryAccessToken(PLANE, { now: () => 1_000, fetchFn: fetchFn as never })).rejects.toThrow(/Superlibrary/);
+    expect(await planeAccessToken(PLANE, { now: () => 1_000 })).toBe("at1");
+  });
+
+  test("a token Superlibrary refused is dropped, so the next need refreshes", async () => {
+    await signIn();
+    const plane = rotatingPlane();
+    expect(await superlibraryAccessToken(PLANE, { now: () => 1_000, fetchFn: plane.fetchFn as never })).toBe("sl2");
+    discardSuperlibraryToken("sl-older"); // not the one held: kept
+    expect(await superlibraryAccessToken(PLANE, { now: () => 1_000, fetchFn: plane.fetchFn as never })).toBe("sl2");
+    discardSuperlibraryToken("sl2");
+    expect(await superlibraryAccessToken(PLANE, { now: () => 1_000, fetchFn: plane.fetchFn as never })).toBe("sl3");
+    expect(await planeAccessToken(PLANE, { now: () => 1_000 })).toBe("at1"); // the hub's is untouched
   });
 });

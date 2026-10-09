@@ -1,6 +1,7 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, fireEvent, cleanup, within } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
+import * as library from "$lib/api/superlibrary";
 import type { FsEntry } from "@agentpod/contract";
 
 // Mock MonacoEditor with a textarea stub so jsdom tests can read its value —
@@ -19,6 +20,9 @@ vi.mock("$lib/components/ui/markdown", async () => {
   );
   return { MarkdownViewer: MarkdownViewerStub };
 });
+
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+vi.mock("svelte-sonner", () => ({ toast }));
 
 // Static import ensures module is compiled during file collection, so the
 // first test doesn't pay the ~4s compilation cost inside its waitFor window.
@@ -562,4 +566,98 @@ test("on a phone the empty preview does not tell you to press a key you do not h
 
   const tree = await findByTestId("file-browser-tree-only");
   expect(tree.ownerDocument.body.textContent).not.toContain("⌘P");
+});
+
+// --- "Link this file" (Task A9R): straight to Superlibrary, as the signed-in person -----------
+
+const LINKED = { itemId: "itm_00000000000000d1", version: 1, url: "https://app.superlibrary.dev/a/itm_00000000000000d1" };
+
+async function openReadme() {
+  vi.spyOn(api, "listFiles").mockResolvedValue([mockDir, mockFile]);
+  vi.spyOn(api, "readFile").mockResolvedValue({ content: "# Hello", truncated: false });
+  const view = render(FileBrowser, { props: { stationId: "station_1" } });
+  await waitFor(() => expect(view.getByText("README.md")).toBeTruthy());
+  fireEvent.click(view.getByText("README.md"));
+  return view;
+}
+
+test("Link this file links the open file, copies the link and offers to open it", async () => {
+  toast.success.mockClear();
+  const writeText = vi.fn(async () => {});
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  const open = vi.spyOn(window, "open").mockImplementation(() => null);
+  const link = vi.spyOn(library, "linkFileToLibrary").mockResolvedValue(LINKED);
+
+  const { findByRole } = await openReadme();
+  fireEvent.click(await findByRole("button", { name: /link this file/i }));
+
+  await waitFor(() => expect(toast.success).toHaveBeenCalled());
+  expect(link).toHaveBeenCalledWith("station_1", "README.md");
+  expect(writeText).toHaveBeenCalledWith(LINKED.url);
+  const [title, opts] = toast.success.mock.calls[0]!;
+  expect(title).toBe("Linked to Superlibrary");
+  expect(opts).toMatchObject({ description: "Link copied.", action: { label: "Open" } });
+  opts.action.onClick();
+  expect(open).toHaveBeenCalledWith(LINKED.url, "_blank", "noopener,noreferrer");
+});
+
+test("Link this file still says it linked when the clipboard refuses", async () => {
+  toast.success.mockClear();
+  Object.defineProperty(navigator, "clipboard", { value: { writeText: vi.fn(async () => { throw new Error("denied"); }) }, configurable: true });
+  vi.spyOn(library, "linkFileToLibrary").mockResolvedValue(LINKED);
+  const { findByRole } = await openReadme();
+  fireEvent.click(await findByRole("button", { name: /link this file/i }));
+  await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Linked to Superlibrary", expect.anything()));
+});
+
+test("a refused link shows Superlibrary's sentence", async () => {
+  toast.error.mockClear();
+  const sentence = "README.md line 2: github-token — files with secrets are never linked.";
+  vi.spyOn(library, "linkFileToLibrary").mockRejectedValue(new Error(sentence));
+  const { findByRole } = await openReadme();
+  fireEvent.click(await findByRole("button", { name: /link this file/i }));
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(sentence));
+});
+
+test("Link this file is disabled and says Linking… while it runs, and is a 44px target", async () => {
+  let finish!: (v: typeof LINKED) => void;
+  vi.spyOn(library, "linkFileToLibrary").mockImplementation(() => new Promise((r) => (finish = r)));
+  const { findByRole } = await openReadme();
+  const button = (await findByRole("button", { name: /link this file/i })) as HTMLButtonElement;
+  expect(button.className).toContain("min-h-11");
+  fireEvent.click(button);
+  await waitFor(() => {
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toContain("Linking…");
+  });
+  finish(LINKED);
+  await waitFor(() => expect(button.disabled).toBe(false));
+});
+
+test("no Link this file for a folder, or with nothing open", async () => {
+  const link = vi.spyOn(library, "linkFileToLibrary");
+  vi.spyOn(api, "listFiles").mockImplementation(async (_id: string, path: string) => (path === "" ? [mockDir, mockFile] : [mockSubFile]));
+  const { getByText, queryByRole } = render(FileBrowser, { props: { stationId: "station_1" } });
+  await waitFor(() => expect(getByText("src")).toBeTruthy());
+  expect(queryByRole("button", { name: /link this file/i })).toBeNull();
+  fireEvent.click(getByText("src"));
+  await waitFor(() => expect(getByText("index.ts")).toBeTruthy());
+  expect(queryByRole("button", { name: /link this file/i })).toBeNull();
+  expect(link).not.toHaveBeenCalled();
+});
+
+test("an open path that has become a folder is not offered for linking", async () => {
+  // The agent replaced the open file with a folder of the same name; the refreshed listing says so.
+  vi.unstubAllGlobals(); // the phone tests above stub matchMedia; this needs both panes
+  const asDir: FsEntry = { ...mockFile, type: "dir", size: null };
+  const list = vi.spyOn(api, "listFiles").mockResolvedValue([mockFile]);
+  vi.spyOn(api, "readFile").mockResolvedValue({ content: "# Hello", truncated: false });
+  const { getByText, findByRole, getByRole, queryByRole } = render(FileBrowser, { props: { stationId: "station_1" } });
+  await waitFor(() => expect(getByText("README.md")).toBeTruthy());
+  fireEvent.click(getByText("README.md"));
+  expect(await findByRole("button", { name: /link this file/i })).toBeTruthy();
+
+  list.mockImplementation(async (_id: string, path: string) => (path === "" ? [asDir] : []));
+  await fireEvent.click(getByRole("button", { name: /refresh file list/i }));
+  await waitFor(() => expect(queryByRole("button", { name: /link this file/i })).toBeNull());
 });

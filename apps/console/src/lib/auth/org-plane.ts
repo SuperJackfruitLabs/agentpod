@@ -42,6 +42,34 @@ let tokens: { access: string; expiresAt: number; refresh: string | null } | null
  */
 let refreshing: Promise<string | null> | null = null;
 
+/**
+ * Superlibrary's audience. The `agentpod-console` client may ask the plane for it, and the console
+ * calls Superlibrary itself with the person's own token for it: the hub never acts for a person.
+ */
+export const SUPERLIBRARY_AUDIENCE = "https://app.superlibrary.dev";
+
+/** The person's Superlibrary-audience access token (memory only), and its refresh in flight. */
+let libraryToken: { access: string; expiresAt: number } | null = null;
+let libraryRefreshing: Promise<string | null> | null = null;
+
+/**
+ * Every refresh-token grant, whatever audience it asks for, runs one after another. One refresh
+ * token buys both the hub's token and Superlibrary's, and it rotates: a grant that started before
+ * the previous one answered would spend a token the plane has already spent. Each grant reads the
+ * refresh token when its turn comes, so it always spends the newest.
+ */
+let grantQueue: { settled: boolean; done: Promise<unknown> } = { settled: true, done: Promise.resolve() };
+
+function oneGrantAtATime<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = grantQueue;
+  // Nothing queued: start in this tick, as a lone refresh always has.
+  const run = prev.settled ? fn() : prev.done.then(fn, fn);
+  const tail = { settled: false, done: run.then(() => undefined, () => undefined) };
+  void tail.done.then(() => (tail.settled = true));
+  grantQueue = tail;
+  return run;
+}
+
 /** Bumped by every sign-out, so a token request that started before one cannot write tokens after it. */
 let generation = 0;
 
@@ -144,18 +172,30 @@ async function startSignIn(plane: PlaneDiscovery, opts: BeginOptions): Promise<v
   (opts.navigate ?? ((u: string) => window.location.assign(u)))(`${base(plane.url)}/api/auth/oauth2/authorize?${q}`);
 }
 
+interface Grant {
+  access: string;
+  expiresAt: number;
+  refresh: string | null;
+}
+
+/**
+ * One token request. Answers the grant, or null when a sign-out happened meanwhile (the answer
+ * belongs to nobody now). The caller stores it: the hub's tokens, or Superlibrary's access token
+ * plus the rotated refresh token.
+ */
 async function tokenRequest(
   plane: PlaneDiscovery,
   body: Record<string, string>,
   fetchFn: typeof fetch,
   now: () => number,
-): Promise<void> {
+  resource: string = plane.audience,
+): Promise<Grant | null> {
   const gen = generation;
   const res = await fetchFn(`${base(plane.url)}/api/auth/oauth2/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     // The contract: the token request MUST carry resource=<audience>, on refresh as well.
-    body: new URLSearchParams({ ...body, client_id: CLIENT_ID, resource: plane.audience }).toString(),
+    body: new URLSearchParams({ ...body, client_id: CLIENT_ID, resource }).toString(),
   });
   // 400/401 is the token endpoint's OAuth refusal (invalid_grant, invalid_client, ...). Anything
   // else that is not ok (5xx, 429, a proxy's page) says nothing about the grant.
@@ -168,8 +208,8 @@ async function tokenRequest(
     throw new Error("The account service answered without an access token.");
   }
   const expiresIn = typeof j.expires_in === "number" ? j.expires_in : 300;
-  if (gen !== generation) return; // signed out meanwhile: the answer belongs to nobody now
-  tokens = {
+  if (gen !== generation) return null; // signed out meanwhile: the answer belongs to nobody now
+  return {
     access: j.access_token,
     expiresAt: now() + expiresIn * 1000,
     // Refresh tokens rotate: the newest one replaces the old, which the plane has now spent.
@@ -211,7 +251,7 @@ export async function completeSignIn(
   }
   if (!pending || !stateOk) return fail("Sign-in state did not match; start again.");
   try {
-    await tokenRequest(
+    const grant = await tokenRequest(
       plane,
       {
         grant_type: "authorization_code",
@@ -222,6 +262,7 @@ export async function completeSignIn(
       opts.fetchFn ?? fetch,
       opts.now ?? Date.now,
     );
+    if (grant) tokens = grant;
   } catch (err) {
     return fail(err instanceof Error ? err.message : "Sign-in failed.");
   }
@@ -265,12 +306,18 @@ function refreshNow(plane: PlaneDiscovery, opts: TokenOptions): Promise<string |
   const now = opts.now ?? Date.now;
   if (!tokens?.refresh) return Promise.resolve(null);
   if (!refreshing) {
-    const refreshToken = tokens.refresh;
     const gen = generation;
     let p: Promise<string | null> | undefined = undefined;
     p = (async () => {
       try {
-        await tokenRequest(plane, { grant_type: "refresh_token", refresh_token: refreshToken }, opts.fetchFn ?? fetch, now);
+        await oneGrantAtATime(async () => {
+          // Read now, not when this refresh was asked for: a Superlibrary grant ahead of it in the
+          // queue may have rotated the refresh token.
+          const refreshToken = tokens?.refresh;
+          if (gen !== generation || !refreshToken) return;
+          const grant = await tokenRequest(plane, { grant_type: "refresh_token", refresh_token: refreshToken }, opts.fetchFn ?? fetch, now);
+          if (grant && gen === generation) tokens = grant;
+        });
         if (gen !== generation) return null;
         resetBackoff();
         return tokens?.access ?? null;
@@ -295,6 +342,61 @@ function refreshNow(plane: PlaneDiscovery, opts: TokenOptions): Promise<string |
     refreshing = p;
   }
   return refreshing;
+}
+
+/**
+ * The person's own access token for Superlibrary (audience `SUPERLIBRARY_AUDIENCE`), bought with
+ * the same refresh token as the hub's and kept in memory until it has under `minValiditySec`
+ * (default 30) left. `null` when signed out. Throws a sentence when the plane will not give one;
+ * that does not end the hub session — the hub's own refresh decides that.
+ *
+ * Never sent to the hub; the hub's token is never sent to Superlibrary.
+ */
+export function superlibraryAccessToken(plane: PlaneDiscovery, opts: TokenOptions = {}): Promise<string | null> {
+  const now = opts.now ?? Date.now;
+  if (!tokens) return Promise.resolve(null);
+  if (libraryToken && libraryToken.expiresAt - now() > (opts.minValiditySec ?? 30) * 1000) {
+    return Promise.resolve(libraryToken.access);
+  }
+  if (!libraryRefreshing) {
+    const gen = generation;
+    let p: Promise<string | null> | undefined = undefined;
+    p = (async () => {
+      try {
+        return await oneGrantAtATime(async () => {
+          const refreshToken = tokens?.refresh;
+          if (gen !== generation || !refreshToken) return null;
+          let grant: Grant | null;
+          try {
+            grant = await tokenRequest(
+              plane,
+              { grant_type: "refresh_token", refresh_token: refreshToken },
+              opts.fetchFn ?? fetch,
+              now,
+              SUPERLIBRARY_AUDIENCE,
+            );
+          } catch (err) {
+            if (err instanceof RefusedError) throw new Error("The account service would not give you a Superlibrary sign-in. Sign in again and retry.");
+            throw new Error("The account service is unavailable, so Superlibrary could not be signed in to. Try again in a moment.");
+          }
+          if (!grant || gen !== generation || !tokens) return null;
+          // Stored exactly as the hub's refresh stores it: the rotated token replaces the spent one.
+          tokens = { ...tokens, refresh: grant.refresh };
+          libraryToken = { access: grant.access, expiresAt: grant.expiresAt };
+          return grant.access;
+        });
+      } finally {
+        if (libraryRefreshing === p) libraryRefreshing = null;
+      }
+    })();
+    libraryRefreshing = p;
+  }
+  return libraryRefreshing;
+}
+
+/** Superlibrary answered 401 to a request that carried `sent`: drop that token, keep the hub's. */
+export function discardSuperlibraryToken(sent: string | null | undefined): void {
+  if (sent && libraryToken?.access === sent) libraryToken = null;
 }
 
 function scheduleRetry(plane: PlaneDiscovery, opts: TokenOptions, delay: number): void {
@@ -426,6 +528,11 @@ export function signOutLocal(): void {
   generation++;
   tokens = null;
   refreshing = null;
+  libraryToken = null;
+  libraryRefreshing = null;
+  // A grant still in flight answers a generation that is gone and stores nothing; a new session
+  // does not wait behind it.
+  grantQueue = { settled: true, done: Promise.resolve() };
   resetBackoff();
 }
 

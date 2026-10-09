@@ -1,8 +1,9 @@
 <script lang="ts">
   import { readFile, readImage, setMatrixAvatar } from "$lib/api/client";
+  import { linkFileToLibrary } from "$lib/api/superlibrary";
   import { toast } from "svelte-sonner";
   import type { FsEntry } from "@agentpod/contract";
-  import { X, RefreshCw, ChevronLeft, UserRound } from "@lucide/svelte";
+  import { X, RefreshCw, ChevronLeft, UserRound, Library } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { ResizablePaneGroup, ResizablePane, ResizableHandle } from "$lib/components/ui/resizable";
   import * as Breadcrumb from "$lib/components/ui/breadcrumb";
@@ -78,6 +79,7 @@
   /** Object URLs for previewed images, revoked when their tab closes. */
   let imageCache = $state<Map<string, { url: string; truncated: boolean }>>(new Map());
   let settingAvatar = $state(false);
+  let linking = $state(false);
   let isLoadingFile = $state(false);
   let fileError = $state<string | null>(null);
 
@@ -198,6 +200,33 @@
       });
     } finally {
       settingAvatar = false;
+    }
+  }
+
+  /**
+   * Link the open file into Superlibrary as the signed-in person: the console reads it through the
+   * hub and uploads it itself, with the person's own Superlibrary token (the hub never acts for a
+   * person). The link is copied; the toast offers to open it.
+   */
+  async function linkToLibrary() {
+    if (!activePath || linking) return;
+    const path = activePath;
+    linking = true;
+    try {
+      const { url } = await linkFileToLibrary(stationId, path);
+      try {
+        await navigator.clipboard?.writeText(url);
+      } catch {
+        // No clipboard (permission, an insecure context): the toast's Open still has the link.
+      }
+      toast.success("Linked to Superlibrary", {
+        description: "Link copied.",
+        action: { label: "Open", onClick: () => window.open(url, "_blank", "noopener,noreferrer") },
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      linking = false;
     }
   }
 
@@ -393,6 +422,18 @@
                 >
                   <UserRound class="h-3.5 w-3.5" />
                   {settingAvatar ? "Setting…" : "Set as profile picture"}
+                </Button>
+              {/if}
+              {#if activeEntry?.type === "file"}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="min-h-11 gap-1.5 px-2 text-xs font-sans"
+                  disabled={linking}
+                  onclick={linkToLibrary}
+                >
+                  <Library class="h-3.5 w-3.5" />
+                  {linking ? "Linking…" : "Link this file"}
                 </Button>
               {/if}
               {#if canWrite && activeContentEntry !== null && onOpenConfigEditor}
