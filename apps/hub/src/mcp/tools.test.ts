@@ -41,7 +41,7 @@ const STATION: SelfStation = {
   identityMode: "bridge",
   ownerUserId: "usr_owner",
   tenantId: "ten_mine",
-  nodeCapabilities: null,
+  capabilities: null,
 };
 
 const deps = (over: Partial<ToolDeps> = {}): ToolDeps => ({

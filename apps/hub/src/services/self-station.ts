@@ -45,8 +45,12 @@ export interface SelfStation {
   ownerUserId: string;
   /** The station's tenant, from its own row: what a Superlibrary link is scoped to. */
   tenantId: string;
-  /** The node's hello-frame capabilities; null when the node never said ("did not say"). */
-  nodeCapabilities: string[] | null;
+  /**
+   * The station's own capabilities (the station-level `Capability` enum, which holds `fs.walk`),
+   * as its descriptors declared them. NOT the node's hello-frame list, a different enum. Null
+   * before adoption, i.e. unknown.
+   */
+  capabilities: string[] | null;
 }
 
 /**
@@ -71,7 +75,7 @@ export async function stationForPrincipal(principalId: string): Promise<SelfStat
       identityMode: stations.matrixIdentityMode,
       ownerUserId: stations.userId,
       tenantId: stations.tenantId,
-      nodeCapabilities: nodes.capabilities,
+      capabilities: stations.capabilities,
     })
     .from(stations)
     .leftJoin(nodes, eq(nodes.id, stations.nodeId))
