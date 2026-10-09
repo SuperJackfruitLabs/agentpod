@@ -60,7 +60,9 @@ export const VERB_PARAMS = {
   "detect": z.object({}),
   "health": z.object({ key: z.string() }),
   "fs.list": z.object({ key: z.string(), path: z.string() }),
+  /** `maxBytes` is clamped by the node (4 MiB for an offset read). */
   "fs.read": z.object({ key: z.string(), path: z.string(), maxBytes: z.number().int().optional(), offset: z.number().int().nonnegative().optional() }),
+  /** Folder manifest. `maxFiles` <= 500, `maxBytes` <= 100 MiB. */
   "fs.walk": z.object({ key: z.string(), path: z.string(), maxFiles: z.number().int().positive().max(500).optional(), maxBytes: z.number().int().positive().max(100 * 1024 * 1024).optional() }),
   "logs.tail": z.object({ key: z.string(), follow: z.boolean() }),
   "fs.write": z.object({ key: z.string(), path: z.string(), content: z.string(), encoding: z.enum(["utf8","base64"]), backup: z.boolean().optional() }),
@@ -183,11 +185,20 @@ export const VERB_RESULTS = {
     size: z.number().int().nonnegative().optional(),
     eof: z.boolean().optional(),
   }),
+  /**
+   * `root` echoes the request path as sent. Walking a single file lists it once with `path: ""`.
+   * Skip reasons: `denied` (path denylist or harness-private), `symlink` (never followed),
+   * `special` (not a regular file), `unreadable` (the node could not read it).
+   * `tooMany` is set when the file, skipped-list or visited-entries limit stopped the walk;
+   * `truncatedBy` says which one (`bytes` accompanies `tooLarge`). Absent on a complete walk
+   * and from older nodes.
+   */
   "fs.walk": z.object({
     root: z.string(),
     files: z.array(z.object({ path: z.string(), size: z.number().int().nonnegative() })),
     skipped: z.array(z.object({ path: z.string(), reason: z.enum(["denied", "symlink", "special", "unreadable"]) })),
     tooMany: z.boolean(), tooLarge: z.boolean(),
+    truncatedBy: z.enum(["files", "bytes", "skipped", "entries"]).optional(),
   }),
   "fs.write": z.object({ bytesWritten: z.number().int(), backupPath: z.string().nullable().optional() }),
   "fs.mkdir": z.object({ ok: z.boolean() }),

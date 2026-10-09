@@ -261,3 +261,10 @@ it("fs.walk takes caps within the folder limits and returns a manifest", () => {
   expect(r.files[0]!.size).toBe(3);
   expect(() => VERB_RESULTS["fs.walk"].parse({ root: "s", files: [], skipped: [{ path: "x", reason: "other" }], tooMany: false, tooLarge: false })).toThrow();
 });
+
+it("fs.walk says which limit truncated it, and an old result without the field still parses", () => {
+  const base = { root: "s", files: [], skipped: [], tooMany: true, tooLarge: false };
+  expect(VERB_RESULTS["fs.walk"].parse({ ...base, truncatedBy: "skipped" }).truncatedBy).toBe("skipped");
+  expect(VERB_RESULTS["fs.walk"].parse(base).truncatedBy).toBeUndefined();
+  expect(() => VERB_RESULTS["fs.walk"].parse({ ...base, truncatedBy: "other" })).toThrow();
+});

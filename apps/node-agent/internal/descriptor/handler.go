@@ -212,7 +212,7 @@ func handleFsWalk(reg *Registry, params json.RawMessage) (any, bool, error) {
 		// A descriptor's own error may name host paths; the hub gets the key only.
 		return nil, false, fmt.Errorf("fs.walk: no workspace for %s", p.Key)
 	}
-	res, err := Walk(root, p.Path, p.MaxFiles, p.MaxBytes)
+	res, err := Walk(root, p.Path, p.MaxFiles, p.MaxBytes, privateOf(d, p.Key)...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -243,10 +243,11 @@ func handleFsRead(reg *Registry, params json.RawMessage) (any, bool, error) {
 		}
 		root, err := rooter.WorkspaceRoot(p.Key)
 		if err != nil {
-			return nil, false, err
+			// A descriptor's own error may name host paths; the hub gets the key only.
+			return nil, false, fmt.Errorf("fs.read: no workspace for %s", p.Key)
 		}
 		// ReadAt caps a chunk at MaxChunk; the default maxBytes above already applies.
-		b, size, eof, err := ReadAt(root, p.Path, *p.Offset, p.MaxBytes)
+		b, size, eof, err := ReadAt(root, p.Path, *p.Offset, p.MaxBytes, privateOf(d, p.Key)...)
 		if err != nil {
 			return nil, false, err
 		}
