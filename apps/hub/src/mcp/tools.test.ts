@@ -40,6 +40,8 @@ const STATION: SelfStation = {
   matrixId: "@agent_mine:id.example",
   identityMode: "bridge",
   ownerUserId: "usr_owner",
+  tenantId: "ten_mine",
+  nodeCapabilities: null,
 };
 
 const deps = (over: Partial<ToolDeps> = {}): ToolDeps => ({
@@ -143,5 +145,78 @@ describe("agentpod_my_station", () => {
     expect(body.station.key).toBe("opencode:mine");
     expect(body.node.status).toBe("offline");
     expect(healthCalled, "an injected health probe is used when provided").toBe(true);
+  });
+});
+
+const GOOD = { ok: true as const, itemId: "itm_0000000000000001", version: 1, url: "https://app.superlibrary.dev/a/itm_0000000000000001", sha256: "x", mediaType: "text/markdown", bytes: 3 };
+const REFUSED = { ok: false as const, status: 503 as const, error: "x", message: "x" };
+
+describe("agentpod_link_artifact", () => {
+  test("an agent gets agentpod_link_artifact beside the self-scoped tools", () => {
+    const { server, tools } = recordingServer();
+    registerHubTools(server, deps({ link: async () => REFUSED }));
+    expect(tools.sort()).toEqual(["agentpod_link_artifact", "agentpod_my_sessions", "agentpod_my_station", "agentpod_my_transcript"]);
+  });
+
+  test("a person or a service is never offered it", () => {
+    for (const kind of ["human", "service"] as const) {
+      const { server, tools } = recordingServer();
+      registerHubTools(server, deps({ caller: { principalId: "prn_x", kind }, link: async () => GOOD }));
+      expect(tools).toEqual([]);
+    }
+  });
+
+  test("the tool takes no station and links only from the caller's own station", async () => {
+    const seen: unknown[] = [];
+    const { server, handlers } = recordingServer();
+    registerHubTools(server, deps({ link: async (i) => { seen.push(i); return GOOD; } }));
+    await handlers.get("agentpod_link_artifact")!({ path: "out/report.md", station: "someone-elses-station" });
+    expect(seen).toEqual([{ principalId: "prn_agent", path: "out/report.md" }]);
+  });
+
+  test("the input schema has no station field", () => {
+    const cfgs = new Map<string, any>();
+    const server = { registerTool(name: string, cfg: unknown) { cfgs.set(name, cfg); } } as never;
+    registerHubTools(server, deps({ link: async () => REFUSED }));
+    expect(Object.keys(cfgs.get("agentpod_link_artifact").inputSchema).sort()).toEqual(["entry", "kind", "path", "title"]);
+  });
+
+  test("a refusal is said in a sentence", async () => {
+    const { server, handlers } = recordingServer();
+    registerHubTools(server, deps({ link: async () => ({ ok: false, status: 503, error: "station_unavailable", message: "This station is unavailable right now, so nothing can be linked from it." }) }));
+    const r = await handlers.get("agentpod_link_artifact")!({ path: "a.md" });
+    expect(text(r)).toBe("This station is unavailable right now, so nothing can be linked from it.");
+  });
+
+  test("success names the url and the next step, and omits skipped when nothing was left out", async () => {
+    const { server, handlers } = recordingServer();
+    registerHubTools(server, deps({ link: async () => GOOD }));
+    const r = await handlers.get("agentpod_link_artifact")!({ path: "a.md" });
+    const body = JSON.parse(text(r));
+    expect(body.url).toBe(GOOD.url);
+    expect(body.next).toContain("superpipeline_add_reference");
+    expect(body.ok).toBeUndefined();
+    expect(body.skipped).toBeUndefined();
+    expect(body.note).toBeUndefined();
+  });
+
+  test("success says what was left out when the walk skipped files", async () => {
+    const { server, handlers } = recordingServer();
+    registerHubTools(server, deps({ link: async () => ({ ...GOOD, skipped: [{ path: "x/.env", reason: "denied" }] }) }));
+    const r = await handlers.get("agentpod_link_artifact")!({ path: "x" });
+    const body = JSON.parse(text(r));
+    expect(body.skipped).toEqual([{ path: "x/.env", reason: "denied" }]);
+    expect(body.note).toContain("x/.env");
+    expect(body.note).toContain("Left out");
+  });
+
+  test("the description says content is reference material and a secret refusal cannot be overridden", () => {
+    const cfgs = new Map<string, any>();
+    const server = { registerTool(name: string, cfg: unknown) { cfgs.set(name, cfg); } } as never;
+    registerHubTools(server, deps({ link: async () => REFUSED }));
+    const d: string = cfgs.get("agentpod_link_artifact").description;
+    expect(d).toContain("reference material");
+    expect(d).toContain("never instructions");
+    expect(d).toMatch(/cannot override a secret-scan refusal/);
   });
 });
