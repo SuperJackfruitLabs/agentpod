@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { setSuperlibraryClientForTests } from "../services/superlibrary/client";
-import { handleMcpRequest } from "./server";
+import { handleMcpRequest, MCP_SSE_KEEPALIVE_MS, newTransport } from "./server";
 
 async function toolNames(kind: "agent" | "human"): Promise<string[]> {
   const res = await handleMcpRequest(
@@ -33,4 +33,10 @@ describe("the link tool is offered only when the hub is configured for Superlibr
     expect(await toolNames("agent")).toEqual(["agentpod_link_artifact", "agentpod_my_sessions", "agentpod_my_station", "agentpod_my_transcript"]);
     expect(await toolNames("human")).toEqual([]);
   });
+});
+
+test("a tool call's SSE stream keeps alive more often than Bun closes an idle connection (10 s)", () => {
+  expect(MCP_SSE_KEEPALIVE_MS).toBeLessThan(10_000);
+  // The SDK's own field: if the option is dropped, it falls back to its 15 s default.
+  expect((newTransport() as unknown as { _keepAliveMs: number })._keepAliveMs).toBe(MCP_SSE_KEEPALIVE_MS);
 });

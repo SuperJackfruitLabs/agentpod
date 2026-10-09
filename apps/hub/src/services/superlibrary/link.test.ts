@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import * as realBroker from "../broker";
-import { linkArtifact, type LinkDeps, type LinkInput } from "./link";
+import { linkArtifact, MAX_CONCURRENT_LINKS, type LinkDeps, type LinkInput } from "./link";
 
 const STATION = { id: "stn_1", stationKey: "builder", nodeId: "node_1", nodeStatus: "online", tenantId: "tnt_1" };
 const AGENT = { principal: "prn_000000000000000000a2", kind: "agent" as const };
@@ -273,11 +273,14 @@ test("a secret found by Superlibrary is reported with file and line, and nothing
 test("Superlibrary's other refusals come back with their own error and reason", async () => {
   const { d } = deps();
   d.client.asService = () => ({
-    async request() { return Response.json({ error: "path_refused", path: "data.bin", reason: "denied (*.key)" }, { status: 400 }); },
+    async request() { return Response.json({ error: "path_refused", path: "data.bin", reason: "denied", rule: "*.key" }, { status: 400 }); },
   });
   expect(await link(d)).toMatchObject({ ok: false, status: 400, error: "path_refused", message: "data.bin: denied (*.key)" });
-  d.client.asService = () => ({ async request() { return Response.json({ error: "scope_mismatch" }, { status: 403 }); } });
-  expect(await link(d)).toMatchObject({ ok: false, status: 403, error: "scope_mismatch" });
+  // Exactly what Superlibrary's checkLinkSource answers (sources/link.ts).
+  d.client.asService = () => ({ async request() { return Response.json({ error: "scope_mismatch", detail: "a linked file belongs to the board of its run" }, { status: 400 }); } });
+  expect(await link(d)).toMatchObject({ ok: false, status: 400, error: "scope_mismatch", message: "a linked file belongs to the board of its run" });
+  d.client.asService = () => ({ async request() { return Response.json({ error: "too_many_files", limit: 500 }, { status: 413 }); } });
+  expect(await link(d)).toMatchObject({ ok: false, status: 413, error: "too_many_files", message: "Superlibrary refused the link (413, too_many_files)." });
   d.client.asService = () => ({ async request() { return new Response("boom", { status: 500 }); } });
   expect(await link(d)).toMatchObject({ ok: false, status: 502, error: "library_refused" });
 });
@@ -373,15 +376,146 @@ test("what the walk left out comes back with the link", async () => {
   expect(r).toMatchObject({ ok: true, skipped: [{ path: "locked.txt", reason: "unreadable" }] });
 });
 
-test("Superlibrary's own message is relayed, capped at 500 characters", async () => {
+test("Superlibrary's own detail is relayed, capped at 500 characters", async () => {
   const { d } = deps();
-  d.client.asService = () => ({ async request() { return Response.json({ error: "quota_exceeded", message: "q".repeat(5000) }, { status: 413 }); } });
+  d.client.asService = () => ({ async request() { return Response.json({ error: "invalid", detail: "q".repeat(5000) }, { status: 400 }); } });
   const r = await link(d);
-  expect(r).toMatchObject({ ok: false, status: 413, error: "quota_exceeded" });
+  expect(r).toMatchObject({ ok: false, status: 400, error: "invalid" });
   expect((r as { message: string }).message).toBe("q".repeat(500));
 });
 
 test("the too-old sentence is the brief's", async () => {
   const r = await link(deps({ echoOffset: false }).d);
   expect((r as { message: string }).message).toBe("This node is too old to link files; update it and try again.");
+});
+
+// ─── Final-review fix wave ────────────────────────────────────────────────────
+
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Wraps the fake node so every fs.read first waits `ms`, and records what happened. */
+function slowReads(d: LinkDeps, ms: number, onRead?: (n: number) => void) {
+  const inner = d.broker;
+  let n = 0;
+  d.broker = {
+    async request(node, verb, p, o) {
+      if (verb === "fs.read") { onRead?.(++n); await pause(ms); }
+      return inner.request(node, verb, p, o);
+    },
+  };
+}
+
+test("a link past its deadline stops between chunks and links nothing", async () => {
+  const { d, sent, verbs } = deps();
+  slowReads(d, 40);
+  const r = await link(d, { deadlineMs: 60 });
+  expect(r).toMatchObject({ ok: false, status: 503, error: "timed_out", message: "The link took too long; nothing was linked." });
+  expect(verbs.filter((v) => v.verb === "fs.read").length).toBeLessThan(3);
+  expect(sent).toEqual([]);
+});
+
+test("a deadline that passes after the last read stops before the declare", async () => {
+  const { d, sent } = deps({ tree: { "a.md": new Uint8Array([1, 2, 3]) } });
+  slowReads(d, 40);
+  expect(await link(d, { path: "a.md", deadlineMs: 20 })).toMatchObject({ ok: false, error: "timed_out" });
+  expect(sent).toEqual([]);
+});
+
+test("a link whose caller went away stops and links nothing", async () => {
+  const { d, sent, verbs } = deps();
+  const ctl = new AbortController();
+  slowReads(d, 1, (n) => { if (n === 1) ctl.abort(); });
+  const r = await link(d, { signal: ctl.signal });
+  expect(r).toMatchObject({ ok: false, status: 503, error: "cancelled", message: "The link was cancelled; nothing was linked." });
+  expect(verbs.filter((v) => v.verb === "fs.read").length).toBe(1);
+  expect(sent).toEqual([]);
+});
+
+test("Superlibrary or Accounts down is a plain refusal, never the exception's text", async () => {
+  for (const at of ["/api/v1/uploads", "/files?path=", "token"]) {
+    const { d } = deps();
+    const inner = d.client.asService(AGENT);
+    d.client.asService = () => ({
+      async request(method, path, init) {
+        if (at === "token" || path.includes(at)) throw new Error("connect ECONNREFUSED 10.0.0.9:443 /internal/secret-path");
+        return inner.request(method, path, init);
+      },
+    });
+    const r = await link(d);
+    expect({ at, r }).toMatchObject({ at, r: { ok: false, status: 503, error: "library_unavailable", message: "Superlibrary is unavailable right now; nothing was linked. Try again later." } });
+  }
+});
+
+test("a commit with no answer is retried once; a second silence is reported honestly", async () => {
+  const commits: number[] = [];
+  const run = async (answers: Array<"throw" | Response>) => {
+    const { d } = deps();
+    const inner = d.client.asService(AGENT);
+    let i = 0;
+    d.client.asService = () => ({
+      async request(method, path, init) {
+        if (path.endsWith("/commit")) {
+          commits.push(i);
+          const a = answers[i++]!;
+          if (a === "throw") throw new Error("aborted");
+          return a;
+        }
+        return inner.request(method, path, init);
+      },
+    });
+    return link(d);
+  };
+  const ok = Response.json({ itemId: "itm_0000000000000001", version: 1, url: "u", sha256: "x", mediaType: "m", bytes: 1 }, { status: 201 });
+  expect(await run(["throw", ok])).toMatchObject({ ok: true, itemId: "itm_0000000000000001" });
+  expect(await run(["throw", "throw"])).toMatchObject({ ok: false, status: 503, error: "commit_unconfirmed" });
+  expect(await run(["throw", Response.json({ error: "already_committed" }, { status: 409 })])).toMatchObject({ ok: false, error: "commit_unconfirmed", message: expect.stringContaining("was made") });
+  expect(commits.length).toBe(6);
+});
+
+test("the tooMany sentence says what stopped the walk", async () => {
+  const one = { files: [{ path: "a.txt", size: 1 }], tooMany: true };
+  const msg = async (by?: string) => ((await link(deps({ walk: one, extra: by ? { truncatedBy: by } : {} }).d, { path: "site" })) as { message: string }).message;
+  expect(await msg("files")).toBe("A folder may have at most 500 files.");
+  expect(await msg()).toBe("A folder may have at most 500 files.");
+  expect(await msg("skipped")).toContain("entries that cannot be linked");
+  expect(await msg("entries")).toContain("too big to list");
+});
+
+test("entry is relative to the linked folder; a workspace-relative entry naming the folder is accepted", async () => {
+  const a = new TextEncoder().encode("x");
+  for (const entry of ["index.html", "site/index.html", "./site/index.html"]) {
+    const { d, sent } = deps({ tree: { "site/index.html": a }, walk: { files: [{ path: "index.html", size: 1 }] } });
+    expect((await link(d, { path: "site", entry })).ok).toBe(true);
+    expect({ entry, sent: sent[0]!.json.entry }).toEqual({ entry, sent: "index.html" });
+  }
+});
+
+test("the workspace itself is not linked", async () => {
+  for (const path of [".", "./", ""]) {
+    const { d, verbs } = deps();
+    expect(await link(d, { path })).toMatchObject({ ok: false, status: 400, error: "path_refused", message: "Link a folder inside the workspace, not the workspace itself." });
+    expect(verbs).toEqual([]);
+  }
+});
+
+test(`at most ${MAX_CONCURRENT_LINKS} links run at once; the next waits, and gives up at its deadline`, async () => {
+  let open!: () => void;
+  const gate = new Promise<void>((r) => { open = r; });
+  const walks: number[] = [];
+  const gated = () => {
+    const { d } = deps();
+    const inner = d.broker;
+    d.broker = { async request(n, verb, p, o) { if (verb === "fs.walk") { walks.push(1); await gate; } return inner.request(n, verb, p, o); } };
+    return d;
+  };
+  const held = Array.from({ length: MAX_CONCURRENT_LINKS }, () => link(gated()));
+  const fourth = link(gated());
+  const late = link(gated(), { deadlineMs: 30 });
+  await pause(10);
+  expect(walks.length).toBe(MAX_CONCURRENT_LINKS);
+  expect(await late).toMatchObject({ ok: false, error: "timed_out" });
+  expect(walks.length).toBe(MAX_CONCURRENT_LINKS);
+  open();
+  const all = await Promise.all([...held, fourth]);
+  expect(all.every((r) => r.ok)).toBe(true);
+  expect(walks.length).toBe(MAX_CONCURRENT_LINKS + 1);
 });

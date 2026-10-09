@@ -57,15 +57,27 @@ function ownStationLink(): ToolDeps["link"] {
     );
 }
 
+/**
+ * SSE keep-alive for a tool call's response stream. Bun.serve closes a connection idle for 10 s
+ * (its default `idleTimeout`, which the hub does not change), and the SDK's default keep-alive is
+ * 15 s, so a link that reads for longer than 10 s would lose its answer. 5 s stays under it.
+ */
+export const MCP_SSE_KEEPALIVE_MS = 5_000;
+
+export function newTransport(): WebStandardStreamableHTTPServerTransport {
+  return new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined, // stateless
+    keepAliveMs: MCP_SSE_KEEPALIVE_MS,
+  });
+}
+
 export async function handleMcpRequest(request: Request, caller: McpCaller): Promise<Response> {
   const server = new McpServer(SERVER_INFO, {
     instructions: caller.kind === "agent" ? AGENT_INSTRUCTIONS : HUMAN_INSTRUCTIONS,
   });
   registerHubTools(server, { caller, link: ownStationLink() });
 
-  const transport = new WebStandardStreamableHTTPServerTransport({
-    sessionIdGenerator: undefined, // stateless
-  });
+  const transport = newTransport();
   await server.connect(transport);
   return transport.handleRequest(request);
 }

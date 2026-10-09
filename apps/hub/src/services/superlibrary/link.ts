@@ -8,7 +8,7 @@
  */
 import { createHash } from "node:crypto";
 import { VERB_RESULTS } from "@agentpod/contract";
-import type { SuperlibraryClient } from "./client";
+import type { SuperlibraryCaller, SuperlibraryClient } from "./client";
 
 export interface LinkProvenanceOk { board: string; card?: string; run?: string }
 export type LinkProvenance = LinkProvenanceOk | { refused: string };
@@ -38,6 +38,10 @@ export interface LinkInput {
   entry?: string;
   /** Always an agent: the hub never acts for a person (R-H1). */
   actor: { principal: string; kind: "agent" };
+  /** The caller's own cancellation (the MCP request's `extra.signal`): an abandoned link stops. */
+  signal?: AbortSignal;
+  /** The whole link's budget, waiting for a slot included. Defaults to `LINK_DEADLINE_MS`. */
+  deadlineMs?: number;
 }
 export type LinkStatus = 400 | 403 | 409 | 413 | 422 | 502 | 503;
 export type LinkResult =
@@ -55,10 +59,19 @@ export const MAX_FILE = 25 * 1024 * 1024;
 export const MAX_FOLDER_BYTES = 100 * 1024 * 1024;
 export const MAX_FOLDER_FILES = 500;
 const READ_TIMEOUT_MS = 60_000;
+const WALK_TIMEOUT_MS = 15_000;
+const LIBRARY_TIMEOUT_MS = 30_000;
+/** A link's total budget, from the first check to the last byte sent. */
+export const LINK_DEADLINE_MS = 5 * 60_000;
+/** Links held in memory at once, process-wide (each may hold up to 100 MB); the next one waits. */
+export const MAX_CONCURRENT_LINKS = 3;
 const MESSAGE_CAP = 500;
 
 const refuse = (status: LinkStatus, error: string, message: string): LinkResult => ({ ok: false, status, error, message });
 const TOO_OLD = "This node is too old to link files; update it and try again.";
+const TIMED_OUT = "The link took too long; nothing was linked.";
+const CANCELLED = "The link was cancelled; nothing was linked.";
+const LIBRARY_DOWN = "Superlibrary is unavailable right now; nothing was linked. Try again later.";
 const changed = (p: string) => refuse(409, "file_changed", `${p} changed while it was being read; link it again.`);
 
 // ─── The denylist (spec §8) ───────────────────────────────────────────────────
@@ -124,7 +137,9 @@ function cleanPath(p: string): string | null {
   const segs = p.replace(/\\/g, "/").split("/");
   if (p.replace(/\\/g, "/").startsWith("/")) return null;
   const kept = segs.filter((x) => x !== "" && x !== ".");
-  if (kept.length === 0 || kept.includes("..")) return null;
+  if (kept.includes("..")) return null;
+  // "" means the workspace root itself, refused with its own sentence by the caller.
+  if (kept.length === 0) return "";
   return kept.join("/");
 }
 
@@ -141,17 +156,70 @@ function walkRefusal(path: string, error: string): LinkResult {
   return refuse(400, "path_refused", `${path} cannot be linked: ${error}`);
 }
 
-async function readWhole(deps: LinkDeps, input: LinkInput, path: string, size: number): Promise<Uint8Array | LinkResult> {
+// ─── Budget and slots ─────────────────────────────────────────────────────────
+
+interface Budget { left(): number; stop(): LinkResult | null }
+function budgetOf(input: LinkInput): Budget {
+  const until = Date.now() + (input.deadlineMs ?? LINK_DEADLINE_MS);
+  return {
+    left: () => Math.max(0, until - Date.now()),
+    stop: () =>
+      input.signal?.aborted ? refuse(503, "cancelled", CANCELLED) : Date.now() >= until ? refuse(503, "timed_out", TIMED_OUT) : null,
+  };
+}
+/** A timeout for one call: its own cap, never past the link's deadline. */
+const within = (b: Budget, cap: number) => Math.max(1, Math.min(cap, b.left()));
+
+let active = 0;
+const waiting: Array<() => void> = [];
+/** Waits for one of `MAX_CONCURRENT_LINKS` slots, until the link's deadline or its cancellation. */
+function acquire(b: Budget, signal?: AbortSignal): Promise<boolean> {
+  if (active < MAX_CONCURRENT_LINKS) {
+    active++;
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (got: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", giveUp);
+      const at = waiting.indexOf(take);
+      if (at >= 0) waiting.splice(at, 1);
+      if (got) active++;
+      resolve(got);
+    };
+    const take = () => finish(true);
+    const giveUp = () => finish(false);
+    const timer = setTimeout(giveUp, b.left());
+    timer.unref?.();
+    signal?.addEventListener("abort", giveUp, { once: true });
+    waiting.push(take);
+  });
+}
+function release(): void {
+  active--;
+  waiting[0]?.();
+}
+
+// ─── Reading and linking ──────────────────────────────────────────────────────
+
+async function readWhole(deps: LinkDeps, input: LinkInput, b: Budget, path: string, size: number): Promise<Uint8Array | LinkResult> {
   const out = new Uint8Array(size);
   let offset = 0;
   while (offset < size) {
+    const halt = b.stop();
+    if (halt) return halt;
     const r = await deps.broker.request(
       input.station.nodeId,
       "fs.read",
       { key: input.station.stationKey, path, offset, maxBytes: Math.min(CHUNK, size - offset) },
-      { timeoutMs: READ_TIMEOUT_MS },
+      { timeoutMs: within(b, READ_TIMEOUT_MS) },
     );
     if (!r.ok) {
+      const late = b.stop();
+      if (late) return late;
       const e = r.error ?? "fs.read failed";
       if (isUnavailable(e)) return refuse(503, "station_unavailable", "This station became unavailable while the file was read; link it again.");
       if (isTooOld(e)) return refuse(409, "node_too_old", TOO_OLD);
@@ -176,6 +244,22 @@ async function readWhole(deps: LinkDeps, input: LinkInput, path: string, size: n
   return out;
 }
 
+/** A Superlibrary call that never throws: a thrown fetch or token mint is `null`. */
+async function call(lib: SuperlibraryCaller, method: string, path: string, init: Parameters<SuperlibraryCaller["request"]>[2]): Promise<Response | null> {
+  try {
+    return await lib.request(method, path, init);
+  } catch {
+    return null;
+  }
+}
+
+/** `tooMany`'s sentence, from what stopped the walk (`truncatedBy`; absent from older nodes). */
+function tooManySentence(by: string | undefined): string {
+  if (by === "skipped") return `The folder has more than ${MAX_FOLDER_FILES} entries that cannot be linked (denied, links or unreadable); link a smaller folder.`;
+  if (by === "entries") return "The folder is too big to list (more than 20,000 entries); link a smaller folder.";
+  return `A folder may have at most ${MAX_FOLDER_FILES} files.`;
+}
+
 export async function linkArtifact(deps: LinkDeps, input: LinkInput): Promise<LinkResult> {
   // R-H1: an agent's own file, through the hub, for the agent. A person is never named.
   if ((input.actor as { kind: string }).kind !== "agent" || !input.actor.principal) {
@@ -185,7 +269,8 @@ export async function linkArtifact(deps: LinkDeps, input: LinkInput): Promise<Li
     return refuse(400, "path_refused", "The path is too long or contains a control character.");
   }
   const path = cleanPath(input.path);
-  if (!path) return refuse(400, "path_refused", "The path must stay inside the workspace.");
+  if (path === null) return refuse(400, "path_refused", "The path must stay inside the workspace.");
+  if (path === "") return refuse(400, "path_refused", "Link a folder inside the workspace, not the workspace itself.");
   // A folder is judged by what it would contain too: ".ssh" and ".git" are denied as folders.
   const rule = deniedRule(path) ?? deniedRule(`${path}/x`);
   if (rule) return refuse(400, "path_refused", `${path} is denied by default (${rule}): credentials and harness files are never linked.`);
@@ -194,16 +279,31 @@ export async function linkArtifact(deps: LinkDeps, input: LinkInput): Promise<Li
   const prov = await deps.provenance(input.station.id, input.station.tenantId);
   if ("refused" in prov) return refuse(409, "no_board", prov.refused);
 
-  const walk = await deps.broker.request(input.station.nodeId, "fs.walk", {
-    key: input.station.stationKey, path, maxFiles: MAX_FOLDER_FILES, maxBytes: MAX_FOLDER_BYTES,
-  });
-  if (!walk.ok) return walkRefusal(path, walk.error ?? "fs.walk failed");
+  const b = budgetOf(input);
+  if (!(await acquire(b, input.signal))) return b.stop() ?? refuse(503, "timed_out", TIMED_OUT);
+  try {
+    return await linkHeld(deps, input, b, path, prov);
+  } finally {
+    release();
+  }
+}
+
+async function linkHeld(deps: LinkDeps, input: LinkInput, b: Budget, path: string, prov: LinkProvenanceOk): Promise<LinkResult> {
+  const before = b.stop();
+  if (before) return before;
+  const walk = await deps.broker.request(
+    input.station.nodeId,
+    "fs.walk",
+    { key: input.station.stationKey, path, maxFiles: MAX_FOLDER_FILES, maxBytes: MAX_FOLDER_BYTES },
+    { timeoutMs: within(b, WALK_TIMEOUT_MS) },
+  );
+  if (!walk.ok) return b.stop() ?? walkRefusal(path, walk.error ?? "fs.walk failed");
   const parsed = VERB_RESULTS["fs.walk"].safeParse(walk.data);
   if (!parsed.success) return refuse(502, "walk_failed", `The node answered an unreadable listing for ${path}.`);
   const w = parsed.data;
 
   // Every cap is checked on the whole listing before the first byte is read.
-  if (w.tooMany || w.files.length > MAX_FOLDER_FILES) return refuse(413, "too_many_files", `A folder may have at most ${MAX_FOLDER_FILES} files.`);
+  if (w.tooMany || w.files.length > MAX_FOLDER_FILES) return refuse(413, "too_many_files", tooManySentence(w.truncatedBy));
   if (w.tooLarge || w.files.reduce((n, f) => n + f.size, 0) > MAX_FOLDER_BYTES) return refuse(413, "folder_too_large", "Together these are more than 100 MB, the limit for a folder.");
   if (w.files.length === 0) return refuse(400, "empty", `${path} has no files that can be linked.`);
   const name = path.split("/").pop()!;
@@ -220,20 +320,26 @@ export async function linkArtifact(deps: LinkDeps, input: LinkInput): Promise<Li
   }
   const big = w.files.find((f) => f.size > MAX_FILE);
   if (big) return refuse(413, "file_too_large", `${big.path || name} is larger than 25 MB, the limit for one file.`);
+  // `entry` is relative to the linked folder; a workspace-relative one naming the folder is accepted too.
+  const entry = input.entry ? (cleanPath(input.entry) ?? input.entry) : undefined;
+  const entryRel = entry && entry.startsWith(`${path}/`) ? entry.slice(path.length + 1) : entry;
 
   const files: Array<{ path: string; bytes: Uint8Array; sha256: string }> = [];
   for (const f of w.files) {
-    const bytes = await readWhole(deps, input, single ? path : `${path}/${f.path}`, f.size);
+    const bytes = await readWhole(deps, input, b, single ? path : `${path}/${f.path}`, f.size);
     if (!(bytes instanceof Uint8Array)) return bytes;
     files.push({ path: single ? name : f.path, bytes, sha256: createHash("sha256").update(bytes).digest("hex") });
   }
 
   const lib = deps.client.asService({ principal: input.actor.principal, kind: "agent" });
-  const declare = await lib.request("POST", "/api/v1/uploads", {
+  const preDeclare = b.stop();
+  if (preDeclare) return preDeclare;
+  const declare = await call(lib, "POST", "/api/v1/uploads", {
+    timeoutMs: within(b, LIBRARY_TIMEOUT_MS),
     json: {
       title: input.title?.trim() || name,
       scope: `board:${prov.board}`,
-      ...(input.entry ? { entry: input.entry } : {}),
+      ...(entryRel ? { entry: entryRel } : {}),
       files: files.map((f) => ({ path: f.path, bytes: f.bytes.length, sha256: f.sha256 })),
       // LinkSource is strict on Superlibrary's side: only these keys.
       source: {
@@ -242,13 +348,27 @@ export async function linkArtifact(deps: LinkDeps, input: LinkInput): Promise<Li
       },
     },
   });
+  if (!declare) return b.stop() ?? refuse(503, "library_unavailable", LIBRARY_DOWN);
   if (!declare.ok) return fromLibrary(declare);
   const { uploadId } = (await declare.json()) as { uploadId: string };
   for (const f of files) {
-    const put = await lib.request("PUT", `/api/v1/uploads/${uploadId}/files?path=${encodeURIComponent(f.path)}`, { body: f.bytes });
+    const prePut = b.stop();
+    if (prePut) return prePut;
+    const put = await call(lib, "PUT", `/api/v1/uploads/${uploadId}/files?path=${encodeURIComponent(f.path)}`, { body: f.bytes, timeoutMs: within(b, LIBRARY_TIMEOUT_MS) });
+    if (!put) return b.stop() ?? refuse(503, "library_unavailable", LIBRARY_DOWN);
     if (!put.ok) return fromLibrary(put);
   }
-  const commit = await lib.request("POST", `/api/v1/uploads/${uploadId}/commit`);
+  const preCommit = b.stop();
+  if (preCommit) return preCommit;
+  // Once the commit is sent it runs to its own timeout, not the link's deadline: stopping it half way
+  // would leave the agent not knowing. A commit that gets no answer is retried once (Superlibrary
+  // commits a session once; a second commit of a committed one answers 409 already_committed).
+  let commit = await call(lib, "POST", `/api/v1/uploads/${uploadId}/commit`, { timeoutMs: LIBRARY_TIMEOUT_MS });
+  if (!commit) {
+    commit = await call(lib, "POST", `/api/v1/uploads/${uploadId}/commit`, { timeoutMs: LIBRARY_TIMEOUT_MS });
+    if (!commit) return refuse(503, "commit_unconfirmed", "Superlibrary did not confirm the link, so it may or may not have been made. Look for it in the library before linking again.");
+    if (commit.status === 409) return refuse(502, "commit_unconfirmed", "The link was made, but Superlibrary's answer was lost. Find it in the library on this card's board.");
+  }
   if (!commit.ok) return fromLibrary(commit);
   const c = (await commit.json()) as { itemId: string; version: number; url: string; sha256: string; mediaType: string; bytes: number };
   return {
@@ -258,16 +378,18 @@ export async function linkArtifact(deps: LinkDeps, input: LinkInput): Promise<Li
 }
 
 async function fromLibrary(res: Response): Promise<LinkResult> {
-  const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string; findings?: Array<{ path: string; line: number; rule: string }>; path?: string; reason?: string };
+  const body = (await res.json().catch(() => ({}))) as { error?: string; detail?: unknown; findings?: Array<{ path: string; line: number; rule: string }>; path?: string; reason?: string; rule?: string };
   if (body.error === "secret_found") {
     const where = (body.findings ?? []).map((f) => `${f.path} line ${f.line} (${f.rule})`).join(", ");
-    return refuse(422, "secret_found", `Not linked: a secret was found in ${where}. Remove it and link again. Nothing was added to the library.`);
+    return refuse(422, "secret_found", `Not linked: a secret was found in ${where}. Remove it and link again. Nothing was added to the library.`.slice(0, 2000));
   }
   const status = ([400, 403, 409, 413, 422] as const).find((s) => s === res.status) ?? 502;
   const error = status === 502 ? "library_refused" : (body.error ?? "library_refused");
-  // `message` is Superlibrary's own sentence, relayed deliberately so the agent sees why; capped so
-  // a misbehaving server cannot flood the agent's context.
-  const relayed = typeof body.message === "string" ? body.message.slice(0, MESSAGE_CAP) : undefined;
-  const message = body.path ? `${body.path}: ${body.reason ?? "refused"}`.slice(0, MESSAGE_CAP) : (relayed ?? `Superlibrary refused the link (${res.status}${body.error ? `, ${body.error}` : ""}).`);
-  return refuse(status, error, message);
+  // `detail` is Superlibrary's own sentence (its `error()` helper), relayed deliberately so the agent
+  // sees why; capped so a misbehaving server cannot flood the agent's context.
+  const detail = typeof body.detail === "string" ? body.detail : undefined;
+  const message = body.path
+    ? `${body.path}: ${body.reason ?? body.error ?? "refused"}${body.rule ? ` (${body.rule})` : ""}`
+    : (detail ?? `Superlibrary refused the link (${res.status}${body.error ? `, ${body.error}` : ""}).`);
+  return refuse(status, error, message.slice(0, MESSAGE_CAP));
 }

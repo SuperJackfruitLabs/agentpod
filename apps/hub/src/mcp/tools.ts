@@ -176,13 +176,15 @@ function registerAgentTools(server: McpServer, deps: ToolDeps): void {
           path: z.string().min(1).max(1024),
           title: z.string().min(1).max(200).optional(),
           kind: z.enum(["file", "folder"]).optional(),
-          entry: z.string().min(1).max(1024).optional(),
+          entry: z.string().min(1).max(1024).optional().describe("For a folder: the file to open first, relative to the linked folder (e.g. index.html)."),
         },
         annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
       },
       // Destructured on purpose: any other key an agent sends (a `station`, say) is dropped here.
-      async ({ path, title, kind, entry }) => {
+      async ({ path, title, kind, entry }, extra) => {
         const r = await link({
+          // A caller that goes away (the MCP request is cancelled) stops the link between chunks.
+          ...(extra?.signal ? { signal: extra.signal } : {}),
           principalId: caller.principalId,
           path,
           ...(title ? { title } : {}),

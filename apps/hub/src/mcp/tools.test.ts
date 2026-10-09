@@ -174,6 +174,22 @@ describe("agentpod_link_artifact", () => {
     expect(seen).toEqual([{ principalId: "prn_agent", path: "out/report.md" }]);
   });
 
+  test("the MCP request's cancellation reaches the link", async () => {
+    const seen: Array<{ signal?: AbortSignal }> = [];
+    const { server, handlers } = recordingServer();
+    registerHubTools(server, deps({ link: async (i) => { seen.push(i); return GOOD; } }));
+    const ctl = new AbortController();
+    await (handlers.get("agentpod_link_artifact") as any)({ path: "a.md" }, { signal: ctl.signal });
+    expect(seen[0]!.signal).toBe(ctl.signal);
+  });
+
+  test("entry is described as relative to the linked folder", () => {
+    const cfgs = new Map<string, any>();
+    const server = { registerTool: (n: string, c: any) => cfgs.set(n, c) } as any;
+    registerHubTools(server, deps({ link: async () => REFUSED }));
+    expect(cfgs.get("agentpod_link_artifact").inputSchema.entry.description).toContain("relative to the linked folder");
+  });
+
   test("the input schema has no station field", () => {
     const cfgs = new Map<string, any>();
     const server = { registerTool(name: string, cfg: unknown) { cfgs.set(name, cfg); } } as never;
