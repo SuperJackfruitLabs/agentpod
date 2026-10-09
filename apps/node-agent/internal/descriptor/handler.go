@@ -209,7 +209,8 @@ func handleFsWalk(reg *Registry, params json.RawMessage) (any, bool, error) {
 	}
 	root, err := rooter.WorkspaceRoot(p.Key)
 	if err != nil {
-		return nil, false, err
+		// A descriptor's own error may name host paths; the hub gets the key only.
+		return nil, false, fmt.Errorf("fs.walk: no workspace for %s", p.Key)
 	}
 	res, err := Walk(root, p.Path, p.MaxFiles, p.MaxBytes)
 	if err != nil {

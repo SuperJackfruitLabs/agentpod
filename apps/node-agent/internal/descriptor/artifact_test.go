@@ -380,6 +380,26 @@ func TestWalkSkipsAWholeDeniedFolderAsOneEntry(t *testing.T) {
 	}
 }
 
+func TestWalkSkipsAFolderNamedLikeADeniedFile(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"credentials.json", "x.pem", ".netrc"} {
+		mustOK(t, os.MkdirAll(filepath.Join(root, "site", d), 0o755))
+		mustOK(t, os.WriteFile(filepath.Join(root, "site", d, "child.txt"), []byte("c"), 0o644))
+	}
+	got, err := Walk(root, "site", 500, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Files) != 0 || len(got.Skipped) != 3 {
+		t.Fatalf("each such folder is one denied entry, nothing beneath: %+v", got)
+	}
+	for _, s := range got.Skipped {
+		if s.Reason != "denied" {
+			t.Errorf("%+v", s)
+		}
+	}
+}
+
 func TestWalkBoundsTheSkippedList(t *testing.T) {
 	root := t.TempDir()
 	for i := 0; i < maxWalkSkipped+5; i++ {

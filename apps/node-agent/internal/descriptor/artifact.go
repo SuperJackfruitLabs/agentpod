@@ -336,11 +336,14 @@ func Walk(root, rel string, maxFiles int, maxBytes int64) (WalkResult, error) {
 		// A folder is judged by what it would contain (see the root probe above), so a whole
 		// ".git" or ".ssh" is skipped as one entry and never entered.
 		fullP, realP := path.Join(rel, r), path.Join(real, r)
-		if d.IsDir() {
-			fullP, realP = path.Join(fullP, "x"), path.Join(realP, "x")
-		}
 		_, deniedFull := Denied(fullP)
 		_, deniedReal := Denied(realP)
+		if d.IsDir() {
+			// ...and also by its own name, which a base() rule (credentials.json, *.pem) matches.
+			_, f2 := Denied(path.Join(fullP, "x"))
+			_, r2 := Denied(path.Join(realP, "x"))
+			deniedFull, deniedReal = deniedFull || f2, deniedReal || r2
+		}
 		if deniedFull || deniedReal {
 			if serr := skip(r, "denied"); serr != nil {
 				return serr
