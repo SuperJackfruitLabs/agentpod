@@ -17,6 +17,13 @@ import { tenantScope } from "../../db/tenant-scope";
 import { createLogger } from "../../utils/logger";
 import { superlibraryClient, type SuperlibraryClient } from "./client";
 
+/** Gap S3: what Superlibrary relates a card by while its record has not synced: title and spec, capped. Never logged. */
+export function relatedBasis(title: string | null | undefined, spec: unknown): string | undefined {
+  const s = typeof spec === "string" ? spec : spec === null || spec === undefined ? "" : JSON.stringify(spec);
+  const text = [title ?? "", s].filter((x) => x.trim() !== "").join("\n").trim();
+  return text === "" ? undefined : text.slice(0, 4000);
+}
+
 /** The most a claim waits for related work, end to end. */
 export const RELATED_TIMEOUT_MS = 2500;
 
@@ -39,6 +46,8 @@ export type RelatedWorkInput = {
   tenantId: string;
   boardId: string;
   cardId: string;
+  /** The card's title and spec (`relatedBasis`), sent beside the cardId. */
+  text?: string;
   principal: string | null | (() => Promise<string | null>);
   /** The board's switch, read once per claim by the caller and shared by the prefetch and the fetch. */
   enabled?: () => Promise<boolean>;
@@ -107,7 +116,7 @@ export function createFetchRelatedWork(deps: {
     // The agent's own token: the section shows what this agent's roster may see, and nothing more.
     const res = await lib
       .asAgent(principal)
-      .request("POST", "/api/v1/related", { json: { cardId: i.cardId }, timeoutMs: RELATED_TIMEOUT_MS });
+      .request("POST", "/api/v1/related", { json: { cardId: i.cardId, ...(i.text ? { text: i.text } : {}) }, timeoutMs: RELATED_TIMEOUT_MS });
     if (!res.ok) throw new Error(`Superlibrary answered ${res.status}`);
     const raw = await res.text();
     let body: { items?: unknown };

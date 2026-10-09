@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { createSuperlibraryClient } from "./client";
-import { RELATED_TIMEOUT_MS, createFetchRelatedWork, createPrefetchRelatedWork } from "./related";
+import { RELATED_TIMEOUT_MS, createFetchRelatedWork, createPrefetchRelatedWork, relatedBasis } from "./related";
 
 const ok = {
   items: [
@@ -310,4 +310,33 @@ test("the prefetch uses the claim's shared switch read when given one", async ()
   });
   await new Promise((r) => setTimeout(r, 20));
   expect([own, shared, warmed.length]).toEqual([0, 1, 1]);
+});
+
+test("sends the card's title and spec as the basis beside the cardId", async () => {
+  const seen: unknown[] = [];
+  const client = {
+    asAgent: () => ({ request: async (_m: string, _p: string, init: { json: unknown }) => { seen.push(init.json); return Response.json({ items: [] }); } }),
+    asService: () => { throw new Error(); },
+    invalidateRoster: async () => {},
+  } as never;
+  const text = relatedBasis("Pricing v2", { goal: "raise" });
+  await createFetchRelatedWork({ client: () => client, enabled: async () => true, log: quiet })({ ...input, text });
+  expect(seen).toEqual([{ cardId: input.cardId, text: 'Pricing v2\n{"goal":"raise"}' }]);
+});
+
+test("relatedBasis caps at 4000 characters and is undefined for an empty card", () => {
+  expect(relatedBasis("t", "x".repeat(5000))).toHaveLength(4000);
+  expect(relatedBasis("  ", null)).toBeUndefined();
+  expect(relatedBasis(undefined, "")).toBeUndefined();
+  expect(relatedBasis("Title", "Spec text")).toBe("Title\nSpec text");
+});
+
+test("the basis is never logged", async () => {
+  const calls: unknown[] = [];
+  const log = { info: (...a: unknown[]) => calls.push(a), warn: (...a: unknown[]) => calls.push(a) };
+  const text = relatedBasis("Secret Title Zed", "spec body");
+  await createFetchRelatedWork({ client: () => lib(async () => Response.json(ok)), enabled: async () => true, log })({ ...input, text });
+  await createFetchRelatedWork({ client: () => lib(async () => new Response("no", { status: 500 })), enabled: async () => true, log })({ ...input, text });
+  expect(calls.length).toBeGreaterThanOrEqual(2);
+  expect(JSON.stringify(calls)).not.toContain("Secret Title Zed");
 });

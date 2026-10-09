@@ -75,7 +75,7 @@ import { inDispatchSpan } from "../../telemetry/dispatch-span";
 import { isControlPairDenied } from "../control-pair";
 import type { Fingerprint } from "../evidence/fingerprint";
 import { fingerprintWithin, resolveStationFingerprint, resolveStationOccupant, within } from "../evidence/station-fingerprint";
-import { fetchRelatedWork, prefetchRelatedWork, relatedWorkEnabled } from "../superlibrary/related";
+import { fetchRelatedWork, prefetchRelatedWork, relatedBasis, relatedWorkEnabled } from "../superlibrary/related";
 import { DEFAULT_PERMISSION_WAIT_MS, type BridgeAgentConfig } from "./config";
 import { isAutoAnswered, selectedOptionId } from "./permission";
 import {
@@ -1189,6 +1189,7 @@ export async function assemblePrompt(
     tenantId: deps.tenantId,
     boardId: deps.agent.boardId,
     cardId,
+    text: relatedBasis(ctx.card.title ?? work.card.title, ctx.card.spec),
     principal: occupant,
     enabled,
   }).catch(() => undefined);
