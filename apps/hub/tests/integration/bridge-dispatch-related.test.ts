@@ -218,7 +218,7 @@ test("the prompt section is the agent's related call", async () => {
       return [r];
     },
   });
-  expect(seen).toEqual([{ tenantId: TENANT, boardId: BOARD, cardId: CARD, principal: PRINCIPAL, enabled: "function" }]);
+  expect(seen).toEqual([{ tenantId: TENANT, boardId: BOARD, cardId: CARD, principal: PRINCIPAL, enabled: "function", text: "Ship the pricing page\nBuild the pricing page." }]);
   expect(prompt).toContain("## Related prior work");
   expect(prompt).toContain("Tried a toggle; rejected.");
 });
@@ -234,7 +234,7 @@ test("production wiring: the station's own principal, the agent's token, the sec
   restore = setSuperlibraryClientForTests(lib.client);
   // No occupant, no relatedWork: the defaults a real claim runs on.
   const prompt = await runOneDispatch();
-  expect(lib.calls).toEqual([{ principal: PRINCIPAL, path: "/api/v1/related", json: { cardId: CARD } }]);
+  expect(lib.calls).toEqual([{ principal: PRINCIPAL, path: "/api/v1/related", json: { cardId: CARD, text: "Ship the pricing page\nBuild the pricing page." } }]);
   expect(prompt).toContain("## Related prior work");
   expect(prompt).toContain("Tried a toggle; rejected.");
   // The attempt reuses the same lookup: it records the principal the prompt was fetched for.
