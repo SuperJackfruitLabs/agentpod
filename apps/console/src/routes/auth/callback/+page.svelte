@@ -7,6 +7,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { beginSignIn, completeSignIn, suppressAutoSignIn } from "$lib/auth/org-plane";
+  import { relaySuperlibraryCallback } from "$lib/auth/superlibrary-grant";
   import { auth, currentPlane, getAuthApiUrl, initAuth, resetAuthInit } from "$lib/stores/auth.svelte";
   import { hardNavigate, resolveReturnTo } from "$lib/utils/return-to";
 
@@ -14,6 +15,12 @@
   let failed = $state(false);
 
   onMount(async () => {
+    // Superlibrary's own sign-in (a separate grant) lands here too, in the small window "Link this
+    // file" opened: hand the answer to the page that opened it, which trades the code.
+    if (relaySuperlibraryCallback(window.location.search)) {
+      message = "Signing you in to Superlibrary…";
+      return;
+    }
     const p = currentPlane();
     if (!p) {
       failed = true;

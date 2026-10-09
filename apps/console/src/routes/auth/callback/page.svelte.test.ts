@@ -4,6 +4,7 @@ vi.mock("$app/navigation", () => ({ goto: vi.fn() }));
 import { goto } from "$app/navigation";
 import * as plane from "$lib/auth/org-plane";
 import * as authStore from "$lib/stores/auth.svelte";
+import * as library from "$lib/auth/superlibrary-grant";
 import Page from "./+page.svelte";
 
 beforeEach(() => {
@@ -66,4 +67,16 @@ test("a hub that refuses the new token shows the error here instead of going on"
   expect(await findByText(/HTTP 403/)).toBeTruthy();
   expect(goto).not.toHaveBeenCalled();
   expect(suppress).toHaveBeenCalled();
+});
+
+test("Superlibrary's sign-in window hands its answer to the page that opened it, and is never the hub's sign-in", async () => {
+  vi.spyOn(authStore, "currentPlane").mockReturnValue({ issuer: "i", url: "u", audience: "a" });
+  const relay = vi.spyOn(library, "relaySuperlibraryCallback").mockReturnValue(true);
+  const complete = vi.spyOn(plane, "completeSignIn");
+  window.history.replaceState({}, "", "/auth/callback?code=c&state=sl.abc");
+  const { findByText } = render(Page);
+  expect(await findByText(/Superlibrary/)).toBeTruthy();
+  expect(relay).toHaveBeenCalledWith("?code=c&state=sl.abc");
+  expect(complete).not.toHaveBeenCalled();
+  expect(goto).not.toHaveBeenCalled();
 });

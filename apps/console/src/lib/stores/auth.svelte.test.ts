@@ -6,6 +6,7 @@
 
 import { vi, test, expect, beforeEach, afterEach, describe } from "vitest";
 import * as plane from "$lib/auth/org-plane";
+import * as library from "$lib/auth/superlibrary-grant";
 import * as staticAuth from "./auth.svelte";
 import * as myGrant from "$lib/api/my-grant";
 
@@ -531,6 +532,52 @@ describe("under the org plane", () => {
     await logout();
     expect(out).toHaveBeenCalledWith(P); // signOut clears memory first, then revokes (finding 7a)
     expect(mockAuthClient.signOut).not.toHaveBeenCalled();
+  });
+
+  test("logout ends both grants: the hub's and Superlibrary's, each revoked", async () => {
+    setPlane(P);
+    const hubOut = vi.spyOn(plane, "signOut").mockResolvedValue();
+    const libraryOut = vi.spyOn(library, "signOutOfSuperlibrary").mockResolvedValue();
+    await logout();
+    expect(hubOut).toHaveBeenCalledWith(P);
+    expect(libraryOut).toHaveBeenCalledWith(P);
+  });
+
+  test("another tab's sign-out forgets both grants here", () => {
+    setPlane(P);
+    const forget = vi.spyOn(library, "forgetSuperlibraryGrant");
+    const hub = vi.spyOn(plane, "discardToken");
+    staticAuth.signedOutElsewhere();
+    expect(forget).toHaveBeenCalled();
+    expect(hub).toHaveBeenCalledWith(null);
+  });
+
+  test("a 401 from the hub (planeSessionLost) does not touch Superlibrary's grant", () => {
+    setPlane(P);
+    const forget = vi.spyOn(library, "forgetSuperlibraryGrant");
+    const out = vi.spyOn(library, "signOutOfSuperlibrary");
+    staticAuth.planeSessionLost("at1");
+    expect(forget).not.toHaveBeenCalled();
+    expect(out).not.toHaveBeenCalled();
+  });
+
+  test("superlibraryToken asks Superlibrary's own grant, and a 401 there drops only its access token", async () => {
+    setPlane(P);
+    const ask = vi.spyOn(library, "superlibraryAccessToken").mockResolvedValue("sl-at");
+    const hubAsk = vi.spyOn(plane, "planeAccessToken");
+    expect(await staticAuth.superlibraryToken()).toBe("sl-at");
+    expect(ask).toHaveBeenCalledWith(P);
+    expect(hubAsk).not.toHaveBeenCalled();
+    const drop = vi.spyOn(library, "discardSuperlibraryAccess");
+    const hubDrop = vi.spyOn(plane, "discardToken");
+    staticAuth.superlibraryTokenRefused("sl-at");
+    expect(drop).toHaveBeenCalledWith("sl-at");
+    expect(hubDrop).not.toHaveBeenCalled();
+  });
+
+  test("superlibraryToken without a plane is a sentence", async () => {
+    setPlane(null);
+    await expect(staticAuth.superlibraryToken()).rejects.toThrow(/Super Jackfruit account/);
   });
 
   test("clearAuthSession (switching hubs) forgets the plane and its tokens", async () => {

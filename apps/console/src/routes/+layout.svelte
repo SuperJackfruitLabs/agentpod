@@ -4,7 +4,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { connection, initConnection, startReachabilityProbe } from "$lib/stores/connection.svelte";
-  import { auth, currentPlane, initAuth, planeSessionLost } from "$lib/stores/auth.svelte";
+  import { auth, currentPlane, initAuth, signedOutElsewhere } from "$lib/stores/auth.svelte";
   import { autoSignIn, watchSession } from "$lib/auth/org-plane";
   import { themeStore } from "$lib/themes/store.svelte";
   import { commandPalette } from "$lib/stores/command-palette.svelte";
@@ -60,7 +60,7 @@
     // Keep connection.reachable honest for the whole session (shell banner).
     stopReachabilityProbe = startReachabilityProbe();
     // Refresh the plane token on wake / reconnect; follow another tab's sign-out.
-    stopWatchingSession = watchSession(currentPlane, { onSignedOut: () => planeSessionLost(null) });
+    stopWatchingSession = watchSession(currentPlane, { onSignedOut: signedOutElsewhere });
 
     window.addEventListener("keydown", handleGlobalKeydown);
   });

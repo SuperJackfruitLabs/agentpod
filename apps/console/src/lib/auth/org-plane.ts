@@ -33,7 +33,7 @@ const AUTO_ATTEMPTS = "agentpod.autoSignIn";
 const AUTO_WINDOW_MS = 60_000;
 const AUTO_MAX_IN_WINDOW = 3;
 /** Plane answers to `prompt=none` that mean "ask the person", not "refused". */
-const NEEDS_INTERACTION = new Set(["login_required", "interaction_required", "consent_required", "account_selection_required"]);
+export const NEEDS_INTERACTION: ReadonlySet<string> = new Set(["login_required", "interaction_required", "consent_required", "account_selection_required"]);
 
 let tokens: { access: string; expiresAt: number; refresh: string | null } | null = null;
 /**
@@ -470,6 +470,19 @@ export async function signOut(
   signOutLocal();
   abandonPendingSignIn(opts.storage); // a sign-out the person chose ends any sign-in under way
   if (!plane || !refresh) return;
+  await revokeAtPlane(plane, refresh, opts);
+}
+
+/**
+ * Revoke one refresh token at the plane (RFC 7009), at the `revocation_endpoint` its discovery
+ * names and only on the plane's own origin. Best effort and bounded: it never throws. The hub's
+ * sign-out and Superlibrary's (a separate grant) both end this way.
+ */
+export async function revokeAtPlane(
+  plane: PlaneDiscovery,
+  refresh: string,
+  opts: { fetchFn?: typeof fetch; timeoutMs?: number } = {},
+): Promise<void> {
   const origin = planeOrigin(plane.url);
   if (!origin) return;
   const fetchFn = opts.fetchFn ?? fetch;
