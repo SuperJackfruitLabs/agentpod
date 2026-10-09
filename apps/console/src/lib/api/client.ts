@@ -433,6 +433,37 @@ export async function readImage(
   };
 }
 
+/** The most one file read through the hub returns (the hub's own ceiling). */
+export const FILE_READ_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * A file's exact bytes, up to the hub's 8 MiB ceiling on one read: binary-safe (never decoded as
+ * text). `truncated` says the node cut it at the ceiling. The person reading their own station.
+ */
+export async function readFileBytes(
+  stationId: string,
+  path: string
+): Promise<{ bytes: ArrayBuffer; truncated: boolean }> {
+  const requestLine = `GET /api/stations/${stationId}/file`;
+  let res: Response;
+  try {
+    res = await authFetch(
+      `${hubUrl()}/api/stations/${stationId}/file?path=${encodeURIComponent(path)}&maxBytes=${FILE_READ_MAX_BYTES}`
+    );
+  } catch (err) {
+    throw networkError(requestLine, err);
+  }
+  if (res.status === 401) {
+    handleUnauthorized(res);
+    throw await apiError(res, requestLine);
+  }
+  if (!res.ok) throw await apiError(res, requestLine);
+  return {
+    bytes: await res.arrayBuffer(),
+    truncated: res.headers.get("X-Truncated") === "true",
+  };
+}
+
 /**
  * Make a workspace image the station's Matrix profile picture. The hub routes
  * it: a harness-mode agent's node uploads it with the agent's own login, a

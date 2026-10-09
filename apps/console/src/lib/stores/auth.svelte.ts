@@ -9,6 +9,7 @@
 
 import { createAuthClient } from "better-auth/svelte";
 import { discardToken, hasTokens, planeAccessToken, signOut, signOutLocal, suppressAutoSignIn, type PlaneDiscovery } from "$lib/auth/org-plane";
+import { discardSuperlibraryAccess, forgetSuperlibraryGrant, signOutOfSuperlibrary, superlibraryAccessToken } from "$lib/auth/superlibrary-grant";
 import { forgetMyReach } from "$lib/api/my-grant";
 
 // =============================================================================
@@ -360,7 +361,8 @@ export async function logout(): Promise<void> {
     if (plane) {
       // Forget the memory-only tokens, then revoke the refresh token at the plane (best effort,
       // bounded). The plane's browser session is its own.
-      await signOut(plane);
+      // Both grants: the hub's and Superlibrary's, each refresh token revoked.
+      await Promise.all([signOut(plane), signOutOfSuperlibrary(plane)]);
       sessionData = null;
       return;
     }
@@ -399,6 +401,22 @@ export async function getToken(minValiditySec?: number): Promise<string | null> 
 }
 
 /**
+ * The signed-in person's own access token for Superlibrary, which the console calls directly (the
+ * hub never acts for a person). A grant of its own, separate from the hub's: the first call of a
+ * session opens a sign-in window (silent while the plane's session is alive), so call this straight
+ * from the click, before any await. Rejects with a sentence when no token can be had.
+ */
+export function superlibraryToken(): Promise<string> {
+  if (!plane) return Promise.reject(new Error("Linking to Superlibrary needs a sign-in through your Super Jackfruit account."));
+  return superlibraryAccessToken(plane);
+}
+
+/** Superlibrary answered 401 to a request that carried `sent`: the next link refreshes. The hub is untouched. */
+export function superlibraryTokenRefused(sent: string): void {
+  discardSuperlibraryAccess(sent);
+}
+
+/**
  * Check authentication status
  */
 export async function checkAuth(): Promise<boolean> {
@@ -432,6 +450,12 @@ export function planeSessionLost(sent: string | null): void {
   if (!hasTokens()) sessionData = null;
 }
 
+/** Another tab signed out (explicitly): this tab forgets both grants. */
+export function signedOutElsewhere(): void {
+  forgetSuperlibraryGrant();
+  planeSessionLost(null);
+}
+
 /**
  * Clear the auth session and reset the client.
  *
@@ -441,6 +465,7 @@ export function planeSessionLost(sent: string | null): void {
  */
 export function clearAuthSession(): void {
   if (plane) signOutLocal();
+  forgetSuperlibraryGrant();
   plane = null;
   sessionData = null;
   currentAuthClient = null;
