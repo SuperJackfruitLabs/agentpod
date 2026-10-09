@@ -86,7 +86,8 @@ async function library(token: string, method: string, path: string, init: { body
 }
 
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  // A view, not the buffer itself: some runtimes refuse an ArrayBuffer from another realm.
+  const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
