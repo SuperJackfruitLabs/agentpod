@@ -670,3 +670,8 @@ func collectJsonlFiles(dir string) []string {
 	})
 	return files
 }
+
+// WorkspaceRoot is the root ReadFile jails reads to (WorkspaceRooter).
+func (c *claudeCodeDescriptor) WorkspaceRoot(key string) (string, error) {
+	return c.projectPathForKey(key)
+}

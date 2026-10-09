@@ -245,3 +245,10 @@ it("RequestMsg carries an optional trace _meta (C2), and stays valid without one
   });
   expect(RequestMsg.parse({ type: "req", id: "1", verb: "x", params: {} })._meta).toBeUndefined();
 });
+it("fs.read takes an offset and echoes offset/size/eof; an old result still parses", () => {
+  expect(VERB_PARAMS["fs.read"].parse({ key: "k", path: "a", offset: 4 }).offset).toBe(4);
+  expect(() => VERB_PARAMS["fs.read"].parse({ key: "k", path: "a", offset: -1 })).toThrow();
+  const r = VERB_RESULTS["fs.read"].parse({ content: "AA==", encoding: "base64", truncated: true, offset: 4, size: 10, eof: false });
+  expect([r.offset, r.size, r.eof]).toEqual([4, 10, false]);
+  expect(VERB_RESULTS["fs.read"].parse({ content: "x", encoding: "utf8", truncated: false }).offset).toBeUndefined();
+});

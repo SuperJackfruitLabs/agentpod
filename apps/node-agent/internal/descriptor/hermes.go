@@ -860,3 +860,6 @@ func emitLogFileFrom(path string, offset int64, emit func([]byte) error) (int64,
 	}
 	return int64(len(data)), nil
 }
+
+// WorkspaceRoot is the root ReadFile jails reads to (WorkspaceRooter).
+func (h *hermesDescriptor) WorkspaceRoot(key string) (string, error) { return h.workspaceFor(key) }

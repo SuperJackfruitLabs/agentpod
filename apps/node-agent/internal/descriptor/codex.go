@@ -675,3 +675,6 @@ func collectCodexLogFiles(sessDir string) []string {
 	})
 	return files
 }
+
+// WorkspaceRoot is the root ReadFile jails reads to (WorkspaceRooter).
+func (c *codexDescriptor) WorkspaceRoot(key string) (string, error) { return c.projectPathForKey(key) }

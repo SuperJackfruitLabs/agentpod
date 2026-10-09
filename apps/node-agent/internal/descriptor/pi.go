@@ -874,3 +874,6 @@ func (p *piDescriptor) CleanApply(key string, paths []string) (int64, error) {
 	}
 	return cleanApplyCommon(wsPath, paths, plan)
 }
+
+// WorkspaceRoot is the root ReadFile jails reads to (WorkspaceRooter).
+func (p *piDescriptor) WorkspaceRoot(key string) (string, error) { return p.workspaceForKey(key) }

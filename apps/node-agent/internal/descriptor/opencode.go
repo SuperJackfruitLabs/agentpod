@@ -757,3 +757,8 @@ func collectOpenCodeLogFiles(logDir string) []string {
 	})
 	return files
 }
+
+// WorkspaceRoot is the root ReadFile jails reads to (WorkspaceRooter).
+func (o *openCodeDescriptor) WorkspaceRoot(key string) (string, error) {
+	return o.projectPathForKey(key)
+}

@@ -789,3 +789,6 @@ func (o *openclawDescriptor) ProbeTransport(_ string) TransportProbe {
 	}
 	return TransportProbe{Reachable: true, Address: addr}
 }
+
+// WorkspaceRoot is the root ReadFile jails reads to (WorkspaceRooter).
+func (o *openclawDescriptor) WorkspaceRoot(key string) (string, error) { return o.workspaceFor(key) }

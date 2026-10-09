@@ -60,7 +60,7 @@ export const VERB_PARAMS = {
   "detect": z.object({}),
   "health": z.object({ key: z.string() }),
   "fs.list": z.object({ key: z.string(), path: z.string() }),
-  "fs.read": z.object({ key: z.string(), path: z.string(), maxBytes: z.number().int().optional() }),
+  "fs.read": z.object({ key: z.string(), path: z.string(), maxBytes: z.number().int().optional(), offset: z.number().int().nonnegative().optional() }),
   "logs.tail": z.object({ key: z.string(), follow: z.boolean() }),
   "fs.write": z.object({ key: z.string(), path: z.string(), content: z.string(), encoding: z.enum(["utf8","base64"]), backup: z.boolean().optional() }),
   "fs.mkdir": z.object({ key: z.string(), path: z.string() }),
@@ -175,7 +175,13 @@ export const VERB_RESULTS = {
   "detect": z.array(Station),
   "health": StationHealth,
   "fs.list": z.array(FsEntry),
-  "fs.read": z.object({ content: z.string(), encoding: z.enum(["utf8","base64"]), truncated: z.boolean() }),
+  "fs.read": z.object({
+    content: z.string(), encoding: z.enum(["utf8","base64"]), truncated: z.boolean(),
+    /** Echoed for an offset read. A node that does not echo it ignored `offset` (Superlibrary plan Task A6). */
+    offset: z.number().int().nonnegative().optional(),
+    size: z.number().int().nonnegative().optional(),
+    eof: z.boolean().optional(),
+  }),
   "fs.write": z.object({ bytesWritten: z.number().int(), backupPath: z.string().nullable().optional() }),
   "fs.mkdir": z.object({ ok: z.boolean() }),
   "fs.move":  z.object({ ok: z.boolean() }),
