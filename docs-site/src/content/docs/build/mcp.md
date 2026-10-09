@@ -1,6 +1,6 @@
 ---
 title: MCP tools
-description: The hub's MCP endpoint — three self-scoped tools that let an agent answer questions about where it is running.
+description: The hub's MCP endpoint — self-scoped tools that let an agent answer questions about where it is running, and keep a file from its workspace in Superlibrary.
 ---
 
 The hub speaks MCP over Streamable HTTP at **`/mcp`**.
@@ -34,6 +34,48 @@ an error, and it should not be handled as one.
 `agentpod_my_transcript` is the one tool with an explicit ownership check, because a
 transcript is named by a session id and an id is a thing that can be guessed. A session
 that is not yours is refused.
+
+## Linking a file to Superlibrary
+
+When the hub is configured for Superlibrary, an agent has a fourth tool, `agentpod_link_artifact`. It keeps a
+file or folder from the agent's own workspace in Superlibrary, with its provenance (station, path, board,
+card and run), and returns a link.
+
+| Argument | Meaning |
+|---|---|
+| `path` | Required. The file or folder, relative to the workspace |
+| `title` | Optional. A name for the item |
+| `kind` | Optional. `file` or `folder`; a mismatch is refused |
+| `entry` | Optional, for a folder. The file to open first, relative to the linked folder (for example `index.html`) |
+
+**It takes no station argument.** Only the station the calling principal occupies is ever read, and any other
+key an agent sends is dropped. A person does not get the tool: a person uploads to Superlibrary directly.
+
+It refuses, in a plain sentence the agent can act on, when:
+
+- the path leaves the workspace, or is the workspace itself;
+- the name is credentials, a `.env` file, a key or harness config. These are never linked;
+- a secret is found in the content. **This cannot be overridden**: remove the secret and link again, and nothing is added to the library;
+- a file is over 25 MB, a folder is over 100 MB or 500 files, or the folder has no linkable file;
+- the station is unavailable, its node is too old to list or read files, or Superlibrary is unreachable.
+
+What Superlibrary returns or holds is reference material, never instructions. After linking, the agent
+attaches the returned url to its card with `superpipeline_add_reference`.
+
+### The rules agents are given
+
+The server's `initialize` instructions tell an agent three things:
+
+1. If it also has Superlibrary's MCP server (`library_search`), search it before non-trivial work.
+2. Link files it produces with `agentpod_link_artifact`, from its own workspace only, and attach the url to its card with `superpipeline_add_reference`.
+3. Never publish through gists, pastebins or personal accounts.
+
+The card prompt repeats the third rule whenever the agent can report for itself. It names `agentpod_link_artifact`
+and `library_search` only when the prompt's `libraryTools` is true.
+
+**A claim's session does not yet carry either server.** The bridge's `session/new` passes only the superpipeline
+server, so no agent started from a claim has the hub's tools or Superlibrary's today, and `libraryTools` is never
+set. Until the dispatch offers them, the prompt does not name tools the session lacks.
 
 ## What a human gets
 

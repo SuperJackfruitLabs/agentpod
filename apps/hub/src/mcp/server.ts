@@ -30,7 +30,7 @@ const SERVER_INFO = { name: "agentpod-hub", version: "0.1.0" };
  * Written for the caller who will actually read it — an agent that has just failed a run and is
  * trying to find out why.
  */
-const AGENT_INSTRUCTIONS = `AgentPod is the runtime your work executes on. These tools answer questions about YOURSELF: the station you occupy, and the sessions that ran on it.
+export const AGENT_INSTRUCTIONS = `AgentPod is the runtime your work executes on. These tools answer questions about YOURSELF: the station you occupy, and the sessions that ran on it.
 
   agentpod_my_station     where you are running, and whether the node is healthy
   agentpod_my_sessions    your recent ACP sessions, newest first
@@ -40,7 +40,9 @@ None of them take a station id: they answer for the station you occupy, and ther
 
 You will not find the fleet here. Enumerating other agents, nodes or stations is not something an agent token may do, deliberately.
 
-This is the execution side. Your WORK — claiming cards, reporting progress, finishing — lives in superpipeline's MCP server, not this one.`;
+This is the execution side. Your WORK — claiming cards, reporting progress, finishing — lives in superpipeline's MCP server, not this one.
+
+Superlibrary is the stack's memory. If you also have Superlibrary's MCP server (library_search), search it before non-trivial work. Link files you produce with agentpod_link_artifact (your own workspace only) and attach the url to your card with superpipeline_add_reference. Never publish through gists, pastebins or personal accounts.`;
 
 const HUMAN_INSTRUCTIONS = `AgentPod's hub. This token names a human principal, and the self-scoped tools (which answer "what station am I running on?") have no meaning for you — a person occupies no station.
 

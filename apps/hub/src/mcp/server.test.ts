@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { setSuperlibraryClientForTests } from "../services/superlibrary/client";
-import { handleMcpRequest, MCP_SSE_KEEPALIVE_MS, newTransport } from "./server";
+import { AGENT_INSTRUCTIONS, handleMcpRequest, MCP_SSE_KEEPALIVE_MS, newTransport } from "./server";
 
 async function toolNames(kind: "agent" | "human"): Promise<string[]> {
   const res = await handleMcpRequest(
@@ -71,4 +71,10 @@ test("a client that hangs up aborts the link it started (the stateless transport
   ctl.abort();
   await Promise.race([aborted, new Promise((_, no) => setTimeout(() => no(new Error("the link's signal never aborted")), 2_000))]);
   expect(linkSignal?.aborted).toBe(true);
+});
+
+test("the hub tells agents to link artifacts and never to use gists; library_search is conditional", () => {
+  expect(AGENT_INSTRUCTIONS).toContain("agentpod_link_artifact");
+  expect(AGENT_INSTRUCTIONS).toMatch(/If you also have Superlibrary's MCP server \(library_search\)/);
+  expect(AGENT_INSTRUCTIONS).toMatch(/never publish through gists/i);
 });

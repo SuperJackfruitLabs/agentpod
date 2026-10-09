@@ -108,3 +108,36 @@ test("wrapLibraryItem is byte-identical to Superlibrary's wrapItem for the same 
     '<library-item id="itm_00000000000000e1" kind="work-record" outcome="rejected" source="superpipeline" board="brd_00000000000000b1" card="card_00000000000000c1" url="https://app.superlibrary.dev/a/itm_00000000000000e1">\ntitle: Old plan\nBody text\n</library-item>',
   );
 });
+
+const withRun = { run: { id: "run_00000000000000d1" } };
+
+test("an agent that can report and has the library tools is told to link files, never through gists", () => {
+  const out = renderCardPrompt(CardPrompt.parse({ ...base, ...withRun, libraryTools: true }));
+  expect(out).toContain("`agentpod_link_artifact`");
+  expect(out).toMatch(/Never publish through gists, pastebins or personal accounts/);
+});
+
+test("with the library tools offered and Superlibrary reachable, the agent is told to search it first", () => {
+  const out = renderCardPrompt(CardPrompt.parse({ ...base, relatedWork: [], libraryTools: true }));
+  expect(out).toContain("## Before you start");
+  expect(out).toContain("`library_search`");
+  expect(renderCardPrompt(CardPrompt.parse({ ...base, libraryTools: true }))).not.toContain("`library_search`");
+});
+
+test("without libraryTools the prompt names neither tool, whatever else is set", () => {
+  for (const extra of [{}, { libraryTools: false }]) {
+    const out = renderCardPrompt(CardPrompt.parse({ ...base, ...withRun, relatedWork: [], ...extra }));
+    expect(out).not.toContain("agentpod_link_artifact");
+    expect(out).not.toContain("library_search");
+    expect(out).not.toContain("## Before you start");
+  }
+});
+
+test("the gists rule is stated whenever the agent has a run, libraryTools or not", () => {
+  for (const extra of [{}, { libraryTools: false }, { libraryTools: true }]) {
+    expect(renderCardPrompt(CardPrompt.parse({ ...base, ...withRun, ...extra }))).toMatch(
+      /Never publish through gists, pastebins or personal accounts/,
+    );
+  }
+  expect(renderCardPrompt(CardPrompt.parse({ ...base, libraryTools: true }))).not.toMatch(/gists/);
+});
