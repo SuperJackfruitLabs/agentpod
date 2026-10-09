@@ -204,3 +204,28 @@ export const bridgeAgents = pgTable(
 
 export type BridgeAgentRow = typeof bridgeAgents.$inferSelect;
 export type InsertBridgeAgent = typeof bridgeAgents.$inferInsert;
+
+/**
+ * Per-board bridge settings, set by an operator. A board with no row has every default.
+ *
+ * `related_work` switches the card prompt's "Related prior work" section (Superlibrary spec §10):
+ * on by default, so a workspace with Superlibrary configured gets it without a step, and off for
+ * a board whose cards should be worked without earlier work in view.
+ *
+ * `board_id` is superpipeline's `brd_…`, not a foreign key: the board is theirs, not ours.
+ */
+export const bridgeBoardSettings = pgTable(
+  "bridge_board_settings",
+  {
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    boardId: text("board_id").notNull(),
+    relatedWork: boolean("related_work").notNull().default(true),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.boardId] }),
+    check("bridge_board_settings_board_grammar_check", sql`${t.boardId} ~ '^brd_[0-9a-f]{16}$'`),
+  ],
+);

@@ -1595,6 +1595,31 @@ the next tick.
 > validation uses the looser `getEnvBool`, so `=1` is the one value that passes validation
 > *and* starts nothing; the boot line above is what tells you which happened.
 
+### Related prior work, per board
+
+When Superlibrary is configured (`SUPERLIBRARY_URL`), each claimed card's prompt gets a
+**Related prior work** section: earlier work Superlibrary finds for the card, fetched with the
+station's own agent token, so it shows only what that agent's roster may see. It is **on for every
+board by default**. Switch it per board:
+
+```bash
+fleet bridge related-work brd_0000000000000001 off   # or: on
+# PUT /api/admin/bridge/boards/:boardId {"relatedWork": false}
+```
+
+The next claim on the board reads the setting; no loop restarts. The section is best-effort: with
+Superlibrary unconfigured, the board switched off, no agent principal on the station, or any
+failure or a reply slower than 2.5 s, the section is left out and the claim goes ahead. Only when
+it is on does the claim wait for it, at most 2.5 s before the session opens. When Superlibrary was
+asked, the hub logs one line for the claim:
+
+```bash
+journalctl -u agentpod-hub | grep -E 'related prior work (attached|skipped)'
+```
+
+`attached` names the item ids, boards and outcomes (never titles or text); `skipped` names the
+failure. Unconfigured, switched off or no principal logs nothing: nothing was asked.
+
 ### What the loop does, and how fast
 
 None of these are configurable — they are constants in `services/bridge/`:

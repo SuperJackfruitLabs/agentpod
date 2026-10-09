@@ -2289,12 +2289,12 @@ fleet settings speech test
 The board roster: which agent claims from which board.
 
 ```text
-fleet bridge <list|add|set|rm> ...
+fleet bridge <list|add|set|rm|related-work> ...
 ```
 
 This table is the gate on an agent doing anything at all: a staffed, online agent claims no card until a row points it at a board. No verb here prints a credential. See [Working a board](/use/boards/).
 
-Subcommands: [`list`](#fleet-bridge-list), [`add`](#fleet-bridge-add), [`set`](#fleet-bridge-set), [`rm`](#fleet-bridge-rm).
+Subcommands: [`list`](#fleet-bridge-list), [`add`](#fleet-bridge-add), [`set`](#fleet-bridge-set), [`rm`](#fleet-bridge-rm), [`related-work`](#fleet-bridge-related-work).
 
 `fleet bridge -h` prints:
 
@@ -2306,6 +2306,7 @@ usage:
   fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                    [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
   fleet bridge rm KEY
+  fleet bridge related-work BOARD on|off
 ```
 
 **Needs:** A workspace admin's token. Anyone else is refused with 403.
@@ -2409,6 +2410,27 @@ fleet bridge rm KEY
 
 ```sh
 fleet bridge rm reviewer
+```
+
+### fleet bridge related-work
+
+Switch a board's Related prior work section on or off.
+
+```text
+fleet bridge related-work BOARD on|off
+```
+
+The earlier work Superlibrary finds for a claimed card, put into the card's prompt as reference material. On for every board until switched off; the next claim on the board reads the new value. Anything but `on` or `off` exits 2 without calling the hub.
+
+| Argument | Meaning |
+|---|---|
+| `BOARD` | a superpipeline `brd_` id |
+| `STATE` | `on` or `off` |
+
+**Needs:** A workspace admin's token. Anyone else is refused with 403.
+
+```sh
+fleet bridge related-work brd_0000000000000001 off
 ```
 
 ## fleet principals

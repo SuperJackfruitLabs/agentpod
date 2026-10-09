@@ -687,6 +687,13 @@
       "when": 1791491607957,
       "tag": "0097_station_git_author",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1791540144140,
+      "tag": "0098_bridge_board_settings",
+      "breakpoints": true
     }
   ]
 }

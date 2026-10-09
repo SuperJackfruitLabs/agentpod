@@ -42,6 +42,23 @@ You will not find the fleet here. Enumerating other agents, nodes or stations is
 
 This is the execution side. Your WORK — claiming cards, reporting progress, finishing — lives in superpipeline's MCP server, not this one.`;
 
+/**
+ * Appended only when `agentpod_link_artifact` is registered (the hub is configured for Superlibrary),
+ * so the instructions never name a tool the server does not offer.
+ */
+const LIBRARY_INSTRUCTIONS = `
+
+Superlibrary is the stack's memory. If you also have Superlibrary's MCP server (library_search), search it before non-trivial work. Link files you produce with agentpod_link_artifact (your own workspace only) and attach the url to your card with superpipeline_add_reference.`;
+
+/** Unconditional: it is a rule about where work goes, true whether or not the link tool exists. */
+const NO_GISTS = `
+
+Never publish through gists, pastebins or personal accounts.`;
+
+export function agentInstructions(linkOffered: boolean): string {
+  return AGENT_INSTRUCTIONS + (linkOffered ? LIBRARY_INSTRUCTIONS : "") + NO_GISTS;
+}
+
 const HUMAN_INSTRUCTIONS = `AgentPod's hub. This token names a human principal, and the self-scoped tools (which answer "what station am I running on?") have no meaning for you — a person occupies no station.
 
 Fleet tools are not exposed here yet. Use \`fleet\` for nodes, agents, stats and activity.`;
@@ -73,10 +90,11 @@ export function newTransport(): WebStandardStreamableHTTPServerTransport {
 
 /** `opts.link` replaces the configured link, for tests that drive the real handler. */
 export async function handleMcpRequest(request: Request, caller: McpCaller, opts: { link?: ToolDeps["link"] } = {}): Promise<Response> {
+  const link = opts.link ?? ownStationLink();
   const server = new McpServer(SERVER_INFO, {
-    instructions: caller.kind === "agent" ? AGENT_INSTRUCTIONS : HUMAN_INSTRUCTIONS,
+    instructions: caller.kind === "agent" ? agentInstructions(link !== undefined) : HUMAN_INSTRUCTIONS,
   });
-  registerHubTools(server, { caller, link: opts.link ?? ownStationLink() });
+  registerHubTools(server, { caller, link });
 
   const transport = newTransport();
   // Stateless: nothing else closes this transport, so a client that hangs up would never abort the
