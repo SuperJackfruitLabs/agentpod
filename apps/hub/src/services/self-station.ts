@@ -43,6 +43,10 @@ export interface SelfStation {
    * (#399, #400), and it is why the translation happens here, once, rather than in each caller.
    */
   ownerUserId: string;
+  /** The station's tenant, from its own row: what a Superlibrary link is scoped to. */
+  tenantId: string;
+  /** The node's hello-frame capabilities; null when the node never said ("did not say"). */
+  nodeCapabilities: string[] | null;
 }
 
 /**
@@ -66,6 +70,8 @@ export async function stationForPrincipal(principalId: string): Promise<SelfStat
       matrixId: stations.matrixId,
       identityMode: stations.matrixIdentityMode,
       ownerUserId: stations.userId,
+      tenantId: stations.tenantId,
+      nodeCapabilities: nodes.capabilities,
     })
     .from(stations)
     .leftJoin(nodes, eq(nodes.id, stations.nodeId))
