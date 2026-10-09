@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/fsops"
@@ -137,7 +138,31 @@ func ReadAt(root, rel string, offset, max int64) ([]byte, int64, bool, error) {
 	if err != nil {
 		return nil, 0, false, err
 	}
-	f, err := os.Open(target)
+	// Resolve symlinks and check the denylist again against what will really be read: an
+	// in-root link (notes.txt -> .env, cfg -> .git) must not launder a denied path.
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	resolved, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	real, err := filepath.Rel(resolvedRoot, resolved)
+	if err != nil || real == ".." || strings.HasPrefix(real, ".."+string(filepath.Separator)) {
+		return nil, 0, false, fsops.ErrEscape
+	}
+	if rule, ok := Denied(filepath.ToSlash(real)); ok {
+		return nil, 0, false, fmt.Errorf("%w: %s resolves to %s (%s)", ErrDenied, rel, real, rule)
+	}
+	// Open through os.Root so a directory swapped for a symlink between the checks above and
+	// the open cannot lead out of the root.
+	r, err := os.OpenRoot(resolvedRoot)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	defer r.Close()
+	f, err := r.Open(real)
 	if err != nil {
 		return nil, 0, false, err
 	}

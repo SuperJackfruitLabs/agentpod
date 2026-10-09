@@ -105,6 +105,9 @@ func TestHandlerFsReadWithOffsetReturnsAChunk(t *testing.T) {
 		m["offset"] != int64(4) || m["size"] != int64(10) || m["eof"] != false || m["truncated"] != true {
 		t.Fatalf("unexpected result %+v", m)
 	}
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := h.Handle(context.Background(), "fs.read", json.RawMessage(`{"key":"fake:s1","path":".env","offset":0}`), nil); err == nil {
 		t.Fatal("a denied path is refused through the handler")
 	}
@@ -127,5 +130,30 @@ func TestSixDescriptorsAreWorkspaceRooters(t *testing.T) {
 		if _, ok := d.(WorkspaceRooter); !ok {
 			t.Errorf("%s must implement WorkspaceRooter", name)
 		}
+	}
+}
+
+func TestReadAtRefusesAnInRootSymlinkToADeniedPath(t *testing.T) {
+	root := t.TempDir()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.WriteFile(filepath.Join(root, ".env"), []byte("secret"), 0o644))
+	must(os.MkdirAll(filepath.Join(root, ".git"), 0o755))
+	must(os.WriteFile(filepath.Join(root, ".git", "config"), []byte("secret"), 0o644))
+	must(os.WriteFile(filepath.Join(root, "real.txt"), []byte("fine"), 0o644))
+	must(os.Symlink(".env", filepath.Join(root, "notes.txt")))
+	must(os.Symlink(".git", filepath.Join(root, "cfg")))
+	must(os.Symlink("real.txt", filepath.Join(root, "ok-link")))
+	for _, rel := range []string{"notes.txt", "cfg/config"} {
+		if b, _, _, err := ReadAt(root, rel, 0, 10); err == nil {
+			t.Errorf("%s resolves to a denied path and must be refused, read %q", rel, b)
+		}
+	}
+	if b, _, _, err := ReadAt(root, "ok-link", 0, 10); err != nil || string(b) != "fine" {
+		t.Fatalf("a link to an ordinary file still reads: %q %v", b, err)
 	}
 }
