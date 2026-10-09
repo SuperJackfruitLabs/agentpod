@@ -117,11 +117,20 @@ test("an agent that can report and has the library tools is told to link files, 
   expect(out).toMatch(/Never publish through gists, pastebins or personal accounts/);
 });
 
-test("with the library tools offered and Superlibrary reachable, the agent is told to search it first", () => {
-  const out = renderCardPrompt(CardPrompt.parse({ ...base, relatedWork: [], libraryTools: true }));
-  expect(out).toContain("## Before you start");
-  expect(out).toContain("`library_search`");
-  expect(renderCardPrompt(CardPrompt.parse({ ...base, libraryTools: true }))).not.toContain("`library_search`");
+test("with the library tools offered, the agent is told to search first — whether or not related work arrived", () => {
+  // The session carries library_search whenever libraryTools is true (the node injected it), so the
+  // block follows the tools, not the claim-time related fetch: that fetch missing its 2.5 s budget
+  // says nothing about whether the agent can search.
+  for (const extra of [{ relatedWork: [] }, {}]) {
+    const out = renderCardPrompt(CardPrompt.parse({ ...base, ...extra, libraryTools: true }));
+    expect(out).toContain("## Before you start");
+    expect(out).toContain("`library_search`");
+  }
+});
+
+test("the link bullet needs a run to attach to: no run, no agentpod_link_artifact", () => {
+  const out = renderCardPrompt(CardPrompt.parse({ ...base, libraryTools: true }));
+  expect(out).not.toContain("agentpod_link_artifact");
 });
 
 test("without libraryTools the prompt names neither tool, whatever else is set", () => {

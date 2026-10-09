@@ -268,3 +268,19 @@ it("fs.walk says which limit truncated it, and an old result without the field s
   expect(VERB_RESULTS["fs.walk"].parse(base).truncatedBy).toBeUndefined();
   expect(() => VERB_RESULTS["fs.walk"].parse({ ...base, truncatedBy: "other" })).toThrow();
 });
+it("acp.open may ask the node to inject its local MCP proxy for a station, and an old hub's request still parses", () => {
+  expect(VERB_PARAMS["acp.open"].parse({ key: "k", instance: "i", mcpProxy: { stationId: "station_1" } })).toEqual({
+    key: "k",
+    instance: "i",
+    mcpProxy: { stationId: "station_1" },
+  });
+  expect(() => VERB_PARAMS["acp.open"].parse({ key: "k", mcpProxy: { stationId: "" } })).toThrow();
+  expect(VERB_PARAMS["acp.open"].parse({ key: "k" })).toEqual({ key: "k" });
+});
+it("acp.open result names the proxied servers the node injected; an old node's result omits them", () => {
+  expect(VERB_RESULTS["acp.open"].parse({ sessionId: "acp_1", mcpProxy: ["agentpod", "superlibrary"] })).toEqual({
+    sessionId: "acp_1",
+    mcpProxy: ["agentpod", "superlibrary"],
+  });
+  expect(VERB_RESULTS["acp.open"].parse({ sessionId: "acp_1" }).mcpProxy).toBeUndefined();
+});

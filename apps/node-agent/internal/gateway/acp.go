@@ -10,6 +10,7 @@ import (
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acptrace"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/mcpproxy"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/turnerror"
 )
 
@@ -88,7 +89,17 @@ type acpHandler struct {
 	inner Handler
 	mgr   *acp.Manager
 	cmdFn ACPCommandFunc
+	mcp   MCPProxyFunc
+
+	// injectMu guards inject: node session id → the proxied MCP servers its session/new gets.
+	injectMu sync.Mutex
+	inject   map[string][]mcpproxy.Server
 }
+
+// MCPProxyFunc answers which loopback-proxy MCP servers a station's session should be given —
+// nil when the proxy does not serve the station or its harness (by station key) takes no HTTP
+// MCP servers. See internal/mcpproxy.
+type MCPProxyFunc func(stationID, key string) []mcpproxy.Server
 
 // NewACPHandler wraps inner with ACP verb and input frame support.
 //   - mgr is shared across the lifetime of the gateway connection.
@@ -96,10 +107,42 @@ type acpHandler struct {
 //
 // The returned handler implements both Handler and FrameHandler.
 func NewACPHandler(inner Handler, mgr *acp.Manager, cmdFn ACPCommandFunc) Handler {
+	return NewACPHandlerWithMCPProxy(inner, mgr, cmdFn, nil)
+}
+
+// NewACPHandlerWithMCPProxy is NewACPHandler plus the loopback MCP proxy: an `acp.open` that asks
+// for it (`mcpProxy: {stationId}`) gets the station's proxied servers added to every
+// `session/new` the hub sends that session, and the result names them. mcp nil: never.
+func NewACPHandlerWithMCPProxy(inner Handler, mgr *acp.Manager, cmdFn ACPCommandFunc, mcp MCPProxyFunc) Handler {
 	return &acpHandler{
-		inner: inner,
-		mgr:   mgr,
-		cmdFn: cmdFn,
+		inner:  inner,
+		mgr:    mgr,
+		cmdFn:  cmdFn,
+		mcp:    mcp,
+		inject: map[string][]mcpproxy.Server{},
+	}
+}
+
+// injectionFor is the servers a node session's session/new gets, if any.
+func (h *acpHandler) injectionFor(sessionID string) []mcpproxy.Server {
+	h.injectMu.Lock()
+	defer h.injectMu.Unlock()
+	return h.inject[sessionID]
+}
+
+// setInjection records a session's servers and forgets them when its process exits.
+func (h *acpHandler) setInjection(sess *acp.Session, servers []mcpproxy.Server) {
+	h.injectMu.Lock()
+	_, had := h.inject[sess.ID()]
+	h.inject[sess.ID()] = servers
+	h.injectMu.Unlock()
+	if !had {
+		id := sess.ID()
+		sess.OnExit(func(string) {
+			h.injectMu.Lock()
+			delete(h.inject, id)
+			h.injectMu.Unlock()
+		})
 	}
 }
 
@@ -132,6 +175,9 @@ func (h *acpHandler) handleOpen(params json.RawMessage) (any, bool, error) {
 	var p struct {
 		Key      string `json:"key"`
 		Instance string `json:"instance"`
+		MCPProxy *struct {
+			StationID string `json:"stationId"`
+		} `json:"mcpProxy"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, false, fmt.Errorf("acp.open: bad params: %w", err)
@@ -159,6 +205,14 @@ func (h *acpHandler) handleOpen(params json.RawMessage) (any, bool, error) {
 	res := map[string]any{"sessionId": sess.ID()}
 	if p.Instance != "" {
 		res["instance"] = p.Instance
+	}
+	// Echoed only when the node will actually inject: the hub renders the tools into the card
+	// prompt on this answer alone, so it must never claim servers the session will not get.
+	if p.MCPProxy != nil && p.MCPProxy.StationID != "" && h.mcp != nil {
+		if servers := h.mcp(p.MCPProxy.StationID, p.Key); len(servers) > 0 {
+			h.setInjection(sess, servers)
+			res["mcpProxy"] = mcpproxy.Names(servers)
+		}
 	}
 	return res, false, nil
 }
@@ -256,6 +310,9 @@ func (h *acpHandler) HandleFrame(frameType, id string, raw json.RawMessage) erro
 			data, err := base64.StdEncoding.DecodeString(f.Data)
 			if err != nil {
 				return fmt.Errorf("acp input: bad base64: %w", err)
+			}
+			if servers := h.injectionFor(id); len(servers) > 0 {
+				data = mcpproxy.Inject(data, servers)
 			}
 			return sess.Write(acptrace.Rewrite(data, id))
 		}

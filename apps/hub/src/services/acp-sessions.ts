@@ -62,7 +62,7 @@ import { getStation } from "./station-registry";
 import { gateCapability } from "../routes/station-writes";
 import { connectionManager } from "./connection-manager";
 import { recordAudit } from "./audit";
-import { openAcpWire, type AcpWire } from "./acp-transport";
+import { openAcpWire, type AcpWire, type OpenAcpWireOptions } from "./acp-transport";
 import * as broker from "./broker";
 import { nodes } from "../db/schema/nodes";
 import { promptBlocks, type PromptImage } from "./matrix-as/attachments";
@@ -205,6 +205,13 @@ export interface CreateSessionInput {
    */
   mcpServers?: McpServer[];
   /**
+   * Ask the station's node for its loopback MCP proxy (the hub's MCP server and Superlibrary's,
+   * as the station's agent). Sent only to a node advertising `mcp.proxy`; the node decides and
+   * says what it injected — read it with `sessionHasLibraryTools`. The proxy's secret stays on
+   * the node: the hub never sees the URL's credential, only the server names.
+   */
+  mcpProxy?: boolean;
+  /**
    * The caller's org-plane token authority, when the caller is the one asking (the console route).
    * Under ORG_PLANE_* the control pair is decided from it, never from a plane read (design §5.7).
    * Absent on the paths that act for the station's owner (the superpipeline bridge, Matrix
@@ -299,6 +306,10 @@ interface LiveSession {
    */
   workspacePath: string | null;
   mcpServers: McpServer[];
+  /** Whether this session asks its node for the MCP proxy — captured at open, re-sent on re-attach. */
+  mcpProxyRequested: boolean;
+  /** What the node said it injected on the latest acp.open. */
+  mcpProxied: string[];
   /** A re-attach is running; a second would race it for the same wire. */
   reattaching: boolean;
 }
@@ -609,7 +620,7 @@ async function reattachAfterTransportLoss(live: LiveSession): Promise<void> {
         } catch {
           // Already gone — which is the case this exists for.
         }
-        const wire = await openAcpWire(live.nodeId, live.stationKey, live.id);
+        const wire = await openAcpWire(live.nodeId, live.stationKey, live.id, proxyOptions(live));
         if (live.ended) {
           await wire.close();
           return;
@@ -617,6 +628,15 @@ async function reattachAfterTransportLoss(live: LiveSession): Promise<void> {
         live.wire = wire;
         live.nodeSessionId = wire.nodeSessionId;
         live.instanceEchoed = wire.instanceEchoed;
+        if (live.mcpProxyRequested && wire.mcpProxy.join() !== live.mcpProxied.join()) {
+          // The prompt already named (or did not name) the tools; say so if the re-open differs.
+          log.warn("ACP re-attach: the node's MCP proxy answer changed", {
+            sessionId: live.id,
+            before: live.mcpProxied,
+            after: wire.mcpProxy,
+          });
+        }
+        live.mcpProxied = wire.mcpProxy;
         await connectAndHandshake(live, wire);
         await db
           .update(acpSessions)
@@ -977,6 +997,9 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     throw new Error("Node is offline.");
   }
   const { nodeId, stationKey, workspacePath, harness } = station;
+  // Asked only of a node that runs the proxy; read before the sibling check, so no await
+  // separates that check from addLive.
+  const mcpProxyRequested = input.mcpProxy === true && (await nodeHasCapability(nodeId, "mcp.proxy"));
 
   // ── Compatibility layer 1 (pre-open) ───────────────────────────────────────
   // A concurrent session is only safe when the node keys its agent processes on
@@ -1033,6 +1056,8 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     acceptsImages: false,
     workspacePath: workspacePath ?? null,
     mcpServers: input.mcpServers ?? [],
+    mcpProxyRequested,
+    mcpProxied: [],
     reattaching: false,
   };
   // Register before any await so siblings (and the layers above) can see this
@@ -1063,10 +1088,11 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     // The hub session id doubles as the ACP instance: stable by construction
     // across a re-open of this session, and it correlates node-side processes
     // back to this row in logs.
-    const wire = await openAcpWire(nodeId, stationKey, id);
+    const wire = await openAcpWire(nodeId, stationKey, id, proxyOptions(live));
     live.wire = wire;
     live.nodeSessionId = wire.nodeSessionId;
     live.instanceEchoed = wire.instanceEchoed;
+    live.mcpProxied = wire.mcpProxy;
 
     // ── Compatibility layer 2 (post-open) ────────────────────────────────────
     // The node did not echo the instance, so this wire may well be the SAME
@@ -1261,12 +1287,36 @@ export function whenIdle(
  * that updates mid-session should get images from its next turn.
  */
 async function nodeReadsLargeFrames(nodeId: string): Promise<boolean> {
+  return nodeHasCapability(nodeId, "frames.large");
+}
+
+/** Whether a node advertised a capability in its last hello. */
+async function nodeHasCapability(nodeId: string, capability: string): Promise<boolean> {
   const rows = await db
     .select({ capabilities: nodes.capabilities })
     .from(nodes)
     .where(eq(nodes.id, nodeId));
   const caps = rows[0]?.capabilities;
-  return Array.isArray(caps) && caps.includes("frames.large");
+  return Array.isArray(caps) && caps.includes(capability);
+}
+
+/** The acp.open options a session's (re-)open sends. */
+function proxyOptions(live: LiveSession): OpenAcpWireOptions {
+  return live.mcpProxyRequested ? { mcpProxy: { stationId: live.stationId } } : {};
+}
+
+/** The names the node's proxy gives its two servers (node-agent internal/mcpproxy). */
+const PROXIED_HUB = "agentpod";
+const PROXIED_SUPERLIBRARY = "superlibrary";
+
+/**
+ * Does this live session carry BOTH the hub's MCP server and Superlibrary's, through its node's
+ * proxy? The card prompt names `agentpod_link_artifact` and `library_search` on this alone
+ * (S3-R12): a prompt naming a tool the session lacks sends the agent into a failing call.
+ */
+export function sessionHasLibraryTools(sessionId: string): boolean {
+  const live = liveById.get(sessionId);
+  return !!live && live.mcpProxied.includes(PROXIED_HUB) && live.mcpProxied.includes(PROXIED_SUPERLIBRARY);
 }
 
 /**

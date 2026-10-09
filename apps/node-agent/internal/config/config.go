@@ -78,6 +78,19 @@ type Config struct {
 	// (`GET /api/nodes/:nodeId/stations` authenticates a human, not a node credential).
 	// See internal/stationtoken.
 	StationTokens []StationToken `json:"stationTokens,omitempty"`
+	// MCPProxy runs the node's loopback MCP proxy for the stations it names, so their harness
+	// sessions reach the hub's MCP server and Superlibrary's as the station's own agent, for as
+	// long as the session runs — with no credential leaving the node. Absent or no stations: off.
+	// Named per station for the reason StationTokens is. See internal/mcpproxy.
+	MCPProxy *MCPProxy `json:"mcpProxy,omitempty"`
+}
+
+// MCPProxy configures the loopback MCP proxy.
+type MCPProxy struct {
+	// Stations are the hub station ids the proxy serves.
+	Stations []string `json:"stations"`
+	// SuperlibraryURL is Superlibrary's MCP endpoint; empty means mcpproxy.DefaultSuperlibraryURL.
+	SuperlibraryURL string `json:"superlibraryUrl,omitempty"`
 }
 
 // StationToken is one station whose token is kept at a path.

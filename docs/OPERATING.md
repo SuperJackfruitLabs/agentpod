@@ -1620,6 +1620,36 @@ journalctl -u agentpod-hub | grep -E 'related prior work (attached|skipped)'
 `attached` names the item ids, boards and outcomes (never titles or text); `skipped` names the
 failure. Unconfigured, switched off or no principal logs nothing: nothing was asked.
 
+### Library tools in the session (the node's MCP proxy)
+
+A claiming agent can call the hub's MCP tools (`agentpod_link_artifact`, `agentpod_my_station`, …)
+and Superlibrary's (`library_search`, `library_get`, `library_related`) for its whole session, as
+**its own agent** (a station token, never a person), when its node runs the **loopback MCP proxy**
+for its station. Turn it on per station in the node's `~/.config/agentpod-node/config.json`:
+
+```json
+"mcpProxy": { "stations": ["station_…"] }
+```
+
+then `apn restart`. The node binds `127.0.0.1` on a free port (never another interface), serves
+`/stations/<stationId>/mcp/{hub,superlibrary}`, and gives each named station a random secret,
+regenerated at every node start. On each request it mints (or reuses, until two minutes before
+expiry) that station's token through the station-token exchange and forwards with it; the harness
+holds only the loopback URL and the secret, which are worthless off the machine. A request with a
+missing or wrong secret — including another station's — is refused and logged without it:
+
+```bash
+apn logs | grep 'mcp proxy'   # serving N station(s); refused …; no station token …
+```
+
+The bridge asks for the proxy on every claim; the node injects the two servers into the harness's
+`session/new` only for a named station whose harness takes HTTP MCP servers — **Hermes, Claude
+Code, Codex and opencode**; OpenClaw and Pi do not (their adapters declare `mcpCapabilities.http:
+false`) — and tells the hub which it injected. The card prompt names `agentpod_link_artifact` and
+the **Before you start … `library_search`** block exactly when both servers are in the session.
+Requires `WORK_PLANE_AUDIENCES` to include Superlibrary's audience (DEPLOYMENT.md), or Superlibrary
+refuses the token. A node advertises `mcp.proxy` in its hello while the proxy is running.
+
 ### What the loop does, and how fast
 
 None of these are configurable — they are constants in `services/bridge/`:

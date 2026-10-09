@@ -134,36 +134,45 @@ func expiryOf(token string) (time.Time, bool) {
 }
 
 func (k *Keeper) refresh(ctx context.Context, w Want) error {
-	url := strings.TrimRight(k.Hub, "/") + "/api/nodes/" + k.NodeID + "/stations/" + w.StationID + "/token"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	token, err := mint(ctx, k.Client, k.Hub, k.NodeID, k.NodeSecret, w.StationID)
 	if err != nil {
 		return err
 	}
+	return writeToken(w.Path, token)
+}
+
+// mint spends the node's credential on one station's behalf and returns the station token.
+// Shared by the file keeper and the in-memory Source, so the two can never ask differently.
+func mint(ctx context.Context, c *http.Client, hub, nodeID, nodeSecret, stationID string) (string, error) {
+	url := strings.TrimRight(hub, "/") + "/api/nodes/" + nodeID + "/stations/" + stationID + "/token"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return "", err
+	}
 	// The node's own credential, spent on the station's behalf. It goes to the hub and
-	// nowhere else, and never into the file this writes.
-	req.Header.Set("Authorization", "Bearer "+k.NodeID+":"+k.NodeSecret)
-	c := k.Client
+	// nowhere else, and never into the token this returns.
+	req.Header.Set("Authorization", "Bearer "+nodeID+":"+nodeSecret)
 	if c == nil {
 		c = &http.Client{Timeout: 20 * time.Second}
 	}
 	res, err := c.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer res.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<16))
 	if res.StatusCode != http.StatusOK {
 		// The hub's refusals are distinct on purpose (403 for a station on another node,
 		// 409 for one with no occupant), so the status travels rather than "mint failed".
-		return fmt.Errorf("hub answered %d", res.StatusCode)
+		return "", fmt.Errorf("hub answered %d", res.StatusCode)
 	}
 	var out struct {
 		Token string `json:"token"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil || strings.TrimSpace(out.Token) == "" {
-		return fmt.Errorf("hub returned no token")
+		return "", fmt.Errorf("hub returned no token")
 	}
-	return writeToken(w.Path, out.Token)
+	return strings.TrimSpace(out.Token), nil
 }
 
 // writeToken replaces the file atomically, at 0600.

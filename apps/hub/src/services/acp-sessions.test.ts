@@ -67,6 +67,7 @@ import { gatewayRoutes } from "../routes/gateway";
 import { websocket } from "../ws";
 import {
   createSession,
+  sessionHasLibraryTools,
   listSessions,
   getSession,
   promptSession,
@@ -3079,3 +3080,69 @@ test(
   },
   30_000
 );
+
+// ─── The node's MCP proxy ───────────────────────────────────────────────────
+//
+// Superlibrary S3-R11 (a): the node injects the hub's and Superlibrary's MCP servers into the
+// harness's session/new through its loopback proxy. The hub asks only a node that advertises
+// `mcp.proxy`, never learns the proxy's secret, and believes the tools are there only when the
+// node says it injected both.
+
+async function nodeRunsMcpProxy(nodeId: string) {
+  await db.update(nodes).set({ capabilities: ["posture", "mcp.proxy"] }).where(eq(nodes.id, nodeId));
+}
+
+test("a node running the proxy is asked for it, and a session with both servers has the library tools", async () => {
+  const { server, nodeId, fake, station } = await setupRig("acpsess-mcpproxy-host", {
+    stationKey: "acp-mcpproxy-station",
+    mcpProxyEcho: ["agentpod", "superlibrary"],
+  });
+  try {
+    await nodeRunsMcpProxy(nodeId);
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask", mcpProxy: true });
+    const open = opensSeenBy(fake).at(-1) as { params?: { mcpProxy?: { stationId: string } } };
+    expect(open.params?.mcpProxy).toEqual({ stationId: station.id });
+    expect(sessionHasLibraryTools(row.id)).toBe(true);
+    await endSession(TEST_USER, row.id, "done");
+  } finally {
+    fake.close();
+    server.stop(true);
+  }
+}, 30_000);
+
+test("a node without the proxy is not asked, and its session has no library tools", async () => {
+  const { server, fake, station } = await setupRig("acpsess-noproxy-host", {
+    stationKey: "acp-noproxy-station",
+    mcpProxyEcho: ["agentpod", "superlibrary"],
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask", mcpProxy: true });
+    const open = opensSeenBy(fake).at(-1) as { params?: { mcpProxy?: unknown } };
+    expect(open.params?.mcpProxy).toBeUndefined();
+    expect(sessionHasLibraryTools(row.id)).toBe(false);
+    await endSession(TEST_USER, row.id, "done");
+  } finally {
+    fake.close();
+    server.stop(true);
+  }
+}, 30_000);
+
+test("the library tools need BOTH servers, and a session that did not ask has none", async () => {
+  const { server, nodeId, fake, station } = await setupRig("acpsess-halfproxy-host", {
+    stationKey: "acp-halfproxy-station",
+    mcpProxyEcho: ["agentpod"],
+  });
+  try {
+    await nodeRunsMcpProxy(nodeId);
+    const half = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask", mcpProxy: true });
+    expect(sessionHasLibraryTools(half.id)).toBe(false);
+    await endSession(TEST_USER, half.id, "done");
+    const unasked = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    expect((opensSeenBy(fake).at(-1) as { params?: { mcpProxy?: unknown } }).params?.mcpProxy).toBeUndefined();
+    expect(sessionHasLibraryTools(unasked.id)).toBe(false);
+    await endSession(TEST_USER, unasked.id, "done");
+  } finally {
+    fake.close();
+    server.stop(true);
+  }
+}, 30_000);
