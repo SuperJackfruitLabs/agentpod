@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,5 +157,205 @@ func TestReadAtRefusesAnInRootSymlinkToADeniedPath(t *testing.T) {
 	}
 	if b, _, _, err := ReadAt(root, "ok-link", 0, 10); err != nil || string(b) != "fine" {
 		t.Fatalf("a link to an ordinary file still reads: %q %v", b, err)
+	}
+}
+
+func TestWalkListsFilesSkipsDeniedAndSymlinks(t *testing.T) {
+	root := t.TempDir()
+	site := filepath.Join(root, "site")
+	os.MkdirAll(filepath.Join(site, "css"), 0o755)
+	os.WriteFile(filepath.Join(site, "index.html"), []byte("<h1>x</h1>"), 0o644)
+	os.WriteFile(filepath.Join(site, "css", "a.css"), []byte("a{}"), 0o644)
+	os.WriteFile(filepath.Join(site, ".env"), []byte("K=V"), 0o644)
+	os.Symlink("/etc/hosts", filepath.Join(site, "hosts"))
+	got, err := Walk(root, "site", 500, 100<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Files) != 2 || got.Files[0].Path != "css/a.css" || got.Files[1].Path != "index.html" {
+		t.Fatalf("files: %+v", got.Files)
+	}
+	reasons := map[string]string{}
+	for _, s := range got.Skipped {
+		reasons[s.Path] = s.Reason
+	}
+	if reasons[".env"] != "denied" || reasons["hosts"] != "symlink" {
+		t.Fatalf("skipped: %+v", got.Skipped)
+	}
+}
+
+func TestWalkStopsAtTheCaps(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 5; i++ {
+		os.WriteFile(filepath.Join(root, fmt.Sprintf("f%d.txt", i)), make([]byte, 10), 0o644)
+	}
+	got, _ := Walk(root, ".", 3, 1<<20)
+	if !got.TooMany || len(got.Files) != 3 {
+		t.Fatalf("files cap: %+v", got)
+	}
+	got, _ = Walk(root, ".", 500, 25)
+	if !got.TooLarge {
+		t.Fatalf("bytes cap: %+v", got)
+	}
+}
+
+func TestWalkRefusesARootOutsideTheWorkspace(t *testing.T) {
+	if _, err := Walk(t.TempDir(), "..", 500, 1<<20); err == nil {
+		t.Fatal("walking .. is refused")
+	}
+}
+
+func TestWalkOfAFileListsItself(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "note.md"), []byte("hello"), 0o644)
+	got, err := Walk(root, "note.md", 500, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Files) != 1 || got.Files[0].Path != "" || got.Files[0].Size != 5 {
+		t.Fatalf("files: %+v", got.Files)
+	}
+}
+
+func TestWalkRefusesADeniedRootItself(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{".ssh", ".git"} {
+		os.MkdirAll(filepath.Join(root, d), 0o755)
+		os.WriteFile(filepath.Join(root, d, "config"), []byte("x"), 0o644)
+		if got, err := Walk(root, d, 500, 1<<20); err == nil || !errors.Is(err, ErrDenied) {
+			t.Errorf("walking %s must be refused: %+v %v", d, got, err)
+		}
+	}
+	os.WriteFile(filepath.Join(root, ".env"), []byte("K=V"), 0o644)
+	if _, err := Walk(root, ".env", 500, 1<<20); !errors.Is(err, ErrDenied) {
+		t.Errorf("walking a denied file must be refused: %v", err)
+	}
+}
+
+func TestWalkChecksEntriesAgainstTheFullPath(t *testing.T) {
+	// Relative to the walked folder "cfg/x" is ordinary; joined with rel ("gemini-x/.claude"
+	// parent) it must be judged by the full path: walk "work" where work/.pi/... is denied only
+	// when the entry path is joined with rel. Use a rule that needs the parent: ".config/opencode".
+	root := t.TempDir()
+	dir := filepath.Join(root, ".config")
+	os.MkdirAll(filepath.Join(dir, "opencode"), 0o755)
+	os.WriteFile(filepath.Join(dir, "opencode", "k.json"), []byte("{}"), 0o644)
+	os.WriteFile(filepath.Join(dir, "plain.txt"), []byte("ok"), 0o644)
+	got, err := Walk(root, ".config", 500, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Files) != 1 || got.Files[0].Path != "plain.txt" {
+		t.Fatalf("files: %+v", got.Files)
+	}
+	denied := false
+	for _, s := range got.Skipped {
+		if s.Path == "opencode" && s.Reason == "denied" {
+			denied = true
+		}
+	}
+	if !denied {
+		t.Fatalf("opencode must be skipped as denied: %+v", got.Skipped)
+	}
+}
+
+func TestWalkNeverListsASymlinkWhateverItsTarget(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	os.WriteFile(filepath.Join(outside, "o.txt"), []byte("o"), 0o644)
+	os.WriteFile(filepath.Join(root, ".env"), []byte("K=V"), 0o644)
+	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("ref"), 0o644)
+	site := filepath.Join(root, "site")
+	os.MkdirAll(site, 0o755)
+	os.WriteFile(filepath.Join(site, "ok.txt"), []byte("ok"), 0o644)
+	os.Symlink(filepath.Join(root, ".env"), filepath.Join(site, "notes.txt"))   // in-root, denied target
+	os.Symlink(filepath.Join(root, ".git"), filepath.Join(site, "cfg"))         // in-root dir, denied
+	os.Symlink(filepath.Join(outside, "o.txt"), filepath.Join(site, "out.txt")) // outside the root
+	os.Symlink(filepath.Join(site, "ok.txt"), filepath.Join(site, "alias.txt")) // in-root, fine target
+	got, err := Walk(root, "site", 500, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Files) != 1 || got.Files[0].Path != "ok.txt" {
+		t.Fatalf("only the real file is listed: %+v", got.Files)
+	}
+	for _, n := range []string{"notes.txt", "cfg", "out.txt", "alias.txt"} {
+		found := false
+		for _, s := range got.Skipped {
+			if s.Path == n && s.Reason == "symlink" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s must be skipped as symlink: %+v", n, got.Skipped)
+		}
+	}
+}
+
+func TestWalkRefusesARootThatIsASymlinkToADeniedPath(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("ref"), 0o644)
+	os.Symlink(filepath.Join(root, ".git"), filepath.Join(root, "docs"))
+	if got, err := Walk(root, "docs", 500, 1<<20); !errors.Is(err, ErrDenied) {
+		t.Fatalf("a link to a denied tree is refused: %+v %v", got, err)
+	}
+}
+
+func TestHandlerFsWalk(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "a.txt"), []byte("abc"), 0o644)
+	reg := NewRegistry()
+	reg.Register(&rootedFake{fakeDescriptor: fakeDescriptor{harness: "fake"}, root: root})
+	h := NewHandler(reg)
+	res, _, err := h.Handle(context.Background(), "fs.walk", json.RawMessage(`{"key":"fake:s1","path":"."}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := res.(WalkResult)
+	if len(w.Files) != 1 || w.Files[0].Path != "a.txt" || w.Root != "." {
+		t.Fatalf("unexpected %+v", w)
+	}
+	reg2 := NewRegistry()
+	reg2.Register(&fakeDescriptor{harness: "fake"})
+	if _, _, err := NewHandler(reg2).Handle(context.Background(), "fs.walk", json.RawMessage(`{"key":"fake:s1","path":"."}`), nil); err == nil {
+		t.Fatal("a descriptor without WorkspaceRooter refuses fs.walk")
+	}
+}
+
+func TestWalkJudgesEntriesByTheRequestedAndTheResolvedPath(t *testing.T) {
+	root := t.TempDir()
+	// requested path denied, resolved path ordinary: .config -> cfg
+	os.MkdirAll(filepath.Join(root, "cfg", "opencode"), 0o755)
+	os.WriteFile(filepath.Join(root, "cfg", "opencode", "k.json"), []byte("{}"), 0o644)
+	os.WriteFile(filepath.Join(root, "cfg", "plain.txt"), []byte("ok"), 0o644)
+	os.Symlink(filepath.Join(root, "cfg"), filepath.Join(root, ".config"))
+	// requested path ordinary, resolved path denied: docs -> real/.config
+	os.MkdirAll(filepath.Join(root, "real", ".config", "opencode"), 0o755)
+	os.WriteFile(filepath.Join(root, "real", ".config", "opencode", "k.json"), []byte("{}"), 0o644)
+	os.WriteFile(filepath.Join(root, "real", ".config", "plain.txt"), []byte("ok"), 0o644)
+	os.Symlink(filepath.Join(root, "real", ".config"), filepath.Join(root, "docs"))
+	for _, rel := range []string{".config", "docs"} {
+		got, err := Walk(root, rel, 500, 1<<20)
+		if err != nil {
+			t.Fatalf("%s: %v", rel, err)
+		}
+		if len(got.Files) != 1 || got.Files[0].Path != "plain.txt" {
+			t.Errorf("%s: files %+v", rel, got.Files)
+		}
+	}
+}
+
+func TestWalkOfAFileIsJudgedByItsRequestedAndResolvedName(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, ".env"), []byte("K=V"), 0o644)
+	os.WriteFile(filepath.Join(root, "ok.txt"), []byte("ok"), 0o644)
+	os.Symlink(filepath.Join(root, ".env"), filepath.Join(root, "notes.txt"))  // ordinary name, denied target
+	os.Symlink(filepath.Join(root, "ok.txt"), filepath.Join(root, ".env.bak")) // denied name, ordinary target
+	for _, rel := range []string{"notes.txt", ".env.bak"} {
+		if got, err := Walk(root, rel, 500, 1<<20); !errors.Is(err, ErrDenied) {
+			t.Errorf("%s must be refused: %+v %v", rel, got, err)
+		}
 	}
 }

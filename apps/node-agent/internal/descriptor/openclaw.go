@@ -145,7 +145,7 @@ func (o *openclawDescriptor) Detect() ([]Station, error) {
 	}
 
 	// "acp" is advertised because *openclawDescriptor implements ACPCommander.
-	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.write", "terminal", "lifecycle", "cleanup", "acp"}
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.walk", "fs.write", "terminal", "lifecycle", "cleanup", "acp"}
 
 	// Root workspace: prefer <home>/workspace if it exists, else fall back to <home>.
 	rootWs := o.resolveRootWorkspace()

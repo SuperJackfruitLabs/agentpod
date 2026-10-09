@@ -70,7 +70,7 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 		return []Station{}, nil
 	}
 
-	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.write", "terminal", "lifecycle", "cleanup", "acp"}
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.walk", "fs.write", "terminal", "lifecycle", "cleanup", "acp"}
 	homeCopy := h.home
 
 	// The root gateway's messaging identity. It is also the value a profile is

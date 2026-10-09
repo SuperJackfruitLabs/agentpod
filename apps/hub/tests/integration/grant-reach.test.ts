@@ -115,6 +115,7 @@ describe("the capability classification", () => {
     // be routed around within a day.
     expect(isReachBearing("changeset")).toBe(false);
     expect(isReachBearing("fs.read")).toBe(false);
+    expect(isReachBearing("fs.walk")).toBe(false);
     expect(isReachBearing("logs")).toBe(false);
     expect(isReachBearing("health")).toBe(false);
     expect(isReachBearing("inventory")).toBe(false);

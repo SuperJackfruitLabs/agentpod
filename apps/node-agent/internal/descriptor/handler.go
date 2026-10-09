@@ -17,6 +17,7 @@ import (
 //	health    – station health snapshot (unary)
 //	fs.list   – directory listing (unary)
 //	fs.read   – file contents (unary, base64 or utf8 encoded)
+//	fs.walk   – folder manifest for linking into Superlibrary
 //	logs.tail – streaming log tail (streamed)
 //
 // Terminal verbs (term.open/attach/close) and input/resize frame routing are
@@ -45,6 +46,9 @@ func NewHandler(reg *Registry) gateway.Handler {
 
 		case "fs.read":
 			return handleFsRead(reg, params)
+
+		case "fs.walk":
+			return handleFsWalk(reg, params)
 
 		case "logs.tail":
 			return handleLogsTail(ctx, reg, params, emit)
@@ -183,6 +187,35 @@ func handleFsList(reg *Registry, params json.RawMessage) (any, bool, error) {
 		entries = []FsEntry{}
 	}
 	return entries, false, nil
+}
+
+func handleFsWalk(reg *Registry, params json.RawMessage) (any, bool, error) {
+	var p struct {
+		Key      string `json:"key"`
+		Path     string `json:"path"`
+		MaxFiles int    `json:"maxFiles"`
+		MaxBytes int64  `json:"maxBytes"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, false, fmt.Errorf("fs.walk: bad params: %w", err)
+	}
+	d, err := reg.For(p.Key)
+	if err != nil {
+		return nil, false, err
+	}
+	rooter, ok := d.(WorkspaceRooter)
+	if !ok {
+		return nil, false, fmt.Errorf("fs.walk: not supported by %s", p.Key)
+	}
+	root, err := rooter.WorkspaceRoot(p.Key)
+	if err != nil {
+		return nil, false, err
+	}
+	res, err := Walk(root, p.Path, p.MaxFiles, p.MaxBytes)
+	if err != nil {
+		return nil, false, err
+	}
+	return res, false, nil
 }
 
 func handleFsRead(reg *Registry, params json.RawMessage) (any, bool, error) {
