@@ -207,6 +207,25 @@ type WalkResult struct {
 	TooLarge bool       `json:"tooLarge"`
 }
 
+// maxWalkSkipped caps the skipped list and maxWalkEntries the entries visited, so a huge tree of
+// folders, links or denied files cannot make the walk (or its answer) unbounded; past either, the
+// walk stops and reports tooMany.
+const (
+	maxWalkSkipped = 500
+	maxWalkEntries = 20000
+)
+
+// walkErr hides host paths: callers get the requested relative path, never an absolute one.
+func walkErr(rel string, err error) error {
+	if errors.Is(err, fsops.ErrEscape) || errors.Is(err, ErrDenied) {
+		return err
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%s: not found", rel)
+	}
+	return fmt.Errorf("%s: cannot be walked", rel)
+}
+
 // Walk lists the regular files under rel (spec §8: inside the root, nothing denied, no symlink
 // followed), stopping at maxFiles or maxBytes. Folder caps are Superlibrary's (500 files, 100 MB).
 // The denylist is applied to rel itself, to where rel really resolves, and to the path of every
@@ -224,15 +243,15 @@ func Walk(root, rel string, maxFiles int, maxBytes int64) (WalkResult, error) {
 	}
 	target, err := fsops.Jail(root, rel)
 	if err != nil {
-		return WalkResult{}, err
+		return WalkResult{}, walkErr(rel, err)
 	}
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return WalkResult{}, err
+		return WalkResult{}, walkErr(rel, err)
 	}
 	base, err := filepath.EvalSymlinks(target)
 	if err != nil {
-		return WalkResult{}, err
+		return WalkResult{}, walkErr(rel, err)
 	}
 	real, err := filepath.Rel(resolvedRoot, base)
 	if err != nil || real == ".." || strings.HasPrefix(real, ".."+string(filepath.Separator)) {
@@ -259,7 +278,7 @@ func Walk(root, rel string, maxFiles int, maxBytes int64) (WalkResult, error) {
 	}
 	st, err := os.Stat(base)
 	if err != nil {
-		return WalkResult{}, err
+		return WalkResult{}, walkErr(rel, err)
 	}
 	if st.IsDir() {
 		// A folder is judged by what it would contain: ".ssh" and ".git" are denied as
@@ -277,23 +296,55 @@ func Walk(root, rel string, maxFiles int, maxBytes int64) (WalkResult, error) {
 		add("", st.Size())
 		return res, nil
 	}
-	err = filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	visited := 0
+	// skip records one skipped entry; past the cap the walk stops.
+	skip := func(r, reason string) error {
+		if len(res.Skipped) >= maxWalkSkipped {
+			res.TooMany = true
+			return filepath.SkipAll
 		}
+		res.Skipped = append(res.Skipped, WalkSkip{r, reason})
+		return nil
+	}
+	err = filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
 		if p == base {
+			if err != nil {
+				return err
+			}
 			return nil
 		}
 		r, _ := filepath.Rel(base, p)
 		r = filepath.ToSlash(r)
-		if d.Type()&fs.ModeSymlink != 0 {
-			res.Skipped = append(res.Skipped, WalkSkip{r, "symlink"})
+		if err != nil {
+			// One unreadable entry or folder does not abort the walk.
+			if serr := skip(r, "unreadable"); serr != nil {
+				return serr
+			}
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
-		_, deniedFull := Denied(path.Join(rel, r))
-		_, deniedReal := Denied(path.Join(real, r))
+		visited++
+		if visited > maxWalkEntries {
+			res.TooMany = true
+			return filepath.SkipAll
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return skip(r, "symlink")
+		}
+		// A folder is judged by what it would contain (see the root probe above), so a whole
+		// ".git" or ".ssh" is skipped as one entry and never entered.
+		fullP, realP := path.Join(rel, r), path.Join(real, r)
+		if d.IsDir() {
+			fullP, realP = path.Join(fullP, "x"), path.Join(realP, "x")
+		}
+		_, deniedFull := Denied(fullP)
+		_, deniedReal := Denied(realP)
 		if deniedFull || deniedReal {
-			res.Skipped = append(res.Skipped, WalkSkip{r, "denied"})
+			if serr := skip(r, "denied"); serr != nil {
+				return serr
+			}
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -303,12 +354,11 @@ func Walk(root, rel string, maxFiles int, maxBytes int64) (WalkResult, error) {
 			return nil
 		}
 		if !d.Type().IsRegular() {
-			res.Skipped = append(res.Skipped, WalkSkip{r, "special"})
-			return nil
+			return skip(r, "special")
 		}
 		info, err := d.Info()
 		if err != nil {
-			return err
+			return skip(r, "unreadable")
 		}
 		if add(r, info.Size()) {
 			return filepath.SkipAll
@@ -316,7 +366,7 @@ func Walk(root, rel string, maxFiles int, maxBytes int64) (WalkResult, error) {
 		return nil
 	})
 	if err != nil {
-		return WalkResult{}, err
+		return WalkResult{}, walkErr(rel, err)
 	}
 	sort.Slice(res.Files, func(i, j int) bool { return res.Files[i].Path < res.Files[j].Path })
 	return res, nil

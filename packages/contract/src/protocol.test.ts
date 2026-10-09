@@ -257,7 +257,7 @@ it("fs.walk takes caps within the folder limits and returns a manifest", () => {
   expect(VERB_PARAMS["fs.walk"].parse({ key: "k", path: "site", maxFiles: 500 }).maxFiles).toBe(500);
   expect(() => VERB_PARAMS["fs.walk"].parse({ key: "k", path: "site", maxFiles: 501 })).toThrow();
   expect(() => VERB_PARAMS["fs.walk"].parse({ key: "k", path: "site", maxBytes: 100 * 1024 * 1024 + 1 })).toThrow();
-  const r = VERB_RESULTS["fs.walk"].parse({ root: "site", files: [{ path: "", size: 3 }], skipped: [{ path: "x", reason: "symlink" }], tooMany: false, tooLarge: false });
+  const r = VERB_RESULTS["fs.walk"].parse({ root: "site", files: [{ path: "", size: 3 }], skipped: [{ path: "x", reason: "symlink" }, { path: "y", reason: "unreadable" }], tooMany: false, tooLarge: false });
   expect(r.files[0]!.size).toBe(3);
   expect(() => VERB_RESULTS["fs.walk"].parse({ root: "s", files: [], skipped: [{ path: "x", reason: "other" }], tooMany: false, tooLarge: false })).toThrow();
 });

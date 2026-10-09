@@ -163,11 +163,11 @@ func TestReadAtRefusesAnInRootSymlinkToADeniedPath(t *testing.T) {
 func TestWalkListsFilesSkipsDeniedAndSymlinks(t *testing.T) {
 	root := t.TempDir()
 	site := filepath.Join(root, "site")
-	os.MkdirAll(filepath.Join(site, "css"), 0o755)
-	os.WriteFile(filepath.Join(site, "index.html"), []byte("<h1>x</h1>"), 0o644)
-	os.WriteFile(filepath.Join(site, "css", "a.css"), []byte("a{}"), 0o644)
-	os.WriteFile(filepath.Join(site, ".env"), []byte("K=V"), 0o644)
-	os.Symlink("/etc/hosts", filepath.Join(site, "hosts"))
+	mustOK(t, os.MkdirAll(filepath.Join(site, "css"), 0o755))
+	mustOK(t, os.WriteFile(filepath.Join(site, "index.html"), []byte("<h1>x</h1>"), 0o644))
+	mustOK(t, os.WriteFile(filepath.Join(site, "css", "a.css"), []byte("a{}"), 0o644))
+	mustOK(t, os.WriteFile(filepath.Join(site, ".env"), []byte("K=V"), 0o644))
+	mustOK(t, os.Symlink("/etc/hosts", filepath.Join(site, "hosts")))
 	got, err := Walk(root, "site", 500, 100<<20)
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +187,7 @@ func TestWalkListsFilesSkipsDeniedAndSymlinks(t *testing.T) {
 func TestWalkStopsAtTheCaps(t *testing.T) {
 	root := t.TempDir()
 	for i := 0; i < 5; i++ {
-		os.WriteFile(filepath.Join(root, fmt.Sprintf("f%d.txt", i)), make([]byte, 10), 0o644)
+		mustOK(t, os.WriteFile(filepath.Join(root, fmt.Sprintf("f%d.txt", i)), make([]byte, 10), 0o644))
 	}
 	got, _ := Walk(root, ".", 3, 1<<20)
 	if !got.TooMany || len(got.Files) != 3 {
@@ -207,7 +207,7 @@ func TestWalkRefusesARootOutsideTheWorkspace(t *testing.T) {
 
 func TestWalkOfAFileListsItself(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, "note.md"), []byte("hello"), 0o644)
+	mustOK(t, os.WriteFile(filepath.Join(root, "note.md"), []byte("hello"), 0o644))
 	got, err := Walk(root, "note.md", 500, 1<<20)
 	if err != nil {
 		t.Fatal(err)
@@ -220,27 +220,26 @@ func TestWalkOfAFileListsItself(t *testing.T) {
 func TestWalkRefusesADeniedRootItself(t *testing.T) {
 	root := t.TempDir()
 	for _, d := range []string{".ssh", ".git"} {
-		os.MkdirAll(filepath.Join(root, d), 0o755)
-		os.WriteFile(filepath.Join(root, d, "config"), []byte("x"), 0o644)
+		mustOK(t, os.MkdirAll(filepath.Join(root, d), 0o755))
+		mustOK(t, os.WriteFile(filepath.Join(root, d, "config"), []byte("x"), 0o644))
 		if got, err := Walk(root, d, 500, 1<<20); err == nil || !errors.Is(err, ErrDenied) {
 			t.Errorf("walking %s must be refused: %+v %v", d, got, err)
 		}
 	}
-	os.WriteFile(filepath.Join(root, ".env"), []byte("K=V"), 0o644)
+	mustOK(t, os.WriteFile(filepath.Join(root, ".env"), []byte("K=V"), 0o644))
 	if _, err := Walk(root, ".env", 500, 1<<20); !errors.Is(err, ErrDenied) {
 		t.Errorf("walking a denied file must be refused: %v", err)
 	}
 }
 
 func TestWalkChecksEntriesAgainstTheFullPath(t *testing.T) {
-	// Relative to the walked folder "cfg/x" is ordinary; joined with rel ("gemini-x/.claude"
-	// parent) it must be judged by the full path: walk "work" where work/.pi/... is denied only
-	// when the entry path is joined with rel. Use a rule that needs the parent: ".config/opencode".
+	// "opencode" is ordinary relative to the walked folder; only joined with rel (".config") is it
+	// the denied ".config/opencode", so entries must be judged by their path from the root.
 	root := t.TempDir()
 	dir := filepath.Join(root, ".config")
-	os.MkdirAll(filepath.Join(dir, "opencode"), 0o755)
-	os.WriteFile(filepath.Join(dir, "opencode", "k.json"), []byte("{}"), 0o644)
-	os.WriteFile(filepath.Join(dir, "plain.txt"), []byte("ok"), 0o644)
+	mustOK(t, os.MkdirAll(filepath.Join(dir, "opencode"), 0o755))
+	mustOK(t, os.WriteFile(filepath.Join(dir, "opencode", "k.json"), []byte("{}"), 0o644))
+	mustOK(t, os.WriteFile(filepath.Join(dir, "plain.txt"), []byte("ok"), 0o644))
 	got, err := Walk(root, ".config", 500, 1<<20)
 	if err != nil {
 		t.Fatal(err)
@@ -262,17 +261,17 @@ func TestWalkChecksEntriesAgainstTheFullPath(t *testing.T) {
 func TestWalkNeverListsASymlinkWhateverItsTarget(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
-	os.WriteFile(filepath.Join(outside, "o.txt"), []byte("o"), 0o644)
-	os.WriteFile(filepath.Join(root, ".env"), []byte("K=V"), 0o644)
-	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
-	os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("ref"), 0o644)
+	mustOK(t, os.WriteFile(filepath.Join(outside, "o.txt"), []byte("o"), 0o644))
+	mustOK(t, os.WriteFile(filepath.Join(root, ".env"), []byte("K=V"), 0o644))
+	mustOK(t, os.MkdirAll(filepath.Join(root, ".git"), 0o755))
+	mustOK(t, os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("ref"), 0o644))
 	site := filepath.Join(root, "site")
-	os.MkdirAll(site, 0o755)
-	os.WriteFile(filepath.Join(site, "ok.txt"), []byte("ok"), 0o644)
-	os.Symlink(filepath.Join(root, ".env"), filepath.Join(site, "notes.txt"))   // in-root, denied target
-	os.Symlink(filepath.Join(root, ".git"), filepath.Join(site, "cfg"))         // in-root dir, denied
-	os.Symlink(filepath.Join(outside, "o.txt"), filepath.Join(site, "out.txt")) // outside the root
-	os.Symlink(filepath.Join(site, "ok.txt"), filepath.Join(site, "alias.txt")) // in-root, fine target
+	mustOK(t, os.MkdirAll(site, 0o755))
+	mustOK(t, os.WriteFile(filepath.Join(site, "ok.txt"), []byte("ok"), 0o644))
+	mustOK(t, os.Symlink(filepath.Join(root, ".env"), filepath.Join(site, "notes.txt")))   // in-root, denied target
+	mustOK(t, os.Symlink(filepath.Join(root, ".git"), filepath.Join(site, "cfg")))         // in-root dir, denied
+	mustOK(t, os.Symlink(filepath.Join(outside, "o.txt"), filepath.Join(site, "out.txt"))) // outside the root
+	mustOK(t, os.Symlink(filepath.Join(site, "ok.txt"), filepath.Join(site, "alias.txt"))) // in-root, fine target
 	got, err := Walk(root, "site", 500, 1<<20)
 	if err != nil {
 		t.Fatal(err)
@@ -295,9 +294,9 @@ func TestWalkNeverListsASymlinkWhateverItsTarget(t *testing.T) {
 
 func TestWalkRefusesARootThatIsASymlinkToADeniedPath(t *testing.T) {
 	root := t.TempDir()
-	os.MkdirAll(filepath.Join(root, ".git"), 0o755)
-	os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("ref"), 0o644)
-	os.Symlink(filepath.Join(root, ".git"), filepath.Join(root, "docs"))
+	mustOK(t, os.MkdirAll(filepath.Join(root, ".git"), 0o755))
+	mustOK(t, os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("ref"), 0o644))
+	mustOK(t, os.Symlink(filepath.Join(root, ".git"), filepath.Join(root, "docs")))
 	if got, err := Walk(root, "docs", 500, 1<<20); !errors.Is(err, ErrDenied) {
 		t.Fatalf("a link to a denied tree is refused: %+v %v", got, err)
 	}
@@ -305,7 +304,7 @@ func TestWalkRefusesARootThatIsASymlinkToADeniedPath(t *testing.T) {
 
 func TestHandlerFsWalk(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, "a.txt"), []byte("abc"), 0o644)
+	mustOK(t, os.WriteFile(filepath.Join(root, "a.txt"), []byte("abc"), 0o644))
 	reg := NewRegistry()
 	reg.Register(&rootedFake{fakeDescriptor: fakeDescriptor{harness: "fake"}, root: root})
 	h := NewHandler(reg)
@@ -327,15 +326,15 @@ func TestHandlerFsWalk(t *testing.T) {
 func TestWalkJudgesEntriesByTheRequestedAndTheResolvedPath(t *testing.T) {
 	root := t.TempDir()
 	// requested path denied, resolved path ordinary: .config -> cfg
-	os.MkdirAll(filepath.Join(root, "cfg", "opencode"), 0o755)
-	os.WriteFile(filepath.Join(root, "cfg", "opencode", "k.json"), []byte("{}"), 0o644)
-	os.WriteFile(filepath.Join(root, "cfg", "plain.txt"), []byte("ok"), 0o644)
-	os.Symlink(filepath.Join(root, "cfg"), filepath.Join(root, ".config"))
+	mustOK(t, os.MkdirAll(filepath.Join(root, "cfg", "opencode"), 0o755))
+	mustOK(t, os.WriteFile(filepath.Join(root, "cfg", "opencode", "k.json"), []byte("{}"), 0o644))
+	mustOK(t, os.WriteFile(filepath.Join(root, "cfg", "plain.txt"), []byte("ok"), 0o644))
+	mustOK(t, os.Symlink(filepath.Join(root, "cfg"), filepath.Join(root, ".config")))
 	// requested path ordinary, resolved path denied: docs -> real/.config
-	os.MkdirAll(filepath.Join(root, "real", ".config", "opencode"), 0o755)
-	os.WriteFile(filepath.Join(root, "real", ".config", "opencode", "k.json"), []byte("{}"), 0o644)
-	os.WriteFile(filepath.Join(root, "real", ".config", "plain.txt"), []byte("ok"), 0o644)
-	os.Symlink(filepath.Join(root, "real", ".config"), filepath.Join(root, "docs"))
+	mustOK(t, os.MkdirAll(filepath.Join(root, "real", ".config", "opencode"), 0o755))
+	mustOK(t, os.WriteFile(filepath.Join(root, "real", ".config", "opencode", "k.json"), []byte("{}"), 0o644))
+	mustOK(t, os.WriteFile(filepath.Join(root, "real", ".config", "plain.txt"), []byte("ok"), 0o644))
+	mustOK(t, os.Symlink(filepath.Join(root, "real", ".config"), filepath.Join(root, "docs")))
 	for _, rel := range []string{".config", "docs"} {
 		got, err := Walk(root, rel, 500, 1<<20)
 		if err != nil {
@@ -349,13 +348,116 @@ func TestWalkJudgesEntriesByTheRequestedAndTheResolvedPath(t *testing.T) {
 
 func TestWalkOfAFileIsJudgedByItsRequestedAndResolvedName(t *testing.T) {
 	root := t.TempDir()
-	os.WriteFile(filepath.Join(root, ".env"), []byte("K=V"), 0o644)
-	os.WriteFile(filepath.Join(root, "ok.txt"), []byte("ok"), 0o644)
-	os.Symlink(filepath.Join(root, ".env"), filepath.Join(root, "notes.txt"))  // ordinary name, denied target
-	os.Symlink(filepath.Join(root, "ok.txt"), filepath.Join(root, ".env.bak")) // denied name, ordinary target
+	mustOK(t, os.WriteFile(filepath.Join(root, ".env"), []byte("K=V"), 0o644))
+	mustOK(t, os.WriteFile(filepath.Join(root, "ok.txt"), []byte("ok"), 0o644))
+	mustOK(t, os.Symlink(filepath.Join(root, ".env"), filepath.Join(root, "notes.txt")))  // ordinary name, denied target
+	mustOK(t, os.Symlink(filepath.Join(root, "ok.txt"), filepath.Join(root, ".env.bak"))) // denied name, ordinary target
 	for _, rel := range []string{"notes.txt", ".env.bak"} {
 		if got, err := Walk(root, rel, 500, 1<<20); !errors.Is(err, ErrDenied) {
 			t.Errorf("%s must be refused: %+v %v", rel, got, err)
 		}
+	}
+}
+
+func TestWalkSkipsAWholeDeniedFolderAsOneEntry(t *testing.T) {
+	root := t.TempDir()
+	site := filepath.Join(root, "site")
+	mustOK(t, os.MkdirAll(filepath.Join(site, ".git", "objects", "ab"), 0o755))
+	mustOK(t, os.WriteFile(filepath.Join(site, ".git", "HEAD"), []byte("ref"), 0o644))
+	mustOK(t, os.WriteFile(filepath.Join(site, ".git", "objects", "ab", "cd"), []byte("o"), 0o644))
+	mustOK(t, os.MkdirAll(filepath.Join(site, ".ssh"), 0o755))
+	mustOK(t, os.WriteFile(filepath.Join(site, ".ssh", "id_rsa"), []byte("k"), 0o644))
+	mustOK(t, os.WriteFile(filepath.Join(site, "index.html"), []byte("x"), 0o644))
+	got, err := Walk(root, "site", 500, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Files) != 1 || got.Files[0].Path != "index.html" {
+		t.Fatalf("files: %+v", got.Files)
+	}
+	if len(got.Skipped) != 2 || got.Skipped[0] != (WalkSkip{".git", "denied"}) || got.Skipped[1] != (WalkSkip{".ssh", "denied"}) {
+		t.Fatalf("each denied folder is one skipped entry and nothing beneath it: %+v", got.Skipped)
+	}
+}
+
+func TestWalkBoundsTheSkippedList(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < maxWalkSkipped+5; i++ {
+		mustOK(t, os.Symlink("/nonexistent", filepath.Join(root, fmt.Sprintf("l%04d", i))))
+	}
+	got, err := Walk(root, ".", 500, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Skipped) != maxWalkSkipped || !got.TooMany {
+		t.Fatalf("skipped %d tooMany=%v", len(got.Skipped), got.TooMany)
+	}
+}
+
+func TestWalkBoundsTheEntriesVisited(t *testing.T) {
+	root := t.TempDir()
+	// Plain folders are neither files nor skipped; only the visit cap bounds them.
+	for i := 0; i < maxWalkEntries+5; i++ {
+		mustOK(t, os.Mkdir(filepath.Join(root, fmt.Sprintf("d%05d", i)), 0o755))
+	}
+	got, err := Walk(root, ".", 500, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.TooMany {
+		t.Fatalf("the visit cap must set tooMany: files=%d", len(got.Files))
+	}
+}
+
+func TestWalkSurvivesAnUnreadableFolder(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	root := t.TempDir()
+	mustOK(t, os.MkdirAll(filepath.Join(root, "a", "locked"), 0o755))
+	mustOK(t, os.WriteFile(filepath.Join(root, "a", "ok.txt"), []byte("ok"), 0o644))
+	mustOK(t, os.Chmod(filepath.Join(root, "a", "locked"), 0))
+	defer os.Chmod(filepath.Join(root, "a", "locked"), 0o755)
+	got, err := Walk(root, "a", 500, 1<<20)
+	if err != nil {
+		t.Fatalf("one unreadable folder must not abort the walk: %v", err)
+	}
+	if len(got.Files) != 1 || got.Files[0].Path != "ok.txt" || len(got.Skipped) != 1 || got.Skipped[0] != (WalkSkip{"locked", "unreadable"}) {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestWalkErrorsCarryNoHostPath(t *testing.T) {
+	root := t.TempDir()
+	for _, rel := range []string{"missing", "../escape"} {
+		_, err := Walk(root, rel, 500, 1<<20)
+		if err == nil {
+			t.Fatalf("%s must fail", rel)
+		}
+		if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), os.TempDir()) {
+			t.Errorf("%s: error leaks a host path: %v", rel, err)
+		}
+	}
+}
+
+func TestWalkOfAnUnreadableRootCarriesNoHostPath(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	root := t.TempDir()
+	locked := filepath.Join(root, "locked")
+	mustOK(t, os.Mkdir(locked, 0o755))
+	mustOK(t, os.Chmod(locked, 0))
+	defer os.Chmod(locked, 0o755)
+	_, err := Walk(root, "locked", 500, 1<<20)
+	if err == nil || strings.Contains(err.Error(), root) {
+		t.Fatalf("want an error without the host path, got %v", err)
+	}
+}
+
+func mustOK(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
 	}
 }

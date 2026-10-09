@@ -186,7 +186,7 @@ export const VERB_RESULTS = {
   "fs.walk": z.object({
     root: z.string(),
     files: z.array(z.object({ path: z.string(), size: z.number().int().nonnegative() })),
-    skipped: z.array(z.object({ path: z.string(), reason: z.enum(["denied", "symlink", "special"]) })),
+    skipped: z.array(z.object({ path: z.string(), reason: z.enum(["denied", "symlink", "special", "unreadable"]) })),
     tooMany: z.boolean(), tooLarge: z.boolean(),
   }),
   "fs.write": z.object({ bytesWritten: z.number().int(), backupPath: z.string().nullable().optional() }),
