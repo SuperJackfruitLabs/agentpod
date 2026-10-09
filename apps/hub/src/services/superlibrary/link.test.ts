@@ -17,7 +17,7 @@ type Walked = { files: Array<{ path: string; size: number }>; tooMany?: boolean;
  * shape), and a fake Superlibrary that answers exactly as its upload routes do.
  */
 function deps(
-  o: { echoOffset?: boolean; walk?: Walked | { error: string }; tree?: Record<string, Uint8Array>; growBy?: number; sizeAt?: (offset: number, size: number) => number; extra?: Record<string, unknown> } = {},
+  o: { echoOffset?: boolean; walk?: Walked | { error: string }; tree?: Record<string, Uint8Array>; growBy?: number; readError?: string; sizeAt?: (offset: number, size: number) => number; extra?: Record<string, unknown> } = {},
 ) {
   const sent: Sent[] = [];
   const verbs: Array<{ verb: string; params: any }> = [];
@@ -32,6 +32,7 @@ function deps(
           return { ok: true, data: { root: p.path, files: w.files, skipped: [{ path: "locked.txt", reason: "unreadable" }], tooMany: w.tooMany ?? false, tooLarge: w.tooLarge ?? false, ...o.extra } };
         }
         if (verb === "fs.read") {
+          if (o.readError) return { ok: false, error: o.readError };
           const whole = tree[p.path];
           if (!whole) return { ok: false, error: `${p.path}: not found` };
           const file = o.growBy ? new Uint8Array(whole.length + o.growBy) : whole;
@@ -346,4 +347,41 @@ test("tooMany and tooLarge refuse whatever else the walk carries (truncatedBy, s
 test("the walk's root is never compared: a root that differs from the request still links", async () => {
   const { d } = deps({ extra: { root: "./out//data.bin" } });
   expect((await link(d)).ok).toBe(true);
+});
+
+test("a node read error is never relayed: it may carry host-absolute paths", async () => {
+  const { d, sent } = deps({ readError: "open /srv/home/someone/workspace/out/data.bin: permission denied" });
+  const r = await link(d);
+  expect(r).toMatchObject({ ok: false, status: 502, error: "read_failed", message: "Could not read out/data.bin; link it again." });
+  expect((r as { message: string }).message).not.toContain("/srv");
+  expect(sent).toEqual([]);
+});
+
+test("a walked name is judged from the workspace too, not only from the folder", async () => {
+  for (const [folder, entry] of [[".config", "gcloud/credentials.db"], [".docker", "config.json"], [".local", "share/opencode/x.json"]] as const) {
+    const { d, verbs, sent } = deps({ walk: { files: [{ path: "ok.txt", size: 1 }, { path: entry, size: 1 }] } });
+    const r = await link(d, { path: folder });
+    expect({ folder, r }).toMatchObject({ folder, r: { ok: false, status: 400, error: "path_refused" } });
+    expect((r as { message: string }).message).toContain(`${folder}/${entry}`);
+    expect(verbs.map((v) => v.verb)).toEqual(["fs.walk"]);
+    expect(sent).toEqual([]);
+  }
+});
+
+test("what the walk left out comes back with the link", async () => {
+  const r = await link(deps().d);
+  expect(r).toMatchObject({ ok: true, skipped: [{ path: "locked.txt", reason: "unreadable" }] });
+});
+
+test("Superlibrary's own message is relayed, capped at 500 characters", async () => {
+  const { d } = deps();
+  d.client.asService = () => ({ async request() { return Response.json({ error: "quota_exceeded", message: "q".repeat(5000) }, { status: 413 }); } });
+  const r = await link(d);
+  expect(r).toMatchObject({ ok: false, status: 413, error: "quota_exceeded" });
+  expect((r as { message: string }).message).toBe("q".repeat(500));
+});
+
+test("the too-old sentence is the brief's", async () => {
+  const r = await link(deps({ echoOffset: false }).d);
+  expect((r as { message: string }).message).toBe("This node is too old to link files; update it and try again.");
 });
