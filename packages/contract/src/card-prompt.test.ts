@@ -139,5 +139,10 @@ test("the gists rule is stated whenever the agent has a run, libraryTools or not
       /Never publish through gists, pastebins or personal accounts/,
     );
   }
-  expect(renderCardPrompt(CardPrompt.parse({ ...base, libraryTools: true }))).not.toMatch(/gists/);
+  // The no-run (bridge reports) paragraph carries it too, as the same sentence.
+  for (const extra of [{}, { libraryTools: true }]) {
+    const out = renderCardPrompt(CardPrompt.parse({ ...base, ...extra }));
+    expect(out).toContain("Never publish through gists, pastebins or personal accounts.");
+    expect(out).toContain("do not ask for the next card.");
+  }
 });

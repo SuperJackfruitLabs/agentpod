@@ -1140,7 +1140,7 @@ async function abort(
  * returns the references and the card's `spec`, neither of which the claim
  * carries. The spike had no such endpoint and sent the title.
  *
- * Exported for its unit test; `runOnce` is the only production caller.
+ * Exported for its unit test; `workClaimed` is the only production caller.
  */
 export async function assemblePrompt(
   deps: DispatchDeps,

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { setSuperlibraryClientForTests } from "../services/superlibrary/client";
-import { AGENT_INSTRUCTIONS, handleMcpRequest, MCP_SSE_KEEPALIVE_MS, newTransport } from "./server";
+import { agentInstructions, handleMcpRequest, MCP_SSE_KEEPALIVE_MS, newTransport } from "./server";
 
 async function toolNames(kind: "agent" | "human"): Promise<string[]> {
   const res = await handleMcpRequest(
@@ -73,8 +73,35 @@ test("a client that hangs up aborts the link it started (the stateless transport
   expect(linkSignal?.aborted).toBe(true);
 });
 
-test("the hub tells agents to link artifacts and never to use gists; library_search is conditional", () => {
-  expect(AGENT_INSTRUCTIONS).toContain("agentpod_link_artifact");
-  expect(AGENT_INSTRUCTIONS).toMatch(/If you also have Superlibrary's MCP server \(library_search\)/);
-  expect(AGENT_INSTRUCTIONS).toMatch(/never publish through gists/i);
+test("the instructions name agentpod_link_artifact only when the link tool is offered; the gists rule is unconditional", () => {
+  const on = agentInstructions(true);
+  expect(on).toContain("agentpod_link_artifact");
+  expect(on).toMatch(/If you also have Superlibrary's MCP server \(library_search\)/);
+  expect(on).toMatch(/never publish through gists/i);
+  const off = agentInstructions(false);
+  expect(off).not.toContain("agentpod_link_artifact");
+  expect(off).not.toContain("library_search");
+  expect(off).toMatch(/never publish through gists/i);
+});
+
+test("initialize carries the instructions that match the registered tools", async () => {
+  const init = async () => {
+    const res = await handleMcpRequest(
+      new Request("http://hub.test/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "t", version: "0" } } }),
+      }),
+      { principalId: "prn_000000000000000000a7", kind: "agent" },
+    );
+    const text = await res.text();
+    return text;
+  };
+  restore = setSuperlibraryClientForTests({} as never);
+  expect(await init()).toContain("agentpod_link_artifact (your own workspace only)");
+  restore();
+  restore = setSuperlibraryClientForTests(null);
+  const off = await init();
+  expect(off).not.toContain("agentpod_link_artifact (your own workspace only)");
+  expect(off).toContain("Never publish through gists");
 });

@@ -426,7 +426,7 @@ export function renderCardPrompt(prompt: CardPrompt): string {
     );
   } else {
     blocks.push(
-      "## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card.",
+      "## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card. Never publish through gists, pastebins or personal accounts.",
     );
   }
 

@@ -18,7 +18,7 @@ import { config } from "../../src/config";
 import { db } from "../../src/db/drizzle";
 import { bridgeBoardSettings } from "../../src/db/schema/bridge";
 import { hubOperators } from "../../src/db/schema/operators";
-import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
+import { BOOTSTRAP_TENANT_ID, tenants } from "../../src/db/schema/tenants";
 import { adminRouter } from "../../src/routes/admin";
 import { adminBridgeBoardsRouter } from "../../src/routes/admin-bridge-boards";
 import { relatedWorkEnabled } from "../../src/services/superlibrary/related";
@@ -76,6 +76,19 @@ test("off, then on again: the row is upserted and the next claim reads it", asyn
     .from(bridgeBoardSettings)
     .where(and(eq(bridgeBoardSettings.tenantId, BOOTSTRAP_TENANT_ID), eq(bridgeBoardSettings.boardId, BOARD)));
   expect(rows).toHaveLength(1);
+});
+
+test("another tenant's off row for the same board does not switch it off for this tenant", async () => {
+  const OTHER_TENANT = "fleet_000000000000000000a8";
+  await db.insert(tenants).values({ id: OTHER_TENANT, name: "related other tenant" }).onConflictDoNothing();
+  try {
+    await db.insert(bridgeBoardSettings).values({ tenantId: OTHER_TENANT, boardId: BOARD, relatedWork: false });
+    expect(await relatedWorkEnabled(OTHER_TENANT, BOARD)).toBe(false);
+    expect(await relatedWorkEnabled(BOOTSTRAP_TENANT_ID, BOARD)).toBe(true);
+  } finally {
+    await db.delete(bridgeBoardSettings).where(eq(bridgeBoardSettings.tenantId, OTHER_TENANT));
+    await db.delete(tenants).where(eq(tenants.id, OTHER_TENANT));
+  }
 });
 
 test("a board id that is not superpipeline's is a 400, and nothing is written", async () => {
