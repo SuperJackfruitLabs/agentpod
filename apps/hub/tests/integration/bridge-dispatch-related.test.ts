@@ -89,12 +89,15 @@ const ev = (type: AcpEvent["type"], payload: unknown): AcpEvent => ({
 });
 
 /** An ACP port that records the prompt and ends the turn at once. */
-function acp() {
+function acp(order: string[] = []) {
   const prompts: string[] = [];
   const subs = new Set<(e: AcpEvent) => void>();
   const port: AcpPort = {
     stationReady: async () => ({ ready: true }),
-    createSession: async () => ({ id: SESSION }),
+    createSession: async () => {
+      order.push("createSession");
+      return { id: SESSION };
+    },
     async promptSession(_u, _s, text) {
       prompts.push(text);
       queueMicrotask(() => {
@@ -116,8 +119,8 @@ function acp() {
 }
 
 /** One claim worked start to finish; the prompt text the harness received. */
-async function runOneDispatch(over: Partial<DispatchDeps> = {}): Promise<string> {
-  const a = acp();
+async function runOneDispatch(over: Partial<DispatchDeps> = {}, order: string[] = []): Promise<string> {
+  const a = acp(order);
   await runOnce({
     client: board(),
     acp: a.port,
@@ -207,7 +210,7 @@ test("the prompt section is the agent's related call", async () => {
   const prompt = await runOneDispatch({
     occupant: async () => PRINCIPAL,
     relatedWork: async (input) => {
-      seen.push(input);
+      seen.push({ ...input, principal: typeof input.principal === "function" ? await input.principal() : input.principal });
       const r: CardPromptRelated = {
         itemId: "itm_0000000000000001", kind: "work-record", title: "Pricing v1", outcome: "rejected",
         url: "https://app.superlibrary.dev/a/itm_0000000000000001", text: "Tried a toggle; rejected.",
@@ -253,6 +256,55 @@ test("production wiring: Superlibrary unconfigured, no section and nothing else 
   restore = setSuperlibraryClientForTests(null);
   const prompt = await runOneDispatch();
   expect(prompt).not.toContain("## Related prior work");
+  const [run] = await db.select().from(acpRuns).where(eq(acpRuns.stationId, STATION));
+  expect(run!.agentPrincipalId).toBe(PRINCIPAL);
+});
+
+/** An occupant seam that records when it was asked, against the session opening. */
+const recordingOccupant = (order: string[], answers: Array<string | null> = [PRINCIPAL]) => {
+  let n = 0;
+  return async () => {
+    order.push("occupant");
+    return answers[Math.min(n++, answers.length - 1)]!;
+  };
+};
+
+test("Superlibrary unconfigured: the occupant is not looked up before the session opens", async () => {
+  restore = setSuperlibraryClientForTests(null);
+  const order: string[] = [];
+  await runOneDispatch({ occupant: recordingOccupant(order) }, order);
+  // The old timing: one lookup, at the attempt's first ACP event, after the session exists.
+  expect(order).toEqual(["createSession", "occupant"]);
+  const [run] = await db.select().from(acpRuns).where(eq(acpRuns.stationId, STATION));
+  expect(run!.agentPrincipalId).toBe(PRINCIPAL);
+});
+
+test("a board switched off: the occupant is not looked up before the session opens either", async () => {
+  await db.insert(bridgeBoardSettings).values({ tenantId: TENANT, boardId: BOARD, relatedWork: false });
+  restore = setSuperlibraryClientForTests(fakeLibrary().client);
+  const order: string[] = [];
+  await runOneDispatch({ occupant: recordingOccupant(order) }, order);
+  expect(order).toEqual(["createSession", "occupant"]);
+});
+
+test("related work on: one lookup before the session, and the attempt reuses it", async () => {
+  const lib = fakeLibrary();
+  restore = setSuperlibraryClientForTests(lib.client);
+  const order: string[] = [];
+  await runOneDispatch({ occupant: recordingOccupant(order) }, order);
+  expect(order).toEqual(["occupant", "createSession"]);
+  expect(lib.calls.map((c) => c.principal)).toEqual([PRINCIPAL]);
+  const [run] = await db.select().from(acpRuns).where(eq(acpRuns.stationId, STATION));
+  expect(run!.agentPrincipalId).toBe(PRINCIPAL);
+});
+
+test("related work on, no principal at prompt time: the attempt looks again, as it always did", async () => {
+  const lib = fakeLibrary();
+  restore = setSuperlibraryClientForTests(lib.client);
+  const order: string[] = [];
+  await runOneDispatch({ occupant: recordingOccupant(order, [null, PRINCIPAL]) }, order);
+  expect(order).toEqual(["occupant", "createSession", "occupant"]);
+  expect(lib.calls).toHaveLength(0);
   const [run] = await db.select().from(acpRuns).where(eq(acpRuns.stationId, STATION));
   expect(run!.agentPrincipalId).toBe(PRINCIPAL);
 });

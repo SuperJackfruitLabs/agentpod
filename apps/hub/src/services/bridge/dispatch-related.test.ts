@@ -5,10 +5,20 @@
  * database. The whole claim, and the production defaults with no seam injected, are in
  * `tests/integration/bridge-dispatch-related.test.ts`.
  */
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { renderCardPrompt, type CardPromptRelated } from "@agentpod/contract";
 
+import { setSuperlibraryClientForTests } from "../superlibrary/client";
 import { assemblePrompt, type DispatchDeps } from "./dispatch";
+
+let restore: (() => void) | undefined;
+afterEach(() => {
+  restore?.();
+  restore = undefined;
+});
+
+/** The principal a seam was given, a lookup resolved. */
+const principalOf = async (p: string | null | (() => Promise<string | null>)) => (typeof p === "function" ? await p() : p);
 
 const TENANT = "tnt_00000000000000a1";
 const BOARD = "brd_00000000000000b1";
@@ -52,7 +62,7 @@ test("the prompt section is the agent's related call", async () => {
   const seen: unknown[] = [];
   const prompt = renderCardPrompt(
     await assemblePrompt(
-      deps({ relatedWork: async (input) => { seen.push(input); return [related]; } }),
+      deps({ relatedWork: async (input) => { seen.push({ ...input, principal: await principalOf(input.principal) }); return [related]; } }),
       work,
       prn,
     ),
@@ -81,8 +91,18 @@ test("a seam that throws anyway leaves the section out, and the prompt is still 
   expect(p.relatedWork).toBeUndefined();
 });
 
-test("no principal is passed as null, for the fetcher to decline", async () => {
+test("no principal reaches the fetcher as null, for it to decline", async () => {
   const seen: unknown[] = [];
-  await assemblePrompt(deps({ relatedWork: async (i) => { seen.push(i.principal); return undefined; } }), work, async () => null);
+  await assemblePrompt(deps({ relatedWork: async (i) => { seen.push(await principalOf(i.principal)); return undefined; } }), work, async () => null);
   expect(seen).toEqual([null]);
+});
+
+test("Superlibrary unconfigured: the occupant is never looked up while the prompt is built", async () => {
+  // The claim path holds the session open for whatever the prompt awaits. With no library to ask,
+  // that must be nothing: the attempt looks the occupant up later, at its first ACP event.
+  restore = setSuperlibraryClientForTests(null);
+  let looked = 0;
+  const p = await assemblePrompt(deps({}), work, async () => { looked++; return PRINCIPAL; });
+  expect(looked).toBe(0);
+  expect(p.relatedWork).toBeUndefined();
 });

@@ -30,7 +30,17 @@ export async function relatedWorkEnabled(tenantId: string, boardId: string): Pro
   return row ? row.on : true;
 }
 
-export type RelatedWorkInput = { tenantId: string; boardId: string; cardId: string; principal: string | null };
+/**
+ * `principal` may be a lookup rather than a value: it is then awaited only once Superlibrary is
+ * configured and the board's switch is on, so a claim that will not fetch related work never
+ * waits for it. The lookup runs inside the deadline.
+ */
+export type RelatedWorkInput = {
+  tenantId: string;
+  boardId: string;
+  cardId: string;
+  principal: string | null | (() => Promise<string | null>);
+};
 type Log = {
   info(message: string, meta?: Record<string, unknown>): void;
   warn(message: string, meta?: Record<string, unknown>): void;
@@ -60,11 +70,13 @@ export function createFetchRelatedWork(deps: {
   const log = deps.log ?? createLogger("related-work");
   const deadline = deps.deadlineMs ?? RELATED_TIMEOUT_MS;
 
-  async function attempt(lib: SuperlibraryClient, i: RelatedWorkInput & { principal: string }): Promise<CardPromptRelated[] | null> {
+  async function attempt(lib: SuperlibraryClient, i: RelatedWorkInput): Promise<CardPromptRelated[] | null> {
     if (!(await deps.enabled(i.tenantId, i.boardId))) return null;
+    const principal = typeof i.principal === "function" ? await i.principal() : i.principal;
+    if (!principal) return null;
     // The agent's own token: the section shows what this agent's roster may see, and nothing more.
     const res = await lib
-      .asAgent(i.principal)
+      .asAgent(principal)
       .request("POST", "/api/v1/related", { json: { cardId: i.cardId }, timeoutMs: RELATED_TIMEOUT_MS });
     if (!res.ok) throw new Error(`Superlibrary answered ${res.status}`);
     const raw = await res.text();
@@ -98,13 +110,13 @@ export function createFetchRelatedWork(deps: {
 
   return async function fetchRelatedWork(i: RelatedWorkInput): Promise<CardPromptRelated[] | undefined> {
     const lib = deps.client();
-    if (!lib || !i.principal) return undefined;
+    if (!lib || i.principal === null) return undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<"late">((done) => {
       timer = setTimeout(() => done("late"), deadline);
     });
     try {
-      const r = await Promise.race([attempt(lib, { ...i, principal: i.principal }), late]);
+      const r = await Promise.race([attempt(lib, i), late]);
       if (r === "late") throw new Error(`no answer within ${deadline} ms`);
       if (r === null) return undefined;
       // One line per dispatch, so an operator can see from the journal that the section went out.

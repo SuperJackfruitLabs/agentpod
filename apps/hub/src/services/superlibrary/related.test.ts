@@ -105,6 +105,8 @@ test("one malformed item is dropped, the rest still reach the prompt", async () 
   expect((await f(input))?.map((r) => r.itemId)).toEqual(["itm_0000000000000001"]);
 });
 
+// This one proves the request is given timeoutMs 2500; the cut itself, for a call that ignores its
+// timeout, is carried by the two deadline tests below ("never settles", "token mint never answers").
 test("a hanging library call is cut at 2.5 s and the prompt has no section", async () => {
   let timeout = 0;
   const f = createFetchRelatedWork({
@@ -153,6 +155,31 @@ test("a token mint that never answers counts against the same deadline", async (
   const t0 = Date.now();
   expect(await f(input)).toBeUndefined();
   expect(Date.now() - t0).toBeLessThan(1000);
+});
+
+test("a principal lookup is awaited only once the library is configured and the board is on", async () => {
+  let looked = 0;
+  const principal = async () => { looked++; return "prn_000000000000000000a2"; };
+  const client = () => lib(async () => Response.json({ items: [] }));
+  await createFetchRelatedWork({ client: () => null, enabled: async () => true, log: quiet })({ ...input, principal });
+  await createFetchRelatedWork({ client, enabled: async () => false, log: quiet })({ ...input, principal });
+  expect(looked).toBe(0);
+  expect(await createFetchRelatedWork({ client, enabled: async () => true, log: quiet })({ ...input, principal })).toEqual([]);
+  expect(looked).toBe(1);
+});
+
+test("a principal lookup that never answers is cut by the same deadline", async () => {
+  const f = createFetchRelatedWork({ client: () => lib(async () => Response.json(ok)), enabled: async () => true, log: quiet, deadlineMs: 50 });
+  const t0 = Date.now();
+  expect(await f({ ...input, principal: () => new Promise(() => {}) })).toBeUndefined();
+  expect(Date.now() - t0).toBeLessThan(1000);
+});
+
+test("a lookup that finds no principal makes no call", async () => {
+  let calls = 0;
+  const f = createFetchRelatedWork({ client: () => lib(async () => { calls++; return Response.json(ok); }), enabled: async () => true, log: quiet });
+  expect(await f({ ...input, principal: async () => null })).toBeUndefined();
+  expect(calls).toBe(0);
 });
 
 test("off for the board, unconfigured, or no principal: no call at all", async () => {

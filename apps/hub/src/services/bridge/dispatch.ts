@@ -151,6 +151,12 @@ export interface DispatchDeps {
    * opens the attempt with the all-unknown fingerprint instead of holding the turn. It is awaited
    * inside the serial post queue, so board posts may lag by up to `FINGERPRINT_TIMEOUT_MS`; the
    * ACP turn itself is never held.
+   *
+   * The one lookup that can come before the turn is `relatedWork`'s, and only when related work is
+   * on (Superlibrary configured and the board's switch on): then the occupant lookup (`within`,
+   * up to `FINGERPRINT_TIMEOUT_MS`, 2 s) and the related call share `RELATED_TIMEOUT_MS`, so the
+   * worst-case delay before the session opens is 2.5 s, not 2 s + 2.5 s. With related work off or
+   * unconfigured nothing is awaited before the session beyond the switch read.
    */
   fingerprint?: (input: { tenantId: string; stationId: string }) => Promise<Fingerprint>;
   /** Who the station runs as (contract C5). A seam; defaults to `resolveStationOccupant`, bounded by `within`. */
@@ -160,7 +166,13 @@ export interface DispatchDeps {
    * defaults to `fetchRelatedWork`, which answers `undefined` whenever the section should be left
    * out (Superlibrary unconfigured, the board switched off, no principal, any failure or lateness).
    */
-  relatedWork?: (input: { tenantId: string; boardId: string; cardId: string; principal: string | null }) => Promise<CardPromptRelated[] | undefined>;
+  relatedWork?: (input: {
+    tenantId: string;
+    boardId: string;
+    cardId: string;
+    /** A lookup, awaited only if related work will actually be fetched. */
+    principal: string | null | (() => Promise<string | null>);
+  }) => Promise<CardPromptRelated[] | undefined>;
   log?: (message: string, meta?: Record<string, unknown>) => void;
 }
 
@@ -354,13 +366,19 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
   // holds and has not begun. A throw anywhere in it used to escape to the loop,
   // which logged and backed off — leaving the card `working` with a delegate
   // assigned and a run that would never do anything. It is handed back instead.
-  // Who the station runs as, looked up at most once per dispatch: the prompt needs it first (the
-  // related section is fetched with the agent's own token) and the attempt row reuses the answer.
-  // Bounded by `within`, so a late or failed lookup is null and never holds the claim.
+  // Who the station runs as. The related section needs it before the session opens, but only
+  // when related work will actually be fetched (Superlibrary configured, the board switched on):
+  // the prompt passes this as a lookup, which `fetchRelatedWork` awaits only then, inside its own
+  // deadline. Otherwise nothing is looked up before the session and the attempt does the lookup at
+  // its first ACP event, as it always has. An attempt reuses an answer the prompt already got; a
+  // null one (no occupant, late, failed) is looked up again at the attempt, as it was before.
+  // Each lookup is bounded by `within`, so a late or failed one is null and never holds the turn.
   const resolveOccupant = deps.occupant ?? ((i) => resolveStationOccupant(i.tenantId, i.stationId));
-  let occupantLookup: Promise<string | null> | null = null;
-  const occupant = (): Promise<string | null> =>
-    (occupantLookup ??= within(() => resolveOccupant({ tenantId, stationId: agent.stationId }), null));
+  const lookUpOccupant = () => within(() => resolveOccupant({ tenantId, stationId: agent.stationId }), null);
+  let promptLookup: Promise<string | null> | null = null;
+  const occupantForPrompt = (): Promise<string | null> => (promptLookup ??= lookUpOccupant());
+  const occupantForAttempt = async (): Promise<string | null> =>
+    (promptLookup ? await promptLookup : null) ?? lookUpOccupant();
 
   let text: string;
   let session: { id: string };
@@ -372,7 +390,7 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
     if (prior) return await replay(deps, key, work, prior);
 
     // ─── the prompt contract ────────────────────────────────────────────────
-    text = renderCardPrompt(await assemblePrompt(deps, work, occupant));
+    text = renderCardPrompt(await assemblePrompt(deps, work, occupantForPrompt));
 
     // ─── the session ────────────────────────────────────────────────────────
     session = await acp.createSession({
@@ -501,7 +519,7 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
         queue(async () => {
           const resolve = deps.fingerprint ?? ((i) => resolveStationFingerprint(i.tenantId, i.stationId));
           const at = { tenantId, stationId: agent.stationId };
-          const [fingerprint, agentPrincipalId] = await Promise.all([fingerprintWithin(() => resolve(at)), occupant()]);
+          const [fingerprint, agentPrincipalId] = await Promise.all([fingerprintWithin(() => resolve(at)), occupantForAttempt()]);
           if (agentPrincipalId === null) {
             // Null covers no occupant, a lookup that timed out and one that threw; the resolver logs
             // a throw itself. Say so here so an operator can tell why agent_principal_id is empty.
@@ -1136,7 +1154,7 @@ export async function assemblePrompt(
     tenantId: deps.tenantId,
     boardId: deps.agent.boardId,
     cardId,
-    principal: await occupant(),
+    principal: occupant,
   }).catch(() => undefined);
   return CardPrompt.parse({
     version: CARD_PROMPT_VERSION,
