@@ -111,7 +111,7 @@ An agent running in a station does not need a token of its own to reach these to
 run a **loopback MCP proxy** that adds two servers to the harness's `session/new` — this endpoint as
 `agentpod` and Superlibrary's as `superlibrary` — reached as the station's own agent through a
 `127.0.0.1` URL and a per-station secret that never leave the machine. Only Hermes, Claude Code,
-Codex and opencode stations can use it; OpenClaw's and Pi's ACP adapters take no HTTP MCP servers.
+Codex, opencode and Muse stations can use it; OpenClaw's and Pi's ACP adapters take no HTTP MCP servers.
 
 ```sh
 fleet mcp-proxy list                  # which stations each node serves, and any drift

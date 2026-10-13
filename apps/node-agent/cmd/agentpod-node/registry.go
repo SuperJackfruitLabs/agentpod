@@ -32,6 +32,10 @@ func buildRegistry(cfg config.Config) *descriptor.Registry {
 		CodexBinary: cfg.CodexBinary,
 		NodeBinary:  cfg.NodeBinary,
 	}))
+	reg.Register(descriptor.NewMuseFrom(descriptor.MuseConfig{
+		AcpBinary:  cfg.MuseAcpBinary,
+		MuseBinary: cfg.MuseBinary,
+	}))
 	if cfg.ConfigManagement {
 		reg.EnableConfigManagement()
 	}

@@ -1662,7 +1662,7 @@ apn mcp-proxy status          # the stations served, and whether each has a pers
 
 The bridge asks for the proxy on every claim; the node injects the two servers into the harness's
 `session/new` only for a named station whose harness takes HTTP MCP servers — **Hermes, Claude
-Code, Codex and opencode**; OpenClaw and Pi do not (their adapters declare `mcpCapabilities.http:
+Code, Codex, opencode and Muse**; OpenClaw and Pi do not (their adapters declare `mcpCapabilities.http:
 false`) — and tells the hub which it injected. The card prompt names `agentpod_link_artifact` and
 the **Before you start … `library_search`** block exactly when both servers are in the session.
 Requires `WORK_PLANE_AUDIENCES` to include Superlibrary's audience (DEPLOYMENT.md), or Superlibrary

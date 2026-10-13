@@ -1432,7 +1432,7 @@ usage:
 
 The node's loopback MCP proxy gives a station's harness sessions the hub's and
 Superlibrary's MCP tools, as the station's own agent. Only Hermes, Claude Code,
-Codex and opencode stations can use it: OpenClaw's and Pi's ACP adapters take
+Codex, opencode and Muse stations can use it: OpenClaw's and Pi's ACP adapters take
 no HTTP MCP servers in session/new, and enabling one is refused.
 
 A change is written to the node's config and applied without a restart, and
@@ -1478,7 +1478,7 @@ fleet mcp-proxy enable STATION_ID...
 fleet mcp-proxy enable --all-eligible [--node ID]
 ```
 
-Only Hermes, Claude Code, Codex and opencode stations are eligible. Naming an OpenClaw or Pi station refuses the whole request (422) and changes nothing: their ACP adapters take no HTTP MCP servers in `session/new`. `--all-eligible` skips them and lists them under `skipped`. A station already served keeps its secret, so its open sessions keep working.
+Only Hermes, Claude Code, Codex, opencode and Muse stations are eligible. Naming an OpenClaw or Pi station refuses the whole request (422) and changes nothing: their ACP adapters take no HTTP MCP servers in `session/new`. `--all-eligible` skips them and lists them under `skipped`. A station already served keeps its secret, so its open sessions keep working.
 
 | Argument | Meaning |
 |---|---|
@@ -1486,7 +1486,7 @@ Only Hermes, Claude Code, Codex and opencode stations are eligible. Naming an Op
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
-| `--all-eligible` | bool | `false` | Every adopted station whose harness takes HTTP MCP servers (Hermes, Claude Code, Codex, opencode). |
+| `--all-eligible` | bool | `false` | Every adopted station whose harness takes HTTP MCP servers (Hermes, Claude Code, Codex, opencode, Muse). |
 | `--node ID` | string | — | With `--all-eligible`: only this node's stations. |
 
 **Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.

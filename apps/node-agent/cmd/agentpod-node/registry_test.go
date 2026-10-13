@@ -216,3 +216,22 @@ func TestBuildRegistry_ThreadsCodexACPKeys(t *testing.T) {
 		}
 	}
 }
+
+// The muse pair must reach the descriptor: a node that names its adapter and
+// CLI in config has to see both in the spawned command, or an operator's
+// override is silently ignored and the session starts against whatever PATH
+// happened to offer.
+func TestBuildRegistry_MuseBinariesReachDescriptor(t *testing.T) {
+	reg := buildRegistry(config.Config{
+		MuseAcpBinary: "/opt/custom/bin/muse-acp",
+		MuseBinary:    "/opt/custom/bin/muse",
+	})
+
+	d, err := reg.For("muse")
+	if err != nil {
+		t.Fatalf("registry has no muse descriptor: %v", err)
+	}
+	if _, ok := d.(descriptor.ACPCommander); !ok {
+		t.Fatalf("muse descriptor must implement ACPCommander, got %T", d)
+	}
+}
