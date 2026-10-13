@@ -18,7 +18,7 @@ const mcpProxyUsage = `usage:
 
 The node's loopback MCP proxy gives a station's harness sessions the hub's and
 Superlibrary's MCP tools, as the station's own agent. Only Hermes, Claude Code,
-Codex and opencode stations can use it: OpenClaw's and Pi's ACP adapters take
+Codex, opencode and Muse stations can use it: OpenClaw's and Pi's ACP adapters take
 no HTTP MCP servers in session/new, and enabling one is refused.
 
 A change is written to the node's config and applied without a restart, and
@@ -48,7 +48,7 @@ func fleetMCPProxy(args []string) {
 		fleetGet(path, nil)
 	case "enable":
 		fs := flag.NewFlagSet("fleet mcp-proxy enable", flag.ExitOnError)
-		all := fs.Bool("all-eligible", false, "every adopted station whose harness takes HTTP MCP servers (Hermes, Claude Code, Codex, opencode)")
+		all := fs.Bool("all-eligible", false, "every adopted station whose harness takes HTTP MCP servers (Hermes, Claude Code, Codex, opencode, Muse)")
 		node := fs.String("node", "", "with --all-eligible: only this node's stations")
 		fs.Parse(args[1:])
 		body := map[string]any{"action": "enable"}

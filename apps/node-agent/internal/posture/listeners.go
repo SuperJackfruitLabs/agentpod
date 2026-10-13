@@ -20,6 +20,7 @@ var HarnessProcessNames = map[string]string{
 	"opencode": "opencode",
 	"codex":    "codex",
 	"claude":   "claude-code",
+	"muse":     "muse",
 }
 
 // Listener is one parsed listening socket.

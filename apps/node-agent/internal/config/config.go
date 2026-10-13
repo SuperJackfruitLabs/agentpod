@@ -60,7 +60,13 @@ type Config struct {
 	// the adapter inherits.
 	CodexAcpBinary string `json:"codexAcpBinary,omitempty"`
 	CodexBinary    string `json:"codexBinary,omitempty"`
-	NodeBinary     string `json:"nodeBinary,omitempty"`
+
+	// MuseAcpBinary is a muse-acp executable, when it is not on the service's
+	// PATH. MuseBinary pins which muse CLI the adapter drives (exported to it
+	// as MUSE_CLI); empty means "resolve it", never "ignore it".
+	MuseAcpBinary string `json:"museAcpBinary,omitempty"`
+	MuseBinary    string `json:"museBinary,omitempty"`
+	NodeBinary    string `json:"nodeBinary,omitempty"`
 	// NativeSkillActivation is an explicit operator opt-in for the separate
 	// native-placement transaction. It is off by default.
 	NativeSkillActivation bool `json:"nativeSkillActivation,omitempty"`

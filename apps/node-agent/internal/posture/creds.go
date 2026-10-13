@@ -56,6 +56,11 @@ var CredentialPaths = map[string][]string{
 	// This Mac 2026-08-11: present, 600.
 	"opencode": {".local/share/opencode/auth.json"},
 
+	// foundry 2026-10-13: `muse login` reported "Credential saved to
+	// /root/.config/muse/auth.json". The session index and skills live under
+	// the XDG DATA dir (~/.local/share/muse); only the credential is here.
+	"muse": {".config/muse/auth.json"},
+
 	// This Mac 2026-08-12, Pi 0.84.1: ~/.pi/agent held auth.json (mode 600, API
 	// keys and OAuth tokens) and models-store.json (mode 600, cached model
 	// catalogs), alongside settings.json (mode 644), bin/ and sessions/.

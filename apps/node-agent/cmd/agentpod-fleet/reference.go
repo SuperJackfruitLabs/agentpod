@@ -644,7 +644,7 @@ var reference = clidoc.Binary{
 		{
 			Path: "mcp-proxy enable", Summary: "Serve the named stations, or every eligible one.",
 			Synopsis: "fleet mcp-proxy enable STATION_ID...\nfleet mcp-proxy enable --all-eligible [--node ID]",
-			Detail: "Only Hermes, Claude Code, Codex and opencode stations are eligible. Naming an OpenClaw or Pi " +
+			Detail: "Only Hermes, Claude Code, Codex, opencode and Muse stations are eligible. Naming an OpenClaw or Pi " +
 				"station refuses the whole request (422) and changes nothing: their ACP adapters take no HTTP MCP " +
 				"servers in `session/new`. `--all-eligible` skips them and lists them under `skipped`. A station " +
 				"already served keeps its secret, so its open sessions keep working.",
