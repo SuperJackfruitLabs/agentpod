@@ -403,11 +403,12 @@ func writeRPCError(w http.ResponseWriter, status int, msg string) {
 //	openclaw     openclaw acp      mcpCapabilities {http: false, sse: false}
 //	pi           pi-acp            mcpCapabilities {http: false, sse: false}
 //	muse         muse-acp          mcpCapabilities {http: true, sse: false}
+//	kilo         kilo acp          mcpCapabilities {http: true, sse: true}
 //	hermes       hermes acp        declares nothing, registers session/new's servers anyway
 //	                               (acp_adapter/server.py new_session → _register_session_mcp_servers)
 //
 // A harness not listed gets no servers, and its prompt names none of their tools.
-var httpMCPHarnesses = map[string]bool{"hermes": true, "claude-code": true, "codex": true, "opencode": true, "muse": true}
+var httpMCPHarnesses = map[string]bool{"hermes": true, "claude-code": true, "codex": true, "opencode": true, "muse": true, "kilo": true}
 
 // SupportsHTTP reports whether a harness takes HTTP MCP servers in session/new.
 func SupportsHTTP(harness string) bool { return httpMCPHarnesses[harness] }
