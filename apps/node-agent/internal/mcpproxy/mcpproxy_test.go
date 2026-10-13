@@ -359,7 +359,7 @@ func TestSecretsRotateWithEachStart(t *testing.T) {
 
 func TestOnlyHarnessesThatTakeHTTPMCPServersQualify(t *testing.T) {
 	for h, want := range map[string]bool{
-		"hermes": true, "claude-code": true, "codex": true, "opencode": true, "muse": true,
+		"hermes": true, "claude-code": true, "codex": true, "opencode": true, "muse": true, "kilo": true,
 		"openclaw": false, "pi": false, "": false, "unknown": false,
 	} {
 		if got := SupportsHTTP(h); got != want {

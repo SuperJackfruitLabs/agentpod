@@ -235,3 +235,20 @@ func TestBuildRegistry_MuseBinariesReachDescriptor(t *testing.T) {
 		t.Fatalf("muse descriptor must implement ACPCommander, got %T", d)
 	}
 }
+
+// The kilo pair must reach the descriptor: a node that pins its data dir and
+// CLI in config has to see both, or an operator's override is silently ignored.
+func TestBuildRegistry_KiloConfigReachesDescriptor(t *testing.T) {
+	reg := buildRegistry(config.Config{
+		KiloDataDir: "/opt/custom/share/kilo",
+		KiloBinary:  "/opt/custom/bin/kilo",
+	})
+
+	d, err := reg.For("kilo")
+	if err != nil {
+		t.Fatalf("registry has no kilo descriptor: %v", err)
+	}
+	if _, ok := d.(descriptor.ACPCommander); !ok {
+		t.Fatalf("kilo descriptor must implement ACPCommander, got %T", d)
+	}
+}

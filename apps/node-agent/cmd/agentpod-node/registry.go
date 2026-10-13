@@ -36,6 +36,10 @@ func buildRegistry(cfg config.Config) *descriptor.Registry {
 		AcpBinary:  cfg.MuseAcpBinary,
 		MuseBinary: cfg.MuseBinary,
 	}))
+	reg.Register(descriptor.NewKiloFrom(descriptor.KiloConfig{
+		DataDir: cfg.KiloDataDir,
+		Binary:  cfg.KiloBinary,
+	}))
 	if cfg.ConfigManagement {
 		reg.EnableConfigManagement()
 	}

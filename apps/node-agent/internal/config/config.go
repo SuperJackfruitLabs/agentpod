@@ -66,7 +66,13 @@ type Config struct {
 	// as MUSE_CLI); empty means "resolve it", never "ignore it".
 	MuseAcpBinary string `json:"museAcpBinary,omitempty"`
 	MuseBinary    string `json:"museBinary,omitempty"`
-	NodeBinary    string `json:"nodeBinary,omitempty"`
+
+	// KiloDataDir overrides where Kilo keeps its data (default
+	// $XDG_DATA_HOME/kilo, else ~/.local/share/kilo); KiloBinary pins which
+	// kilo CLI serves ACP. Both empty means "resolve it".
+	KiloDataDir string `json:"kiloDataDir,omitempty"`
+	KiloBinary  string `json:"kiloBinary,omitempty"`
+	NodeBinary  string `json:"nodeBinary,omitempty"`
 	// NativeSkillActivation is an explicit operator opt-in for the separate
 	// native-placement transaction. It is off by default.
 	NativeSkillActivation bool `json:"nativeSkillActivation,omitempty"`

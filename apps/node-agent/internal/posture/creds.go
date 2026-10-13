@@ -61,6 +61,13 @@ var CredentialPaths = map[string][]string{
 	// the XDG DATA dir (~/.local/share/muse); only the credential is here.
 	"muse": {".config/muse/auth.json"},
 
+	// foundry 2026-10-13, Kilo 7.8.8: credentials live in the SQLite database
+	// rather than a file of their own — `account` carries access_token and
+	// refresh_token, `credential` carries value. Both tables were empty on an
+	// unauthenticated install, so this is read off the schema, not off a
+	// populated row.
+	"kilo": {".local/share/kilo/kilo.db"},
+
 	// This Mac 2026-08-12, Pi 0.84.1: ~/.pi/agent held auth.json (mode 600, API
 	// keys and OAuth tokens) and models-store.json (mode 600, cached model
 	// catalogs), alongside settings.json (mode 644), bin/ and sessions/.
