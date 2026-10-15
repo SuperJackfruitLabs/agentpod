@@ -1,6 +1,9 @@
 package service
 
 import (
+	"errors"
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -51,6 +54,12 @@ func TestNewManager_UsesRealGOOSAndUID(t *testing.T) {
 	// recording Runner that fails every call must still produce either a
 	// Manager or a well-formed error, never a panic.
 	run := func(name string, args ...string) (string, error) {
+		// As root on Linux, NewManager decides the unit scope by probing for a user unit
+		// (`systemctl --user is-active`) — on purpose. A container that runs the tests as
+		// root (the forge's CI does) reaches that, so the probe is allowed and answers "no".
+		if runtime.GOOS == "linux" && os.Getuid() == 0 && name == "systemctl" {
+			return "", errors.New("no user unit")
+		}
 		t.Fatalf("NewManager must not execute commands: %s %v", name, args)
 		return "", nil
 	}
