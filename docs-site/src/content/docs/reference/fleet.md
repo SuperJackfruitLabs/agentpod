@@ -69,6 +69,7 @@ This page is generated from the binary's own command table and source, and a tes
 | Command | What it does |
 |---|---|
 | [`fleet update`](#fleet-update) | Replace this binary with the newest release. |
+| [`fleet skill`](#fleet-skill) | Print the skill that ships inside this binary. |
 | [`fleet version`](#fleet-version) | Print the version and platform. |
 | [`fleet help`](#fleet-help) | Print the verb list and how credentials work. |
 
@@ -2997,6 +2998,51 @@ Fetches the `agentpod-fleet` asset for this platform and verifies it against the
 ```sh
 fleet update --check
 fleet update
+```
+
+## fleet skill
+
+Print the skill that ships inside this binary.
+
+```text
+fleet skill
+fleet skill install [--dir DIR] [--json]
+```
+
+Prints a `SKILL.md` for agents: what `fleet` is, how to sign in, every verb, and which verbs change shared state and so need an operator's say-so. It is written from this binary's own verbs and stamped with its version, and a test fails when a verb exists that it does not mention. Not to be confused with `fleet skills`, which manages skill artifacts on the fleet.
+
+Subcommands: [`install`](#fleet-skill-install).
+
+**Needs:** Nothing. Runs without a credential or a hub.
+
+**Exit status:** 0. 2 for an unknown subverb.
+
+```sh
+fleet skill | less
+```
+
+### fleet skill install
+
+Write the skill where an agent will find it.
+
+```text
+fleet skill install [--dir DIR] [--json]
+```
+
+Writes `DIR/agentpod-fleet/SKILL.md` atomically (a staged file in the same directory, then a rename) and prints the path. Running it again rewrites only that file. `DIR` defaults to `~/.claude/skills`. `fleet update` refreshes a copy at the default directory and never creates one.
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--dir DIR` | string | — | The skills directory to install under (default ~/.claude/skills). |
+| `--json` | bool | `false` | Print the path written as JSON. |
+
+**Needs:** Nothing. Runs without a credential or a hub.
+
+**Exit status:** 0 once written. 1 when the file could not be written. 2 for a bad flag.
+
+```sh
+fleet skill install
+fleet skill install --dir ./skills --json
 ```
 
 ## fleet version

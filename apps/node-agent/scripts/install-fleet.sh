@@ -11,6 +11,10 @@
 #   sh install-fleet.sh --uninstall     remove both names
 #
 # FLEET_BINARY=<path> installs that file instead of downloading (used by tests).
+#
+# SKILL_DIR=<dir> also runs the freshly installed `fleet skill install --dir <dir>`, which
+# writes <dir>/agentpod-fleet/SKILL.md for agents. Unset, nothing happens. A binary that
+# predates the verb is reported, not fatal.
 set -eu
 
 REPO="SuperJackfruitLabs/agentpod"
@@ -128,5 +132,14 @@ case ":$PATH:" in
 *":$BIN_DIR:"*) ;;
 *) echo "note: $BIN_DIR is not on your PATH; add it to run these by name." ;;
 esac
+
+if [ -n "${SKILL_DIR:-}" ]; then
+	if skill_out=$("$DEST" skill install --dir "$SKILL_DIR" 2>&1); then
+		echo "installed skill: $skill_out"
+	else
+		echo "note: SKILL_DIR is set but $DEST could not install the skill (a release older than" >&2
+		echo "      'fleet skill' does not have it). The install itself succeeded." >&2
+	fi
+fi
 
 echo "next: fleet login"
