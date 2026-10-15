@@ -1162,6 +1162,32 @@ var reference = clidoc.Binary{
 			Example:  "fleet update --check\nfleet update",
 		},
 		{
+			Path: "skill", Group: "This binary",
+			Summary:  "Print the skill that ships inside this binary.",
+			Synopsis: "fleet skill\nfleet skill install [--dir DIR] [--json]",
+			Detail: "Prints a `SKILL.md` for agents: what `fleet` is, how to sign in, every verb, and which verbs " +
+				"change shared state and so need an operator's say-so. It is written from this binary's own " +
+				"verbs and stamped with its version, and a test fails when a verb exists that it does not " +
+				"mention. Not to be confused with `fleet skills`, which manages skill artifacts on the fleet.",
+			Dispatch: []clidoc.Dispatch{{Func: "fleetSkill", Tag: "args[0]"}},
+			Auth:     needsNone,
+			Exit:     "0. 2 for an unknown subverb.",
+			Example:  "fleet skill | less",
+		},
+		{
+			Path:     "skill install",
+			Summary:  "Write the skill where an agent will find it.",
+			Synopsis: "fleet skill install [--dir DIR] [--json]",
+			Detail: "Writes `DIR/agentpod-fleet/SKILL.md` atomically (a staged file in the same directory, then a " +
+				"rename) and prints the path. Running it again rewrites only that file. `DIR` defaults to " +
+				"`~/.claude/skills`. `fleet update` refreshes a copy at the default directory and never creates one.",
+			Handlers: []string{"fleetSkillInstall"},
+			Flags:    []clidoc.Flag{{Name: "dir", Arg: "DIR"}, {Name: "json"}},
+			Auth:     needsNone,
+			Exit:     "0 once written. 1 when the file could not be written. 2 for a bad flag.",
+			Example:  "fleet skill install\nfleet skill install --dir ./skills --json",
+		},
+		{
 			Path: "version", Group: "This binary",
 			Summary:  "Print the version and platform.",
 			Synopsis: "fleet version",

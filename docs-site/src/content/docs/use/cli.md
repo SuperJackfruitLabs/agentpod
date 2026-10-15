@@ -47,6 +47,29 @@ curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/downlo
 This installs a client only — it enrols nothing and installs no service. `apn` has its own
 installer; see [Enrolling a node](/use/nodes/).
 
+## Skill for agents
+
+`fleet` carries a skill for agents inside the binary: what `fleet` is, how to sign in, every
+verb, and which verbs change shared state and need an operator's say-so. It is stamped with
+the version that printed it.
+
+```sh
+fleet skill                      # print SKILL.md
+fleet skill install              # write ~/.claude/skills/agentpod-fleet/SKILL.md
+fleet skill install --dir DIR    # write DIR/agentpod-fleet/SKILL.md
+```
+
+The installer can do it in one step: set `SKILL_DIR` and it runs the freshly installed
+`fleet skill install --dir "$SKILL_DIR"` (a binary that predates the verb is reported, and the
+install still succeeds).
+
+```sh
+curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/install-fleet.sh | SKILL_DIR=~/.claude/skills sh
+```
+
+`fleet update` refreshes a skill already installed at the default directory, so it does not
+fall behind the binary; it never creates one.
+
 ## Signing in
 
 ```sh

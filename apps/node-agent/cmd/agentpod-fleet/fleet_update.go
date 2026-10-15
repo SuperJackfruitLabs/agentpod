@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/selfupdate"
 )
@@ -46,9 +47,34 @@ func fleetUpdate(args []string) {
 	switch {
 	case res.Updated:
 		fmt.Printf("updated to %s\n", res.LatestTag)
+		refreshSkillAfterUpdate()
 	case res.CurrentVersion == res.LatestTag:
 		fmt.Println("up to date")
 	default:
 		fmt.Printf("update available: %s → %s\n", res.CurrentVersion, res.LatestTag)
+	}
+}
+
+// refreshSkillAfterUpdate keeps an installed skill from drifting behind the binary: if one is
+// already at the default directory, the NEW binary (this process still carries the old
+// embedded text) reinstalls it. It never creates one, and never fails the update.
+func refreshSkillAfterUpdate() {
+	dir, err := defaultSkillDir()
+	if err != nil {
+		return
+	}
+	attempted, err := refreshInstalledSkill(dir, func(dir string) error {
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		return exec.Command(exe, "skill", "install", "--dir", dir).Run()
+	})
+	switch {
+	case !attempted:
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "note: the installed skill was not refreshed (%v); run `fleet skill install`\n", err)
+	default:
+		fmt.Println("refreshed the installed skill")
 	}
 }

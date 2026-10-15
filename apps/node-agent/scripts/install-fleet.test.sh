@@ -167,3 +167,21 @@ BIN_DIR="$FAILDIR" FLEET_BINARY="$FAKE/agentpod-fleet" sh "$INSTALLER" >/dev/nul
 BIN_DIR="$FAILDIR" sh "$INSTALLER" --uninstall >/dev/null || fail "cleanup uninstall exited non-zero"
 
 echo "ok: install-fleet.sh"
+
+# SKILL_DIR runs the installed binary's `skill install --dir`; unset, it does nothing.
+SK_BIN=$(mktemp -d); SK_LOG=$(mktemp)
+printf '#!/bin/sh\necho "$*" >> "%s"\necho /skills/agentpod-fleet/SKILL.md\n' "$SK_LOG" > "$SK_BIN/agentpod-fleet"
+chmod +x "$SK_BIN/agentpod-fleet"
+BIN_DIR=$(mktemp -d) FLEET_BINARY="$SK_BIN/agentpod-fleet" sh "$INSTALLER" >/dev/null \
+  || fail "install without SKILL_DIR failed"
+[ ! -s "$SK_LOG" ] || fail "skill install ran although SKILL_DIR was unset"
+SK_OUT=$(BIN_DIR=$(mktemp -d) SKILL_DIR=/tmp/somewhere FLEET_BINARY="$SK_BIN/agentpod-fleet" sh "$INSTALLER") \
+  || fail "install with SKILL_DIR failed"
+[ "$(cat "$SK_LOG")" = "skill install --dir /tmp/somewhere" ] || fail "wrong skill install invocation: $(cat "$SK_LOG")"
+case "$SK_OUT" in *"installed skill: /skills/agentpod-fleet/SKILL.md"*) ;; *) fail "skill path not reported" ;; esac
+
+# A binary that predates the verb: non-fatal, with a clear message.
+printf '#!/bin/sh\necho unknown >&2\nexit 2\n' > "$SK_BIN/agentpod-fleet"
+SK_ERR=$(BIN_DIR=$(mktemp -d) SKILL_DIR=/tmp/somewhere FLEET_BINARY="$SK_BIN/agentpod-fleet" sh "$INSTALLER" 2>&1 >/dev/null) \
+  || fail "install failed because the binary predates 'skill'"
+case "$SK_ERR" in *"could not install the skill"*) ;; *) fail "no clear message for an old binary" ;; esac
