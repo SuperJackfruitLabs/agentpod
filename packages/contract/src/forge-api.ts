@@ -75,23 +75,22 @@ export const ForgeApiRevokeParams = z
 
 export const ForgeApiStatusParams = z.object({ stationId: z.string().min(1) }).strict();
 
+// Results are deliberately NOT strict: hub and nodes deploy independently, and a newer node adding a
+// field must not make a healthy reply unreadable. Params stay strict (no credential in a frame).
 export const ForgeApiDeliverResult = z
-  .object({ ok: z.boolean(), isolation: ForgeApiIsolation, stored: z.boolean() })
-  .strict();
-export const ForgeApiPolicyResult = z.object({ ok: z.boolean(), error: z.string().optional() }).strict();
+  .object({ ok: z.boolean(), isolation: ForgeApiIsolation, stored: z.boolean() });
+export const ForgeApiPolicyResult = z.object({ ok: z.boolean(), error: z.string().optional() });
 export const ForgeApiVerifyResult = z
   .object({
     ok: z.boolean(),
     login: z.string().optional(),
     reason: z.string().optional(),
     isolation: ForgeApiIsolation,
-  })
-  .strict();
-export const ForgeApiRevokeResult = z.object({ removed: z.boolean() }).strict();
+  });
+export const ForgeApiRevokeResult = z.object({ removed: z.boolean() });
 export const ForgeApiStatusResult = z
   .object({
     grants: z.array(
-      z.object({ grantId: z.string(), present: z.boolean(), isolation: ForgeApiIsolation }).strict(),
+      z.object({ grantId: z.string(), present: z.boolean(), isolation: ForgeApiIsolation }),
     ),
-  })
-  .strict();
+  });

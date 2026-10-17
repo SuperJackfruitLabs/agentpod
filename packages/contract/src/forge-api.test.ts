@@ -72,6 +72,11 @@ describe("forge.api contract", () => {
     expect(VERB_RESULTS["forge.api.revoke"].parse({ removed: true })).toBeTruthy();
     expect(VERB_RESULTS["forge.api.policy"].parse({ ok: false, error: "e" })).toBeTruthy();
     expect(VERB_RESULTS["forge.api.status"].parse({ grants: [{ grantId: "g", present: true, isolation: "same-user" }] })).toBeTruthy();
-    expect(VERB_RESULTS["forge.api.deliver"].safeParse({ ok: true, isolation: "same-user", stored: true, token: "x" }).success).toBe(false);
+    // results are NOT strict: a newer node may add a field and the hub must still read the reply
+    const skew = VERB_RESULTS["forge.api.deliver"].safeParse({ ok: true, isolation: "same-user", stored: true, future: 1 });
+    expect(skew.success).toBe(true);
+    if (skew.success) expect(skew.data).toMatchObject({ ok: true, isolation: "same-user", stored: true });
+    for (const v of VERBS) expect(VERB_RESULTS[v]).toBeDefined();
+    expect(VERB_RESULTS["forge.api.status"].safeParse({ grants: [{ grantId: "g", present: true, isolation: "same-user", extra: 1 }], extra: 2 }).success).toBe(true);
   });
 });
