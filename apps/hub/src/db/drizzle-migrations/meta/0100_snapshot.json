@@ -1,5 +1,5 @@
 {
-  "id": "e738eb3f-70f2-428a-af34-e01ecf575c05",
+  "id": "b9c52ffc-e96f-4b4b-8d9e-64535152709f",
   "prevId": "d35ffade-9366-4a5c-9952-fabd97d2db31",
   "version": "7",
   "dialect": "postgresql",
@@ -5421,6 +5421,12 @@
         "isolation": {
           "name": "isolation",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "policy_pending_since": {
+          "name": "policy_pending_since",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },

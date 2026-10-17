@@ -171,6 +171,8 @@ export function viewOf(row: StationForgeApiGrant, now = new Date()) {
     hasPendingCredential:
       row.sealedBlob !== null && row.sealedExpiresAt !== null && row.sealedExpiresAt.getTime() > now.getTime(),
     rotation: row.tokenHandle?.previous?.disposition === "live-until-verified" ? ("pending" as const) : null,
+    // Only whether a policy change awaits the node's confirmation; never when.
+    policyPending: row.policyPendingSince !== null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     verifiedAt: row.verifiedAt,

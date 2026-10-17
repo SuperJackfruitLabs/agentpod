@@ -102,6 +102,12 @@ export const stationForgeApiGrants = pgTable(
     generation: integer("generation").notNull(),
     isolation: text("isolation").$type<"separate-user" | "same-user">(),
 
+    /**
+     * Set when a policy change was saved but the node has not confirmed it; cleared on its ack.
+     * Kept apart from `stateReason` so a lifecycle reason never hides an outstanding policy.
+     */
+    policyPendingSince: timestamp("policy_pending_since", { withTimezone: true }),
+
     sealedBlob: text("sealed_blob"),
     sealedExpiresAt: timestamp("sealed_expires_at", { withTimezone: true }),
 

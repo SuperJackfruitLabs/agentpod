@@ -143,6 +143,7 @@ export interface TransitionPatch {
   verifiedAt?: Date | null;
   /** Written as a pair or cleared as a pair (the table CHECKs it); omitted = unchanged. */
   sealed?: { blob: string; expiresAt: Date } | null;
+  policyPendingSince?: Date | null;
 }
 
 /**
@@ -174,6 +175,7 @@ export async function transition(
   if (patch.isolation !== undefined) set.isolation = patch.isolation;
   if (patch.deliveredAt !== undefined) set.deliveredAt = patch.deliveredAt;
   if (patch.verifiedAt !== undefined) set.verifiedAt = patch.verifiedAt;
+  if (patch.policyPendingSince !== undefined) set.policyPendingSince = patch.policyPendingSince;
   if (patch.sealed !== undefined) {
     set.sealedBlob = patch.sealed?.blob ?? null;
     set.sealedExpiresAt = patch.sealed?.expiresAt ?? null;
@@ -830,6 +832,8 @@ async function sendDeliver(deps: ForgeApiDeps, row: Grant, station: StationRow, 
     verifiedAt: null,
     isolation: out.isolation,
     sealed: null,
+    // The acked deliver frame carried the row's current policy.
+    policyPendingSince: null,
   }).catch((err) => afterAckConflict(deps, row, err));
   log.info("forge grant delivered", { grantId: row.id, stationId: station.id, isolation: out.isolation });
   return done;
@@ -1619,7 +1623,7 @@ export async function updateGrantPolicy(deps: ForgeApiDeps, input: UpdatePolicyI
       throw new ForgeApiGrantError("grant-not-deliverable", `forge grant ${row.id} is ${row.state}.`, row.id);
     }
     const onNode = (row.state === "delivered" || row.state === "verified") && row.stationId !== null;
-    const save = async (reason: string | null | undefined, from: ForgeGrantState[]) => {
+    const save = async (reason: string | null | undefined, from: ForgeGrantState[], pendingSince?: Date | null) => {
       const set: Partial<typeof g.$inferInsert> = {
         preset: input.preset,
         rules: input.rules,
@@ -1627,6 +1631,8 @@ export async function updateGrantPolicy(deps: ForgeApiDeps, input: UpdatePolicyI
         updatedAt: deps.now(),
       };
       if (reason !== undefined) set.stateReason = reason;
+      // The outstanding-policy flag, independent of the reason: written in the same UPDATE.
+      if (pendingSince !== undefined) set.policyPendingSince = pendingSince;
       const [out] = await deps.db
         .update(g)
         .set(set)
@@ -1640,7 +1646,8 @@ export async function updateGrantPolicy(deps: ForgeApiDeps, input: UpdatePolicyI
     // Only our own marker may be written over; a lifecycle reason is left exactly as it is.
     const mayMark = row.stateReason === null || row.stateReason.startsWith("policy-pending");
     const mark = (r: string | null) => (mayMark ? r : undefined);
-    let saved = await save(mark("policy-pending: sending to the node"), [row.state]);
+    // Flagged before the frame goes out: a crash mid-send leaves it for reconcile to re-send.
+    let saved = await save(mark("policy-pending: sending to the node"), [row.state], row.policyPendingSince ?? deps.now());
     const station = await loadStation(deps.db, row.tenantId, row.stationId!);
     const params = VERB_PARAMS["forge.api.policy"].safeParse({
       stationId: station.id,
@@ -1666,7 +1673,7 @@ export async function updateGrantPolicy(deps: ForgeApiDeps, input: UpdatePolicyI
         else if (ack.data.ok !== true) why = `node rejected the policy: ${untrusted(ack.data.error ?? "no reason given")}`;
       }
     }
-    saved = await save(mark(why ? `policy-pending: ${why}` : null), [saved.state]);
+    saved = await save(mark(why ? `policy-pending: ${why}` : null), [saved.state], why ? saved.policyPendingSince : null);
     if (why) log.warn("forge grant policy not applied on the node", { grantId: row.id, stationId: station.id, reason: why });
     return { outcome: why ? "policy-pending" : "applied", grant: saved };
   });

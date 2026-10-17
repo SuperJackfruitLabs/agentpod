@@ -296,3 +296,12 @@ describe("CHECK constraints", () => {
     await grant({ stationId: ST_B, stationIdSnapshot: ST_B, instance: "https://ok-iso.test", isolation: "same-user" });
   });
 });
+
+describe("policy outstanding", () => {
+  test("policy_pending_since is a nullable timestamptz, independent of state_reason", async () => {
+    const [col] = await rawSql`
+      SELECT data_type, is_nullable FROM information_schema.columns
+      WHERE table_name = 'station_forge_api_grants' AND column_name = 'policy_pending_since'`;
+    expect(col).toEqual({ data_type: "timestamp with time zone", is_nullable: "YES" });
+  });
+});

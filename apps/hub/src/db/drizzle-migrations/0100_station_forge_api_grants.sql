@@ -18,6 +18,7 @@ CREATE TABLE "station_forge_api_grants" (
 	"token_handle" jsonb,
 	"generation" integer NOT NULL,
 	"isolation" text,
+	"policy_pending_since" timestamp with time zone,
 	"sealed_blob" text,
 	"sealed_expires_at" timestamp with time zone,
 	"created_by" text NOT NULL,

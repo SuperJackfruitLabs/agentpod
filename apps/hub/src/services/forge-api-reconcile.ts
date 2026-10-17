@@ -20,7 +20,7 @@
  *                                             or missing blob: revoke + mint generation + 1)
  *   supplied/app, not delivered, live blob  → deliverGrant (re-send)
  *   delivered/verified with a live blob     → deliverGrant (re-send the unacknowledged credential)
- *   delivered/verified, reason policy-pending → updateGrantPolicy with the row's own policy
+ *   delivered/verified, policy_pending_since set → updateGrantPolicy with the row's own policy
  *
  * Anything that sends a frame needs the node online AND advertising `forge.api`; otherwise it is
  * skipped and reported (`node-offline`, `node-lacks-forge.api`). One grant's failure never stops
@@ -122,7 +122,9 @@ function nextStep(row: Grant, now: Date): Step | null {
   }
   if (blobIsLive(row, now)) return { action: "deliver", needsNode: true };
   if (row.stateReason?.includes(VERIFY_PENDING)) return { action: "verify", needsNode: true };
-  if (row.stateReason?.startsWith("policy-pending")) return { action: "policy", needsNode: true };
+  // The flag, not the reason: a lifecycle reason (rotation-failed, …) must not hide a policy the
+  // node never confirmed.
+  if (row.policyPendingSince !== null) return { action: "policy", needsNode: true };
   return null;
 }
 
