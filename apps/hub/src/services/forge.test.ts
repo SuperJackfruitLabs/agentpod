@@ -73,28 +73,41 @@ describe("ensureAgentUser", () => {
 });
 
 describe("mintAgentToken", () => {
+  const repos = [{ owner: "SuperJackfruitLabs", name: "super-jackfruit-website" }];
+
   test("reads the token from `sha1`, which is where Forgejo puts it", async () => {
     // Not `token`. A reader expecting `token` gets undefined and hands an empty credential onward.
     const { fetchImpl, at } = scripted([[201, { id: 4, name: "station-x", sha1: "a".repeat(40) }]]);
 
-    const minted = await mintAgentToken(cfg, "coder-kai", {
-      name: "station-x",
-      repositories: ["SuperJackfruitLabs/super-jackfruit-website"],
-    }, fetchImpl);
+    const minted = await mintAgentToken(
+      cfg,
+      "coder-kai",
+      { name: "station-x", scopes: ["write:repository"], repositories: repos },
+      fetchImpl,
+    );
 
-    expect(minted.token).toBe("a".repeat(40));
+    expect(minted.secret).toBe("a".repeat(40));
     expect(minted.name).toBe("station-x");
     expect(at(0).url).toBe("https://forge.test/api/v1/admin/users/coder-kai/tokens");
     const sent = at(0).body as Record<string, unknown>;
     expect(sent.scopes).toEqual(["write:repository"]);
     // Confined to the repositories it works on, which the API supports and nothing else enforces.
-    expect(sent.repositories).toEqual(["SuperJackfruitLabs/super-jackfruit-website"]);
+    expect(sent.repositories).toEqual(repos);
+  });
+
+  test("an empty repositories list throws before any request", async () => {
+    // Omitted would mean every repository the account can reach.
+    const { fetchImpl, calls } = scripted([[201, { id: 4, name: "x", sha1: "a".repeat(40) }]]);
+    await expect(
+      mintAgentToken(cfg, "coder-kai", { name: "x", scopes: ["read:repository"], repositories: [] }, fetchImpl),
+    ).rejects.toThrow(/repositor/i);
+    expect(calls.length).toBe(0);
   });
 
   test("a 2xx carrying no token is a failure, not an empty credential", async () => {
     const { fetchImpl } = scripted([[201, { id: 4, name: "station-x" }]]);
     await expect(
-      mintAgentToken(cfg, "coder-kai", { name: "station-x" }, fetchImpl),
+      mintAgentToken(cfg, "coder-kai", { name: "station-x", scopes: ["read:repository"], repositories: repos }, fetchImpl),
     ).rejects.toThrow(/token/i);
   });
 
@@ -102,7 +115,12 @@ describe("mintAgentToken", () => {
     // forge answers a bad request with `%!s(<nil>)` — a Go format string printing a nil error — so
     // the body is noise at best, and at worst it echoes what was sent.
     const { fetchImpl } = scripted([[400, { message: "%!s(<nil>)" }]]);
-    const err = await mintAgentToken(cfg, "coder-kai", { name: "x" }, fetchImpl).catch((e) => e);
+    const err = await mintAgentToken(
+      cfg,
+      "coder-kai",
+      { name: "x", scopes: ["read:repository"], repositories: repos },
+      fetchImpl,
+    ).catch((e) => e);
     expect(String(err)).toContain("400");
     expect(String(err)).not.toContain("%!s");
   });

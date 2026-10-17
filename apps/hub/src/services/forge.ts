@@ -56,7 +56,8 @@ export interface ForgeUser {
 export interface MintedToken {
   id: number;
   name: string;
-  token: string;
+  /** The credential. Held in memory until sealed; never logged, never stored by the hub. */
+  secret: string;
 }
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -158,10 +159,12 @@ export async function readAgentUser(
 }
 
 export interface MintOptions {
-  /** Names the token so it can be revoked on its own. One per station. */
+  /** Names the token so it can be revoked on its own. The caller chooses it. */
   name: string;
-  /** `owner/repo` entries. Omitted means every repository the account can reach. */
-  repositories?: string[];
+  /** Forgejo token scopes, chosen by the grant's preset. Never hardcoded here. */
+  scopes: string[];
+  /** REQUIRED and non-empty: omitting it would mean every repository the account can reach. */
+  repositories: Array<{ owner: string; name: string }>;
 }
 
 /**
@@ -176,12 +179,17 @@ export async function mintAgentToken(
   opts: MintOptions,
   fetchImpl: FetchLike = fetch,
 ): Promise<MintedToken> {
+  // Before any request: an unconfined token is the failure this guard exists to prevent.
+  if (!Array.isArray(opts.repositories) || opts.repositories.length === 0) {
+    throw new Error(`forge: minting a token for ${username} needs at least one repository.`);
+  }
+  if (!Array.isArray(opts.scopes) || opts.scopes.length === 0) {
+    throw new Error(`forge: minting a token for ${username} needs at least one scope.`);
+  }
   const res = await call(cfg, "POST", `/admin/users/${encodeURIComponent(username)}/tokens`, fetchImpl, {
     name: opts.name,
-    // Enough to clone, commit and push. Not `write:user`, not `write:admin`: an agent that can
-    // edit accounts is an agent that can grant itself more.
-    scopes: ["write:repository"],
-    ...(opts.repositories ? { repositories: opts.repositories } : {}),
+    scopes: opts.scopes,
+    repositories: opts.repositories,
   });
 
   if (res.status !== 201 && res.status !== 200) {
@@ -196,11 +204,11 @@ export async function mintAgentToken(
     throw new Error(`forge: the mint for ${username} returned no token.`);
   }
 
-  log.info("forge token minted", { username, name: opts.name, repositories: opts.repositories?.length ?? 0 });
+  log.info("forge token minted", { username, name: opts.name, repositories: opts.repositories.length });
   return {
     id: typeof body.id === "number" ? body.id : 0,
     name: typeof body.name === "string" ? body.name : opts.name,
-    token: body.sha1,
+    secret: body.sha1,
   };
 }
 
