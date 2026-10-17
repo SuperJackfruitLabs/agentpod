@@ -1,4 +1,5 @@
 /** Explicit, owner-scoped onboarding. Existing assign/move APIs keep their semantics. */
+import { markGrantsRevoking } from "../services/station-forge-api";
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
@@ -293,6 +294,11 @@ export const stationSetupRouter = new Hono()
                 "This agent is already assigned elsewhere. Setup will not move it.",
               );
           }
+          // The station is unoccupied here (checked above), but a supplied/app forge API grant
+          // can exist on an unoccupied station: a new occupant inherits nothing, exactly as
+          // agents-admin's assign does. Same transaction; never calls the forge or the node
+          // (the reconcile sweep revokes).
+          await markGrantsRevoking(tx, { tenantId: station.tenantId, stationId, cause: "reassigned", actor: userId });
           // The dispatch grant is written at the plane after commit (below).
           await tx
             .update(stations)

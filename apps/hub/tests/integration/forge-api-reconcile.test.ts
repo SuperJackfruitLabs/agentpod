@@ -22,6 +22,7 @@ import {
   createForgeApiGrant,
   revokeGrant,
   rotateGrant,
+  updateGrantPolicy,
   verifyGrant,
   withGrantClaim,
 } from "../../src/services/station-forge-api";
@@ -38,6 +39,7 @@ import { forgetPrincipals } from "../helpers/principals";
 import { pollUntil } from "../helpers/wait";
 import {
   ACK,
+  FORGE,
   OFFLINE,
   assertNoLeak,
   captureConsole,
@@ -287,6 +289,47 @@ describe("rotations", () => {
     expect(row.generation).toBe(grant.generation);
     expect(row.sealedBlob).toBeNull();
     expect(row.stateReason).toStartWith("rotation-failed");
+    expect(row.stateReason).toContain("verify-pending");
+  });
+
+  for (const outcome of ["ok", "wrong-identity"] as const) {
+    test(`after an expired-rotation undo the next sweep verifies once (${outcome})`, async () => {
+      const h = harness();
+      const node = await freshNode();
+      const { agent, grant, ref } = await granted(h, node);
+      h.replies["forge.api.deliver"] = () => OFFLINE;
+      await rotateGrant(h.deps, ref);
+      await rawSql`UPDATE station_forge_api_grants SET sealed_expires_at = now() - interval '1 minute' WHERE id = ${grant.id}`;
+      await run(h, node, { isNodeOnline: () => false });
+      expect((await loadGrant(grant.id)).stateReason).toContain("verify-pending");
+      h.reset();
+      if (outcome === "wrong-identity") h.setLogin("someone-else");
+      else h.setLogin(agent.handle);
+
+      await run(h, node);
+      const row = await loadGrant(grant.id);
+      expect(h.callsOf("forge.api.verify").length).toBe(1);
+      if (outcome === "ok") {
+        expect(row.state).toBe("verified");
+        expect(row.stateReason).toBeNull();
+      } else {
+        expect(row.state).toBe("failed");
+        expect(row.stateReason).toContain("wrong-identity");
+      }
+      // Once only: a further sweep does not verify again.
+      h.reset();
+      await run(h, node);
+      expect(h.callsOf("forge.api.verify").length).toBe(0);
+    });
+  }
+
+  test("verify-pending is a lifecycle reason: a policy change does not overwrite it", async () => {
+    const h = harness();
+    const node = await freshNode();
+    const { grant, ref } = await granted(h, node);
+    await rawSql`UPDATE station_forge_api_grants SET state_reason = 'rotation-failed: expired; verify-pending' WHERE id = ${grant.id}`;
+    await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false });
+    expect((await loadGrant(grant.id)).stateReason).toBe("rotation-failed: expired; verify-pending");
   });
 
   test("a previous with disposition revoke and an orphan handle are revoked and cleared", async () => {
@@ -309,6 +352,35 @@ describe("rotations", () => {
 });
 
 describe("orphan scan", () => {
+  test("a token whose id matches a recorded handle is accounted for even under another name", async () => {
+    const h = harness();
+    const node = await freshNode();
+    const { agent, grant } = await granted(h, node);
+    const id = grant.tokenHandle!.id!;
+    const listTokens = async () => [{ id, name: `agentpod-renamed-${RUN}` }];
+    const report = await runForgeApiReconcile({
+      ...h.deps,
+      providers: () => ({ ...h.provider, listTokens }),
+      isNodeOnline: () => false,
+      failures: createFailureTracker(),
+    });
+    expect(report.orphans.filter((o) => o.account === agent.handle)).toEqual([]);
+  });
+
+  test("a provider that cannot list tokens is reported, not silently skipped", async () => {
+    const h = harness();
+    const node = await freshNode();
+    const { agent } = await granted(h, node);
+    const { listTokens: _l, ...noList } = h.provider;
+    const report = await runForgeApiReconcile({
+      ...h.deps,
+      providers: () => noList,
+      isNodeOnline: () => false,
+      failures: createFailureTracker(),
+    });
+    expect(report.orphanScanUnsupported).toContainEqual({ provider: "forgejo", instance: FORGE, account: agent.handle });
+  });
+
   test("orphan token found by name prefix is reported and NOT deleted", async () => {
     const h = harness();
     const node = await freshNode();

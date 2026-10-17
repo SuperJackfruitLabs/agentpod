@@ -22,12 +22,21 @@ import { stationForgeApiGrants as g } from "../../src/db/schema/forge-api-grants
 import { agentsAdminRouter } from "../../src/routes/agents-admin";
 import { unadopt } from "../../src/services/station-registry";
 import { removeNode } from "../../src/services/node-removal";
+import { destroyRuntime } from "../../src/services/runtimes";
 import {
   createForgeApiGrant,
+  deliverFaults,
   markGrantsRevoking,
+  revokeGrant,
+  rotateGrant,
+  withGrantClaim,
   REVOKED_STATION_GONE,
 } from "../../src/services/station-forge-api";
-import { configureForgeApiReconcile, runForgeApiReconcile } from "../../src/services/forge-api-reconcile";
+import {
+  configureForgeApiReconcile,
+  kickForgeApiRevoke,
+  runForgeApiReconcile,
+} from "../../src/services/forge-api-reconcile";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
 import { forgetPrincipals } from "../helpers/principals";
@@ -70,9 +79,9 @@ const put = (stationId: string, principalId: string) =>
 const del = (stationId: string) => app().request(`/stations/${stationId}/agent`, { method: "DELETE" });
 
 /** An occupied station with a delivered minted grant. */
-async function grantedStation(h: Harness, nodeId = NODE) {
+async function grantedStation(h: Harness, nodeId = NODE, parentStationId?: string) {
   const agent = await newAgent(f);
-  const st = await insertStation(f, nodeId, { principalId: agent.principalId });
+  const st = await insertStation(f, nodeId, { principalId: agent.principalId, parentStationId });
   const grant = await createForgeApiGrant(h.deps, grantInput(f, st.id));
   expect(grant.state).toBe("delivered");
   h.reset();
@@ -104,6 +113,7 @@ beforeEach(() => {
 afterEach(() => {
   con.restore();
   configureForgeApiReconcile(null);
+  deliverFaults.beforeSend = undefined;
 });
 
 beforeAll(async () => {
@@ -116,6 +126,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await rawSql`DELETE FROM station_forge_api_grants WHERE station_id_snapshot LIKE ${`station_${RUN}_%`}`;
   await rawSql`DELETE FROM station_audit WHERE user_id = ${OWNER}`;
+  await rawSql`DELETE FROM provisioned_runtimes WHERE user_id = ${OWNER}`;
   await rawSql`DELETE FROM stations WHERE user_id = ${OWNER}`;
   await rawSql`DELETE FROM nodes WHERE user_id = ${OWNER}`;
   await forgetPrincipals({ handles: f.handles });
@@ -329,5 +340,160 @@ describe("station deletion and node removal", () => {
     for (const { grant } of [a, b]) expect((await loadGrant(grant.id)).state).toBe("revoked");
     expect(h.revoked.map((r) => r.name)).toEqual(expect.arrayContaining([a.grant.tokenHandle!.name, b.grant.tokenHandle!.name]));
     await assertNoLeak(h, f, con.lines);
+  });
+});
+
+describe("cascades: child stations and runtime destroy", () => {
+  async function expectDeleted(grantId: string, stationId: string, cause: string) {
+    const row = await loadGrant(grantId);
+    expect(row.state).toBe("revoking");
+    expect(row.stationId).toBeNull();
+    expect(row.stationIdSnapshot).toBe(stationId);
+    expect(row.stateReason).toContain(cause);
+  }
+
+  test("deleting a parent station marks its descendants' grants in the same transaction", async () => {
+    const h = harness();
+    const parent = await grantedStation(h);
+    const child = await grantedStation(h, NODE, parent.st.id);
+    const grandchild = await grantedStation(h, NODE, child.st.id);
+
+    await unadopt(OWNER, parent.st.id);
+
+    for (const x of [parent, child, grandchild]) await expectDeleted(x.grant.id, x.st.id, "station-deleted");
+    expect((await auditFor(child.grant.id)).length).toBe(1);
+    expect(h.calls).toEqual([]);
+  });
+
+  test("a parent deletion that rolls back leaves the child's grant live", async () => {
+    const h = harness();
+    const parent = await grantedStation(h);
+    const child = await grantedStation(h, NODE, parent.st.id);
+    const restore = await failWritesTo(parent.st.id, "DELETE");
+    try {
+      await expect(unadopt(OWNER, parent.st.id)).rejects.toThrow();
+    } finally {
+      await restore();
+    }
+    expect((await loadGrant(child.grant.id)).state).toBe("delivered");
+  });
+
+  for (const order of ["parent-first", "child-first"] as const) {
+    test(`node removal with a parent/child pair (${order}) marks both`, async () => {
+      const h = harness();
+      const node = `node_${RUN}_pc_${order}`;
+      await insertNode(f, node);
+      await rawSql`UPDATE nodes SET status = 'offline' WHERE id = ${node}`;
+      let parent, child;
+      if (order === "parent-first") {
+        parent = await grantedStation(h, node);
+        child = await grantedStation(h, node, parent.st.id);
+      } else {
+        // The child row is inserted (and so listed) before its parent.
+        const tmp = await insertStation(f, node);
+        child = await grantedStation(h, node, tmp.id);
+        parent = await grantedStation(h, node);
+        await rawSql`UPDATE stations SET parent_station_id = ${parent.st.id} WHERE id = ${child.st.id}`;
+        await unadopt(OWNER, tmp.id);
+      }
+      expect((await removeNode(OWNER, node, { force: true })).kind).toBe("removed");
+      await expectDeleted(parent.grant.id, parent.st.id, "node-removed");
+      await expectDeleted(child.grant.id, child.st.id, "node-removed");
+    });
+  }
+
+  test("destroying a provisioned runtime marks its stations' grants", async () => {
+    const h = harness();
+    const node = `node_${RUN}_rt`;
+    await insertNode(f, node);
+    const rt = `rt_${RUN}`;
+    await rawSql`
+      INSERT INTO provisioned_runtimes (tenant_id, id, user_id, provider, external_id, status, name, resource_tier, harness, node_id, created_at, updated_at)
+      VALUES (${f.tenant}, ${rt}, ${OWNER}, 'docker', NULL, 'online', ${rt}, 'small', 'none', ${node}, now(), now())`;
+    const x = await grantedStation(h, node);
+
+    await destroyRuntime(OWNER, rt);
+
+    expect((await rawSql`SELECT id FROM nodes WHERE id = ${node}`).length).toBe(0);
+    await expectDeleted(x.grant.id, x.st.id, "node-removed");
+    expect(h.calls).toEqual([]);
+  });
+});
+
+describe("deliver after the mark", () => {
+  const mark = (stationId: string) =>
+    db.transaction((tx) => markGrantsRevoking(tx, { tenantId: f.tenant, stationId, cause: "unassigned", actor: OWNER }));
+
+  test("a rotation whose grant is marked between blob persist and send sends no frame", async () => {
+    const h = harness();
+    const { st, agent, grant } = await grantedStation(h);
+    h.setLogin(agent.handle);
+    deliverFaults.beforeSend = async () => {
+      await mark(st.id);
+    };
+    const err = await rotateGrant(h.deps, { tenantId: f.tenant, grantId: grant.id }).catch((e) => e);
+    deliverFaults.beforeSend = undefined;
+    expect(err?.code).toBe("grant-revoking");
+    expect(h.callsOf("forge.api.deliver")).toEqual([]);
+    const row = await loadGrant(grant.id);
+    expect(row.state).toBe("revoking");
+    // The revoke that follows takes both generations back.
+    await revokeGrant(h.deps, { tenantId: f.tenant, grantId: grant.id });
+    expect(h.revoked.map((r) => r.name).sort()).toEqual([grant.tokenHandle!.name, row.tokenHandle!.name].sort());
+    await assertNoLeak(h, f, con.lines, [err]);
+  });
+
+  test("a first delivery whose grant is marked before send sends no frame", async () => {
+    const h = harness();
+    const agent = await newAgent(f);
+    const st = await insertStation(f, NODE, { principalId: agent.principalId });
+    deliverFaults.beforeSend = async () => {
+      await mark(st.id);
+    };
+    const err = await createForgeApiGrant(h.deps, grantInput(f, st.id)).catch((e) => e);
+    expect(err?.code).toBe("grant-revoking");
+    expect(h.callsOf("forge.api.deliver")).toEqual([]);
+  });
+
+  test("an ack that lands after revocation began re-queues the node wipe", async () => {
+    const h = harness();
+    const agent = await newAgent(f);
+    const st = await insertStation(f, NODE, { principalId: agent.principalId });
+    let grantId = "";
+    h.replies["forge.api.deliver"] = async (params) => {
+      grantId = (params as { grantId: string }).grantId;
+      // Revocation began and its wipe already ran: only the provider side is outstanding.
+      await rawSql`UPDATE station_forge_api_grants SET state = 'revoking', state_reason = 'provider-pending: forge down', sealed_blob = NULL, sealed_expires_at = NULL WHERE id = ${grantId}`;
+      return { ok: true, data: { ok: true, stored: true, isolation: "same-user" } };
+    };
+    const err = await createForgeApiGrant(h.deps, grantInput(f, st.id)).catch((e) => e);
+    expect(err?.code).toBe("grant-revoking");
+    expect((await loadGrant(grantId)).stateReason).toContain("wipe-pending");
+    h.reset();
+    await revokeGrant(h.deps, { tenantId: f.tenant, grantId });
+    expect(h.callsOf("forge.api.revoke").length).toBe(1);
+    expect((await loadGrant(grantId)).state).toBe("revoked");
+  });
+
+  test("the post-commit kick retries grant-busy before deferring to the sweep", async () => {
+    const h = harness();
+    const { st, grant } = await grantedStation(h);
+    await mark(st.id);
+    configureForgeApiReconcile(h.deps, { schedule: false, kickBackoffMs: 30 });
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let entered!: () => void;
+    const inside = new Promise<void>((r) => (entered = r));
+    const holder = withGrantClaim(f.tenant, grant.id, async () => {
+      entered();
+      await held;
+    });
+    await inside;
+    kickForgeApiRevoke([{ tenantId: f.tenant, grantId: grant.id }]);
+    await new Promise((r) => setTimeout(r, 40));
+    release();
+    await holder;
+    const done = await pollUntil(async () => ((await loadGrant(grant.id)).state === "revoked" ? true : null));
+    expect(done).toBe(true);
   });
 });

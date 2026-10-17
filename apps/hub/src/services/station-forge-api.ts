@@ -698,6 +698,9 @@ async function mintAndDeliver(
   return sendDeliver(deps, current, station, sealed);
 }
 
+/** Test seam: runs immediately before a deliver frame's last state check (proves the check). */
+export const deliverFaults: { beforeSend?: (grantId: string) => Promise<void> } = {};
+
 /** Retryable transport failures: the frame may never have reached the node. */
 const TRANSIENT = new Set(["node offline", "timeout", "node disconnected"]);
 
@@ -708,7 +711,9 @@ type DeliverOutcome =
   /** The node said no, or did not positively confirm: not delivered. */
   | { kind: "refused"; reason: string }
   /** The node answered, but unreadably: it may have stored the credential. */
-  | { kind: "ambiguous"; reason: string };
+  | { kind: "ambiguous"; reason: string }
+  /** Revocation began (markGrantsRevoking does not take the claim): nothing was sent. */
+  | { kind: "revoking" };
 
 /**
  * Validate and send one `forge.api.deliver` frame and classify the reply. Writes nothing; callers
@@ -735,6 +740,16 @@ async function relayDeliver(deps: ForgeApiDeps, row: Grant, station: StationRow,
     const where = frame.error.issues.map((i) => i.path.join(".") || "(root)").join(", ");
     return { kind: "refused", reason: `invalid deliver frame (${where}); nothing was sent` };
   }
+
+  // Last check before the frame leaves: an occupancy change may have marked the grant `revoking`
+  // since this step read it (it does not wait for the claim). Never hand a revoking grant's
+  // credential to a node. The window left after this read is closed by `afterAck`.
+  if (deliverFaults.beforeSend) await deliverFaults.beforeSend(row.id);
+  const [now] = await deps.db
+    .select({ state: g.state })
+    .from(g)
+    .where(and(eq(g.tenantId, row.tenantId), eq(g.id, row.id)));
+  if (!now || now.state === "revoking" || now.state === "revoked") return { kind: "revoking" };
 
   let res: BrokerReply;
   try {
@@ -768,8 +783,32 @@ function expectLoginFor(deps: Pick<ForgeApiDeps, "providers">, row: Grant): stri
   return deps.providers(row.provider).expectedIdentity(grantRef(row));
 }
 
+function revokingError(row: Grant): ForgeApiGrantError {
+  return new ForgeApiGrantError("grant-revoking", `forge grant ${row.id} is being revoked; nothing was delivered.`, row.id);
+}
+
+/**
+ * The node acked a credential, but the grant's own UPDATE failed: revocation began after the last
+ * pre-send check. The node now holds a credential its grant is revoking, so a node wipe must be
+ * outstanding even if one already ran before the frame landed. Re-queue it (revoking), or log
+ * (revoked: the provider side is done, the credential is inert). Always throws `grant-revoking`.
+ */
+async function afterAckConflict(deps: ForgeApiDeps, row: Grant, err: unknown): Promise<never> {
+  const cur = await loadGrant(deps.db, row).catch(() => null);
+  if (!cur || (cur.state !== "revoking" && cur.state !== "revoked")) throw err;
+  if (cur.state === "revoking" && !(cur.stateReason ?? "").includes(WIPE_PENDING)) {
+    await transition(deps.db, cur, ["revoking"], "revoking", {
+      now: deps.now(),
+      stateReason: [cur.stateReason, `${WIPE_PENDING}: delivered after revocation began`].filter(Boolean).join("; "),
+    }).catch(() => undefined);
+  }
+  log.warn("forge grant credential delivered after revocation began; node wipe re-queued", { grantId: row.id, state: cur.state });
+  throw new ForgeApiGrantError("grant-revoking", `forge grant ${row.id} was revoked while it was being delivered.`, row.id);
+}
+
 async function sendDeliver(deps: ForgeApiDeps, row: Grant, station: StationRow, sealed: string): Promise<Grant> {
   const out = await relayDeliver(deps, row, station, sealed);
+  if (out.kind === "revoking") throw revokingError(row);
   if (out.kind !== "acked") {
     // A failed or unreadable ack keeps the sealed blob by design: it is ciphertext only the node can
     // open, it expires after 24 h, and keeping it lets a retry re-send instead of re-minting.
@@ -778,7 +817,10 @@ async function sendDeliver(deps: ForgeApiDeps, row: Grant, station: StationRow, 
     const to: ForgeGrantState =
       out.kind === "refused" || out.kind === "ambiguous" ? "failed" : row.state === "delivered" || row.state === "verified" ? row.state : "provisioned";
     log.warn("forge grant not delivered", { grantId: row.id, stationId: station.id, state: to, reason: out.reason });
-    return transition(deps.db, row, [row.state], to, { now: deps.now(), stateReason: out.reason });
+    // A frame that may have landed (ambiguous/transient) on a grant revoked meanwhile: re-queue the wipe.
+    return transition(deps.db, row, [row.state], to, { now: deps.now(), stateReason: out.reason }).catch((err) =>
+      afterAckConflict(deps, row, err),
+    );
   }
   const done = await transition(deps.db, row, [row.state], "delivered", {
     now: deps.now(),
@@ -787,7 +829,7 @@ async function sendDeliver(deps: ForgeApiDeps, row: Grant, station: StationRow, 
     verifiedAt: null,
     isolation: out.isolation,
     sealed: null,
-  });
+  }).catch((err) => afterAckConflict(deps, row, err));
   log.info("forge grant delivered", { grantId: row.id, stationId: station.id, isolation: out.isolation });
   return done;
 }
@@ -1014,10 +1056,14 @@ async function restorePrevious(
  */
 async function sendRotationBlob(deps: ForgeApiDeps, row: Grant, station: StationRow): Promise<Grant> {
   const out = await relayDeliver(deps, row, station, row.sealedBlob!);
+  // Revoking: the revoke takes both generations back (current and previous); nothing to undo.
+  if (out.kind === "revoking") throw revokingError(row);
   if (out.kind === "refused") return restorePrevious(deps, row, out.reason);
   if (out.kind !== "acked") {
     log.warn("forge grant rotation delivery unconfirmed; nothing revoked", { grantId: row.id, stationId: station.id });
-    return transition(deps.db, row, [row.state], row.state, { now: deps.now(), stateReason: `rotation-pending: ${out.reason}` });
+    return transition(deps.db, row, [row.state], row.state, { now: deps.now(), stateReason: `rotation-pending: ${out.reason}` }).catch(
+      (err) => afterAckConflict(deps, row, err),
+    );
   }
   const now = deps.now();
   return transition(deps.db, row, [row.state], "delivered", {
@@ -1027,7 +1073,7 @@ async function sendRotationBlob(deps: ForgeApiDeps, row: Grant, station: Station
     isolation: out.isolation,
     sealed: null,
     stateReason: "rotation-pending: awaiting verification",
-  });
+  }).catch((err) => afterAckConflict(deps, row, err));
 }
 
 /**
@@ -1322,6 +1368,8 @@ const PROVIDER_PENDING = "provider-pending";
 const PENDING_OPERATOR = "revocation-pending-operator";
 const WIPE_PENDING = "wipe-pending";
 const WIPE_SKIPPED = "wipe-skipped: station-gone";
+/** Reason suffix: reconcile verifies this grant once on its next sweep (a lifecycle reason). */
+export const VERIFY_PENDING = "verify-pending";
 export const REVOKED_STATION_GONE = "revoked; node wipe skipped: station-gone (credential inert)";
 
 type WipeResult = { status: "done" } | { status: "skipped" } | { status: "pending"; why: string };
@@ -1668,9 +1716,8 @@ export async function markGrantsRevoking(
       stateReason: `${provider}; ${WIPE_PENDING}; cause: ${input.cause}`,
       sealed: null,
     });
-    // recordAudit takes the Database type; a transaction has the same insert/update surface, and
-    // writing through it is what makes the audit row roll back with the change it records.
-    const audit = await recordAudit(tx as unknown as Database, {
+    // Through the transaction: the audit row rolls back with the change it records.
+    const audit = await recordAudit(tx, {
       userId: input.actor ?? "system",
       nodeId: st?.nodeId ?? "",
       stationKey: st?.stationKey ?? row.stationIdSnapshot,
@@ -1745,6 +1792,13 @@ export async function undoExpiredRotation(deps: ForgeApiDeps, ref: Ref): Promise
     const row = await loadGrant(deps.db, stale);
     const { rotating } = rotationOf(row);
     if (!rotating || !row.sealedBlob || blobIsLive(row, deps.now())) return row;
-    return restorePrevious(deps, row, "the new token's sealed copy expired unacknowledged");
+    const restored = await restorePrevious(deps, row, "the new token's sealed copy expired unacknowledged");
+    // The frame may have reached the node (an ambiguous delivery), so the node may now hold the
+    // revoked n+1 instead of n. Verify once on the next sweep: a match clears the marker, a
+    // failure (wrong-identity, unauthorized) fails the grant honestly.
+    return transition(deps.db, restored, [restored.state], restored.state, {
+      now: deps.now(),
+      stateReason: `${restored.stateReason}; ${VERIFY_PENDING}`,
+    });
   });
 }

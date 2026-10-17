@@ -15,7 +15,7 @@
  */
 
 import { eq } from "drizzle-orm";
-import type { Database } from "../db/drizzle";
+import type { DbExecutor } from "../db/drizzle";
 import { resolveTenantForUser } from "../auth/tenant";
 import { stationAudit } from "../db/schema/audit";
 
@@ -108,7 +108,7 @@ function sanitizeParams(params: Record<string, unknown>): Record<string, unknown
  * @param args    Audit context: who did what, where.
  */
 export async function recordAudit(
-  db: Database,
+  db: DbExecutor,
   args: AuditArgs
 ): Promise<AuditHandle> {
   const id = `audit_${crypto.randomUUID()}`;

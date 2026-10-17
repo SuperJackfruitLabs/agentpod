@@ -38,7 +38,7 @@ import { resolveTenantForUser } from "../auth/tenant";
 import { tenantScope } from "../db/tenant-scope";
 import { provisionedRuntimes, nodes } from "../db/schema/nodes";
 import { stations } from "../db/schema/stations";
-import { markGrantsRevoking } from "./station-forge-api";
+import { markStationTreeRevoking } from "./station-registry";
 import { mintEnrollmentToken } from "./enrollment";
 import {
   getProvisioner,
@@ -353,12 +353,11 @@ export async function destroyRuntime(userId: string, id: string): Promise<void> 
     // transaction (the FK nulls their station_id) so the reconcile sweep revokes the tokens.
     await db.transaction(async (tx) => {
       const gone = await tx
-        .select({ id: stations.id, tenantId: stations.tenantId })
+        .select({ id: stations.id })
         .from(stations)
         .where(eq(stations.nodeId, nodeId));
-      for (const st of gone) {
-        await markGrantsRevoking(tx, { tenantId: st.tenantId, stationId: st.id, cause: "node-removed" });
-      }
+      // Each station's descendants too: they cascade with it, wherever their node is.
+      for (const st of gone) await markStationTreeRevoking(tx, st.id, "node-removed");
       await tx.delete(nodes).where(eq(nodes.id, nodeId));
     });
   }

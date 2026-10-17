@@ -39,7 +39,8 @@ export type ForgeApiGrantErrorCode =
   | "expected-login-required"
   | "bad-expected-login"
   | "bad-sealed-blob"
-  | "bad-policy";
+  | "bad-policy"
+  | "grant-revoking";
 
 const GRANT_ERROR_STATUS: Record<ForgeApiGrantErrorCode, number> = {
   "station-not-found": 404,
@@ -67,6 +68,8 @@ const GRANT_ERROR_STATUS: Record<ForgeApiGrantErrorCode, number> = {
   "bad-expected-login": 422,
   "bad-sealed-blob": 422,
   "bad-policy": 422,
+  // Revocation began while this step was under way; nothing (more) was sent.
+  "grant-revoking": 409,
 };
 
 /**

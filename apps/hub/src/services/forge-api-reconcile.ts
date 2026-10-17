@@ -63,6 +63,7 @@ import {
   untrusted,
   updateGrantPolicy,
   verifyGrant,
+  VERIFY_PENDING,
   type ForgeApiDeps,
 } from "./station-forge-api";
 
@@ -95,6 +96,8 @@ export interface ReconcileReport {
   skipped: { grantId: string; why: string }[];
   errors: { grantId: string; action: ReconcileAction; error: string }[];
   orphans: { provider: ForgeApiProvider; instance: string; account: string; name: string }[];
+  /** Accounts the orphan scan could not check: their provider cannot list tokens. */
+  orphanScanUnsupported: { provider: ForgeApiProvider; instance: string; account: string }[];
   /** Grants that have failed the same way in REPEATED_FAILURE_THRESHOLD or more consecutive sweeps. */
   repeatedFailures: string[];
 }
@@ -118,6 +121,7 @@ function nextStep(row: Grant, now: Date): Step | null {
     return null;
   }
   if (blobIsLive(row, now)) return { action: "deliver", needsNode: true };
+  if (row.stateReason?.includes(VERIFY_PENDING)) return { action: "verify", needsNode: true };
   if (row.stateReason?.startsWith("policy-pending")) return { action: "policy", needsNode: true };
   return null;
 }
@@ -173,7 +177,7 @@ async function auditSystem(
 export async function runForgeApiReconcile(deps: ReconcileDeps): Promise<ReconcileReport> {
   const failures = deps.failures ?? defaultFailures;
   const isOnline = deps.isNodeOnline ?? ((id: string) => connectionManager.isOnline(id));
-  const report: ReconcileReport = { scanned: 0, actions: [], skipped: [], errors: [], orphans: [], repeatedFailures: [] };
+  const report: ReconcileReport = { scanned: 0, actions: [], skipped: [], errors: [], orphans: [], orphanScanUnsupported: [], repeatedFailures: [] };
   const rows = await deps.db
     .select({ grant: g, nodeId: stations.nodeId, capabilities: stations.capabilities })
     .from(g)
@@ -243,24 +247,33 @@ export async function runForgeApiReconcile(deps: ReconcileDeps): Promise<Reconci
 /** Report provider tokens named `agentpod-*` that no grant row knows. Never deletes. */
 async function orphanScan(deps: ForgeApiDeps, report: ReconcileReport): Promise<void> {
   const rows = await deps.db.select().from(g).where(eq(g.mode, "minted"));
-  const accounts = new Map<string, { provider: ForgeApiProvider; instance: string; account: string; known: Set<string> }>();
+  type Entry = { provider: ForgeApiProvider; instance: string; account: string; names: Set<string>; ids: Set<number> };
+  const accounts = new Map<string, Entry>();
   for (const row of rows) {
     const key = JSON.stringify([row.provider, row.instance, row.account]);
     let entry = accounts.get(key);
     if (!entry) {
-      entry = { provider: row.provider, instance: row.instance, account: row.account, known: new Set() };
+      entry = { provider: row.provider, instance: row.instance, account: row.account, names: new Set(), ids: new Set() };
       accounts.set(key, entry);
     }
     // A revoked tombstone's token should be gone; if the provider still lists it, that is an orphan.
     if (row.state === "revoked") continue;
     const h = row.tokenHandle;
-    for (const name of [h?.name, h?.previous?.name, h?.orphan?.name]) if (name) entry.known.add(name);
+    // Accounted for if EITHER its name or its id matches a recorded handle.
+    for (const ref of [h, h?.previous, h?.orphan]) {
+      if (!ref) continue;
+      entry.names.add(ref.name);
+      if (typeof ref.id === "number") entry.ids.add(ref.id);
+    }
   }
   for (const entry of accounts.values()) {
-    let listed: { name: string }[];
+    let listed: { id?: number; name: string }[];
     try {
       const provider = deps.providers(entry.provider);
-      if (!provider.listTokens) continue;
+      if (!provider.listTokens) {
+        report.orphanScanUnsupported.push({ provider: entry.provider, instance: entry.instance, account: entry.account });
+        continue;
+      }
       listed = await provider.listTokens(entry.account);
     } catch (err) {
       report.errors.push({
@@ -271,7 +284,8 @@ async function orphanScan(deps: ForgeApiDeps, report: ReconcileReport): Promise<
       continue;
     }
     for (const t of listed) {
-      if (!t.name.startsWith("agentpod-") || entry.known.has(t.name)) continue;
+      if (!t.name.startsWith("agentpod-") || entry.names.has(t.name)) continue;
+      if (typeof t.id === "number" && entry.ids.has(t.id)) continue;
       const orphan = { provider: entry.provider, instance: entry.instance, account: entry.account, name: t.name };
       report.orphans.push(orphan);
       const seen = JSON.stringify(orphan);
@@ -293,6 +307,10 @@ let current: ReconcileDeps | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 let hookInstalled = false;
+/** The post-commit kick: tries per grant on `grant-busy`, base backoff (doubling). */
+const KICK_RETRIES = 3;
+const KICK_BACKOFF_MS = 250;
+let kickBackoffMs = KICK_BACKOFF_MS;
 
 /** The service deps a hub with a configured forge uses (the routes build the same). */
 export function forgeApiServiceDeps(forge: ForgeConfig): ForgeApiDeps {
@@ -328,9 +346,10 @@ export async function tickForgeApiReconcile(): Promise<ReconcileReport | null> {
  */
 export function configureForgeApiReconcile(
   deps: ReconcileDeps | null,
-  opts: { schedule?: boolean; intervalMs?: number } = {},
+  opts: { schedule?: boolean; intervalMs?: number; kickBackoffMs?: number } = {},
 ): void {
   current = deps;
+  kickBackoffMs = opts.kickBackoffMs ?? KICK_BACKOFF_MS;
   if (timer) {
     clearInterval(timer);
     timer = null;
@@ -370,10 +389,22 @@ export function forgeApiReconcileTimerActive(): boolean {
 export function kickForgeApiRevoke(refs: { tenantId: string; grantId: string }[]): void {
   const deps = current;
   if (!deps || refs.length === 0) return;
+  const backoff = kickBackoffMs;
   void (async () => {
     for (const ref of refs) {
       try {
-        await revokeGrant(deps, ref);
+        // A step already holding the grant's claim (a rotation, a delivery) finishes first; retry
+        // a few times before leaving it to the sweep.
+        for (let attempt = 0; ; attempt++) {
+          try {
+            await revokeGrant(deps, ref);
+            break;
+          } catch (err) {
+            const busy = err instanceof ForgeApiGrantError && err.code === "grant-busy";
+            if (!busy || attempt >= KICK_RETRIES - 1) throw err;
+            await new Promise((r) => setTimeout(r, backoff * 2 ** attempt));
+          }
+        }
       } catch (err) {
         log.warn("forge grant revoke after an occupancy change deferred to reconcile", {
           grantId: ref.grantId,

@@ -235,7 +235,7 @@ export async function revokeAgentToken(
   log.info("forge token revoked", { username, name: tokenName });
 }
 
-/** A page of the admin token listing; a short page is the last. */
+/** The page size asked for; the listing ends on an empty page, not a short one. */
 const TOKEN_PAGE = 50;
 /** Bound on pages read, so a misbehaving forge cannot keep a sweep paging forever. */
 const TOKEN_PAGES_MAX = 100;
@@ -263,7 +263,9 @@ export async function listAgentTokens(
       if (typeof t?.name !== "string") continue;
       out.push(typeof t.id === "number" ? { id: t.id, name: t.name } : { name: t.name });
     }
-    if (res.body.length < TOKEN_PAGE) return out;
+    // Only an EMPTY page ends the listing: a forge may cap the page size below the limit asked
+    // for, and stopping on a short page would then miss every later token.
+    if (res.body.length === 0) return out;
   }
   return out;
 }

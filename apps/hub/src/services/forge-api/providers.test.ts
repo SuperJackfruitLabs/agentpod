@@ -148,14 +148,17 @@ describe("forgejo provider", () => {
 
   test("listTokens pages GET /admin/users/{u}/tokens and keeps only id and name", async () => {
     const page1 = Array.from({ length: 50 }, (_, i) => ({ id: i, name: `agentpod-x-g${i}`, token_last_eight: "abcd1234", sha1: SECRET }));
+    // A short page is not the end (a forge may cap page size below the limit asked); an empty one is.
     const a = scripted([
       [200, page1],
       [200, [{ id: 99, name: "laptop", token_last_eight: "zzzz9999" }]],
+      [200, []],
     ]);
     const out = await p(a.fetchImpl).listTokens!("coder-kai");
     expect(a.calls.map((c) => [c.method, c.url])).toEqual([
       ["GET", "https://forge.test/api/v1/admin/users/coder-kai/tokens?page=1&limit=50"],
       ["GET", "https://forge.test/api/v1/admin/users/coder-kai/tokens?page=2&limit=50"],
+      ["GET", "https://forge.test/api/v1/admin/users/coder-kai/tokens?page=3&limit=50"],
     ]);
     expect(out.length).toBe(51);
     expect(out[50]).toEqual({ id: 99, name: "laptop" });

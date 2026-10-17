@@ -131,13 +131,13 @@ export async function insertNode(f: Fixture, nodeId: string) {
 export async function insertStation(
   f: Fixture,
   nodeId: string,
-  opts: { principalId?: string | null; capabilities?: string[] } = {},
+  opts: { principalId?: string | null; capabilities?: string[]; parentStationId?: string } = {},
 ) {
   const id = `station_${f.run}_${f.seq++}`;
   await rawSql`
-    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, adopted_at, created_at)
+    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, parent_station_id, adopted_at, created_at)
     VALUES (${id}, ${f.tenant}, ${f.owner}, ${nodeId}, 'claude-code', ${"claude-code:" + id}, 'leaf', ${id},
-            ${JSON.stringify(opts.capabilities ?? ["acp", "forge.api"])}::jsonb, ${opts.principalId ?? null}, now(), now())`;
+            ${JSON.stringify(opts.capabilities ?? ["acp", "forge.api"])}::jsonb, ${opts.principalId ?? null}, ${opts.parentStationId ?? null}, now(), now())`;
   return { id, stationKey: "claude-code:" + id };
 }
 
