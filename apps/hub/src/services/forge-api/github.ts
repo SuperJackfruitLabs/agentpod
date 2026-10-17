@@ -8,6 +8,9 @@ import type { ForgeProvider } from "./providers";
 export const githubProvider: ForgeProvider = {
   kind: "github",
   modes: ["app", "supplied"],
+  async checkToken() {
+    throw new Error("forge: checkToken is not applicable to github (the hub mints no github token).");
+  },
   expectedIdentity(grant) {
     const declared = grant.expectedLogin;
     if (!declared) throw new Error("forge: a github grant needs its declared login or app slug.");

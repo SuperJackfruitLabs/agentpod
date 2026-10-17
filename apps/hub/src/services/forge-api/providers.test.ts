@@ -200,3 +200,44 @@ describe("splitRepo", () => {
     test(`rejects ${JSON.stringify(bad)}`, () => expect(() => splitRepo(bad)).toThrow());
   }
 });
+
+describe("checkToken (hub-side validity check before sealing)", () => {
+  test("forgejo: GET /api/v1/user with the token, returns the login", async () => {
+    const seen: { url: string; auth: string }[] = [];
+    const fetchImpl: FetchLike = async (url, init) => {
+      seen.push({ url, auth: String((init?.headers as Record<string, string>).Authorization) });
+      return new Response(JSON.stringify({ login: "coder-kai", id: 3 }), { status: 200 });
+    };
+    const out = await getProvider("forgejo", { cfg, fetchImpl }).checkToken!("coder-kai", SECRET);
+    expect(out).toEqual({ login: "coder-kai" });
+    expect(seen).toEqual([{ url: "https://forge.test/api/v1/user", auth: `token ${SECRET}` }]);
+  });
+
+  test("forgejo: a 401 whose body reflects the Authorization header never leaks the token", async () => {
+    const fetchImpl: FetchLike = async (_url, init) => {
+      const auth = (init?.headers as Record<string, string>).Authorization;
+      return new Response(JSON.stringify({ message: `body-marker ${auth}` }), { status: 401 });
+    };
+    const err = await getProvider("forgejo", { cfg, fetchImpl }).checkToken!("coder-kai", SECRET).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    const text = String(err.message) + String(err.stack ?? "");
+    expect(text).toContain("401");
+    expect(text).not.toContain(SECRET);
+    expect(text).not.toContain("body-marker");
+  });
+
+  test("forgejo: a network error carrying the token is scrubbed", async () => {
+    const fetchImpl: FetchLike = async () => {
+      throw new Error(`connect failed token ${SECRET}`);
+    };
+    const err = await getProvider("forgejo", { cfg, fetchImpl }).checkToken!("coder-kai", SECRET).catch((e) => e);
+    expect(String(err.message) + String(err.stack ?? "")).not.toContain(SECRET);
+  });
+
+  test("github: not applicable", async () => {
+    const err = await getProvider("github").checkToken!("x", SECRET).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(String(err.message)).toMatch(/not applicable/);
+    expect(String(err.message)).not.toContain(SECRET);
+  });
+});

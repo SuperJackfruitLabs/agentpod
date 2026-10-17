@@ -35,6 +35,11 @@ export interface ForgeProvider {
   modes: ForgeApiMode[];
   mint?(account: string, spec: MintSpec): Promise<{ id: number | undefined; name: string; secret: string }>;
   revoke?(account: string, handle: { id?: number; name: string }): Promise<void>;
+  /**
+   * Hub-side validity check of a freshly minted token, before it is sealed: who does the forge
+   * say this token is? Errors carry a status code only, never the token or a response body.
+   */
+  checkToken?(account: string, secret: string): Promise<{ login: string }>;
   /** The login a verifying read call must come back as. */
   expectedIdentity(grant: ForgeGrantRef): string;
   scopesFor(preset: ForgeApiPreset): string[];

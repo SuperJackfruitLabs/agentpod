@@ -31,6 +31,29 @@ export function createForgejoProvider(deps: ProviderDeps): ForgeProvider {
     async revoke(account, handle) {
       await revokeAgentToken(need(), account, handle.name, deps.fetchImpl);
     },
+    async checkToken(_account, secret) {
+      const cfg = need();
+      const fetchImpl = deps.fetchImpl ?? fetch;
+      let res: Response;
+      try {
+        res = await fetchImpl(`${cfg.baseUrl}/api/v1/user`, {
+          method: "GET",
+          headers: { Authorization: `token ${secret}`, Accept: "application/json" },
+        });
+      } catch {
+        // The underlying error may quote the request; say nothing of it.
+        throw new Error("forge: checking the new token failed (network error).");
+      }
+      if (!res.ok) throw new Error(`forge: checking the new token failed (HTTP ${res.status}).`);
+      let login: unknown;
+      try {
+        login = ((await res.json()) as { login?: unknown }).login;
+      } catch {
+        throw new Error("forge: checking the new token failed (unreadable reply).");
+      }
+      if (typeof login !== "string" || !login) throw new Error("forge: checking the new token failed (no login).");
+      return { login };
+    },
     expectedIdentity(grant) {
       if (grant.mode === "supplied") {
         if (!grant.expectedLogin) throw new Error("forge: a supplied grant needs its declared login.");

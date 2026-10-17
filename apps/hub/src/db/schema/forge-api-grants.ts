@@ -20,8 +20,20 @@ export interface ForgeTokenRef {
   id?: number;
   name: string;
 }
+/**
+ * What `token_handle` records, so reconcile can act from the jsonb alone:
+ * - the top level is the CURRENT token (the generation in `generation`);
+ * - `previous` is the generation the current one replaced, with what to do with it:
+ *   - `live-until-verified`: a rotation is under way (or crashed). The node may still hold
+ *     `previous`; it is revoked only once the current token verifies on the node.
+ *   - `revoke`: superseded and held by nobody — revoke it (a rotation whose final revoke failed,
+ *     or one that failed definitively after the node took the new token).
+ * - `orphan` is a token a failed rotation minted and could not take back. It was never the
+ *   node's credential; revoke it.
+ */
 export interface ForgeTokenHandle extends ForgeTokenRef {
-  previous?: ForgeTokenRef;
+  previous?: ForgeTokenRef & { disposition: "live-until-verified" | "revoke" };
+  orphan?: ForgeTokenRef;
 }
 
 export type ForgeGrantState =
@@ -76,10 +88,8 @@ export const stationForgeApiGrants = pgTable(
     stateReason: text("state_reason"),
 
     /**
-     * Persisted before delivery is attempted so reconcile can retry or revoke. `previous` is a
-     * superseded handle that must still be revoked at the provider: the old generation during a
-     * rotation (revoked only after the new one verifies), or a new token a failed rotation could
-     * not take back. It is persisted before the new token is minted, so a crash never loses it.
+     * Persisted before delivery is attempted so reconcile can retry or revoke. See
+     * ForgeTokenHandle for `previous` (persisted before a rotation mints) and `orphan`.
      */
     tokenHandle: jsonb("token_handle").$type<ForgeTokenHandle>(),
     /** Never resets across re-grants; see nextGeneration(). */

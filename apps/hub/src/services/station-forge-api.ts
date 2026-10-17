@@ -534,7 +534,9 @@ async function stationPublicKey(deps: ForgeApiDeps, station: StationRow): Promis
  */
 export async function deliverGrant(deps: ForgeApiDeps, ref: { tenantId: string; grantId: string }): Promise<Grant> {
   const row = await loadGrant(deps.db, { tenantId: ref.tenantId, id: ref.grantId });
-  if (row.state === "delivered" || row.state === "verified") return row;
+  // A delivered/verified grant is left alone unless it carries an unacknowledged live blob (an
+  // ambiguous rotation delivery or a re-supplied credential): then that blob is re-sent.
+  if ((row.state === "delivered" || row.state === "verified") && !blobIsLive(row, deps.now())) return row;
   if (row.state === "revoking" || row.state === "revoked") {
     throw new ForgeApiGrantError("grant-not-deliverable", `forge grant ${row.id} is ${row.state}.`, row.id);
   }
@@ -543,7 +545,7 @@ export async function deliverGrant(deps: ForgeApiDeps, ref: { tenantId: string; 
   }
   const station = await loadStation(deps.db, row.tenantId, row.stationId);
   const provider = deps.providers(row.provider);
-  const blobLive = row.sealedBlob && row.sealedExpiresAt && row.sealedExpiresAt.getTime() > deps.now().getTime();
+  const blobLive = blobIsLive(row, deps.now());
   if (!blobLive && row.mode !== "minted") throw needsOperatorCredential(row);
   // Only a path that mints needs the key; fetch it before that mint, never after.
   const publicKey = blobLive ? null : await stationPublicKey(deps, station);
@@ -576,10 +578,10 @@ async function advanceClaimed(
   provider: ForgeProvider,
   publicKey: string | null,
 ): Promise<Grant> {
-  if (row.state === "delivered" || row.state === "verified") return row;
   const now = deps.now();
-  const blobLive = row.sealedBlob && row.sealedExpiresAt && row.sealedExpiresAt.getTime() > now.getTime();
+  const blobLive = blobIsLive(row, now);
   if (blobLive) return sendDeliver(deps, row, station, row.sealedBlob!);
+  if (row.state === "delivered" || row.state === "verified") return row;
   // Never mint for a supplied/app grant: only the operator can produce its credential.
   if (row.mode !== "minted") throw needsOperatorCredential(row);
   if (!publicKey) {
@@ -760,6 +762,8 @@ async function sendDeliver(deps: ForgeApiDeps, row: Grant, station: StationRow, 
   const done = await transition(deps.db, row, [row.state], "delivered", {
     now: deps.now(),
     deliveredAt: deps.now(),
+    // A newly stored credential is unverified, whatever the grant was before.
+    verifiedAt: null,
     isolation: out.isolation,
     sealed: null,
   });
@@ -780,31 +784,54 @@ function needsOperatorCredential(row: Grant): ForgeApiGrantError {
 // The rules this half keeps:
 //
 // - **Every mutating operation runs inside `withGrantClaim`**, so a rotate and a revoke on one
-//   grant cannot interleave: the second is `grant-busy`. Helpers named `*Claimed` assume the claim.
+//   grant cannot interleave: the second is `grant-busy`. Helpers below assume the claim is held.
 // - **Frames are validated before `broker.request` and replies parsed with VERB_RESULTS**; only a
 //   positive acknowledgement counts. Node offline/timeout is a typed outcome that changes nothing.
 // - **Node text is untrusted**: a reason or login from the node is stripped of control characters
 //   and capped at 200 characters before it is stored (`untrusted`).
-// - **Rotation (minted)**: the previous handle is persisted (inside `token_handle.previous`) BEFORE
-//   the new token is minted, so a crash at any point leaves both handles findable. The old
-//   generation is revoked only after the new one verifies; any failure before that revokes the NEW
-//   token (best effort; kept as `previous` if that fails) and restores the old handle/generation.
-// - **Revocation**: one UPDATE to `revoking`, then the provider FIRST (minted: current + previous
-//   handle, 404 = success; app: nothing, installation tokens expire; supplied: agentpod cannot, so
-//   `revocation-pending-operator` until `confirmSuppliedRevoked`), then the node wipe best effort,
-//   then `revoked` in one UPDATE. A revoke never mints and never needs the station key. A pending
-//   step is recorded as the reason's leading code, and a retry resumes from it:
-//     `revoke-pending-retry` provider failed; nothing sent to the node yet; retry from the top
-//     `revocation-pending-operator` supplied: the operator must revoke at the provider
-//     `wipe-pending` provider done; the node's stk entry still needs wiping (Task 8 reconnect)
-//     `wipe-pending: station-gone` the station row is gone, so its node cannot be addressed
-// - **Policy** is not a transition: the row's policy is updated in one UPDATE that keeps the state;
-//   if the node cannot apply it the DB keeps the new policy and the reason says `policy-pending`
-//   (the next deliver frame carries the policy too, so nothing is lost by not rolling back).
+// - **A live `sealed_blob` on a delivered/verified grant means the node has NOT acknowledged the
+//   current credential** (an ambiguous rotation delivery, or a re-supplied credential whose relay
+//   failed transiently). `deliverGrant` re-sends it, and `verifyGrant` re-sends it before verifying:
+//   verifying without that could pass on the OLD credential (same account) and wrongly revoke it.
+// - **Rotation (minted)** — `token_handle.previous` (disposition `live-until-verified`) is persisted
+//   BEFORE the new token is minted. Then: mint → hub-side `checkToken` (identity of the new token)
+//   → seal → deliver → node verify.
+//   - PRE-ACK failure (mint, record, hub check, seal, a definitively refused deliver): the node is
+//     untouched, so the new token is revoked (404 ok; if that fails it is kept as `orphan`), the row
+//     goes back to the old handle and generation, reason `rotation-failed`, error `rotation-failed`.
+//   - AMBIGUOUS (deliver transient/timeout — the node may have stored it): nothing is revoked; the
+//     new token stays current with its sealed blob (24 h), state unchanged, reason
+//     `rotation-pending`. `deliverGrant`/`verifyGrant` finish it.
+//   - POST-ACK (the node stored it) and the verify is unreachable/inconclusive: nothing is
+//     revoked; state `delivered` (so `verifyGrant` can retry), blob cleared (acked), reason
+//     `rotation-pending`. A later matching `verifyGrant` revokes the old generation and clears
+//     `previous`.
+//   - POST-ACK and a definitive `wrong-identity`: the new token is revoked, the old one becomes
+//     `previous` with disposition `revoke` (nobody holds it), state `failed`, reason
+//     `rotation-failed`. The node holds a dead token either way; the grant needs a fresh mint.
+// - **Revocation**: one UPDATE to `revoking`, then the node wipe FIRST (best effort; it cuts the
+//   station's access at once), then the provider (minted: current, `previous`, `orphan`, 404 =
+//   success; app: nothing, installation tokens expire; supplied: agentpod cannot, so
+//   `revocation-pending-operator` until `confirmSuppliedRevoked`). `revoked` in one UPDATE once both
+//   sides are done. What is outstanding is recorded in the reason as `; `-joined parts, provider
+//   part first, and a retry does only those:
+//     `provider-pending: …`            the provider revoke failed; retry
+//     `revocation-pending-operator: …` supplied: the operator must revoke at the provider
+//     `wipe-pending: …`                the node wipe has not been confirmed; retry (Task 8 reconnect)
+//     `wipe-skipped: station-gone`     the station row is gone, so no node can be addressed
+//   With the station gone and the provider side done the grant is `revoked` with reason
+//   `revoked; node wipe skipped: station-gone (credential inert)`: a revoked-at-provider (or
+//   expiring) credential on an unaddressable node is inert. A revoke never mints and never needs
+//   the station key.
+// - **Policy** is not a transition: the row's policy is updated in one UPDATE that keeps the state.
+//   If the node cannot apply it the DB keeps the new policy (the next deliver frame carries it) and
+//   the outcome is `policy-pending`. The reason says `policy-pending` ONLY when it was empty or
+//   already a policy marker — a lifecycle reason (rotation-pending, wipe-pending, …) is never
+//   overwritten. Task 8's reconcile re-sends the policy on reconnect / compares `forge.api.status`.
 // - **The hub never opens a supplied/app blob**: it checks the envelope prefix and size and relays
 //   it byte-identical.
 
-/** Supplied/app sealed credentials are small: a PAT or an App key. */
+/** Supplied/app sealed credentials are small: a PAT or an App key. Measured in characters. */
 export const SUPPLIED_BLOB_MAX = 16 * 1024;
 
 const NODE_REASON_MAX = 200;
@@ -822,12 +849,29 @@ function isUnknownVerb(error: string): boolean {
   return /unknown verb/i.test(error);
 }
 
+const bareHandle = (h: ForgeTokenRef): ForgeTokenRef => (h.id === undefined ? { name: h.name } : { id: h.id, name: h.name });
+
+const blobIsLive = (row: Grant, now: Date) =>
+  !!row.sealedBlob && !!row.sealedExpiresAt && row.sealedExpiresAt.getTime() > now.getTime();
+
 // ─── verify ───────────────────────────────────────────────────────────────────
+
+/**
+ * The verify reasons the hub relies on (stk's `forge.api.verify` reason codes, the first word of
+ * `reason`). Definitive — the credential does not work as this grant: the grant fails.
+ */
+const VERIFY_DEFINITIVE = new Set(["unauthorized", "forbidden", "wrong-identity", "repository-missing"]);
+/** The PROVIDER could not be asked: says nothing about the credential. State unchanged. */
+const VERIFY_PROVIDER_DOWN = new Set(["unreachable", "server-error"]);
 
 type VerifyAnswer =
   | { kind: "ok"; login: string; isolation: "separate-user" | "same-user" }
-  | { kind: "failed"; reason: string }
-  | { kind: "offline"; reason: string };
+  /** The grant fails. `code` is the definitive reason, `node-too-old`, or `verify-failed`. */
+  | { kind: "failed"; code: string; reason: string }
+  | { kind: "offline"; reason: string }
+  | { kind: "provider-unavailable"; reason: string }
+  /** The node answered no with a reason code the hub does not know: not evidence either way. */
+  | { kind: "inconclusive"; reason: string };
 
 /** Ask the node to make a real read call as the grant's credential. Writes nothing. */
 async function askVerify(deps: ForgeApiDeps, row: Grant, station: { id: string; nodeId: string }): Promise<VerifyAnswer> {
@@ -835,10 +879,10 @@ async function askVerify(deps: ForgeApiDeps, row: Grant, station: { id: string; 
   try {
     expectLogin = expectLoginFor(deps, row);
   } catch (err) {
-    return { kind: "failed", reason: `verify-failed: ${scrub(err)}` };
+    return { kind: "failed", code: "verify-failed", reason: `verify-failed: ${scrub(err)}` };
   }
   const params = VERB_PARAMS["forge.api.verify"].safeParse({ stationId: station.id, grantId: row.id, expectLogin });
-  if (!params.success) return { kind: "failed", reason: "verify-failed: invalid verify frame; nothing was sent" };
+  if (!params.success) return { kind: "failed", code: "verify-failed", reason: "verify-failed: invalid verify frame; nothing was sent" };
   let res: BrokerReply;
   try {
     res = await deps.broker.request(station.nodeId, "forge.api.verify", params.data);
@@ -848,16 +892,25 @@ async function askVerify(deps: ForgeApiDeps, row: Grant, station: { id: string; 
   if (!res.ok) {
     const error = untrusted(res.error ?? "node error");
     if (TRANSIENT.has(error)) return { kind: "offline", reason: `verify not attempted: ${error}` };
-    if (isUnknownVerb(error)) return { kind: "failed", reason: "node-too-old: the node does not know forge.api.verify" };
-    return { kind: "failed", reason: `verify-failed: ${error}` };
+    if (isUnknownVerb(error)) {
+      return { kind: "failed", code: "node-too-old", reason: "node-too-old: the node does not know forge.api.verify" };
+    }
+    return { kind: "failed", code: "verify-failed", reason: `verify-failed: ${error}` };
   }
   const parsed = VERB_RESULTS["forge.api.verify"].safeParse(res.data);
-  if (!parsed.success) return { kind: "failed", reason: "verify-failed: unreadable verify reply" };
+  if (!parsed.success) return { kind: "failed", code: "verify-failed", reason: "verify-failed: unreadable verify reply" };
   const r = parsed.data;
-  if (r.ok !== true) return { kind: "failed", reason: `verify-failed: ${untrusted(r.reason ?? "no reason given")}` };
+  if (r.ok !== true) {
+    const text = untrusted(r.reason ?? "no reason given");
+    const code = text.split(/[:\s]/)[0]!.toLowerCase();
+    if (VERIFY_DEFINITIVE.has(code)) return { kind: "failed", code, reason: code === "wrong-identity" ? text : `verify-failed: ${text}` };
+    if (VERIFY_PROVIDER_DOWN.has(code)) return { kind: "provider-unavailable", reason: `provider unavailable: ${text}` };
+    return { kind: "inconclusive", reason: `verify inconclusive: ${text}` };
+  }
   if (!r.login || r.login.toLowerCase() !== expectLogin.toLowerCase()) {
     return {
       kind: "failed",
+      code: "wrong-identity",
       reason: `wrong-identity: expected ${untrusted(expectLogin)}, the forge answered as ${untrusted(r.login ?? "(nobody)")}`,
     };
   }
@@ -865,7 +918,7 @@ async function askVerify(deps: ForgeApiDeps, row: Grant, station: { id: string; 
 }
 
 export interface VerifyResult {
-  outcome: "verified" | "failed" | "node-offline";
+  outcome: "verified" | "failed" | "node-offline" | "provider-unavailable" | "inconclusive";
   grant: Grant;
 }
 
@@ -881,47 +934,112 @@ function assertVerifiable(row: Grant): void {
 }
 
 /**
- * `forge.api.verify` with the provider's expected identity. Match (case-insensitive) → `verified`;
- * a wrong login → `failed wrong-identity`; a negative answer → `failed` with the node's reason
- * (sanitised); an old node → `failed node-too-old`; offline/timeout → unchanged, `node-offline`.
+ * Apply a verify answer to the row (claim held). On a match: `verified`, and a `previous` token is
+ * revoked (404 ok) and cleared, or kept with disposition `revoke` if that fails. A definitive
+ * `wrong-identity` during a rotation revokes the NEW token (see the header). Offline, provider
+ * down or inconclusive: nothing changes.
+ */
+async function settleVerify(deps: ForgeApiDeps, row: Grant, answer: VerifyAnswer): Promise<VerifyResult> {
+  const handle = row.tokenHandle;
+  const prev = handle?.previous;
+  const rotating = prev?.disposition === "live-until-verified";
+  switch (answer.kind) {
+    case "offline":
+      log.info("forge grant verify deferred: node unreachable", { grantId: row.id });
+      return { outcome: "node-offline", grant: row };
+    case "provider-unavailable":
+    case "inconclusive":
+      log.info("forge grant verify inconclusive", { grantId: row.id, reason: answer.reason });
+      return { outcome: answer.kind, grant: row };
+    case "failed": {
+      if (rotating && answer.code === "wrong-identity" && handle) {
+        const provider = deps.providers(row.provider);
+        await compensateRevoke(provider, row.account, bareHandle(handle), row.id);
+        const reason = `rotation-failed: ${answer.reason}`;
+        const grant = await transition(deps.db, row, [row.state], "failed", {
+          now: deps.now(),
+          tokenHandle: { ...handle, previous: { ...bareHandle(prev!), disposition: "revoke" } },
+          stateReason: reason,
+        });
+        log.warn("forge grant rotation failed after delivery; the new token was revoked", { grantId: row.id, reason });
+        return { outcome: "failed", grant };
+      }
+      log.warn("forge grant failed verification", { grantId: row.id, reason: answer.reason });
+      const grant = await transition(deps.db, row, [row.state], "failed", { now: deps.now(), stateReason: answer.reason });
+      return { outcome: "failed", grant };
+    }
+    case "ok": {
+      const now = deps.now();
+      let grant = await transition(deps.db, row, [row.state], "verified", {
+        now,
+        verifiedAt: now,
+        isolation: answer.isolation,
+        stateReason: prev ? `verified; revoking generation token ${prev.name}` : null,
+      });
+      if (prev && handle) {
+        const { previous: _p, ...rest } = handle;
+        try {
+          await revokeTolerant(deps.providers(row.provider), row.account, bareHandle(prev));
+          grant = await transition(deps.db, grant, ["verified"], "verified", { now: deps.now(), tokenHandle: rest, stateReason: null });
+        } catch (err) {
+          log.warn("forge grant verified but the previous token is not revoked yet", { grantId: row.id });
+          grant = await transition(deps.db, grant, ["verified"], "verified", {
+            now: deps.now(),
+            tokenHandle: { ...rest, previous: { ...bareHandle(prev), disposition: "revoke" } },
+            stateReason: `previous-revoke-pending: ${scrub(err)}`,
+          });
+        }
+      }
+      log.info("forge grant verified", { grantId: row.id });
+      return { outcome: "verified", grant };
+    }
+  }
+}
+
+/**
+ * `forge.api.verify` with the provider's expected identity. Match (case-insensitive) → `verified`
+ * (and a rotation's old token revoked); a definitive reason (`unauthorized`, `forbidden`,
+ * `wrong-identity`, `repository-missing`) or an old node → `failed`; node offline →
+ * `node-offline`; provider unreachable/5xx at the node → `provider-unavailable`; an unknown reason
+ * → `inconclusive`. The last three change nothing. A live unacknowledged blob is re-delivered first.
  */
 export async function verifyGrant(deps: ForgeApiDeps, ref: Ref): Promise<VerifyResult> {
   const stale = await loadGrant(deps.db, toRef(ref));
   return withGrantClaim(stale.tenantId, stale.id, async () => {
-    const row = await loadGrant(deps.db, stale);
+    let row = await loadGrant(deps.db, stale);
     assertVerifiable(row);
     if (!row.stationId) {
       throw new ForgeApiGrantError("grant-not-verifiable", `forge grant ${row.id}'s station is gone.`, row.id);
     }
     const station = await loadStation(deps.db, row.tenantId, row.stationId);
-    const answer = await askVerify(deps, row, station);
-    if (answer.kind === "offline") {
-      log.info("forge grant verify deferred: node unreachable", { grantId: row.id, stationId: station.id });
-      return { outcome: "node-offline", grant: row };
+    if (row.sealedBlob) {
+      // The node has not acknowledged the current credential; verifying now could pass on the old.
+      if (!blobIsLive(row, deps.now())) {
+        throw new ForgeApiGrantError(
+          "grant-not-verifiable",
+          `forge grant ${row.id}: its current credential was never acknowledged and the sealed copy expired.`,
+          row.id,
+        );
+      }
+      row = await sendDeliver(deps, row, station, row.sealedBlob);
+      if (row.sealedBlob) {
+        return { outcome: row.state === "failed" ? "failed" : "node-offline", grant: row };
+      }
     }
-    if (answer.kind === "failed") {
-      log.warn("forge grant failed verification", { grantId: row.id, stationId: station.id, reason: answer.reason });
-      const grant = await transition(deps.db, row, [row.state], "failed", { now: deps.now(), stateReason: answer.reason });
-      return { outcome: "failed", grant };
-    }
-    const now = deps.now();
-    const grant = await transition(deps.db, row, [row.state], "verified", { now, verifiedAt: now, isolation: answer.isolation });
-    log.info("forge grant verified", { grantId: row.id, stationId: station.id });
-    return { outcome: "verified", grant };
+    return settleVerify(deps, row, await askVerify(deps, row, station));
   });
 }
 
 // ─── rotate (minted) ──────────────────────────────────────────────────────────
 
-const bareHandle = (h: ForgeTokenRef): ForgeTokenRef => (h.id === undefined ? { name: h.name } : { id: h.id, name: h.name });
-
 /**
- * Minted rotation: mint generation n+1, deliver, verify, THEN revoke generation n. Supplied and
- * app grants rotate by the operator supplying a new sealed credential (`acceptSuppliedSecret`).
+ * Minted rotation; see the header for every outcome. Supplied and app grants rotate by the
+ * operator supplying a new sealed credential (`acceptSuppliedSecret`).
  *
- * Returns the verified row. Throws `rotation-failed` when the new token could not be delivered or
- * verified: generation n is still live and the row is back on it with reason `rotation-failed`.
- * An unreachable node is found before any mint (`station-key-unavailable`), changing nothing.
+ * Returns the row: `verified` when finished, or `rotation-pending` (delivered or unchanged state)
+ * when the node may hold the new token but has not verified it. Throws `rotation-failed` when the
+ * rotation was taken back (pre-ack) or the new token was definitively the wrong identity. An
+ * unreachable node is found before any mint (`station-key-unavailable`), changing nothing.
  */
 export async function rotateGrant(deps: ForgeApiDeps, ref: Ref): Promise<Grant> {
   const stale = await loadGrant(deps.db, toRef(ref));
@@ -937,10 +1055,10 @@ export async function rotateGrant(deps: ForgeApiDeps, ref: Ref): Promise<Grant> 
     if ((row.state !== "delivered" && row.state !== "verified") || !row.tokenHandle) {
       throw new ForgeApiGrantError("grant-not-rotatable", `forge grant ${row.id} is ${row.state}; only a delivered grant rotates.`, row.id);
     }
-    if (row.tokenHandle.previous) {
+    if (row.tokenHandle.previous || row.tokenHandle.orphan || row.sealedBlob) {
       throw new ForgeApiGrantError(
         "grant-not-rotatable",
-        `forge grant ${row.id} still has a superseded token to revoke; reconcile must finish it first.`,
+        `forge grant ${row.id} has an unfinished rotation or a token to revoke; finish that first.`,
         row.id,
       );
     }
@@ -965,6 +1083,7 @@ async function rotateClaimed(
 ): Promise<Grant> {
   const oldHandle = bareHandle(before.tokenHandle!);
   const priorState = before.state as "delivered" | "verified";
+  const previous = { ...oldHandle, disposition: "live-until-verified" as const };
 
   // 1. Persist the old handle as `previous` and the next generation's deterministic name, BEFORE
   //    minting: a crash from here on leaves both tokens findable by handle or name.
@@ -973,138 +1092,226 @@ async function rotateClaimed(
     return transition(tx, before, [priorState], priorState, {
       now: deps.now(),
       generation,
-      tokenHandle: { name: tokenName({ id: before.id, generation }), previous: oldHandle },
-      stateReason: `rotating to generation ${generation}`,
+      tokenHandle: { name: tokenName({ id: before.id, generation }), previous },
+      stateReason: `rotation-pending: minting generation ${generation}`,
     });
   });
   const newName = row.tokenHandle!.name;
 
-  /** Take back the new token, put the row back on the old one, and report rotation-failed. */
-  const abort = async (why: string, newHandle: ForgeTokenRef, secret?: string): Promise<never> => {
+  /** PRE-ACK: the node never took the new token. Take it back and put the row back on the old one. */
+  const abortPreAck = async (why: string, newHandle: ForgeTokenRef, secret?: string): Promise<never> => {
     const gone = await compensateRevoke(provider, row.account, newHandle, row.id, secret);
     const reason = `rotation-failed: ${why}`;
     await transition(deps.db, row, [priorState], priorState, {
       now: deps.now(),
       generation: before.generation,
-      // A new token that could not be revoked stays recorded so reconcile can take it back.
-      tokenHandle: gone ? oldHandle : { ...oldHandle, previous: newHandle },
+      tokenHandle: gone ? oldHandle : { ...oldHandle, orphan: newHandle },
       stateReason: reason,
     });
-    log.warn("forge grant rotation failed; the previous token stays live", { grantId: row.id, stationId: station.id, reason });
+    log.warn("forge grant rotation failed before delivery; the previous token stays live", { grantId: row.id, stationId: station.id, reason });
     throw new ForgeApiGrantError("rotation-failed", `forge grant ${row.id}: ${reason}`, row.id);
   };
 
   // 2. Mint generation n+1. The token lives in `secret` until it is sealed.
-  const ref = grantRef(row);
   let minted: { id: number | undefined; name: string; secret: string };
   try {
     minted = await provider.mint!(row.account, {
       name: newName,
-      scopes: provider.mintScopes(ref),
+      scopes: provider.mintScopes(grantRef(row)),
       repositories: row.repositories.map(splitRepo),
     });
   } catch (err) {
-    return abort(`mint failed: ${scrub(err)}`, { name: newName });
+    return abortPreAck(`mint failed: ${scrub(err)}`, { name: newName });
   }
   let secret: string | undefined = minted.secret;
   const newHandle: ForgeTokenRef = minted.id === undefined ? { name: minted.name } : { id: minted.id, name: minted.name };
   try {
     row = await transition(deps.db, row, [priorState], priorState, {
       now: deps.now(),
-      tokenHandle: { ...newHandle, previous: oldHandle },
+      tokenHandle: { ...newHandle, previous },
       stateReason: row.stateReason,
     });
   } catch (err) {
     const s = secret;
     secret = undefined;
-    return abort(`the new token could not be recorded (${scrub(err, s)})`, newHandle, s);
+    return abortPreAck(`the new token could not be recorded (${scrub(err, s)})`, newHandle, s);
   }
 
-  // 3. Seal and deliver: the node replaces its stored credential.
+  // 3. Hub-side check: the forge must say the new token is the expected account.
+  if (provider.checkToken) {
+    let login: string;
+    try {
+      ({ login } = await provider.checkToken(row.account, secret));
+    } catch (err) {
+      const s = secret;
+      secret = undefined;
+      return abortPreAck(`the new token did not check out: ${scrub(err, s)}`, newHandle, s);
+    }
+    const expected = expectLoginFor(deps, row);
+    if (login.toLowerCase() !== expected.toLowerCase()) {
+      secret = undefined;
+      return abortPreAck(`the new token belongs to ${untrusted(login)}, not ${expected}`, newHandle);
+    }
+  }
+
+  // 4. Seal and deliver: the node replaces its stored credential.
   let sealed: string;
   try {
     sealed = await deps.seal(publicKey, { token: secret });
   } catch (err) {
     const why = `seal failed: ${scrub(err, secret)}`;
     secret = undefined;
-    return abort(why, newHandle);
+    return abortPreAck(why, newHandle);
   }
   secret = undefined;
   const delivery = await relayDeliver(deps, row, station, sealed);
-  if (delivery.kind !== "acked") return abort(delivery.reason, newHandle);
-
-  // 4. Verify the new token as the right account. Anything but a match aborts.
-  const answer = await askVerify(deps, row, station);
-  if (answer.kind !== "ok") return abort(answer.reason, newHandle);
-
-  const now = deps.now();
-  row = await transition(deps.db, row, [priorState], "verified", {
-    now,
-    deliveredAt: now,
-    verifiedAt: now,
-    isolation: answer.isolation,
-    sealed: null,
-    stateReason: `rotated; revoking generation ${before.generation}`,
-  });
-
-  // 5. Only now revoke generation n. A failure keeps it as `previous` for reconcile.
-  try {
-    await revokeTolerant(provider, row.account, oldHandle);
-  } catch (err) {
-    log.warn("forge grant rotated but the old token is not revoked yet", { grantId: row.id, stationId: station.id });
-    return transition(deps.db, row, ["verified"], "verified", {
-      now: deps.now(),
-      stateReason: `previous-revoke-pending: ${scrub(err)}`,
+  if (delivery.kind === "refused") return abortPreAck(delivery.reason, newHandle);
+  if (delivery.kind === "transient") {
+    // AMBIGUOUS: the node may have stored it. Revoke nothing; keep the blob to re-send.
+    const now = deps.now();
+    row = await transition(deps.db, row, [priorState], priorState, {
+      now,
+      sealed: { blob: sealed, expiresAt: new Date(now.getTime() + SEALED_BLOB_TTL_MS) },
+      stateReason: `rotation-pending: ${delivery.reason}`,
     });
+    log.warn("forge grant rotation delivery unconfirmed; nothing revoked", { grantId: row.id, stationId: station.id });
+    return row;
   }
-  row = await transition(deps.db, row, ["verified"], "verified", { now: deps.now(), tokenHandle: newHandle });
-  log.info("forge grant rotated", { grantId: row.id, stationId: station.id, generation: row.generation });
-  return row;
+
+  // 5. POST-ACK: the node holds the new token.
+  const ackAt = deps.now();
+  row = await transition(deps.db, row, [priorState], "delivered", {
+    now: ackAt,
+    deliveredAt: ackAt,
+    verifiedAt: null,
+    isolation: delivery.isolation,
+    sealed: null,
+    stateReason: "rotation-pending: awaiting verification",
+  });
+  const settled = await settleVerify(deps, row, await askVerify(deps, row, station));
+  if (settled.outcome === "failed" && settled.grant.stateReason?.startsWith("rotation-failed")) {
+    throw new ForgeApiGrantError("rotation-failed", `forge grant ${row.id}: ${settled.grant.stateReason}`, row.id);
+  }
+  if (settled.outcome === "verified") {
+    log.info("forge grant rotated", { grantId: row.id, stationId: station.id, generation: settled.grant.generation });
+    return settled.grant;
+  }
+  if (settled.outcome === "failed") return settled.grant;
+  // Unverified for now: keep `rotation-pending` (plus why) so verifyGrant finishes it.
+  return transition(deps.db, settled.grant, ["delivered"], "delivered", {
+    now: deps.now(),
+    stateReason: `rotation-pending: ${settled.outcome}`,
+  });
 }
 
 // ─── revoke ───────────────────────────────────────────────────────────────────
 
 export interface RevokeResult {
   /**
-   * revoked: both sides done. pending: the provider step failed, retry. pending-operator: a
+   * revoked: both sides done. pending: the provider revoke failed, retry. pending-operator: a
    * supplied credential the operator must revoke. wipe-pending: provider done, node wipe queued.
    */
   outcome: "revoked" | "pending" | "pending-operator" | "wipe-pending";
   grant: Grant;
 }
 
+const PROVIDER_PENDING = "provider-pending";
 const PENDING_OPERATOR = "revocation-pending-operator";
 const WIPE_PENDING = "wipe-pending";
+const WIPE_SKIPPED = "wipe-skipped: station-gone";
+export const REVOKED_STATION_GONE = "revoked; node wipe skipped: station-gone (credential inert)";
 
-/** Ask the node to wipe its stk entry. Returns null when done, else why it is still pending. */
-async function wipeOnNode(deps: ForgeApiDeps, row: Grant): Promise<string | null> {
-  if (!row.stationId) return `${WIPE_PENDING}: station-gone`;
+type WipeResult = { status: "done" } | { status: "skipped" } | { status: "pending"; why: string };
+
+/** Ask the node to wipe its stk entry. */
+async function wipeOnNode(deps: ForgeApiDeps, row: Grant): Promise<WipeResult> {
+  if (!row.stationId) return { status: "skipped" };
   const [st] = await deps.db
     .select()
     .from(stations)
     .where(and(eq(stations.tenantId, row.tenantId), eq(stations.id, row.stationId)));
-  if (!st) return `${WIPE_PENDING}: station-gone`;
+  if (!st) return { status: "skipped" };
   const params = VERB_PARAMS["forge.api.revoke"].safeParse({ stationId: st.id, grantId: row.id });
-  if (!params.success) return `${WIPE_PENDING}: invalid revoke frame`;
+  if (!params.success) return { status: "pending", why: "invalid revoke frame" };
   let res: BrokerReply;
   try {
     res = await deps.broker.request(st.nodeId, "forge.api.revoke", params.data);
   } catch (err) {
-    return `${WIPE_PENDING}: ${untrusted(scrub(err))}`;
+    return { status: "pending", why: untrusted(scrub(err)) };
   }
   if (!res.ok) {
     const error = untrusted(res.error ?? "node error");
-    return isUnknownVerb(error) ? `${WIPE_PENDING}: node-too-old` : `${WIPE_PENDING}: ${error}`;
+    return { status: "pending", why: isUnknownVerb(error) ? "node-too-old" : error };
   }
   // removed:false means there was nothing to remove: the entry is gone either way.
-  if (!VERB_RESULTS["forge.api.revoke"].safeParse(res.data).success) return `${WIPE_PENDING}: unreadable revoke reply`;
-  return null;
+  if (!VERB_RESULTS["forge.api.revoke"].safeParse(res.data).success) return { status: "pending", why: "unreadable revoke reply" };
+  return { status: "done" };
 }
 
 /**
- * Revoke a grant: `revoking`, provider first, node wipe best effort, then `revoked`. Re-entrant:
- * calling it again on a `revoking` grant resumes the step its reason records (reconcile does this).
- * Works with the station gone. Never mints, never needs the station key.
+ * One pass over a `revoking` grant (claim held): the outstanding sides only, wipe first, then the
+ * provider; `revoked` when nothing is outstanding. `operatorConfirmed`: a supplied token the
+ * operator says is revoked at the provider.
+ */
+async function revokePass(deps: ForgeApiDeps, row: Grant, operatorConfirmed: boolean): Promise<RevokeResult> {
+  const reason = row.stateReason ?? "";
+  const marked = [PROVIDER_PENDING, PENDING_OPERATOR, WIPE_PENDING, WIPE_SKIPPED].some((m) => reason.includes(m));
+  // Unmarked (just entered, or moved to `revoking` by someone else): both sides are outstanding.
+  const wipeNeeded = !marked || reason.includes(WIPE_PENDING);
+  const providerNeeded = !marked || reason.includes(PROVIDER_PENDING) || reason.includes(PENDING_OPERATOR);
+  let skipped = reason.includes(WIPE_SKIPPED);
+
+  // 1. Node wipe first: it cuts the station's access at once, whatever the forge is doing.
+  let wipePart: string | null = null;
+  if (wipeNeeded) {
+    const w = await wipeOnNode(deps, row);
+    if (w.status === "skipped") skipped = true;
+    if (w.status === "pending") wipePart = `${WIPE_PENDING}: ${w.why}`;
+  }
+
+  // 2. Provider.
+  let providerPart: string | null = null;
+  if (providerNeeded) {
+    if (row.mode === "minted") {
+      const provider = deps.providers(row.provider);
+      const h = row.tokenHandle;
+      const handles = [h, h?.previous, h?.orphan].filter((x): x is ForgeTokenRef => !!x).map(bareHandle);
+      try {
+        for (const x of handles) await revokeTolerant(provider, row.account, x);
+      } catch (err) {
+        providerPart = `${PROVIDER_PENDING}: ${scrub(err)}`;
+        log.warn("forge grant revoke at the provider failed; will retry", { grantId: row.id, stationId: row.stationIdSnapshot });
+      }
+    } else if (row.mode === "supplied" && !operatorConfirmed) {
+      providerPart = `${PENDING_OPERATOR}: the operator must revoke this token at the provider`;
+    }
+    // app: nothing to revoke — stk's installation tokens expire within about an hour. The operator
+    // removes the App key on GitHub if the App itself should go.
+  }
+
+  // 3. Settle.
+  if (!providerPart && !wipePart) {
+    const grant = await transition(deps.db, row, ["revoking"], "revoked", {
+      now: deps.now(),
+      stateReason: skipped ? REVOKED_STATION_GONE : null,
+    });
+    log.info("forge grant revoked", { grantId: row.id, stationId: row.stationIdSnapshot, wipeSkipped: skipped });
+    return { outcome: "revoked", grant };
+  }
+  const parts = [providerPart, wipePart, skipped ? WIPE_SKIPPED : null].filter((p): p is string => !!p);
+  const grant = await transition(deps.db, row, ["revoking"], "revoking", { now: deps.now(), stateReason: parts.join("; ") });
+  const outcome: RevokeResult["outcome"] = providerPart?.startsWith(PENDING_OPERATOR)
+    ? "pending-operator"
+    : providerPart
+      ? "pending"
+      : "wipe-pending";
+  return { outcome, grant };
+}
+
+/**
+ * Revoke a grant: `revoking`, node wipe first (best effort), then the provider, then `revoked`.
+ * Re-entrant: calling it again on a `revoking` grant does only what its reason says is outstanding
+ * (reconcile does this). Works with the station gone. Never mints, never needs the station key.
  */
 export async function revokeGrant(deps: ForgeApiDeps, ref: Ref): Promise<RevokeResult> {
   const stale = await loadGrant(deps.db, toRef(ref));
@@ -1112,60 +1319,22 @@ export async function revokeGrant(deps: ForgeApiDeps, ref: Ref): Promise<RevokeR
   return withGrantClaim(stale.tenantId, stale.id, async () => {
     let row = await loadGrant(deps.db, stale);
     if (row.state === "revoked") return { outcome: "revoked", grant: row };
-    const resumeWipeOnly = row.state === "revoking" && (row.stateReason ?? "").startsWith(WIPE_PENDING);
     if (row.state !== "revoking") {
-      // One UPDATE; any undelivered blob goes with it.
-      row = await transition(deps.db, row, [row.state], "revoking", { now: deps.now(), stateReason: "revoking", sealed: null });
+      // One UPDATE; any undelivered blob goes with it. Both sides outstanding.
+      const provider = row.mode === "supplied" ? PENDING_OPERATOR : PROVIDER_PENDING;
+      row = await transition(deps.db, row, [row.state], "revoking", {
+        now: deps.now(),
+        stateReason: `${provider}; ${WIPE_PENDING}`,
+        sealed: null,
+      });
     }
-
-    // 1. Provider side.
-    let providerDone: boolean;
-    if (resumeWipeOnly) {
-      providerDone = true;
-    } else if (row.mode === "minted") {
-      const provider = deps.providers(row.provider);
-      const handles = [row.tokenHandle, row.tokenHandle?.previous].filter((h): h is ForgeTokenRef => !!h).map(bareHandle);
-      try {
-        for (const h of handles) await revokeTolerant(provider, row.account, h);
-        providerDone = true;
-      } catch (err) {
-        const reason = `revoke-pending-retry: ${scrub(err)}`;
-        log.warn("forge grant revoke at the provider failed; will retry", { grantId: row.id, stationId: row.stationIdSnapshot });
-        const grant = await transition(deps.db, row, ["revoking"], "revoking", { now: deps.now(), stateReason: reason });
-        return { outcome: "pending", grant };
-      }
-    } else if (row.mode === "app") {
-      // Nothing to revoke: stk exchanges the App key for installation tokens that expire in about
-      // an hour. The operator removes the App key on GitHub if the App itself should go.
-      providerDone = true;
-    } else {
-      // supplied: agentpod cannot revoke an operator-made token.
-      providerDone = false;
-    }
-
-    // 2. Node wipe, best effort.
-    const wipePending = await wipeOnNode(deps, row);
-
-    // 3. Settle.
-    if (providerDone && !wipePending) {
-      const grant = await transition(deps.db, row, ["revoking"], "revoked", { now: deps.now(), stateReason: null });
-      log.info("forge grant revoked", { grantId: row.id, stationId: row.stationIdSnapshot });
-      return { outcome: "revoked", grant };
-    }
-    if (!providerDone) {
-      const reason = `${PENDING_OPERATOR}: the operator must revoke this token at the provider${wipePending ? `; ${wipePending}` : ""}`;
-      const grant = await transition(deps.db, row, ["revoking"], "revoking", { now: deps.now(), stateReason: reason });
-      return { outcome: "pending-operator", grant };
-    }
-    const grant = await transition(deps.db, row, ["revoking"], "revoking", { now: deps.now(), stateReason: wipePending });
-    log.info("forge grant revoked at the provider; node wipe queued", { grantId: row.id, stationId: row.stationIdSnapshot });
-    return { outcome: "wipe-pending", grant };
+    return revokePass(deps, row, false);
   });
 }
 
 /**
- * The operator confirms a supplied token is revoked at the provider. Completes the revocation, or
- * leaves `wipe-pending` if the node wipe has not happened yet (it is retried here first).
+ * The operator confirms a supplied token is revoked at the provider. Completes the revocation,
+ * retrying an outstanding node wipe first (a gone station skips it).
  */
 export async function confirmSuppliedRevoked(deps: ForgeApiDeps, ref: Ref): Promise<RevokeResult> {
   const stale = await loadGrant(deps.db, toRef(ref));
@@ -1178,13 +1347,7 @@ export async function confirmSuppliedRevoked(deps: ForgeApiDeps, ref: Ref): Prom
     if (row.state !== "revoking") {
       throw new ForgeApiGrantError("bad-transition", `forge grant ${row.id} is ${row.state}; revoke it first.`, row.id);
     }
-    const wipePending = (row.stateReason ?? "").includes(WIPE_PENDING) ? await wipeOnNode(deps, row) : null;
-    if (!wipePending) {
-      const grant = await transition(deps.db, row, ["revoking"], "revoked", { now: deps.now(), stateReason: null });
-      return { outcome: "revoked", grant };
-    }
-    const grant = await transition(deps.db, row, ["revoking"], "revoking", { now: deps.now(), stateReason: wipePending });
-    return { outcome: "wipe-pending", grant };
+    return revokePass(deps, row, true);
   });
 }
 
@@ -1211,7 +1374,7 @@ export async function acceptSuppliedSecret(deps: ForgeApiDeps, input: AcceptSupp
     // Never echo the value: it may be a plaintext token pasted by mistake.
     throw new ForgeApiGrantError(
       "bad-sealed-blob",
-      `forge: a supplied credential must be a ${STK_HANDOVER_PREFIX} envelope of at most ${SUPPLIED_BLOB_MAX} bytes.`,
+      `forge: a supplied credential must be a ${STK_HANDOVER_PREFIX} envelope of at most ${SUPPLIED_BLOB_MAX} characters.`,
       input.grantId,
     );
   }
@@ -1258,8 +1421,11 @@ export interface UpdatePolicyInput extends Ref {
 }
 
 export interface PolicyResult {
-  /** applied: the node confirmed. stored: the node has no credential yet; the next deliver carries it. pending: saved, node not confirmed. */
-  outcome: "applied" | "stored" | "pending";
+  /**
+   * applied: the node confirmed. stored: the node has no credential yet; the next deliver carries
+   * it. policy-pending: saved, the node has not confirmed (reconcile re-sends it).
+   */
+  outcome: "applied" | "stored" | "policy-pending";
   grant: Grant;
 }
 
@@ -1282,8 +1448,11 @@ function checkPolicy(input: UpdatePolicyInput): void {
 /**
  * Change a grant's preset/rules/GraphQL switch. One UPDATE that keeps the state; then
  * `forge.api.policy` to a node that holds the credential (positive ack required). A node that cannot
- * apply it leaves the DB policy in place and the reason `policy-pending` (not rolled back: the
- * policy is the operator's intent, and every later deliver frame carries it). For a minted grant
+ * apply it leaves the DB policy in place and returns `policy-pending` (not rolled back: the policy
+ * is the operator's intent, and every later deliver frame carries it). The reason records
+ * `policy-pending` only when it was empty or already a policy marker; a lifecycle reason
+ * (rotation-pending, previous-revoke-pending, rotation-failed, …) is never overwritten — Task 8's
+ * reconcile re-sends the policy on reconnect / compares `forge.api.status`. For a minted grant
  * the token's scopes follow the preset only from the next mint (rotate to widen them).
  */
 export async function updateGrantPolicy(deps: ForgeApiDeps, input: UpdatePolicyInput): Promise<PolicyResult> {
@@ -1313,7 +1482,10 @@ export async function updateGrantPolicy(deps: ForgeApiDeps, input: UpdatePolicyI
     };
     if (!onNode) return { outcome: "stored", grant: await save(undefined, [row.state]) };
 
-    let saved = await save("policy-pending: sending to the node", [row.state]);
+    // Only our own marker may be written over; a lifecycle reason is left exactly as it is.
+    const mayMark = row.stateReason === null || row.stateReason.startsWith("policy-pending");
+    const mark = (r: string | null) => (mayMark ? r : undefined);
+    let saved = await save(mark("policy-pending: sending to the node"), [row.state]);
     const station = await loadStation(deps.db, row.tenantId, row.stationId!);
     const params = VERB_PARAMS["forge.api.policy"].safeParse({
       stationId: station.id,
@@ -1339,8 +1511,8 @@ export async function updateGrantPolicy(deps: ForgeApiDeps, input: UpdatePolicyI
         else if (ack.data.ok !== true) why = `node rejected the policy: ${untrusted(ack.data.error ?? "no reason given")}`;
       }
     }
-    saved = await save(why ? `policy-pending: ${why}` : null, [saved.state]);
+    saved = await save(mark(why ? `policy-pending: ${why}` : null), [saved.state]);
     if (why) log.warn("forge grant policy not applied on the node", { grantId: row.id, stationId: station.id, reason: why });
-    return { outcome: why ? "pending" : "applied", grant: saved };
+    return { outcome: why ? "policy-pending" : "applied", grant: saved };
   });
 }
