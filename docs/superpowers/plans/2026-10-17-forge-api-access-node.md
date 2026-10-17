@@ -146,3 +146,5 @@
 ---
 
 **Not in this plan:** the console section (needs mockups first), Gitea and Bitbucket node-side differences (none expected; provider knowledge lives in stk and the hub), and fixing the four SSH-grant defects.
+
+> **Plan amendment (2026-10-17, from hub plan Task 5):** the `forge.api.status` handler in Task 3 MUST return `publicKey` (the output of `stk handover key`, `stk-handover-v1:`-prefixed) in its result so the hub can seal credentials to this station's stk. The contract result gains this optional field in hub Task 5. A status call must succeed even when no grants exist (it is how the hub bootstraps a first grant).
