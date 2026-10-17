@@ -53,6 +53,7 @@ import { hubOperators } from "./schema/operators";
 import { liveActivityTokens } from "./schema/live-activity";
 import { matrixCredentialAuthorizations } from "./schema/matrix-credentials";
 import { stationGitIdentities } from "./schema/git-identities";
+import { stationForgeApiGrants } from "./schema/forge-api-grants";
 import { declaredHarnessConfig } from "./schema/harness-config";
 import { appliedHarnessConfig, harnessConfigOptOut } from "./schema/harness-config-ops";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
@@ -146,6 +147,7 @@ export const TENANT_SCOPED_TABLES = {
   matrixSpaces,
   matrixCredentialAuthorizations,
   stationGitIdentities,
+  stationForgeApiGrants,
   declaredHarnessConfig,
   appliedHarnessConfig,
   harnessConfigOptOut,

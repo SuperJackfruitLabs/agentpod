@@ -74,3 +74,6 @@ export * from "./user-id-rewrites";
 export * from "./operators";
 
 // A person's Matrix id by principal, which the plane cannot answer in that direction (P3 plan, Task 17).
+
+// A station's repository-restricted forge API access; no token is stored (forge-api-access design, 2026-10-17).
+export * from "./forge-api-grants";
