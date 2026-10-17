@@ -14,3 +14,56 @@ export class ForgeApiConfigError extends Error {
     this.name = "ForgeApiConfigError";
   }
 }
+
+export type ForgeApiGrantErrorCode =
+  | "station-not-found"
+  | "grant-not-found"
+  | "no-occupant"
+  | "capability-missing"
+  | "station-key-unavailable"
+  | "bad-repository"
+  | "mode-not-supported"
+  | "grant-exists"
+  | "grant-not-deliverable"
+  | "mint-failed"
+  | "revoke-failed"
+  | "seal-failed"
+  | "delivery-failed"
+  | "bad-transition"
+  | "state-conflict";
+
+const GRANT_ERROR_STATUS: Record<ForgeApiGrantErrorCode, number> = {
+  "station-not-found": 404,
+  "grant-not-found": 404,
+  "no-occupant": 409,
+  "capability-missing": 409,
+  // The node is the upstream that failed to answer with a key: a gateway error, like the observe routes.
+  "station-key-unavailable": 502,
+  "bad-repository": 422,
+  "mode-not-supported": 422,
+  "grant-exists": 409,
+  "grant-not-deliverable": 409,
+  "mint-failed": 502,
+  "revoke-failed": 502,
+  "seal-failed": 500,
+  "delivery-failed": 502,
+  "bad-transition": 500,
+  "state-conflict": 409,
+};
+
+/**
+ * A grant lifecycle step that could not proceed. `status` is the HTTP mapping for routes. Messages
+ * are built by the hub from ids and fixed text only: never a token, a sealed blob or a body.
+ */
+export class ForgeApiGrantError extends Error {
+  readonly status: number;
+  constructor(
+    readonly code: ForgeApiGrantErrorCode,
+    message: string,
+    readonly grantId?: string,
+  ) {
+    super(message);
+    this.name = "ForgeApiGrantError";
+    this.status = GRANT_ERROR_STATUS[code];
+  }
+}
