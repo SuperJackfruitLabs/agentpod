@@ -32,7 +32,14 @@ export type ForgeApiGrantErrorCode =
   | "bad-transition"
   | "state-conflict"
   | "handle-persist-failed"
-  | "grant-busy";
+  | "grant-busy"
+  | "grant-not-verifiable"
+  | "grant-not-rotatable"
+  | "rotation-failed"
+  | "expected-login-required"
+  | "bad-expected-login"
+  | "bad-sealed-blob"
+  | "bad-policy";
 
 const GRANT_ERROR_STATUS: Record<ForgeApiGrantErrorCode, number> = {
   "station-not-found": 404,
@@ -53,6 +60,13 @@ const GRANT_ERROR_STATUS: Record<ForgeApiGrantErrorCode, number> = {
   "state-conflict": 409,
   "handle-persist-failed": 500,
   "grant-busy": 409,
+  "grant-not-verifiable": 409,
+  "grant-not-rotatable": 409,
+  "rotation-failed": 502,
+  "expected-login-required": 422,
+  "bad-expected-login": 422,
+  "bad-sealed-blob": 422,
+  "bad-policy": 422,
 };
 
 /**

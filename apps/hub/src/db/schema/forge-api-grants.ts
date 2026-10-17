@@ -16,6 +16,14 @@ import type { ForgeApiMode, ForgeApiPreset, ForgeApiProvider } from "@agentpod/c
 import { stations } from "./stations";
 import { tenants } from "./tenants";
 
+export interface ForgeTokenRef {
+  id?: number;
+  name: string;
+}
+export interface ForgeTokenHandle extends ForgeTokenRef {
+  previous?: ForgeTokenRef;
+}
+
 export type ForgeGrantState =
   | "authorised"
   | "provisioned"
@@ -67,8 +75,13 @@ export const stationForgeApiGrants = pgTable(
     state: text("state").$type<ForgeGrantState>().notNull(),
     stateReason: text("state_reason"),
 
-    /** Persisted before delivery is attempted so reconcile can retry or revoke. */
-    tokenHandle: jsonb("token_handle").$type<{ id?: number; name: string }>(),
+    /**
+     * Persisted before delivery is attempted so reconcile can retry or revoke. `previous` is a
+     * superseded handle that must still be revoked at the provider: the old generation during a
+     * rotation (revoked only after the new one verifies), or a new token a failed rotation could
+     * not take back. It is persisted before the new token is minted, so a crash never loses it.
+     */
+    tokenHandle: jsonb("token_handle").$type<ForgeTokenHandle>(),
     /** Never resets across re-grants; see nextGeneration(). */
     generation: integer("generation").notNull(),
     isolation: text("isolation").$type<"separate-user" | "same-user">(),
