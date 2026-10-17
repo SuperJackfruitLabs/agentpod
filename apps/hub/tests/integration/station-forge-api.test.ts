@@ -572,6 +572,8 @@ describe("transition", () => {
       ["delivered", "verified"],
       ["provisioned", "provisioned"],
       ["failed", "provisioned"],
+      // A retry whose node positively acknowledges the credential it kept.
+      ["failed", "delivered"],
       ["authorised", "failed"],
       ["verified", "failed"],
       ["delivered", "revoking"],
@@ -588,7 +590,6 @@ describe("transition", () => {
       ["revoked", "provisioned"],
       ["revoked", "failed"],
       ["delivered", "provisioned"],
-      ["failed", "delivered"],
       ["authorised", "revoked"],
     ];
     for (const [from, to] of refused) {

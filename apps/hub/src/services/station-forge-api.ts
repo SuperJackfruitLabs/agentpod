@@ -124,8 +124,9 @@ const ALLOWED: Record<ForgeGrantState, readonly ForgeGrantState[]> = {
   // verified → delivered: a supplied/app credential replaced, awaiting its own verify.
   verified: ["verified", "delivered", "failed", "revoking"],
   // failed → provisioned: a retry; failed → failed: a retry that failed again; failed → verified:
-  // a re-verify of a credential the node holds.
-  failed: ["provisioned", "failed", "verified", "revoking"],
+  // a re-verify of a credential the node holds; failed → delivered: a retry of a refused delivery
+  // that the node now POSITIVELY acknowledges (sendDeliver is the only writer of `delivered`).
+  failed: ["provisioned", "failed", "verified", "delivered", "revoking"],
   revoking: ["revoking", "revoked", "failed"],
   // A tombstone is final.
   revoked: [],
