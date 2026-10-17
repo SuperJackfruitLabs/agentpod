@@ -11,8 +11,19 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
+import type { ForgeApiMode, ForgeApiPreset, ForgeApiProvider } from "@agentpod/contract";
+
 import { stations } from "./stations";
 import { tenants } from "./tenants";
+
+export type ForgeGrantState =
+  | "authorised"
+  | "provisioned"
+  | "delivered"
+  | "verified"
+  | "failed"
+  | "revoking"
+  | "revoked";
 
 /**
  * A station's repository-restricted API access to a forge (spec 2026-10-17-forge-api-access-design).
@@ -38,10 +49,10 @@ export const stationForgeApiGrants = pgTable(
     stationId: text("station_id").references(() => stations.id, { onDelete: "set null" }),
     stationIdSnapshot: text("station_id_snapshot").notNull(),
 
-    provider: text("provider").notNull(),
+    provider: text("provider").$type<ForgeApiProvider>().notNull(),
     /** The forge base URL: one provider can have several instances on one station. */
     instance: text("instance").notNull(),
-    mode: text("mode").notNull(),
+    mode: text("mode").$type<ForgeApiMode>().notNull(),
 
     principalId: text("principal_id"),
     /** Derived by the hub from the occupying principal, never from a request body or a node. */
@@ -49,18 +60,18 @@ export const stationForgeApiGrants = pgTable(
     expectedLogin: text("expected_login"),
 
     repositories: jsonb("repositories").$type<string[]>().notNull(),
-    preset: text("preset").notNull(),
+    preset: text("preset").$type<ForgeApiPreset>().notNull(),
     rules: jsonb("rules").$type<unknown[]>().notNull().default(sql`'[]'::jsonb`),
     allowGraphql: boolean("allow_graphql").notNull().default(false),
 
-    state: text("state").notNull(),
+    state: text("state").$type<ForgeGrantState>().notNull(),
     stateReason: text("state_reason"),
 
     /** Persisted before delivery is attempted so reconcile can retry or revoke. */
     tokenHandle: jsonb("token_handle").$type<{ id?: number; name: string }>(),
     /** Never resets across re-grants; see nextGeneration(). */
     generation: integer("generation").notNull(),
-    isolation: text("isolation"),
+    isolation: text("isolation").$type<"separate-user" | "same-user">(),
 
     sealedBlob: text("sealed_blob"),
     sealedExpiresAt: timestamp("sealed_expires_at", { withTimezone: true }),
@@ -87,6 +98,18 @@ export const stationForgeApiGrants = pgTable(
     check(
       "station_forge_api_grants_preset_check",
       sql`${t.preset} IN ('read','issues','pull-requests','maintain','none')`,
+    ),
+    uniqueIndex("station_forge_api_grants_generation_idx").on(
+      t.stationIdSnapshot,
+      t.provider,
+      t.instance,
+      t.generation,
+    ),
+    check("station_forge_api_grants_generation_check", sql`${t.generation} >= 1`),
+    check("station_forge_api_grants_revoked_at_check", sql`(${t.state} = 'revoked') = (${t.revokedAt} IS NOT NULL)`),
+    check(
+      "station_forge_api_grants_sealed_check",
+      sql`(${t.sealedBlob} IS NULL) = (${t.sealedExpiresAt} IS NULL)`,
     ),
     check(
       "station_forge_api_grants_isolation_check",

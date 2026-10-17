@@ -30,6 +30,9 @@ CREATE TABLE "station_forge_api_grants" (
 	CONSTRAINT "station_forge_api_grants_provider_check" CHECK ("station_forge_api_grants"."provider" IN ('forgejo','gitea','github','bitbucket')),
 	CONSTRAINT "station_forge_api_grants_mode_check" CHECK ("station_forge_api_grants"."mode" IN ('minted','app','supplied')),
 	CONSTRAINT "station_forge_api_grants_preset_check" CHECK ("station_forge_api_grants"."preset" IN ('read','issues','pull-requests','maintain','none')),
+	CONSTRAINT "station_forge_api_grants_generation_check" CHECK ("station_forge_api_grants"."generation" >= 1),
+	CONSTRAINT "station_forge_api_grants_revoked_at_check" CHECK (("station_forge_api_grants"."state" = 'revoked') = ("station_forge_api_grants"."revoked_at" IS NOT NULL)),
+	CONSTRAINT "station_forge_api_grants_sealed_check" CHECK (("station_forge_api_grants"."sealed_blob" IS NULL) = ("station_forge_api_grants"."sealed_expires_at" IS NULL)),
 	CONSTRAINT "station_forge_api_grants_isolation_check" CHECK ("station_forge_api_grants"."isolation" IS NULL OR "station_forge_api_grants"."isolation" IN ('separate-user','same-user'))
 );
 --> statement-breakpoint
@@ -37,4 +40,5 @@ ALTER TABLE "station_forge_api_grants" ADD CONSTRAINT "station_forge_api_grants_
 ALTER TABLE "station_forge_api_grants" ADD CONSTRAINT "station_forge_api_grants_station_id_stations_id_fk" FOREIGN KEY ("station_id") REFERENCES "public"."stations"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "station_forge_api_grants_live_idx" ON "station_forge_api_grants" USING btree ("station_id_snapshot","provider","instance") WHERE "station_forge_api_grants"."state" <> 'revoked';--> statement-breakpoint
 CREATE INDEX "station_forge_api_grants_state_updated_idx" ON "station_forge_api_grants" USING btree ("state","updated_at");--> statement-breakpoint
-CREATE INDEX "station_forge_api_grants_tenant_idx" ON "station_forge_api_grants" USING btree ("tenant_id");
+CREATE INDEX "station_forge_api_grants_tenant_idx" ON "station_forge_api_grants" USING btree ("tenant_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "station_forge_api_grants_generation_idx" ON "station_forge_api_grants" USING btree ("station_id_snapshot","provider","instance","generation");

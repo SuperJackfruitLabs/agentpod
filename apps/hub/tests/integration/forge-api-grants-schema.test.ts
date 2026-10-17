@@ -7,9 +7,8 @@ import { rawSql } from "../../src/db/drizzle";
 import { db } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { TENANT_SCOPED_TABLES } from "../../src/db/tenant-scope";
-import { stationForgeApiGrants, type StationForgeApiGrant } from "../../src/db/schema/forge-api-grants";
+import { stationForgeApiGrants } from "../../src/db/schema/forge-api-grants";
 import { nextGeneration } from "../../src/services/forge-api/generation";
-import type { ForgeGrantRef } from "../../src/services/forge-api/providers";
 
 /**
  * station_forge_api_grants against Postgres: live uniqueness keys on the station-id SNAPSHOT, the
@@ -17,9 +16,7 @@ import type { ForgeGrantRef } from "../../src/services/forge-api/providers";
  * generation never resets. Ruling 2026-10-17: stationId is nullable/set null, not restrict.
  */
 
-// Compile-time: the row type structurally satisfies the provider adapters' view of a grant.
-const _rowSatisfiesRef = (r: StationForgeApiGrant): ForgeGrantRef => r;
-void _rowSatisfiesRef;
+// The ForgeGrantRef structural assertion lives in src/db/schema/forge-api-grants.typecheck.ts (tsc covers src only).
 
 const OWNER = "test-user-fga-owner";
 const NODE = "node_fga_schema";
@@ -76,7 +73,8 @@ async function violated(p: Promise<unknown>): Promise<string> {
 }
 
 async function setState(id: string, state: string) {
-  await rawSql`UPDATE station_forge_api_grants SET state = ${state}, updated_at = now() WHERE id = ${id}`;
+  await rawSql`UPDATE station_forge_api_grants
+    SET state = ${state}, revoked_at = CASE WHEN ${state} = 'revoked' THEN now() ELSE NULL END, updated_at = now() WHERE id = ${id}`;
 }
 
 const clean = async () => {
@@ -192,6 +190,82 @@ describe("generation", () => {
   });
 });
 
+describe("generation uniqueness under concurrency", () => {
+  const GEN_IDX = "station_forge_api_grants_generation_idx";
+  const base = { stationId: null, stationIdSnapshot: "station_fga_race", instance: FORGE };
+
+  test("a plain duplicate generation insert is rejected", async () => {
+    await grant({ ...base, generation: 7, state: "revoked", revokedAt: new Date() });
+    expect(await violated(grant({ ...base, generation: 7 }))).toBe(GEN_IDX);
+  });
+
+  test("two racing transactions get distinct generations (tombstone vs live)", async () => {
+    const take = (state: string) =>
+      db.transaction(async (tx) => {
+        const generation = await nextGeneration(tx, tenant, "station_fga_race", "forgejo", FORGE);
+        await tx.insert(stationForgeApiGrants).values({
+          id: `fga_race_${state}_${seq++}`,
+          tenantId: tenant,
+          ...base,
+          provider: "forgejo",
+          mode: "minted",
+          account: "agent-x",
+          repositories: [],
+          preset: "read",
+          state: state as never,
+          revokedAt: state === "revoked" ? new Date() : null,
+          generation,
+          createdBy: OWNER,
+        });
+        return generation;
+      });
+    const [a, b] = await Promise.all([take("revoked"), take("authorised")]);
+    expect(a).not.toBe(b);
+    expect(Math.min(a, b)).toBe(8);
+    expect(Math.max(a, b)).toBe(9);
+  });
+
+  test("nextGeneration under the lock still returns max+1", async () => {
+    expect(await db.transaction((tx) => nextGeneration(tx, tenant, "station_fga_race", "forgejo", FORGE))).toBe(10);
+  });
+});
+
+describe("integrity CHECKs and FKs", () => {
+  const at = (n: string) => ({ stationId: ST_B, stationIdSnapshot: ST_B, instance: `https://int-${n}.test` });
+
+  test("state=revoked requires revoked_at, and revoked_at requires state=revoked", async () => {
+    expect(await violated(grant({ ...at("r1"), state: "revoked", revokedAt: null }))).toBe("station_forge_api_grants_revoked_at_check");
+    expect(await violated(grant({ ...at("r2"), state: "verified", revokedAt: new Date() }))).toBe("station_forge_api_grants_revoked_at_check");
+  });
+
+  test("sealed_blob and sealed_expires_at are both set or both null", async () => {
+    expect(await violated(grant({ ...at("s1"), sealedBlob: "stk-handover-v1:x" }))).toBe("station_forge_api_grants_sealed_check");
+    expect(await violated(grant({ ...at("s2"), sealedExpiresAt: new Date() }))).toBe("station_forge_api_grants_sealed_check");
+    await grant({ ...at("s3"), sealedBlob: "stk-handover-v1:x", sealedExpiresAt: new Date() });
+  });
+
+  test("generation must be >= 1", async () => {
+    expect(await violated(grant({ ...at("g0"), generation: 0 }))).toBe("station_forge_api_grants_generation_check");
+  });
+
+  test("the tenant FK (restrict) refuses deleting a tenant that has a grant", async () => {
+    const T = "fleet_fga_tenant_restrict";
+    await rawSql`DELETE FROM station_forge_api_grants WHERE tenant_id = ${T}`;
+    await rawSql`DELETE FROM tenants WHERE id = ${T}`;
+    await rawSql`INSERT INTO tenants (id, name) VALUES (${T}, 'fga restrict')`;
+    await grant({ tenantId: T, stationId: null, stationIdSnapshot: "station_fga_tenant", instance: FORGE });
+    let err: any;
+    try {
+      await rawSql`DELETE FROM tenants WHERE id = ${T}`;
+    } catch (e) {
+      err = e;
+    }
+    expect(err?.constraint_name ?? err?.constraint).toBe("station_forge_api_grants_tenant_id_tenants_id_fk");
+    await rawSql`DELETE FROM station_forge_api_grants WHERE tenant_id = ${T}`;
+    await rawSql`DELETE FROM tenants WHERE id = ${T}`;
+  });
+});
+
 describe("CHECK constraints", () => {
   const cases: [string, Record<string, unknown>][] = [
     ["state", { state: "bogus" }],
@@ -211,7 +285,13 @@ describe("CHECK constraints", () => {
   test("accepts every documented state", async () => {
     let i = 0;
     for (const state of ["authorised", "provisioned", "delivered", "verified", "failed", "revoking", "revoked"]) {
-      await grant({ stationId: ST_B, stationIdSnapshot: ST_B, instance: `https://ok-${i++}.test`, state });
+      await grant({
+        stationId: ST_B,
+        stationIdSnapshot: ST_B,
+        instance: `https://ok-${i++}.test`,
+        state,
+        revokedAt: state === "revoked" ? new Date() : null,
+      });
     }
     await grant({ stationId: ST_B, stationIdSnapshot: ST_B, instance: "https://ok-iso.test", isolation: "same-user" });
   });

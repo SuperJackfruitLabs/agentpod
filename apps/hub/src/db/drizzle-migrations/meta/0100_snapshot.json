@@ -1,5 +1,5 @@
 {
-  "id": "d7070003-59e9-4f6a-adc4-d85d6cf8973b",
+  "id": "e738eb3f-70f2-428a-af34-e01ecf575c05",
   "prevId": "d35ffade-9366-4a5c-9952-fabd97d2db31",
   "version": "7",
   "dialect": "postgresql",
@@ -5539,6 +5539,39 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "station_forge_api_grants_generation_idx": {
+          "name": "station_forge_api_grants_generation_idx",
+          "columns": [
+            {
+              "expression": "station_id_snapshot",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "instance",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "generation",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -5588,6 +5621,18 @@
         "station_forge_api_grants_preset_check": {
           "name": "station_forge_api_grants_preset_check",
           "value": "\"station_forge_api_grants\".\"preset\" IN ('read','issues','pull-requests','maintain','none')"
+        },
+        "station_forge_api_grants_generation_check": {
+          "name": "station_forge_api_grants_generation_check",
+          "value": "\"station_forge_api_grants\".\"generation\" >= 1"
+        },
+        "station_forge_api_grants_revoked_at_check": {
+          "name": "station_forge_api_grants_revoked_at_check",
+          "value": "(\"station_forge_api_grants\".\"state\" = 'revoked') = (\"station_forge_api_grants\".\"revoked_at\" IS NOT NULL)"
+        },
+        "station_forge_api_grants_sealed_check": {
+          "name": "station_forge_api_grants_sealed_check",
+          "value": "(\"station_forge_api_grants\".\"sealed_blob\" IS NULL) = (\"station_forge_api_grants\".\"sealed_expires_at\" IS NULL)"
         },
         "station_forge_api_grants_isolation_check": {
           "name": "station_forge_api_grants_isolation_check",
