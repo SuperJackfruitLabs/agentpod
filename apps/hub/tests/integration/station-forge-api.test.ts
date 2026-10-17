@@ -14,13 +14,15 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import handoverFixture from "../../../../packages/contract/fixtures/handover-v1.json";
 
 import { db, rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
-import { stationForgeApiGrants as g, type StationForgeApiGrant } from "../../src/db/schema/forge-api-grants";
+import { stationForgeApiGrants as g, type StationForgeApiGrant as Grant, type StationForgeApiGrant } from "../../src/db/schema/forge-api-grants";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
+import { pollUntil } from "../helpers/wait";
+import postgres from "postgres";
 import { createTestUser } from "../helpers/database";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { getProvider, type ForgeProvider } from "../../src/services/forge-api/providers";
@@ -30,6 +32,9 @@ import {
   deliverGrant,
   transition,
   ForgeApiGrantError,
+  CLAIM_CAP,
+  POOL_RESERVE,
+  claimFaults,
   type ForgeApiDeps,
 } from "../../src/services/station-forge-api";
 
@@ -190,7 +195,7 @@ beforeAll(async () => {
   tenant = await resolveTenantForUser(OWNER);
   await rawSql`
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
-    VALUES (${NODE}, ${tenant}, ${OWNER}, 'sfa-box', 'sb', 'linux', 'amd64', 2, 'online', 'x', now())`;
+    VALUES (${NODE}, ${tenant}, ${OWNER}, ${`sfa-box-${RUN}`}, 'sb', 'linux', 'amd64', 2, 'online', 'x', now())`;
 });
 
 afterAll(async () => {
@@ -605,15 +610,16 @@ async function failedGrantWithoutHandle(h: ReturnType<typeof harness>) {
 describe("no orphan token", () => {
   test("persisting the handle fails after a successful mint → exactly one compensating revoke, typed error, no secret", async () => {
     const h = harness();
+    const target = { stationId: "" };
     const provider = h.deps.providers("forgejo");
     const fast = provider.mint!.bind(provider);
     provider.mint = async (account, spec) => {
       // Something else moves the row underneath, so the persist UPDATE finds no `authorised` row.
-      await rawSql`UPDATE station_forge_api_grants SET state = 'revoking' WHERE station_id_snapshot = ${stationId}`;
+      await rawSql`UPDATE station_forge_api_grants SET state = 'revoking' WHERE station_id_snapshot = ${target.stationId}`;
       return fast(account, spec);
     };
     const st = await freshStation();
-    var stationId = st.id;
+    target.stationId = st.id;
     await h.attempt(createForgeApiGrant(h.deps, input(st.id)));
     expect(h.errors).toHaveLength(1);
     expect(h.errors[0]).toBeInstanceOf(ForgeApiGrantError);
@@ -717,5 +723,78 @@ describe("no double mint", () => {
     provider.mint = real;
     const done = await deliverGrant(h.deps, { tenantId: tenant, grantId: row.id });
     expect(done.state).toBe("delivered");
+  });
+});
+
+describe("claims never exhaust the pool", () => {
+  test("the claim cap leaves at least POOL_RESERVE connections for the rest of the hub", () => {
+    const poolMax = (rawSql as unknown as { options: { max: number } }).options.max;
+    expect(POOL_RESERVE).toBeGreaterThanOrEqual(3);
+    expect(CLAIM_CAP).toBeGreaterThanOrEqual(1);
+    expect(CLAIM_CAP).toBeLessThanOrEqual(poolMax - POOL_RESERVE);
+  });
+
+  test("15 concurrent claims on different grants: at most CLAIM_CAP mint, the rest are grant-busy at once, the pool stays usable", async () => {
+    const h = harness();
+    const grants: string[] = [];
+    for (let i = 0; i < 15; i++) grants.push((await failedGrantWithoutHandle(h)).row.id);
+    const provider = h.deps.providers("forgejo");
+    const fast = provider.mint!.bind(provider);
+    const release = deferred();
+    let inMint = 0;
+    let maxInMint = 0;
+    provider.mint = async (account, spec) => {
+      inMint++;
+      maxInMint = Math.max(maxInMint, inMint);
+      await release.promise;
+      inMint--;
+      return fast(account, spec);
+    };
+    const outcomes: (Grant | Error)[] = [];
+    const runs = grants.map((id) =>
+      deliverGrant(h.deps, { tenantId: tenant, grantId: id }).then(
+        (r) => void outcomes.push(r as never),
+        (e) => void outcomes.push(e),
+      ),
+    );
+    await pollUntil(() => inMint === CLAIM_CAP && outcomes.length === 15 - CLAIM_CAP);
+    expect(maxInMint).toBe(CLAIM_CAP);
+    for (const o of outcomes) {
+      expect(o).toBeInstanceOf(ForgeApiGrantError);
+      expect((o as ForgeApiGrantError).code).toBe("grant-busy");
+    }
+    // An unrelated query through the same pool completes while the claims are held.
+    const [one] = await db.execute(sql`SELECT 1 AS one`);
+    expect(Number((one as { one: number }).one)).toBe(1);
+    release.resolve();
+    await Promise.all(runs);
+    expect(maxInMint).toBe(CLAIM_CAP);
+    // A slot is free again: a grant that was busy can now be claimed.
+    const rows = await Promise.all(grants.map(async (id) => (await db.select().from(g).where(eq(g.id, id)))[0]!));
+    const row = rows.find((r) => r.state === "failed");
+    expect(rows.filter((r) => r.state === "delivered")).toHaveLength(CLAIM_CAP);
+    const next = await deliverGrant(h.deps, { tenantId: tenant, grantId: row!.id });
+    expect(next.state).toBe("delivered");
+  });
+
+  test("an unlock that fails never returns a connection still holding the session lock", async () => {
+    const h = harness();
+    const { row } = await failedGrantWithoutHandle(h);
+    claimFaults.failUnlock = true;
+    try {
+      await deliverGrant(h.deps, { tenantId: tenant, grantId: row.id });
+    } finally {
+      claimFaults.failUnlock = false;
+    }
+    // A different session must be able to take the same lock: nothing leaked it.
+    const other = postgres(process.env.DATABASE_URL!, { max: 1 });
+    try {
+      const key = `forge-grant|${tenant}|${row.id}`;
+      const [r] = await other`SELECT pg_try_advisory_lock(hashtextextended(${key}, 0)) AS ok`;
+      expect(r!.ok).toBe(true);
+      await other`SELECT pg_advisory_unlock(hashtextextended(${key}, 0))`;
+    } finally {
+      await other.end();
+    }
   });
 });
