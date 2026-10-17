@@ -1,7 +1,7 @@
 import type { ForgeApiPreset } from "@agentpod/contract";
 
 import { ForgeApiConfigError } from "./errors";
-import { mintAgentToken, revokeAgentToken } from "../forge";
+import { listAgentTokens, mintAgentToken, revokeAgentToken } from "../forge";
 import type { ForgeGrantRef, ForgeProvider, ProviderDeps } from "./providers";
 
 const SCOPES: Record<Exclude<ForgeApiPreset, "none">, string[]> = {
@@ -30,6 +30,9 @@ export function createForgejoProvider(deps: ProviderDeps): ForgeProvider {
     },
     async revoke(account, handle) {
       await revokeAgentToken(need(), account, handle.name, deps.fetchImpl);
+    },
+    async listTokens(account) {
+      return listAgentTokens(need(), account, deps.fetchImpl);
     },
     async checkToken(_account, secret) {
       const cfg = need();

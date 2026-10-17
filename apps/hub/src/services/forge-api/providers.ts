@@ -36,6 +36,11 @@ export interface ForgeProvider {
   mint?(account: string, spec: MintSpec): Promise<{ id: number | undefined; name: string; secret: string }>;
   revoke?(account: string, handle: { id?: number; name: string }): Promise<void>;
   /**
+   * Every token on the account (names and ids only; a provider never returns a token's secret in a
+   * listing). Used by the reconcile orphan scan, which reports and never deletes.
+   */
+  listTokens?(account: string): Promise<{ id?: number; name: string }[]>;
+  /**
    * Hub-side validity check of a freshly minted token, before it is sealed: who does the forge
    * say this token is? Errors carry a status code only, never the token or a response body.
    */

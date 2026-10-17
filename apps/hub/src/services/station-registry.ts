@@ -19,6 +19,7 @@ import { VERB_RESULTS, unknownCapabilitiesByStation } from "@agentpod/contract";
 import type { DetectedStation } from "@agentpod/contract";
 import * as broker from "./broker";
 import { reconcileOnAdopt } from "./harness-config-apply";
+import { markGrantsRevoking, type RevokeCause } from "./station-forge-api";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("station-registry");
@@ -259,14 +260,31 @@ export async function getStation(
 
 // ─── unadopt ─────────────────────────────────────────────────────────────────
 
-/** Remove a station row. Silently succeeds if already gone or not owned. */
+/**
+ * Remove a station row. Silently succeeds if already gone or not owned.
+ *
+ * Its forge API grants are moved to `revoking` in the same transaction as the delete (the FK sets
+ * their `station_id` NULL; `station_id_snapshot` keeps the id), so a deleted station never leaves
+ * a live token unaccounted for. The reconcile sweep revokes them at the provider; it never happens
+ * inline here. `cause` is `node-removed` when the whole node is going.
+ */
 export async function unadopt(
   userId: string,
-  stationId: string
+  stationId: string,
+  cause: RevokeCause = "station-deleted"
 ): Promise<void> {
-  await db
-    .delete(stations)
-    .where(and(eq(stations.id, stationId), eq(stations.userId, userId)));
+  await db.transaction(async (tx) => {
+    const [st] = await tx
+      .select({ tenantId: stations.tenantId })
+      .from(stations)
+      .where(and(eq(stations.id, stationId), eq(stations.userId, userId)))
+      .for("update");
+    if (!st) return;
+    await markGrantsRevoking(tx, { tenantId: st.tenantId, stationId, cause, actor: userId });
+    await tx
+      .delete(stations)
+      .where(and(eq(stations.id, stationId), eq(stations.userId, userId)));
+  });
 }
 
 // ─── refreshAdoptedCapabilities ───────────────────────────────────────────────

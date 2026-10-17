@@ -37,7 +37,7 @@ import {
   type ForgeApiProvider,
   type ForgeApiRule,
 } from "@agentpod/contract";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, ne, notInArray } from "drizzle-orm";
 
 import { rawSql, type Database, type DbExecutor } from "../db/drizzle";
 import {
@@ -208,7 +208,7 @@ function isNotFound(err: unknown): boolean {
 }
 
 /** Revoke, treating "already gone" as success. */
-async function revokeTolerant(provider: ForgeProvider, account: string, handle: ForgeTokenRef) {
+export async function revokeTolerant(provider: ForgeProvider, account: string, handle: ForgeTokenRef) {
   if (!provider.revoke) throw new Error(`forge: ${provider.kind} cannot revoke tokens.`);
   try {
     await provider.revoke(account, handle);
@@ -218,7 +218,7 @@ async function revokeTolerant(provider: ForgeProvider, account: string, handle: 
 }
 
 /** Best-effort compensation: never throws, never logs more than ids and a scrubbed message. */
-async function compensateRevoke(
+export async function compensateRevoke(
   provider: ForgeProvider,
   account: string,
   handle: ForgeTokenRef,
@@ -872,7 +872,7 @@ function isUnknownVerb(error: string): boolean {
 
 const bareHandle = (h: ForgeTokenRef): ForgeTokenRef => (h.id === undefined ? { name: h.name } : { id: h.id, name: h.name });
 
-const blobIsLive = (row: Grant, now: Date) =>
+export const blobIsLive = (row: Grant, now: Date) =>
   !!row.sealedBlob && !!row.sealedExpiresAt && row.sealedExpiresAt.getTime() > now.getTime();
 
 // ─── verify ───────────────────────────────────────────────────────────────────
@@ -972,7 +972,7 @@ function assertVerifiable(row: Grant): void {
 }
 
 /** Is this row mid-rotation, and has the node acknowledged the NEW token? */
-function rotationOf(row: Grant): { rotating: boolean; acked: boolean } {
+export function rotationOf(row: Grant): { rotating: boolean; acked: boolean } {
   const rotating = row.tokenHandle?.previous?.disposition === "live-until-verified";
   // A rotation clears delivered_at when it starts and sets it only on a positive ack; the blob is
   // persisted before the frame goes out and cleared only on that ack. Both must say "acked".
@@ -1334,6 +1334,9 @@ async function wipeOnNode(deps: ForgeApiDeps, row: Grant): Promise<WipeResult> {
     .from(stations)
     .where(and(eq(stations.tenantId, row.tenantId), eq(stations.id, row.stationId)));
   if (!st) return { status: "skipped" };
+  // Version skew: a node that does not advertise forge.api gets no frame at all; the wipe stays
+  // queued until it does (the provider side, done independently, has made the copy inert).
+  if (!(st.capabilities ?? []).includes("forge.api")) return { status: "pending", why: "node-lacks-forge.api" };
   const params = VERB_PARAMS["forge.api.revoke"].safeParse({ stationId: st.id, grantId: row.id });
   if (!params.success) return { status: "pending", why: "invalid revoke frame" };
   let res: BrokerReply;
@@ -1617,5 +1620,131 @@ export async function updateGrantPolicy(deps: ForgeApiDeps, input: UpdatePolicyI
     saved = await save(mark(why ? `policy-pending: ${why}` : null), [saved.state]);
     if (why) log.warn("forge grant policy not applied on the node", { grantId: row.id, stationId: station.id, reason: why });
     return { outcome: why ? "policy-pending" : "applied", grant: saved };
+  });
+}
+
+// ─── occupancy changes and reconcile helpers (Task 8) ─────────────────────────
+
+/** Why a station's grants are being revoked by an occupancy change or a deletion. */
+export type RevokeCause = "reassigned" | "unassigned" | "station-deleted" | "node-removed";
+
+/**
+ * Move every live grant of a station to `revoking`, inside the CALLER'S transaction — the one that
+ * changes the station's occupant or deletes it — so the two commit or roll back together.
+ *
+ * It never calls the forge or the node: an occupancy change must not wait on either, and must not
+ * fail because of either. The provider revoke and the node wipe are the reconcile sweep's (and an
+ * out-of-band kick's) job; the reason written here is exactly what `revokeGrant` treats as "both
+ * sides outstanding", plus the cause. Any undelivered sealed blob goes with it. One audit row per
+ * grant (ids and enums only). Returns the ids moved.
+ */
+export async function markGrantsRevoking(
+  tx: DbExecutor,
+  input: { tenantId: string; stationId: string; cause: RevokeCause; actor?: string; now?: Date },
+): Promise<string[]> {
+  const now = input.now ?? new Date();
+  // FOR UPDATE: a concurrent lifecycle step waits for this transaction, then finds `revoking`.
+  const live = await tx
+    .select()
+    .from(g)
+    .where(
+      and(
+        eq(g.tenantId, input.tenantId),
+        eq(g.stationIdSnapshot, input.stationId),
+        notInArray(g.state, ["revoking", "revoked"]),
+      ),
+    )
+    .for("update");
+  if (live.length === 0) return [];
+  const [st] = await tx
+    .select({ nodeId: stations.nodeId, stationKey: stations.stationKey })
+    .from(stations)
+    .where(and(eq(stations.tenantId, input.tenantId), eq(stations.id, input.stationId)));
+  const ids: string[] = [];
+  for (const row of live) {
+    const provider = row.mode === "supplied" ? PENDING_OPERATOR : PROVIDER_PENDING;
+    await transition(tx, row, [row.state], "revoking", {
+      now,
+      stateReason: `${provider}; ${WIPE_PENDING}; cause: ${input.cause}`,
+      sealed: null,
+    });
+    // recordAudit takes the Database type; a transaction has the same insert/update surface, and
+    // writing through it is what makes the audit row roll back with the change it records.
+    const audit = await recordAudit(tx as unknown as Database, {
+      userId: input.actor ?? "system",
+      nodeId: st?.nodeId ?? "",
+      stationKey: st?.stationKey ?? row.stationIdSnapshot,
+      verb: "forge.api.revoking",
+      params: {
+        grantId: row.id,
+        provider: row.provider,
+        mode: row.mode,
+        generation: row.generation,
+        action: `revoking:${input.cause}`,
+        ...(input.actor ? { actor: input.actor } : {}),
+      },
+    });
+    await audit.done("ok");
+    ids.push(row.id);
+  }
+  log.info("forge grants marked revoking", { stationId: input.stationId, cause: input.cause, grants: ids.length });
+  return ids;
+}
+
+/**
+ * Revoke a grant's superseded `previous` (disposition `revoke`) and its `orphan` handle at the
+ * provider (404 = gone = success) and clear them from `token_handle`. Leaves a rotation in progress
+ * (`live-until-verified`) alone, and revoking/revoked grants to `revokeGrant`. A
+ * `previous-revoke-pending` reason is cleared once nothing is outstanding; any other reason stays.
+ * Throws `revoke-failed` (after recording what did succeed) if a handle could not be revoked.
+ */
+export async function revokeStrayHandles(deps: ForgeApiDeps, ref: Ref): Promise<{ revoked: string[]; grant: Grant }> {
+  const stale = await loadGrant(deps.db, toRef(ref));
+  return withGrantClaim(stale.tenantId, stale.id, async () => {
+    const row = await loadGrant(deps.db, stale);
+    const h = row.tokenHandle;
+    const prev = h?.previous?.disposition === "revoke" ? h.previous : undefined;
+    const orphan = h?.orphan;
+    // Only states with a self-edge; revoking/revoked grants are revokeGrant's (it revokes these too).
+    const selfEdge = row.state === "provisioned" || row.state === "delivered" || row.state === "verified" || row.state === "failed";
+    if (!h || (!prev && !orphan) || !selfEdge) return { revoked: [], grant: row };
+    const provider = deps.providers(row.provider);
+    const next: ForgeTokenHandle = { ...h };
+    const revoked: string[] = [];
+    let failure: string | null = null;
+    for (const [key, handle] of [["previous", prev], ["orphan", orphan]] as const) {
+      if (!handle) continue;
+      try {
+        await revokeTolerant(provider, row.account, bareHandle(handle));
+        delete next[key];
+        revoked.push(handle.name);
+      } catch (err) {
+        failure = scrub(err);
+      }
+    }
+    const pendingReason = row.stateReason?.startsWith("previous-revoke-pending");
+    const grant = await transition(deps.db, row, [row.state], row.state, {
+      now: deps.now(),
+      tokenHandle: next,
+      stateReason: pendingReason ? (failure ? `previous-revoke-pending: ${failure}` : null) : row.stateReason,
+    });
+    if (failure) throw new ForgeApiGrantError("revoke-failed", `forge grant ${row.id}: a superseded token could not be revoked: ${failure}`, row.id);
+    log.info("forge grant superseded tokens revoked", { grantId: row.id, count: revoked.length });
+    return { revoked, grant };
+  });
+}
+
+/**
+ * Undo a rotation whose new token's sealed blob expired unacknowledged: the hub cannot re-seal it,
+ * so generation n+1 is revoked and the row returns to n (`restorePrevious`, the same undo the
+ * pre-ack failures use). Returns the row unchanged when it is not such a rotation.
+ */
+export async function undoExpiredRotation(deps: ForgeApiDeps, ref: Ref): Promise<Grant> {
+  const stale = await loadGrant(deps.db, toRef(ref));
+  return withGrantClaim(stale.tenantId, stale.id, async () => {
+    const row = await loadGrant(deps.db, stale);
+    const { rotating } = rotationOf(row);
+    if (!rotating || !row.sealedBlob || blobIsLive(row, deps.now())) return row;
+    return restorePrevious(deps, row, "the new token's sealed copy expired unacknowledged");
   });
 }

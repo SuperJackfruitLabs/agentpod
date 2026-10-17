@@ -146,6 +146,26 @@ describe("forgejo provider", () => {
     expect(String(err)).not.toContain(SECRET);
   });
 
+  test("listTokens pages GET /admin/users/{u}/tokens and keeps only id and name", async () => {
+    const page1 = Array.from({ length: 50 }, (_, i) => ({ id: i, name: `agentpod-x-g${i}`, token_last_eight: "abcd1234", sha1: SECRET }));
+    const a = scripted([
+      [200, page1],
+      [200, [{ id: 99, name: "laptop", token_last_eight: "zzzz9999" }]],
+    ]);
+    const out = await p(a.fetchImpl).listTokens!("coder-kai");
+    expect(a.calls.map((c) => [c.method, c.url])).toEqual([
+      ["GET", "https://forge.test/api/v1/admin/users/coder-kai/tokens?page=1&limit=50"],
+      ["GET", "https://forge.test/api/v1/admin/users/coder-kai/tokens?page=2&limit=50"],
+    ]);
+    expect(out.length).toBe(51);
+    expect(out[50]).toEqual({ id: 99, name: "laptop" });
+    expect(JSON.stringify(out)).not.toContain(SECRET);
+    const b = scripted([[403, { message: SECRET }]]);
+    const err = await p(b.fetchImpl).listTokens!("coder-kai").catch((e) => e);
+    expect(String(err)).toContain("403");
+    expect(String(err)).not.toContain(SECRET);
+  });
+
   test("token name is unique per generation", () => {
     expect(tokenName(grant({ generation: 1 }))).toBe("agentpod-g1-g1");
     expect(tokenName(grant({ generation: 2 }))).toBe("agentpod-g1-g2");

@@ -235,6 +235,39 @@ export async function revokeAgentToken(
   log.info("forge token revoked", { username, name: tokenName });
 }
 
+/** A page of the admin token listing; a short page is the last. */
+const TOKEN_PAGE = 50;
+/** Bound on pages read, so a misbehaving forge cannot keep a sweep paging forever. */
+const TOKEN_PAGES_MAX = 100;
+
+/**
+ * Every access token on an account, by id and name: `GET /admin/users/{username}/tokens`, paged.
+ * The listing carries `token_last_eight`, never the secret, and only id and name are kept.
+ */
+export async function listAgentTokens(
+  cfg: ForgeConfig,
+  username: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<{ id?: number; name: string }[]> {
+  const out: { id?: number; name: string }[] = [];
+  for (let page = 1; page <= TOKEN_PAGES_MAX; page++) {
+    const res = await call(
+      cfg,
+      "GET",
+      `/admin/users/${encodeURIComponent(username)}/tokens?page=${page}&limit=${TOKEN_PAGE}`,
+      fetchImpl,
+    );
+    if (res.status !== 200) refuse(`listing tokens for ${username}`, res.status);
+    if (!Array.isArray(res.body)) throw new Error(`forge: the token listing for ${username} was unreadable.`);
+    for (const t of res.body as { id?: unknown; name?: unknown }[]) {
+      if (typeof t?.name !== "string") continue;
+      out.push(typeof t.id === "number" ? { id: t.id, name: t.name } : { name: t.name });
+    }
+    if (res.body.length < TOKEN_PAGE) return out;
+  }
+  return out;
+}
+
 export interface RegisteredKey {
   /** forge's numeric key id — the handle revocation needs. */
   id: number;

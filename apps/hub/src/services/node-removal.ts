@@ -132,7 +132,7 @@ export async function removeNode(
     };
   }
 
-  for (const s of owned) await unadopt(s.userId, s.id);
+  for (const s of owned) await unadopt(s.userId, s.id, "node-removed");
 
   await db.delete(declaredHarnessConfig).where(eq(declaredHarnessConfig.nodeId, nodeId));
   await db.delete(harnessConfigOptOut).where(eq(harnessConfigOptOut.nodeId, nodeId));
