@@ -21,9 +21,10 @@ async function open(envelope: string): Promise<Record<string, string>> {
 
 describe("handover seal", () => {
   test("the vector private key derives the vector public key", async () => {
+    const parsed = parseHandoverPublicKey(vector.public_key);
     await sodium.ready;
     const pk = sodium.crypto_scalarmult_base(b64urlDecode(vector.private_key));
-    expect(parseHandoverPublicKey(vector.public_key)).toEqual(pk);
+    expect(parsed).toEqual(pk);
   });
 
   test("seals material that the vector private key opens", async () => {
@@ -53,11 +54,16 @@ describe("handover seal", () => {
   });
 
   test("rejects wrong length", async () => {
-    const short = PREFIX + sodium.to_base64(new Uint8Array(31), sodium.base64_variants.URLSAFE_NO_PADDING);
-    const long = PREFIX + sodium.to_base64(new Uint8Array(33), sodium.base64_variants.URLSAFE_NO_PADDING);
+    const short = PREFIX + Buffer.alloc(31).toString("base64url");
+    const long = PREFIX + Buffer.alloc(33).toString("base64url");
     expect(() => parseHandoverPublicKey(short)).toThrow();
     expect(() => parseHandoverPublicKey(long)).toThrow();
     await expect(sealHandover(short, vector.material)).rejects.toThrow();
+  });
+
+  test("rejects embedded CR/LF in a key", () => {
+    expect(() => parseHandoverPublicKey(vector.public_key + "\n")).toThrow();
+    expect(() => parseHandoverPublicKey(PREFIX + "B6N8vBQgk8i3Vdwb\r\nEOhstCY3StFqqFPtC9_AsrhtHHw")).toThrow();
   });
 
   test("rejects bad base64 and padded base64", () => {

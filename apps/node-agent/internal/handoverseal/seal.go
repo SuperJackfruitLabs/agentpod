@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 
 	"golang.org/x/crypto/nacl/box"
@@ -16,12 +17,20 @@ import (
 
 const prefix = "stk-handover-v1:"
 
+var alphabet = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 // ParsePublicKey parses "stk-handover-v1:<base64url-nopad 32 bytes>".
 func ParsePublicKey(s string) (*[32]byte, error) {
 	if !strings.HasPrefix(s, prefix) {
 		return nil, errors.New("handover public key must start with " + prefix)
 	}
-	raw, err := base64.RawURLEncoding.Strict().DecodeString(strings.TrimPrefix(s, prefix))
+	body := strings.TrimPrefix(s, prefix)
+	// Stricter than stk's own Go parser on purpose: Go's base64 decoder skips
+	// CR/LF, so check the alphabet first. The TS sealer does the same.
+	if !alphabet.MatchString(body) {
+		return nil, errors.New("handover public key is not unpadded base64url")
+	}
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(body)
 	if err != nil {
 		return nil, errors.New("handover public key is not unpadded base64url")
 	}

@@ -13,13 +13,10 @@ const PREFIX = "stk-handover-v1:";
 const KEY_BYTES = 32;
 const BASE64URL_NOPAD = /^[A-Za-z0-9_-]+$/;
 
+// Pure Node/Bun: key validation must never depend on libsodium's WASM init.
 function decode(body: string, what: string): Uint8Array {
   if (!BASE64URL_NOPAD.test(body)) throw new Error(`${what} is not unpadded base64url`);
-  try {
-    return sodium.from_base64(body, sodium.base64_variants.URLSAFE_NO_PADDING);
-  } catch {
-    throw new Error(`${what} is not unpadded base64url`);
-  }
+  return new Uint8Array(Buffer.from(body, "base64url"));
 }
 
 /** Parse `stk-handover-v1:<base64url-nopad 32 bytes>`. Throws on any deviation. */
@@ -39,6 +36,7 @@ export async function sealHandover(
   publicKey: string,
   material: Record<string, string>,
 ): Promise<string> {
+  await sodium.ready;
   const key = parseHandoverPublicKey(publicKey);
   if (material === null || typeof material !== "object" || Array.isArray(material)) {
     throw new Error("handover material must be an object of strings");
@@ -48,7 +46,6 @@ export async function sealHandover(
   for (const [, v] of entries) {
     if (typeof v !== "string") throw new Error("handover material values must be strings");
   }
-  await sodium.ready;
   const sealed = sodium.crypto_box_seal(JSON.stringify(material), key);
   return PREFIX + sodium.to_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING);
 }

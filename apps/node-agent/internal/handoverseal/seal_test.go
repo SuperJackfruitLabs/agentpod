@@ -1,6 +1,7 @@
 package handoverseal
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -104,10 +105,24 @@ func TestEnvelopeContainsNoPlaintext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(env, prefix))
-	for _, s := range []string{env, string(raw)} {
-		if strings.Contains(s, v.Material["token"]) || strings.Contains(string(raw), "token") {
-			t.Fatal("plaintext leaked")
+	token := v.Material["token"]
+	if strings.Contains(env, token) {
+		t.Fatal("plaintext in envelope string")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(env, prefix))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(token)) || bytes.Contains(raw, []byte(`"token"`)) {
+		t.Fatal("plaintext in decoded envelope bytes")
+	}
+}
+
+func TestRejectsEmbeddedNewlinesInAKey(t *testing.T) {
+	v := loadVector(t)
+	for _, k := range []string{v.PublicKey + "\n", prefix + "B6N8vBQgk8i3Vdwb\r\nEOhstCY3StFqqFPtC9_AsrhtHHw"} {
+		if _, err := ParsePublicKey(k); err == nil {
+			t.Fatalf("accepted %q", k)
 		}
 	}
 }
