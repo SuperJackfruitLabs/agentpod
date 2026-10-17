@@ -80,3 +80,18 @@ describe("forge.api contract", () => {
     expect(VERB_RESULTS["forge.api.status"].safeParse({ grants: [{ grantId: "g", present: true, isolation: "same-user", extra: 1 }], extra: 2 }).success).toBe(true);
   });
 });
+
+describe("forge.api.status publicKey", () => {
+  const S = VERB_RESULTS["forge.api.status"];
+  it("status result carries the station's stk handover public key when the node has one", () => {
+    const r = S.safeParse({ grants: [], publicKey: "stk-handover-v1:AAAA" });
+    expect(r.success).toBe(true);
+    if (r.success) expect((r.data as { publicKey?: string }).publicKey).toBe("stk-handover-v1:AAAA");
+  });
+  it("publicKey is optional (an older node omits it)", () => {
+    expect(S.safeParse({ grants: [] }).success).toBe(true);
+  });
+  it("a publicKey without the stk-handover-v1: prefix is rejected", () => {
+    expect(S.safeParse({ grants: [], publicKey: "ssh-ed25519 AAAA" }).success).toBe(false);
+  });
+});

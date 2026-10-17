@@ -93,4 +93,6 @@ export const ForgeApiStatusResult = z
     grants: z.array(
       z.object({ grantId: z.string(), present: z.boolean(), isolation: ForgeApiIsolation }),
     ),
+    /** The station's stk handover PUBLIC key; the hub seals deliveries to it. Older nodes omit it. */
+    publicKey: z.string().startsWith(STK_HANDOVER_PREFIX).optional(),
   });
