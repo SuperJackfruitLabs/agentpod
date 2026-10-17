@@ -2058,7 +2058,8 @@ between minting and sealing (see Limits).
 reach over the station's agent; owning the station is not enough (403). An agent must not, and
 cannot, grant itself access. The forge account is never taken from the request: a minted grant is
 for the station's occupying agent, a supplied or app grant for the `--expect-login` you declare.
-A station with no occupant is refused (409).
+A minted grant on a station with no occupant is refused (409); a supplied or app grant does not
+need one.
 
 **Three credential modes.**
 
@@ -2103,9 +2104,12 @@ expected account. Isolation is `separate-user` (the broker runs as its own OS us
 
 **Rotation and revocation.** `rotate` (minted) mints a new token, delivers and verifies it, then
 revokes the old one; if verification fails the old token stays live. For a supplied or app grant,
-rotate by sending a new credential with `secret`. `revoke` revokes a minted token at the forge
-first, then wipes the station's copy (queued if the node is offline). Reassigning, unassigning or
-deleting a station revokes its grants; a new occupant starts with nothing.
+rotate by sending a new credential with `secret`. `revoke` first wipes the station's copy (best
+effort; queued if the node is offline, which cuts the station's access at once), then revokes a
+minted token at the forge, retrying until it succeeds. Reassigning, unassigning or deleting a
+station (or removing its node) marks its grants `revoking` in the same change and never waits on
+the forge; the reconcile sweep (every 5 minutes, and when a node reconnects) finishes the job. A
+new occupant starts with nothing.
 
 **Verifying a grant.** After `grant`, `list` should reach `verified`; run `verify` after any node
 change. Implementation: `apps/hub/src/routes/station-forge-api.ts` (routes, including
@@ -2126,6 +2130,9 @@ an older node answers `capability-missing` rather than doing nothing.
   only where isolation is `separate-user`.
 - **The hub sees a minted token for an instant**, between minting and sealing it. It stores only the
   sealed envelope.
+- **Every forge-api route needs the hub's Forgejo admin configuration.** Without `FORGE_URL` and
+  `FORGE_ADMIN_TOKEN` on the hub, every `forge-api` route answers 503, even for a GitHub-only
+  (`app` or `supplied`) grant, and the reconcile sweep does not run.
 - **agentpod cannot revoke a supplied token at its provider.** `revoke` removes it from the station;
   revoke it at the provider yourself, then run `fleet stations forge-api confirm-revoked`.
 - **A client that ignores proxy settings bypasses the broker.** It sends a placeholder and gets a
