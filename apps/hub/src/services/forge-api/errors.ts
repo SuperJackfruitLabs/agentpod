@@ -30,7 +30,9 @@ export type ForgeApiGrantErrorCode =
   | "seal-failed"
   | "delivery-failed"
   | "bad-transition"
-  | "state-conflict";
+  | "state-conflict"
+  | "handle-persist-failed"
+  | "grant-busy";
 
 const GRANT_ERROR_STATUS: Record<ForgeApiGrantErrorCode, number> = {
   "station-not-found": 404,
@@ -49,6 +51,8 @@ const GRANT_ERROR_STATUS: Record<ForgeApiGrantErrorCode, number> = {
   "delivery-failed": 502,
   "bad-transition": 500,
   "state-conflict": 409,
+  "handle-persist-failed": 500,
+  "grant-busy": 409,
 };
 
 /**

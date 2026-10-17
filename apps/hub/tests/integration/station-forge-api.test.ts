@@ -562,3 +562,160 @@ describe("transition", () => {
     expect(cleared.updatedAt.getTime()).toBe(now.getTime());
   });
 });
+
+// ─── Fix round 1: no orphan token, no double mint ─────────────────────────────
+
+function deferred<T = void>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+/** Make the harness's mint slow: it signals when entered and waits for `release`. */
+function slowMint(h: ReturnType<typeof harness>) {
+  const entered = deferred();
+  const release = deferred();
+  const provider = h.deps.providers("forgejo");
+  const fast = provider.mint!.bind(provider);
+  provider.mint = async (account, spec) => {
+    entered.resolve();
+    await release.promise;
+    return fast(account, spec);
+  };
+  return { entered: entered.promise, release: () => release.resolve() };
+}
+
+async function failedGrantWithoutHandle(h: ReturnType<typeof harness>) {
+  const provider = h.deps.providers("forgejo");
+  const real = provider.mint!;
+  provider.mint = async () => {
+    throw new Error("forge: minting was refused (HTTP 422).");
+  };
+  const st = await freshStation();
+  await h.attempt(createForgeApiGrant(h.deps, input(st.id)));
+  provider.mint = real;
+  h.errors.length = 0;
+  h.revoked.length = 0;
+  const [row] = await rowsFor(st.id);
+  expect(row!.state).toBe("failed");
+  expect(row!.tokenHandle).toBeNull();
+  return { st, row: row! };
+}
+
+describe("no orphan token", () => {
+  test("persisting the handle fails after a successful mint → exactly one compensating revoke, typed error, no secret", async () => {
+    const h = harness();
+    const provider = h.deps.providers("forgejo");
+    const fast = provider.mint!.bind(provider);
+    provider.mint = async (account, spec) => {
+      // Something else moves the row underneath, so the persist UPDATE finds no `authorised` row.
+      await rawSql`UPDATE station_forge_api_grants SET state = 'revoking' WHERE station_id_snapshot = ${stationId}`;
+      return fast(account, spec);
+    };
+    const st = await freshStation();
+    var stationId = st.id;
+    await h.attempt(createForgeApiGrant(h.deps, input(st.id)));
+    expect(h.errors).toHaveLength(1);
+    expect(h.errors[0]).toBeInstanceOf(ForgeApiGrantError);
+    expect((h.errors[0] as ForgeApiGrantError).code).toBe("handle-persist-failed");
+    expect((h.errors[0] as ForgeApiGrantError).status).toBe(500);
+    const [row] = await rowsFor(st.id);
+    expect(h.revoked).toEqual([{ account: st.handle!, handle: { id: 500, name: `agentpod-${row!.id}-g1` } }]);
+    await assertNoLeak(h, st.id);
+  });
+
+  test("an ambiguous mint failure → best-effort revoke by the deterministic name, grant failed", async () => {
+    const h = harness();
+    const provider = h.deps.providers("forgejo");
+    provider.mint = async () => {
+      throw new Error("forge: minting a token was refused (HTTP 502).");
+    };
+    const st = await freshStation();
+    await h.attempt(createForgeApiGrant(h.deps, input(st.id)));
+    const [row] = await rowsFor(st.id);
+    expect(row!.state).toBe("failed");
+    expect(h.revoked).toEqual([{ account: st.handle!, handle: { name: `agentpod-${row!.id}-g1` } }]);
+  });
+
+  test("a revoke that answers 404 on re-mint is success, not revoke-failed", async () => {
+    const h = harness();
+    h.replies["forge.api.deliver"] = () => ({ ok: false, error: "node offline" });
+    const st = await freshStation();
+    await h.attempt(createForgeApiGrant(h.deps, input(st.id)));
+    const [row] = await rowsFor(st.id);
+    h.deps.providers("forgejo").revoke = async () => {
+      throw new Error("forge: revoking was refused (HTTP 404).");
+    };
+    h.advance(DAY + 1000);
+    h.replies["forge.api.deliver"] = () => ({ ok: true, data: { ok: true, stored: true, isolation: "same-user" } });
+    const done = await deliverGrant(h.deps, { tenantId: tenant, grantId: row!.id });
+    expect(done.state).toBe("delivered");
+    expect(done.generation).toBe(2);
+  });
+});
+
+describe("no double mint", () => {
+  test("two concurrent deliverGrant calls → exactly one mint; the loser is grant-busy", async () => {
+    const h = harness();
+    const { row } = await failedGrantWithoutHandle(h);
+    const slow = slowMint(h);
+    const first = deliverGrant(h.deps, { tenantId: tenant, grantId: row.id });
+    await slow.entered;
+    const second = await deliverGrant(h.deps, { tenantId: tenant, grantId: row.id }).catch((e) => e);
+    expect(second).toBeInstanceOf(ForgeApiGrantError);
+    expect(second.code).toBe("grant-busy");
+    expect(second.status).toBe(409);
+    slow.release();
+    const won = await first;
+    expect(won.state).toBe("delivered");
+    expect(h.minted).toHaveLength(1);
+  });
+
+  test("two concurrent re-mints of an expired-blob grant → exactly one revoke and one mint", async () => {
+    const h = harness();
+    h.replies["forge.api.deliver"] = () => ({ ok: false, error: "node offline" });
+    const st = await freshStation();
+    await h.attempt(createForgeApiGrant(h.deps, input(st.id)));
+    const [row] = await rowsFor(st.id);
+    h.advance(DAY + 1000);
+    h.replies["forge.api.deliver"] = () => ({ ok: true, data: { ok: true, stored: true, isolation: "same-user" } });
+    const slow = slowMint(h);
+    const first = deliverGrant(h.deps, { tenantId: tenant, grantId: row!.id });
+    await slow.entered;
+    const second = await deliverGrant(h.deps, { tenantId: tenant, grantId: row!.id }).catch((e) => e);
+    expect(second.code).toBe("grant-busy");
+    slow.release();
+    expect((await first).generation).toBe(2);
+    expect(h.revoked).toHaveLength(1);
+    expect(h.minted).toHaveLength(2);
+  });
+
+  test("concurrent createForgeApiGrant on the same station/provider/instance → one mint", async () => {
+    const h = harness();
+    const st = await freshStation();
+    const slow = slowMint(h);
+    const first = createForgeApiGrant(h.deps, input(st.id));
+    await slow.entered;
+    const second = await createForgeApiGrant(h.deps, input(st.id)).catch((e) => e);
+    expect(second.code).toBe("grant-busy");
+    slow.release();
+    expect((await first).state).toBe("delivered");
+    expect(h.minted).toHaveLength(1);
+    expect(await rowsFor(st.id)).toHaveLength(1);
+  });
+
+  test("the claim is released when mint throws: a follow-up call proceeds", async () => {
+    const h = harness();
+    const { row } = await failedGrantWithoutHandle(h);
+    const provider = h.deps.providers("forgejo");
+    const real = provider.mint!;
+    provider.mint = async () => {
+      throw new Error("forge: minting was refused (HTTP 500).");
+    };
+    await h.attempt(deliverGrant(h.deps, { tenantId: tenant, grantId: row.id }));
+    expect((h.errors[0] as ForgeApiGrantError).code).toBe("mint-failed");
+    provider.mint = real;
+    const done = await deliverGrant(h.deps, { tenantId: tenant, grantId: row.id });
+    expect(done.state).toBe("delivered");
+  });
+});

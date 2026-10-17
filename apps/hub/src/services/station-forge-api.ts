@@ -34,7 +34,7 @@ import {
 } from "@agentpod/contract";
 import { and, eq, inArray, ne } from "drizzle-orm";
 
-import type { Database, DbExecutor } from "../db/drizzle";
+import { rawSql, type Database, type DbExecutor } from "../db/drizzle";
 import {
   stationForgeApiGrants as g,
   type ForgeGrantState,
@@ -181,6 +181,67 @@ function scrub(err: unknown, secret?: string): string {
   return msg.length > 200 ? `${msg.slice(0, 200)}…` : msg;
 }
 
+/** A provider 404 on revoke means the token is already gone: the end state asked for. */
+function isNotFound(err: unknown): boolean {
+  if ((err as { status?: unknown })?.status === 404) return true;
+  return err instanceof Error && /\bHTTP 404\b/.test(err.message);
+}
+
+/** Revoke, treating "already gone" as success. */
+async function revokeTolerant(provider: ForgeProvider, account: string, handle: { id?: number; name: string }) {
+  if (!provider.revoke) throw new Error(`forge: ${provider.kind} cannot revoke tokens.`);
+  try {
+    await provider.revoke(account, handle);
+  } catch (err) {
+    if (!isNotFound(err)) throw err;
+  }
+}
+
+/** Best-effort compensation: never throws, never logs more than ids and a scrubbed message. */
+async function compensateRevoke(
+  provider: ForgeProvider,
+  account: string,
+  handle: { id?: number; name: string },
+  grantId: string,
+  secret?: string,
+): Promise<void> {
+  try {
+    await revokeTolerant(provider, account, handle);
+  } catch (err) {
+    log.warn("forge compensating revoke failed; reconcile will find the token by name", {
+      grantId,
+      tokenName: handle.name,
+      error: scrub(err, secret),
+    });
+  }
+}
+
+/**
+ * The per-grant claim around mint → persist (→ re-mint) → seal → deliver.
+ *
+ * A session-level `pg_try_advisory_lock` on a RESERVED connection: it is not a transaction, so no
+ * transaction is held open across the provider's HTTP call, and the lock lives exactly as long as
+ * this function (released in `finally`; a crashed hub drops the connection and with it the lock).
+ * A caller that cannot get it does not wait and does not mint: `grant-busy` (409).
+ */
+async function withGrantClaim<T>(tenantId: string, grantId: string, fn: () => Promise<T>): Promise<T> {
+  const conn = await rawSql.reserve();
+  const key = `forge-grant|${tenantId}|${grantId}`;
+  try {
+    const [r] = await conn`SELECT pg_try_advisory_lock(hashtextextended(${key}, 0)) AS ok`;
+    if (!r?.ok) {
+      throw new ForgeApiGrantError("grant-busy", `forge grant ${grantId} is being worked on by another request; try again.`, grantId);
+    }
+    try {
+      return await fn();
+    } finally {
+      await conn`SELECT pg_advisory_unlock(hashtextextended(${key}, 0))`.catch(() => undefined);
+    }
+  } finally {
+    conn.release();
+  }
+}
+
 /** `forge-<provider>-<12 chars of the grant id>`: stable per grant, safe as an stk service name. */
 export function serviceNameFor(grant: Pick<Grant, "id" | "provider">): string {
   const short = grant.id.replace(/[^a-zA-Z0-9]/g, "").slice(-12).toLowerCase();
@@ -296,21 +357,27 @@ export async function createForgeApiGrant(deps: ForgeApiDeps, input: CreateForge
 
   const now = deps.now();
   const { row, created } = await deps.db.transaction(async (tx) => {
-    // Takes the (tenant, station, provider, instance) lock first, so the live-row check and the
-    // insert below cannot race another request for the same grant.
+    const findLive = async () =>
+      (
+        await tx
+          .select()
+          .from(g)
+          .where(
+            and(
+              eq(g.tenantId, input.tenantId),
+              eq(g.stationIdSnapshot, station.id),
+              eq(g.provider, input.provider),
+              eq(g.instance, input.instance),
+              ne(g.state, "revoked"),
+            ),
+          )
+      )[0];
+    // Reusing a live row needs no generation. Otherwise take the (tenant, station, provider,
+    // instance) lock via nextGeneration and look again under it, so a racing insert is seen.
+    const seen = await findLive();
+    if (seen) return { row: seen, created: false };
     const generation = await nextGeneration(tx, input.tenantId, station.id, input.provider, input.instance);
-    const [live] = await tx
-      .select()
-      .from(g)
-      .where(
-        and(
-          eq(g.tenantId, input.tenantId),
-          eq(g.stationIdSnapshot, station.id),
-          eq(g.provider, input.provider),
-          eq(g.instance, input.instance),
-          ne(g.state, "revoked"),
-        ),
-      );
+    const live = await findLive();
     if (live) return { row: live, created: false };
     const [inserted] = await tx
       .insert(g)
@@ -408,6 +475,23 @@ export async function deliverGrant(deps: ForgeApiDeps, ref: { tenantId: string; 
 
 async function advance(
   deps: ForgeApiDeps,
+  stale: Grant,
+  station: StationRow,
+  provider: ForgeProvider,
+  publicKey: string | null,
+): Promise<Grant> {
+  return withGrantClaim(stale.tenantId, stale.id, async () => {
+    // Re-read under the claim: a request that held it before us may have moved the grant on.
+    const row = await loadGrant(deps.db, stale);
+    if (row.state === "revoking" || row.state === "revoked") {
+      throw new ForgeApiGrantError("grant-not-deliverable", `forge grant ${row.id} is ${row.state}.`, row.id);
+    }
+    return advanceClaimed(deps, row, station, provider, publicKey);
+  });
+}
+
+async function advanceClaimed(
+  deps: ForgeApiDeps,
   row: Grant,
   station: StationRow,
   provider: ForgeProvider,
@@ -426,8 +510,7 @@ async function advance(
     // A token exists but no deliverable blob does, and the hub has no plaintext to re-seal.
     // Revoke it, then mint the next generation (spec: sealed-blob expiry).
     try {
-      if (!provider.revoke) throw new Error(`forge: ${provider.kind} cannot revoke tokens.`);
-      await provider.revoke(current.account, current.tokenHandle);
+      await revokeTolerant(provider, current.account, current.tokenHandle);
     } catch (err) {
       const reason = `re-mint blocked: revoking the undelivered token failed: ${scrub(err)}`;
       await transition(deps.db, current, [current.state], "failed", { now, stateReason: reason });
@@ -466,6 +549,9 @@ async function mintAndDeliver(
   try {
     minted = await provider.mint(row.account, { name, scopes, repositories });
   } catch (err) {
+    // Ambiguous: a timeout or 5xx may have created the token anyway. Revoke by the deterministic
+    // name (best effort) so a retry can never leave two tokens under one name.
+    await compensateRevoke(provider, row.account, { name }, row.id);
     const reason = `mint failed: ${scrub(err)}`;
     await transition(deps.db, row, [row.state], "failed", { now: deps.now(), stateReason: reason });
     log.warn("forge token mint failed", { grantId: row.id, stationId: station.id });
@@ -475,7 +561,20 @@ async function mintAndDeliver(
   const handle = minted.id === undefined ? { name: minted.name } : { id: minted.id, name: minted.name };
 
   // Persist the handle BEFORE sealing or delivering, so reconcile can always find this token.
-  let current = await transition(deps.db, row, [row.state], "provisioned", { now: deps.now(), tokenHandle: handle });
+  let current: Grant;
+  try {
+    current = await transition(deps.db, row, [row.state], "provisioned", { now: deps.now(), tokenHandle: handle });
+  } catch (err) {
+    // The token exists and nothing records it: take it back before anything else.
+    await compensateRevoke(provider, row.account, handle, row.id, secret);
+    secret = undefined;
+    log.warn("forge token handle could not be persisted; minted token revoked", { grantId: row.id, stationId: station.id });
+    throw new ForgeApiGrantError(
+      "handle-persist-failed",
+      `forge grant ${row.id}: the minted token could not be recorded (${scrub(err, minted.secret)}); it was revoked.`,
+      row.id,
+    );
+  }
 
   let sealed: string;
   try {
@@ -541,6 +640,8 @@ async function sendDeliver(deps: ForgeApiDeps, row: Grant, station: StationRow, 
       : fail("failed", `node refused delivery: ${error}`);
   }
   const ack = VERB_RESULTS["forge.api.deliver"].safeParse(res.data);
+  // A failed or unreadable ack keeps the sealed blob by design: it is ciphertext only the node can
+  // open, it expires after 24 h, and keeping it lets a retry re-send instead of re-minting.
   if (!ack.success) return fail("failed", "node acknowledged delivery with an unreadable reply");
   if (ack.data.ok !== true || ack.data.stored !== true) {
     return fail("failed", `node did not confirm the token was stored (ok=${ack.data.ok}, stored=${ack.data.stored})`);
