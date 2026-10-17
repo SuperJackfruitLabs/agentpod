@@ -558,3 +558,32 @@ test("the options list unplaced, unsuspended agents from the plane with their di
     plane.restore();
   }
 });
+
+test("setup on an empty station marks its forge API grants revoking and kicks the revoke after commit", async () => {
+  const { harness } = await import("../../tests/helpers/forge-api-harness");
+  const { configureForgeApiReconcile } = await import("../services/forge-api-reconcile");
+  const { pollUntil } = await import("../../tests/helpers/wait");
+  const id = await station();
+  const grantId = `fag_setup_${crypto.randomUUID().replace(/-/g, "")}`;
+  const name = `agentpod-${grantId}-g1`;
+  // A grant can sit on an unoccupied station (supplied/app grants do not need an occupant); a
+  // minted row stands in here so the kick's provider call is observable.
+  await rawSql`
+    INSERT INTO station_forge_api_grants (id, tenant_id, station_id, station_id_snapshot, provider, instance, mode, account,
+      expected_login, repositories, preset, rules, allow_graphql, state, token_handle, generation, created_by, created_at, updated_at)
+    VALUES (${grantId}, ${BOOTSTRAP_TENANT_ID}, ${id}, ${id}, 'forgejo', 'https://forge.recon.test', 'minted', 'someone',
+      'someone', '["o/r"]'::jsonb, 'read', '[]'::jsonb, false, 'delivered', ${JSON.stringify({ name })}::jsonb, 1, ${actor}, now(), now())`;
+  const h = harness();
+  configureForgeApiReconcile(h.deps, { schedule: false });
+  try {
+    const res = await request(id, input());
+    expect(res.status).toBe(200);
+    const [row] = await rawSql`SELECT state, state_reason FROM station_forge_api_grants WHERE id = ${grantId}`;
+    expect(["revoking", "revoked"]).toContain(row!.state);
+    await pollUntil(() => h.revoked.some((r) => r.name === name));
+  } finally {
+    configureForgeApiReconcile(null);
+    await rawSql`DELETE FROM station_forge_api_grants WHERE id = ${grantId}`;
+    await rawSql`DELETE FROM station_audit WHERE params_summary->>'grantId' = ${grantId}`;
+  }
+});

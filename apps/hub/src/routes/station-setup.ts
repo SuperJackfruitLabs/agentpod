@@ -1,5 +1,6 @@
 /** Explicit, owner-scoped onboarding. Existing assign/move APIs keep their semantics. */
 import { markGrantsRevoking } from "../services/station-forge-api";
+import { kickForgeApiRevoke } from "../services/forge-api-reconcile";
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
@@ -241,6 +242,8 @@ export const stationSetupRouter = new Hono()
         }
       }
       try {
+        // Grants marked revoking in the transaction; revoked out of band after it commits.
+        const revoking: { tenantId: string; grantId: string }[] = [];
         const principalId = await db.transaction(async (tx) => {
           // Serializes setup at this station; a stale UI cannot evict its new occupant.
           const [station] = await tx
@@ -298,7 +301,8 @@ export const stationSetupRouter = new Hono()
           // can exist on an unoccupied station: a new occupant inherits nothing, exactly as
           // agents-admin's assign does. Same transaction; never calls the forge or the node
           // (the reconcile sweep revokes).
-          await markGrantsRevoking(tx, { tenantId: station.tenantId, stationId, cause: "reassigned", actor: userId });
+          const ids = await markGrantsRevoking(tx, { tenantId: station.tenantId, stationId, cause: "reassigned", actor: userId });
+          revoking.push(...ids.map((grantId) => ({ tenantId: station.tenantId, grantId })));
           // The dispatch grant is written at the plane after commit (below).
           await tx
             .update(stations)
@@ -320,6 +324,8 @@ export const stationSetupRouter = new Hono()
           fresh = true;
           return id;
         });
+        // After commit, never awaited: the revoke runs out of band (the sweep retries).
+        kickForgeApiRevoke(revoking);
         // A concurrent retry's receipt answered this request: the agent made for it is unused.
         if (planeAgent && planeAgent !== principalId) await abandonPlaneAgent(planeAgent);
         planeAgent = null; // settled: placed, or abandoned just now. Nothing below may suspend it.
