@@ -181,6 +181,25 @@ and a forge key for every station is an account nobody uses and a key nobody rev
 The keypair is generated **on the node** and the private half never leaves it — `grant-push` asks
 for the public half and registers that. The hub holds no secret.
 
+### Forge API access
+
+```sh
+fleet stations forge-api list   --station <stationId>                     # state, mode, account, isolation
+fleet stations forge-api grant  --station <stationId> --provider forgejo \
+    --instance https://forge.example --repo org/repo --preset issues      # minted: no credential
+pbpaste | fleet stations forge-api grant --station <stationId> --provider github \
+    --instance https://github.com --repo org/repo --mode supplied --expect-login octo-bot
+fleet stations forge-api verify|rotate|revoke|confirm-revoked --station <stationId> --grant <grantId>
+fleet stations forge-api secret --station <stationId> --grant <grantId>   # re-supply, from stdin
+fleet stations forge-api policy --station <stationId> --grant <grantId> --preset issues --rule 'deny: DELETE /repos/**'
+```
+
+**Operator only, and no credential on the command line.** Every verb but `list` needs the operator
+seat and the control pair's reach over the agent. A supplied token or an App's fields are read from
+stdin, sealed on this machine to the station's broker key, and only the envelope is sent; there is
+no `--token` flag. The modes, presets, rules and limits are in
+[Stations](/use/stations/#forge-api-access).
+
 ### Staffing
 
 ```sh

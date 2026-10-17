@@ -41,7 +41,7 @@ This page is generated from the binary's own command table and source, and a tes
 
 | Command | What it does |
 |---|---|
-| [`fleet stations`](#fleet-stations) | Detect, adopt and unadopt stations; grant one push access. |
+| [`fleet stations`](#fleet-stations) | Detect, adopt and unadopt stations; grant one push or forge API access. |
 | [`fleet station`](#fleet-station) | One station: lifecycle, cleanup, changeset, files. |
 | [`fleet staff`](#fleet-staff) | Put an agent in a station, or take it out. |
 | [`fleet config`](#fleet-config) | Declare what a harness setting should be, and see what it is. |
@@ -558,7 +558,7 @@ fleet runtimes rm rt_123
 
 ## fleet stations
 
-Detect, adopt and unadopt stations; grant one push access.
+Detect, adopt and unadopt stations; grant one push or forge API access.
 
 ```text
 fleet stations <verb> [flags]
@@ -566,7 +566,7 @@ fleet stations <verb> [flags]
 
 Acts on the fleet's shape. For one station's contents — lifecycle, disk, diffs, files — see [`fleet station`](#fleet-station). Every verb here parses the same flags; each lists the ones it reads.
 
-Subcommands: [`detected`](#fleet-stations-detected), [`list`](#fleet-stations-list), [`adopt`](#fleet-stations-adopt), [`unadopt`](#fleet-stations-unadopt), [`git-identity`](#fleet-stations-git-identity), [`grant-push`](#fleet-stations-grant-push), [`revoke-push`](#fleet-stations-revoke-push).
+Subcommands: [`detected`](#fleet-stations-detected), [`list`](#fleet-stations-list), [`adopt`](#fleet-stations-adopt), [`unadopt`](#fleet-stations-unadopt), [`git-identity`](#fleet-stations-git-identity), [`grant-push`](#fleet-stations-grant-push), [`revoke-push`](#fleet-stations-revoke-push), [`forge-api`](#fleet-stations-forge-api).
 
 `fleet stations -h` prints:
 
@@ -581,6 +581,10 @@ Usage: fleet stations <verb>
   fleet stations git-identity --station STATION_ID   what it can push to forge as
   fleet stations grant-push   --station STATION_ID   give it a forge push key
   fleet stations revoke-push  --station STATION_ID   take that key away
+
+  fleet stations forge-api <verb> --station STATION_ID …   forge API access through the
+                                                     station's broker (operator only;
+                                                     see fleet stations forge-api --help)
 
 A detected station is not an agent until it is adopted. Adopting re-detects on
 the node first, so a key that has gone away is not adopted from a stale list.
@@ -730,6 +734,233 @@ fleet stations revoke-push --station STATION_ID
 
 ```sh
 fleet stations revoke-push --station stn_123
+```
+
+### fleet stations forge-api
+
+Give a station's agent scoped forge API access through its broker (operator only).
+
+```text
+fleet stations forge-api <verb> --station STATION_ID [flags]
+```
+
+The station's broker (stk) holds the credential and injects it into requests the policy allows; the agent never sees it. Every verb but `list` is an operator action: the hub operator seat AND the control pair's reach over the station's agent (the owner alone is refused with 403). Three credential modes: `minted` (the hub mints a scoped token on its configured forge for the occupying agent), `supplied` (an operator-provided token) and `app` (a GitHub App's id, installation id and private key). A supplied or app credential is read from stdin, sealed on this machine to the station's handover key (fetched from the hub once, before anything is created), and only the sealed envelope is sent. There is no flag that takes a credential. Output is the hub's sanitised grant view; it never contains a token. See [Stations](/use/stations/#forge-api-access) for the limits.
+
+Subcommands: [`list`](#fleet-stations-forge-api-list), [`grant`](#fleet-stations-forge-api-grant), [`verify`](#fleet-stations-forge-api-verify), [`rotate`](#fleet-stations-forge-api-rotate), [`secret`](#fleet-stations-forge-api-secret), [`policy`](#fleet-stations-forge-api-policy), [`revoke`](#fleet-stations-forge-api-revoke), [`confirm-revoked`](#fleet-stations-forge-api-confirm-revoked).
+
+`fleet stations forge-api -h` prints:
+
+```text
+Usage: fleet stations forge-api <verb> --station STATION_ID [flags]
+
+  list            --station ID                       grants: state, mode, account, isolation
+  grant           --station ID --provider P --instance https://… --repo owner/name …
+                  [--preset read|issues|pull-requests|maintain|none]
+                  [--rule 'allow: METHOD /path']… [--rules-file FILE]
+                  [--mode minted|app|supplied] [--expect-login LOGIN] [--allow-graphql]
+  verify          --station ID --grant GRANT_ID      re-check the credential on the node
+  rotate          --station ID --grant GRANT_ID      minted: a new token, the old one revoked
+  secret          --station ID --grant GRANT_ID      re-supply a supplied/app credential (stdin)
+  policy          --station ID --grant GRANT_ID --preset P [--rule …]… [--rules-file FILE] [--allow-graphql]
+  revoke          --station ID --grant GRANT_ID
+  confirm-revoked --station ID --grant GRANT_ID      supplied: you revoked it at the provider
+
+Granting an agent forge API access is an OPERATOR action (hub operator seat and the
+control pair's reach). An agent must not try to grant itself access.
+
+A supplied or app credential is read from STDIN, never from a flag: a token for
+--mode supplied; for --mode app the lines app_id=…, installation_id=… and
+private_key=… (the PEM may continue over the following lines). The CLI fetches
+the station's handover key and seals the credential to it on this machine; the
+hub only ever sees the sealed envelope. A minted grant needs no credential.
+```
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+**Exit status:** 0 on success; 2 when a flag or the stdin credential is refused before any request; 1 when the hub refuses (its status and fixed message are printed, never the request).
+
+```sh
+fleet stations forge-api list --station stn_123
+```
+
+#### fleet stations forge-api list
+
+A station's forge API grants: state, mode, account, isolation.
+
+```text
+fleet stations forge-api list --station STATION_ID [--json]
+```
+
+Prints only known fields (id, state, mode, account, isolation, provider, instance, preset, repositories); `--json` prints the same fields as JSON. Readable by the station's owner as well as an operator.
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--station STATION_ID` | string | — | Station ID. **Required.** |
+| `--json` | bool | `false` | List: print the same fields as JSON. |
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+```sh
+fleet stations forge-api list --station stn_123
+```
+
+#### fleet stations forge-api grant
+
+Grant a station API access to named repositories on one forge.
+
+```text
+fleet stations forge-api grant --station STATION_ID --provider forgejo|github|gitea|bitbucket \
+    --instance https://HOST --repo OWNER/NAME [--repo …] [--preset read|issues|pull-requests|maintain|none] \
+    [--rule 'allow: METHOD /path']… [--rules-file FILE] [--mode minted|app|supplied] [--expect-login LOGIN] [--allow-graphql]
+```
+
+Refused before any request: no `--repo`, an `--instance` that is not https, an unknown provider, preset or mode, a malformed `--rule`, or `--mode supplied|app` without `--expect-login` (for an app, its slug). `--rule` is `allow: METHOD /path` or `deny: METHOD /path`; a rule with a `when` condition goes in `--rules-file`, a JSON array of `{allow|deny, when}` objects. `minted` (the default) sends one request. `supplied` reads one token from stdin; `app` reads `app_id=…`, `installation_id=…` and `private_key=…` lines (the PEM may continue over the following lines). For those the CLI fetches the station's key, seals, creates the grant, then posts the envelope; if that last step fails, re-send with `secret`. What the hub accepts today: Forgejo `minted` (the hub's configured forge only) and `supplied`; GitHub `app` and `supplied`. Gitea and Bitbucket are refused until their adapters exist.
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--station STATION_ID` | string | — | Station ID. **Required.** |
+| `--provider PROVIDER` | string | — | Forgejo, github, gitea or bitbucket. **Required.** |
+| `--instance URL` | string | — | The forge's https origin. **Required.** |
+| `--repo OWNER/NAME` | string | — | Owner/name (repeatable). **Required.** |
+| `--preset PRESET` | string | read | Read, issues, pull-requests, maintain or none. |
+| `--rule RULE` | string | — | 'allow: METHOD /path' or 'deny: METHOD /path' (repeatable). |
+| `--rules-file FILE` | string | — | A JSON array of rules ({allow\|deny, when}), added after `--rule`. |
+| `--mode MODE` | string | `minted` | Minted, app or supplied. |
+| `--expect-login LOGIN` | string | — | The account the credential must belong to (app: the App's slug). |
+| `--allow-graphql` | bool | `false` | Let the station use the GraphQL endpoint. |
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+```sh
+fleet stations forge-api grant --station stn_123 --provider forgejo --instance https://forge.example \
+    --repo org/repo --preset issues
+pbpaste | fleet stations forge-api grant --station stn_123 --provider github --instance https://github.com \
+    --repo org/repo --mode supplied --expect-login octo-bot
+```
+
+#### fleet stations forge-api verify
+
+Re-check a grant's credential on the node.
+
+```text
+fleet stations forge-api verify --station STATION_ID --grant GRANT_ID
+```
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--station STATION_ID` | string | — | Station ID. **Required.** |
+| `--grant GRANT_ID` | string | — | Grant ID, as `fleet stations forge-api list` shows it. **Required.** |
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+```sh
+fleet stations forge-api verify --station stn_123 --grant fag_123
+```
+
+#### fleet stations forge-api rotate
+
+Mint a minted grant a new token; the previous one is revoked.
+
+```text
+fleet stations forge-api rotate --station STATION_ID --grant GRANT_ID
+```
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--station STATION_ID` | string | — | Station ID. **Required.** |
+| `--grant GRANT_ID` | string | — | Grant ID, as `fleet stations forge-api list` shows it. **Required.** |
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+```sh
+fleet stations forge-api rotate --station stn_123 --grant fag_123
+```
+
+#### fleet stations forge-api secret
+
+Re-supply a supplied or app grant's credential from stdin, sealed.
+
+```text
+fleet stations forge-api secret --station STATION_ID --grant GRANT_ID [--mode app]
+```
+
+Reads a token from stdin, or with `--mode app` the App's three field lines; fetches the station's key once, seals, and posts only the envelope.
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--station STATION_ID` | string | — | Station ID. **Required.** |
+| `--grant GRANT_ID` | string | — | Grant ID, as `fleet stations forge-api list` shows it. **Required.** |
+| `--mode MODE` | string | `minted` | App to read an App's fields instead of a token. |
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+```sh
+pbpaste | fleet stations forge-api secret --station stn_123 --grant fag_123
+```
+
+#### fleet stations forge-api policy
+
+Replace a grant's preset, rules and GraphQL setting.
+
+```text
+fleet stations forge-api policy --station STATION_ID --grant GRANT_ID --preset PRESET [--rule RULE]… [--rules-file FILE] [--allow-graphql]
+```
+
+Replaces, not merges: rules not given are removed, and GraphQL is off unless `--allow-graphql` is given.
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--station STATION_ID` | string | — | Station ID. **Required.** |
+| `--grant GRANT_ID` | string | — | Grant ID, as `fleet stations forge-api list` shows it. **Required.** |
+| `--preset PRESET` | string | — | Read, issues, pull-requests, maintain or none. **Required.** |
+| `--rule RULE` | string | — | 'allow: METHOD /path' or 'deny: METHOD /path' (repeatable). |
+| `--rules-file FILE` | string | — | A JSON array of rules ({allow\|deny, when}), added after `--rule`. |
+| `--allow-graphql` | bool | `false` | Let the station use the GraphQL endpoint. |
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+```sh
+fleet stations forge-api policy --station stn_123 --grant fag_123 --preset issues --rule 'deny: DELETE /repos/**'
+```
+
+#### fleet stations forge-api revoke
+
+Remove a grant from the station (and, when minted, revoke the token at the forge).
+
+```text
+fleet stations forge-api revoke --station STATION_ID --grant GRANT_ID
+```
+
+agentpod cannot revoke a supplied token at its provider: revoke it there, then run `confirm-revoked`.
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--station STATION_ID` | string | — | Station ID. **Required.** |
+| `--grant GRANT_ID` | string | — | Grant ID, as `fleet stations forge-api list` shows it. **Required.** |
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+```sh
+fleet stations forge-api revoke --station stn_123 --grant fag_123
+```
+
+#### fleet stations forge-api confirm-revoked
+
+Record that you revoked a supplied credential at its provider.
+
+```text
+fleet stations forge-api confirm-revoked --station STATION_ID --grant GRANT_ID
+```
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--station STATION_ID` | string | — | Station ID. **Required.** |
+| `--grant GRANT_ID` | string | — | Grant ID, as `fleet stations forge-api list` shows it. **Required.** |
+
+**Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
+
+```sh
+fleet stations forge-api confirm-revoked --station stn_123 --grant fag_123
 ```
 
 ## fleet station
