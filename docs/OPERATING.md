@@ -2050,8 +2050,9 @@ fleet stations forge-api revoke --station <stationId> --grant <grantId>
 
 **The agent never holds the token.** The station's broker (`stk`) holds the credential and adds it
 to the requests its policy allows, whichever client the agent uses (`tea`, `gh`, `curl`, an MCP
-server). The hub delivers the credential **sealed** to the station's broker key, so the hub relays
-ciphertext it cannot open.
+server). The hub delivers the credential **sealed** to the station's broker key. For a supplied or
+app grant the hub relays ciphertext it cannot open; for a minted grant it holds the token briefly
+between minting and sealing (see Limits).
 
 **Operator only.** Every verb except `list` needs the hub operator seat **and** the control pair's
 reach over the station's agent; owning the station is not enough (403). An agent must not, and
@@ -2089,7 +2090,8 @@ App's fields). A sealed credential the station does not acknowledge within 24 ho
 `--rules-file`, a JSON array such as
 `[{"allow": "PATCH /repos/org/repo/issues/*", "when": {"body.state": "absent"}}]`. Rules narrow the
 token and never widen it; a `deny` wins; `DELETE` is denied by every preset. `policy` **replaces**
-the preset, rules and GraphQL setting (GraphQL is off unless `--allow-graphql`), and needs no new
+the preset, rules and GraphQL setting (GraphQL is off unless `--allow-graphql`, so omitting the flag
+turns it off), and needs no new
 credential. A minted token's provider-side scopes follow a changed preset only from the next
 `rotate`; until then the broker's rules are what apply.
 

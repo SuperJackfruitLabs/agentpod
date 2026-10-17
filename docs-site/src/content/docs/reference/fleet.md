@@ -760,8 +760,9 @@ Usage: fleet stations forge-api <verb> --station STATION_ID [flags]
                   [--mode minted|app|supplied] [--expect-login LOGIN] [--allow-graphql]
   verify          --station ID --grant GRANT_ID      re-check the credential on the node
   rotate          --station ID --grant GRANT_ID      minted: a new token, the old one revoked
-  secret          --station ID --grant GRANT_ID      re-supply a supplied/app credential (stdin)
+  secret          --station ID --grant GRANT_ID      re-supply a credential (stdin); add --mode app for an App
   policy          --station ID --grant GRANT_ID --preset P [--rule …]… [--rules-file FILE] [--allow-graphql]
+                  replaces the whole policy: omitting --allow-graphql turns GraphQL OFF
   revoke          --station ID --grant GRANT_ID
   confirm-revoked --station ID --grant GRANT_ID      supplied: you revoked it at the provider
 

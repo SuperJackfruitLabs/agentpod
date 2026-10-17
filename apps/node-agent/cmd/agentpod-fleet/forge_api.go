@@ -26,8 +26,9 @@ const forgeAPIUsage = `Usage: fleet stations forge-api <verb> --station STATION_
                   [--mode minted|app|supplied] [--expect-login LOGIN] [--allow-graphql]
   verify          --station ID --grant GRANT_ID      re-check the credential on the node
   rotate          --station ID --grant GRANT_ID      minted: a new token, the old one revoked
-  secret          --station ID --grant GRANT_ID      re-supply a supplied/app credential (stdin)
+  secret          --station ID --grant GRANT_ID      re-supply a credential (stdin); add --mode app for an App
   policy          --station ID --grant GRANT_ID --preset P [--rule …]… [--rules-file FILE] [--allow-graphql]
+                  replaces the whole policy: omitting --allow-graphql turns GraphQL OFF
   revoke          --station ID --grant GRANT_ID
   confirm-revoked --station ID --grant GRANT_ID      supplied: you revoked it at the provider
 
@@ -188,8 +189,8 @@ func forgeAPIGrant(f *forgeAPIFlags, base string) {
 		fmt.Fprintln(os.Stderr, "the hub did not return the new grant's id; nothing was sealed and sent")
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "grant %s created; sending its sealed credential (if this fails: fleet stations forge-api secret --station %s --grant %s)\n",
-		view.Grant.ID, *f.station, view.Grant.ID)
+	fmt.Fprintf(os.Stderr, "grant %s created; sending its sealed credential (if this fails: fleet stations forge-api secret --station %s --grant %s --mode %s)\n",
+		view.Grant.ID, *f.station, view.Grant.ID, *f.mode)
 	fleetSkillJSON(http.MethodPost, base+"/"+url.PathEscape(view.Grant.ID)+"/secret", map[string]string{"sealed": sealed})
 }
 
@@ -312,8 +313,23 @@ func sealToStation(base string, material map[string]string) string {
 		fmt.Fprintf(os.Stderr, "sealing failed: %v\n", err)
 		os.Exit(1)
 	}
+	if err := checkEnvelope(sealed); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	return sealed
 }
+
+// checkEnvelope refuses to send anything that is not a sealed envelope. Its message is fixed: it
+// never quotes the value, which could be plaintext if the sealer were ever wrong.
+func checkEnvelope(s string) error {
+	if !strings.HasPrefix(s, handoverEnvelopePrefix) {
+		return fmt.Errorf("sealing did not produce a sealed envelope; nothing was sent")
+	}
+	return nil
+}
+
+const handoverEnvelopePrefix = "stk-handover-v1:"
 
 // forgeGrantRow is every field `list` prints. Only these are decoded, so a field the CLI does not
 // know — even one a faulty hub should never send — is never printed.

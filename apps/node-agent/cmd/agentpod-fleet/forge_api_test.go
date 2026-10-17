@@ -449,3 +449,37 @@ func TestForgeAPIHelpAndReferenceAgree(t *testing.T) {
 		t.Error("fleet stations --help does not mention forge-api")
 	}
 }
+
+// The retry hint after a failed secret POST names the mode that reads that credential's shape:
+// `secret` defaults to a one-line token, so an app grant's hint must say --mode app.
+func TestForgeAPISecretRetryHintNamesTheMode(t *testing.T) {
+	bin := build(t)
+	for _, tc := range []struct{ mode, stdin string }{
+		{"supplied", testPAT},
+		{"app", "app_id=1\ninstallation_id=2\nprivate_key=k\n"},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			h, srv := newForgeHub(t)
+			h.mu.Lock()
+			h.status["POST /api/stations/stn_1/forge-api/fag_1/secret"] = http.StatusForbidden
+			h.mu.Unlock()
+			args := []string{"stations", "forge-api", "grant", "--station", "stn_1", "--provider", "github",
+				"--instance", "https://github.com", "--repo", "org/repo", "--mode", tc.mode, "--expect-login", "x"}
+			out, code := runStdin(t, bin, srv.URL, tc.stdin, args...)
+			if code == 0 || !strings.Contains(out, "forge-api secret --station stn_1 --grant fag_1 --mode "+tc.mode) {
+				t.Fatalf("exit %d, hint lacks --mode %s: %s", code, tc.mode, out)
+			}
+		})
+	}
+}
+
+func TestEnvelopeGuard(t *testing.T) {
+	if err := checkEnvelope("stk-handover-v1:abc"); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"", "abc", "ghp_xxx"} {
+		if err := checkEnvelope(bad); err == nil || strings.Contains(err.Error(), bad+"x") {
+			t.Errorf("%q accepted or error echoes it: %v", bad, err)
+		}
+	}
+}
