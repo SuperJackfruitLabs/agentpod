@@ -201,3 +201,51 @@ describe("boot", () => {
       .not.toContain("HUB_REDACTION_RULES_FILE");
   });
 });
+
+/**
+ * Forgejo/Gitea API tokens are 40 lower-case hex with no prefix — the same shape as a git commit
+ * SHA, which transcripts are full of. Masking every 40-hex run would erase the SHAs that make a
+ * transcript useful evidence, so the rule fires only where token-ish context precedes the value.
+ */
+describe("forge-token: 40 hex, only in token context", () => {
+  const hex = (n: number) => "0123456789abcdef".repeat(4).slice(0, n);
+  const T = hex(40);
+
+  for (const hit of [
+    j("token: ", T),
+    j('{"sha1":"', T, '"}'),
+    j("access_token ", T),
+    j("forge_token=", T),
+    j("secret ", T),
+    j("password=", T),
+  ]) {
+    test(`masks ${JSON.stringify(hit.slice(0, 16))}…`, () => {
+      const got = r.string(`before ${hit} after`);
+      expect(got.value).toContain("[redacted:forge-token]");
+      expect(got.value).not.toContain(T);
+      expect(got.count).toBe(1);
+    });
+  }
+
+  for (const miss of [
+    j("commit ", T),
+    j(T, " fix token handling"),
+    j("token: ", hex(39)),
+    j("token: ", hex(40), "a"),
+    j("token: ", "a", hex(40)),
+    j("tokenizer ", T),
+  ]) {
+    test(`leaves ${JSON.stringify(miss.slice(0, 16))}…`, () => {
+      expect(r.string(miss)).toEqual({ value: miss, count: 0 });
+    });
+  }
+
+  test("masks a forge token in a transcript item, keeps a commit SHA beside it", () => {
+    const sha = "f".repeat(40);
+    const item = { kind: "tool_result", text: j("created ", sha, "; the new token is ", T) };
+    const got = r.value(item).value as { text: string };
+    expect(got.text).toContain(sha);
+    expect(got.text).not.toContain(T);
+    expect(got.text).toContain("[redacted:forge-token]");
+  });
+});

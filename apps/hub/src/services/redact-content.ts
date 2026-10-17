@@ -11,7 +11,8 @@
  *   2. credential patterns, each named in its marker: anthropic-key, openai-key, aws-access-key,
  *      github-token, slack-token, stripe-key, google-api-key, jwt, private-key, authorization,
  *      url-credentials (with or without a user), service-credential, superpipeline-key,
- *      query-secret, and env-assignment (`AWS_SECRET_ACCESS_KEY=…`, the name kept);
+ *      query-secret, env-assignment (`AWS_SECRET_ACCESS_KEY=…`, the name kept), and forge-token
+ *      (40 hex labelled by a credential word; a bare git SHA is not masked);
  *   3. key names (`key-name`): in an object, the WHOLE value of a key that names a credential —
  *      `db_password`, `X-Api-Key`, `aws_secret_access_key`, and camelCase `accessToken`,
  *      `clientSecret`, `dbPassword`;
@@ -120,6 +121,18 @@ export const PATTERN_RULES: readonly RedactionRule[] = [
     name: "env-assignment",
     pattern:
       /(\b(?:[A-Z][A-Z0-9]{0,31}_){0,8}(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|ACCESS_KEY)(?:_[A-Z0-9]{1,32}){0,8}=["']?)(?!\[redacted:)[^\s"']{1,4096}/g,
+    keepPrefix: true,
+  },
+  {
+    // Forgejo/Gitea API tokens: 40 hex, no prefix — exactly a git commit SHA's shape. Masking every
+    // 40-hex run would erase the SHAs that make a transcript useful evidence, so this fires only
+    // where a credential word (token, secret, sha1 — Forgejo's own field name for a new token —,
+    // access, bearer, authorization, password) directly labels the value: `token: <hex>`,
+    // `"sha1":"<hex>"`, `access_token=<hex>`, `token is <hex>`. A bare SHA, or a 39/41-hex run, is left alone. The
+    // trade-off: a forge token pasted with no such label passes (as any unlabelled secret does).
+    name: "forge-token",
+    pattern:
+      /((?<![A-Za-z0-9])(?:token|secret|sha1|access|bearer|authorization|password|passwd)(?:[_-][A-Za-z0-9]{1,16}){0,2}["']?[ \t]{0,3}(?:(?:is|was|[:=])[ \t]{0,3})?["']?)(?<![0-9A-Za-z])[0-9a-fA-F]{40}(?![0-9A-Za-z])/gi,
     keepPrefix: true,
   },
 ];

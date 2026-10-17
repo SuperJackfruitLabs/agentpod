@@ -53,6 +53,7 @@ import { stationTokenRoutes } from './routes/station-token.ts';
 // A node redeeming a human's authorization for a station's Matrix credential
 import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-credential.ts';
 import { createStationGitIdentityRoutes } from './routes/station-git-identity.ts';
+import { createStationForgeApiRoutes } from './routes/station-forge-api.ts';
 import { createMcpProxyRoutes } from './routes/mcp-proxy.ts';
 import { configureGitAuthorSync } from './services/station-git-identity.ts';
 // A node reading its station's voice-note setting (transcription.apply)
@@ -293,6 +294,11 @@ const app = new Hono()
    * uses. The predecessor in #594 was a node calling in with its own credential and sat above.
    */
   .route('/api', createStationGitIdentityRoutes({ forge: forgeConfig }))
+  /**
+   * Forge API access grants (spec 2026-10-17-forge-api-access-design). Below `authMiddleware`;
+   * the route itself demands the operator seat AND the control pair on every mutation.
+   */
+  .route('/api', createStationForgeApiRoutes({ forge: forgeConfig }))
   .route('/api', nodePostureRoutes)                        // POST /api/nodes/:id/posture/scan
   .route('/public', runtimeCallbackRoutes)                 // POST /public/runtimes/:id/state
   .route('/api', stationAcpRoutes)                         // POST/GET /api/stations/:id/acp/sessions, WS /api/acp/sessions/:sessionId/ws
