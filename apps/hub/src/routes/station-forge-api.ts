@@ -51,9 +51,11 @@ import * as broker from "../services/broker";
 import type { FetchLike, ForgeConfig } from "../services/forge";
 import { getProvider } from "../services/forge-api/providers";
 import { ForgeApiConfigError } from "../services/forge-api/errors";
+import { instanceOrigin, isConfiguredForge, isIpLiteral } from "../services/forge-api/instance";
 import {
   ForgeApiGrantError,
   SUPPLIED_BLOB_MAX,
+  untrusted,
   acceptSuppliedSecret,
   confirmSuppliedRevoked,
   createForgeApiGrant,
@@ -80,32 +82,26 @@ export interface StationForgeApiDeps {
 
 // ─── Bodies ───────────────────────────────────────────────────────────────────
 
-/** An https origin: no credentials, no path beyond `/`, no query or fragment. Normalised to the origin. */
+/**
+ * An https origin: no credentials, no path beyond `/`, no query or fragment, no trailing-dot host.
+ * Normalised to the origin (lower-cased host, no trailing slash). IP-literal hosts are refused for
+ * supplied/app grants in `GrantBody` (a forge or GHE is addressed by name); a minted grant must be
+ * the configured forge exactly (checked here early and, authoritatively, in the service).
+ *
+ * Private NAMES are not refused: whether `git.internal` is reachable is a node-network concern. The
+ * hub never contacts a supplied/app instance — the node's stk does — and only an operator (admin +
+ * control pair) can create a grant, so this is not a hub-side SSRF surface.
+ */
 const Instance = z
   .string()
   .max(512)
   .transform((s, ctx) => {
-    let u: URL;
-    try {
-      u = new URL(s);
-    } catch {
-      ctx.addIssue({ code: "custom", message: "instance must be a URL" });
-      return z.NEVER;
-    }
-    if (
-      u.protocol !== "https:" ||
-      u.username ||
-      u.password ||
-      (u.pathname !== "/" && u.pathname !== "") ||
-      u.search ||
-      u.hash ||
-      s.includes("?") ||
-      s.includes("#")
-    ) {
+    const origin = instanceOrigin(s);
+    if (!origin) {
       ctx.addIssue({ code: "custom", message: "instance must be a bare https origin" });
       return z.NEVER;
     }
-    return u.origin; // lower-cased host, no trailing slash
+    return origin;
   });
 
 const Repository = z.string().max(200).regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
@@ -118,6 +114,8 @@ const GrantBody = z
     mode: ForgeApiMode,
     repositories: z.array(Repository).min(1).max(50),
     preset: ForgeApiPreset,
+    // `ForgeApiRule.when` is passed through to stk unevaluated; it is bounded only by the 64 KiB
+    // body limit (and stk validates it at reload).
     rules: z.array(ForgeApiRule).max(100).optional(),
     allowGraphql: z.boolean().optional(),
     expectedLogin: Login.optional(),
@@ -126,6 +124,9 @@ const GrantBody = z
   .superRefine((b, ctx) => {
     if (b.mode !== "minted" && !b.expectedLogin) {
       ctx.addIssue({ code: "custom", message: "expectedLogin is required for app and supplied grants" });
+    }
+    if (b.mode !== "minted" && isIpLiteral(new URL(b.instance).hostname)) {
+      ctx.addIssue({ code: "custom", path: ["instance"], message: "instance must be a host name, not an IP" });
     }
   });
 
@@ -159,7 +160,8 @@ export function viewOf(row: StationForgeApiGrant, now = new Date()) {
     rules: row.rules,
     allowGraphql: row.allowGraphql,
     state: row.state,
-    stateReason: row.stateReason,
+    // Capped and stripped: a reason can carry provider- or node-derived text.
+    stateReason: row.stateReason === null ? null : untrusted(row.stateReason),
     generation: row.generation,
     isolation: row.isolation,
     hasPendingCredential:
@@ -186,6 +188,7 @@ const MESSAGES: Record<string, string> = {
   "handle-persist-failed": "The token could not be recorded; it was revoked.",
   "bad-sealed-blob": "The credential must be a sealed stk handover envelope.",
   "preset-none-needs-no-token": "Preset 'none' needs no token.",
+  "instance-not-forge": "A minted grant's instance must be this hub's configured forge.",
 };
 
 const messageFor = (code: string) => MESSAGES[code] ?? `The forge grant step was refused (${code}).`;
@@ -222,6 +225,7 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
         }
       },
       now: () => new Date(),
+      forgeOrigin: forge.baseUrl,
       // Loaded on use: libsodium has no business in the route module's import graph.
       seal: async (pk, material) => (await import("../services/handover-seal")).sealHandover(pk, material),
       ...deps.service,
@@ -291,6 +295,9 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
     if (!parsed.success) {
       // Field paths only: an issue message could quote a pasted secret.
       const fields = parsed.error.issues.map((i) => i.path.join(".") || "(body)");
+      if (fields.includes("instance")) {
+        return c.json({ error: "invalid-instance", message: "instance must be a bare https origin addressed by name." }, 400);
+      }
       return c.json({ error: "bad-request", message: `Invalid or unexpected fields: ${[...new Set(fields)].join(", ")}` }, 400);
     }
     return parsed.data;
@@ -389,8 +396,12 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
           a,
           "grant",
           { provider: b.provider, mode: b.mode, preset: b.preset },
-          () =>
-            createForgeApiGrant(serviceDeps(a.forge), {
+          async () => {
+            // Early, before any claim or key fetch; the service repeats it and is the authority.
+            if (b.mode === "minted" && !isConfiguredForge(b.instance, a.forge.baseUrl)) {
+              throw new ForgeApiConfigError("instance-not-forge", "instance is not the configured forge");
+            }
+            return createForgeApiGrant(serviceDeps(a.forge), {
               tenantId: a.station.tenantId,
               stationId: a.station.id,
               actor: a.user.id,
@@ -402,7 +413,8 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
               rules: b.rules ?? [],
               allowGraphql: b.allowGraphql ?? false,
               expectedLogin: b.expectedLogin,
-            }),
+            });
+          },
           (grant) => c.json({ grant: viewOf(grant) }),
         );
       })

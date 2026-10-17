@@ -464,6 +464,64 @@ describe("preconditions and errors", () => {
     expect(ok.json.grant.instance).toBe(FORGE);
   });
 
+  test("minted: an instance that is not the configured forge is 422, with no URL in the message", async () => {
+    const st = await freshStation();
+    for (const instance of ["https://other.sfr.test", "https://forge.sfr.test:8443"]) {
+      const r = await call(asAdmin(), "POST", `/stations/${st.id}/forge-api`, grantBody({ instance }));
+      expect(r.status).toBe(422);
+      expect(r.json.error).toBe("instance-not-forge");
+      expect(r.text).not.toContain("forge.sfr.test");
+    }
+    expect(await db.select().from(g).where(eq(g.stationIdSnapshot, st.id))).toHaveLength(0);
+    const [a] = await db
+      .select()
+      .from(stationAudit)
+      .where(and(eq(stationAudit.verb, "forge.api.route.grant"), eq(stationAudit.stationKey, "claude-code:" + st.id)));
+    expect(a!.error).toBe("instance-not-forge");
+  });
+
+  test("the route checks the configured forge itself, before the service runs", async () => {
+    // A service seam that WOULD accept other.sfr.test: only the route's own check refuses it.
+    const st = await freshStation();
+    const a = new Hono();
+    a.use("*", async (c, next) => {
+      c.set("user", { id: ADMIN, authType: "api_key", tenantId: tenant } as AuthUser);
+      await next();
+    });
+    a.route("/api", createStationForgeApiRoutes({ forge: FORGE_CFG, service: { ...service, forgeOrigin: "https://other.sfr.test" } }));
+    const r = await call(a, "POST", `/stations/${st.id}/forge-api`, grantBody({ instance: "https://other.sfr.test" }));
+    expect(r.status).toBe(422);
+    expect(r.json.error).toBe("instance-not-forge");
+  });
+
+  test("a trailing-dot host is invalid-instance in every mode; IP literals are invalid for supplied/app", async () => {
+    const st = await freshStation();
+    const cases: [Record<string, unknown>][] = [
+      [{ instance: "https://forge.sfr.test." }],
+      [{ instance: "https://forge.sfr.test./", mode: "supplied", expectedLogin: "b" }],
+      [{ instance: "https://10.0.0.1", mode: "supplied", expectedLogin: "b" }],
+      [{ instance: "https://192.168.1.1:3000", mode: "supplied", expectedLogin: "b" }],
+      [{ instance: "https://[::1]", mode: "supplied", expectedLogin: "b" }],
+      [{ instance: "https://[fd00::1]/", mode: "app", provider: "github", expectedLogin: "b" }],
+    ];
+    for (const [over] of cases) {
+      const r = await call(asAdmin(), "POST", `/stations/${st.id}/forge-api`, grantBody(over));
+      expect(`${over.instance} ${r.status} ${r.json.error}`).toBe(`${over.instance} 400 invalid-instance`);
+    }
+    const ok = await call(asAdmin(), "POST", `/stations/${st.id}/forge-api`, grantBody({ instance: "https://git.elsewhere.test", mode: "supplied", expectedLogin: "b" }));
+    expect(ok.status).toBe(200);
+  });
+
+  test("a long or control-character state reason is capped and cleaned in the view", async () => {
+    const st = await grantedStation();
+    await rawSql`UPDATE station_forge_api_grants SET state_reason = ${"mint failed: \u0007\u001b[31m" + "x".repeat(500)} WHERE id = ${st.grantId}`;
+    const r = await call(asAdmin(), "GET", `/stations/${st.id}/forge-api`);
+    const reason = r.json.grants[0].stateReason as string;
+    expect(reason.length).toBeLessThanOrEqual(201);
+    expect(reason).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    expect(reason.startsWith("mint failed: ")).toBe(true);
+  });
+
   test("repository lists are bounded and shaped", async () => {
     const st = await freshStation();
     for (const repositories of [[], ["noslash"], Array.from({ length: 51 }, (_, i) => `o/r${i}`)]) {

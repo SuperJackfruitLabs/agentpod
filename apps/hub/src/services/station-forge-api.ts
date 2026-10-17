@@ -50,7 +50,8 @@ import {
 import { stations } from "../db/schema/stations";
 import { createLogger } from "../utils/logger";
 import { recordAudit } from "./audit";
-import { ForgeApiGrantError } from "./forge-api/errors";
+import { ForgeApiConfigError, ForgeApiGrantError } from "./forge-api/errors";
+import { isConfiguredForge } from "./forge-api/instance";
 import { nextGeneration } from "./forge-api/generation";
 import { tokenName } from "./forge-api/forgejo";
 import { splitRepo, type ForgeGrantRef, type ForgeProvider } from "./forge-api/providers";
@@ -77,6 +78,11 @@ export interface ForgeApiDeps {
    * `fetchStationPublicKey`. Injectable so a caller with a cached key can skip the round trip.
    */
   stationPublicKey?: (station: { id: string; nodeId: string }) => Promise<string>;
+  /**
+   * The configured forge's URL (FORGE_URL). A minted grant's instance must be its origin, since the
+   * token is minted there; absent means no minted grant is possible (fail closed).
+   */
+  forgeOrigin?: string | null;
 }
 
 export interface CreateForgeApiGrantInput {
@@ -367,8 +373,20 @@ const sameList = (a: readonly string[], b: readonly string[]) =>
  * the returned row's `state` and `stateReason` say what happened.
  */
 export async function createForgeApiGrant(deps: ForgeApiDeps, input: CreateForgeApiGrantInput): Promise<Grant> {
-  const station = await loadStation(deps.db, input.tenantId, input.stationId);
   const minted = input.mode === "minted";
+  // Pure checks first, before the station is even read: does the provider offer this mode, and a
+  // minted token belongs to the configured forge only.
+  const provider = deps.providers(input.provider);
+  if (!provider.modes.includes(input.mode)) {
+    throw new ForgeApiGrantError("mode-not-supported", `forge: ${input.provider} does not offer ${input.mode} grants.`);
+  }
+  if (minted && !isConfiguredForge(input.instance, deps.forgeOrigin)) {
+    throw new ForgeApiConfigError(
+      "instance-not-forge",
+      "forge: a minted grant's instance must be this hub's configured forge (same https origin).",
+    );
+  }
+  const station = await loadStation(deps.db, input.tenantId, input.stationId);
 
   // minted: the account is the occupant's handle, and nothing in `input` can name it.
   // supplied/app: the account is the machine/bot login the operator created and declares; the
@@ -391,10 +409,6 @@ export async function createForgeApiGrant(deps: ForgeApiDeps, input: CreateForge
   }
   if (!(station.capabilities ?? []).includes("forge.api")) {
     throw new ForgeApiGrantError("capability-missing", `station ${station.id}'s node does not support forge.api; update the node.`);
-  }
-  const provider = deps.providers(input.provider);
-  if (!provider.modes.includes(input.mode)) {
-    throw new ForgeApiGrantError("mode-not-supported", `forge: ${input.provider} does not offer ${input.mode} grants.`);
   }
   for (const repo of input.repositories) {
     try {
@@ -844,7 +858,7 @@ export const SUPPLIED_BLOB_MAX = 16 * 1024;
 const NODE_REASON_MAX = 200;
 
 /** A node-supplied string, safe to store: control characters removed, length capped. */
-function untrusted(s: unknown): string {
+export function untrusted(s: unknown): string {
   const clean = String(s ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
   return clean.length > NODE_REASON_MAX ? `${clean.slice(0, NODE_REASON_MAX)}…` : clean;
 }

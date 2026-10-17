@@ -120,6 +120,7 @@ function harness() {
       },
     },
     providers: (kind) => (kind === "github" ? githubProvider : provider),
+    forgeOrigin: FORGE,
     now: () => new Date("2026-10-17T10:00:00Z"),
     seal: (pk, material) => sealHandover(pk, material),
   };

@@ -109,6 +109,7 @@ function harness(opts: { secret?: string } = {}) {
     providers: () => provider,
     now: () => clock,
     seal: (pk, material) => sealHandover(pk, material),
+    forgeOrigin: FORGE,
   };
   return {
     secret,
@@ -436,6 +437,64 @@ describe("createForgeApiGrant (minted)", () => {
     expect(err.status).toBe(422);
     expect(h.minted).toHaveLength(0);
     expect(await rowsFor(st.id)).toHaveLength(0);
+  });
+
+  describe("a minted grant's instance must be the configured forge", () => {
+    for (const ok of [FORGE, FORGE + "/", FORGE.toUpperCase().replace("HTTPS", "https")]) {
+      test(`accepts ${ok}`, async () => {
+        const h = harness();
+        const st = await freshStation();
+        const row = await createForgeApiGrant(h.deps, input(st.id, { instance: ok }));
+        expect(row.state).toBe("delivered");
+      });
+    }
+    for (const bad of [
+      "https://other.sfa.test",
+      "https://forge.sfa.test:8443",
+      "http://forge.sfa.test",
+      "https://user:pw@forge.sfa.test",
+      "https://user@forge.sfa.test",
+      "https://forge.sfa.test.",
+      "https://forge.sfa.test./",
+      "not a url",
+    ]) {
+      test(`rejects ${bad} before any key fetch, insert or mint`, async () => {
+        const h = harness();
+        const st = await freshStation();
+        const err = await createForgeApiGrant(h.deps, input(st.id, { instance: bad })).catch((e) => e);
+        expect(err.name).toBe("ForgeApiConfigError");
+        expect(err.code).toBe("instance-not-forge");
+        expect(err.status).toBe(422);
+        expect(String(err.message)).not.toContain("forge.sfa.test");
+        expect(h.minted).toHaveLength(0);
+        expect(h.calls).toHaveLength(0);
+        expect(await rowsFor(st.id)).toHaveLength(0);
+      });
+    }
+    test("a hub with no forge origin refuses every minted grant", async () => {
+      const h = harness();
+      const st = await freshStation();
+      const { forgeOrigin: _f, ...noForge } = h.deps;
+      const err = await createForgeApiGrant(noForge, input(st.id)).catch((e) => e);
+      expect(err.code).toBe("instance-not-forge");
+      expect(h.minted).toHaveLength(0);
+      expect(await rowsFor(st.id)).toHaveLength(0);
+    });
+    test("a configured forge URL with a trailing-dot host matches nothing", async () => {
+      const h = harness();
+      const st = await freshStation();
+      const err = await createForgeApiGrant({ ...h.deps, forgeOrigin: "https://forge.sfa.test." }, input(st.id)).catch((e) => e);
+      expect(err.code).toBe("instance-not-forge");
+    });
+    test("supplied grants are not tied to the configured forge", async () => {
+      const h = harness();
+      const st = await freshStation();
+      const row = await createForgeApiGrant(
+        h.deps,
+        input(st.id, { mode: "supplied", instance: "https://elsewhere.sfa.test", expectedLogin: "sfa-bot" }),
+      );
+      expect(row.instance).toBe("https://elsewhere.sfa.test");
+    });
   });
 
   test("preset none with minted mode propagates ForgeApiConfigError (422) before any mint", async () => {

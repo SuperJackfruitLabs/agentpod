@@ -1,4 +1,4 @@
-export type ForgeApiConfigErrorCode = "preset-none-needs-no-token" | "mode-not-minted";
+export type ForgeApiConfigErrorCode = "preset-none-needs-no-token" | "mode-not-minted" | "instance-not-forge";
 
 /**
  * A grant whose configuration cannot do what was asked. A client mistake, so routes map it to 4xx
