@@ -29,3 +29,4 @@ export * from "./transcript";
 export * from "./transcript-evidence";
 export * from "./token-claims";
 export * from "./mcp-proxy";
+export * from "./forge-api";
