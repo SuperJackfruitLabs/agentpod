@@ -636,3 +636,63 @@ describe("responses are sanitised and every mutation is audited", () => {
     expect((a!.paramsSummary as Record<string, unknown>).actor).toBe(ADMIN);
   });
 });
+
+describe("GET /stations/:id/forge-api/key: the station's stk handover public key, for the CLI to seal to", () => {
+  const PK = (handoverFixture as { public_key: string }).public_key;
+
+  test("an operator gets exactly {publicKey}, and the read is audited before and after", async () => {
+    const st = await freshStation();
+    const r = await call(asAdmin(), "GET", `/stations/${st.id}/forge-api/key`);
+    expect(r.status).toBe(200);
+    expect(allKeys(r.json)).toEqual(["publickey"]);
+    expect(r.json.publicKey).toBe(PK);
+    const audits = await db
+      .select()
+      .from(stationAudit)
+      .where(and(eq(stationAudit.verb, "forge.api.route.key"), eq(stationAudit.stationKey, "claude-code:" + st.id)));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.result).toBe("ok");
+  });
+
+  test("the owner who is not an operator is 403", async () => {
+    const st = await freshStation();
+    const r = await call(asOwner(), "GET", `/stations/${st.id}/forge-api/key`);
+    expect(r.status).toBe(403);
+    expect(r.json.error).toBe("operator-required");
+    expect(r.text).not.toContain(PK);
+  });
+
+  test("an operator without reach is 403 under the control pair", async () => {
+    const st = await freshStation();
+    process.env.ENFORCE_CONTROL_PAIR = "true";
+    const noReach = app({
+      id: ADMIN,
+      authType: "org_plane",
+      authority: { principalKind: "human", mayDispatch: [st.principalId!], mayGrantReach: false, scopes: [] },
+    });
+    const r = await call(noReach, "GET", `/stations/${st.id}/forge-api/key`);
+    expect(r.status).toBe(403);
+    expect(r.json.error).toBe("reach-denied");
+  });
+
+  test("another tenant's station is 404", async () => {
+    const id = `station_sfr_${RUN}_${seq++}`;
+    await rawSql`
+      INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, created_at)
+      VALUES (${id}, ${OTHER_TENANT}, ${ADMIN}, ${OTHER_NODE}, 'claude-code', ${"claude-code:" + id}, 'leaf', ${id}, '["acp","forge.api"]'::jsonb, now())`;
+    const r = await call(asAdmin(), "GET", `/stations/${id}/forge-api/key`);
+    expect(r.status).toBe(404);
+  });
+
+  test("502 station-key-unavailable when the node reports no key, with no node text", async () => {
+    const st = await freshStation();
+    replies["forge.api.status"] = () => ({ ok: false, error: "NODE-TEXT boom" });
+    const r = await call(asAdmin(), "GET", `/stations/${st.id}/forge-api/key`);
+    expect(r.status).toBe(502);
+    expect(r.json.error).toBe("station-key-unavailable");
+    expect(r.text).not.toContain("NODE-TEXT");
+    replies["forge.api.status"] = () => ({ ok: true, data: { grants: [] } });
+    const none = await call(asAdmin(), "GET", `/stations/${st.id}/forge-api/key`);
+    expect(none.status).toBe(502);
+  });
+});

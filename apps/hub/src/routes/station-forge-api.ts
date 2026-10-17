@@ -2,6 +2,9 @@
  * Forge API access routes (spec docs/superpowers/specs/2026-10-17-forge-api-access-design.md):
  *
  *   GET    /api/stations/:id/forge-api                              status (owner or operator)
+ *   GET    /api/stations/:id/forge-api/key                          the station's stk handover public key
+ *                                                                   (operator; the CLI seals supplied/app
+ *                                                                   credentials to it)
  *   POST   /api/stations/:id/forge-api                              grant
  *   POST   /api/stations/:id/forge-api/:grantId/verify
  *   POST   /api/stations/:id/forge-api/:grantId/rotate              minted
@@ -57,6 +60,7 @@ import {
   SUPPLIED_BLOB_MAX,
   untrusted,
   acceptSuppliedSecret,
+  fetchStationPublicKey,
   confirmSuppliedRevoked,
   createForgeApiGrant,
   revokeGrant,
@@ -320,7 +324,7 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
     c: Context,
     a: { user: AuthUser; station: Station },
     action: string,
-    params: { grantId?: string; provider: string; mode: string; preset?: string; generation?: number },
+    params: { grantId?: string; provider?: string; mode?: string; preset?: string; generation?: number },
     run: () => Promise<T>,
     respond: (out: T) => Response | Promise<Response>,
   ): Promise<Response> {
@@ -384,6 +388,25 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
           .orderBy(desc(g.createdAt));
         const now = new Date();
         return c.json({ grants: rows.map((r) => viewOf(r, now)) });
+      })
+
+      /**
+       * The station's stk handover public key, so `fleet stations forge-api grant|secret` can seal a
+       * supplied/app credential on the operator's machine: the plaintext never reaches the hub. Same
+       * gate as a mutation (handing out the key is the first step of granting reach), audited, and
+       * the response is `{publicKey}` and nothing else.
+       */
+      .get("/stations/:id/forge-api/key", async (c) => {
+        const a = await authorise(c);
+        if (a instanceof Response) return a;
+        return audited(
+          c,
+          a,
+          "key",
+          {},
+          () => fetchStationPublicKey(serviceDeps(a.forge), { id: a.station.id, nodeId: a.station.nodeId }),
+          (publicKey) => c.json({ publicKey }),
+        );
       })
 
       .post("/stations/:id/forge-api", async (c) => {
