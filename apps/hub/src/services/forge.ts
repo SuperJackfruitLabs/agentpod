@@ -54,9 +54,11 @@ export interface ForgeUser {
 }
 
 export interface MintedToken {
-  id: number;
+  /** Absent when forge sent none; revoke by `name` then. Never a placeholder like 0. */
+  id: number | undefined;
   name: string;
-  token: string;
+  /** The credential. Held in memory until sealed; never logged, never stored by the hub. */
+  secret: string;
 }
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -158,10 +160,12 @@ export async function readAgentUser(
 }
 
 export interface MintOptions {
-  /** Names the token so it can be revoked on its own. One per station. */
+  /** Names the token so it can be revoked on its own. The caller chooses it. */
   name: string;
-  /** `owner/repo` entries. Omitted means every repository the account can reach. */
-  repositories?: string[];
+  /** Forgejo token scopes, chosen by the grant's preset. Never hardcoded here. */
+  scopes: string[];
+  /** REQUIRED and non-empty: omitting it would mean every repository the account can reach. */
+  repositories: Array<{ owner: string; name: string }>;
 }
 
 /**
@@ -176,18 +180,25 @@ export async function mintAgentToken(
   opts: MintOptions,
   fetchImpl: FetchLike = fetch,
 ): Promise<MintedToken> {
+  // Before any request: an unconfined token is the failure this guard exists to prevent.
+  if (!Array.isArray(opts.repositories) || opts.repositories.length === 0) {
+    throw new Error(`forge: minting a token for ${username} needs at least one repository.`);
+  }
+  if (!Array.isArray(opts.scopes) || opts.scopes.length === 0) {
+    throw new Error(`forge: minting a token for ${username} needs at least one scope.`);
+  }
   const res = await call(cfg, "POST", `/admin/users/${encodeURIComponent(username)}/tokens`, fetchImpl, {
     name: opts.name,
-    // Enough to clone, commit and push. Not `write:user`, not `write:admin`: an agent that can
-    // edit accounts is an agent that can grant itself more.
-    scopes: ["write:repository"],
-    ...(opts.repositories ? { repositories: opts.repositories } : {}),
+    scopes: opts.scopes,
+    repositories: opts.repositories,
   });
 
   if (res.status !== 201 && res.status !== 200) {
     refuse(`minting a token for ${username}`, res.status);
   }
 
+  // Wire format verified against the deployed Forgejo 16.0.5 swagger: CreateAccessTokenOption
+  // {name, scopes[], repositories[] of {owner,name}}; AccessToken carries `sha1` and `id`.
   // **`sha1`, not `token`.** Gitea's field name, kept by Forgejo. A reader expecting `token` gets
   // `undefined` and hands an empty credential onward, which then fails at `git push` with an
   // authentication error that names nothing useful.
@@ -196,11 +207,11 @@ export async function mintAgentToken(
     throw new Error(`forge: the mint for ${username} returned no token.`);
   }
 
-  log.info("forge token minted", { username, name: opts.name, repositories: opts.repositories?.length ?? 0 });
+  log.info("forge token minted", { username, name: opts.name, repositories: opts.repositories.length });
   return {
-    id: typeof body.id === "number" ? body.id : 0,
+    id: typeof body.id === "number" ? body.id : undefined,
     name: typeof body.name === "string" ? body.name : opts.name,
-    token: body.sha1,
+    secret: body.sha1,
   };
 }
 
@@ -222,6 +233,41 @@ export async function revokeAgentToken(
     refuse(`revoking ${tokenName} for ${username}`, res.status);
   }
   log.info("forge token revoked", { username, name: tokenName });
+}
+
+/** The page size asked for; the listing ends on an empty page, not a short one. */
+const TOKEN_PAGE = 50;
+/** Bound on pages read, so a misbehaving forge cannot keep a sweep paging forever. */
+const TOKEN_PAGES_MAX = 100;
+
+/**
+ * Every access token on an account, by id and name: `GET /admin/users/{username}/tokens`, paged.
+ * The listing carries `token_last_eight`, never the secret, and only id and name are kept.
+ */
+export async function listAgentTokens(
+  cfg: ForgeConfig,
+  username: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<{ id?: number; name: string }[]> {
+  const out: { id?: number; name: string }[] = [];
+  for (let page = 1; page <= TOKEN_PAGES_MAX; page++) {
+    const res = await call(
+      cfg,
+      "GET",
+      `/admin/users/${encodeURIComponent(username)}/tokens?page=${page}&limit=${TOKEN_PAGE}`,
+      fetchImpl,
+    );
+    if (res.status !== 200) refuse(`listing tokens for ${username}`, res.status);
+    if (!Array.isArray(res.body)) throw new Error(`forge: the token listing for ${username} was unreadable.`);
+    for (const t of res.body as { id?: unknown; name?: unknown }[]) {
+      if (typeof t?.name !== "string") continue;
+      out.push(typeof t.id === "number" ? { id: t.id, name: t.name } : { name: t.name });
+    }
+    // Only an EMPTY page ends the listing: a forge may cap the page size below the limit asked
+    // for, and stopping on a short page would then miss every later token.
+    if (res.body.length === 0) return out;
+  }
+  return out;
 }
 
 export interface RegisteredKey {

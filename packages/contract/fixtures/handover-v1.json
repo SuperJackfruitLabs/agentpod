@@ -1,0 +1,8 @@
+{
+  "public_key": "stk-handover-v1:B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9_AsrhtHHw",
+  "private_key": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+  "material": {
+    "token": "test-fixture-token-not-a-real-credential"
+  },
+  "envelope": "stk-handover-v1:uOrtfXf4hoH3ONPpQHeh6UI8FYj8t4arSBCt1Sn3DUyTS8x2b6o2ErUhxa4QcOBEWy9SoMc9fO0oNXsZ8WUvsbimH71XimLP1j61PYBMy37oa2c5yMkEiv9M4hBWCO9Z2ik-Bw"
+}

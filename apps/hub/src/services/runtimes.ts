@@ -37,6 +37,8 @@ import { db } from "../db/drizzle";
 import { resolveTenantForUser } from "../auth/tenant";
 import { tenantScope } from "../db/tenant-scope";
 import { provisionedRuntimes, nodes } from "../db/schema/nodes";
+import { stations } from "../db/schema/stations";
+import { markStationTreeRevoking } from "./station-registry";
 import { mintEnrollmentToken } from "./enrollment";
 import {
   getProvisioner,
@@ -346,7 +348,18 @@ export async function destroyRuntime(userId: string, id: string): Promise<void> 
   // runtime row remains for history with a null node_id. station_audit rows are
   // kept (no FK) but won't surface in the UI once their stations are gone.
   if (row.nodeId) {
-    await db.delete(nodes).where(eq(nodes.id, row.nodeId));
+    const nodeId = row.nodeId;
+    // The cascade takes the stations with it; their forge API grants go to `revoking` in the same
+    // transaction (the FK nulls their station_id) so the reconcile sweep revokes the tokens.
+    await db.transaction(async (tx) => {
+      const gone = await tx
+        .select({ id: stations.id })
+        .from(stations)
+        .where(eq(stations.nodeId, nodeId));
+      // Each station's descendants too: they cascade with it, wherever their node is.
+      for (const st of gone) await markStationTreeRevoking(tx, st.id, "node-removed");
+      await tx.delete(nodes).where(eq(nodes.id, nodeId));
+    });
   }
 }
 

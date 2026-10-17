@@ -53,8 +53,10 @@ import { stationTokenRoutes } from './routes/station-token.ts';
 // A node redeeming a human's authorization for a station's Matrix credential
 import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-credential.ts';
 import { createStationGitIdentityRoutes } from './routes/station-git-identity.ts';
+import { createStationForgeApiRoutes } from './routes/station-forge-api.ts';
 import { createMcpProxyRoutes } from './routes/mcp-proxy.ts';
 import { configureGitAuthorSync } from './services/station-git-identity.ts';
+import { configureForgeApiReconcile, forgeApiServiceDeps } from './services/forge-api-reconcile.ts';
 // A node reading its station's voice-note setting (transcription.apply)
 import { createNodeTranscriptionRoutes } from './routes/station-transcription-node.ts';
 // ... and its spoken-reply setting (speech.apply)
@@ -147,6 +149,11 @@ const forgeConfig = config.forge.url && config.forge.adminToken
 // Each station's commit author is re-sent when its node connects: that is how identities provisioned
 // before authors existed get one, and how a renamed agent's commits follow the rename.
 configureGitAuthorSync({ forge: forgeConfig });
+
+// Forge API grants: a reconcile sweep every 5 minutes (unref'd, never overlapping) plus one per node
+// on reconnect — retries delivery, finishes revocations and node wipes, undoes stale rotations,
+// reports orphan tokens. Only with a configured forge: without one nothing can be minted or revoked.
+if (forgeConfig) configureForgeApiReconcile(forgeApiServiceDeps(forgeConfig));
 
 const app = new Hono()
   // Before the request logger, so a span covers every later middleware too.
@@ -293,6 +300,11 @@ const app = new Hono()
    * uses. The predecessor in #594 was a node calling in with its own credential and sat above.
    */
   .route('/api', createStationGitIdentityRoutes({ forge: forgeConfig }))
+  /**
+   * Forge API access grants (spec 2026-10-17-forge-api-access-design). Below `authMiddleware`;
+   * the route itself demands the operator seat AND the control pair on every mutation.
+   */
+  .route('/api', createStationForgeApiRoutes({ forge: forgeConfig }))
   .route('/api', nodePostureRoutes)                        // POST /api/nodes/:id/posture/scan
   .route('/public', runtimeCallbackRoutes)                 // POST /public/runtimes/:id/state
   .route('/api', stationAcpRoutes)                         // POST/GET /api/stations/:id/acp/sessions, WS /api/acp/sessions/:sessionId/ws
@@ -577,7 +589,7 @@ if (matrixBridge) {
 // shutdown coordinator is shared by both signals so duplicate delivery cannot
 // interrupt cleanup halfway through.
 const shutdown = createGracefulShutdown({
-  stopSweeper: stopNodeSweeper,
+  stopSweeper: () => { stopNodeSweeper(); configureForgeApiReconcile(null); },
   stopBridge: bridge?.stop.bind(bridge),
   closeMatrixBridge: matrixBridge?.close.bind(matrixBridge),
   flushTelemetry: () => shutdownTelemetry(3_000),

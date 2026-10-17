@@ -10,7 +10,7 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { notifyStationsAdopted, stationReportedMatrixId } from "./matrix-as/hooks";
-import { db } from "../db/drizzle";
+import { db, type DbExecutor } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
@@ -19,6 +19,7 @@ import { VERB_RESULTS, unknownCapabilitiesByStation } from "@agentpod/contract";
 import type { DetectedStation } from "@agentpod/contract";
 import * as broker from "./broker";
 import { reconcileOnAdopt } from "./harness-config-apply";
+import { markGrantsRevoking, type RevokeCause } from "./station-forge-api";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("station-registry");
@@ -259,14 +260,61 @@ export async function getStation(
 
 // ─── unadopt ─────────────────────────────────────────────────────────────────
 
-/** Remove a station row. Silently succeeds if already gone or not owned. */
+/**
+ * Remove a station row. Silently succeeds if already gone or not owned.
+ *
+ * Its forge API grants are moved to `revoking` in the same transaction as the delete (the FK sets
+ * their `station_id` NULL; `station_id_snapshot` keeps the id), so a deleted station never leaves
+ * a live token unaccounted for. The reconcile sweep revokes them at the provider; it never happens
+ * inline here. `cause` is `node-removed` when the whole node is going.
+ */
+/** Bound on the station tree walked by unadopt (real trees are one or two levels deep). */
+const STATION_TREE_MAX_DEPTH = 32;
+
+/**
+ * Mark the forge API grants of a station AND every descendant (`parent_station_id` cascades, so
+ * deleting the station deletes them too) as `revoking`, in the caller's transaction. A later delete
+ * of a child finds no row and marks nothing, so this is the only chance. The depth cap bounds the
+ * walk, which also ends a (corrupt) cycle; DISTINCT folds revisits.
+ */
+export async function markStationTreeRevoking(
+  tx: DbExecutor,
+  stationId: string,
+  cause: RevokeCause,
+  actor?: string
+): Promise<string[]> {
+  const tree = await tx.execute<{ id: string; tenant_id: string }>(sql`
+    WITH RECURSIVE tree(id, tenant_id, depth) AS (
+      SELECT id, tenant_id, 0 FROM stations WHERE id = ${stationId}
+      UNION
+      SELECT s.id, s.tenant_id, t.depth + 1 FROM stations s JOIN tree t ON s.parent_station_id = t.id
+      WHERE t.depth < ${STATION_TREE_MAX_DEPTH}
+    )
+    SELECT DISTINCT id, tenant_id FROM tree`);
+  const ids: string[] = [];
+  for (const node of tree) {
+    ids.push(...(await markGrantsRevoking(tx, { tenantId: node.tenant_id, stationId: node.id, cause, actor })));
+  }
+  return ids;
+}
+
 export async function unadopt(
   userId: string,
-  stationId: string
+  stationId: string,
+  cause: RevokeCause = "station-deleted"
 ): Promise<void> {
-  await db
-    .delete(stations)
-    .where(and(eq(stations.id, stationId), eq(stations.userId, userId)));
+  await db.transaction(async (tx) => {
+    const [st] = await tx
+      .select({ tenantId: stations.tenantId })
+      .from(stations)
+      .where(and(eq(stations.id, stationId), eq(stations.userId, userId)))
+      .for("update");
+    if (!st) return;
+    await markStationTreeRevoking(tx, stationId, cause, userId);
+    await tx
+      .delete(stations)
+      .where(and(eq(stations.id, stationId), eq(stations.userId, userId)));
+  });
 }
 
 // ─── refreshAdoptedCapabilities ───────────────────────────────────────────────

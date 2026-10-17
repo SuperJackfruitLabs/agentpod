@@ -155,3 +155,20 @@ func TestRefreshInstalledSkillOnlyWhenAlreadyInstalled(t *testing.T) {
 		t.Fatal("installed skill was not brought forward")
 	}
 }
+
+// Forge API access is an operator action: the skill must name the verbs and tell an agent not to
+// grant itself access, and must classify every changing forge-api verb as ask-first.
+func TestSkillCoversForgeAPIAccessAsOperatorOnly(t *testing.T) {
+	text := skillText("test")
+	safety := safetySection(t, text)
+	for _, want := range []string{"fleet stations forge-api list", "Never grant yourself forge API access"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("SKILL.md lacks %q", want)
+		}
+	}
+	for _, verb := range []string{"grant", "verify", "rotate", "secret", "policy", "revoke", "confirm-revoked"} {
+		if !strings.Contains(safety, "`fleet stations forge-api "+verb+"`") {
+			t.Errorf("Safety section does not classify forge-api %s", verb)
+		}
+	}
+}

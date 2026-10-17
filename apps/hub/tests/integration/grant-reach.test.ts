@@ -109,6 +109,7 @@ describe("the capability classification", () => {
     expect(isReachBearing("terminal")).toBe(true);
     expect(isReachBearing("cleanup")).toBe(true);
     expect(isReachBearing("skills.manage")).toBe(true);
+    expect(isReachBearing("forge.api")).toBe(true);
     expect(isReachBearing("skills.inventory")).toBe(false);
 
     // Reads are not reach. A console that refused to show a diff or a log would

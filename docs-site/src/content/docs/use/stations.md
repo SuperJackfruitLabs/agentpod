@@ -110,6 +110,111 @@ to the host. A station with no identity gets none of these and keeps the host's 
 authors existed gets one the next time its node connects (a node update reconnects it), with no key
 regenerated. A harness or terminal already running keeps the environment it started with.
 
+## Forge API access
+
+A station's agent can be given scoped access to a forge's **API** (issues, pull requests, comments,
+reviews) for named repositories. This is separate from [git identity](#git-identity): SSH keeps
+carrying git, and neither grant ever creates the other.
+
+```sh
+fleet stations forge-api list   --station <stationId>
+fleet stations forge-api grant  --station <stationId> --provider forgejo \
+    --instance https://forge.example --repo org/repo --preset issues
+fleet stations forge-api verify --station <stationId> --grant <grantId>
+fleet stations forge-api rotate --station <stationId> --grant <grantId>
+fleet stations forge-api policy --station <stationId> --grant <grantId> --preset issues \
+    --rule 'deny: DELETE /repos/**'
+fleet stations forge-api revoke --station <stationId> --grant <grantId>
+```
+
+**The agent never holds the token.** The station's broker (`stk`) holds the credential and adds it
+to the requests its policy allows, whichever client the agent uses (`tea`, `gh`, `curl`, an MCP
+server). The hub delivers the credential **sealed** to the station's broker key. For a supplied or
+app grant the hub relays ciphertext it cannot open; for a minted grant it holds the token briefly
+between minting and sealing (see Limits).
+
+**Operator only.** Every verb except `list` needs the hub operator seat **and** the control pair's
+reach over the station's agent; owning the station is not enough (403). An agent must not, and
+cannot, grant itself access. The forge account is never taken from the request: a minted grant is
+for the station's occupying agent, a supplied or app grant for the `--expect-login` you declare.
+A minted grant on a station with no occupant is refused (409); a supplied or app grant does not
+need one.
+
+**Three credential modes.**
+
+| Mode | What it is | Where the credential comes from |
+|---|---|---|
+| `minted` (default) | The agent's own forge account | The hub mints a token, limited to the listed repositories, on its configured forge |
+| `supplied` | A machine account you made by hand (a GitHub PAT, for instance) | You, on stdin |
+| `app` | A GitHub App installation, acting as the bot | You, on stdin: `app_id=…`, `installation_id=…`, `private_key=…` lines |
+
+Today the hub accepts Forgejo `minted` (only on its configured forge) and `supplied`, and GitHub
+`app` and `supplied`. Gitea and Bitbucket are refused until their adapters exist.
+
+A supplied or app credential is **never a flag** (there is no `--token`). It is read from stdin,
+sealed on your machine to the station's broker key (fetched once from the hub, before anything is
+created), and only the sealed envelope is sent:
+
+```sh
+pbpaste | fleet stations forge-api grant --station <stationId> --provider github \
+    --instance https://github.com --repo org/repo --mode supplied --expect-login octo-bot
+```
+
+If the grant is created but the envelope does not arrive, the CLI names the grant: re-send with
+`fleet stations forge-api secret --station <stationId> --grant <grantId>` (add `--mode app` for an
+App's fields). A sealed credential the station does not acknowledge within 24 hours is discarded.
+
+**Policy.** A grant names its repositories and a preset: `read`, `issues`, `pull-requests`
+(no merge), `maintain`, or `none` (start from nothing). `--rule 'allow: METHOD /path'` and
+`--rule 'deny: METHOD /path'` add to it, repeatable; a rule with a body condition goes in
+`--rules-file`, a JSON array such as
+`[{"allow": "PATCH /repos/org/repo/issues/*", "when": {"body.state": "absent"}}]`. Rules narrow the
+token and never widen it; a `deny` wins; `DELETE` is denied by every preset. `policy` **replaces**
+the preset, rules and GraphQL setting (GraphQL is off unless `--allow-graphql`, so omitting the flag
+turns it off), and needs no new
+credential. A minted token's provider-side scopes follow a changed preset only from the next
+`rotate`; until then the broker's rules are what apply.
+
+**Status.** `list` prints each grant's state, mode, account, isolation, provider, instance, preset
+and repositories, and never a token. States run `authorised → provisioned → delivered → verified`,
+plus `failed`, `revoking` and `revoked`. `verified` means the broker made a real read call as the
+expected account. Isolation is `separate-user` (the broker runs as its own OS user) or `same-user`
+(degraded, see below).
+
+**Rotation and revocation.** `rotate` (minted) mints a new token, delivers and verifies it, then
+revokes the old one; if verification fails the old token stays live. For a supplied or app grant,
+rotate by sending a new credential with `secret`. `revoke` first wipes the station's copy (best
+effort; queued if the node is offline, which cuts the station's access at once), then revokes a
+minted token at the forge, retrying until it succeeds. Reassigning, unassigning or deleting a
+station (or removing its node) marks its grants `revoking` in the same change and never waits on
+the forge; the reconcile sweep (every 5 minutes, and when a node reconnects) finishes the job. A
+new occupant starts with nothing.
+
+**Needs a node that supports it.** A station's node must advertise the `forge.api` capability;
+an older node answers `capability-missing` rather than doing nothing.
+
+### Limits
+
+- **No protection against root.** An agent or user with root on the station can read the broker's
+  store.
+- **Same-user mode is weak.** When the broker runs as the agent's own user, only file permissions
+  separate them. The design requires an explicit operator acknowledgement before a write preset
+  is granted in this mode; the hub does not ask for one yet, so check `list` and grant write presets
+  only where isolation is `separate-user`.
+- **The hub sees a minted token for an instant**, between minting and sealing it. It stores only the
+  sealed envelope.
+- **Every forge-api route needs the hub's Forgejo admin configuration.** Without `FORGE_URL` and
+  `FORGE_ADMIN_TOKEN` on the hub, every `forge-api` route answers 503, even for a GitHub-only
+  (`app` or `supplied`) grant, and the reconcile sweep does not run.
+- **agentpod cannot revoke a supplied token at its provider.** `revoke` removes it from the station;
+  revoke it at the provider yourself, then run `fleet stations forge-api confirm-revoked`.
+- **A client that ignores proxy settings bypasses the broker.** It sends a placeholder and gets a
+  plausible 401; detection is by test, per harness, not by prevention.
+- **Body-level rules cover JSON REST only.** A rule that would have to read a GraphQL or non-JSON
+  body cannot be enforced.
+- **Forgejo's token listing and repository confinement are to be verified live** against the real
+  forge before relying on them for orphan cleanup and repository restriction.
+
 ## Staffing
 
 Putting an agent in a station, or taking it out:

@@ -15,7 +15,7 @@
  */
 
 import { eq } from "drizzle-orm";
-import type { Database } from "../db/drizzle";
+import type { DbExecutor } from "../db/drizzle";
 import { resolveTenantForUser } from "../auth/tenant";
 import { stationAudit } from "../db/schema/audit";
 
@@ -42,7 +42,7 @@ export interface AuditHandle {
  * value could contain secrets or PII.  Store only structural identifiers and
  * small scalar metadata.
  */
-const SAFE_PARAM_KEYS = new Set<string>([
+export const SAFE_PARAM_KEYS: ReadonlySet<string> = new Set<string>([
   "path",
   "from",
   "to",
@@ -69,6 +69,17 @@ const SAFE_PARAM_KEYS = new Set<string>([
   "full",
   "item_seq",
   "on_behalf_of",
+  // forge API grants (routes/station-forge-api.ts): ids and enums only — never the sealed blob,
+  // the token handle or a token. `actor` is the acting user, repeated in params because the row's
+  // own user_id is what the tenant is resolved from.
+  "actor",
+  "grantId",
+  "provider",
+  "mode",
+  "preset",
+  "generation",
+  "username",
+  "outcome",
 ]);
 
 /**
@@ -97,7 +108,7 @@ function sanitizeParams(params: Record<string, unknown>): Record<string, unknown
  * @param args    Audit context: who did what, where.
  */
 export async function recordAudit(
-  db: Database,
+  db: DbExecutor,
   args: AuditArgs
 ): Promise<AuditHandle> {
   const id = `audit_${crypto.randomUUID()}`;

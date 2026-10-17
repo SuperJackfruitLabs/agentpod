@@ -49,6 +49,7 @@ export const REACH_BEARING: Record<Capability, boolean> = {
   "config.manage": true, // an apply writes the harness's own config, and
   // `approvals.command_allowlist` is a grant of shell commands: writing it
   // widens what the agent may do without asking again
+  "forge.api": true, // grants an agent a credential for the forge's API
   "matrix.avatar": false, // a profile picture: cosmetic, the agent can do nothing new
   lifecycle: false, // operating an agent, not widening it
   acp: false, // dispatch — mayDispatch already guards it

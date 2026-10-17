@@ -135,3 +135,28 @@ test("sanitizer drops 'content' and 'data' but keeps 'path'", async () => {
   expect(summary.content).toBeUndefined();
   expect(summary.data).toBeUndefined();
 });
+
+// ─── SAFE_PARAM_KEYS: forge API grants ────────────────────────────────────────
+
+import { SAFE_PARAM_KEYS } from "./audit";
+
+test("forge grant audit keys are allow-listed; credential-shaped keys are not", () => {
+  for (const k of ["actor", "grantId", "provider", "mode", "preset", "generation", "username", "outcome"]) {
+    expect(SAFE_PARAM_KEYS.has(k)).toBe(true);
+  }
+  for (const k of ["sealed", "sealedBlob", "token", "secret", "tokenHandle", "account", "material"]) {
+    expect(SAFE_PARAM_KEYS.has(k)).toBe(false);
+  }
+});
+
+test("a sealed blob or token passed as a param is dropped from the row", async () => {
+  await recordAudit(db, {
+    userId: TEST_USER,
+    nodeId: "node-audit-forge",
+    stationKey: "hermes:audit-forge",
+    verb: "forge.api.route.secret",
+    params: { actor: TEST_USER, grantId: "fag_x", sealed: "stk-handover-v1:AAAA", token: "f".repeat(40), secret: "s" },
+  });
+  const rows = await rawSql`SELECT params_summary FROM station_audit WHERE user_id = ${TEST_USER} AND verb = 'forge.api.route.secret'`;
+  expect(rows[0]!.params_summary).toEqual({ actor: TEST_USER, grantId: "fag_x" });
+});
