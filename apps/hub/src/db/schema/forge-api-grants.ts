@@ -25,14 +25,20 @@ export interface ForgeTokenRef {
  * - the top level is the CURRENT token (the generation in `generation`);
  * - `previous` is the generation the current one replaced, with what to do with it:
  *   - `live-until-verified`: a rotation is under way (or crashed). The node may still hold
- *     `previous`; it is revoked only once the current token verifies on the node.
+ *     `previous`; it is revoked only once the node has ACKED the current token (delivered_at set,
+ *     no sealed blob) and it verifies. A rotation clears delivered_at when it starts.
  *   - `revoke`: superseded and held by nobody — revoke it (a rotation whose final revoke failed,
  *     or one that failed definitively after the node took the new token).
  * - `orphan` is a token a failed rotation minted and could not take back. It was never the
  *   node's credential; revoke it.
  */
 export interface ForgeTokenHandle extends ForgeTokenRef {
-  previous?: ForgeTokenRef & { disposition: "live-until-verified" | "revoke" };
+  previous?: ForgeTokenRef & {
+    disposition: "live-until-verified" | "revoke";
+    /** Set by a rotation: the generation and delivered_at to restore if it is undone. */
+    generation?: number;
+    deliveredAt?: string | null;
+  };
   orphan?: ForgeTokenRef;
 }
 

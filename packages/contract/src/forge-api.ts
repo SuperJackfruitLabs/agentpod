@@ -80,6 +80,25 @@ export const ForgeApiStatusParams = z.object({ stationId: z.string().min(1) }).s
 export const ForgeApiDeliverResult = z
   .object({ ok: z.boolean(), isolation: ForgeApiIsolation, stored: z.boolean() });
 export const ForgeApiPolicyResult = z.object({ ok: z.boolean(), error: z.string().optional() });
+/**
+ * stk's `forge.api.verify` reason codes, exactly. The node puts one first in `reason` (optionally
+ * followed by `: detail`). The result's `reason` stays a lenient string so a newer stk adding a code
+ * does not make a reply unreadable; the hub maps by the first token and treats an unknown one as
+ * inconclusive.
+ */
+export const ForgeApiVerifyReasons = [
+  "unauthorized",
+  "forbidden",
+  "unreachable",
+  "unexpected-response",
+  "server-error",
+  "redirect",
+  "wrong-identity",
+  "repository-missing",
+  "unsupported",
+] as const;
+export type ForgeApiVerifyReason = (typeof ForgeApiVerifyReasons)[number];
+
 export const ForgeApiVerifyResult = z
   .object({
     ok: z.boolean(),

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { VERB_PARAMS, VERB_RESULTS } from "./protocol";
 import { Capability, CapabilityList, unknownCapabilitiesByStation } from "./station";
-import { ForgeApiMode, ForgeApiProvider, ForgeApiPreset } from "./forge-api";
+import { ForgeApiMode, ForgeApiProvider, ForgeApiPreset, ForgeApiVerifyReasons } from "./forge-api";
 
 const VERBS = ["forge.api.deliver", "forge.api.policy", "forge.api.verify", "forge.api.revoke", "forge.api.status"] as const;
 
@@ -93,5 +93,25 @@ describe("forge.api.status publicKey", () => {
   });
   it("a publicKey without the stk-handover-v1: prefix is rejected", () => {
     expect(S.safeParse({ grants: [], publicKey: "ssh-ed25519 AAAA" }).success).toBe(false);
+  });
+});
+
+describe("forge.api.verify reasons", () => {
+  it("are exactly stk's verify reason codes", () => {
+    expect([...ForgeApiVerifyReasons]).toEqual([
+      "unauthorized",
+      "forbidden",
+      "unreachable",
+      "unexpected-response",
+      "server-error",
+      "redirect",
+      "wrong-identity",
+      "repository-missing",
+      "unsupported",
+    ]);
+  });
+  it("the result reason stays a lenient string (a newer stk may add codes)", () => {
+    const r = VERB_RESULTS["forge.api.verify"].safeParse({ ok: false, reason: "brand-new-code: x", isolation: "same-user" });
+    expect(r.success).toBe(true);
   });
 });

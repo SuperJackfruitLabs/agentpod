@@ -350,7 +350,7 @@ describe("rotateGrant (minted)", () => {
     await assertNoLeak(h, grant.id);
   });
 
-  test("a definitive wrong-identity after the node acked: old token NOT revoked, the new one is, grant failed", async () => {
+  test("a definitive wrong-identity after the node acked: the new token AND the superseded old one are revoked, grant failed", async () => {
     const h = harness();
     const { grant, ref } = await delivered(h);
     const oldHandle = grant.tokenHandle!;
@@ -358,12 +358,12 @@ describe("rotateGrant (minted)", () => {
     await h.attempt(rotateGrant(h.deps, ref));
     expect(h.errors).toHaveLength(1);
     expect((h.errors[0] as ForgeApiGrantError).code).toBe("rotation-failed");
-    expect(h.revoked.map((r) => r.handle)).toEqual([{ id: 501, name: `agentpod-${grant.id}-g2` }]);
+    // After an ack the node no longer holds n: it is superseded, so it goes too (best effort).
+    expect(h.revoked.map((r) => r.handle)).toEqual([{ id: 501, name: `agentpod-${grant.id}-g2` }, oldHandle]);
     const row = await load(grant.id);
     expect(row.state).toBe("failed");
     expect(row.stateReason).toMatch(/^rotation-failed/);
-    // The old token is still live and nobody holds it: recorded for reconcile to revoke.
-    expect(row.tokenHandle).toEqual({ id: 501, name: `agentpod-${grant.id}-g2`, previous: { ...oldHandle, disposition: "revoke" } });
+    expect(row.tokenHandle).toEqual({ id: 501, name: `agentpod-${grant.id}-g2` });
     await assertNoLeak(h, grant.id);
   });
 
@@ -389,12 +389,15 @@ describe("rotateGrant (minted)", () => {
       return ACK;
     };
     await rotateGrant(h.deps, ref);
-    expect(atDelivery!.tokenHandle).toEqual({
+    expect(atDelivery!.tokenHandle).toMatchObject({
       id: 501,
       name: `agentpod-${grant.id}-g2`,
-      previous: { ...grant.tokenHandle!, disposition: "live-until-verified" },
+      previous: { ...grant.tokenHandle!, disposition: "live-until-verified", generation: 1 },
     });
     expect(atDelivery!.generation).toBe(2);
+    // The blob is on the row BEFORE the frame goes out: a crash here still says "not acked".
+    expect(atDelivery!.sealedBlob!.startsWith("stk-handover-v1:")).toBe(true);
+    expect(atDelivery!.deliveredAt).toBeNull();
   });
 
   test("the previous handle is persisted before the mint, too", async () => {
@@ -407,7 +410,7 @@ describe("rotateGrant (minted)", () => {
       return fast(a, s);
     };
     await rotateGrant(h.deps, ref);
-    expect(atMint!.tokenHandle?.previous).toEqual({ ...grant.tokenHandle!, disposition: "live-until-verified" });
+    expect(atMint!.tokenHandle?.previous).toMatchObject({ ...grant.tokenHandle!, disposition: "live-until-verified" });
   });
 
   test("a delivery that is not acknowledged fails the rotation and revokes the new token", async () => {
@@ -912,7 +915,7 @@ describe("rotation: pre-ack vs post-ack failures", () => {
     expect(out.state).toBe("delivered");
     expect(out.stateReason).toMatch(/^rotation-pending/);
     expect(out.generation).toBe(2);
-    expect(out.tokenHandle).toEqual({ id: 501, name: `agentpod-${grant.id}-g2`, previous: { ...oldHandle, disposition: "live-until-verified" } });
+    expect(out.tokenHandle).toMatchObject({ id: 501, name: `agentpod-${grant.id}-g2`, previous: { ...oldHandle, disposition: "live-until-verified" } });
     // Acked: nothing left to re-deliver.
     expect(out.sealedBlob).toBeNull();
 
@@ -1058,5 +1061,213 @@ describe("policy never clobbers a lifecycle reason", () => {
     h.replies["forge.api.policy"] = () => ({ ok: true, data: { ok: true } });
     const ok = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false });
     expect(ok.grant.stateReason).toBeNull();
+  });
+});
+
+// ─── Fix round 2 ──────────────────────────────────────────────────────────────
+
+const SNAP_COLS = ["state", "stateReason", "tokenHandle", "generation", "deliveredAt", "verifiedAt", "sealedBlob", "sealedExpiresAt"] as const;
+/** Put a row back exactly as it was at a captured moment: a hub crash at that point. */
+async function crashAt(snapshot: Grant) {
+  const set: Record<string, unknown> = {};
+  for (const c of SNAP_COLS) set[c] = snapshot[c];
+  await db.update(g).set(set as never).where(eq(g.id, snapshot.id));
+}
+
+describe("rotation crash simulations", () => {
+  test("(i) crash after recording n+1, before sealing: verify never revokes n; it undoes the unsealable rotation", async () => {
+    const h = harness();
+    const { grant, ref } = await delivered(h);
+    let atSeal: Grant | undefined;
+    const real = h.deps.seal;
+    h.deps.seal = async (pk, m) => {
+      atSeal = await load(grant.id);
+      return real(pk, m);
+    };
+    await rotateGrant(h.deps, ref);
+    await crashAt(atSeal!);
+    expect(atSeal!.sealedBlob).toBeNull();
+    expect(atSeal!.deliveredAt).toBeNull();
+    h.revoked.length = 0;
+    h.calls.length = 0;
+    const out = await verifyGrant(h.deps, ref);
+    // n (what the node holds) is never revoked; n+1 was never sealed, so it can never be
+    // delivered: it is taken back and n is current again.
+    expect(h.revoked.map((r) => r.handle)).toEqual([{ id: 501, name: `agentpod-${grant.id}-g2` }]);
+    expect(h.callsOf("forge.api.verify")).toHaveLength(0);
+    expect(out.outcome).toBe("rotation-failed");
+    expect(out.grant.tokenHandle).toEqual(grant.tokenHandle);
+    expect(out.grant.generation).toBe(1);
+    expect(out.grant.deliveredAt).toEqual(grant.deliveredAt);
+    expect(out.grant.stateReason).toMatch(/^rotation-failed/);
+  });
+
+  test("(ii) crash after the blob is persisted, before the ack: verify re-sends the blob first, then revokes n", async () => {
+    const h = harness();
+    const { grant, ref } = await delivered(h);
+    let atDeliver: Grant | undefined;
+    h.replies["forge.api.deliver"] = async () => {
+      atDeliver = await load(grant.id);
+      return ACK;
+    };
+    await rotateGrant(h.deps, ref);
+    await crashAt(atDeliver!);
+    expect(atDeliver!.sealedBlob).not.toBeNull();
+    h.revoked.length = 0;
+    h.events.length = 0;
+    // A node that answers verify as the right account (n would, too) must not be believed before the ack.
+    const out = await verifyGrant(h.deps, ref);
+    expect(h.events).toEqual(["forge.api.deliver", "forge.api.verify", `revoke:${grant.tokenHandle!.name}`]);
+    expect(out.grant.state).toBe("verified");
+    expect(out.grant.sealedBlob).toBeNull();
+  });
+
+  test("(ii') same crash, node unreachable on re-send: n is not revoked and the blob stays", async () => {
+    const h = harness();
+    const { grant, ref } = await delivered(h);
+    let atDeliver: Grant | undefined;
+    h.replies["forge.api.deliver"] = async () => {
+      atDeliver = await load(grant.id);
+      return ACK;
+    };
+    await rotateGrant(h.deps, ref);
+    await crashAt(atDeliver!);
+    h.revoked.length = 0;
+    h.calls.length = 0;
+    h.replies["forge.api.deliver"] = () => ({ ok: false, error: "node offline" });
+    const out = await verifyGrant(h.deps, ref);
+    expect(out.outcome).toBe("node-offline");
+    expect(h.revoked).toHaveLength(0);
+    expect(h.callsOf("forge.api.verify")).toHaveLength(0);
+    expect((await load(grant.id)).sealedBlob).toBe(atDeliver!.sealedBlob);
+  });
+});
+
+describe("rotation: unreadable ack is ambiguous", () => {
+  for (const reply of [{ ok: true, data: {} }, { ok: true }, { ok: true, data: { ok: "yes" } }] as Reply[]) {
+    test(`deliver reply ${JSON.stringify(reply)} → nothing revoked, blob kept, rotation-pending`, async () => {
+      const h = harness();
+      const { grant, ref } = await delivered(h);
+      h.replies["forge.api.deliver"] = () => reply;
+      const out = await rotateGrant(h.deps, ref);
+      expect(h.revoked).toHaveLength(0);
+      expect(out.sealedBlob).not.toBeNull();
+      expect(out.stateReason).toMatch(/^rotation-pending/);
+      expect(out.tokenHandle!.previous).toMatchObject({ ...grant.tokenHandle!, disposition: "live-until-verified" });
+    });
+  }
+
+  test("an explicit negative ack (ok:false) is a definite refusal: pre-ack", async () => {
+    const h = harness();
+    const { grant, ref } = await delivered(h);
+    h.replies["forge.api.deliver"] = () => ({ ok: true, data: { ok: false, stored: false, isolation: "same-user" } });
+    await h.attempt(rotateGrant(h.deps, ref));
+    expect((h.errors[0] as ForgeApiGrantError).code).toBe("rotation-failed");
+    expect(h.revoked.map((r) => r.handle.name)).toEqual([`agentpod-${grant.id}-g2`]);
+    const row = await load(grant.id);
+    expect(row.tokenHandle).toEqual(grant.tokenHandle);
+    expect(row.sealedBlob).toBeNull();
+    expect(row.deliveredAt).toEqual(grant.deliveredAt);
+  });
+});
+
+describe("rotation: a refused re-delivery is pre-ack", () => {
+  for (const via of ["verifyGrant", "deliverGrant"] as const) {
+    test(`${via}: the kept blob is refused → n+1 revoked, n current again, blob cleared, rotation-failed`, async () => {
+      const h = harness();
+      const { grant, ref } = await delivered(h);
+      h.replies["forge.api.deliver"] = () => ({ ok: false, error: "timeout" });
+      await rotateGrant(h.deps, ref);
+      h.replies["forge.api.deliver"] = () => ({ ok: false, error: "stk refused the envelope" });
+      if (via === "verifyGrant") await verifyGrant(h.deps, ref);
+      else await deliverGrant(h.deps, ref);
+      expect(h.revoked.map((r) => r.handle.name)).toEqual([`agentpod-${grant.id}-g2`]);
+      const row = await load(grant.id);
+      expect(row.tokenHandle).toEqual(grant.tokenHandle);
+      expect(row.generation).toBe(1);
+      expect(row.sealedBlob).toBeNull();
+      expect(row.deliveredAt).toEqual(grant.deliveredAt);
+      expect(row.state).toBe("delivered");
+      expect(row.stateReason).toMatch(/^rotation-failed/);
+    });
+  }
+});
+
+describe("verify reason mapping (stk's codes)", () => {
+  const verifyReply = (reason: string) => () => ({ ok: true, data: { ok: false, reason, isolation: "same-user" } });
+
+  const outside: [string, string][] = [
+    ["unauthorized", "failed"],
+    ["forbidden", "failed"],
+    ["wrong-identity", "failed"],
+    ["repository-missing", "failed"],
+    ["redirect", "failed"],
+    ["unsupported", "failed"],
+    ["unreachable", "provider-unavailable"],
+    ["server-error", "provider-unavailable"],
+    ["unexpected-response", "provider-unavailable"],
+    ["something-new", "inconclusive"],
+  ];
+  for (const [code, outcome] of outside) {
+    test(`outside a rotation: ${code} → ${outcome}`, async () => {
+      const h = harness();
+      const { ref } = await delivered(h);
+      h.replies["forge.api.verify"] = verifyReply(`${code}: detail`);
+      const out = await verifyGrant(h.deps, ref);
+      expect(out.outcome).toBe(outcome as never);
+      expect((await load(ref.grantId)).state).toBe(outcome === "failed" ? "failed" : "delivered");
+      expect(h.revoked).toHaveLength(0);
+    });
+  }
+
+  // [code, grant failed?, new token revoked?]
+  const rotation: [string, boolean, boolean][] = [
+    ["unauthorized", true, true],
+    ["wrong-identity", true, true],
+    ["forbidden", true, false],
+    ["repository-missing", true, false],
+    ["redirect", true, false],
+    ["unsupported", true, false],
+    ["unreachable", false, false],
+    ["server-error", false, false],
+    ["unexpected-response", false, false],
+    ["something-new", false, false],
+  ];
+  for (const [code, fails, revokesNew] of rotation) {
+    test(`after a rotation's ack: ${code} → ${fails ? "failed" : "rotation-pending"}${revokesNew ? ", new token revoked" : ""}`, async () => {
+      const h = harness();
+      const { grant, ref } = await delivered(h);
+      const oldHandle = grant.tokenHandle!;
+      const newHandle = { id: 501, name: `agentpod-${grant.id}-g2` };
+      h.replies["forge.api.verify"] = verifyReply(`${code}: detail`);
+      await h.attempt(rotateGrant(h.deps, ref));
+      const row = await load(grant.id);
+      if (fails) {
+        expect((h.errors[0] as ForgeApiGrantError).code).toBe("rotation-failed");
+        expect(row.state).toBe("failed");
+        expect(row.stateReason).toMatch(/^rotation-failed/);
+        // Gap A: n is superseded once the node acked n+1 — revoked now (best effort).
+        expect(h.revoked.map((r) => r.handle)).toEqual(revokesNew ? [newHandle, oldHandle] : [oldHandle]);
+        expect(row.tokenHandle!.previous).toBeUndefined();
+      } else {
+        expect(h.errors).toHaveLength(0);
+        expect(row.state).toBe("delivered");
+        expect(row.stateReason).toMatch(/^rotation-pending/);
+        expect(h.revoked).toHaveLength(0);
+        expect(row.tokenHandle!.previous).toMatchObject({ ...oldHandle, disposition: "live-until-verified" });
+      }
+    });
+  }
+
+  test("after an ack, a definitive failure whose n-revoke fails leaves previous with disposition revoke", async () => {
+    const h = harness();
+    const { grant, ref } = await delivered(h);
+    h.replies["forge.api.verify"] = verifyReply("forbidden");
+    h.provider.revoke = async () => {
+      throw new Error("forge: revoking was refused (HTTP 503).");
+    };
+    await h.attempt(rotateGrant(h.deps, ref));
+    const row = await load(grant.id);
+    expect(row.tokenHandle!.previous).toMatchObject({ ...grant.tokenHandle!, disposition: "revoke" });
   });
 });
