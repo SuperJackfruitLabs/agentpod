@@ -7,6 +7,7 @@
 import type { ForgeApiMode, ForgeApiPreset, ForgeApiProvider } from "@agentpod/contract";
 
 import type { FetchLike, ForgeConfig } from "../forge";
+export { ForgeApiConfigError } from "./errors";
 import { createForgejoProvider } from "./forgejo";
 import { githubProvider } from "./github";
 
@@ -32,11 +33,16 @@ export interface MintSpec {
 export interface ForgeProvider {
   kind: ForgeApiProvider;
   modes: ForgeApiMode[];
-  mint?(account: string, spec: MintSpec): Promise<{ id: number; name: string; secret: string }>;
+  mint?(account: string, spec: MintSpec): Promise<{ id: number | undefined; name: string; secret: string }>;
   revoke?(account: string, handle: { id?: number; name: string }): Promise<void>;
   /** The login a verifying read call must come back as. */
   expectedIdentity(grant: ForgeGrantRef): string;
   scopesFor(preset: ForgeApiPreset): string[];
+  /**
+   * The ONLY scope source for minted mode. Throws ForgeApiConfigError (422) for a grant that is
+   * not minted or whose preset is "none"; a supplied grant never needs scopes.
+   */
+  mintScopes(grant: ForgeGrantRef): string[];
 }
 
 export interface ProviderDeps {

@@ -1,5 +1,6 @@
 import type { ForgeApiPreset } from "@agentpod/contract";
 
+import { ForgeApiConfigError } from "./errors";
 import { mintAgentToken, revokeAgentToken } from "../forge";
 import type { ForgeGrantRef, ForgeProvider, ProviderDeps } from "./providers";
 
@@ -36,6 +37,15 @@ export function createForgejoProvider(deps: ProviderDeps): ForgeProvider {
         return grant.expectedLogin;
       }
       return grant.account;
+    },
+    mintScopes(grant) {
+      if (grant.mode !== "minted") {
+        throw new ForgeApiConfigError("mode-not-minted", `forge: a ${grant.mode} grant does not mint a token, so it has no mint scopes.`);
+      }
+      if (grant.preset === "none") {
+        throw new ForgeApiConfigError("preset-none-needs-no-token", 'forge: preset "none" grants no scopes, so a minted token cannot be made for it.');
+      }
+      return this.scopesFor(grant.preset);
     },
     scopesFor(preset) {
       if (preset === "none") {

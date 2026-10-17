@@ -54,7 +54,8 @@ export interface ForgeUser {
 }
 
 export interface MintedToken {
-  id: number;
+  /** Absent when forge sent none; revoke by `name` then. Never a placeholder like 0. */
+  id: number | undefined;
   name: string;
   /** The credential. Held in memory until sealed; never logged, never stored by the hub. */
   secret: string;
@@ -196,6 +197,8 @@ export async function mintAgentToken(
     refuse(`minting a token for ${username}`, res.status);
   }
 
+  // Wire format verified against the deployed Forgejo 16.0.5 swagger: CreateAccessTokenOption
+  // {name, scopes[], repositories[] of {owner,name}}; AccessToken carries `sha1` and `id`.
   // **`sha1`, not `token`.** Gitea's field name, kept by Forgejo. A reader expecting `token` gets
   // `undefined` and hands an empty credential onward, which then fails at `git push` with an
   // authentication error that names nothing useful.
@@ -206,7 +209,7 @@ export async function mintAgentToken(
 
   log.info("forge token minted", { username, name: opts.name, repositories: opts.repositories.length });
   return {
-    id: typeof body.id === "number" ? body.id : 0,
+    id: typeof body.id === "number" ? body.id : undefined,
     name: typeof body.name === "string" ? body.name : opts.name,
     secret: body.sha1,
   };

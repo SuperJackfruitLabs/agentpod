@@ -3,11 +3,12 @@ import { describe, expect, test } from "bun:test";
 import type { ForgeApiMode, ForgeApiPreset, ForgeApiProvider } from "@agentpod/contract";
 
 import type { FetchLike } from "../forge";
+import { ForgeApiConfigError } from "./errors";
 import { tokenName } from "./forgejo";
 import { getProvider, splitRepo, type ForgeGrantRef } from "./providers";
 
-const cfg = { baseUrl: "https://forge.test", adminToken: "ADMIN-SECRET-TOKEN" };
-const SECRET = "s3cr3t-token-" + "b".repeat(30);
+const cfg = { baseUrl: "https://forge.test", adminToken: "c0ffee".repeat(6) + "abcd" };
+const SECRET = "5ec0de".repeat(6) + "beef";
 
 function grant(over: Partial<ForgeGrantRef> = {}): ForgeGrantRef {
   return {
@@ -63,15 +64,63 @@ describe("forgejo provider", () => {
   });
 
   test("mint error messages never include a response body or the token", async () => {
-    const { fetchImpl } = scripted([[400, { message: `echo ${SECRET} body-marker` }]]);
+    // The stub checks the admin token really is sent, then reflects it AND the minted secret back
+    // in the error body, the way a forge that echoes the request would.
+    const fetchImpl: FetchLike = async (_url, init) => {
+      const auth = (init?.headers as Record<string, string>).Authorization;
+      expect(auth).toBe(`token ${cfg.adminToken}`);
+      return new Response(JSON.stringify({ message: `body-marker ${auth} ${SECRET}` }), { status: 400 });
+    };
     const err = await p(fetchImpl)
       .mint!("coder-kai", { name: "n", scopes: ["read:repository"], repositories: [{ owner: "o", name: "r" }] })
       .catch((e) => e);
-    const text = String(err) + String((err as Error).stack ?? "");
+    expect(err).toBeInstanceOf(Error);
+    const text = String((err as Error).message) + String((err as Error).stack ?? "");
     expect(text).toContain("400");
     expect(text).not.toContain("body-marker");
     expect(text).not.toContain(SECRET);
     expect(text).not.toContain(cfg.adminToken);
+  });
+
+  test("mint returns id undefined when forge sends none, never a fake 0", async () => {
+    const { fetchImpl } = scripted([[201, { name: "n", sha1: SECRET }]]);
+    const out = await p(fetchImpl).mint!("coder-kai", {
+      name: "n",
+      scopes: ["read:repository"],
+      repositories: [{ owner: "o", name: "r" }],
+    });
+    expect(out.id).toBeUndefined();
+    expect(out.name).toBe("n");
+  });
+
+  test("mintScopes gives the preset's scopes for a minted grant", () => {
+    expect(p().mintScopes(grant({ preset: "issues" }))).toEqual(["read:repository", "write:issue"]);
+  });
+
+  test("mintScopes refuses a supplied grant with a typed error (supplied never mints)", () => {
+    const err = (() => {
+      try {
+        p().mintScopes(grant({ mode: "supplied", expectedLogin: "m", preset: "none" }));
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err).toBeInstanceOf(ForgeApiConfigError);
+    expect((err as ForgeApiConfigError).code).toBe("mode-not-minted");
+    expect((err as ForgeApiConfigError).status).toBe(422);
+  });
+
+  test("mintScopes refuses minted + none with a typed error", () => {
+    const err = (() => {
+      try {
+        p().mintScopes(grant({ preset: "none" }));
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err).toBeInstanceOf(ForgeApiConfigError);
+    expect((err as ForgeApiConfigError).code).toBe("preset-none-needs-no-token");
+    expect((err as ForgeApiConfigError).status).toBe(422);
   });
 
   test("scopesFor each preset", () => {
@@ -125,6 +174,12 @@ describe("github provider", () => {
     expect(() => p().expectedIdentity(grant({ provider: "github", mode: "app", expectedLogin: "my-app[bot]" }))).toThrow(/bot/);
     expect(p().expectedIdentity(grant({ provider: "github", mode: "supplied", expectedLogin: "octo" }))).toBe("octo");
     expect(() => p().expectedIdentity(grant({ provider: "github", mode: "supplied", expectedLogin: null }))).toThrow();
+  });
+
+  test("mintScopes is a typed refusal: github never mints", () => {
+    expect(() => p().mintScopes(grant({ provider: "github", mode: "app", expectedLogin: "a" }))).toThrow(
+      ForgeApiConfigError,
+    );
   });
 
   test("scopesFor returns []", () => {

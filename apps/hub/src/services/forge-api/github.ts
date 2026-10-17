@@ -1,3 +1,4 @@
+import { ForgeApiConfigError } from "./errors";
 import type { ForgeProvider } from "./providers";
 
 /**
@@ -17,6 +18,9 @@ export const githubProvider: ForgeProvider = {
       return `${declared}[bot]`;
     }
     return declared;
+  },
+  mintScopes(grant) {
+    throw new ForgeApiConfigError("mode-not-minted", `forge: a github ${grant.mode} grant does not mint a token.`);
   },
   scopesFor() {
     return [];
