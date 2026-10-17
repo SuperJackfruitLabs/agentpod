@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/libsodium-wrappers": "^0.8.2",
     "@types/pg": "^8.23.1",
     "@types/pngjs": "^6.0.5",
     "drizzle-kit": "^0.31.10",
@@ -59,6 +60,7 @@
     "hono": "^4.13.8",
     "isomorphic-git": "^1.42.2",
     "jose": "^6.2.12",
+    "libsodium-wrappers": "0.7.15",
     "modal": "0.10.1",
     "nanoid": "^5.1.16",
     "pngjs": "^7.0.0",
