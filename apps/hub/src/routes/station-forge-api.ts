@@ -74,7 +74,10 @@ import type { AuthUser } from "../auth/middleware";
 
 const log = createLogger("station-forge-api-route");
 
-export const FORGE_API_BODY_MAX = 64 * 1024;
+// The request-size ceiling for every forge-api route, derived from the one envelope cap so the two
+// cannot drift: a /secret body is the envelope plus a few bytes of JSON (its schema holds the
+// envelope to SUPPLIED_BLOB_MAX); a grant body (repositories, rules) stays well under it.
+export const FORGE_API_BODY_MAX = 4 * SUPPLIED_BLOB_MAX;
 
 export interface StationForgeApiDeps {
   /** Null when no forge admin credential is configured; mutations then answer 503. */
@@ -186,6 +189,7 @@ const MESSAGES: Record<string, string> = {
   "capability-missing": "This station's node does not support forge API access; update the node.",
   "station-key-unavailable": "The station's node did not provide its handover key; is it online?",
   "grant-exists": "This station already has a live grant for that forge.",
+  "grant-revoking": "This station's grant for that forge is being revoked; revocation is in progress, try again once it is revoked.",
   "grant-busy": "Another operation on this grant is in progress; try again.",
   "grant-not-found": "No such grant on this station.",
   "mint-failed": "The forge refused to create the token.",

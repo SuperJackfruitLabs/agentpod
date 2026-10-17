@@ -96,6 +96,8 @@ export interface ReconcileReport {
   skipped: { grantId: string; why: string }[];
   errors: { grantId: string; action: ReconcileAction; error: string }[];
   orphans: { provider: ForgeApiProvider; instance: string; account: string; name: string }[];
+  /** supplied/app grants still `authorised`: the operator has not supplied the credential. No action. */
+  awaitingCredential: string[];
   /** Accounts the orphan scan could not check: their provider cannot list tokens. */
   orphanScanUnsupported: { provider: ForgeApiProvider; instance: string; account: string }[];
   /** Grants that have failed the same way in REPEATED_FAILURE_THRESHOLD or more consecutive sweeps. */
@@ -179,7 +181,7 @@ async function auditSystem(
 export async function runForgeApiReconcile(deps: ReconcileDeps): Promise<ReconcileReport> {
   const failures = deps.failures ?? defaultFailures;
   const isOnline = deps.isNodeOnline ?? ((id: string) => connectionManager.isOnline(id));
-  const report: ReconcileReport = { scanned: 0, actions: [], skipped: [], errors: [], orphans: [], orphanScanUnsupported: [], repeatedFailures: [] };
+  const report: ReconcileReport = { scanned: 0, actions: [], skipped: [], errors: [], orphans: [], awaitingCredential: [], orphanScanUnsupported: [], repeatedFailures: [] };
   const rows = await deps.db
     .select({ grant: g, nodeId: stations.nodeId, capabilities: stations.capabilities })
     .from(g)
@@ -188,6 +190,7 @@ export async function runForgeApiReconcile(deps: ReconcileDeps): Promise<Reconci
   report.scanned = rows.length;
 
   for (const { grant: row, nodeId, capabilities } of rows) {
+    if (row.state === "authorised" && row.mode !== "minted") report.awaitingCredential.push(row.id);
     const step = nextStep(row, deps.now());
     if (!step) {
       failures.delete(row.id);

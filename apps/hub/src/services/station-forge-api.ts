@@ -29,6 +29,7 @@ import {
   ForgeApiRule as ForgeApiRuleSchema,
   ForgeApiVerifyReasons,
   type ForgeApiVerifyReason,
+  FORGE_API_SEALED_MAX,
   STK_HANDOVER_PREFIX,
   VERB_PARAMS,
   VERB_RESULTS,
@@ -498,6 +499,14 @@ export async function createForgeApiGrant(deps: ForgeApiDeps, input: CreateForge
     return { row: inserted!, created: true };
   });
 
+  if (!created && row.state === "revoking") {
+    // Not "revoke it first": it is being revoked. A new grant can be made once it is a tombstone.
+    throw new ForgeApiGrantError(
+      "grant-revoking",
+      `station ${station.id}'s ${row.provider} grant for ${row.instance} (${row.id}): revocation is in progress; try again once it is revoked.`,
+      row.id,
+    );
+  }
   if (!created) {
     const same =
       row.mode === input.mode &&
@@ -900,7 +909,7 @@ function needsOperatorCredential(row: Grant): ForgeApiGrantError {
 //   it byte-identical.
 
 /** Supplied/app sealed credentials are small: a PAT or an App key. Measured in characters. */
-export const SUPPLIED_BLOB_MAX = 16 * 1024;
+export const SUPPLIED_BLOB_MAX = FORGE_API_SEALED_MAX;
 
 const NODE_REASON_MAX = 200;
 
@@ -1375,7 +1384,20 @@ const WIPE_PENDING = "wipe-pending";
 const WIPE_SKIPPED = "wipe-skipped: station-gone";
 /** Reason suffix: reconcile verifies this grant once on its next sweep (a lifecycle reason). */
 export const VERIFY_PENDING = "verify-pending";
+/**
+ * A supplied/app grant still `authorised`: the operator never supplied a credential, so nothing
+ * exists at the provider or on the node. Revoking it needs neither side nor a confirmation.
+ */
+const NOTHING_SUPPLIED = "nothing-supplied";
+export const REVOKED_NOTHING_SUPPLIED = "revoked; no credential was ever supplied";
+const neverSupplied = (row: Grant) => row.state === "authorised" && row.mode !== "minted" && row.deliveredAt === null && !row.sealedBlob;
 export const REVOKED_STATION_GONE = "revoked; node wipe skipped: station-gone (credential inert)";
+
+/** What a grant entering `revoking` has outstanding, as the reason revokePass reads. */
+function initialRevokeReason(row: Grant): string {
+  if (neverSupplied(row)) return NOTHING_SUPPLIED;
+  return `${row.mode === "supplied" ? PENDING_OPERATOR : PROVIDER_PENDING}; ${WIPE_PENDING}`;
+}
 
 type WipeResult = { status: "done" } | { status: "skipped" } | { status: "pending"; why: string };
 
@@ -1414,6 +1436,10 @@ async function wipeOnNode(deps: ForgeApiDeps, row: Grant): Promise<WipeResult> {
  */
 async function revokePass(deps: ForgeApiDeps, row: Grant, operatorConfirmed: boolean): Promise<RevokeResult> {
   const reason = row.stateReason ?? "";
+  if (reason.startsWith(NOTHING_SUPPLIED)) {
+    const grant = await transition(deps.db, row, ["revoking"], "revoked", { now: deps.now(), stateReason: REVOKED_NOTHING_SUPPLIED });
+    return { outcome: "revoked", grant };
+  }
   const marked = [PROVIDER_PENDING, PENDING_OPERATOR, WIPE_PENDING, WIPE_SKIPPED].some((m) => reason.includes(m));
   // Unmarked (just entered, or moved to `revoking` by someone else): both sides are outstanding.
   const wipeNeeded = !marked || reason.includes(WIPE_PENDING);
@@ -1480,10 +1506,9 @@ export async function revokeGrant(deps: ForgeApiDeps, ref: Ref): Promise<RevokeR
     if (row.state === "revoked") return { outcome: "revoked", grant: row };
     if (row.state !== "revoking") {
       // One UPDATE; any undelivered blob goes with it. Both sides outstanding.
-      const provider = row.mode === "supplied" ? PENDING_OPERATOR : PROVIDER_PENDING;
       row = await transition(deps.db, row, [row.state], "revoking", {
         now: deps.now(),
-        stateReason: `${provider}; ${WIPE_PENDING}`,
+        stateReason: initialRevokeReason(row),
         sealed: null,
       });
     }
@@ -1718,10 +1743,9 @@ export async function markGrantsRevoking(
     .where(and(eq(stations.tenantId, input.tenantId), eq(stations.id, input.stationId)));
   const ids: string[] = [];
   for (const row of live) {
-    const provider = row.mode === "supplied" ? PENDING_OPERATOR : PROVIDER_PENDING;
     await transition(tx, row, [row.state], "revoking", {
       now,
-      stateReason: `${provider}; ${WIPE_PENDING}; cause: ${input.cause}`,
+      stateReason: `${initialRevokeReason(row)}; cause: ${input.cause}`,
       sealed: null,
     });
     // Through the transaction: the audit row rolls back with the change it records.

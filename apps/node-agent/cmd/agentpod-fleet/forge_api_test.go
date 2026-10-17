@@ -10,7 +10,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -481,5 +483,45 @@ func TestEnvelopeGuard(t *testing.T) {
 		if err := checkEnvelope(bad); err == nil || strings.Contains(err.Error(), bad+"x") {
 			t.Errorf("%q accepted or error echoes it: %v", bad, err)
 		}
+	}
+}
+
+// A credential whose sealed envelope the hub would refuse is refused HERE, before a grant exists:
+// the hub caps a supplied/app envelope (FORGE_API_SEALED_MAX) far below the 64 KiB stdin limit.
+func TestForgeAPIOversizedCredentialRefusedBeforeTheGrant(t *testing.T) {
+	bin := build(t)
+	h, srv := newForgeHub(t)
+	key := strings.Repeat("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n", 600) // ~22 KiB of key lines
+	stdin := "app_id=1\ninstallation_id=2\nprivate_key=" + key
+	args := []string{"stations", "forge-api", "grant", "--station", "stn_1", "--provider", "github",
+		"--instance", "https://github.com", "--repo", "org/repo", "--mode", "app", "--expect-login", "my-app"}
+	out, code := runStdin(t, bin, srv.URL, stdin, args...)
+	if code == 0 {
+		t.Fatalf("an oversized credential was accepted: %s", out)
+	}
+	if !strings.Contains(out, "16384") {
+		t.Errorf("the refusal should name the hub's limit: %s", out)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, c := range h.calls {
+		if c.Method == http.MethodPost {
+			t.Fatalf("a grant was created (or a secret sent) for a credential the hub would refuse: %s %s", c.Method, c.Path)
+		}
+	}
+}
+
+// The CLI's envelope cap is the contract's FORGE_API_SEALED_MAX, the one value the hub uses.
+func TestForgeSealedMaxMatchesTheContract(t *testing.T) {
+	src, err := os.ReadFile("../../../../packages/contract/src/forge-api.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`export const FORGE_API_SEALED_MAX = (\d+);`).FindSubmatch(src)
+	if m == nil {
+		t.Fatal("packages/contract/src/forge-api.ts does not export FORGE_API_SEALED_MAX as a literal")
+	}
+	if want := string(m[1]); want != strconv.Itoa(forgeSealedMax) {
+		t.Fatalf("forgeSealedMax = %d, contract FORGE_API_SEALED_MAX = %s", forgeSealedMax, want)
 	}
 }

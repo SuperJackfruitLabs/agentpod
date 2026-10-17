@@ -30,6 +30,12 @@ export type ForgeApiRule = z.infer<typeof ForgeApiRule>;
 
 /** The prefix of stk's frozen handover envelope (docs/handover-v1.md in supertoolkit). */
 export const STK_HANDOVER_PREFIX = "stk-handover-v1:";
+/**
+ * The largest supplied/app sealed envelope the hub accepts, in characters (a PAT or an App key
+ * sealed is a few KiB). The fleet CLI refuses a larger one BEFORE creating the grant; its Go
+ * constant is held to this literal by a test, so keep it a plain number.
+ */
+export const FORGE_API_SEALED_MAX = 16384;
 
 export const ForgeApiDeliverParams = z
   .object({

@@ -15,11 +15,14 @@ process.env.NODE_ENV = "test";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
-import { rawSql } from "../../src/db/drizzle";
+import { db, rawSql } from "../../src/db/drizzle";
+import { viewOf } from "../../src/routes/station-forge-api";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { connectionManager } from "../../src/services/connection-manager";
 import {
   createForgeApiGrant,
+  createForgeApiGrant as create,
+  markGrantsRevoking,
   revokeGrant,
   rotateGrant,
   updateGrantPolicy,
@@ -220,7 +223,7 @@ describe("delivery retries", () => {
     const h = harness();
     const node = await freshNode();
     const { grant } = await granted(h, node);
-    await rawSql`UPDATE station_forge_api_grants SET state_reason = 'policy-pending: node offline', preset = 'issues' WHERE id = ${grant.id}`;
+    await rawSql`UPDATE station_forge_api_grants SET state_reason = 'policy-pending: node offline', preset = 'issues', policy_pending_since = now() WHERE id = ${grant.id}`;
     h.reset();
     await run(h, node);
     const frames = h.callsOf("forge.api.policy");
@@ -516,5 +519,88 @@ describe("scheduling", () => {
     connectionManager.unregister(nodeB);
     await pollUntil(() => con.lines.some((l) => l.includes("forge api reconcile failed")));
     await revokeGrant(h.deps, b.ref);
+  });
+});
+
+describe("final review fixes", () => {
+  test("a grant that failed delivery becomes delivered when a retry is acknowledged", async () => {
+    const h = harness();
+    const node = await freshNode();
+    h.replies["forge.api.deliver"] = () => ({ ok: false, error: "unknown verb: forge.api.deliver" });
+    const { grant } = await granted(h, node);
+    expect(grant.state).toBe("failed");
+    expect(grant.sealedBlob).not.toBeNull();
+    h.replies["forge.api.deliver"] = () => ACK;
+    const failures = createFailureTracker();
+    for (let i = 0; i < 3; i++) await run(h, node, { failures });
+    const row = await loadGrant(grant.id);
+    expect(row.state).toBe("delivered");
+    expect(row.sealedBlob).toBeNull();
+    expect(h.secrets.length).toBe(1);
+    expect(h.callsOf("forge.api.deliver").length).toBe(2);
+    const audit = await rawSql`SELECT 1 FROM station_audit WHERE verb = 'forge.api.reconcile.failing' AND params_summary->>'grantId' = ${grant.id}`;
+    expect(audit.length).toBe(0);
+    await assertNoLeak(h, f, con.lines);
+  });
+
+  test("an unconfirmed policy change is retried even when the row carries a lifecycle reason", async () => {
+    const h = harness();
+    const node = await freshNode();
+    const agent = await newAgent(f);
+    const st = await insertStation(f, node, { principalId: agent.principalId });
+    const grant = await create(h.deps, grantInput(f, st.id, { preset: "issues" }));
+    await rawSql`UPDATE station_forge_api_grants SET state_reason = 'rotation-failed: earlier' WHERE id = ${grant.id}`;
+    h.replies["forge.api.policy"] = () => OFFLINE;
+    const out = await updateGrantPolicy(h.deps, { tenantId: f.tenant, grantId: grant.id, preset: "read", rules: [], allowGraphql: false });
+    expect(out.outcome).toBe("policy-pending");
+    let row = await loadGrant(grant.id);
+    expect(row.policyPendingSince).not.toBeNull();
+    expect(row.stateReason).toBe("rotation-failed: earlier");
+    expect(viewOf(row)).toMatchObject({ policyPending: true });
+    expect(Object.keys(viewOf(row))).not.toContain("policyPendingSince");
+
+    h.replies["forge.api.policy"] = () => ({ ok: true, data: { ok: true } });
+    h.reset();
+    await run(h, node);
+    const frames = h.callsOf("forge.api.policy");
+    expect(frames.length).toBe(1);
+    expect((frames[0]!.params as { preset: string }).preset).toBe("read");
+    row = await loadGrant(grant.id);
+    expect(row.policyPendingSince).toBeNull();
+    expect(row.stateReason).toBe("rotation-failed: earlier");
+    expect(viewOf(row)).toMatchObject({ policyPending: false });
+  });
+
+  test("supplied grants awaiting a credential are reported, and revoke without an operator confirmation", async () => {
+    const h = harness();
+    const node = await freshNode();
+    const st = await insertStation(f, node);
+    const a = await create(h.deps, grantInput(f, st.id, { mode: "supplied", expectedLogin: `${RUN}-bot` }));
+    expect(a.state).toBe("authorised");
+    const report = await run(h, node);
+    expect(report.awaitingCredential).toContain(a.id);
+    expect(report.actions.filter((x) => x.grantId === a.id)).toEqual([]);
+
+    h.reset();
+    const out = await revokeGrant(h.deps, { tenantId: f.tenant, grantId: a.id });
+    expect(out.outcome).toBe("revoked");
+    expect(h.calls).toEqual([]);
+
+    // The same through an occupancy change and the sweep.
+    const st2 = await insertStation(f, node);
+    const b = await create(h.deps, grantInput(f, st2.id, { mode: "supplied", expectedLogin: `${RUN}-bot2` }));
+    await db.transaction((tx) => markGrantsRevoking(tx, { tenantId: f.tenant, stationId: st2.id, cause: "unassigned" }));
+    await run(h, node);
+    expect((await loadGrant(b.id)).state).toBe("revoked");
+  });
+
+  test("a grant request that meets a revoking grant says revocation is in progress", async () => {
+    const h = harness();
+    const node = await freshNode();
+    const { st, grant } = await granted(h, node);
+    await rawSql`UPDATE station_forge_api_grants SET state = 'revoking', state_reason = 'provider-pending; wipe-pending' WHERE id = ${grant.id}`;
+    const err = await create(h.deps, grantInput(f, st.id)).catch((e) => e);
+    expect(err?.code).toBe("grant-revoking");
+    expect(String(err?.message)).toContain("revocation is in progress");
   });
 });

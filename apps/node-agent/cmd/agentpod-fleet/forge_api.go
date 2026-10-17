@@ -249,6 +249,10 @@ func parseForgeRule(s string) (map[string]any, bool) {
 
 const forgeCredentialMax = 64 * 1024
 
+// forgeSealedMax is the hub's cap on a supplied/app envelope (contract FORGE_API_SEALED_MAX, held
+// to it by TestForgeSealedMaxMatchesTheContract). Checked after sealing and before the grant exists.
+const forgeSealedMax = 16384
+
 // readForgeCredential reads the credential from stdin. Errors never quote what was read.
 func readForgeCredential(mode string) map[string]string {
 	raw, err := io.ReadAll(io.LimitReader(os.Stdin, forgeCredentialMax+1))
@@ -316,6 +320,10 @@ func sealToStation(base string, material map[string]string) string {
 	if err := checkEnvelope(sealed); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+	// Before anything is created or sent: the hub would refuse it after the grant exists.
+	if len(sealed) > forgeSealedMax {
+		refuse("the sealed credential is %d characters; the hub accepts at most %d, so nothing was created or sent", len(sealed), forgeSealedMax)
 	}
 	return sealed
 }
