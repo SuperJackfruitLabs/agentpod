@@ -280,7 +280,7 @@ var reference = clidoc.Binary{
 		// ---- Stations ------------------------------------------------------------------
 		{
 			Path: "stations", Group: "Stations",
-			Summary:  "Detect, adopt and unadopt stations; grant one push access.",
+			Summary:  "Detect, adopt and unadopt stations; grant one push or forge API access.",
 			Synopsis: "fleet stations <verb> [flags]",
 			Help:     stationsUsage,
 			Detail: "Acts on the fleet's shape. For one station's contents — lifecycle, disk, diffs, " +
@@ -348,6 +348,111 @@ var reference = clidoc.Binary{
 			Handlers: []string{"fleetStations"},
 			Flags:    []clidoc.Flag{{Name: "station", Arg: "STATION_ID", Required: true}},
 			Example:  "fleet stations revoke-push --station stn_123",
+		},
+		{
+			Path: "stations forge-api", Summary: "Give a station's agent scoped forge API access through its broker (operator only).",
+			Synopsis: "fleet stations forge-api <verb> --station STATION_ID [flags]",
+			Help:     forgeAPIUsage,
+			Detail: "The station's broker (stk) holds the credential and injects it into requests the policy allows; the agent " +
+				"never sees it. Every verb but `list` is an operator action: the hub operator seat AND the control pair's reach " +
+				"over the station's agent (the owner alone is refused with 403). Three credential modes: `minted` (the hub mints a " +
+				"scoped token on its configured forge for the occupying agent), `supplied` (an operator-provided token) and `app` " +
+				"(a GitHub App's id, installation id and private key). A supplied or app credential is read from stdin, sealed on " +
+				"this machine to the station's handover key (fetched from the hub once, before anything is created), and only the " +
+				"sealed envelope is sent. There is no flag that takes a credential. Output is the hub's sanitised grant view; it " +
+				"never contains a token. See [Stations](/use/stations/#forge-api-access) for the limits.",
+			Dispatch: []clidoc.Dispatch{{Func: "fleetForgeAPI", Tag: "verb"}},
+			Exit:     "0 on success; 2 when a flag or the stdin credential is refused before any request; 1 when the hub refuses (its status and fixed message are printed, never the request).",
+			Example:  "fleet stations forge-api list --station stn_123",
+		},
+		{
+			Path: "stations forge-api list", Summary: "A station's forge API grants: state, mode, account, isolation.",
+			Synopsis: "fleet stations forge-api list --station STATION_ID [--json]",
+			Detail:   "Prints only known fields (id, state, mode, account, isolation, provider, instance, preset, repositories); `--json` prints the same fields as JSON. Readable by the station's owner as well as an operator.",
+			Handlers: []string{"newForgeAPIFlags"},
+			Flags:    []clidoc.Flag{{Name: "station", Arg: "STATION_ID", Required: true}, {Name: "json"}},
+			Example:  "fleet stations forge-api list --station stn_123",
+		},
+		{
+			Path: "stations forge-api grant", Summary: "Grant a station API access to named repositories on one forge.",
+			Synopsis: "fleet stations forge-api grant --station STATION_ID --provider forgejo|github|gitea|bitbucket \\\n" +
+				"    --instance https://HOST --repo OWNER/NAME [--repo …] [--preset read|issues|pull-requests|maintain|none] \\\n" +
+				"    [--rule 'allow: METHOD /path']… [--rules-file FILE] [--mode minted|app|supplied] [--expect-login LOGIN] [--allow-graphql]",
+			Detail: "Refused before any request: no `--repo`, an `--instance` that is not https, an unknown provider, preset or mode, " +
+				"a malformed `--rule`, or `--mode supplied|app` without `--expect-login` (for an app, its slug). `--rule` is " +
+				"`allow: METHOD /path` or `deny: METHOD /path`; a rule with a `when` condition goes in `--rules-file`, a JSON array " +
+				"of `{allow|deny, when}` objects. `minted` (the default) sends one request. `supplied` reads one token from stdin; " +
+				"`app` reads `app_id=…`, `installation_id=…` and `private_key=…` lines (the PEM may continue over the following lines). " +
+				"For those the CLI fetches the station's key, seals, creates the grant, then posts the envelope; if that last step " +
+				"fails, re-send with `secret`. What the hub accepts today: Forgejo `minted` (the hub's configured forge only) and " +
+				"`supplied`; GitHub `app` and `supplied`. Gitea and Bitbucket are refused until their adapters exist.",
+			Handlers: []string{"newForgeAPIFlags"},
+			Flags: []clidoc.Flag{
+				{Name: "station", Arg: "STATION_ID", Required: true},
+				{Name: "provider", Arg: "PROVIDER", Required: true},
+				{Name: "instance", Arg: "URL", Required: true},
+				{Name: "repo", Arg: "OWNER/NAME", Required: true, Repeatable: true},
+				{Name: "preset", Arg: "PRESET", Default: "read"},
+				{Name: "rule", Arg: "RULE", Repeatable: true},
+				{Name: "rules-file", Arg: "FILE"},
+				{Name: "mode", Arg: "MODE"},
+				{Name: "expect-login", Arg: "LOGIN"},
+				{Name: "allow-graphql"},
+			},
+			Example: "fleet stations forge-api grant --station stn_123 --provider forgejo --instance https://forge.example \\\n" +
+				"    --repo org/repo --preset issues\n" +
+				"pbpaste | fleet stations forge-api grant --station stn_123 --provider github --instance https://github.com \\\n" +
+				"    --repo org/repo --mode supplied --expect-login octo-bot",
+		},
+		{
+			Path: "stations forge-api verify", Summary: "Re-check a grant's credential on the node.",
+			Synopsis: "fleet stations forge-api verify --station STATION_ID --grant GRANT_ID",
+			Handlers: []string{"newForgeAPIFlags"},
+			Flags:    []clidoc.Flag{{Name: "station", Arg: "STATION_ID", Required: true}, {Name: "grant", Arg: "GRANT_ID", Required: true, Usage: "grant ID, as `fleet stations forge-api list` shows it"}},
+			Example:  "fleet stations forge-api verify --station stn_123 --grant fag_123",
+		},
+		{
+			Path: "stations forge-api rotate", Summary: "Mint a minted grant a new token; the previous one is revoked.",
+			Synopsis: "fleet stations forge-api rotate --station STATION_ID --grant GRANT_ID",
+			Handlers: []string{"newForgeAPIFlags"},
+			Flags:    []clidoc.Flag{{Name: "station", Arg: "STATION_ID", Required: true}, {Name: "grant", Arg: "GRANT_ID", Required: true, Usage: "grant ID, as `fleet stations forge-api list` shows it"}},
+			Example:  "fleet stations forge-api rotate --station stn_123 --grant fag_123",
+		},
+		{
+			Path: "stations forge-api secret", Summary: "Re-supply a supplied or app grant's credential from stdin, sealed.",
+			Synopsis: "fleet stations forge-api secret --station STATION_ID --grant GRANT_ID [--mode app]",
+			Detail:   "Reads a token from stdin, or with `--mode app` the App's three field lines; fetches the station's key once, seals, and posts only the envelope.",
+			Handlers: []string{"newForgeAPIFlags"},
+			Flags:    []clidoc.Flag{{Name: "station", Arg: "STATION_ID", Required: true}, {Name: "grant", Arg: "GRANT_ID", Required: true, Usage: "grant ID, as `fleet stations forge-api list` shows it"}, {Name: "mode", Arg: "MODE", Usage: "app to read an App's fields instead of a token"}},
+			Example:  "pbpaste | fleet stations forge-api secret --station stn_123 --grant fag_123",
+		},
+		{
+			Path: "stations forge-api policy", Summary: "Replace a grant's preset, rules and GraphQL setting.",
+			Synopsis: "fleet stations forge-api policy --station STATION_ID --grant GRANT_ID --preset PRESET [--rule RULE]… [--rules-file FILE] [--allow-graphql]",
+			Detail:   "Replaces, not merges: rules not given are removed, and GraphQL is off unless `--allow-graphql` is given.",
+			Handlers: []string{"newForgeAPIFlags"},
+			Flags: []clidoc.Flag{{Name: "station", Arg: "STATION_ID", Required: true}, {Name: "grant", Arg: "GRANT_ID", Required: true, Usage: "grant ID, as `fleet stations forge-api list` shows it"},
+				{Name: "preset", Arg: "PRESET", Required: true},
+				{Name: "rule", Arg: "RULE", Repeatable: true},
+				{Name: "rules-file", Arg: "FILE"},
+				{Name: "allow-graphql"},
+			},
+			Example: "fleet stations forge-api policy --station stn_123 --grant fag_123 --preset issues --rule 'deny: DELETE /repos/**'",
+		},
+		{
+			Path: "stations forge-api revoke", Summary: "Remove a grant from the station (and, when minted, revoke the token at the forge).",
+			Synopsis: "fleet stations forge-api revoke --station STATION_ID --grant GRANT_ID",
+			Detail:   "agentpod cannot revoke a supplied token at its provider: revoke it there, then run `confirm-revoked`.",
+			Handlers: []string{"newForgeAPIFlags"},
+			Flags:    []clidoc.Flag{{Name: "station", Arg: "STATION_ID", Required: true}, {Name: "grant", Arg: "GRANT_ID", Required: true, Usage: "grant ID, as `fleet stations forge-api list` shows it"}},
+			Example:  "fleet stations forge-api revoke --station stn_123 --grant fag_123",
+		},
+		{
+			Path: "stations forge-api confirm-revoked", Summary: "Record that you revoked a supplied credential at its provider.",
+			Synopsis: "fleet stations forge-api confirm-revoked --station STATION_ID --grant GRANT_ID",
+			Handlers: []string{"newForgeAPIFlags"},
+			Flags:    []clidoc.Flag{{Name: "station", Arg: "STATION_ID", Required: true}, {Name: "grant", Arg: "GRANT_ID", Required: true, Usage: "grant ID, as `fleet stations forge-api list` shows it"}},
+			Example:  "fleet stations forge-api confirm-revoked --station stn_123 --grant fag_123",
 		},
 		{
 			Path: "station", Group: "Stations",
