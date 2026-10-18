@@ -83,8 +83,17 @@ export const ForgeApiStatusParams = z.object({ stationId: z.string().min(1) }).s
 
 // Results are deliberately NOT strict: hub and nodes deploy independently, and a newer node adding a
 // field must not make a healthy reply unreadable. Params stay strict (no credential in a frame).
-export const ForgeApiDeliverResult = z
-  .object({ ok: z.boolean(), isolation: ForgeApiIsolation, stored: z.boolean() });
+export const ForgeApiDeliverResult = z.object({
+  ok: z.boolean(),
+  isolation: ForgeApiIsolation,
+  stored: z.boolean(),
+  /**
+   * The station's harness was already running when its stk environment changed, and a running
+   * process keeps the environment it started with: it must be restarted to use the grant. The node
+   * does not restart it itself (it cannot know the agent is not mid-turn). Older nodes omit it.
+   */
+  needsRestart: z.boolean().optional(),
+});
 export const ForgeApiPolicyResult = z.object({ ok: z.boolean(), error: z.string().optional() });
 /**
  * stk's `forge.api.verify` reason codes, exactly. The node puts one first in `reason` (optionally
@@ -112,7 +121,11 @@ export const ForgeApiVerifyResult = z
     reason: z.string().optional(),
     isolation: ForgeApiIsolation,
   });
-export const ForgeApiRevokeResult = z.object({ removed: z.boolean() });
+export const ForgeApiRevokeResult = z.object({
+  removed: z.boolean(),
+  /** See ForgeApiDeliverResult.needsRestart: a running harness still holds the revoked wiring. */
+  needsRestart: z.boolean().optional(),
+});
 export const ForgeApiStatusResult = z
   .object({
     grants: z.array(

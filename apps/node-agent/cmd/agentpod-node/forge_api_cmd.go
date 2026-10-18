@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
@@ -126,6 +127,18 @@ func newInstanceClient(inst forgeapi.Instance) stkclient.Client {
 	return stkclient.New("stk", instanceClientOptions(os.Geteuid(), osUserExists, inst))
 }
 
+// nodeHarnessWiring is how the node reaches the systemd user units that start a station's harness:
+// which units a station key has, whether one is running, the drop-in directory and a daemon-reload.
+// The env files themselves are written by forgeapi, owned by the station's agent uid.
+func nodeHarnessWiring() *forgeapi.HarnessWiring {
+	return &forgeapi.HarnessWiring{
+		Units:        descriptor.HarnessSystemdUnits,
+		DropInDir:    descriptor.UserUnitDropInDir,
+		Running:      func(_ context.Context, unit string) bool { return descriptor.UserUnitActive(unit) },
+		DaemonReload: func(context.Context) error { return descriptor.UserDaemonReload() },
+	}
+}
+
 // forgeAPIInstancesConfig turns node config and environment into the instances configuration.
 // Environment wins over the config file, which wins over the defaults.
 func forgeAPIInstancesConfig(c config.ForgeAPI, getenv func(string) string) (forgeapi.InstancesConfig, error) {
@@ -138,6 +151,7 @@ func forgeAPIInstancesConfig(c config.ForgeAPI, getenv func(string) string) (for
 			}
 			return forgeapi.NodeHarnessUIDs()
 		},
+		Harness:   nodeHarnessWiring(),
 		Lifecycle: &forgeapi.SystemLifecycle{Roots: []string{forgeapi.DefaultStateRoot, forgeapi.DefaultConfigRoot, forgeapi.DefaultRuntimeRoot}},
 	}
 	if v := strings.ToLower(strings.TrimSpace(getenv("AGENTPOD_ALLOW_SHARED_AGENT_UID"))); v == "1" || v == "true" || v == "yes" {

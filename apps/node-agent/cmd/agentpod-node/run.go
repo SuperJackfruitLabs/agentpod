@@ -15,6 +15,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetreport"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
@@ -102,9 +103,18 @@ func runCmd() {
 	// Where each station's git identity (push key, commit author) lives. The config directory,
 	// NOT a workspace — see internal/gitidentity for why.
 	gitIdentityRoot := filepath.Dir(config.DefaultPath())
-	// A station's terminal commits as the same author its harness does.
+	// forge.api: one stk instance per station (see below). Built first because a spawned terminal
+	// or ACP session asks it for the station's own proxy environment.
+	instances, err := newStationInstances(cfg, os.Getenv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "forge.api:", err)
+		os.Exit(1)
+	}
+	// A station's terminal commits as the same author its harness does, and reaches its forge
+	// through the station's own stk when it holds a grant.
 	h := gateway.NewTerminalHandlerWithEnv(descriptor.NewHandler(reg), resolver, mgr, func(key string) []string {
-		return gitidentity.Env(gitIdentityRoot, key)
+		add, hosts := instances.EnvForKey(key)
+		return forgeapi.WithBrokerEnv(gitidentity.Env(gitIdentityRoot, key), add, hosts...)
 	}, lifecycleFn)
 	if fetch, err := gateway.NewHTTPArtifactFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret); err == nil {
 		h = gateway.NewSkillManagementHandler(h, gateway.SkillManagementDeps{
@@ -255,11 +265,6 @@ func runCmd() {
 	// a station and routed by the frame's stationId. The capability is advertised only while the
 	// probe below says stk is usable; the verbs are registered regardless and answer an error
 	// naming the reason when it is not.
-	instances, err := newStationInstances(cfg, os.Getenv)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "forge.api:", err)
-		os.Exit(1)
-	}
 	h = gateway.NewForgeAPIHandler(h, instances)
 	// A service the operator removed from the shared base policy while the node was down leaves
 	// every station's policy, credential forgotten, as soon as the node is up.
@@ -276,9 +281,15 @@ func runCmd() {
 	// forge, and `git push` still uses whatever ssh would have used anyway.
 	mcpProxy, proxy, proxyStop := startMCPProxy(cfg, reg, gitIdentityRoot)
 	defer proxyStop()
-	h = gateway.NewACPHandlerWithMCPProxy(h, acpMgr, gateway.ACPCommandFunc(gitidentity.WithSSHCommand(
-		gitIdentityRoot,
-		descriptor.NewCapabilityHandler(reg).ACPCommand,
+	// A station that holds a forge grant also gets its own stk instance's proxy and CA variables
+	// and the placeholders of its grants (forgeapi.WithBrokerCommand): its forge traffic goes
+	// through the broker, and only through its own.
+	h = gateway.NewACPHandlerWithMCPProxy(h, acpMgr, gateway.ACPCommandFunc(forgeapi.WithBrokerCommand(
+		forgeapi.CommandFunc(gitidentity.WithSSHCommand(
+			gitIdentityRoot,
+			descriptor.NewCapabilityHandler(reg).ACPCommand,
+		)),
+		instances.EnvForKey,
 	)), mcpProxy)
 	// The daemon's otel.env comes from its own cgroup (otelenv.DaemonPath), not from uid: a
 	// system unit with User= still reads the system file, and a node that is not the

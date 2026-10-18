@@ -384,6 +384,8 @@ func MergePolicy(existing []byte, entry PolicyEntry) ([]byte, error) {
 // ManagedEntry is a policy entry the node wrote: a forge service carrying a grant label.
 type ManagedEntry struct {
 	Service, Station, Principal, Grant string
+	// Host is the forge host the entry brokers (the harness wiring warns when a NO_PROXY covers it).
+	Host string
 }
 
 // ManagedEntries lists the node's entries in file order.
@@ -408,6 +410,7 @@ func ManagedEntries(existing []byte) ([]ManagedEntry, error) {
 		out = append(out, ManagedEntry{
 			Service: services.Content[i].Value, Grant: g,
 			Station: labelOf(val, "station"), Principal: labelOf(val, "principal"),
+			Host: scalarOf(val, "host"),
 		})
 	}
 	return out, nil

@@ -92,6 +92,10 @@ type DeliverAck struct {
 	// is lenient about extra result fields.
 	IsolationDetail string `json:"isolationDetail,omitempty"`
 	Reason          string `json:"reason,omitempty"`
+	// NeedsRestart: the harness was already running when its environment changed, and a running
+	// process keeps the environment it started with. The hub's result schema is lenient, so an
+	// older hub ignores it.
+	NeedsRestart bool `json:"needsRestart,omitempty"`
 }
 
 // PolicyAck: the hub reads ok and error (station-forge-api.ts: "node rejected the policy: <error>"),
@@ -116,6 +120,8 @@ type VerifyAck struct {
 // RevokeAck: Removed is false when there was nothing on this node to remove.
 type RevokeAck struct {
 	Removed bool `json:"removed"`
+	// NeedsRestart: see DeliverAck.
+	NeedsRestart bool `json:"needsRestart,omitempty"`
 }
 
 // StatusGrant: Present means the node holds a policy entry for the grant (not that the

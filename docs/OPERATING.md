@@ -2158,6 +2158,27 @@ or remove stations that are gone). The registry is read and written under a file
 setup --station` in another process never lose each other's records. Do not edit the registry by hand; if the node reports
 `registry-invalid` it has stopped touching instances until the file is fixed or removed.
 
+**How a station's harness reaches its broker.** A station that holds a forge grant has its
+harness started with that station's own instance's proxy URL (the proxy key is in it), the CA
+variables (`SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`,
+`NODE_USE_ENV_PROXY`) and a placeholder (`stk:ref:<service>:v1`) in each grant's variable, never a
+token. ACP sessions and terminals the node spawns get this at spawn time; a station with no
+grant of its own is started exactly as before. A harness a systemd *user* unit starts
+(`hermes-gateway-<profile>.service`) gets a node-owned environment file
+(`/var/lib/agentpod/forge-api/harness-env/<instance>/<unit>.env`, mode 0600, owned by the
+station's agent uid) and a unit drop-in (`~/.config/systemd/user/<unit>.d/90-agentpod-forge.conf`)
+that reads it. The root `hermes` gateway and OpenClaw's single gateway serve several stations, so
+they get nothing from this: one station's proxy cannot be given to a process other stations use.
+The node refuses to write the file for a station whose agent uid is the node's own
+(`harness-uid-is-node`) unless `allowSharedAgentUid` is set, because a file the node and every
+other default-mapped station can read isolates nothing. **A running process keeps the environment
+it started with**, so when a deliver or revoke changes the environment under a running unit the
+ack says `needsRestart: true`; the node does not restart it (it cannot know the agent is not
+mid-turn), restart the station from lifecycle. The node never sets or changes `NO_PROXY` /
+`no_proxy`; if one already covers a forge host (or is `*`) the harness bypasses the broker, and
+the node logs a warning once. The proxy credential is only in the harness environment and that
+file: never in a log, an ack or an error.
+
 **Shared base policy.** An optional stk policy file (same format as `supertoolkit.yaml`, only its
 `services:` are read) listing services every station needs. The node copies each entry into every
 station's own policy when the instance is created and on every policy write, and marks the copies

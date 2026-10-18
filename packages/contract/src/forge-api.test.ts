@@ -115,3 +115,21 @@ describe("forge.api.verify reasons", () => {
     expect(r.success).toBe(true);
   });
 });
+
+describe("needsRestart (the harness was running when its environment changed)", () => {
+  it("deliver and revoke results keep an optional needsRestart", () => {
+    const d = VERB_RESULTS["forge.api.deliver"].safeParse({ ok: true, stored: true, isolation: "separate-user", needsRestart: true });
+    expect(d.success).toBe(true);
+    if (d.success) expect((d.data as { needsRestart?: boolean }).needsRestart).toBe(true);
+    const r = VERB_RESULTS["forge.api.revoke"].safeParse({ removed: true, needsRestart: true });
+    expect(r.success).toBe(true);
+    if (r.success) expect((r.data as { needsRestart?: boolean }).needsRestart).toBe(true);
+  });
+  it("an older node omits it", () => {
+    expect(VERB_RESULTS["forge.api.deliver"].safeParse({ ok: true, stored: true, isolation: "same-user" }).success).toBe(true);
+    expect(VERB_RESULTS["forge.api.revoke"].safeParse({ removed: false }).success).toBe(true);
+  });
+  it("must be a boolean", () => {
+    expect(VERB_RESULTS["forge.api.revoke"].safeParse({ removed: true, needsRestart: "yes" }).success).toBe(false);
+  });
+});

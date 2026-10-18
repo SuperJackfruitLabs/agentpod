@@ -240,3 +240,20 @@ func TestForgeAPISetupStationPassesTheSharedUIDAcknowledgement(t *testing.T) {
 		t.Fatalf("code %d allow %v: %s", code, got, e.String())
 	}
 }
+
+func TestTheNodeWiresStationHarnessesThroughSystemdUserUnits(t *testing.T) {
+	cfg, err := forgeAPIInstancesConfig(config.ForgeAPI{}, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := cfg.Harness
+	if h == nil || h.Units == nil || h.DropInDir == nil || h.Running == nil || h.DaemonReload == nil {
+		t.Fatalf("harness wiring is not configured: %+v", h)
+	}
+	// the root station and a station of a harness no per-station unit starts have no unit
+	for _, key := range []string{"hermes", "openclaw", "claude-code:work"} {
+		if u := h.Units(key); len(u) != 0 {
+			t.Errorf("Units(%q) = %v", key, u)
+		}
+	}
+}

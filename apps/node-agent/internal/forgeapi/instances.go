@@ -113,6 +113,10 @@ type InstancesConfig struct {
 	// Unwire removes the harness wiring for a grant (Task 5); Bypass is the bypass check (Task 6).
 	Unwire func(grantID string) error
 	Bypass func(ctx context.Context, c stkclient.Client) any
+	// Harness, when set, routes each station's harness through its own instance: the node records
+	// the station's key at deliver, hands spawns the instance's proxy environment (EnvForKey) and
+	// writes drop-in environment files for systemd-started harnesses. Nil: no harness wiring.
+	Harness *HarnessWiring
 
 	// test seams
 	env        *sysEnv
@@ -134,6 +138,7 @@ type StationInstances struct {
 	warned   map[string]bool
 	seedWarn map[string]string // station -> why the shared base policy was not seeded
 
+	wiringMu   sync.Mutex // serialises harness wiring (env files and drop-ins)
 	refreshMu  sync.Mutex // serialises shared-policy refreshes
 	sharedHash string
 	sharedSeen bool
@@ -152,6 +157,9 @@ type record struct {
 	// AgentUIDs are the uids the station's agents ran as when the instance was last used; the
 	// next station's uids are compared with them.
 	AgentUIDs []int `json:"agentUids,omitempty"`
+	// StationKey is the node's key for the station's harness ("hermes:press"), recorded at deliver
+	// so a spawn, which knows only the key, finds the station's instance. Not a secret.
+	StationKey string `json:"stationKey,omitempty"`
 }
 
 type registryFile struct {
@@ -618,10 +626,20 @@ func (m *StationInstances) Deliver(ctx context.Context, p DeliverParams) (Delive
 		return DeliverAck{}, err
 	}
 	ack, err := st.svc.Deliver(ctx, p)
-	if err == nil && shared {
+	if err != nil {
+		return ack, err
+	}
+	if shared {
 		ack.Isolation, ack.IsolationDetail, ack.Reason = "same-user", IsolationSharedUID, sharedUIDMessage
 	}
-	return ack, err
+	// The harness is wired only once stk holds the credential. A failure here is the deliver's
+	// failure: the grant would otherwise look usable while the agent has no route to it.
+	restart, werr := m.wireStation(ctx, st, p.StationKey)
+	if werr != nil {
+		return DeliverAck{}, werr
+	}
+	ack.NeedsRestart = restart
+	return ack, nil
 }
 
 func (m *StationInstances) Policy(ctx context.Context, p PolicyParams) (PolicyAck, error) {
@@ -674,7 +692,18 @@ func (m *StationInstances) Revoke(ctx context.Context, p RevokeParams) (RevokeAc
 		}
 		return RevokeAck{Removed: false}, nil
 	}
-	return st.svc.Revoke(ctx, p)
+	ack, err := st.svc.Revoke(ctx, p)
+	if err != nil {
+		return ack, err
+	}
+	// Whatever the revoke found, leave the harness wiring as the grants that remain say (an
+	// interrupted revoke is healed by the next one).
+	restart, werr := m.wireStation(ctx, st, "")
+	if werr != nil {
+		return RevokeAck{}, coded("unwire-failed", werr)
+	}
+	ack.NeedsRestart = restart
+	return ack, nil
 }
 
 // Status creates the station's instance if there is none: the hub fetches the station's public
@@ -760,6 +789,14 @@ func (m *StationInstances) removeInstance(ctx context.Context, r record) error {
 		defer unlock()
 	}
 	// The harness wiring first: it points at the instance about to go.
+	if m.cfg.Harness != nil {
+		m.wiringMu.Lock()
+		_, err := m.unwireInstance(ctx, inst)
+		m.wiringMu.Unlock()
+		if err != nil {
+			return coded("unwire-failed", err)
+		}
+	}
 	if m.cfg.Unwire != nil {
 		data, _, err := readPolicyFile(inst.ConfigPath)
 		if err != nil {
