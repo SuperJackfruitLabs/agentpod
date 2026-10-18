@@ -79,6 +79,20 @@ func newStationEnsurer() *forgeapi.Ensurer {
 	return forgeapi.NewEnsurer(func() stkclient.Client { return newStkClient("stk", "stk", "") }, forgeapi.SetupOptions{})
 }
 
+// newForgeAPIService wires the forge.api verbs to the real stk. STK_CONFIG, when set, names the
+// policy file (it is the variable stk itself reads); otherwise stk's install default is used.
+func newForgeAPIService(ensure func(context.Context) (forgeapi.SetupResult, error)) *forgeapi.Service {
+	path := os.Getenv("STK_CONFIG")
+	if path == "" {
+		path = forgeapi.DefaultPolicyPath
+	}
+	return &forgeapi.Service{
+		Ensure:     ensure,
+		NewClient:  func() stkclient.Client { return newStkClient("stk", "stk", "") },
+		PolicyPath: path,
+	}
+}
+
 func forgeAPICmd(args []string, out, errw io.Writer) int {
 	return forgeAPICmdWith(args, out, errw, defaultForgeAPIDeps())
 }

@@ -61,6 +61,7 @@ Each command's text below is what `apn help <command>` prints, from the same tab
 | `$AGENTPOD_TOKEN` | `apn acp`: a person's access token. Prefer it to `--token`, which lands in shell history. |
 | `$OTEL_EXPORTER_OTLP_ENDPOINT` | `apn run`: the OTLP/HTTP collector to export traces to; unset exports nothing. Normally written to `otel.env` by `apn telemetry enable`. |
 | `$OTEL_SDK_DISABLED` | `apn run`: `true` turns export off even with an endpoint set. |
+| `$STK_CONFIG` | `apn run`: the stk policy file the forge API verbs edit. Default `/etc/stk/supertoolkit.yaml`, where `stk install` puts it. |
 
 ## Exit status
 

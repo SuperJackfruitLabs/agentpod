@@ -257,8 +257,11 @@ func runCmd() {
 	h = gateway.NewGitIdentityHandler(h, gitIdentityRoot)
 	// forge.api: the lazy "make sure stk is installed" seam. The deliver handler (wired in a later
 	// change) calls ensureStk on every delivery; concurrent first deliveries share one setup and
-	// nothing runs stk until the first call.
-	ensureStk = newStationEnsurer().Ensure
+	// nothing runs stk until the first call. The verbs are registered here but the capability is
+	// not advertised yet (that follows once stk usability is checked on connect).
+	ensurer := newStationEnsurer()
+	ensureStk = ensurer.Ensure
+	h = gateway.NewForgeAPIHandler(h, newForgeAPIService(ensurer.Ensure))
 	h = gateway.NewPostureHandler(h, func() int { return len(reg.DetectAll()) })
 	// A station with a provisioned git identity gets GIT_SSH_COMMAND — and GIT_AUTHOR_* /
 	// GIT_COMMITTER_* once the hub has sent its author — in its harness's environment.

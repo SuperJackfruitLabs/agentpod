@@ -371,6 +371,7 @@ func apnReference() clidoc.Binary {
 			{Name: "AGENTPOD_TOKEN", Meaning: "`apn acp`: a person's access token. Prefer it to `--token`, which lands in shell history."},
 			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Meaning: "`apn run`: the OTLP/HTTP collector to export traces to; unset exports nothing. Normally written to `otel.env` by `apn telemetry enable`."},
 			{Name: "OTEL_SDK_DISABLED", Meaning: "`apn run`: `true` turns export off even with an endpoint set."},
+			{Name: "STK_CONFIG", Meaning: "`apn run`: the stk policy file the forge API verbs edit. Default `/etc/stk/supertoolkit.yaml`, where `stk install` puts it."},
 		},
 		Auth: "Commands that talk to the hub use **this machine's** credential, stored by `apn enroll` " +
 			"in the node config (`~/.config/agentpod-node/config.json` on Linux, " +
