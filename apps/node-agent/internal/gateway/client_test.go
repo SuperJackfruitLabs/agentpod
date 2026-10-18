@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -325,4 +327,40 @@ func TestExtraCapabilitiesAreAdvertisedInHello(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("no hello")
 	}
+}
+
+// Capabilities that depend on the host (is stk usable now?) are re-evaluated by the Prepare hook
+// before every connection, so a reconnect picks up a change the process start never saw.
+func TestPrepareRunsBeforeEveryConnection(t *testing.T) {
+	url, hellos := hubCollecting(t, "hello")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg := config.Config{Hub: url, NodeID: "node_1", NodeSecret: "s"}
+	var calls atomic.Int32
+	var order []string
+	var mu sync.Mutex
+	prepare := func(context.Context) {
+		mu.Lock()
+		order = append(order, "prepare")
+		mu.Unlock()
+		calls.Add(1)
+	}
+	for i := 0; i < 2; i++ {
+		cctx, ccancel := context.WithTimeout(ctx, 300*time.Millisecond)
+		_ = connectOnce(cctx, cfg, stubHandler, func() {
+			mu.Lock()
+			order = append(order, "connected")
+			mu.Unlock()
+		}, "dev", nil, Extras{Prepare: prepare})
+		ccancel()
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("Prepare ran %d times for 2 connections", calls.Load())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(order) < 2 || order[0] != "prepare" {
+		t.Fatalf("order = %v, want prepare before the connection is up", order)
+	}
+	_ = hellos
 }

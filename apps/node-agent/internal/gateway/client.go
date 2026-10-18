@@ -165,6 +165,11 @@ type Extras struct {
 	// only exists when something started — the turn-error intake is only a
 	// capability if its socket opened.
 	Capabilities []string
+	// Prepare, if set, runs at the start of EVERY connection attempt (so on each reconnect), before
+	// the dial. It is for facts about the host that can change while the process lives: is stk
+	// usable now? It must bound its own time (the forge.api probe has a 5s deadline), because it
+	// sits on the connect path.
+	Prepare func(ctx context.Context)
 }
 
 // RunWith is Run with Extras.
@@ -207,6 +212,10 @@ type HelloMsg struct {
 func connectOnce(parent context.Context, cfg config.Config, h Handler, onConnected func(), version string, gatherHealth func() []HealthReport, extras Extras) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
+
+	if extras.Prepare != nil {
+		extras.Prepare(ctx)
+	}
 
 	c, _, err := websocket.Dial(ctx, wsURL(cfg.Hub), &websocket.DialOptions{
 		HTTPHeader: map[string][]string{"Authorization": {"Bearer " + cfg.NodeID + ":" + cfg.NodeSecret}},

@@ -95,6 +95,35 @@ type Config struct {
 	// long as the session runs — with no credential leaving the node. Absent or no stations: off.
 	// Named per station for the reason StationTokens is. See internal/mcpproxy.
 	MCPProxy *MCPProxy `json:"mcpProxy,omitempty"`
+	// ForgeAPI tunes forge API access: each station gets its own stk instance (own OS user,
+	// state, policy file, proxy port and key, systemd unit). Absent: the defaults below. The
+	// environment variables AGENTPOD_STK_SHARED_POLICY, AGENTPOD_STK_PORTS ("8900-8999") and
+	// AGENTPOD_STK_REGISTRY override these.
+	ForgeAPI *ForgeAPI `json:"forgeApi,omitempty"`
+}
+
+// ForgeAPI configures the per-station stk instances. Zero values mean the defaults.
+type ForgeAPI struct {
+	// SharedPolicy is an operator-authored stk policy file of services every station needs; its
+	// entries are copied into each station's own policy (default /etc/agentpod/stk-shared.yaml;
+	// absent file: none).
+	SharedPolicy string `json:"sharedPolicy,omitempty"`
+	// ProxyPortMin and ProxyPortMax bound the proxy ports handed to station instances
+	// (default 8900-8999).
+	ProxyPortMin int `json:"proxyPortMin,omitempty"`
+	ProxyPortMax int `json:"proxyPortMax,omitempty"`
+	// Registry is the node-owned file that remembers which instance and port belong to which
+	// station (default /var/lib/agentpod/forge-api/stk-instances.json, mode 0600).
+	Registry string `json:"registry,omitempty"`
+	// StationUIDs maps a station id to the uid(s) its agents run as. Per-station isolation only
+	// holds when every station's agents have a distinct uid; a station missing here is taken to run
+	// as the node's own uid. The node does not switch uids itself: this states how harnesses are
+	// started, and a second station whose uids overlap another's is refused (`station-uid-shared`).
+	StationUIDs map[string][]int `json:"stationUids,omitempty"`
+	// AllowSharedAgentUID is the operator's acknowledgement that stations sharing an agent uid are
+	// NOT isolated from each other (they can read each other's environment and use each other's
+	// proxy key). Default false: such a station is refused. Env: AGENTPOD_ALLOW_SHARED_AGENT_UID=1.
+	AllowSharedAgentUID bool `json:"allowSharedAgentUid,omitempty"`
 }
 
 // MCPProxy configures the loopback MCP proxy.

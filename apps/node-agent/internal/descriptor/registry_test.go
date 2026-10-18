@@ -209,3 +209,44 @@ func TestDetectAllDoesNotAdvertiseConfigManageOnACompositeRoot(t *testing.T) {
 		t.Fatal("a profile station must still advertise config.manage")
 	}
 }
+
+func forgeCapStations(reg *Registry) (with, total int) {
+	for _, s := range reg.DetectAll() {
+		total++
+		for _, c := range s.Capabilities {
+			if c == "forge.api" {
+				with++
+			}
+		}
+	}
+	return
+}
+
+// The hub gates forge access on the STATION's capabilities (what detect reports), not on the
+// node's hello, so the probe's answer must reach every station a detect lists.
+func TestDetectAllAdvertisesForgeAPIOnlyWhileTheProbeSaysSo(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "profiles", "one"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry()
+	reg.Register(NewHermes(home, ""))
+
+	if with, total := forgeCapStations(reg); total == 0 || with != 0 {
+		t.Fatalf("with no probe configured forge.api must be absent, got %d/%d", with, total)
+	}
+	usable := false
+	reg.SetForgeAPIProbe(func() bool { return usable })
+	if with, _ := forgeCapStations(reg); with != 0 {
+		t.Fatal("forge.api advertised while the probe says stk is unusable")
+	}
+	usable = true
+	with, total := forgeCapStations(reg)
+	if with != total || total == 0 {
+		t.Fatalf("forge.api on %d of %d stations once the probe says yes", with, total)
+	}
+	usable = false
+	if with, _ := forgeCapStations(reg); with != 0 {
+		t.Fatal("forge.api must be withdrawn when the probe turns negative")
+	}
+}

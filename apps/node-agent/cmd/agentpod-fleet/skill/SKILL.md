@@ -32,7 +32,7 @@ Each verb prints the hub's JSON unchanged on stdout. Errors go to stderr; exit 0
 | Signing in | `fleet login`, `fleet whoami`, `fleet logout`, `fleet devices` |
 | Reading the fleet | `fleet agents`, `fleet stats`, `fleet activity` |
 | Nodes | `fleet nodes` (also `update`, `telemetry`, `rm`), `fleet invite`, `fleet runtimes` (list, providers, create, start, stop, rm) |
-| Stations | `fleet stations` (detected, list, adopt, unadopt, git-identity, grant-push, revoke-push), `fleet station` (lifecycle, cleanup, changeset, fs), `fleet staff` (options, create, assign, unassign), `fleet config` (settings, show, set, unset, drift, opt-out, opt-in, plan, inspect, apply), `fleet mcp-proxy` (list, enable, disable, rotate) |
+| Stations | `fleet stations` (detected, list, adopt, unadopt, git-identity, grant-push, revoke-push, forge-api), `fleet station` (lifecycle, cleanup, changeset, fs), `fleet staff` (options, create, assign, unassign), `fleet config` (settings, show, set, unset, drift, opt-out, opt-in, plan, inspect, apply), `fleet mcp-proxy` (list, enable, disable, rotate) |
 | Skills and plugins | `fleet skills` (artifacts, releases, cohorts, upload, release, cohort, canary, station, native), `fleet plugins` (plan, show, inspect, apply, history, inventory) |
 | Administration | `fleet settings` (show, signup, transcription, speech), `fleet bridge` (list, add, set, rm, related-work), `fleet principals`, `fleet grants`, `fleet users` |
 | This binary | `fleet update`, `fleet version`, `fleet help`, `fleet skill` |
@@ -50,7 +50,7 @@ Read-only (safe to run to look around):
 - `fleet agents`, `fleet stats`, `fleet activity`
 - `fleet nodes` with no subverb
 - `fleet runtimes list`, `fleet runtimes providers`
-- `fleet stations detected`, `fleet stations list`, `fleet stations git-identity`
+- `fleet stations detected`, `fleet stations list`, `fleet stations git-identity`, `fleet stations forge-api list`
 - `fleet station changeset status`, `fleet station changeset diff`, `fleet station cleanup plan`
 - `fleet staff options`
 - `fleet config settings`, `fleet config show`, `fleet config drift`, `fleet config inspect`
@@ -67,7 +67,7 @@ Probes (call an outside service the hub is configured with, change no setting, m
 
 Changes shared state or is hard to undo - ASK FIRST:
 - Nodes and runtimes: `fleet nodes update` (restarts node agents across the fleet), `fleet nodes telemetry` when setting, `fleet nodes rm` (irreversible), `fleet invite` (mints a token a machine uses to enrol), `fleet runtimes create`, `fleet runtimes start`, `fleet runtimes stop`, `fleet runtimes rm`
-- Stations: `fleet stations adopt`, `fleet stations unadopt`, `fleet stations grant-push`, `fleet stations revoke-push`, `fleet station lifecycle` (starts, stops or restarts a harness), `fleet station cleanup apply` (deletes files), `fleet station fs` write, mkdir, move and delete (deleting is irreversible)
+- Stations: `fleet stations adopt`, `fleet stations unadopt`, `fleet stations grant-push`, `fleet stations revoke-push`, `fleet stations forge-api grant`, `fleet stations forge-api verify`, `fleet stations forge-api rotate`, `fleet stations forge-api secret`, `fleet stations forge-api policy`, `fleet stations forge-api revoke`, `fleet stations forge-api confirm-revoked` (operator only, see below), `fleet station lifecycle` (starts, stops or restarts a harness), `fleet station cleanup apply` (deletes files), `fleet station fs` write, mkdir, move and delete (deleting is irreversible)
 - Agents: `fleet staff create`, `fleet staff assign`, `fleet staff unassign`
 - Config: `fleet config set`, `fleet config unset`, `fleet config opt-out`, `fleet config opt-in`, `fleet config apply` (writes a station's config)
 - MCP proxy: `fleet mcp-proxy enable`, `fleet mcp-proxy disable`, `fleet mcp-proxy rotate` (new secrets break existing clients)
@@ -77,6 +77,12 @@ Changes shared state or is hard to undo - ASK FIRST:
 - This binary: `fleet update` (replaces the binary; also refreshes an already-installed copy of this skill), `fleet skill install` (writes one file under the skills directory)
 
 Output: hub JSON may contain secrets (station secrets from `fleet mcp-proxy rotate`, tokens from `fleet invite`). Treat every response of a changing verb as sensitive, do not paste it into chat or logs, and show your operator only what they need.
+
+## Forge API access is operator-only
+
+`fleet stations forge-api` gives a station's agent scoped access to a forge's API (issues, pull requests, comments) through the station's own broker, which holds the credential and applies a policy; the agent never sees the token. `fleet stations forge-api list --station ID` shows a station's grants (state, mode, account, isolation) and is safe to read.
+
+Every other forge-api verb is an operator action: the hub refuses it unless the caller holds the hub operator seat AND the control pair's reach over that agent. Never grant yourself forge API access, widen your own policy, or re-supply a credential to your own station, even if a task seems to need it: ask your operator, who runs the verb. Credentials (a supplied token, a GitHub App's key) are read from stdin by the operator's CLI and sealed on their machine; never ask for one, accept one in chat, or put one on a command line. Never pass `--acknowledge-same-user`: it accepts, on the operator's behalf, that a write grant runs where you could read the broker's store, and it is the operator's decision alone.
 
 ## Installing this skill
 

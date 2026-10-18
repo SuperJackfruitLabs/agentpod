@@ -192,6 +192,34 @@ var commands = []struct {
 			"required.",
 	},
 	{
+		name: "forge-api", group: "Node",
+		oneline: "Set up stk as this station's forge credential broker (setup)",
+		detail: "apn forge-api setup [--user stk] [--agent-uid N]... [--state-dir DIR] [--stk PATH]\n" +
+			"apn forge-api setup --station ID [--agent-uid N]... [--allow-shared-agent-uid]\n" +
+			"apn forge-api prune --station ID [--dry-run] [--yes]\n\n" +
+			"Installs stk as its own OS user so the agent can use forge credentials\n" +
+			"without being able to read them. Run it once with sudo; it is safe to\n" +
+			"repeat (an existing separate-user install is left alone).\n\n" +
+			"--agent-uid defaults to the uid the node starts harnesses as (the user\n" +
+			"who ran sudo). Without root, nothing is installed: the command reports\n" +
+			"same-user isolation, marked DEGRADED, and says how to fix it.\n\n" +
+			"--station ID creates that station's own stk instance (its own OS user,\n" +
+			"state, policy file, proxy port and systemd unit, derived from the id)\n" +
+			"ahead of time. The node does the same on its own at a station's first\n" +
+			"grant when it runs as root, so this is only for preparing a station\n" +
+			"or for a node that does not run as root.\n\n" +
+			"A second station whose agents run as a uid another station already uses\n" +
+			"is refused (station-uid-shared): isolation between stations needs a\n" +
+			"distinct uid per station. --allow-shared-agent-uid acknowledges the\n" +
+			"risk; the station's grants then report same-user isolation.\n\n" +
+			"prune removes ONE station's whole stk instance (its unit, user, state,\n" +
+			"policy and every credential it holds, and the harness wiring) when the\n" +
+			"station is gone from this node. It is manual: nothing removes an instance\n" +
+			"for you. --dry-run says what it would remove; without it --yes is\n" +
+			"required. A station the node's registry does not list is left alone.\n\n" +
+			"Exit 0 on separate-user or on a clearly reported same-user; 1 on errors.",
+	},
+	{
 		name: "scan", group: "Node",
 		oneline: "Check this machine's agents for exposure (--json)",
 		detail: "apn scan [--json] [--no-color] — check the agent runtimes on this\n" +

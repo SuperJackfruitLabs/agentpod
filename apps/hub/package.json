@@ -59,6 +59,7 @@
     "hono": "^4.13.8",
     "isomorphic-git": "^1.42.2",
     "jose": "^6.2.12",
+    "libsodium-wrappers": "0.7.15",
     "modal": "0.10.1",
     "nanoid": "^5.1.16",
     "pngjs": "^7.0.0",

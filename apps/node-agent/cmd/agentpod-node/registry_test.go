@@ -9,6 +9,7 @@ import (
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi"
 )
 
 // openclawBinary must reach the descriptor: on a node where openclaw is installed
@@ -250,5 +251,24 @@ func TestBuildRegistry_KiloConfigReachesDescriptor(t *testing.T) {
 	}
 	if _, ok := d.(descriptor.ACPCommander); !ok {
 		t.Fatalf("kilo descriptor must implement ACPCommander, got %T", d)
+	}
+}
+
+// Every harness the node knows has a defined set of paths the bypass check reports on: a harness
+// added to the registry without one is a harness whose coverage nobody decided.
+func TestEveryRegisteredHarnessHasADefinedBypassPathSet(t *testing.T) {
+	names := buildRegistry(config.Config{}).Harnesses()
+	if len(names) < 8 {
+		t.Fatalf("registry lists %v", names)
+	}
+	for _, n := range names {
+		paths := forgeapi.HarnessPaths(n)
+		if len(paths) == 0 || paths[0] != "spawn" {
+			t.Errorf("%s: path set = %v, want spawn first", n, paths)
+		}
+		gw := n == "hermes" || n == "openclaw"
+		if has := len(paths) == 2 && paths[1] == "gateway"; has != gw {
+			t.Errorf("%s: gateway path = %v, want %v", n, has, gw)
+		}
 	}
 }

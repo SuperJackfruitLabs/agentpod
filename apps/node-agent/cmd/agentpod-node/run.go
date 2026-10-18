@@ -15,6 +15,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetreport"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
@@ -102,9 +103,14 @@ func runCmd() {
 	// Where each station's git identity (push key, commit author) lives. The config directory,
 	// NOT a workspace — see internal/gitidentity for why.
 	gitIdentityRoot := filepath.Dir(config.DefaultPath())
-	// A station's terminal commits as the same author its harness does.
+	// forge.api: one stk instance per station (see below). Built first because a spawned terminal
+	// or ACP session asks it for the station's own proxy environment.
+	instances, forgeAPI, forgeAPIOK := forgeAPIForNode(cfg, os.Getenv, detectedKey(reg))
+	// A station's terminal commits as the same author its harness does, and reaches its forge
+	// through the station's own stk when it holds a grant.
 	h := gateway.NewTerminalHandlerWithEnv(descriptor.NewHandler(reg), resolver, mgr, func(key string) []string {
-		return gitidentity.Env(gitIdentityRoot, key)
+		add, hosts := instances.EnvForKey(key)
+		return forgeapi.WithBrokerEnv(gitidentity.Env(gitIdentityRoot, key), add, hosts...)
 	}, lifecycleFn)
 	if fetch, err := gateway.NewHTTPArtifactFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret); err == nil {
 		h = gateway.NewSkillManagementHandler(h, gateway.SkillManagementDeps{
@@ -251,6 +257,21 @@ func runCmd() {
 	// git.identity.ensure: the public half of a station's push key, generated on first ask, and
 	// the author its commits are by.
 	h = gateway.NewGitIdentityHandler(h, gitIdentityRoot)
+	// forge.api: one stk instance per station, created lazily at the first deliver or status for
+	// a station and routed by the frame's stationId. The capability is advertised only while the
+	// probe below says stk is usable; the verbs are registered regardless and answer an error
+	// naming the reason when it is not.
+	h = gateway.NewForgeAPIHandler(h, forgeAPI)
+	// A service the operator removed from the shared base policy while the node was down leaves
+	// every station's policy, credential forgotten, as soon as the node is up.
+	go instances.RefreshShared(ctx)
+	// "forge.api" is a STATION capability (the hub gates on what detect reports per station, and
+	// drops unknown node-level ones from hello), so it rides on DetectAll. The probe runs in
+	// Extras.Prepare on every (re)connect; detect only reads its last answer.
+	forgeProbe := newForgeAPIProbe()
+	if forgeAPIOK {
+		reg.SetForgeAPIProbe(forgeProbe.Available)
+	}
 	h = gateway.NewPostureHandler(h, func() int { return len(reg.DetectAll()) })
 	// A station with a provisioned git identity gets GIT_SSH_COMMAND — and GIT_AUTHOR_* /
 	// GIT_COMMITTER_* once the hub has sent its author — in its harness's environment.
@@ -258,9 +279,16 @@ func runCmd() {
 	// forge, and `git push` still uses whatever ssh would have used anyway.
 	mcpProxy, proxy, proxyStop := startMCPProxy(cfg, reg, gitIdentityRoot)
 	defer proxyStop()
-	h = gateway.NewACPHandlerWithMCPProxy(h, acpMgr, gateway.ACPCommandFunc(gitidentity.WithSSHCommand(
-		gitIdentityRoot,
-		descriptor.NewCapabilityHandler(reg).ACPCommand,
+	// A station that holds a forge grant also gets its own stk instance's proxy and CA variables
+	// and the placeholders of its grants (forgeapi.WithBrokerCommand): its forge traffic goes
+	// through the broker, and only through its own.
+	h = gateway.NewACPHandlerWithMCPProxy(h, acpMgr, gateway.ACPCommandFunc(forgeapi.WithBrokerCommand(
+		forgeapi.CommandFunc(gitidentity.WithSSHCommand(
+			gitIdentityRoot,
+			descriptor.NewCapabilityHandler(reg).ACPCommand,
+		)),
+		instances.EnvForKey,
+		instances.NoteBlocked,
 	)), mcpProxy)
 	// The daemon's otel.env comes from its own cgroup (otelenv.DaemonPath), not from uid: a
 	// system unit with User= still reads the system file, and a node that is not the
@@ -276,6 +304,11 @@ func runCmd() {
 	h = gateway.NewUpdateHandler(h, version)
 	startStationTokens(ctx, cfg)
 	extras := startIntakes(ctx)
+	extras.Prepare = func(ctx context.Context) {
+		if forgeAPIOK {
+			forgeProbe.Refresh(ctx)
+		}
+	}
 	if mcpProxy != nil {
 		extras.Capabilities = append(extras.Capabilities, "mcp.proxy", "mcp.proxy.manage")
 	}

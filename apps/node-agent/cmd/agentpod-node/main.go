@@ -150,6 +150,8 @@ func main() {
 		os.Exit(piErrorsCmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "plugin-management":
 		os.Exit(pluginManagementCmd(os.Args[2:], os.Stdout, os.Stderr))
+	case "forge-api":
+		os.Exit(forgeAPICmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "mcp-proxy":
 		os.Exit(mcpProxyEntry(os.Args[2:], os.Stdout, os.Stderr))
 	case "detect":

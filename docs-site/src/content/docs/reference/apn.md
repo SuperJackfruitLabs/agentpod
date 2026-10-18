@@ -39,6 +39,7 @@ Each command's text below is what `apn help <command>` prints, from the same tab
 | [`apn openclaw-errors`](#apn-openclaw-errors) | Install, enable or remove the agentpod-errors plugin in OpenClaw. |
 | [`apn pi-errors`](#apn-pi-errors) | Install, enable or remove the agentpod-errors extension in Pi. |
 | [`apn detect`](#apn-detect) | Print detected harness stations as JSON. |
+| [`apn forge-api`](#apn-forge-api) | Set up stk as this station's forge credential broker (setup). |
 | [`apn scan`](#apn-scan) | Check this machine's agents for exposure (`--json`). |
 | [`apn acp`](#apn-acp) | Attach an ACP editor to a station (`--list`, `--station`). |
 
@@ -60,6 +61,10 @@ Each command's text below is what `apn help <command>` prints, from the same tab
 | `$AGENTPOD_TOKEN` | `apn acp`: a person's access token. Prefer it to `--token`, which lands in shell history. |
 | `$OTEL_EXPORTER_OTLP_ENDPOINT` | `apn run`: the OTLP/HTTP collector to export traces to; unset exports nothing. Normally written to `otel.env` by `apn telemetry enable`. |
 | `$OTEL_SDK_DISABLED` | `apn run`: `true` turns export off even with an endpoint set. |
+| `$AGENTPOD_ALLOW_SHARED_AGENT_UID` | `apn run`, `apn forge-api setup --station`: `1` acknowledges that stations whose agents share a uid are not isolated from each other. Default off: a second station on a uid already in use is refused with `station-uid-shared`. Same as `allowSharedAgentUid` in the node config. |
+| `$AGENTPOD_STK_SHARED_POLICY` | `apn run`, `apn forge-api setup --station`: the shared base policy, an stk policy file of services every station needs, copied into each station's own stk policy. Default `/etc/agentpod/stk-shared.yaml`; an absent file means none. Overrides `forgeApi.sharedPolicy` in the node config. |
+| `$AGENTPOD_STK_PORTS` | `apn run`, `apn forge-api setup --station`: the proxy port range for the per-station stk instances, as `MIN-MAX`. Default `8900-8999`. Overrides `forgeApi.proxyPortMin` and `proxyPortMax` in the node config. |
+| `$AGENTPOD_STK_REGISTRY` | `apn run`, `apn forge-api setup --station`: the node-owned file (mode 0600) that remembers which stk instance and port belong to which station. Default `/var/lib/agentpod/forge-api/stk-instances.json`. |
 
 ## Exit status
 
@@ -1032,6 +1037,71 @@ required.
 
 ```sh
 apn detect | jq '.[].key'
+```
+
+## apn forge-api
+
+Set up stk as this station's forge credential broker (setup).
+
+```text
+apn forge-api setup [--user NAME] [--agent-uid N]... [--state-dir DIR] [--stk PATH]
+apn forge-api setup --station ID [--agent-uid N]... [--allow-shared-agent-uid]
+apn forge-api prune --station ID [--dry-run] [--yes]
+```
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--user NAME` | string | `stk` | The OS user stk runs as. |
+| `--agent-uid N` | string | — | A uid allowed to use the broker; repeatable. Default: the uid harnesses run as (the user who ran sudo). |
+| `--state-dir DIR` | string | stk's own (`/var/lib/stk`) | Stk state directory (default: stk's own). |
+| `--stk PATH` | string | `stk` | The stk binary. |
+| `--allow-shared-agent-uid` | bool | `false` | With `--station`: acknowledge that stations whose agents share a uid are not isolated from each other (otherwise a second station on a uid already in use is refused with `station-uid-shared`). Same as `allowSharedAgentUid` in the node config. |
+| `--dry-run` | bool | `false` | With `prune`: say what would be removed and remove nothing. |
+| `--yes` | bool | `false` | With `prune`: confirm. `prune` deletes the station's stk user, state, every credential it holds and its harness wiring, and nothing runs it automatically. |
+| `--station ID` | string | — | `setup`: create this station's own stk instance now, as the node would at its first grant: own OS user, state, policy file, proxy port and systemd unit, all derived from the id. Cannot be combined with `--user`, `--state-dir` or `--stk`. |
+
+`apn help forge-api` prints:
+
+```text
+apn forge-api setup [--user stk] [--agent-uid N]... [--state-dir DIR] [--stk PATH]
+apn forge-api setup --station ID [--agent-uid N]... [--allow-shared-agent-uid]
+apn forge-api prune --station ID [--dry-run] [--yes]
+
+Installs stk as its own OS user so the agent can use forge credentials
+without being able to read them. Run it once with sudo; it is safe to
+repeat (an existing separate-user install is left alone).
+
+--agent-uid defaults to the uid the node starts harnesses as (the user
+who ran sudo). Without root, nothing is installed: the command reports
+same-user isolation, marked DEGRADED, and says how to fix it.
+
+--station ID creates that station's own stk instance (its own OS user,
+state, policy file, proxy port and systemd unit, derived from the id)
+ahead of time. The node does the same on its own at a station's first
+grant when it runs as root, so this is only for preparing a station
+or for a node that does not run as root.
+
+A second station whose agents run as a uid another station already uses
+is refused (station-uid-shared): isolation between stations needs a
+distinct uid per station. --allow-shared-agent-uid acknowledges the
+risk; the station's grants then report same-user isolation.
+
+prune removes ONE station's whole stk instance (its unit, user, state,
+policy and every credential it holds, and the harness wiring) when the
+station is gone from this node. It is manual: nothing removes an instance
+for you. --dry-run says what it would remove; without it --yes is
+required. A station the node's registry does not list is left alone.
+
+Exit 0 on separate-user or on a clearly reported same-user; 1 on errors.
+```
+
+**Needs:** root to install (Linux with systemd). Without root nothing is installed and the command reports same-user isolation as degraded.
+
+**Exit status:** 0 on separate-user, or on a clearly reported same-user. 1 on an error. 2 on a bad flag or verb.
+
+```sh
+sudo agentpod-node forge-api setup
+sudo agentpod-node forge-api setup --agent-uid 1001
 ```
 
 ## apn scan

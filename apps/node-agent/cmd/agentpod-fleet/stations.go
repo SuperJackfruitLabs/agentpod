@@ -19,6 +19,10 @@ const stationsUsage = `Usage: fleet stations <verb>
   fleet stations grant-push   --station STATION_ID   give it a forge push key
   fleet stations revoke-push  --station STATION_ID   take that key away
 
+  fleet stations forge-api <verb> --station STATION_ID …   forge API access through the
+                                                     station's broker (operator only;
+                                                     see fleet stations forge-api --help)
+
 A detected station is not an agent until it is adopted. Adopting re-detects on
 the node first, so a key that has gone away is not adopted from a stale list.
 
@@ -35,6 +39,11 @@ half never leaves it — grant-push asks for the public half and registers that.
 func fleetStations(args []string) {
 	if len(args) == 0 || helpRequested(args) {
 		fmt.Println(stationsUsage)
+		return
+	}
+	if args[0] == "forge-api" {
+		// Its own flag set: the forge-api verbs read flags no other stations verb has.
+		fleetForgeAPI(args[1:])
 		return
 	}
 	fs := flag.NewFlagSet("fleet stations", flag.ExitOnError)
@@ -108,7 +117,7 @@ func (s *stringList) String() string { return fmt.Sprint([]string(*s)) }
 
 func (s *stringList) Set(value string) error {
 	if value == "" {
-		return fmt.Errorf("station key must not be empty")
+		return fmt.Errorf("value must not be empty")
 	}
 	*s = append(*s, value)
 	return nil

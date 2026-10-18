@@ -50,6 +50,8 @@ import { principalDirectory } from "../services/org-plane/directory";
 import { createPlaneAgent } from "../services/org-plane/agent-placement";
 import { unboundRoomsForStation } from "../services/matrix-as/station-room";
 import { principalById } from "../services/principals";
+import { markGrantsRevoking } from "../services/station-forge-api";
+import { kickForgeApiRevoke } from "../services/forge-api-reconcile";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("agents-admin");
@@ -175,7 +177,27 @@ export const agentsAdminRouter = new Hono()
     // `unboundRoomsForStation`.
     const candidates = await unboundRoomsForStation(stationId);
 
+    // Forge API grants of every station whose occupant this changes, moved to `revoking` INSIDE the
+    // transaction below (spec: reassignment never blocks on the forge). Revoked out of band after
+    // the commit; the reconcile sweep retries.
+    let revoking: { tenantId: string; grantId: string }[] = [];
+
     await db.transaction(async (tx) => {
+      const actor = c.get("user")?.id;
+      // The stations this assignment changes the occupant of, read under lock: the principal's
+      // current station (vacated by a move) and this one unless it already holds this principal.
+      const affected = await tx
+        .select({ id: stations.id, tenantId: stations.tenantId, principalId: stations.principalId })
+        .from(stations)
+        .where(sql`${stations.id} = ${stationId} OR ${stations.principalId} = ${principalId}`)
+        .for("update");
+      for (const st of affected) {
+        if (st.principalId === principalId && st.id === stationId) continue; // same occupant: no-op
+        const cause = "reassigned" as const;
+        const ids = await markGrantsRevoking(tx, { tenantId: st.tenantId, stationId: st.id, cause, actor });
+        revoking.push(...ids.map((grantId) => ({ tenantId: st.tenantId, grantId })));
+      }
+
       // Vacate wherever this principal already is — including this same
       // station, harmlessly — BEFORE placing it here. Done first and in the
       // same transaction so a crash between the two steps cannot leave the
@@ -235,6 +257,9 @@ export const agentsAdminRouter = new Hono()
         )
       `);
     });
+
+    kickForgeApiRevoke(revoking);
+    revoking = [];
 
     if (evictedPrincipalId) {
       log.warn("assigning a new occupant evicted the station's previous one", {
@@ -305,10 +330,25 @@ export const agentsAdminRouter = new Hono()
   .delete("/stations/:stationId/agent", async (c) => {
     const stationId = c.req.param("stationId");
 
-    const [station] = await db.select({ id: stations.id }).from(stations).where(eq(stations.id, stationId));
+    const [station] = await db
+      .select({ id: stations.id, tenantId: stations.tenantId })
+      .from(stations)
+      .where(eq(stations.id, stationId));
     if (!station) return c.json({ error: "no such station" }, 404);
 
-    await db.update(stations).set({ principalId: null }).where(eq(stations.id, stationId));
+    // The station's forge API grants go to `revoking` in the same transaction as the unassign;
+    // nothing here waits on the forge or the node.
+    const revoking = await db.transaction(async (tx) => {
+      const ids = await markGrantsRevoking(tx, {
+        tenantId: station.tenantId,
+        stationId,
+        cause: "unassigned",
+        actor: c.get("user")?.id,
+      });
+      await tx.update(stations).set({ principalId: null }).where(eq(stations.id, stationId));
+      return ids;
+    });
+    kickForgeApiRevoke(revoking.map((grantId) => ({ tenantId: station.tenantId, grantId })));
     log.info("station unassigned", { stationId, by: c.get("user")?.id });
     return c.json({ stationId, principalId: null });
   });

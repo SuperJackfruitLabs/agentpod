@@ -1,0 +1,117 @@
+{
+  "_note": "Hand-written from packages/contract/src/forge-api.ts (no hub-produced fixtures exist). Consumed by the Go gateway test (apps/node-agent/internal/gateway/forgeapi_test.go) and by packages/contract/src/forge-api-fixtures.test.ts; change schema, fixtures and both tests together.",
+  "params": {
+    "forge.api.deliver": {
+      "stationId": "stn_1",
+      "stationKey": "hermes:press",
+      "grantId": "fag_0123456789abcdef0123456789abcdef",
+      "provider": "forgejo",
+      "instance": "https://forge.example.com",
+      "mode": "minted",
+      "serviceName": "forge-forgejo-89abcdef0123",
+      "repositories": [
+        "acme/widgets"
+      ],
+      "preset": "issues",
+      "rules": [
+        {
+          "deny": "DELETE /repos/{owner}/{repo}/issues/*"
+        },
+        {
+          "allow": "POST /repos/{owner}/{repo}/issues",
+          "when": {
+            "title": "x"
+          }
+        }
+      ],
+      "allowGraphql": false,
+      "sealed": "stk-handover-v1:c2VhbGVkLWZpeHR1cmUtbm90LWEtcmVhbC10b2tlbg==",
+      "expectLogin": "agent-press"
+    },
+    "forge.api.policy": {
+      "stationId": "stn_1",
+      "grantId": "fag_0123456789abcdef0123456789abcdef",
+      "preset": "read",
+      "rules": [],
+      "allowGraphql": true
+    },
+    "forge.api.verify": {
+      "stationId": "stn_1",
+      "grantId": "fag_0123456789abcdef0123456789abcdef",
+      "expectLogin": "agent-press"
+    },
+    "forge.api.revoke": {
+      "stationId": "stn_1",
+      "grantId": "fag_0123456789abcdef0123456789abcdef"
+    },
+    "forge.api.status": {
+      "stationId": "stn_1"
+    }
+  },
+  "results": {
+    "forge.api.deliver": {
+      "ok": true,
+      "stored": true,
+      "isolation": "separate-user"
+    },
+    "forge.api.policy": {
+      "ok": true
+    },
+    "forge.api.verify": {
+      "ok": true,
+      "login": "agent-press",
+      "isolation": "separate-user"
+    },
+    "forge.api.revoke": {
+      "removed": true
+    },
+    "forge.api.status": {
+      "grants": [
+        {
+          "grantId": "fag_0123456789abcdef0123456789abcdef",
+          "present": true,
+          "isolation": "separate-user"
+        }
+      ],
+      "publicKey": "stk-handover-v1:PUB"
+    }
+  },
+  "resultsWithBypass": {
+    "forge.api.verify": {
+      "ok": true,
+      "login": "agent-press",
+      "isolation": "separate-user",
+      "bypass": {
+        "clients": [
+          {
+            "client": "curl",
+            "outcome": "honoured"
+          },
+          {
+            "client": "go net/http",
+            "outcome": "refused-ca"
+          },
+          {
+            "client": "hermes",
+            "outcome": "untested"
+          }
+        ],
+        "harness": "hermes",
+        "paths": [
+          {
+            "path": "spawn",
+            "wired": true
+          },
+          {
+            "path": "gateway",
+            "wired": false,
+            "reason": "no unit of this station's own starts the gateway"
+          }
+        ],
+        "brokered": false,
+        "wiringBlocked": "the harness environment already sets HTTPS_PROXY",
+        "measured": "partial"
+      }
+    }
+  }
+}

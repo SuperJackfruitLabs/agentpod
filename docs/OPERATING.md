@@ -2028,3 +2028,274 @@ What this means for an operator:
   finds it held exclusively refuses to boot.
 - `legacy_user_principals` (pre-cutover user id → `prn_`) is permanent: other planes recorded
   hub user ids before the cutover, and `GET /api/evidence/principals/:id` still resolves them.
+
+---
+
+## 12. Forge API access
+
+A station's agent can be given scoped access to a forge's **API** (issues, pull requests, comments,
+reviews) for named repositories. This is separate from [git identity](https://docs.agentpod.dev/use/stations/#git-identity): SSH keeps
+carrying git, and neither grant ever creates the other.
+
+```sh
+fleet stations forge-api list   --station <stationId>
+fleet stations forge-api grant  --station <stationId> --provider forgejo \
+    --instance https://forge.example --repo org/repo --preset issues
+fleet stations forge-api verify --station <stationId> --grant <grantId>
+fleet stations forge-api rotate --station <stationId> --grant <grantId>
+fleet stations forge-api policy --station <stationId> --grant <grantId> --preset issues \
+    --rule 'deny: DELETE /repos/**'
+fleet stations forge-api revoke --station <stationId> --grant <grantId>
+```
+
+**The agent never holds the token.** The station's broker (`stk`) holds the credential and adds it
+to the requests its policy allows, whichever client the agent uses (`tea`, `gh`, `curl`, an MCP
+server). The hub delivers the credential **sealed** to the station's broker key. For a supplied or
+app grant the hub relays ciphertext it cannot open; for a minted grant it holds the token briefly
+between minting and sealing (see Limits).
+
+**Operator only.** Every verb except `list` needs the hub operator seat **and** the control pair's
+reach over the station's agent; owning the station is not enough (403). An agent must not, and
+cannot, grant itself access. The forge account is never taken from the request: a minted grant is
+for the station's occupying agent, a supplied or app grant for the `--expect-login` you declare.
+A minted grant on a station with no occupant is refused (409); a supplied or app grant does not
+need one.
+
+**Three credential modes.**
+
+| Mode | What it is | Where the credential comes from |
+|---|---|---|
+| `minted` (default) | The agent's own forge account | The hub mints a token, limited to the listed repositories, on its configured forge |
+| `supplied` | A machine account you made by hand (a GitHub PAT, for instance) | You, on stdin |
+| `app` | A GitHub App installation, acting as the bot | You, on stdin: `app_id=…`, `installation_id=…`, `private_key=…` lines |
+
+Today the hub accepts Forgejo `minted` (only on its configured forge) and `supplied`, and GitHub
+`app` and `supplied`. Gitea and Bitbucket are refused until their adapters exist.
+
+A supplied or app credential is **never a flag** (there is no `--token`). It is read from stdin,
+sealed on your machine to the station's broker key (fetched once from the hub, before anything is
+created), and only the sealed envelope is sent:
+
+```sh
+pbpaste | fleet stations forge-api grant --station <stationId> --provider github \
+    --instance https://github.com --repo org/repo --mode supplied --expect-login octo-bot
+```
+
+If the grant is created but the envelope does not arrive, the CLI names the grant: re-send with
+`fleet stations forge-api secret --station <stationId> --grant <grantId>` (add `--mode app` for an
+App's fields). A sealed credential the station does not acknowledge within 24 hours is discarded.
+
+**Policy.** A grant names its repositories and a preset: `read`, `issues`, `pull-requests`
+(no merge), `maintain`, or `none` (start from nothing). `--rule 'allow: METHOD /path'` and
+`--rule 'deny: METHOD /path'` add to it, repeatable; a rule with a body condition goes in
+`--rules-file`, a JSON array such as
+`[{"allow": "PATCH /repos/org/repo/issues/*", "when": {"body.state": "absent"}}]`. Rules narrow the
+token and never widen it; a `deny` wins; `DELETE` is denied by every preset. `policy` **replaces**
+the preset, rules and GraphQL setting (GraphQL is off unless `--allow-graphql`, so omitting the flag
+turns it off), and needs no new
+credential. A minted token's provider-side scopes follow a changed preset only from the next
+`rotate`; until then the broker's rules are what apply.
+
+**Status.** `list` prints each grant's state, mode, account, isolation, provider, instance, preset
+and repositories, and never a token. States run `authorised → provisioned → delivered → verified`,
+plus `failed`, `revoking` and `revoked`. `verified` means the broker made a real read call as the
+expected account **and** a node that reports bypass evidence showed the broker carries the
+station's traffic. How `verify` reads that evidence:
+
+- A client that **bypassed** the broker fails the grant (`failed`, reason `bypassed: <clients>`),
+  even one that was `verified` before.
+- **No path routed** through the broker (`not-wired: <paths>`) is inconclusive: the state is kept,
+  so a first verify stays `delivered`; the reason is written only if it would not replace another
+  lifecycle reason.
+- The identity matched but the node could not show the traffic is brokered: the grant stays (or
+  goes back to) `delivered` with `coverage-incomplete: <bypassed|failed|refused-ca|unwired|probe-failed>`.
+- Brokered, but not every client was measured: `verified` with the note
+  `coverage: partial (untested: <clients>)`. The harnesses' own clients have no safe probe today,
+  so they report `untested` and **most grants verify with partial coverage**: the generic clients
+  were seen going through the broker, the harness's own client was not checked.
+- A node too old to send bypass evidence verifies as before (identity only).
+
+A verify can take up to 90 seconds, because the node probes its clients first. Isolation is `separate-user` (the broker runs as its own OS user) or `same-user`
+(degraded, see below).
+
+**Rotation and revocation.** `rotate` (minted) mints a new token, delivers and verifies it, then
+revokes the old one; if verification fails the old token stays live. For a supplied or app grant,
+rotate by sending a new credential with `secret`. `revoke` first wipes the station's copy (best
+effort; queued if the node is offline, which cuts the station's access at once), then revokes a
+minted token at the forge, retrying until it succeeds. Reassigning, unassigning or deleting a
+station (or removing its node) marks its grants `revoking` in the same change and never waits on
+the forge; the reconcile sweep (every 5 minutes, and when a node reconnects) finishes the job. A
+new occupant starts with nothing.
+
+**Verifying a grant.** After `grant`, `list` should reach `verified`; run `verify` after any node
+change. Implementation: `apps/hub/src/routes/station-forge-api.ts` (routes, including
+`GET …/forge-api/key`, which returns only the station's handover public key for the CLI to seal
+to), `apps/hub/src/services/station-forge-api.ts` (lifecycle), and
+`apps/node-agent/cmd/agentpod-fleet/forge_api.go` (the CLI).
+
+**Needs a node that supports it.** A station's node must advertise the `forge.api` capability;
+an older node answers `capability-missing` rather than doing nothing.
+
+**One broker per station, and what "isolated" means here.** A node that hosts several stations runs
+several `stk` instances, one per station, each with its own OS user (`stk-<station>-<hash>`), state
+directory (`/var/lib/<name>`), policy file (`/etc/<name>/supertoolkit.yaml`), runtime directory
+(`/run/<name>`), proxy port, proxy key and systemd unit, so two stations can hold grants for the
+same forge host and one station's credential is never in another's store. The node creates the
+instance itself, the first time the hub asks for the station's key (`status`) or delivers a grant,
+and only when it runs as root on Linux with systemd; on a node that cannot, deliver and status
+fail with `station-instance-unavailable` (run `sudo agentpod-node forge-api setup --station
+<stationId>` instead), and the node does not advertise `forge.api` at all, so the hub says
+`capability-missing`. The node never falls back to a shared broker.
+
+**An agent only counts as isolated if it runs as a user of its own, and today the node cannot make
+that so.** The node starts ACP sessions and terminals with a plain exec and no uid switch: the
+agents it spawns run as **the node's own user, root on any node that has instances**. A broker
+protects nothing from an agent that is root or that shares a uid with another station: such an agent
+can read other processes' environment and the harness files (where the loopback proxy key lives),
+and the broker's control socket admits agents by uid. So the node judges isolation on where each
+agent path of a station REALLY runs, and does not take `forgeApi.stationUids` (a declaration) as
+proof: a station is `separate-user` only if the stk instance is separate-user AND every path its
+harness has (`spawn` always; a long-lived `gateway` unit for Hermes) runs as a distinct non-node uid.
+Spawned sessions run as the node and an unknown path counts as the node's uid, so **today every
+station is reported `same-user`**, with `isolationDetail` `node-uid` (a lone station) or
+`shared-uid` (two stations at the same uid), and a reason that names every cause (agents run as
+root; stations share an agent uid). Nothing here spawns an agent as another user. Consequences:
+
+- A second station is **refused** (`station-uid-shared`, on deliver and on the status call that
+  fetches the key); the first station on a node is never refused. `forgeApi.stationUids` does not
+  lift the refusal for spawn-path stations (it still sets who may use the broker's control socket
+  and who owns a systemd-started harness's environment file).
+- To run several stations on one node anyway, acknowledge the weaker isolation with
+  `forgeApi.allowSharedAgentUid` (or `AGENTPOD_ALLOW_SHARED_AGENT_UID=1`, or
+  `--allow-shared-agent-uid` on `forge-api setup --station`). The stations are then served, every
+  reply reports isolation `same-user` with `isolationDetail: "shared-uid"`, and the node logs a
+  warning once per instance. Treat those stations as able to act as each other.
+- Station-by-station separation of agents (each one under its own user) is a different job from
+  this one; until it exists, per-station brokers keep **credentials** apart, not **agents**.
+
+| Setting | Node config (`forgeApi`) | Environment | Default |
+|---|---|---|---|
+| Proxy port range | `proxyPortMin`, `proxyPortMax` | `AGENTPOD_STK_PORTS=MIN-MAX` | `8900-8999` |
+| Shared base policy | `sharedPolicy` | `AGENTPOD_STK_SHARED_POLICY` | `/etc/agentpod/stk-shared.yaml` |
+| Instance registry (0600) | `registry` | `AGENTPOD_STK_REGISTRY` | `/var/lib/agentpod/forge-api/stk-instances.json` |
+
+**Removing a station's instance is manual.** Nothing removes an instance for you: a station that
+leaves the node keeps its user, unit, state, credentials and proxy port until you run
+`sudo agentpod-node forge-api prune --station <stationId> --dry-run` (says what would go) and then
+`... prune --station <stationId> --yes`. It removes that one station's whole instance (stops and
+removes the unit, deletes the user, state and policy, removes the harness files) and frees its port,
+and it only ever touches instances in the registry. Without a way for the node to learn which
+stations the hub still owns, an automatic removal could delete live credentials, so none exists. The
+node also refuses a deliver for a station key it does not itself detect (`station-not-hosted`) and a
+status for a station whose recorded key it no longer detects, without creating anything; a station
+can only be bound to one key (`station-key-changed`), and a first status for a station the node has
+never seen cannot be checked (the frame carries no key).
+
+The registry remembers which name and port belong to which station, so a restart reuses them. When
+the port range is used up the next station is refused with `port-range-exhausted` (widen the range
+or remove stations that are gone). The registry is read and written under a file lock (`<registry>.lock`), so the daemon and `forge-api
+setup --station` in another process never lose each other's records. Do not edit the registry by hand; if the node reports
+`registry-invalid` it has stopped touching instances until the file is fixed or removed.
+
+**How a station's harness reaches its broker.** A station that holds a forge grant has its
+harness started with that station's own instance's proxy URL (the proxy key is in it), the CA
+variables (`SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`,
+`NODE_USE_ENV_PROXY`) and a placeholder (`stk:ref:<service>:v1`) in each grant's variable, never a
+token. ACP sessions and terminals the node spawns get this at spawn time; a station with no
+grant of its own is started exactly as before. A harness a systemd *user* unit starts
+(`hermes-gateway-<profile>.service`) gets a node-owned environment file
+(`/var/lib/agentpod/forge-api/harness-env/<instance>/<unit>.env`, mode 0600, owned by the
+station's agent uid) and a unit drop-in (`~/.config/systemd/user/<unit>.d/90-agentpod-forge.conf`)
+that reads it. The root `hermes` gateway and OpenClaw's single gateway serve several stations, so
+they get nothing from this: one station's proxy cannot be given to a process other stations use.
+The node refuses to write the file for a station whose agent uid is the node's own
+(`harness-uid-is-node`) unless `allowSharedAgentUid` is set, because a file the node and every
+other default-mapped station can read isolates nothing. **A running process keeps the environment
+it started with**, so when a deliver or revoke changes the environment under a running unit the
+ack says `needsRestart: true`; the node does not restart it (it cannot know the agent is not
+mid-turn). **The hub ignores `needsRestart` today**, so nothing tells the operator: after a grant
+or a revoke on a station whose harness unit is running, restart the station from lifecycle
+yourself, or the old environment stays in force. The node never sets or changes `NO_PROXY` /
+`no_proxy`; if one already covers a forge host (or is `*`) the harness bypasses the broker, and
+the node logs a warning once. A proxy variable the harness environment or unit already sets
+(`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, either case) blocks the broker for that harness: it is
+started unchanged, never half-wired, and the node logs the variable's name (never its value). A
+station key belongs to one station (`station-key-in-use`), and one unit serves one station
+(`harness-unit-in-use`). The node never follows a symlink in the agent-owned wiring directory.
+The ack's `wired` lists the units that carry the station's file. The proxy credential is only in
+the harness environment and that file: never in a log, an ack or an error.
+
+**Shared base policy.** An optional stk policy file (same format as `supertoolkit.yaml`, only its
+`services:` are read) listing services every station needs. The node copies each entry into every
+station's own policy when the instance is created and on every policy write, and marks the copies
+(label `grant: shared:<service>`); edit the shared file and the next write for a station refreshes
+its copy, delete an entry and the copy goes. A shared entry never replaces or removes a station's
+own entry: if its service name, host or environment variable is already taken in a station's policy
+it is skipped for that station (the node logs it). A grant for a host a shared entry already brokers
+is refused with `policy-conflict`. A shared file that cannot be read stops grants and policy
+changes with `shared-policy-invalid`, but never a revoke. **Credentials for shared services are not
+delivered by the hub or the node**: the node copies the entries only, and loading a shared service's
+credential into each instance is yours to do. When you remove a service from the shared file, its
+copy leaves every station's policy and its credential is forgotten (`stk revoke`) first; the node
+checks the file at start and before each deliver, policy and status.
+
+### 12a. Limits
+
+- **No protection against root.** An agent or user with root on the station can read the broker's
+  store.
+- **Same-user mode is weak, and today it is every station; write grants need your acknowledgement.**
+  When the broker runs as the agent's own user, only file permissions separate them, and the agent
+  can read the broker's store. Agents spawned by the node run as the node's uid, so every station
+  currently reports isolation `same-user` (`isolationDetail` `node-uid`, or `shared-uid` when
+  acknowledged on the node). A **write grant** is any preset except `read` (`issues`,
+  `pull-requests`, `maintain` and `none` all count), or `read` with an `allow` rule for a method
+  other than GET, HEAD or OPTIONS. The hub refuses a write grant (409
+  `same-user-acknowledgement-required`) unless the operator passes `--acknowledge-same-user`
+  (`acknowledgeSameUser: true`), on `grant` and on a `policy` that moves a grant to write. It
+  assumes same-user unless the node has shown `separate-user` for the station's grants, so a
+  supplied or app write grant always needs it today. If a node's delivery reports `same-user`
+  for an unacknowledged write grant anyway, the grant is not delivered: the node's copy is wiped,
+  a minted token is revoked, and the grant is `failed` with that reason. The acknowledgement is an
+  operator decision: the hub records who gave it and when (from the signed-in account, never the
+  request body), the audit row records the request, `list` shows only that it was given, and a
+  rotation keeps it. Read-only grants never need it. Agents must never pass the flag.
+- **A node preparing its broker answers later, not never.** The first grant on a station can make
+  the node install its broker instance; the hub waits up to 120 s for that (`forge.api.status`,
+  `forge.api.deliver`). If an install is already running the grant answers 503 `station-preparing`
+  with `Retry-After`, and nothing is created; a delivery that meets it is retried with the same
+  sealed blob. A node that refuses the station answers 409 with its code: `station-not-hosted`,
+  `station-key-changed`, `station-uid-shared` or `stk-unavailable`.
+- **The hub sees a minted token for an instant**, between minting and sealing it. It stores only the
+  sealed envelope.
+- **Every forge-api route needs the hub's Forgejo admin configuration.** Without `FORGE_URL` and
+  `FORGE_ADMIN_TOKEN` on the hub, every `forge-api` route answers 503, even for a GitHub-only
+  (`app` or `supplied`) grant, and the reconcile sweep does not run.
+- **agentpod cannot revoke a supplied token at its provider.** `revoke` removes it from the station;
+  revoke it at the provider yourself, then run `fleet stations forge-api confirm-revoked`.
+- **A client that ignores proxy settings bypasses the broker.** It sends a placeholder and gets a
+  plausible 401; detection is by test, per harness, not by prevention. `verify` runs stk's probe
+  through the station's own instance (curl, python3, node and a Go client against a local stand-in
+  at a host that cannot resolve) and reports each as `honoured`, `bypassed`, `refused-ca`,
+  `untested` or `failed` in the ack's `bypass.clients`. A `bypassed` client makes the verify
+  `ok: false` with a reason starting `bypassed:`. The station's own harness client is `untested`
+  unless a safe probe command is configured (none ships), and is never reported `honoured`
+  without one. `bypass.paths` says which harness paths the node routed through the broker
+  (`spawn`, and `gateway` for hermes/openclaw) and `bypass.wiringBlocked` why a path is not.
+  `bypass.brokered` is wiring AND measurement: true only when every path is wired, the probe ran,
+  and no client is `bypassed`, `failed` or `refused-ca`. `bypass.measured` is `complete` only when
+  every client row (including the harness's own) is `honoured`, else `partial`; an untested client
+  is never evidence. The probe takes up to 45 s, is skipped when stk's own verify already failed,
+  and a clean result is reused for 60 s per station (never a failure; any deliver, policy, revoke
+  or wiring change drops it). Harness probes are refused on a root node. A station with no wired path at all is
+  `ok: false` with `not-wired:`. The hub reads all of this as described under **Status**:
+  `bypassed` fails the grant (a verified one too), `not-wired` is inconclusive (state kept),
+  `brokered: false` keeps or puts the grant at `delivered` with a `coverage-incomplete` note, and
+  `brokered: true` with `measured: partial` verifies with a `coverage: partial` note. A rotation
+  still finishes on a station that cannot show brokered traffic: once the node acknowledged the
+  new token and its identity matched, the old token is revoked; the grant stays `delivered` with
+  the coverage note. The reconcile sweep does not re-verify a not-brokered grant within 30 minutes;
+  `fleet stations forge-api verify` always runs.
+- **Body-level rules cover JSON REST only.** A rule that would have to read a GraphQL or non-JSON
+  body cannot be enforced.
+- **Forgejo's token listing and repository confinement are to be verified live** against the real
+  forge before relying on them for orphan cleanup and repository restriction.
