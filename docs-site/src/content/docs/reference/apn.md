@@ -39,6 +39,7 @@ Each command's text below is what `apn help <command>` prints, from the same tab
 | [`apn openclaw-errors`](#apn-openclaw-errors) | Install, enable or remove the agentpod-errors plugin in OpenClaw. |
 | [`apn pi-errors`](#apn-pi-errors) | Install, enable or remove the agentpod-errors extension in Pi. |
 | [`apn detect`](#apn-detect) | Print detected harness stations as JSON. |
+| [`apn forge-api`](#apn-forge-api) | Set up stk as this station's forge credential broker (setup). |
 | [`apn scan`](#apn-scan) | Check this machine's agents for exposure (`--json`). |
 | [`apn acp`](#apn-acp) | Attach an ACP editor to a station (`--list`, `--station`). |
 
@@ -1032,6 +1033,46 @@ required.
 
 ```sh
 apn detect | jq '.[].key'
+```
+
+## apn forge-api
+
+Set up stk as this station's forge credential broker (setup).
+
+```text
+apn forge-api setup [--user NAME] [--agent-uid N]... [--state-dir DIR] [--stk PATH]
+```
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--user NAME` | string | `stk` | The OS user stk runs as. |
+| `--agent-uid N` | string | — | A uid allowed to use the broker; repeatable. Default: the uid harnesses run as (the user who ran sudo). |
+| `--state-dir DIR` | string | stk's own (`/var/lib/stk`) | Stk state directory (default: stk's own). |
+| `--stk PATH` | string | `stk` | The stk binary. |
+
+`apn help forge-api` prints:
+
+```text
+apn forge-api setup [--user stk] [--agent-uid N]... [--state-dir DIR] [--stk PATH]
+
+Installs stk as its own OS user so the agent can use forge credentials
+without being able to read them. Run it once with sudo; it is safe to
+repeat (an existing separate-user install is left alone).
+
+--agent-uid defaults to the uid the node starts harnesses as (the user
+who ran sudo). Without root, nothing is installed: the command reports
+same-user isolation, marked DEGRADED, and says how to fix it.
+
+Exit 0 on separate-user or on a clearly reported same-user; 1 on errors.
+```
+
+**Needs:** root to install (Linux with systemd). Without root nothing is installed and the command reports same-user isolation as degraded.
+
+**Exit status:** 0 on separate-user, or on a clearly reported same-user. 1 on an error. 2 on a bad flag or verb.
+
+```sh
+sudo agentpod-node forge-api setup
+sudo agentpod-node forge-api setup --agent-uid 1001
 ```
 
 ## apn scan

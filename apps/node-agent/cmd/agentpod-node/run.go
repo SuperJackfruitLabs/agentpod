@@ -17,6 +17,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetreport"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/mcpproxy"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
@@ -27,6 +28,9 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/turnerror"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
 )
+
+// ensureStk is set by runCmd; see newStationEnsurer.
+var ensureStk func(context.Context) (stkclient.DoctorReport, error)
 
 func runCmd() {
 	cfg, err := config.Load(config.DefaultPath())
@@ -251,6 +255,10 @@ func runCmd() {
 	// git.identity.ensure: the public half of a station's push key, generated on first ask, and
 	// the author its commits are by.
 	h = gateway.NewGitIdentityHandler(h, gitIdentityRoot)
+	// forge.api: the lazy "make sure stk is installed" seam. The deliver handler (wired in a later
+	// change) calls ensureStk on every delivery; concurrent first deliveries share one setup and
+	// nothing runs stk until the first call.
+	ensureStk = newStationEnsurer().Ensure
 	h = gateway.NewPostureHandler(h, func() int { return len(reg.DetectAll()) })
 	// A station with a provisioned git identity gets GIT_SSH_COMMAND — and GIT_AUTHOR_* /
 	// GIT_COMMITTER_* once the hub has sent its author — in its harness's environment.

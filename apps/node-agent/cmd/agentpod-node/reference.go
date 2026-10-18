@@ -256,6 +256,19 @@ var apnRef = []clidoc.Command{
 	},
 	{Path: "detect", Synopsis: "apn detect", Auth: apnNeedsNothing, Example: "apn detect | jq '.[].key'"},
 	{
+		Path: "forge-api", Synopsis: "apn forge-api setup [--user NAME] [--agent-uid N]... [--state-dir DIR] [--stk PATH]",
+		Handlers: []string{"forgeAPICmdWith"},
+		Flags: []clidoc.Flag{
+			{Name: "user", Arg: "NAME", Default: "`stk`", Usage: "the OS user stk runs as"},
+			{Name: "agent-uid", Arg: "N", Usage: "a uid allowed to use the broker; repeatable. Default: the uid harnesses run as (the user who ran sudo)"},
+			{Name: "state-dir", Arg: "DIR", Default: "stk's own (`/var/lib/stk`)"},
+			{Name: "stk", Arg: "PATH", Default: "`stk`", Usage: "the stk binary"},
+		},
+		Auth:    "root to install (Linux with systemd). Without root nothing is installed and the command reports same-user isolation as degraded.",
+		Exit:    "0 on separate-user, or on a clearly reported same-user. 1 on an error. 2 on a bad flag or verb.",
+		Example: "sudo agentpod-node forge-api setup\nsudo agentpod-node forge-api setup --agent-uid 1001",
+	},
+	{
 		Path: "scan", Synopsis: "apn scan [--json] [--no-color]",
 		Detail:   "See [Checking for exposure](/use/scan/).",
 		Handlers: []string{"scanCmd"},
