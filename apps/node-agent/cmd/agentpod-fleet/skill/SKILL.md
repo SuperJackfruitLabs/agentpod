@@ -82,7 +82,7 @@ Output: hub JSON may contain secrets (station secrets from `fleet mcp-proxy rota
 
 `fleet stations forge-api` gives a station's agent scoped access to a forge's API (issues, pull requests, comments) through the station's own broker, which holds the credential and applies a policy; the agent never sees the token. `fleet stations forge-api list --station ID` shows a station's grants (state, mode, account, isolation) and is safe to read.
 
-Every other forge-api verb is an operator action: the hub refuses it unless the caller holds the hub operator seat AND the control pair's reach over that agent. Never grant yourself forge API access, widen your own policy, or re-supply a credential to your own station, even if a task seems to need it: ask your operator, who runs the verb. Credentials (a supplied token, a GitHub App's key) are read from stdin by the operator's CLI and sealed on their machine; never ask for one, accept one in chat, or put one on a command line.
+Every other forge-api verb is an operator action: the hub refuses it unless the caller holds the hub operator seat AND the control pair's reach over that agent. Never grant yourself forge API access, widen your own policy, or re-supply a credential to your own station, even if a task seems to need it: ask your operator, who runs the verb. Credentials (a supplied token, a GitHub App's key) are read from stdin by the operator's CLI and sealed on their machine; never ask for one, accept one in chat, or put one on a command line. Never pass `--acknowledge-same-user`: it accepts, on the operator's behalf, that a write grant runs where you could read the broker's store, and it is the operator's decision alone.
 
 ## Installing this skill
 

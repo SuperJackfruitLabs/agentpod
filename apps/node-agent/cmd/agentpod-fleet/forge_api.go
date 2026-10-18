@@ -24,10 +24,12 @@ const forgeAPIUsage = `Usage: fleet stations forge-api <verb> --station STATION_
                   [--preset read|issues|pull-requests|maintain|none]
                   [--rule 'allow: METHOD /path']… [--rules-file FILE]
                   [--mode minted|app|supplied] [--expect-login LOGIN] [--allow-graphql]
+                  [--acknowledge-same-user]
   verify          --station ID --grant GRANT_ID      re-check the credential on the node
   rotate          --station ID --grant GRANT_ID      minted: a new token, the old one revoked
   secret          --station ID --grant GRANT_ID      re-supply a credential (stdin); add --mode app for an App
   policy          --station ID --grant GRANT_ID --preset P [--rule …]… [--rules-file FILE] [--allow-graphql]
+                  [--acknowledge-same-user]
                   replaces the whole policy: omitting --allow-graphql turns GraphQL OFF
   revoke          --station ID --grant GRANT_ID
   confirm-revoked --station ID --grant GRANT_ID      supplied: you revoked it at the provider
@@ -39,7 +41,12 @@ A supplied or app credential is read from STDIN, never from a flag: a token for
 --mode supplied; for --mode app the lines app_id=…, installation_id=… and
 private_key=… (the PEM may continue over the following lines). The CLI fetches
 the station's handover key and seals the credential to it on this machine; the
-hub only ever sees the sealed envelope. A minted grant needs no credential.`
+hub only ever sees the sealed envelope. A minted grant needs no credential.
+
+A write grant (any preset except read, or an allow rule for a write method) on a
+station whose broker runs in same-user mode is refused until the operator passes
+--acknowledge-same-user: the agent could then read the broker's store. Today every
+station reports same-user. The hub records who acknowledged.`
 
 var forgeAPIPresets = map[string]bool{"read": true, "issues": true, "pull-requests": true, "maintain": true, "none": true}
 var forgeAPIProviders = map[string]bool{"forgejo": true, "github": true, "gitea": true, "bitbucket": true}
@@ -51,7 +58,7 @@ type forgeAPIFlags struct {
 	fs                                                      *flag.FlagSet
 	station, grant, provider, instance, preset, mode, login *string
 	rulesFile                                               *string
-	graphql, json                                           *bool
+	graphql, json, ackSameUser                              *bool
 	repos, rules                                            stringList
 }
 
@@ -68,6 +75,7 @@ func newForgeAPIFlags() *forgeAPIFlags {
 	f.rulesFile = fs.String("rules-file", "", "a JSON array of rules ({allow|deny, when}), added after --rule")
 	f.graphql = fs.Bool("allow-graphql", false, "let the station use the GraphQL endpoint")
 	f.json = fs.Bool("json", false, "list: print the same fields as JSON")
+	f.ackSameUser = fs.Bool("acknowledge-same-user", false, "operator only: accept a write grant while the broker runs in same-user mode")
 	fs.Var(&f.repos, "repo", "owner/name (repeatable)")
 	fs.Var(&f.rules, "rule", "'allow: METHOD /path' or 'deny: METHOD /path' (repeatable)")
 	return f
@@ -120,8 +128,11 @@ func fleetForgeAPI(args []string) {
 			refuse("forge-api policy requires --preset (it replaces the grant's preset, rules and GraphQL setting)")
 		}
 		preset, rules := policyOf(f)
-		fleetSkillJSON(http.MethodPatch, grantPath+"/policy",
-			map[string]any{"preset": preset, "rules": rules, "allowGraphql": *f.graphql})
+		body := map[string]any{"preset": preset, "rules": rules, "allowGraphql": *f.graphql}
+		if *f.ackSameUser {
+			body["acknowledgeSameUser"] = true
+		}
+		fleetSkillJSON(http.MethodPatch, grantPath+"/policy", body)
 	}
 }
 
@@ -169,6 +180,9 @@ func forgeAPIGrant(f *forgeAPIFlags, base string) {
 	}
 	if *f.login != "" {
 		body["expectedLogin"] = *f.login
+	}
+	if *f.ackSameUser {
+		body["acknowledgeSameUser"] = true
 	}
 	if *f.mode == "minted" {
 		fleetSkillJSON(http.MethodPost, base, body)

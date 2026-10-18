@@ -377,7 +377,8 @@ var reference = clidoc.Binary{
 			Path: "stations forge-api grant", Summary: "Grant a station API access to named repositories on one forge.",
 			Synopsis: "fleet stations forge-api grant --station STATION_ID --provider forgejo|github|gitea|bitbucket \\\n" +
 				"    --instance https://HOST --repo OWNER/NAME [--repo …] [--preset read|issues|pull-requests|maintain|none] \\\n" +
-				"    [--rule 'allow: METHOD /path']… [--rules-file FILE] [--mode minted|app|supplied] [--expect-login LOGIN] [--allow-graphql]",
+				"    [--rule 'allow: METHOD /path']… [--rules-file FILE] [--mode minted|app|supplied] [--expect-login LOGIN] [--allow-graphql] \\\n" +
+				"    [--acknowledge-same-user]",
 			Detail: "Refused before any request: no `--repo`, an `--instance` that is not https, an unknown provider, preset or mode, " +
 				"a malformed `--rule`, or `--mode supplied|app` without `--expect-login` (for an app, its slug). `--rule` is " +
 				"`allow: METHOD /path` or `deny: METHOD /path`; a rule with a `when` condition goes in `--rules-file`, a JSON array " +
@@ -385,7 +386,10 @@ var reference = clidoc.Binary{
 				"`app` reads `app_id=…`, `installation_id=…` and `private_key=…` lines (the PEM may continue over the following lines). " +
 				"For those the CLI fetches the station's key, seals, creates the grant, then posts the envelope; if that last step " +
 				"fails, re-send with `secret`. What the hub accepts today: Forgejo `minted` (the hub's configured forge only) and " +
-				"`supplied`; GitHub `app` and `supplied`. Gitea and Bitbucket are refused until their adapters exist.",
+				"`supplied`; GitHub `app` and `supplied`. Gitea and Bitbucket are refused until their adapters exist. " +
+				"A write grant (any preset except `read`, or an allow rule for a write method) on a station whose broker runs in " +
+				"same-user mode (today: every station) is refused (409 `same-user-acknowledgement-required`) unless the operator " +
+				"passes `--acknowledge-same-user`; the hub records who acknowledged. Agents must never pass it.",
 			Handlers: []string{"newForgeAPIFlags"},
 			Flags: []clidoc.Flag{
 				{Name: "station", Arg: "STATION_ID", Required: true},
@@ -398,6 +402,7 @@ var reference = clidoc.Binary{
 				{Name: "mode", Arg: "MODE"},
 				{Name: "expect-login", Arg: "LOGIN"},
 				{Name: "allow-graphql"},
+				{Name: "acknowledge-same-user", Usage: "operator only: accept a write grant in same-user mode"},
 			},
 			Example: "fleet stations forge-api grant --station stn_123 --provider forgejo --instance https://forge.example \\\n" +
 				"    --repo org/repo --preset issues\n" +
@@ -428,14 +433,16 @@ var reference = clidoc.Binary{
 		},
 		{
 			Path: "stations forge-api policy", Summary: "Replace a grant's preset, rules and GraphQL setting.",
-			Synopsis: "fleet stations forge-api policy --station STATION_ID --grant GRANT_ID --preset PRESET [--rule RULE]… [--rules-file FILE] [--allow-graphql]",
-			Detail:   "Replaces, not merges: rules not given are removed, and GraphQL is off unless `--allow-graphql` is given.",
+			Synopsis: "fleet stations forge-api policy --station STATION_ID --grant GRANT_ID --preset PRESET [--rule RULE]… [--rules-file FILE] [--allow-graphql] [--acknowledge-same-user]",
+			Detail: "Replaces, not merges: rules not given are removed, and GraphQL is off unless `--allow-graphql` is given. " +
+				"Moving a same-user grant to a write policy needs `--acknowledge-same-user` (operator only).",
 			Handlers: []string{"newForgeAPIFlags"},
 			Flags: []clidoc.Flag{{Name: "station", Arg: "STATION_ID", Required: true}, {Name: "grant", Arg: "GRANT_ID", Required: true, Usage: "grant ID, as `fleet stations forge-api list` shows it"},
 				{Name: "preset", Arg: "PRESET", Required: true},
 				{Name: "rule", Arg: "RULE", Repeatable: true},
 				{Name: "rules-file", Arg: "FILE"},
 				{Name: "allow-graphql"},
+				{Name: "acknowledge-same-user", Usage: "operator only: accept a write policy in same-user mode"},
 			},
 			Example: "fleet stations forge-api policy --station stn_123 --grant fag_123 --preset issues --rule 'deny: DELETE /repos/**'",
 		},

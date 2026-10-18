@@ -758,10 +758,12 @@ Usage: fleet stations forge-api <verb> --station STATION_ID [flags]
                   [--preset read|issues|pull-requests|maintain|none]
                   [--rule 'allow: METHOD /path']… [--rules-file FILE]
                   [--mode minted|app|supplied] [--expect-login LOGIN] [--allow-graphql]
+                  [--acknowledge-same-user]
   verify          --station ID --grant GRANT_ID      re-check the credential on the node
   rotate          --station ID --grant GRANT_ID      minted: a new token, the old one revoked
   secret          --station ID --grant GRANT_ID      re-supply a credential (stdin); add --mode app for an App
   policy          --station ID --grant GRANT_ID --preset P [--rule …]… [--rules-file FILE] [--allow-graphql]
+                  [--acknowledge-same-user]
                   replaces the whole policy: omitting --allow-graphql turns GraphQL OFF
   revoke          --station ID --grant GRANT_ID
   confirm-revoked --station ID --grant GRANT_ID      supplied: you revoked it at the provider
@@ -774,6 +776,11 @@ A supplied or app credential is read from STDIN, never from a flag: a token for
 private_key=… (the PEM may continue over the following lines). The CLI fetches
 the station's handover key and seals the credential to it on this machine; the
 hub only ever sees the sealed envelope. A minted grant needs no credential.
+
+A write grant (any preset except read, or an allow rule for a write method) on a
+station whose broker runs in same-user mode is refused until the operator passes
+--acknowledge-same-user: the agent could then read the broker's store. Today every
+station reports same-user. The hub records who acknowledged.
 ```
 
 **Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
@@ -812,10 +819,11 @@ Grant a station API access to named repositories on one forge.
 ```text
 fleet stations forge-api grant --station STATION_ID --provider forgejo|github|gitea|bitbucket \
     --instance https://HOST --repo OWNER/NAME [--repo …] [--preset read|issues|pull-requests|maintain|none] \
-    [--rule 'allow: METHOD /path']… [--rules-file FILE] [--mode minted|app|supplied] [--expect-login LOGIN] [--allow-graphql]
+    [--rule 'allow: METHOD /path']… [--rules-file FILE] [--mode minted|app|supplied] [--expect-login LOGIN] [--allow-graphql] \
+    [--acknowledge-same-user]
 ```
 
-Refused before any request: no `--repo`, an `--instance` that is not https, an unknown provider, preset or mode, a malformed `--rule`, or `--mode supplied|app` without `--expect-login` (for an app, its slug). `--rule` is `allow: METHOD /path` or `deny: METHOD /path`; a rule with a `when` condition goes in `--rules-file`, a JSON array of `{allow|deny, when}` objects. `minted` (the default) sends one request. `supplied` reads one token from stdin; `app` reads `app_id=…`, `installation_id=…` and `private_key=…` lines (the PEM may continue over the following lines). For those the CLI fetches the station's key, seals, creates the grant, then posts the envelope; if that last step fails, re-send with `secret`. What the hub accepts today: Forgejo `minted` (the hub's configured forge only) and `supplied`; GitHub `app` and `supplied`. Gitea and Bitbucket are refused until their adapters exist.
+Refused before any request: no `--repo`, an `--instance` that is not https, an unknown provider, preset or mode, a malformed `--rule`, or `--mode supplied|app` without `--expect-login` (for an app, its slug). `--rule` is `allow: METHOD /path` or `deny: METHOD /path`; a rule with a `when` condition goes in `--rules-file`, a JSON array of `{allow|deny, when}` objects. `minted` (the default) sends one request. `supplied` reads one token from stdin; `app` reads `app_id=…`, `installation_id=…` and `private_key=…` lines (the PEM may continue over the following lines). For those the CLI fetches the station's key, seals, creates the grant, then posts the envelope; if that last step fails, re-send with `secret`. What the hub accepts today: Forgejo `minted` (the hub's configured forge only) and `supplied`; GitHub `app` and `supplied`. Gitea and Bitbucket are refused until their adapters exist. A write grant (any preset except `read`, or an allow rule for a write method) on a station whose broker runs in same-user mode (today: every station) is refused (409 `same-user-acknowledgement-required`) unless the operator passes `--acknowledge-same-user`; the hub records who acknowledged. Agents must never pass it.
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
@@ -829,6 +837,7 @@ Refused before any request: no `--repo`, an `--instance` that is not https, an u
 | `--mode MODE` | string | `minted` | Minted, app or supplied. |
 | `--expect-login LOGIN` | string | — | The account the credential must belong to (app: the App's slug). |
 | `--allow-graphql` | bool | `false` | Let the station use the GraphQL endpoint. |
+| `--acknowledge-same-user` | bool | `false` | Operator only: accept a write grant in same-user mode. |
 
 **Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
 
@@ -904,10 +913,10 @@ pbpaste | fleet stations forge-api secret --station stn_123 --grant fag_123
 Replace a grant's preset, rules and GraphQL setting.
 
 ```text
-fleet stations forge-api policy --station STATION_ID --grant GRANT_ID --preset PRESET [--rule RULE]… [--rules-file FILE] [--allow-graphql]
+fleet stations forge-api policy --station STATION_ID --grant GRANT_ID --preset PRESET [--rule RULE]… [--rules-file FILE] [--allow-graphql] [--acknowledge-same-user]
 ```
 
-Replaces, not merges: rules not given are removed, and GraphQL is off unless `--allow-graphql` is given.
+Replaces, not merges: rules not given are removed, and GraphQL is off unless `--allow-graphql` is given. Moving a same-user grant to a write policy needs `--acknowledge-same-user` (operator only).
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
@@ -917,6 +926,7 @@ Replaces, not merges: rules not given are removed, and GraphQL is off unless `--
 | `--rule RULE` | string | — | 'allow: METHOD /path' or 'deny: METHOD /path' (repeatable). |
 | `--rules-file FILE` | string | — | A JSON array of rules ({allow\|deny, when}), added after `--rule`. |
 | `--allow-graphql` | bool | `false` | Let the station use the GraphQL endpoint. |
+| `--acknowledge-same-user` | bool | `false` | Operator only: accept a write policy in same-user mode. |
 
 **Needs:** A person's token: `$AGENTPOD_TOKEN`, or the credential `fleet login` stored. The hub refuses an agent's token on these routes, and answers only about what the signed-in person owns.
 

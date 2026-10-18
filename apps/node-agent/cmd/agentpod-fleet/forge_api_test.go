@@ -234,7 +234,7 @@ func TestForgeAPIHasNoSecretFlag(t *testing.T) {
 	var names []string
 	f.fs.VisitAll(func(fl *flag.Flag) { names = append(names, fl.Name) })
 	sort.Strings(names)
-	want := []string{"allow-graphql", "expect-login", "grant", "instance", "json", "mode", "preset", "provider", "repo", "rule", "rules-file", "station"}
+	want := []string{"acknowledge-same-user", "allow-graphql", "expect-login", "grant", "instance", "json", "mode", "preset", "provider", "repo", "rule", "rules-file", "station"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("flags = %v, want %v", names, want)
 	}
@@ -523,5 +523,48 @@ func TestForgeSealedMaxMatchesTheContract(t *testing.T) {
 	}
 	if want := string(m[1]); want != strconv.Itoa(forgeSealedMax) {
 		t.Fatalf("forgeSealedMax = %d, contract FORGE_API_SEALED_MAX = %s", forgeSealedMax, want)
+	}
+}
+
+// --acknowledge-same-user reaches the grant and policy bodies as acknowledgeSameUser: true, and is
+// absent (not false-by-default noise the hub would also accept) when not given.
+func TestForgeAPIAcknowledgeSameUserReachesTheBody(t *testing.T) {
+	bin := build(t)
+	for _, tc := range []struct {
+		name string
+		args []string
+		path string
+	}{
+		{"grant", []string{"stations", "forge-api", "grant", "--station", "stn_1", "--provider", "forgejo", "--instance", "https://forge.example",
+			"--repo", "o/r", "--preset", "issues", "--acknowledge-same-user"}, "/api/stations/stn_1/forge-api"},
+		{"policy", []string{"stations", "forge-api", "policy", "--station", "stn_1", "--grant", "fag_1", "--preset", "issues",
+			"--acknowledge-same-user"}, "/api/stations/stn_1/forge-api/fag_1/policy"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, srv := newForgeHub(t)
+			out, code := runStdin(t, bin, srv.URL, "", tc.args...)
+			if code != 0 {
+				t.Fatalf("exit %d: %s", code, out)
+			}
+			var with map[string]any
+			for _, c := range h.calls {
+				if c.Path == tc.path {
+					_ = json.Unmarshal([]byte(c.Body), &with)
+				}
+			}
+			if with["acknowledgeSameUser"] != true {
+				t.Fatalf("body %v lacks acknowledgeSameUser: true", with)
+			}
+			h2, srv2 := newForgeHub(t)
+			args := tc.args[:len(tc.args)-1]
+			if _, code := runStdin(t, bin, srv2.URL, "", args...); code != 0 {
+				t.Fatal("without the flag the call failed")
+			}
+			for _, c := range h2.calls {
+				if c.Path == tc.path && strings.Contains(c.Body, "acknowledgeSameUser") {
+					t.Fatalf("acknowledgeSameUser sent without the flag: %s", c.Body)
+				}
+			}
+		})
 	}
 }
