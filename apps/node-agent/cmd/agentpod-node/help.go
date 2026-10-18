@@ -194,13 +194,19 @@ var commands = []struct {
 	{
 		name: "forge-api", group: "Node",
 		oneline: "Set up stk as this station's forge credential broker (setup)",
-		detail: "apn forge-api setup [--user stk] [--agent-uid N]... [--state-dir DIR] [--stk PATH]\n\n" +
+		detail: "apn forge-api setup [--user stk] [--agent-uid N]... [--state-dir DIR] [--stk PATH]\n" +
+			"apn forge-api setup --station ID [--agent-uid N]...\n\n" +
 			"Installs stk as its own OS user so the agent can use forge credentials\n" +
 			"without being able to read them. Run it once with sudo; it is safe to\n" +
 			"repeat (an existing separate-user install is left alone).\n\n" +
 			"--agent-uid defaults to the uid the node starts harnesses as (the user\n" +
 			"who ran sudo). Without root, nothing is installed: the command reports\n" +
 			"same-user isolation, marked DEGRADED, and says how to fix it.\n\n" +
+			"--station ID creates that station's own stk instance (its own OS user,\n" +
+			"state, policy file, proxy port and systemd unit, derived from the id)\n" +
+			"ahead of time. The node does the same on its own at a station's first\n" +
+			"grant when it runs as root, so this is only for preparing a station\n" +
+			"or for a node that does not run as root.\n\n" +
 			"Exit 0 on separate-user or on a clearly reported same-user; 1 on errors.",
 	},
 	{

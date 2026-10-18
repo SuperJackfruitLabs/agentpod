@@ -256,13 +256,14 @@ var apnRef = []clidoc.Command{
 	},
 	{Path: "detect", Synopsis: "apn detect", Auth: apnNeedsNothing, Example: "apn detect | jq '.[].key'"},
 	{
-		Path: "forge-api", Synopsis: "apn forge-api setup [--user NAME] [--agent-uid N]... [--state-dir DIR] [--stk PATH]",
+		Path: "forge-api", Synopsis: "apn forge-api setup [--user NAME] [--agent-uid N]... [--state-dir DIR] [--stk PATH]\napn forge-api setup --station ID [--agent-uid N]...",
 		Handlers: []string{"forgeAPICmdWith"},
 		Flags: []clidoc.Flag{
 			{Name: "user", Arg: "NAME", Default: "`stk`", Usage: "the OS user stk runs as"},
 			{Name: "agent-uid", Arg: "N", Usage: "a uid allowed to use the broker; repeatable. Default: the uid harnesses run as (the user who ran sudo)"},
 			{Name: "state-dir", Arg: "DIR", Default: "stk's own (`/var/lib/stk`)"},
 			{Name: "stk", Arg: "PATH", Default: "`stk`", Usage: "the stk binary"},
+			{Name: "station", Arg: "ID", Usage: "create this station's own stk instance now, as the node would at its first grant: own OS user, state, policy file, proxy port and systemd unit, all derived from the id. Cannot be combined with `--user`, `--state-dir` or `--stk`"},
 		},
 		Auth:    "root to install (Linux with systemd). Without root nothing is installed and the command reports same-user isolation as degraded.",
 		Exit:    "0 on separate-user, or on a clearly reported same-user. 1 on an error. 2 on a bad flag or verb.",
@@ -371,7 +372,9 @@ func apnReference() clidoc.Binary {
 			{Name: "AGENTPOD_TOKEN", Meaning: "`apn acp`: a person's access token. Prefer it to `--token`, which lands in shell history."},
 			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Meaning: "`apn run`: the OTLP/HTTP collector to export traces to; unset exports nothing. Normally written to `otel.env` by `apn telemetry enable`."},
 			{Name: "OTEL_SDK_DISABLED", Meaning: "`apn run`: `true` turns export off even with an endpoint set."},
-			{Name: "STK_CONFIG", Meaning: "`apn run`: the stk policy file the forge API verbs edit. Default `/etc/stk/supertoolkit.yaml`, where `stk install` puts it."},
+			{Name: "AGENTPOD_STK_SHARED_POLICY", Meaning: "`apn run`, `apn forge-api setup --station`: the shared base policy, an stk policy file of services every station needs, copied into each station's own stk policy. Default `/etc/agentpod/stk-shared.yaml`; an absent file means none. Overrides `forgeApi.sharedPolicy` in the node config."},
+			{Name: "AGENTPOD_STK_PORTS", Meaning: "`apn run`, `apn forge-api setup --station`: the proxy port range for the per-station stk instances, as `MIN-MAX`. Default `8900-8999`. Overrides `forgeApi.proxyPortMin` and `proxyPortMax` in the node config."},
+			{Name: "AGENTPOD_STK_REGISTRY", Meaning: "`apn run`, `apn forge-api setup --station`: the node-owned file (mode 0600) that remembers which stk instance and port belong to which station. Default `/var/lib/agentpod/forge-api/stk-instances.json`."},
 		},
 		Auth: "Commands that talk to the hub use **this machine's** credential, stored by `apn enroll` " +
 			"in the node config (`~/.config/agentpod-node/config.json` on Linux, " +

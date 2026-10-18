@@ -17,7 +17,6 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetreport"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/mcpproxy"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
@@ -28,9 +27,6 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/turnerror"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
 )
-
-// ensureStk is set by runCmd; see newStationEnsurer.
-var ensureStk func(context.Context) (forgeapi.SetupResult, error)
 
 func runCmd() {
 	cfg, err := config.Load(config.DefaultPath())
@@ -255,14 +251,16 @@ func runCmd() {
 	// git.identity.ensure: the public half of a station's push key, generated on first ask, and
 	// the author its commits are by.
 	h = gateway.NewGitIdentityHandler(h, gitIdentityRoot)
-	// forge.api: the lazy "make sure stk is installed" seam. The deliver handler (wired in a later
-	// change) calls ensureStk on every delivery; concurrent first deliveries share one setup and
-	// nothing runs stk until the first call. The capability is advertised only while the probe
-	// below says stk is usable; the verbs are registered regardless and answer an error ack naming
-	// the reason when it is not.
-	ensurer := newStationEnsurer()
-	ensureStk = ensurer.Ensure
-	h = gateway.NewForgeAPIHandler(h, newForgeAPIService(ensurer.Ensure))
+	// forge.api: one stk instance per station, created lazily at the first deliver or status for
+	// a station and routed by the frame's stationId. The capability is advertised only while the
+	// probe below says stk is usable; the verbs are registered regardless and answer an error
+	// naming the reason when it is not.
+	instances, err := newStationInstances(cfg, os.Getenv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "forge.api:", err)
+		os.Exit(1)
+	}
+	h = gateway.NewForgeAPIHandler(h, instances)
 	// "forge.api" is a STATION capability (the hub gates on what detect reports per station, and
 	// drops unknown node-level ones from hello), so it rides on DetectAll. The probe runs in
 	// Extras.Prepare on every (re)connect; detect only reads its last answer.

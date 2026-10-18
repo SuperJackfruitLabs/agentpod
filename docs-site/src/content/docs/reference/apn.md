@@ -61,7 +61,9 @@ Each command's text below is what `apn help <command>` prints, from the same tab
 | `$AGENTPOD_TOKEN` | `apn acp`: a person's access token. Prefer it to `--token`, which lands in shell history. |
 | `$OTEL_EXPORTER_OTLP_ENDPOINT` | `apn run`: the OTLP/HTTP collector to export traces to; unset exports nothing. Normally written to `otel.env` by `apn telemetry enable`. |
 | `$OTEL_SDK_DISABLED` | `apn run`: `true` turns export off even with an endpoint set. |
-| `$STK_CONFIG` | `apn run`: the stk policy file the forge API verbs edit. Default `/etc/stk/supertoolkit.yaml`, where `stk install` puts it. |
+| `$AGENTPOD_STK_SHARED_POLICY` | `apn run`, `apn forge-api setup --station`: the shared base policy, an stk policy file of services every station needs, copied into each station's own stk policy. Default `/etc/agentpod/stk-shared.yaml`; an absent file means none. Overrides `forgeApi.sharedPolicy` in the node config. |
+| `$AGENTPOD_STK_PORTS` | `apn run`, `apn forge-api setup --station`: the proxy port range for the per-station stk instances, as `MIN-MAX`. Default `8900-8999`. Overrides `forgeApi.proxyPortMin` and `proxyPortMax` in the node config. |
+| `$AGENTPOD_STK_REGISTRY` | `apn run`, `apn forge-api setup --station`: the node-owned file (mode 0600) that remembers which stk instance and port belong to which station. Default `/var/lib/agentpod/forge-api/stk-instances.json`. |
 
 ## Exit status
 
@@ -1042,6 +1044,7 @@ Set up stk as this station's forge credential broker (setup).
 
 ```text
 apn forge-api setup [--user NAME] [--agent-uid N]... [--state-dir DIR] [--stk PATH]
+apn forge-api setup --station ID [--agent-uid N]...
 ```
 
 | Flag | Type | Default | Meaning |
@@ -1050,11 +1053,13 @@ apn forge-api setup [--user NAME] [--agent-uid N]... [--state-dir DIR] [--stk PA
 | `--agent-uid N` | string | — | A uid allowed to use the broker; repeatable. Default: the uid harnesses run as (the user who ran sudo). |
 | `--state-dir DIR` | string | stk's own (`/var/lib/stk`) | Stk state directory (default: stk's own). |
 | `--stk PATH` | string | `stk` | The stk binary. |
+| `--station ID` | string | — | Create this station's own stk instance now, as the node would at its first grant: own OS user, state, policy file, proxy port and systemd unit, all derived from the id. Cannot be combined with `--user`, `--state-dir` or `--stk`. |
 
 `apn help forge-api` prints:
 
 ```text
 apn forge-api setup [--user stk] [--agent-uid N]... [--state-dir DIR] [--stk PATH]
+apn forge-api setup --station ID [--agent-uid N]...
 
 Installs stk as its own OS user so the agent can use forge credentials
 without being able to read them. Run it once with sudo; it is safe to
@@ -1063,6 +1068,12 @@ repeat (an existing separate-user install is left alone).
 --agent-uid defaults to the uid the node starts harnesses as (the user
 who ran sudo). Without root, nothing is installed: the command reports
 same-user isolation, marked DEGRADED, and says how to fix it.
+
+--station ID creates that station's own stk instance (its own OS user,
+state, policy file, proxy port and systemd unit, derived from the id)
+ahead of time. The node does the same on its own at a station's first
+grant when it runs as root, so this is only for preparing a station
+or for a node that does not run as root.
 
 Exit 0 on separate-user or on a clearly reported same-user; 1 on errors.
 ```

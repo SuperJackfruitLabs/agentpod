@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
@@ -102,5 +103,95 @@ func TestAgentUIDRejectsOutOfRange(t *testing.T) {
 	var u uidList
 	if err := u.Set("4294967295"); err != nil || u[0] != 4294967295 {
 		t.Fatalf("max uid: %v %v", err, u)
+	}
+}
+
+// ---- one stk instance per station ----
+
+func testInstance() forgeapi.Instance {
+	return forgeapi.Instance{Station: "stn_1", Name: "stk-stn-1-abcdef", Port: 8900,
+		StateDir: "/var/lib/stk-stn-1-abcdef", RuntimeDir: "/run/stk-stn-1-abcdef", ConfigPath: "/etc/stk-stn-1-abcdef/supertoolkit.yaml"}
+}
+
+func TestInstanceClientRunsAsTheInstanceUserWithItsOwnStore(t *testing.T) {
+	inst := testInstance()
+	o := instanceClientOptions(0, func(string) bool { return true }, inst)
+	if o.RunAs != inst.Name || o.Env["STK_HOME"] != inst.StateDir || o.Env["STK_CONFIG"] != inst.ConfigPath || o.Env["STK_SOCKET"] != "/run/stk-stn-1-abcdef/stk.sock" {
+		t.Fatalf("options = %+v", o)
+	}
+	// before the user exists, and without root, nothing is bound to the instance
+	if o := instanceClientOptions(0, func(string) bool { return false }, inst); o.RunAs != "" || len(o.Env) != 0 {
+		t.Fatalf("before install: %+v", o)
+	}
+	if o := instanceClientOptions(1000, func(string) bool { return true }, inst); o.RunAs != "" || len(o.Env) != 0 {
+		t.Fatalf("non-root: %+v", o)
+	}
+}
+
+func TestForgeAPIInstancesConfigPrefersEnvironmentOverConfig(t *testing.T) {
+	c := config.ForgeAPI{SharedPolicy: "/etc/a.yaml", ProxyPortMin: 9000, ProxyPortMax: 9010, Registry: "/var/r.json"}
+	cfg, err := forgeAPIInstancesConfig(c, func(string) string { return "" })
+	if err != nil || cfg.SharedPolicyPath != "/etc/a.yaml" || cfg.PortMin != 9000 || cfg.PortMax != 9010 || cfg.RegistryPath != "/var/r.json" {
+		t.Fatalf("config only: %+v %v", cfg, err)
+	}
+	env := map[string]string{"AGENTPOD_STK_SHARED_POLICY": "/etc/b.yaml", "AGENTPOD_STK_PORTS": "9100-9199", "AGENTPOD_STK_REGISTRY": "/var/x.json"}
+	cfg, err = forgeAPIInstancesConfig(c, func(k string) string { return env[k] })
+	if err != nil || cfg.SharedPolicyPath != "/etc/b.yaml" || cfg.PortMin != 9100 || cfg.PortMax != 9199 || cfg.RegistryPath != "/var/x.json" {
+		t.Fatalf("env: %+v %v", cfg, err)
+	}
+	// defaults stay empty here: the manager fills them
+	cfg, err = forgeAPIInstancesConfig(config.ForgeAPI{}, func(string) string { return "" })
+	if err != nil || cfg.PortMin != 0 || cfg.SharedPolicyPath != "" {
+		t.Fatalf("defaults: %+v %v", cfg, err)
+	}
+	for _, bad := range []string{"8900", "a-b", "9000-8900x", "-5"} {
+		if _, err := forgeAPIInstancesConfig(c, func(k string) string {
+			if k == "AGENTPOD_STK_PORTS" {
+				return bad
+			}
+			return ""
+		}); err == nil {
+			t.Errorf("AGENTPOD_STK_PORTS=%q accepted", bad)
+		}
+	}
+	// the range itself is validated when the manager is made
+	if _, err := newStationInstances(config.Config{ForgeAPI: &config.ForgeAPI{ProxyPortMin: 9000, ProxyPortMax: 8000}}, func(string) string { return "" }); err == nil {
+		t.Error("an inverted range was accepted")
+	}
+}
+
+func TestForgeAPISetupStationDerivesEverythingAndReportsTheInstance(t *testing.T) {
+	var gotID string
+	var gotUIDs []int
+	var o, e bytes.Buffer
+	d := forgeAPIDeps{station: func(_ context.Context, id string, uids []int) (forgeapi.SetupResult, forgeapi.Instance, error) {
+		gotID, gotUIDs = id, uids
+		return forgeapi.SetupResult{Report: sepReport(), Installed: true}, testInstance(), nil
+	}}
+	if code := forgeAPICmdWith([]string{"setup", "--station", "stn_1", "--agent-uid", "1001"}, &o, &e, d); code != 0 {
+		t.Fatalf("code %d: %s", code, e.String())
+	}
+	if gotID != "stn_1" || len(gotUIDs) != 1 || gotUIDs[0] != 1001 {
+		t.Fatalf("station %q uids %v", gotID, gotUIDs)
+	}
+	for _, want := range []string{"isolation: separate-user", "instance:  stk-stn-1-abcdef (unit stk-stn-1-abcdef, proxy port 8900)"} {
+		if !strings.Contains(o.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, o.String())
+		}
+	}
+	// --station owns the user and state dir
+	for _, bad := range [][]string{{"--user", "x"}, {"--state-dir", "/x"}, {"--stk", "/bin/stk"}} {
+		var o2, e2 bytes.Buffer
+		if code := forgeAPICmdWith(append([]string{"setup", "--station", "stn_1"}, bad...), &o2, &e2, d); code != 2 {
+			t.Errorf("%v: code %d", bad, code)
+		}
+	}
+	// an error exits 1 and still names the instance
+	d.station = func(context.Context, string, []int) (forgeapi.SetupResult, forgeapi.Instance, error) {
+		return forgeapi.SetupResult{}, testInstance(), errors.New("boom")
+	}
+	var o3, e3 bytes.Buffer
+	if code := forgeAPICmdWith([]string{"setup", "--station", "stn_1"}, &o3, &e3, d); code != 1 || !strings.Contains(e3.String(), "boom") {
+		t.Fatalf("code %d: %s", code, e3.String())
 	}
 }

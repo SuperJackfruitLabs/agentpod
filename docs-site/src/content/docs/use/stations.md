@@ -193,6 +193,15 @@ new occupant starts with nothing.
 **Needs a node that supports it.** A station's node must advertise the `forge.api` capability;
 an older node answers `capability-missing` rather than doing nothing.
 
+**One broker per station.** Each station gets its own broker on the node, with its own OS user,
+store, policy and proxy key, so one station's agent cannot use another station's credential, and
+two stations can hold grants for the same forge host. The node creates it the first time it is
+needed and needs to run as root on Linux with systemd to do so; otherwise grants fail with
+`station-instance-unavailable`. An operator can also list services every station needs in a
+*shared base policy* file, which the node copies into each station's own policy
+(`/etc/agentpod/stk-shared.yaml` by default; its credentials are not delivered for you).
+The proxy port range and the file locations are settings in the node config; the operating guide lists them.
+
 ### Limits
 
 - **No protection against root.** An agent or user with root on the station can read the broker's

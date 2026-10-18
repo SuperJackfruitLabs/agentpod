@@ -240,8 +240,28 @@ returned, sealed within the same call.* Docs and schema comments must say so.
 
 ## Station topology and isolation
 
-- **One stk instance per station**, with its own store, policy and audit log.
-  Grants are per station and provider.
+- **One stk instance per station** (decided 2026-10-18; a node that hosts several
+  stations runs several stk instances). Each has its own OS user
+  (`stk-<station slug>-<hash>`), state directory, runtime directory, policy file,
+  proxy port, proxy key, audit log and systemd unit (`stk install --unit-name`).
+  A station's harness is given only its own instance's proxy URL and key, so one
+  station's agent cannot use another station's brokered credential, and two
+  stations may hold grants for the same forge host. Grants are per station and
+  provider. The node creates an instance at its first deliver or status for a
+  station and removes it (unit, state, user) when the station is no longer
+  hosted; it records name and proxy port in a node-owned registry so a restart
+  finds the same instance. Proxy ports come from a configurable range (default
+  8900-8999); an exhausted range is a refusal, not a reuse.
+- **Two policy layers per station.** (a) A *shared base policy*: an
+  operator-authored node-level file (default `/etc/agentpod/stk-shared.yaml`)
+  of services every station needs. The node copies its entries into each
+  station's policy when the instance is created and on every policy write, marks
+  the copies (label `grant: shared:<service>`) so it can refresh or remove them,
+  and never lets them replace or remove a station's own entries; the hub never
+  edits them. The node delivers no credentials for shared services (the hub does
+  not send them and the node invents no path); loading them is the operator's,
+  per instance. (b) The *station layer*: the hub's forge grants, only in that
+  station's instance.
 - **Separate-user mode (supported).** Node setup creates a dedicated `stk` OS
   user, a socket reachable only by that user and the agent's user, and a service
   unit. The sealed-store passphrase comes from the service manager's credential
@@ -371,7 +391,13 @@ since `acp_events` stores original text.
   usable. Frames carry ids, mode, repositories and sealed blobs, never plaintext.
 - A handler beside `NewGitIdentityHandler` in `run.go` that drives the local
   stk through its CLI or socket and reports structured results.
-- Node setup provisions the `stk` user, socket and unit (separate-user mode).
+- Node setup provisions, per station, the `stk-<station>` user, state, socket
+  and unit (separate-user mode), lazily at the first deliver or status for the
+  station. Creating an instance needs a Linux node running as root with systemd;
+  otherwise deliver and status answer `station-instance-unavailable` and the node
+  never falls back to one shared broker. Every verb is routed by the frame's
+  `stationId`; `status` returns the public key of that station's own stk, which
+  the hub seals to.
 - Harness wiring: harnesses are started with the broker's proxy and CA
   environment, or given the broker's MCP server, so CLI, MCP and `curl` all
   traverse stk. Harnesses that systemd starts do not inherit

@@ -2120,6 +2120,41 @@ to), `apps/hub/src/services/station-forge-api.ts` (lifecycle), and
 **Needs a node that supports it.** A station's node must advertise the `forge.api` capability;
 an older node answers `capability-missing` rather than doing nothing.
 
+**One broker per station.** A node that hosts several stations runs several `stk` instances, one
+per station, so one station's agent cannot use another station's brokered credential and two
+stations can hold grants for the same forge host. Each instance has its own OS user
+(`stk-<station>-<hash>`, derived from the station id), state directory (`/var/lib/<name>`), policy
+file (`/etc/<name>/supertoolkit.yaml`), runtime directory (`/run/<name>`), proxy port, proxy key
+and systemd unit. The node creates the instance itself, the first time the hub asks for the
+station's key (`status`) or delivers a grant, and only when it runs as root on Linux with
+systemd; on a node that cannot, deliver and status fail with `station-instance-unavailable` (run
+`sudo agentpod-node forge-api setup --station <stationId>` instead, or run the node as root). The
+node never falls back to a shared broker. When a station is no longer hosted its whole instance
+(unit, state, user) is removed, and only instances in the node's registry are ever touched.
+
+| Setting | Node config (`forgeApi`) | Environment | Default |
+|---|---|---|---|
+| Proxy port range | `proxyPortMin`, `proxyPortMax` | `AGENTPOD_STK_PORTS=MIN-MAX` | `8900-8999` |
+| Shared base policy | `sharedPolicy` | `AGENTPOD_STK_SHARED_POLICY` | `/etc/agentpod/stk-shared.yaml` |
+| Instance registry (0600) | `registry` | `AGENTPOD_STK_REGISTRY` | `/var/lib/agentpod/forge-api/stk-instances.json` |
+
+The registry remembers which name and port belong to which station, so a restart reuses them. When
+the port range is used up the next station is refused with `port-range-exhausted` (widen the range
+or remove stations that are gone). Do not edit the registry by hand; if the node reports
+`registry-invalid` it has stopped touching instances until the file is fixed or removed.
+
+**Shared base policy.** An optional stk policy file (same format as `supertoolkit.yaml`, only its
+`services:` are read) listing services every station needs. The node copies each entry into every
+station's own policy when the instance is created and on every policy write, and marks the copies
+(label `grant: shared:<service>`); edit the shared file and the next write for a station refreshes
+its copy, delete an entry and the copy goes. A shared entry never replaces or removes a station's
+own entry: if its service name, host or environment variable is already taken in a station's policy
+it is skipped for that station (the node logs it). A grant for a host a shared entry already brokers
+is refused with `policy-conflict`. A shared file that cannot be read stops grants and policy
+changes with `shared-policy-invalid`, but never a revoke. **Credentials for shared services are not
+delivered by the hub or the node**: the node copies the entries only, and loading a shared service's
+credential into each instance is yours to do.
+
 ### 12a. Limits
 
 - **No protection against root.** An agent or user with root on the station can read the broker's
