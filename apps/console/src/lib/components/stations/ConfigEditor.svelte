@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { beforeNavigate } from "$app/navigation";
   import { readFile, writeFile } from "$lib/api/client";
-  import { diffLines } from "diff";
+  import { DiffLines } from "$lib/components/ui/diff-lines";
   import { MonacoEditor } from "$lib/components/ui/monaco-editor";
   import { Button } from "$lib/components/ui/button";
   import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";
@@ -31,10 +31,6 @@
 
   // ── Derived ──────────────────────────────────────────────────────────────────
   const hasChanges = $derived(buffer !== original);
-
-  const diff = $derived(
-    hasChanges ? diffLines(original, buffer) : []
-  );
 
   // ── Language detection ───────────────────────────────────────────────────────
   function getLanguage(filePath: string): string {
@@ -164,21 +160,7 @@
             data-testid="diff-view"
             class="flex-1 overflow-auto p-2 font-mono text-xs leading-relaxed"
           >
-            {#each diff as part, i (i)}
-              {#if part.added}
-                <pre
-                  class="m-0 whitespace-pre-wrap break-all rounded px-1 bg-green-500/15 text-green-700 dark:text-green-400"
-                >{part.value}</pre>
-              {:else if part.removed}
-                <pre
-                  class="m-0 whitespace-pre-wrap break-all rounded px-1 bg-red-500/15 text-red-700 dark:text-red-400 line-through"
-                >{part.value}</pre>
-              {:else}
-                <pre
-                  class="m-0 whitespace-pre-wrap break-all px-1 text-muted-foreground"
-                >{part.value}</pre>
-              {/if}
-            {/each}
+            <DiffLines oldText={original} newText={buffer} />
           </div>
         </div>
       {/if}

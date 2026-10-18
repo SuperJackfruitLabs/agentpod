@@ -22,6 +22,7 @@
    * language. That derivation, and the two extra round-trips it needed, are
    * gone now that the server carries the answer on the observation itself.
    */
+  import { WarnBox } from "$lib/components/ui/warn-box";
   import type { ConfigLevel, ConfigObservation, ConfigPlan, ConfigPolicy, ConfigReceipt, ConfigScope } from "@agentpod/contract";
   import * as api from "$lib/api/harness-config";
   import { ApiError } from "$lib/api/http-error";
@@ -362,7 +363,7 @@
     <p class="text-sm text-muted-foreground">No settings declared for this station.</p>
   {:else}
     {#if restartNeeded}
-      <div class="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-sm">
+      <WarnBox>
         <p>
           One or more settings below are written but not yet in effect. <strong
             >agentpod will not restart the harness</strong
@@ -373,7 +374,7 @@
         {:else}
           <p class="text-muted-foreground">Use this station's own restart control to apply them.</p>
         {/if}
-      </div>
+      </WarnBox>
     {/if}
     <div class="overflow-x-auto">
       <table class="w-full text-left text-sm">
@@ -467,9 +468,9 @@
     {#if plan}
       <div class="space-y-2">
         {#if plan.refused && plan.refused.length > 0}
-          <div
+          <WarnBox
             aria-label="Settings excluded from this plan"
-            class="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs"
+            class="text-xs"
           >
             <p class="font-medium">
               {plan.refused.length}
@@ -481,13 +482,13 @@
                 <li><span class="font-mono">{r.settingId}</span> — {r.code}: {r.message}</li>
               {/each}
             </ul>
-          </div>
+          </WarnBox>
         {/if}
         {#if plan.noOp}
           <p>Nothing to change: every planned setting already matches what is declared.</p>
         {:else}
           {#if plan.restartRequired && receipt?.phase !== "applied"}
-            <p class="text-amber-700">
+            <p class="text-warn-text">
               Applying this plan will need a restart to take effect. <strong
                 >agentpod will not restart the harness.</strong
               >

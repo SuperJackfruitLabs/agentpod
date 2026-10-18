@@ -180,6 +180,11 @@
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-brand-text: var(--brand-text);
+  /* vibekit's own tones, for the text and wash a status colour cannot carry (diffs, results). */
+  --color-success: var(--vk-color-success);
+  --color-success-text: var(--vk-color-success-text);
+  --color-success-wash: var(--vk-color-success-wash);
+  --color-danger-wash: var(--vk-color-danger-wash);
   --color-warn: var(--ap-warn);
   --color-warn-text: var(--ap-warn-text);
   --color-warn-wash: var(--ap-warn-wash);

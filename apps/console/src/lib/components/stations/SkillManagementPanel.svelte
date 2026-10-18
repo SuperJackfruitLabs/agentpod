@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { WarnBox } from "$lib/components/ui/warn-box";
   import { TrustedSkillReleaseRecord, type SkillArtifactMetadata, type SkillHubOperation, type SkillHubOperationSummary, type TrustedSkillReleaseMetadata, type SkillReleaseCohortMetadata } from "@agentpod/contract";
   import * as api from "$lib/api/skills";
   import { Button } from "$lib/components/ui/button";
@@ -174,7 +175,7 @@
     <Button variant="outline" size="sm" disabled={busy !== null} onclick={refresh}>Refresh history</Button>
   </div>
   {#if canNative}
-    <div class="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+    <WarnBox class="space-y-2">
       <h3 class="font-medium">Native placement</h3>
       <p class="text-muted-foreground">Places the selected managed profile in this harness’s native skill directory. It requires a quiescent project, never restarts the agent, and can remain loading-unknown after publication.</p>
       <div class="flex flex-wrap gap-2">
@@ -183,13 +184,13 @@
         <Button size="sm" variant="outline" disabled={nativeLocked || !validProfile || nativePending !== null} onclick={() => planNative("deactivate")}>Review native removal</Button>
       </div>
       {#if nativePending}<p>Planning has not returned a confirmed result. <button class="underline" disabled={nativeLocked} onclick={retryNativePlanning}>Retry native planning</button></p>{/if}
-    </div>
+    </WarnBox>
   {/if}
   {#if needsNativeActivation}
-    <div class="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+    <WarnBox>
       <h3 class="font-medium">Native placement is off on this node</h3>
       <p class="mt-1 text-muted-foreground">A node operator must run <code>apn native-skills enable</code> and restart the node service. AgentPod will then re-detect the station and expose native placement only when its Codex runtime is ready and the workspace is quiet.</p>
-    </div>
+    </WarnBox>
   {/if}
   {#if !canManage}<p class="text-sm text-muted-foreground">Permission to change this station is required to install or roll back skills.</p>{/if}
   {#if busy}<p role="status" class="text-sm">{busy}…</p>{/if}

@@ -148,8 +148,8 @@ test("diff content renders added and removed lines", () => {
   expect(block).not.toBeNull();
   expect(block!.textContent).toContain("src/app.ts");
 
-  const added = block!.querySelector(".bg-green-500\\/15");
-  const removed = block!.querySelector(".bg-red-500\\/15");
+  const added = block!.querySelector("[data-diff='added']");
+  const removed = block!.querySelector("[data-diff='removed']");
   expect(added?.textContent).toContain("const a = 2;");
   expect(removed?.textContent).toContain("const a = 1;");
 });
@@ -163,9 +163,9 @@ test("diff with null oldText renders the whole newText as added", () => {
       }),
     },
   });
-  const added = container.querySelector(".bg-green-500\\/15");
+  const added = container.querySelector("[data-diff='added']");
   expect(added?.textContent).toContain("brand new");
-  expect(container.querySelector(".bg-red-500\\/15")).toBeNull();
+  expect(container.querySelector("[data-diff='removed']")).toBeNull();
 });
 
 test("locations render as a file list", () => {

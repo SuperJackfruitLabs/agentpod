@@ -2,12 +2,10 @@
   /**
    * DiffBlock — inline line-diff for a tool-call `diff` content block.
    *
-   * The rendering (diffLines + green/red 15% fills) is copied from
-   * ConfigEditor.svelte's diff view — the ONE sanctioned raw-color exception
-   * to the status-token rule. Future shared component: ConfigEditor should
-   * eventually render through this too (deliberately not refactored here).
+   * The lines are the shared DiffLines (the config editor's Changes view uses
+   * the same), drawn with the vibe's success and danger tokens.
    */
-  import { diffLines } from "diff";
+  import { DiffLines } from "$lib/components/ui/diff-lines";
 
   interface Props {
     path: string;
@@ -16,8 +14,6 @@
   }
 
   let { path, oldText, newText }: Props = $props();
-
-  const diff = $derived(diffLines(oldText ?? "", newText));
 </script>
 
 <div data-testid="diff-block" class="overflow-hidden rounded-md border border-border bg-muted/10">
@@ -25,18 +21,6 @@
     {path}
   </div>
   <div class="overflow-x-auto p-2 font-mono text-xs leading-relaxed">
-    {#each diff as part, i (i)}
-      {#if part.added}
-        <pre
-          class="m-0 whitespace-pre-wrap break-all rounded px-1 bg-green-500/15 text-green-700 dark:text-green-400"
-        >{part.value}</pre>
-      {:else if part.removed}
-        <pre
-          class="m-0 whitespace-pre-wrap break-all rounded px-1 bg-red-500/15 text-red-700 dark:text-red-400 line-through"
-        >{part.value}</pre>
-      {:else}
-        <pre class="m-0 whitespace-pre-wrap break-all px-1 text-muted-foreground">{part.value}</pre>
-      {/if}
-    {/each}
+    <DiffLines oldText={oldText ?? ""} {newText} />
   </div>
 </div>

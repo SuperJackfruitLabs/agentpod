@@ -142,7 +142,7 @@
     </Card.Root>
 
     {#if status.truncatedFiles}
-      <p class="text-sm text-amber-600 dark:text-amber-500">
+      <p class="text-sm text-warn-text">
         Too many changed files to list them all — this is a partial view.
       </p>
     {/if}

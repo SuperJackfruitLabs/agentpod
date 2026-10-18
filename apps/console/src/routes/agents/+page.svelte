@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { WarnBox } from "$lib/components/ui/warn-box";
   import { onMount } from "svelte";
   import { startPolling } from "$lib/utils/poll";
   import { page } from "$app/state";
@@ -342,11 +343,11 @@
 
   {:else}
     {#if assignmentsError || principalsError}
-      <div
-        class="flex items-start justify-between gap-3 rounded-lg border border-amber-500/50 bg-amber-500/5 p-3"
+      <WarnBox
+        class="flex items-start justify-between gap-3"
         role="alert"
       >
-        <p class="text-xs text-amber-700 dark:text-amber-400">{assignmentsError ?? principalsError}</p>
+        <p class="text-xs text-warn-text">{assignmentsError ?? principalsError}</p>
         <Button
           variant="outline"
           size="sm"
@@ -357,7 +358,7 @@
         >
           Retry
         </Button>
-      </div>
+      </WarnBox>
     {:else if agents.length > 0}
       {#if blockedStations.length > 0}
         <!-- The point of this task: a station that cannot be dispatched must
@@ -365,9 +366,9 @@
              assigned it an agent, or because the agent it has is suspended.
              Either way a fleet-wide refusal to dispatch otherwise produces no
              signal anywhere in this console. -->
-        <div class="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4" data-testid="unassigned-stations">
+        <WarnBox data-testid="unassigned-stations">
           <div class="flex items-start gap-2">
-            <UserXIcon class="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
+            <UserXIcon class="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
             <div class="space-y-1">
               <p class="text-sm font-medium">
                 {blockedStations.length}
@@ -448,7 +449,7 @@
               </li>
             {/each}
           </ul>
-        </div>
+        </WarnBox>
       {:else}
         <p class="flex items-center gap-1.5 text-xs text-muted-foreground" data-testid="all-assigned">
           <UserCheckIcon class="h-3.5 w-3.5" aria-hidden="true" />
