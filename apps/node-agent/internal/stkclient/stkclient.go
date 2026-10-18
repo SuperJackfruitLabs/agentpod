@@ -95,7 +95,10 @@ type InstallPlan struct {
 	User, Group, StateDir, RuntimeDir, ConfigPath string
 	AgentUIDs                                     []int
 	ProxyPort                                     int
-	DryRun                                        bool
+	// UnitName is the systemd unit's name without ".service" (`stk install --unit-name`); empty
+	// means stk's default, "stk". One unit per station instance needs distinct names.
+	UnitName string
+	DryRun   bool
 }
 
 // InstallReport carries the capped, scrubbed text `stk install` prints.
@@ -580,6 +583,9 @@ func (c *client) Install(ctx context.Context, p InstallPlan) (InstallReport, err
 	if !nameRE.MatchString(p.User) || (p.Group != "" && !nameRE.MatchString(p.Group)) {
 		return InstallReport{}, errors.New("stk install: invalid user or group name")
 	}
+	if p.UnitName != "" && !nameRE.MatchString(p.UnitName) {
+		return InstallReport{}, errors.New("stk install: invalid unit name")
+	}
 	args := []string{"install", "--user", p.User}
 	add := func(flag, val string) {
 		if val != "" {
@@ -596,6 +602,7 @@ func (c *client) Install(ctx context.Context, p InstallPlan) (InstallReport, err
 	if p.ProxyPort != 0 {
 		args = append(args, "--proxy-port", strconv.Itoa(p.ProxyPort))
 	}
+	add("--unit-name", p.UnitName)
 	if p.DryRun {
 		args = append(args, "--dry-run")
 	}

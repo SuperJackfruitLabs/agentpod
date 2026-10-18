@@ -647,14 +647,14 @@ func TestInstallPassesFlagsAsArgumentVector(t *testing.T) {
 	c, calls := newStub("installed user stk\nca at /run/stk/ca.pem\n", "", 0, nil)
 	rep, err := c.Install(ctx(), InstallPlan{
 		User: "stk", Group: "stk", StateDir: "/var/lib/stk", RuntimeDir: "/run/stk",
-		ConfigPath: "/etc/stk/x y.yaml", AgentUIDs: []int{1001, 1002}, ProxyPort: 8899, DryRun: true,
+		ConfigPath: "/etc/stk/x y.yaml", AgentUIDs: []int{1001, 1002}, ProxyPort: 8899, UnitName: "stk-st1", DryRun: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"install", "--user", "stk", "--group", "stk", "--state-dir", "/var/lib/stk",
 		"--runtime-dir", "/run/stk", "--config", "/etc/stk/x y.yaml",
-		"--agent-uid", "1001", "--agent-uid", "1002", "--proxy-port", "8899", "--dry-run"}
+		"--agent-uid", "1001", "--agent-uid", "1002", "--proxy-port", "8899", "--unit-name", "stk-st1", "--dry-run"}
 	if !reflect.DeepEqual((*calls)[0].args, want) {
 		t.Fatalf("args = %v", (*calls)[0].args)
 	}
@@ -667,6 +667,24 @@ func TestInstallPassesFlagsAsArgumentVector(t *testing.T) {
 	}
 	if _, err := c.Install(ctx(), InstallPlan{}); err == nil {
 		t.Fatal("User is required")
+	}
+	// the unit name follows the same rules as user names: never an option, path or space
+	for _, bad := range []string{"--dry-run", "a/b", "a b", "x.service/../y", "-x"} {
+		if _, err := c.Install(ctx(), InstallPlan{User: "stk", UnitName: bad}); err == nil {
+			t.Fatalf("UnitName %q must be rejected", bad)
+		}
+	}
+}
+
+func TestInstallOmitsUnitNameWhenEmpty(t *testing.T) {
+	c, calls := newStub("ok", "", 0, nil)
+	if _, err := c.Install(ctx(), InstallPlan{User: "stk"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range (*calls)[0].args {
+		if a == "--unit-name" {
+			t.Fatalf("empty UnitName must not pass --unit-name: %v", (*calls)[0].args)
+		}
 	}
 }
 
