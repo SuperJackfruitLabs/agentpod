@@ -69,7 +69,7 @@ type BrokerReply = { ok: boolean; data?: unknown; error?: string };
 
 export interface ForgeApiDeps {
   db: Database;
-  broker: { request(nodeId: string, verb: string, params: unknown): Promise<BrokerReply> };
+  broker: { request(nodeId: string, verb: string, params: unknown, opts?: { timeoutMs?: number }): Promise<BrokerReply> };
   providers: (kind: ForgeApiProvider) => ForgeProvider;
   now: () => Date;
   /** Seal material to a station's stk handover public key (`sealHandover` in production). */
@@ -913,6 +913,15 @@ export const SUPPLIED_BLOB_MAX = FORGE_API_SEALED_MAX;
 
 const NODE_REASON_MAX = 200;
 
+/**
+ * The hub's timeout for `forge.api.verify`. The node's bypass probe can take up to 45 s, the
+ * harness's own probe up to 10 s more, then stk's verify call to the forge: 90 s covers all three
+ * with margin. The broker's default (15 s) would turn every probing verify into "offline".
+ * A verify holds the grant's claim (one of CLAIM_CAP slots) for that long; reconcile runs grants
+ * one at a time and verifies only rotating or verify-pending rows, so it holds at most one slot.
+ */
+export const FORGE_VERIFY_TIMEOUT_MS = 90_000;
+
 /** A node-supplied string, safe to store: control characters removed, length capped. */
 export function untrusted(s: unknown): string {
   const clean = String(s ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
@@ -957,14 +966,59 @@ ForgeApiVerifyReasons.forEach((r) => {
   if (!VERIFY_DEFINITIVE.has(r) && !VERIFY_PROVIDER_DOWN.has(r)) throw new Error(`forge: unmapped verify reason ${r}`);
 });
 
+// ─── bypass evidence (contract ForgeApiBypass) ───────────────────────────────
+//
+// Ruling: no new column. Bypass/coverage text goes in state_reason, built only from sanitised
+// client names, path names and fixed words:
+// - `bypassed: <clients>`           definitive: the grant fails (a verified one is downgraded);
+// - `not-wired: <paths>`            inconclusive: state unchanged; written only as a NOTE;
+// - `coverage-incomplete: <words>`  ok but not brokered: `delivered` (never `verified`);
+// - `coverage: partial (untested: <clients>)` brokered, partly measured: `verified` + NOTE.
+// A NOTE is written only where it cannot clobber a lifecycle reason: when the reason is empty or
+// is itself a coverage note (the same rule updateGrantPolicy follows for policy-pending).
+const COVERAGE_NOTES = ["not-wired", "coverage-incomplete", "coverage:"];
+const isCoverageNote = (r: string | null) => r === null || COVERAGE_NOTES.some((p) => r.startsWith(p));
+
+/** A node-reported name, reduced to a safe token: [A-Za-z0-9._+-], at most 32 characters. */
+function safeName(s: string): string {
+  const clean = s.replace(/[^A-Za-z0-9._+-]/g, "");
+  return clean.slice(0, 32) || "?";
+}
+function namesList(names: string[]): string {
+  const uniq = [...new Set(names.map(safeName))];
+  const shown = uniq.slice(0, 5).join(", ");
+  return uniq.length > 5 ? `${shown} (+${uniq.length - 5})` : shown;
+}
+type Bypass = NonNullable<ReturnType<(typeof VERB_RESULTS)["forge.api.verify"]["parse"]>["bypass"]>;
+const clientsWith = (b: Bypass | undefined, outcomes: string[]) =>
+  (b?.clients ?? []).filter((c) => outcomes.includes(c.outcome)).map((c) => c.client);
+
+/** Fixed words for why a verify was not brokered. */
+function incompleteWords(b: Bypass): string {
+  const words: string[] = [];
+  for (const o of ["bypassed", "failed", "refused-ca"]) if (b.clients.some((c) => c.outcome === o)) words.push(o);
+  if ((b.paths ?? []).some((p) => !p.wired) || b.wiringBlocked) words.push("unwired");
+  if (b.clients.length === 0) words.push("probe-failed");
+  return words.length ? words.join(", ") : "probe-failed";
+}
+
+function notWiredText(b: Bypass | undefined): string {
+  const paths = (b?.paths ?? []).filter((p) => !p.wired).map((p) => p.path);
+  let t = paths.length ? namesList(paths) : "no path routed";
+  if (b?.wiringBlocked) t += ` (blocked by ${namesList(b.wiringBlocked.split(/[\s,]+/).filter(Boolean))})`;
+  return `not-wired: ${t}`;
+}
+
 type VerifyAnswer =
-  | { kind: "ok"; login: string; isolation: "separate-user" | "same-user" }
+  | { kind: "ok"; login: string; isolation: "separate-user" | "same-user"; note?: string }
+  /** The identity matched but the node did not show the broker carries the traffic. */
+  | { kind: "unbrokered"; reason: string }
   /** The grant fails. `code` is the definitive reason, `node-too-old`, or `verify-failed`. */
   | { kind: "failed"; code: string; reason: string }
   | { kind: "offline"; reason: string }
   | { kind: "provider-unavailable"; reason: string }
   /** The node answered no with a reason code the hub does not know: not evidence either way. */
-  | { kind: "inconclusive"; reason: string };
+  | { kind: "inconclusive"; reason: string; note?: string };
 
 /** Ask the node to make a real read call as the grant's credential. Writes nothing. */
 async function askVerify(deps: ForgeApiDeps, row: Grant, station: { id: string; nodeId: string }): Promise<VerifyAnswer> {
@@ -978,7 +1032,7 @@ async function askVerify(deps: ForgeApiDeps, row: Grant, station: { id: string; 
   if (!params.success) return { kind: "failed", code: "verify-failed", reason: "verify-failed: invalid verify frame; nothing was sent" };
   let res: BrokerReply;
   try {
-    res = await deps.broker.request(station.nodeId, "forge.api.verify", params.data);
+    res = await deps.broker.request(station.nodeId, "forge.api.verify", params.data, { timeoutMs: FORGE_VERIFY_TIMEOUT_MS });
   } catch (err) {
     return { kind: "offline", reason: `verify not attempted: ${untrusted(scrub(err))}` };
   }
@@ -996,6 +1050,14 @@ async function askVerify(deps: ForgeApiDeps, row: Grant, station: { id: string; 
   if (r.ok !== true) {
     const text = untrusted(r.reason ?? "no reason given");
     const code = text.split(/[:\s]/)[0]!.toLowerCase();
+    if (code === "bypassed") {
+      const names = clientsWith(r.bypass, ["bypassed"]);
+      return { kind: "failed", code, reason: `bypassed: ${names.length ? namesList(names) : "clients not reported"}` };
+    }
+    if (code === "not-wired") {
+      const note = notWiredText(r.bypass);
+      return { kind: "inconclusive", reason: note, note };
+    }
     if (VERIFY_DEFINITIVE.has(code as ForgeApiVerifyReason)) return { kind: "failed", code, reason: code === "wrong-identity" ? text : `verify-failed: ${text}` };
     if (VERIFY_PROVIDER_DOWN.has(code as ForgeApiVerifyReason)) return { kind: "provider-unavailable", reason: `provider unavailable: ${text}` };
     return { kind: "inconclusive", reason: `verify inconclusive: ${text}` };
@@ -1007,7 +1069,16 @@ async function askVerify(deps: ForgeApiDeps, row: Grant, station: { id: string; 
       reason: `wrong-identity: expected ${untrusted(expectLogin)}, the forge answered as ${untrusted(r.login ?? "(nobody)")}`,
     };
   }
-  return { kind: "ok", login: r.login, isolation: r.isolation };
+  // Older nodes send no bypass evidence: verified as before (cannot tell old from silent).
+  if (r.bypass && r.bypass.brokered !== true) {
+    return { kind: "unbrokered", reason: `coverage-incomplete: ${incompleteWords(r.bypass)}` };
+  }
+  const untested = clientsWith(r.bypass, ["untested"]);
+  const note =
+    r.bypass?.measured === "partial"
+      ? `coverage: partial${untested.length ? ` (untested: ${namesList(untested)})` : ""}`
+      : undefined;
+  return { kind: "ok", login: r.login, isolation: r.isolation, note };
 }
 
 export interface VerifyResult {
@@ -1109,9 +1180,28 @@ async function settleVerify(deps: ForgeApiDeps, row: Grant, answer: VerifyAnswer
       log.info("forge grant verify deferred: node unreachable", { grantId: row.id });
       return { outcome: "node-offline", grant: row };
     case "provider-unavailable":
-    case "inconclusive":
+    case "inconclusive": {
       log.info("forge grant verify inconclusive", { grantId: row.id, reason: answer.reason });
+      // A coverage note (not-wired) only where it cannot clobber a lifecycle reason; state kept.
+      if (answer.kind === "inconclusive" && answer.note && isCoverageNote(row.stateReason) && row.state !== "revoked") {
+        const grant = await transition(deps.db, row, [row.state], row.state, { now: deps.now(), stateReason: answer.note });
+        return { outcome: answer.kind, grant };
+      }
       return { outcome: answer.kind, grant: row };
+    }
+    case "unbrokered": {
+      // Not verified: the broker was not shown to carry the traffic. A rotation is left as it is
+      // (its lifecycle reason is not overwritten); otherwise the grant is `delivered`, a verified
+      // one included — `verified` claims the broker is in the path.
+      log.warn("forge grant not verified: traffic not shown to go through the broker", { grantId: row.id, reason: answer.reason });
+      if (rotating || !["delivered", "verified", "failed"].includes(row.state)) return { outcome: "inconclusive", grant: row };
+      const grant = await transition(deps.db, row, [row.state], "delivered", {
+        now: deps.now(),
+        verifiedAt: null,
+        stateReason: answer.reason,
+      });
+      return { outcome: "inconclusive", grant };
+    }
     case "failed": {
       if (acked && handle && prev) {
         const provider = deps.providers(row.provider);
@@ -1138,13 +1228,17 @@ async function settleVerify(deps: ForgeApiDeps, row: Grant, answer: VerifyAnswer
         now,
         verifiedAt: now,
         isolation: answer.isolation,
-        stateReason: revokePrev ? `verified; revoking ${prev!.name}` : rotating ? "rotation-pending: new token not acknowledged" : null,
+        stateReason: revokePrev
+          ? `verified; revoking ${prev!.name}`
+          : rotating
+            ? "rotation-pending: new token not acknowledged"
+            : (answer.note ?? null),
       });
       if (revokePrev && handle) {
         const { previous: _p, ...rest } = handle;
         try {
           await revokeTolerant(deps.providers(row.provider), row.account, bareHandle(prev!));
-          grant = await transition(deps.db, grant, ["verified"], "verified", { now: deps.now(), tokenHandle: rest, stateReason: null });
+          grant = await transition(deps.db, grant, ["verified"], "verified", { now: deps.now(), tokenHandle: rest, stateReason: answer.note ?? null });
         } catch (err) {
           log.warn("forge grant verified but the previous token is not revoked yet", { grantId: row.id });
           grant = await transition(deps.db, grant, ["verified"], "verified", {

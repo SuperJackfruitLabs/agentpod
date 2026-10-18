@@ -2099,7 +2099,23 @@ credential. A minted token's provider-side scopes follow a changed preset only f
 **Status.** `list` prints each grant's state, mode, account, isolation, provider, instance, preset
 and repositories, and never a token. States run `authorised → provisioned → delivered → verified`,
 plus `failed`, `revoking` and `revoked`. `verified` means the broker made a real read call as the
-expected account. Isolation is `separate-user` (the broker runs as its own OS user) or `same-user`
+expected account **and** a node that reports bypass evidence showed the broker carries the
+station's traffic. How `verify` reads that evidence:
+
+- A client that **bypassed** the broker fails the grant (`failed`, reason `bypassed: <clients>`),
+  even one that was `verified` before.
+- **No path routed** through the broker (`not-wired: <paths>`) is inconclusive: the state is kept,
+  so a first verify stays `delivered`; the reason is written only if it would not replace another
+  lifecycle reason.
+- The identity matched but the node could not show the traffic is brokered: the grant stays (or
+  goes back to) `delivered` with `coverage-incomplete: <bypassed|failed|refused-ca|unwired|probe-failed>`.
+- Brokered, but not every client was measured: `verified` with the note
+  `coverage: partial (untested: <clients>)`. The harnesses' own clients have no safe probe today,
+  so they report `untested` and **most grants verify with partial coverage**: the generic clients
+  were seen going through the broker, the harness's own client was not checked.
+- A node too old to send bypass evidence verifies as before (identity only).
+
+A verify can take up to 90 seconds, because the node probes its clients first. Isolation is `separate-user` (the broker runs as its own OS user) or `same-user`
 (degraded, see below).
 
 **Rotation and revocation.** `rotate` (minted) mints a new token, delivers and verifies it, then

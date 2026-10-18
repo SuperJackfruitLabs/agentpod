@@ -126,7 +126,12 @@ export type ForgeApiBypassOutcome = (typeof ForgeApiBypassOutcomes)[number];
  * `untested`, never `honoured`); `paths` and `brokered` are the node's record of what it routed
  * through the station's broker. A node sets `ok: false` with a `reason` starting `bypassed:` when a
  * client bypassed the broker and `not-wired:` when no path of the harness is routed; neither is one
- * of stk's codes, so the hub reads them as not verified. Older nodes omit the whole field.
+ * of stk's codes. The hub reads `bypassed:` as a failed verification (the grant becomes `failed`,
+ * even if it was `verified`) and `not-wired:` as inconclusive (the state is kept; a first verify
+ * stays `delivered`). `ok: true` with `brokered: false` never reaches `verified` (`delivered`,
+ * reason `coverage-incomplete`); `brokered: true` with `measured: "partial"` verifies with a
+ * coverage note. The hub stores only sanitised client/path names and fixed outcome words. Older
+ * nodes omit the whole field and verify as before.
  *
  * The probe can take up to 45 s (plus up to 10 s for the harness's own probe): the hub's request
  * timeout for forge.api.verify must exceed that. A verify whose stk check already failed carries

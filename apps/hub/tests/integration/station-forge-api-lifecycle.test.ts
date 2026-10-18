@@ -34,6 +34,7 @@ import {
   rotateGrant,
   updateGrantPolicy,
   verifyGrant,
+  FORGE_VERIFY_TIMEOUT_MS,
   ForgeApiGrantError,
   type ForgeApiDeps,
 } from "../../src/services/station-forge-api";
@@ -1270,5 +1271,145 @@ describe("verify reason mapping (stk's codes)", () => {
     await h.attempt(rotateGrant(h.deps, ref));
     const row = await load(grant.id);
     expect(row.tokenHandle!.previous).toMatchObject({ ...grant.tokenHandle!, disposition: "revoke" });
+  });
+});
+
+// ─── verify: the node's bypass evidence gates `verified` (H10) ─────────────────
+
+describe("verify: bypass evidence", () => {
+  const honoured = (client: string) => ({ client, outcome: "honoured" });
+  const bypassReply = (h: H, reply: Record<string, unknown>) => {
+    h.replies["forge.api.verify"] = () => ({ ok: true, data: { isolation: "separate-user", ...reply } });
+  };
+  const clean = { clients: [honoured("curl"), honoured("git")], brokered: true, measured: "complete" };
+
+  test("bypassed → failed, naming the clients", async () => {
+    const h = harness();
+    const { ref } = await delivered(h);
+    bypassReply(h, {
+      ok: false,
+      reason: "bypassed: tea",
+      bypass: { clients: [{ client: "tea", outcome: "bypassed" }, honoured("curl")], brokered: false, measured: "partial" },
+    });
+    const out = await verifyGrant(h.deps, ref);
+    expect(out.outcome).toBe("failed");
+    expect(out.grant.state).toBe("failed");
+    expect(out.grant.stateReason).toBe("bypassed: tea");
+  });
+
+  test("bypassed on an already verified grant downgrades it to failed", async () => {
+    const h = harness();
+    const { st, ref } = await delivered(h);
+    bypassReply(h, { ok: true, login: st.handle, bypass: clean });
+    expect((await verifyGrant(h.deps, ref)).grant.state).toBe("verified");
+    bypassReply(h, { ok: false, reason: "bypassed", bypass: { clients: [{ client: "gh", outcome: "bypassed" }], brokered: false } });
+    const out = await verifyGrant(h.deps, ref);
+    expect(out.grant.state).toBe("failed");
+    expect(out.grant.stateReason).toBe("bypassed: gh");
+  });
+
+  test("not-wired on a first verify is inconclusive: delivered, reason names the unrouted paths", async () => {
+    const h = harness();
+    const { ref } = await delivered(h);
+    bypassReply(h, {
+      ok: false,
+      reason: "not-wired: no path routed",
+      bypass: { clients: [], brokered: false, paths: [{ path: "env", wired: false }], wiringBlocked: "HTTPS_PROXY" },
+    });
+    const out = await verifyGrant(h.deps, ref);
+    expect(out.outcome).toBe("inconclusive");
+    expect(out.grant.state).toBe("delivered");
+    expect(out.grant.stateReason).toBe("not-wired: env (blocked by HTTPS_PROXY)");
+  });
+
+  test("not-wired never downgrades a verified grant nor clobbers a lifecycle reason", async () => {
+    const h = harness();
+    const { st, grant, ref } = await delivered(h);
+    bypassReply(h, { ok: true, login: st.handle, bypass: clean });
+    await verifyGrant(h.deps, ref);
+    await rawSql`UPDATE station_forge_api_grants SET state_reason = 'previous-revoke-pending: x' WHERE id = ${grant.id}`;
+    bypassReply(h, { ok: false, reason: "not-wired", bypass: { clients: [], brokered: false } });
+    const out = await verifyGrant(h.deps, ref);
+    expect(out.grant.state).toBe("verified");
+    expect(out.grant.stateReason).toBe("previous-revoke-pending: x");
+  });
+
+  test("ok but brokered:false is not verified: delivered with coverage-incomplete", async () => {
+    const h = harness();
+    const { st, ref } = await delivered(h);
+    bypassReply(h, {
+      ok: true,
+      login: st.handle,
+      bypass: { clients: [{ client: "curl", outcome: "refused-ca" }, { client: "x", outcome: "untested" }], brokered: false, measured: "partial" },
+    });
+    const out = await verifyGrant(h.deps, ref);
+    expect(out.grant.state).toBe("delivered");
+    expect(out.grant.verifiedAt).toBeNull();
+    expect(out.grant.stateReason).toBe("coverage-incomplete: refused-ca");
+  });
+
+  test("brokered:true with partial measurement verifies and notes the untested clients", async () => {
+    const h = harness();
+    const { st, ref } = await delivered(h);
+    bypassReply(h, {
+      ok: true,
+      login: st.handle,
+      bypass: { clients: [honoured("curl"), { client: "claude-code", outcome: "untested" }], brokered: true, measured: "partial" },
+    });
+    const out = await verifyGrant(h.deps, ref);
+    expect(out.grant.state).toBe("verified");
+    expect(out.grant.stateReason).toBe("coverage: partial (untested: claude-code)");
+  });
+
+  test("brokered:true and complete: verified with no note; absent bypass: as before", async () => {
+    const h = harness();
+    const { st, ref } = await delivered(h);
+    bypassReply(h, { ok: true, login: st.handle, bypass: clean });
+    expect((await verifyGrant(h.deps, ref)).grant.stateReason).toBeNull();
+    const h2 = harness();
+    const d2 = await delivered(h2);
+    bypassReply(h2, { ok: true, login: d2.st.handle });
+    const out = await verifyGrant(h2.deps, d2.ref);
+    expect(out.grant.state).toBe("verified");
+    expect(out.grant.stateReason).toBeNull();
+  });
+
+  test("an unknown first token is still inconclusive", async () => {
+    const h = harness();
+    const { ref } = await delivered(h);
+    bypassReply(h, { ok: false, reason: "quantum-flux: maybe" });
+    const out = await verifyGrant(h.deps, ref);
+    expect(out.outcome).toBe("inconclusive");
+    expect(out.grant.state).toBe("delivered");
+  });
+
+  test("hostile client names are never stored raw", async () => {
+    const h = harness();
+    const { ref } = await delivered(h);
+    const evil = "<script>alert(1)</script>" + "A".repeat(300);
+    bypassReply(h, { ok: false, reason: "bypassed", bypass: { clients: [{ client: evil, outcome: "bypassed" }], brokered: false } });
+    const out = await verifyGrant(h.deps, ref);
+    expect(out.grant.state).toBe("failed");
+    expect(out.grant.stateReason).not.toContain("<");
+    expect(out.grant.stateReason).not.toContain(">");
+    expect(out.grant.stateReason!.length).toBeLessThan(80);
+  });
+
+  test("the verify request is sent with a timeout of at least 90 s", async () => {
+    const h = harness();
+    const { st, ref } = await delivered(h);
+    const seen: (number | undefined)[] = [];
+    const inner = h.deps.broker.request.bind(h.deps.broker);
+    h.deps.broker = {
+      request: (nodeId: string, verb: string, params: unknown, opts?: { timeoutMs?: number }) => {
+        if (verb === "forge.api.verify") seen.push(opts?.timeoutMs);
+        return inner(nodeId, verb, params);
+      },
+    } as typeof h.deps.broker;
+    h.setLogin(st.handle);
+    await verifyGrant(h.deps, ref);
+    expect(seen.length).toBe(1);
+    expect(seen[0]).toBeGreaterThanOrEqual(90_000);
+    expect(FORGE_VERIFY_TIMEOUT_MS).toBe(seen[0]!);
   });
 });
