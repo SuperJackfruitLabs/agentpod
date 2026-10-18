@@ -58,6 +58,7 @@
   import MessageSquareIcon from "@lucide/svelte/icons/message-square";
   import IdCardIcon from "@lucide/svelte/icons/id-card";
   import LockIcon from "@lucide/svelte/icons/lock";
+  import * as Sheet from "$lib/components/ui/sheet";
 
   const nodeId = $derived($page.params.id as string);
   const stationId = $derived($page.params.stationId as string);
@@ -305,6 +306,9 @@
    * already hit once at 900px.
    */
   let narrow = $state(false);
+  /** At 900px and below (the phone layout) the rail is the About sheet, not a tab. */
+  let phone = $state(false);
+  let aboutOpen = $state(false);
 
   onMount(() => {
     void myReach().then((r) => (mayGrantReach = r.mayGrantReach));
@@ -313,7 +317,17 @@
     narrow = mq.matches;
     const onChange = (e: MediaQueryListEvent) => (narrow = e.matches);
     mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
+    const pq = window.matchMedia("(max-width: 900px)");
+    phone = pq.matches;
+    const onPhone = (e: MediaQueryListEvent) => {
+      phone = e.matches;
+      if (!e.matches) aboutOpen = false;
+    };
+    pq.addEventListener("change", onPhone);
+    return () => {
+      mq.removeEventListener("change", onChange);
+      pq.removeEventListener("change", onPhone);
+    };
   });
 
   // ─── The header's facts ───────────────────────────────────────────────────
@@ -350,6 +364,7 @@
   let actionError = $state<string | null>(null);
 
   function askFor(action: "stop" | "restart") {
+    aboutOpen = false;
     pendingAction = action;
     confirmOpen = true;
   }
@@ -391,7 +406,7 @@
     // behind a horizontal scroll past seven other tabs, which is the opposite
     // of what the rail does for free. It is the frame for the rest, so it sits
     // where you reach it without hunting: immediately after the conversation.
-    ...(narrow ? [{ id: "identity" as const, label: "Identity", icon: IdCardIcon }] : []),
+    ...(narrow && !phone ? [{ id: "identity" as const, label: "Identity", icon: IdCardIcon }] : []),
     { id: "health" as const, label: "Health", icon: HeartPulseIcon },
     { id: "logs" as const, label: "Logs", icon: ScrollTextIcon },
     { id: "files" as const, label: "Files", icon: FolderIcon },
@@ -543,7 +558,7 @@
   <!-- `relative`: StateDot's sr-only word is position:absolute, and with no
        positioned ancestor inside the stage's scroller it escapes every
        overflow-hidden between here and the document. -->
-  <header class="relative shrink-0 border-b border-border bg-background">
+  <header class="ap-st-head relative shrink-0 border-b border-border bg-background" data-testid="station-header">
     <div class="flex flex-wrap items-start justify-between gap-3 px-4 pt-4 pb-3 sm:px-6">
       <div class="min-w-0 flex-1">
         <div class="flex min-w-0 items-center gap-2">
@@ -572,7 +587,7 @@
       </div>
 
       {#if canLifecycle}
-        <div class="flex shrink-0 items-center gap-2">
+        <div class="ap-st-actions flex shrink-0 items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -593,6 +608,14 @@
       {/if}
     </div>
 
+    {#if phone && station}
+      <div class="px-4 pb-3">
+        <button type="button" class="ap-st-about" onclick={() => (aboutOpen = true)}>
+          <IdCardIcon class="size-4" aria-hidden="true" />About {station.displayName}
+        </button>
+      </div>
+    {/if}
+
     {#if actionError}
       <p class="px-4 pb-2 text-sm text-status-error sm:px-6" role="alert">{actionError}</p>
     {/if}
@@ -600,7 +623,7 @@
     {#if stationLoad !== "notFound" && stationLoad !== "error"}
       <!-- svelte-ignore a11y_interactive_supports_focus -- the roving tabindex lives on the tab buttons, not the tablist -->
       <div
-        class="scroll-strip flex min-w-0 gap-1 px-4 sm:px-6"
+        class="ap-st-tabs scroll-strip flex min-w-0 gap-1 px-4 sm:px-6"
         role="tablist"
         onkeydown={handleTablistKeydown}
         use:scrollStrip={`${activeTab}:${tabs.length}`}
@@ -852,7 +875,7 @@
     </div>
   {/snippet}
 
-  {#if narrow}
+  {#if narrow && !phone}
     <!-- The rail's content, for the widths where the shell has no room for a
          third column. Same component, so the two can never say different
          things about the same agent. -->
@@ -862,6 +885,27 @@
     {/snippet}
   {/if}
 {/snippet}
+
+{#if phone && station}
+  <!-- The phone's rail: everything the context column holds, plus Restart and
+       Stop (which also stay in the header). Both still go through the confirm. -->
+  <Sheet.Root bind:open={aboutOpen}>
+    <Sheet.Content side="bottom" class="ap-about" data-testid="station-about">
+      <div class="ap-more__grab" aria-hidden="true"></div>
+      <Sheet.Title class="ap-about__title">About {station.displayName}</Sheet.Title>
+      <Sheet.Description class="sr-only">Identity, placement, voice and who may dispatch this agent</Sheet.Description>
+      <div class="ap-about__body">
+        {@render stationRail()}
+        {#if canLifecycle}
+          <div class="ap-about__actions">
+            <Button variant="outline" disabled={actionInFlight !== null} onclick={() => askFor("restart")}>Restart</Button>
+            <Button variant="destructive" disabled={actionInFlight !== null} onclick={() => askFor("stop")}>Stop</Button>
+          </div>
+        {/if}
+      </div>
+    </Sheet.Content>
+  </Sheet.Root>
+{/if}
 
 <ConfirmDialog
   open={confirmOpen}

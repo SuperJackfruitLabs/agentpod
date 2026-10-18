@@ -15,7 +15,7 @@
  */
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, cleanup, waitFor, fireEvent } from "@testing-library/svelte";
+import { render, cleanup, waitFor, fireEvent, within } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
 import * as harnessConfigApi from "$lib/api/harness-config";
 import * as pluginsApi from "$lib/api/plugins";
@@ -91,7 +91,14 @@ vi.mock("$lib/api/acp", () => ({
   })),
 }));
 
+vi.mock("$lib/api/grants", () => ({
+  listGrants: vi.fn(async () => ({ enforced: true, grants: [] })),
+  listPrincipals: vi.fn(async () => []),
+}));
+
 import * as acpApi from "$lib/api/acp";
+import * as grantsApi from "$lib/api/grants";
+import { auth } from "$lib/stores/auth.svelte";
 import { contextRailSlot, setContextRail } from "$lib/stores/context-rail.svelte";
 // Mounted through a Tooltip.Provider host (panels below the tab bar need one).
 import StationPage from "./page-test-host.svelte";
@@ -105,33 +112,7 @@ import StationPage from "./page-test-host.svelte";
 // that does.
 
 const realMatchMedia = window.matchMedia;
-let mediaListeners: Array<(e: MediaQueryListEvent) => void> = [];
-let mediaMatches = false;
-
-function narrowViewport(matches: boolean) {
-  mediaMatches = matches;
-  mediaListeners = [];
-  window.matchMedia = ((query: string) => ({
-    get matches() {
-      return mediaMatches;
-    },
-    media: query,
-    onchange: null,
-    addListener: () => {},
-    removeListener: () => {},
-    addEventListener: (_: string, fn: (e: MediaQueryListEvent) => void) => mediaListeners.push(fn),
-    removeEventListener: (_: string, fn: (e: MediaQueryListEvent) => void) => {
-      mediaListeners = mediaListeners.filter((l) => l !== fn);
-    },
-    dispatchEvent: () => false,
-  })) as unknown as typeof window.matchMedia;
-}
-
-/** Resize, as the browser reports it. */
-function setNarrow(matches: boolean) {
-  mediaMatches = matches;
-  for (const fn of mediaListeners) fn({ matches } as MediaQueryListEvent);
-}
+// atWidth() and resizeTo(), below, answer max-width queries by a width.
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -169,6 +150,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   goto.mockClear();
   vi.mocked(acpApi.listAcpSessions).mockClear();
+  vi.mocked(grantsApi.listGrants).mockClear();
   setStation("station_1");
   setUrl("");
   // The rail is a module-level slot shared with the layout; a page left
@@ -442,7 +424,7 @@ test("the page hands its rail to the shell while it is mounted, and takes it bac
 });
 
 test("below 1240px the rail becomes an Identity tab, and the shell is given nothing", async () => {
-  narrowViewport(true);
+  atWidth(1024);
   vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "acp"])]);
 
   const { getAllByRole } = render(StationPage);
@@ -454,13 +436,13 @@ test("below 1240px the rail becomes an Identity tab, and the shell is given noth
 });
 
 test("the Identity tab disappears again when the viewport grows past 1240px", async () => {
-  narrowViewport(true);
+  atWidth(1024);
   vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "acp"])]);
 
   const { getAllByRole } = render(StationPage);
   await waitFor(() => expect(tabNames(getAllByRole("tab"))).toContain("Identity"));
 
-  setNarrow(false);
+  resizeTo(1440);
 
   await waitFor(() => expect(tabNames(getAllByRole("tab"))).not.toContain("Identity"));
   await waitFor(() => expect(contextRailSlot.snippet).not.toBeNull());
@@ -746,4 +728,192 @@ test("the tab strip is a scroll strip that brings the selected tab into view", a
   setUrl("?tab=health");
   await waitFor(() => expect(scrolled.at(-1)).toBe(getByRole("tab", { name: "Health" })));
   spy.mockRestore();
+});
+
+// ─── the About sheet and the three widths ───────────────────────────────────
+// Phone (<= 900px): no Identity tab; "About {agent}" opens a sheet holding the
+// whole rail plus Restart and Stop (which also stay in the header). Tablet
+// (901 to 1240px): the Identity tab. Desktop (>= 1241px): the shell's rail.
+
+let widthListeners: Array<{ query: string; fn: (e: MediaQueryListEvent) => void }> = [];
+let viewportWidth = 1440;
+const maxWidth = (query: string) => Number(/max-width:\s*(\d+)px/.exec(query)?.[1] ?? Infinity);
+
+function atWidth(width: number) {
+  viewportWidth = width;
+  widthListeners = [];
+  window.matchMedia = ((query: string) => ({
+    get matches() {
+      return viewportWidth <= maxWidth(query);
+    },
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: (_: string, fn: (e: MediaQueryListEvent) => void) => widthListeners.push({ query, fn }),
+    removeEventListener: (_: string, fn: (e: MediaQueryListEvent) => void) => {
+      widthListeners = widthListeners.filter((l) => l.fn !== fn);
+    },
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}
+
+function resizeTo(width: number) {
+  viewportWidth = width;
+  for (const l of widthListeners) l.fn({ matches: width <= maxWidth(l.query) } as MediaQueryListEvent);
+}
+
+function occupied(capabilities: StationRow["capabilities"]): StationRow {
+  return {
+    ...station(capabilities),
+    principalId: "prn_annapurna",
+    bridgeMatrixId: "@agent_annapurna:id.agentpod.dev",
+    purpose: "Writes the release notes",
+  };
+}
+
+function asAdmin() {
+  vi.spyOn(auth, "user", "get").mockReturnValue({
+    id: "user_1", email: "op@example.com", name: null, image: null, role: "admin",
+  } as never);
+}
+
+test("on a phone there is no Identity tab; About {agent} opens a sheet with the whole rail", async () => {
+  atWidth(390);
+  asAdmin();
+  vi.mocked(grantsApi.listGrants).mockResolvedValue({
+    enforced: true,
+    grants: [{ principalId: "prn_op", mayDispatch: ["prn_annapurna"] }],
+  } as never);
+  vi.mocked(grantsApi.listPrincipals).mockResolvedValue([{ id: "prn_op", handle: "operator" }] as never);
+  vi.spyOn(api, "listStations").mockResolvedValue([occupied(["health", "acp", "lifecycle"])]);
+
+  const { getAllByRole, getByRole, findByRole } = render(StationPage);
+  await waitFor(() => expect(tabNames(getAllByRole("tab"))).toContain("Health"));
+  expect(tabNames(getAllByRole("tab"))).not.toContain("Identity");
+  expect(contextRailSlot.snippet).toBeNull();
+
+  await fireEvent.click(await findByRole("button", { name: "About Workspace" }));
+  const sheet = await findByRole("dialog");
+  const q = within(sheet);
+  // Identity
+  expect(q.getByTestId("rail-handle").textContent).toBe("Workspace");
+  expect(q.getByTestId("rail-mxid").textContent?.trim()).toBe("@agent_annapurna:id.agentpod.dev");
+  expect(q.getByTestId("rail-principal").textContent?.trim()).toBe("prn_annapurna");
+  expect(q.getByTestId("rail-credential-mode").textContent).toBe("The bridge speaks for it");
+  // Placement
+  expect(q.getByTestId("rail-station-key").textContent).toBe("claude://workspace");
+  expect(q.getByRole("link", { name: "node_1" }).getAttribute("href")).toBe("/nodes/node_1");
+  expect(q.getByText("claude")).toBeTruthy();
+  expect(q.getByTestId("rail-agent-version")).toBeTruthy();
+  expect(q.getByTestId("rail-placement").textContent).toContain("Purpose");
+  // Who may dispatch it, Voice notes, Voice replies
+  await waitFor(() => expect(q.getByTestId("rail-dispatchers").textContent).toContain("operator"));
+  expect(q.getByTestId("rail-voice-notes")).toBeTruthy();
+  expect(q.getByTestId("rail-voice-replies")).toBeTruthy();
+  // Restart and Stop, in the sheet AND still in the header
+  expect(q.getByRole("button", { name: "Restart" })).toBeTruthy();
+  expect(q.getByRole("button", { name: "Stop" })).toBeTruthy();
+  expect(within(getByTestId_header()).getByRole("button", { name: "Restart" })).toBeTruthy();
+  expect(within(getByTestId_header()).getByRole("button", { name: "Stop" })).toBeTruthy();
+});
+
+function getByTestId_header() {
+  return document.querySelector('[data-testid="station-header"]') as HTMLElement;
+}
+
+test("the About sheet says Couldn't read the grants. when the grants call fails", async () => {
+  atWidth(390);
+  asAdmin();
+  vi.mocked(grantsApi.listGrants).mockRejectedValue("network");
+  vi.mocked(grantsApi.listPrincipals).mockResolvedValue([] as never);
+  vi.spyOn(api, "listStations").mockResolvedValue([occupied(["health"])]);
+
+  const { findByRole } = render(StationPage);
+  await fireEvent.click(await findByRole("button", { name: "About Workspace" }));
+  const sheet = await findByRole("dialog");
+  await waitFor(() => expect(within(sheet).getByRole("alert").textContent).toBe("Couldn't read the grants."));
+});
+
+test("the About sheet keeps the rail's other dispatch states", async () => {
+  atWidth(390);
+  vi.spyOn(api, "listStations").mockResolvedValue([occupied(["health"])]);
+
+  const { findByRole } = render(StationPage);
+  await fireEvent.click(await findByRole("button", { name: "About Workspace" }));
+  const sheet = await findByRole("dialog");
+  // Not an admin: the grants are not asked for, and it says why.
+  expect(within(sheet).getByTestId("rail-grant-not-visible")).toBeTruthy();
+  expect(grantsApi.listGrants).not.toHaveBeenCalled();
+});
+
+test("Restart and Stop in the About sheet both ask to confirm", async () => {
+  atWidth(390);
+  vi.spyOn(api, "listStations").mockResolvedValue([occupied(["health", "lifecycle"])]);
+  const call = vi.spyOn(api, "lifecycle").mockResolvedValue(health);
+
+  const { findByRole, findAllByRole } = render(StationPage);
+  await fireEvent.click(await findByRole("button", { name: "About Workspace" }));
+  let sheet = await findByRole("dialog");
+  await fireEvent.click(within(sheet).getByRole("button", { name: "Restart" }));
+  await findByRole("button", { name: "Restart agent" });
+  expect(call).not.toHaveBeenCalled();
+  await fireEvent.click(await findByRole("button", { name: "Cancel" }));
+
+  await fireEvent.click(await findByRole("button", { name: "About Workspace" }));
+  sheet = (await findAllByRole("dialog"))[0];
+  await fireEvent.click(within(sheet).getByRole("button", { name: "Stop" }));
+  await fireEvent.click(await findByRole("button", { name: "Stop agent" }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith("station_1", "stop"));
+  expect(call).toHaveBeenCalledTimes(1);
+});
+
+test("Restart in the header asks to confirm too", async () => {
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "lifecycle"])]);
+  const call = vi.spyOn(api, "lifecycle").mockResolvedValue(health);
+
+  const { findByRole } = render(StationPage);
+  await fireEvent.click(await findByRole("button", { name: "Restart" }));
+  await fireEvent.click(await findByRole("button", { name: "Restart agent" }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith("station_1", "restart"));
+});
+
+test("between 901 and 1240px the Identity tab stays and there is no About button", async () => {
+  atWidth(1024);
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "acp"])]);
+
+  const { getAllByRole, queryByRole } = render(StationPage);
+  await waitFor(() => expect(tabNames(getAllByRole("tab"))).toContain("Identity"));
+  expect(queryByRole("button", { name: "About Workspace" })).toBeNull();
+  expect(contextRailSlot.snippet).toBeNull();
+
+  resizeTo(901);
+  await waitFor(() => expect(tabNames(getAllByRole("tab"))).toContain("Identity"));
+  resizeTo(900);
+  await waitFor(() => expect(tabNames(getAllByRole("tab"))).not.toContain("Identity"));
+  expect(queryByRole("button", { name: "About Workspace" })).toBeTruthy();
+  resizeTo(1241);
+  await waitFor(() => expect(contextRailSlot.snippet).not.toBeNull());
+  expect(queryByRole("button", { name: "About Workspace" })).toBeNull();
+});
+
+test("an Identity deep link on a phone falls back to the default tab", async () => {
+  atWidth(390);
+  setUrl("?tab=identity");
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "acp"])]);
+
+  const { getAllByRole } = render(StationPage);
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Chat"));
+});
+
+test("a station missing five capabilities shows only its real tabs, in the console's order", async () => {
+  atWidth(360);
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "logs"])]);
+
+  const { getAllByRole, getByRole } = render(StationPage);
+  await waitFor(() => expect(tabNames(getAllByRole("tab"))).toEqual(["Health", "Logs", "Files", "Activity"]));
+  // The strip scrolls inside itself; it never sets a width of its own.
+  const strip = getByRole("tablist");
+  expect(strip.className).toContain("scroll-strip");
+  expect(strip.className).toContain("min-w-0");
 });
