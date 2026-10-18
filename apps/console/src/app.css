@@ -8,6 +8,8 @@
    --color-muted, --color-accent, --font-*, --radius-* with other meanings (see the bridge below). */
 @import "@superjackfruit/vibekit/fonts.css";
 @import "@superjackfruit/vibekit/vibekit.css";
+/* Each vibe's look for the shadcn primitives (unlayered: outranks their utilities). */
+@import "./lib/styles/primitives.css";
 
 /* Dark is a vibekit theme on <html> (data-theme), never a .dark class. */
 @custom-variant dark (&:is([data-theme="dark"] *));
@@ -78,6 +80,14 @@
   --status-error: var(--vk-color-danger);
   --status-sleeping: var(--ap-violet);
   --status-unknown: var(--vk-color-signal);
+  /* Status as TEXT: the fills above are too light to read as words in some vibes. */
+  --status-running-text: var(--vk-color-success-text);
+  --status-degraded-text: var(--vk-color-signal-text);
+  --status-starting-text: var(--vk-color-accent-text);
+  --status-stopped-text: var(--vk-color-muted);
+  --status-error-text: var(--vk-color-danger);
+  --status-sleeping-text: var(--ap-violet);
+  --status-unknown-text: var(--vk-color-signal-text);
 
   /* Local tones vibekit has no token for (hexes from the approved mockups' --ap-* values).
      Daylight is the default; Paper and Quiet below; Studio draws warnings with its signal. */
@@ -121,6 +131,10 @@
   --ap-info: var(--vk-color-accent);
   --ap-info-text: var(--vk-color-accent-text);
   --ap-info-wash: var(--vk-color-accent-wash);
+}
+[data-vibe="studio"][data-theme="light"] {
+  /* Studio's blue-tinted ground: the default violet falls under 4.5:1 as text. */
+  --ap-violet: #6448b0;
 }
 [data-vibe="quiet"][data-theme="light"] {
   --ap-warn: #8a5300;
@@ -427,3 +441,13 @@ nav,
     padding-inline: 1.5rem;
   }
 }
+
+/* Status words use the readable text tone; dots, cells and borders keep the fill
+   (text-status-* is the class every status surface uses; unlayered so it wins). */
+.text-status-running { color: var(--status-running-text); }
+.text-status-degraded { color: var(--status-degraded-text); }
+.text-status-starting { color: var(--status-starting-text); }
+.text-status-stopped { color: var(--status-stopped-text); }
+.text-status-error { color: var(--status-error-text); }
+.text-status-sleeping { color: var(--status-sleeping-text); }
+.text-status-unknown { color: var(--status-unknown-text); }

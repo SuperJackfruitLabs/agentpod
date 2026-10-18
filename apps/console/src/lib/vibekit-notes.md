@@ -50,3 +50,29 @@ Type roles (`t-page`, `t-section`, `t-body`, `t-label`, `t-metric`) keep their s
 
 - The sonner toaster follows `appearance.theme` (it read mode-watcher, which was never mounted). Regression test: `ui/sonner/sonner.svelte.test.ts`.
 - Monaco follows `appearance.theme` (`vs` / `vs-dark`). xterm re-reads the CSS variables on a vibe or theme change (they now compute to vibekit hex). Shiki uses the GitHub light/dark pair everywhere (the schemes that named other Shiki themes are gone).
+
+## Part 1: primitives and widgets
+
+### Widgets themed from tokens
+
+- `src/lib/utils/vk-colors.ts`: `tokenHex()` reads a computed vibekit token as `#rrggbb`; `vibePalette()` maps the vibe onto code roles (red = danger, green = success, yellow = signal, blue = accent, magenta = `--ap-violet`, cyan = `--ap-info`, or a blue/green mix where info is the accent, as in Studio). Any role under 4.5:1 on the ground has its HSL lightness moved until it passes (`ensureContrast`). `vk-colors.test.ts` checks all 8 vibe x theme pairs against the real token files (`vk-tokens.fixture.ts` parses vibekit's tokens.css, accents.css and app.css).
+- xterm: `terminalTheme()` (16 ANSI colours, hex); the search decorations use signal / accent. Monaco: `monacoTheme()` defined as `agentpod-vibe` and redefined on each change. Both repaint through `onAppearanceChange()`, a MutationObserver on `<html>`'s `data-vibe`/`data-theme`/`data-accent`, so a change that lands inside a view transition still repaints.
+- Shiki: one treatment for code blocks, the markdown preview and chat replies: a css-variables theme (`src/lib/utils/shiki-theme.ts`). The `--shiki-*` variables have token defaults on `:root` in app.css (so light/dark is chosen by `[data-theme]` through the tokens, never `.dark`), and `startWidgetColours()` (layout) writes the contrast-checked hex on `<html>` on every change. Highlighted HTML is never re-rendered for a theme change. The code background is `raised` in all three places. code-block's unused `lightTheme`/`darkTheme` props were removed.
+- Markdown preview: `render-markdown.ts` sanitises marked's output with DOMPurify 3.4.13 (already in the lockfile through svelte-streamdown; now a direct dependency): no scripts, event handlers, forms, iframes, or non-http(s)/mailto/relative URLs.
+
+### Primitives
+
+- `src/lib/styles/primitives.css` (imported by app.css, unlayered so it outranks the primitives' Tailwind utilities; selectors in `:where()` so they add no specificity) gives every primitive its vibe's look by `data-slot` (Button also exposes `data-variant`/`data-size`): Daylight pill buttons with a lift, raised inputs with a 2px inset line, large radii and soft shadows; Paper small radii, ink-ruled buttons and dialogs, italic serif dialog titles; Studio square, ink primary, mono uppercase table heads; Quiet 2px ink outlines, no shadows. Primary buttons are the product accent in Daylight and Paper, the ink primary in Studio and Quiet (as the mockups draw them). 44px targets on coarse pointers only (desktop density unchanged).
+- Status as text: `text-status-*` now reads `--status-*-text` (success-text, signal-text, accent-text, muted, danger, violet), because the fills (Daylight's success `#7fd3a0`) are unreadable as words. Dots, cells and borders keep the fill. Tested at 4.5:1 on bg and surface in all 8 pairs; Studio light needed a darker violet (`#6448b0`).
+- One `WarnBox` (`ui/warn-box`) on the local warn tone replaces six hand-built amber boxes; one `DiffLines` (`ui/diff-lines`) on success/danger tokens serves DiffBlock and ConfigEditor. No Tailwind palette colour remains in src.
+- The five dialogs with a doubled Portal + Overlay now use Dialog.Content's own.
+
+### Wrap or build (vibekit 0.0.13 component vs the console's)
+
+All kept local and restyled; none switched in this part:
+
+- Dialog / Sheet / Drawer: vibekit's take `title`, `description`, `actions` as props and pick a form per vibe from VibeRoot context; the console composes bits-ui parts (`Dialog.Title`, `Dialog.Footer` ...) in about twenty callers whose tests query `role="dialog"` and named buttons. vibekit renders destructive confirms as `alertdialog`, which the existing tests (and ConfirmDialog's callers) do not expect. Switching is a caller rewrite, not a primitive swap.
+- Menu: item-list API (`label`, `onselect`) vs the console's composed dropdown parts with links and checkbox items; kept.
+- Tabs, DataTable, CommandPalette: the console's are bits-ui based with link tabs, sortable tables and a command list whose groups and strings the tests pin; the shell and pages are rebuilt in Parts 2+, where these swaps belong.
+- Notice: no warning tone (`needs` is the signal colour) and it adds an icon and `role="note"`; WarnBox was built instead.
+- EmptyState, Loading, Toast, StateLabel, Face: no caller is touched by this part; svelte-sonner stays (its toaster already follows the theme and reads the token bridge).
