@@ -95,6 +95,26 @@ type Config struct {
 	// long as the session runs — with no credential leaving the node. Absent or no stations: off.
 	// Named per station for the reason StationTokens is. See internal/mcpproxy.
 	MCPProxy *MCPProxy `json:"mcpProxy,omitempty"`
+	// ForgeAPI tunes forge API access: each station gets its own stk instance (own OS user,
+	// state, policy file, proxy port and key, systemd unit). Absent: the defaults below. The
+	// environment variables AGENTPOD_STK_SHARED_POLICY, AGENTPOD_STK_PORTS ("8900-8999") and
+	// AGENTPOD_STK_REGISTRY override these.
+	ForgeAPI *ForgeAPI `json:"forgeApi,omitempty"`
+}
+
+// ForgeAPI configures the per-station stk instances. Zero values mean the defaults.
+type ForgeAPI struct {
+	// SharedPolicy is an operator-authored stk policy file of services every station needs; its
+	// entries are copied into each station's own policy (default /etc/agentpod/stk-shared.yaml;
+	// absent file: none).
+	SharedPolicy string `json:"sharedPolicy,omitempty"`
+	// ProxyPortMin and ProxyPortMax bound the proxy ports handed to station instances
+	// (default 8900-8999).
+	ProxyPortMin int `json:"proxyPortMin,omitempty"`
+	ProxyPortMax int `json:"proxyPortMax,omitempty"`
+	// Registry is the node-owned file that remembers which instance and port belong to which
+	// station (default /var/lib/agentpod/forge-api/stk-instances.json, mode 0600).
+	Registry string `json:"registry,omitempty"`
 }
 
 // MCPProxy configures the loopback MCP proxy.

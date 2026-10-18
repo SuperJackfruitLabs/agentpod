@@ -23,11 +23,27 @@ import (
 // job, so that it is only claimed when stk is usable.
 type forgeAPIHandler struct {
 	inner Handler
-	svc   *forgeapi.Service
+	svc   ForgeAPI
 }
 
+// ForgeAPI is what the handler needs: the five verbs. forgeapi.StationInstances is the node's
+// implementation (it routes each frame to its station's own stk instance); a single
+// forgeapi.Service satisfies it too.
+type ForgeAPI interface {
+	Deliver(context.Context, forgeapi.DeliverParams) (forgeapi.DeliverAck, error)
+	Policy(context.Context, forgeapi.PolicyParams) (forgeapi.PolicyAck, error)
+	Verify(context.Context, forgeapi.VerifyParams) (forgeapi.VerifyAck, error)
+	Revoke(context.Context, forgeapi.RevokeParams) (forgeapi.RevokeAck, error)
+	Status(context.Context, forgeapi.StatusParams) (forgeapi.StatusAck, error)
+}
+
+var (
+	_ ForgeAPI = (*forgeapi.Service)(nil)
+	_ ForgeAPI = (*forgeapi.StationInstances)(nil)
+)
+
 // NewForgeAPIHandler wraps inner with the forge.api verbs.
-func NewForgeAPIHandler(inner Handler, svc *forgeapi.Service) Handler {
+func NewForgeAPIHandler(inner Handler, svc ForgeAPI) Handler {
 	return &forgeAPIHandler{inner: inner, svc: svc}
 }
 

@@ -43,6 +43,19 @@ type SetupOptions struct {
 	AgentUIDs   []int  // uids allowed to use the broker; default: the uid the node spawns harnesses as
 	StateDir    string // stk state directory; default is stk's own (/var/lib/stk)
 	Interactive bool   // informational only (a human is watching); setup behaves identically either way
+
+	// A station's own instance (instances.go) sets these; zero values are stk's defaults.
+	RuntimeDir string // directly under /run
+	ConfigPath string // the instance's policy file
+	ProxyPort  int
+	UnitName   string // systemd unit without ".service"; default "stk"
+	// ForceInstall runs `stk install` even when the pre-check already says separate-user: the
+	// client is not bound to the instance yet (its user does not exist), so that answer describes
+	// some other store.
+	ForceInstall bool
+	// AfterInstall runs once install succeeded, before the isolation re-check: the instance's
+	// policy is seeded and its unit started here.
+	AfterInstall func(context.Context) error
 }
 
 // SetupResult is what setup learned, beyond stk's doctor report.
@@ -54,10 +67,11 @@ type SetupResult struct {
 	Notice    string // something to do next that is not a degradation (e.g. restart the service)
 }
 
-const (
-	reasonRootAgent = "agents run as root; root can read the store"
-	noticeRestart   = "the allowlist was written for these agent uid(s); restart the stk service for a changed unit to take effect: `systemctl daemon-reload && systemctl restart stk`"
-)
+const reasonRootAgent = "agents run as root; root can read the store"
+
+func noticeRestart(unit string) string {
+	return "the allowlist was written for these agent uid(s); restart the stk service for a changed unit to take effect: `systemctl daemon-reload && systemctl restart " + unit + "`"
+}
 
 // sysEnv is what setup needs to know about the machine, injectable for tests.
 type sysEnv struct {
@@ -223,7 +237,7 @@ func ensureF(ctx context.Context, newClient func() stkclient.Client, opts SetupO
 	// An existing separate-user install is left alone, except that an explicit
 	// allowlist from a root operator is always (re)applied: `stk install` is
 	// idempotent and a different --agent-uid set must not be silently ignored.
-	if rep.Isolation.Level == LevelSeparateUser && !(explicit && canInstall) {
+	if rep.Isolation.Level == LevelSeparateUser && !((explicit || opts.ForceInstall) && canInstall) {
 		return finish(rep, false, ""), nil
 	}
 
@@ -250,10 +264,22 @@ func ensureF(ctx context.Context, newClient func() stkclient.Client, opts SetupO
 		user = defaultServiceUser
 	}
 
-	logf("forgeapi: installing stk as user %q for agent uid(s) %v", user, uids)
+	unit := opts.UnitName
+	if unit == "" {
+		unit = "stk"
+	}
+	logf("forgeapi: installing stk as user %q (unit %s) for agent uid(s) %v", user, unit, uids)
 	// Exactly one attempt: a failure is reported, never retried here.
-	if _, err := c.Install(ctx, stkclient.InstallPlan{User: user, Group: user, AgentUIDs: uids, StateDir: opts.StateDir}); err != nil {
+	if _, err := c.Install(ctx, stkclient.InstallPlan{
+		User: user, Group: user, AgentUIDs: uids, StateDir: opts.StateDir, RuntimeDir: opts.RuntimeDir,
+		ConfigPath: opts.ConfigPath, ProxyPort: opts.ProxyPort, UnitName: opts.UnitName,
+	}); err != nil {
 		return degraded(rep, false), scrubErr("stk install failed", err)
+	}
+	if opts.AfterInstall != nil {
+		if err := opts.AfterInstall(ctx); err != nil {
+			return degraded(rep, true), scrubErr("after stk install", err)
+		}
 	}
 
 	after, err := newClient().Doctor(ctx)
@@ -261,13 +287,13 @@ func ensureF(ctx context.Context, newClient func() stkclient.Client, opts SetupO
 		return degraded(rep, true), scrubErr("stk doctor after install", err)
 	}
 	if after.Isolation.Level != LevelSeparateUser {
-		return degraded(after, true), fmt.Errorf("%w (level %q): start the service with `systemctl enable --now stk`, then run setup again; reasons: %s",
-			ErrNotSeparateUser, clean(after.Isolation.Level), clean(strings.Join(after.Isolation.Reasons, "; ")))
+		return degraded(after, true), fmt.Errorf("%w (level %q): start the service with `systemctl enable --now %s`, then run setup again; reasons: %s",
+			ErrNotSeparateUser, clean(after.Isolation.Level), unit, clean(strings.Join(after.Isolation.Reasons, "; ")))
 	}
 	logf("forgeapi: stk isolation is %s (user %q)", after.Isolation.Level, user)
 	notice := ""
 	if rep.Isolation.Level == LevelSeparateUser {
-		notice = noticeRestart
+		notice = noticeRestart(unit)
 	}
 	return finish(after, true, notice), nil
 }

@@ -152,6 +152,12 @@ type Service struct {
 	NewClient func() stkclient.Client
 	// PolicyPath is stk's policy file; DefaultPolicyPath when empty.
 	PolicyPath string
+	// SharedPolicyPath is the node-level shared base policy (shared.go); empty or absent means
+	// none. Its entries are copied into PolicyPath on every policy write.
+	SharedPolicyPath string
+	// Station, when set, binds this Service to one station's stk instance: a frame for any other
+	// station is refused before anything is read or run. (StationInstances sets it.)
+	Station string
 	// Unwire removes the harness wiring for a grant (Task 5). Nil until then.
 	Unwire func(grantID string) error
 	// Bypass is the per-harness bypass check (Task 6); its result rides in the verify ack. Nil
@@ -193,6 +199,13 @@ func stkUnavailableCode(err error) (string, bool) {
 }
 
 // ready ensures stk and returns a client built for the world as it is now.
+// lockForRemoval blocks every verb on this Service until the returned func is called, after the
+// ones in flight have finished.
+func (s *Service) lockForRemoval() func() {
+	s.mu.Lock()
+	return s.mu.Unlock
+}
+
 func (s *Service) ready(ctx context.Context) (stkclient.Client, SetupResult, error) {
 	if s.Ensure == nil || s.NewClient == nil {
 		return nil, SetupResult{}, codedf("stk-unavailable", "forge API access is not configured on this node")
@@ -202,6 +215,8 @@ func (s *Service) ready(ctx context.Context) (stkclient.Client, SetupResult, err
 		code := "stk-setup-failed"
 		if c, ok := stkUnavailableCode(err); ok {
 			code = c
+		} else if errors.Is(err, ErrInstanceUnavailable) {
+			code = "station-instance-unavailable"
 		}
 		return nil, SetupResult{}, coded(code, err)
 	}
@@ -217,23 +232,44 @@ func checkNonEmpty(fields map[string]string) error {
 	return nil
 }
 
-// refuseOtherStation is a TEMPORARY fail-closed guard. One node runs one stk with one proxy key,
-// so every harness on the node can use every brokered credential: a second station's grant would
-// let the first station's agent act as it (and vice versa). Until per-station isolation exists
-// (one stk per station, or stk caller identity), a node serves a single station: deliver is
-// refused while the policy holds managed entries labelled with a different station. Several
-// grants for the same station are fine. Remove this when isolation lands.
-func refuseOtherStation(policy []byte, station string) error {
-	all, err := ManagedEntries(policy)
-	if err != nil {
-		return coded("policy-invalid", err)
-	}
-	for _, m := range all {
-		if m.Station != station {
-			return codedf("station-isolation-unsupported", "one broker per node currently serves a single station; this node already holds grants for another station")
-		}
+// checkStation refuses a frame meant for another station than the one this Service serves.
+func (s *Service) checkStation(station string) error {
+	if s.Station != "" && station != s.Station {
+		return codedf("station-mismatch", "this stk instance serves another station")
 	}
 	return nil
+}
+
+// sharedBytes reads the shared base policy; a missing file is "no shared entries".
+func (s *Service) sharedBytes() ([]byte, error) {
+	if s.SharedPolicyPath == "" {
+		return nil, nil
+	}
+	b, _, err := readPolicyFile(s.SharedPolicyPath)
+	return b, err
+}
+
+// withShared brings prev's shared entries in line with the shared file. strict: an unusable
+// shared file is an error (writes that add or change something); otherwise it is logged and prev
+// is returned (a revoke must not be blocked by an operator's broken file).
+func (s *Service) withShared(prev []byte, station string, strict bool) ([]byte, error) {
+	shared, err := s.sharedBytes()
+	var out []byte
+	if err == nil {
+		var skipped []string
+		out, skipped, err = ApplyShared(prev, shared, station)
+		for _, sk := range skipped {
+			logf("forgeapi: shared base policy entry skipped for the station: %s", sk)
+		}
+	}
+	if err != nil {
+		if strict {
+			return nil, coded("shared-policy-invalid", err)
+		}
+		logf("forgeapi: shared base policy not applied: %v", clean(err.Error()))
+		return prev, nil
+	}
+	return out, nil
 }
 
 // Deliver stores the policy entry, opens the sealed credential into stk and reloads. On any
@@ -243,19 +279,21 @@ func refuseOtherStation(policy []byte, station string) error {
 // Known limit (availability only): the credential is replaced by HandoverOpen BEFORE the reload,
 // so if the reload then rejects an update to an existing grant, the policy is restored but the
 // previous credential is already gone. Re-delivering heals it; nothing is exposed.
-func (s *Service) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, error) {
+// validateDeliver checks a deliver frame before anything is installed, read or written, and
+// returns the policy entry it describes.
+func validateDeliver(p DeliverParams) (PolicyEntry, error) {
 	if err := checkNonEmpty(map[string]string{
 		"stationId": p.StationID, "stationKey": p.StationKey, "grantId": p.GrantID, "provider": p.Provider,
 		"instance": p.Instance, "mode": p.Mode, "serviceName": p.ServiceName, "preset": p.Preset,
 		"expectLogin": p.ExpectLogin,
 	}); err != nil {
-		return DeliverAck{}, err
+		return PolicyEntry{}, err
 	}
 	if !strings.HasPrefix(string(p.Sealed), HandoverPrefix) || len(p.Sealed) == len(HandoverPrefix) {
-		return DeliverAck{}, codedf("invalid-params", "sealed is not an stk handover envelope")
+		return PolicyEntry{}, codedf("invalid-params", "sealed is not an stk handover envelope")
 	}
 	if len(p.Sealed) > SealedMax {
-		return DeliverAck{}, codedf("invalid-params", "sealed is larger than %d characters", SealedMax)
+		return PolicyEntry{}, codedf("invalid-params", "sealed is larger than %d characters", SealedMax)
 	}
 	entry := PolicyEntry{
 		Service: p.ServiceName, Provider: p.Provider, Instance: p.Instance, Mode: p.Mode,
@@ -264,7 +302,18 @@ func (s *Service) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, err
 	}
 	// Checked before anything is installed or written: a bad frame must not cost an install.
 	if _, err := MergePolicy(nil, entry); err != nil {
-		return DeliverAck{}, coded(entryCode(err), err)
+		return PolicyEntry{}, coded(entryCode(err), err)
+	}
+	return entry, nil
+}
+
+func (s *Service) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, error) {
+	entry, err := validateDeliver(p)
+	if err != nil {
+		return DeliverAck{}, err
+	}
+	if err := s.checkStation(p.StationID); err != nil {
+		return DeliverAck{}, err
 	}
 
 	s.mu.Lock()
@@ -279,10 +328,11 @@ func (s *Service) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, err
 	if err != nil {
 		return DeliverAck{}, coded("policy-read-failed", err)
 	}
-	if err := refuseOtherStation(prev, p.StationID); err != nil {
+	base, err := s.withShared(prev, p.StationID, true)
+	if err != nil {
 		return DeliverAck{}, err
 	}
-	merged, err := MergePolicy(prev, entry)
+	merged, err := MergePolicy(base, entry)
 	if err != nil {
 		return DeliverAck{}, coded(entryCode(err), err)
 	}
@@ -355,6 +405,9 @@ func (s *Service) Policy(ctx context.Context, p PolicyParams) (PolicyAck, error)
 	if strings.TrimSpace(p.StationID) == "" || strings.TrimSpace(p.GrantID) == "" {
 		return PolicyAck{}, codedf("invalid-params", "stationId and grantId are required")
 	}
+	if err := s.checkStation(p.StationID); err != nil {
+		return PolicyAck{OK: false, Error: err.Error()}, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -363,7 +416,11 @@ func (s *Service) Policy(ctx context.Context, p PolicyParams) (PolicyAck, error)
 	if err != nil {
 		return PolicyAck{OK: false, Error: coded("policy-read-failed", err).Error()}, nil
 	}
-	updated, found, err := UpdatePolicy(prev, p.StationID, p.GrantID, p.Preset, p.Rules, p.AllowGraphql)
+	base, err := s.withShared(prev, p.StationID, true)
+	if err != nil {
+		return PolicyAck{OK: false, Error: err.Error()}, nil
+	}
+	updated, found, err := UpdatePolicy(base, p.StationID, p.GrantID, p.Preset, p.Rules, p.AllowGraphql)
 	if err != nil {
 		return PolicyAck{OK: false, Error: coded("invalid-policy", err).Error()}, nil
 	}
@@ -410,6 +467,9 @@ func (s *Service) Verify(ctx context.Context, p VerifyParams) (VerifyAck, error)
 	if strings.TrimSpace(p.StationID) == "" || strings.TrimSpace(p.GrantID) == "" || strings.TrimSpace(p.ExpectLogin) == "" {
 		return VerifyAck{}, codedf("invalid-params", "stationId, grantId and expectLogin are required")
 	}
+	if err := s.checkStation(p.StationID); err != nil {
+		return VerifyAck{}, err
+	}
 	client, res, err := s.ready(ctx)
 	if err != nil {
 		return VerifyAck{}, err
@@ -449,6 +509,9 @@ func (s *Service) Revoke(ctx context.Context, p RevokeParams) (RevokeAck, error)
 	if strings.TrimSpace(p.StationID) == "" || strings.TrimSpace(p.GrantID) == "" {
 		return RevokeAck{}, codedf("invalid-params", "stationId and grantId are required")
 	}
+	if err := s.checkStation(p.StationID); err != nil {
+		return RevokeAck{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -487,6 +550,10 @@ func nothingToWithdraw(err error) bool {
 
 // removeLocked forgets the credentials, removes the entries, reloads and unwires. mu is held.
 func (s *Service) removeLocked(ctx context.Context, client stkclient.Client, entries []ManagedEntry) error {
+	station := ""
+	if len(entries) > 0 {
+		station = entries[0].Station
+	}
 	grants := map[string]bool{}
 	for _, m := range entries {
 		if err := client.RevokeLocal(ctx, m.Service); err != nil && !nothingToWithdraw(err) {
@@ -504,6 +571,9 @@ func (s *Service) removeLocked(ctx context.Context, client stkclient.Client, ent
 		return coded("policy-invalid", err)
 	}
 	if len(removed) > 0 {
+		if station != "" {
+			updated, _ = s.withShared(updated, station, false)
+		}
 		if err := writePolicyFile(path, updated); err != nil {
 			return coded("policy-write-failed", err)
 		}
@@ -526,53 +596,15 @@ func (s *Service) removeLocked(ctx context.Context, client stkclient.Client, ent
 	return nil
 }
 
-// PruneUnhosted removes the managed entries (and their credentials) of stations this node no
-// longer hosts. An entry with no station label is not the node's to judge and is kept. It
-// returns the grants it removed. Wiring it to the connect event is the caller's job.
-func (s *Service) PruneUnhosted(ctx context.Context, hosted []string) ([]string, error) {
-	keep := map[string]bool{}
-	for _, h := range hosted {
-		keep[h] = true
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	data, _, err := readPolicyFile(s.path())
-	if err != nil {
-		return nil, coded("policy-read-failed", err)
-	}
-	all, err := ManagedEntries(data)
-	if err != nil {
-		return nil, coded("policy-invalid", err)
-	}
-	var stale []ManagedEntry
-	for _, m := range all {
-		if m.Station != "" && !keep[m.Station] {
-			stale = append(stale, m)
-		}
-	}
-	if len(stale) == 0 {
-		return nil, nil
-	}
-	if s.NewClient == nil {
-		return nil, codedf("stk-unavailable", "forge API access is not configured on this node")
-	}
-	if err := s.removeLocked(ctx, s.NewClient(), stale); err != nil {
-		return nil, err
-	}
-	ids := make([]string, len(stale))
-	for i, m := range stale {
-		ids[i] = m.Grant
-	}
-	return ids, nil
-}
-
 // Status reports the station's handover public key (required by the hub, present with zero
 // grants), the grants this node holds for the station and the isolation level. If the key
 // cannot be read the whole call fails: a stale or empty key would make the hub seal to nothing.
 func (s *Service) Status(ctx context.Context, p StatusParams) (StatusAck, error) {
 	if strings.TrimSpace(p.StationID) == "" {
 		return StatusAck{}, codedf("invalid-params", "stationId is required")
+	}
+	if err := s.checkStation(p.StationID); err != nil {
+		return StatusAck{}, err
 	}
 	client, res, err := s.ready(ctx)
 	if err != nil {

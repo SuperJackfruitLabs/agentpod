@@ -214,6 +214,9 @@ func (e PolicyEntry) validate() error {
 	if err := checkLabel("grant", e.Grant, true); err != nil {
 		return err
 	}
+	if strings.HasPrefix(e.Grant, SharedGrantPrefix) {
+		return invalid("grant %q uses the shared-entry marker", e.Grant)
+	}
 	if err := checkLabel("principal", e.Principal, false); err != nil {
 		return err
 	}
@@ -399,7 +402,7 @@ func ManagedEntries(existing []byte) ([]ManagedEntry, error) {
 			continue
 		}
 		g := labelOf(val, MarkerLabel)
-		if g == "" {
+		if g == "" || strings.HasPrefix(g, SharedGrantPrefix) {
 			continue
 		}
 		out = append(out, ManagedEntry{
@@ -442,7 +445,7 @@ func UpdatePolicy(existing []byte, station, grant, preset string, rules []Rule, 
 	}
 	for i := 0; i+1 < len(services.Content); i += 2 {
 		val := services.Content[i+1]
-		if scalarOf(val, "kind") != "forge" || labelOf(val, MarkerLabel) != grant {
+		if scalarOf(val, "kind") != "forge" || labelOf(val, MarkerLabel) != grant || strings.HasPrefix(grant, SharedGrantPrefix) {
 			continue
 		}
 		if station != "" && labelOf(val, "station") != station {
@@ -484,7 +487,7 @@ func RemoveEntries(existing []byte, grants map[string]bool) (out []byte, removed
 	kept := services.Content[:0:0]
 	for i := 0; i+1 < len(services.Content); i += 2 {
 		val := services.Content[i+1]
-		if g := labelOf(val, MarkerLabel); g != "" && scalarOf(val, "kind") == "forge" && grants[g] {
+		if g := labelOf(val, MarkerLabel); g != "" && !strings.HasPrefix(g, SharedGrantPrefix) && scalarOf(val, "kind") == "forge" && grants[g] {
 			removed = append(removed, services.Content[i].Value)
 			continue
 		}
@@ -533,6 +536,9 @@ func loadDoc(existing []byte, create bool) (doc, services *yaml.Node, err error)
 		}
 		if v.Kind != yaml.MappingNode {
 			return nil, nil, fmt.Errorf("%w: services is not a mapping", ErrBadPolicyFile)
+		}
+		if len(v.Content) == 0 {
+			v.Style = 0 // `services: {}` must not make every entry added later flow-style
 		}
 		return doc, v, nil
 	}

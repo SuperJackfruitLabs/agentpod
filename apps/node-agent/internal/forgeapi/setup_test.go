@@ -467,3 +467,63 @@ func TestEnsurerPanicDoesNotWedgeLaterCalls(t *testing.T) {
 		t.Fatal("a panic in the first run left the in-flight marker set")
 	}
 }
+
+// ---- Task 3b: setup for one station's instance ----
+
+func TestSetupPassesInstanceLayoutToInstall(t *testing.T) {
+	f := &fakeStk{doctors: []stkclient.DoctorReport{rep("same-user"), rep("separate-user")}}
+	_, err := ensure(context.Background(), f, SetupOptions{
+		ServiceUser: "stk-ab-123456", StateDir: "/var/lib/x/stk-ab-123456", RuntimeDir: "/run/stk-ab-123456",
+		ConfigPath: "/etc/x/stk-ab-123456/supertoolkit.yaml", ProxyPort: 8901, UnitName: "stk-ab-123456",
+		AgentUIDs: []int{7},
+	}, rootLinux())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := f.installs[0]
+	if p.RuntimeDir != "/run/stk-ab-123456" || p.ConfigPath != "/etc/x/stk-ab-123456/supertoolkit.yaml" ||
+		p.ProxyPort != 8901 || p.UnitName != "stk-ab-123456" {
+		t.Fatalf("plan = %+v", p)
+	}
+}
+
+func TestSetupForceInstallRunsInstallEvenWhenDoctorSaysSeparateUser(t *testing.T) {
+	// The doctor of a client that is not bound to an instance yet describes some other store.
+	f := &fakeStk{doctors: []stkclient.DoctorReport{rep("separate-user")}}
+	res, err := ensure(context.Background(), f, SetupOptions{ForceInstall: true, UnitName: "stk-x"}, rootLinux(1001))
+	if err != nil || f.installCount() != 1 || !res.Installed {
+		t.Fatalf("err=%v installs=%d res=%+v", err, f.installCount(), res)
+	}
+}
+
+func TestSetupRunsAfterInstallBeforeTheRecheck(t *testing.T) {
+	f := &fakeStk{stateful: true, doctors: []stkclient.DoctorReport{rep("same-user"), rep("separate-user")}}
+	var order []string
+	opts := SetupOptions{AgentUIDs: []int{7}, UnitName: "stk-x", AfterInstall: func(context.Context) error {
+		f.mu.Lock()
+		order = append(order, "after")
+		f.mu.Unlock()
+		return nil
+	}}
+	if _, err := ensure(context.Background(), f, opts, rootLinux()); err != nil {
+		t.Fatal(err)
+	}
+	if len(order) != 1 {
+		t.Fatalf("AfterInstall calls = %v", order)
+	}
+	// A failing hook is reported, scrubbed, and leaves the result degraded.
+	f2 := &fakeStk{doctors: []stkclient.DoctorReport{rep("same-user")}}
+	opts.AfterInstall = func(context.Context) error { return errors.New("systemctl failed " + secretish) }
+	res, err := ensure(context.Background(), f2, opts, rootLinux())
+	if err == nil || strings.Contains(err.Error(), secretish) || !res.Degraded {
+		t.Fatalf("err=%v res=%+v", err, res)
+	}
+}
+
+func TestSetupMessagesNameTheUnit(t *testing.T) {
+	f := &fakeStk{doctors: []stkclient.DoctorReport{rep("same-user"), rep("same-user")}}
+	_, err := ensure(context.Background(), f, SetupOptions{AgentUIDs: []int{7}, UnitName: "stk-ab-123456"}, rootLinux())
+	if err == nil || !strings.Contains(err.Error(), "systemctl enable --now stk-ab-123456") {
+		t.Fatalf("err = %v", err)
+	}
+}

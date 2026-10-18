@@ -40,6 +40,7 @@ type brokerStub struct {
 	policyPath string
 	onReload   func(policy []byte) error
 	onRevoke   func() error
+	onOpen     func() // runs inside HandoverOpen, before it returns
 }
 
 func (b *brokerStub) rec(s string) {
@@ -66,6 +67,9 @@ func (b *brokerStub) HandoverKey(context.Context) (string, error) {
 
 func (b *brokerStub) HandoverOpen(_ context.Context, service, envelope string) error {
 	b.rec("open:" + service)
+	if b.onOpen != nil {
+		b.onOpen()
+	}
 	b.mu.Lock()
 	if b.envelopes == nil {
 		b.envelopes = map[string]string{}
@@ -138,8 +142,8 @@ func (h *harness) policy() []byte {
 	return b
 }
 
-// seedOtherStation writes a managed entry for another station straight into the file, as an
-// older node (before the single-station guard) would have left it.
+// seedOtherStation writes a managed entry labelled with another station straight into the file
+// (a leftover; a station's own file should never hold one).
 func (h *harness) seedOtherStation(grant, host, station string) {
 	h.t.Helper()
 	e := baseEntry()
@@ -678,50 +682,6 @@ func TestVerifyBypassHookRidesInTheAck(t *testing.T) {
 	}
 }
 
-func TestPruneUnhostedRemovesOnlyManagedEntriesOfUnhostedStations(t *testing.T) {
-	h := newHarness(t)
-	if err := os.WriteFile(h.path, []byte(operatorFile), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	var unwired []string
-	h.svc.Unwire = func(g string) error { unwired = append(unwired, g); return nil }
-	keep := deliverParams("fag_aaa111", "a.example.com")
-	if _, err := h.svc.Deliver(t.Context(), keep); err != nil {
-		t.Fatal(err)
-	}
-	h.seedOtherStation("fag_bbb222", "b.example.com", "stn_gone")
-	h.stub.calls = nil
-	ids, err := h.svc.PruneUnhosted(t.Context(), []string{"stn_1"})
-	if err != nil || len(ids) != 1 || ids[0] != "fag_bbb222" {
-		t.Fatalf("pruned %v, %v", ids, err)
-	}
-	p := string(h.policy())
-	if strings.Contains(p, "forge-forgejo-bbb222") || !strings.Contains(p, "forge-forgejo-aaa111") || !strings.Contains(p, "slack:") {
-		t.Fatalf("wrong entries removed:\n%s", p)
-	}
-	if got := strings.Join(h.stub.callList(), ","); got != "revoke:forge-forgejo-bbb222,reload" {
-		t.Fatalf("calls = %s", got)
-	}
-	if len(unwired) != 1 || unwired[0] != "fag_bbb222" {
-		t.Fatalf("unwired %v", unwired)
-	}
-	// Nothing hosted at all: both managed entries go, the operator's slack stays.
-	if ids, err := h.svc.PruneUnhosted(t.Context(), nil); err != nil || len(ids) != 1 {
-		t.Fatalf("second prune = %v, %v", ids, err)
-	}
-	if !strings.Contains(string(h.policy()), "slack:") {
-		t.Fatal("operator entry removed")
-	}
-	// An entry with no station label is not the node's to judge.
-	h2 := newHarness(t)
-	if err := os.WriteFile(h2.path, []byte("services:\n  x1:\n    kind: forge\n    labels:\n      grant: g1\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	if ids, _ := h2.svc.PruneUnhosted(t.Context(), nil); len(ids) != 0 {
-		t.Fatalf("pruned a station-less entry: %v", ids)
-	}
-}
-
 func TestSecondGrantOnAProviderGetsADerivedEnvVarAndKeepsItOnReplay(t *testing.T) {
 	h := newHarness(t)
 	a := deliverParams("fag_aaa111", "a.example.com")
@@ -785,62 +745,6 @@ func TestConcurrentDeliverAndRevokeLeaveAConsistentFile(t *testing.T) {
 }
 
 // ---- review fix round 1 ----
-
-func TestDeliverRefusesASecondStationWhileTheFirstHoldsAGrant(t *testing.T) {
-	h := newHarness(t)
-	if _, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "a.example.com")); err != nil {
-		t.Fatal(err)
-	}
-	before := h.policy()
-	h.stub.calls = nil
-	other := deliverParams("fag_bbb222", "b.example.com")
-	other.StationID = "stn_2"
-	ack, err := h.svc.Deliver(t.Context(), other)
-	if err == nil || ack.OK || ack.Stored {
-		t.Fatalf("second station accepted: %+v, %v", ack, err)
-	}
-	if !strings.HasPrefix(err.Error(), "station-isolation-unsupported:") || !strings.Contains(err.Error(), "single station") {
-		t.Errorf("error = %q", err)
-	}
-	if !bytes.Equal(before, h.policy()) {
-		t.Error("policy file changed")
-	}
-	if len(h.stub.callList()) != 0 {
-		t.Errorf("stk was called: %v", h.stub.callList())
-	}
-}
-
-func TestDeliverAllowsTheSameStationOnAnotherHost(t *testing.T) {
-	h := newHarness(t)
-	for _, p := range []DeliverParams{deliverParams("fag_aaa111", "a.example.com"), deliverParams("fag_bbb222", "b.example.com")} {
-		if _, err := h.svc.Deliver(t.Context(), p); err != nil {
-			t.Fatalf("same station refused: %v", err)
-		}
-	}
-}
-
-func TestAnotherStationIsAcceptedOnceTheFirstHasNoGrants(t *testing.T) {
-	other := deliverParams("fag_bbb222", "b.example.com")
-	other.StationID = "stn_2"
-	// revoked
-	h := newHarness(t)
-	_, _ = h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "a.example.com"))
-	if _, err := h.svc.Revoke(t.Context(), RevokeParams{StationID: "stn_1", GrantID: "fag_aaa111"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.svc.Deliver(t.Context(), other); err != nil {
-		t.Fatalf("after revoke: %v", err)
-	}
-	// pruned
-	h2 := newHarness(t)
-	_, _ = h2.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "a.example.com"))
-	if _, err := h2.svc.PruneUnhosted(t.Context(), []string{"stn_2"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h2.svc.Deliver(t.Context(), other); err != nil {
-		t.Fatalf("after prune: %v", err)
-	}
-}
 
 // stk resolves a service through the policy, so forgetting a refused entry's credential only
 // works while the entry is still in the file.
@@ -948,5 +852,129 @@ func TestEnsureRefusesAVersionBelowTheFloor(t *testing.T) {
 	}
 	if _, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "forge.example.com")); err == nil || !strings.HasPrefix(err.Error(), "stk-too-old:") {
 		t.Errorf("Deliver = %v, want stk-too-old first", err)
+	}
+}
+
+// ---- Task 3b: the shared base policy rides every policy write ----
+
+func (h *harness) writeShared(body string) string {
+	h.t.Helper()
+	p := filepath.Join(h.t.TempDir(), "stk-shared.yaml")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		h.t.Fatal(err)
+	}
+	h.svc.SharedPolicyPath = p
+	return p
+}
+
+func TestDeliverCopiesSharedEntriesIntoThePolicyBeforeReload(t *testing.T) {
+	h := newHarness(t)
+	h.writeShared(sharedBase)
+	var seenAtReload []byte
+	h.stub.onReload = func(policy []byte) error { seenAtReload = policy; return nil }
+	if _, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "forge.example.com")); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"slack:", "shared-forge:", "shared:slack", "forge-forgejo-aaa111"} {
+		if !strings.Contains(string(seenAtReload), want) {
+			t.Errorf("policy at reload lacks %q:\n%s", want, seenAtReload)
+		}
+	}
+}
+
+func TestPolicyUpdateRefreshesSharedEntriesAndKeepsGrantEntries(t *testing.T) {
+	h := newHarness(t)
+	sp := h.writeShared(sharedBase)
+	if _, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "forge.example.com")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sp, []byte(strings.Replace(sharedBase, "hooks.example.com", "hooks9.example.com", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ack, err := h.svc.Policy(t.Context(), PolicyParams{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "issues", Rules: []Rule{}})
+	if err != nil || !ack.OK {
+		t.Fatalf("%+v %v", ack, err)
+	}
+	pol := h.policy()
+	if !strings.Contains(string(pol), "hooks9.example.com") || strings.Contains(string(pol), "hooks.example.com") {
+		t.Errorf("shared entry not refreshed:\n%s", pol)
+	}
+	if got := serviceNode(t, pol, "forge-forgejo-aaa111")["preset"]; got != "issues" {
+		t.Errorf("grant entry = %v", got)
+	}
+}
+
+func TestDeliverWithAnUnreadableSharedFileChangesNothing(t *testing.T) {
+	h := newHarness(t)
+	h.writeShared("services: [x]")
+	ack, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "forge.example.com"))
+	if err == nil || ack.OK || !strings.HasPrefix(err.Error(), "shared-policy-invalid:") {
+		t.Fatalf("%+v %v", ack, err)
+	}
+	if h.policy() != nil || len(h.stub.callList()) != 0 {
+		t.Errorf("file or stk touched: %q %v", h.policy(), h.stub.callList())
+	}
+}
+
+func TestRevokeStillWorksWithAnUnreadableSharedFile(t *testing.T) {
+	h := newHarness(t)
+	h.writeShared(sharedBase)
+	if _, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "forge.example.com")); err != nil {
+		t.Fatal(err)
+	}
+	h.writeShared("services: [x]")
+	ack, err := h.svc.Revoke(t.Context(), RevokeParams{StationID: "stn_1", GrantID: "fag_aaa111"})
+	if err != nil || !ack.Removed {
+		t.Fatalf("%+v %v", ack, err)
+	}
+	if m, _ := ManagedEntries(h.policy()); len(m) != 0 {
+		t.Errorf("grant left: %v", m)
+	}
+}
+
+func TestMissingSharedFileIsNoSharedEntries(t *testing.T) {
+	h := newHarness(t)
+	h.svc.SharedPolicyPath = filepath.Join(t.TempDir(), "absent.yaml")
+	if _, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "forge.example.com")); err != nil {
+		t.Fatal(err)
+	}
+	if len(SharedServices(h.policy())) != 0 {
+		t.Errorf("shared entries from nowhere:\n%s", h.policy())
+	}
+}
+
+func TestSharedHostBlocksAGrantOnTheSameHostWithAClearCode(t *testing.T) {
+	h := newHarness(t)
+	h.writeShared(sharedBase)
+	// pkg.example.com is brokered by a shared entry; a grant for it conflicts rather than
+	// silently shadowing the shared service.
+	_, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "pkg.example.com"))
+	if err == nil || !strings.HasPrefix(err.Error(), "policy-conflict:") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestAServiceBoundToOneStationRefusesFramesForAnother(t *testing.T) {
+	h := newHarness(t)
+	h.svc.Station = "stn_1"
+	other := deliverParams("fag_bbb222", "b.example.com")
+	other.StationID = "stn_2"
+	if _, err := h.svc.Deliver(t.Context(), other); err == nil || !strings.HasPrefix(err.Error(), "station-mismatch:") {
+		t.Fatalf("deliver: %v", err)
+	}
+	if _, err := h.svc.Status(t.Context(), StatusParams{StationID: "stn_2"}); err == nil || !strings.HasPrefix(err.Error(), "station-mismatch:") {
+		t.Fatalf("status: %v", err)
+	}
+	if ack, _ := h.svc.Policy(t.Context(), PolicyParams{StationID: "stn_2", GrantID: "g", Preset: "read"}); ack.OK || !strings.HasPrefix(ack.Error, "station-mismatch:") {
+		t.Fatalf("policy: %+v", ack)
+	}
+	if _, err := h.svc.Revoke(t.Context(), RevokeParams{StationID: "stn_2", GrantID: "g"}); err == nil {
+		t.Fatal("revoke")
+	}
+	if _, err := h.svc.Verify(t.Context(), VerifyParams{StationID: "stn_2", GrantID: "g", ExpectLogin: "x"}); err == nil {
+		t.Fatal("verify")
+	}
+	if len(h.stub.callList()) != 0 || h.policy() != nil {
+		t.Fatal("work done for the wrong station")
 	}
 }
