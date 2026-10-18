@@ -1514,7 +1514,7 @@ describe("same-user acknowledgement for write grants", () => {
     expect(err?.code).toBe("same-user-acknowledgement-required");
     expect(err?.status).toBe(409);
     expect(h.minted).toEqual([]);
-    expect(await rawSql`SELECT id FROM station_forge_api_grants WHERE station_id_snapshot = ${st.id}`).toEqual([]);
+    expect((await rawSql`SELECT id FROM station_forge_api_grants WHERE station_id_snapshot = ${st.id}`).length).toBe(0);
   });
 
   test("read with a write allow rule counts as a write grant", async () => {
