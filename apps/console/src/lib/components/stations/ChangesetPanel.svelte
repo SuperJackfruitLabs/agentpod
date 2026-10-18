@@ -9,7 +9,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { Empty } from "$lib/components/ui/empty";
-  import CodeBlock from "$lib/components/ui/code-block/code-block.svelte";
+  import { DiffLines } from "$lib/components/ui/diff-lines";
 
   interface Props {
     stationId: string;
@@ -215,7 +215,7 @@
                 No textual diff to show for this file.
               </p>
             {:else}
-              <CodeBlock code={patch.content} language="diff" />
+              <div class="ap-diff-box"><DiffLines patch={patch.content} /></div>
             {/if}
           {/if}
         </Card.Content>

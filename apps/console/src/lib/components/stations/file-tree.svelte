@@ -175,6 +175,61 @@
     });
   }
 
+
+  // ── Tree keyboard (WAI-ARIA tree view) ──────────────────────────────────────
+  /** The treeitem that holds the tab stop; the first root entry until one is focused. */
+  let focusPath = $state<string | null>(null);
+  const currentPath = $derived.by(() => {
+    const first = sortEntries(rootEntries)[0]?.path ?? null;
+    if (focusPath === null) return first;
+    // A focused row inside a folder that was closed or deleted gives the stop back.
+    const visible = focusPath.split("/").slice(0, -1).every((_, i, parts) =>
+      expandedPaths.has(parts.slice(0, i + 1).join("/")),
+    );
+    return visible ? focusPath : first;
+  });
+
+  function visibleItems(): HTMLElement[] {
+    return [...(container?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])];
+  }
+
+  function entryFor(path: string): FsEntry | undefined {
+    if (!path.includes("/")) return rootEntries.find((x) => x.path === path);
+    return getChildren(path.substring(0, path.lastIndexOf("/"))).find((x) => x.path === path);
+  }
+
+  async function handleTreeKeydown(e: KeyboardEvent) {
+    const item = e.target as HTMLElement;
+    if (item.getAttribute?.("role") !== "treeitem") return;
+    const path = item.dataset.treePath ?? "";
+    const entry = entryFor(path);
+    const items = visibleItems();
+    const at = items.indexOf(item);
+    const focusAt = (i: number) => items[Math.max(0, Math.min(items.length - 1, i))]?.focus();
+    switch (e.key) {
+      case "ArrowDown": focusAt(at + 1); break;
+      case "ArrowUp": focusAt(at - 1); break;
+      case "Home": focusAt(0); break;
+      case "End": focusAt(items.length - 1); break;
+      case "ArrowRight":
+        if (entry?.type !== "dir") return;
+        if (!expandedPaths.has(path)) await ensureExpanded(path);
+        else item.querySelector<HTMLElement>('[role="group"] > [role="treeitem"]')?.focus();
+        break;
+      case "ArrowLeft":
+        if (entry?.type === "dir" && expandedPaths.has(path)) await toggleDir(path);
+        else item.parentElement?.closest<HTMLElement>('[role="treeitem"]')?.focus();
+        break;
+      case "Enter":
+      case " ":
+        if (entry) handleEntryClick(entry);
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+  }
+
   // ── Write helpers ────────────────────────────────────────────────────────────
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -313,88 +368,100 @@
   {:else if rootEntries.length === 0}
     <p class="text-sm text-muted-foreground p-3">No files found.</p>
   {:else}
-    <div class="py-1">
+    <!-- A real tree (WAI-ARIA tree view): one treeitem in the tab order, arrows,
+         Home and End move between visible rows, Right/Left open and close folders. -->
+    <div class="ap-ftree py-1" role="tree" aria-label="Files" tabindex="-1" onkeydown={handleTreeKeydown}>
       {#snippet renderEntry(entry: FsEntry, depth: number)}
-        <!-- Row wrapper: holds the entry button + optional action buttons -->
+        {@const isDir = entry.type === "dir"}
+        {@const open = isDir && expandedPaths.has(entry.path)}
         <div
-          class="group flex items-center w-full rounded-sm
-            {entry.path === activePath ? 'bg-primary/10 text-primary' : 'hover:bg-muted/30 text-foreground'}"
-          style:padding-left="{depth * 16 + 4}px"
+          role="treeitem"
+          aria-label={entry.name}
+          aria-level={depth + 1}
+          aria-selected={entry.path === activePath}
+          aria-expanded={isDir ? open : undefined}
+          tabindex={entry.path === currentPath ? 0 : -1}
           data-tree-path={entry.path}
+          class="ap-ftree-item outline-none"
+          onfocus={() => (focusPath = entry.path)}
         >
-          <!-- Main entry button -->
-          <button
-            type="button"
-            class="flex flex-1 items-center gap-1.5 py-1.5 text-sm font-mono text-left pr-1 pl-1 min-w-0"
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="ap-ftree-row group flex items-center w-full rounded-sm cursor-pointer
+              {entry.path === activePath ? 'bg-primary/10 text-primary' : 'hover:bg-muted/30 text-foreground'}"
+            data-active={entry.path === activePath ? "" : undefined}
+            style:padding-left="{depth * 16 + 4}px"
             onclick={() => handleEntryClick(entry)}
           >
-            {#if entry.type === "dir"}
-              <span class="flex items-center justify-center w-4 shrink-0 text-muted-foreground">
-                {#if loadingFolders.has(entry.path)}
-                  <Loader2 class="h-3.5 w-3.5 animate-spin" />
-                {:else if expandedPaths.has(entry.path)}
-                  <ChevronDown class="h-3.5 w-3.5" />
-                {:else}
-                  <ChevronRight class="h-3.5 w-3.5" />
-                {/if}
-              </span>
-            {:else}
-              <span class="w-4 shrink-0"></span>
-            {/if}
-            <FileIcon
-              filename={entry.name}
-              isDirectory={entry.type === "dir"}
-              isExpanded={expandedPaths.has(entry.path)}
-              size="xs"
-            />
-            <span class="truncate">{entry.name}</span>
-          </button>
+            <span class="flex flex-1 items-center gap-1.5 py-1.5 text-sm font-mono text-left pr-1 pl-1 min-w-0">
+              {#if isDir}
+                <span class="flex items-center justify-center w-4 shrink-0 text-muted-foreground">
+                  {#if loadingFolders.has(entry.path)}
+                    <Loader2 class="h-3.5 w-3.5 animate-spin" />
+                  {:else if open}
+                    <ChevronDown class="h-3.5 w-3.5" />
+                  {:else}
+                    <ChevronRight class="h-3.5 w-3.5" />
+                  {/if}
+                </span>
+              {:else}
+                <span class="w-4 shrink-0"></span>
+              {/if}
+              <FileIcon filename={entry.name} isDirectory={isDir} isExpanded={open} size="xs" />
+              <span class="truncate">{entry.name}</span>
+            </span>
 
-          <!-- Write action buttons (visible on hover; always in DOM for testing) -->
-          {#if canWrite}
-            {#if renameTarget?.path === entry.path}
-              <input
-                type="text"
-                class="h-6 w-24 shrink-0 rounded border border-input bg-background px-1 text-xs font-mono outline-none focus:border-ring focus:ring-2 focus:ring-ring"
-                bind:value={renameName}
-                onkeydown={handleRenameKeydown}
-                use:autofocus
-              />
-            {:else}
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Rename {entry.name}"
-                class="mr-0.5 h-6 w-6 shrink-0 text-muted-foreground opacity-0 hover:text-foreground focus:opacity-100 group-hover:opacity-100"
-                onclick={(e: MouseEvent) => {
-                  e.stopPropagation();
-                  renameTarget = entry;
-                  renameName = entry.name;
-                }}
-              >
-                <Pencil class="h-3 w-3" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Delete {entry.name}"
-                class="mr-1 h-6 w-6 shrink-0 text-muted-foreground opacity-0 hover:text-destructive focus:opacity-100 group-hover:opacity-100"
-                onclick={(e: MouseEvent) => {
-                  e.stopPropagation();
-                  deleteTarget = entry;
-                }}
-              >
-                <Trash2 class="h-3 w-3" />
-              </Button>
+            <!-- Write actions: on hover or focus with a mouse; always shown, 44px, on touch. -->
+            {#if canWrite}
+              {#if renameTarget?.path === entry.path}
+                <input
+                  type="text"
+                  aria-label="New name for {entry.name}"
+                  class="h-6 w-24 shrink-0 rounded border border-input bg-background px-1 text-xs font-mono outline-none focus:border-ring focus:ring-2 focus:ring-ring"
+                  bind:value={renameName}
+                  onkeydown={handleRenameKeydown}
+                  onclick={(e: MouseEvent) => e.stopPropagation()}
+                  use:autofocus
+                />
+              {:else}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Rename {entry.name}"
+                  class="mr-0.5 h-6 w-6 shrink-0 text-muted-foreground opacity-0 hover:text-foreground focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100 pointer-coarse:size-11"
+                  onclick={(e: MouseEvent) => {
+                    e.stopPropagation();
+                    renameTarget = entry;
+                    renameName = entry.name;
+                  }}
+                >
+                  <Pencil class="h-3 w-3" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Delete {entry.name}"
+                  class="mr-1 h-6 w-6 shrink-0 text-muted-foreground opacity-0 hover:text-destructive focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100 pointer-coarse:size-11"
+                  onclick={(e: MouseEvent) => {
+                    e.stopPropagation();
+                    deleteTarget = entry;
+                  }}
+                >
+                  <Trash2 class="h-3 w-3" />
+                </Button>
+              {/if}
             {/if}
+          </div>
+
+          {#if open}
+            <div role="group">
+              {#each sortEntries(getChildren(entry.path)) as child (child.path)}
+                {@render renderEntry(child, depth + 1)}
+              {/each}
+            </div>
           {/if}
         </div>
-
-        {#if entry.type === "dir" && expandedPaths.has(entry.path)}
-          {#each sortEntries(getChildren(entry.path)) as child (child.path)}
-            {@render renderEntry(child, depth + 1)}
-          {/each}
-        {/if}
       {/snippet}
 
       {#each sortEntries(rootEntries) as entry (entry.path)}

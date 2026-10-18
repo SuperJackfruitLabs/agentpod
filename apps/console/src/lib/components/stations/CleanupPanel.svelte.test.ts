@@ -75,6 +75,13 @@ test("CleanupPanel: selecting an item enables Apply; confirming calls cleanupApp
   fireEvent.click(getByRole("button", { name: /apply/i }));
 
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
+  // The type-to-confirm keeps its words.
+  expect(within(getByRole("dialog")).getByText("Apply cleanup")).toBeTruthy();
+  expect(
+    within(getByRole("dialog")).getByText(
+      "This will permanently remove the selected 1 item. Type the agent ID below to confirm.",
+    ),
+  ).toBeTruthy();
 
   // cleanupApply must NOT be called before confirming
   expect(api.cleanupApply).not.toHaveBeenCalled();
