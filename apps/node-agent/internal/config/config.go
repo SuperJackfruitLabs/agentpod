@@ -115,6 +115,15 @@ type ForgeAPI struct {
 	// Registry is the node-owned file that remembers which instance and port belong to which
 	// station (default /var/lib/agentpod/forge-api/stk-instances.json, mode 0600).
 	Registry string `json:"registry,omitempty"`
+	// StationUIDs maps a station id to the uid(s) its agents run as. Per-station isolation only
+	// holds when every station's agents have a distinct uid; a station missing here is taken to run
+	// as the node's own uid. The node does not switch uids itself: this states how harnesses are
+	// started, and a second station whose uids overlap another's is refused (`station-uid-shared`).
+	StationUIDs map[string][]int `json:"stationUids,omitempty"`
+	// AllowSharedAgentUID is the operator's acknowledgement that stations sharing an agent uid are
+	// NOT isolated from each other (they can read each other's environment and use each other's
+	// proxy key). Default false: such a station is refused. Env: AGENTPOD_ALLOW_SHARED_AGENT_UID=1.
+	AllowSharedAgentUID bool `json:"allowSharedAgentUid,omitempty"`
 }
 
 // MCPProxy configures the loopback MCP proxy.

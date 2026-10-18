@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -164,7 +165,7 @@ func TestForgeAPISetupStationDerivesEverythingAndReportsTheInstance(t *testing.T
 	var gotID string
 	var gotUIDs []int
 	var o, e bytes.Buffer
-	d := forgeAPIDeps{station: func(_ context.Context, id string, uids []int) (forgeapi.SetupResult, forgeapi.Instance, error) {
+	d := forgeAPIDeps{station: func(_ context.Context, id string, uids []int, _ bool) (forgeapi.SetupResult, forgeapi.Instance, error) {
 		gotID, gotUIDs = id, uids
 		return forgeapi.SetupResult{Report: sepReport(), Installed: true}, testInstance(), nil
 	}}
@@ -187,11 +188,55 @@ func TestForgeAPISetupStationDerivesEverythingAndReportsTheInstance(t *testing.T
 		}
 	}
 	// an error exits 1 and still names the instance
-	d.station = func(context.Context, string, []int) (forgeapi.SetupResult, forgeapi.Instance, error) {
+	d.station = func(context.Context, string, []int, bool) (forgeapi.SetupResult, forgeapi.Instance, error) {
 		return forgeapi.SetupResult{}, testInstance(), errors.New("boom")
 	}
 	var o3, e3 bytes.Buffer
 	if code := forgeAPICmdWith([]string{"setup", "--station", "stn_1"}, &o3, &e3, d); code != 1 || !strings.Contains(e3.String(), "boom") {
 		t.Fatalf("code %d: %s", code, e3.String())
+	}
+}
+
+func TestForgeAPIUIDMappingAndAcknowledgementReachTheManager(t *testing.T) {
+	c := config.ForgeAPI{StationUIDs: map[string][]int{"stn_1": {2001}, "stn_2": {2002, 2003}}}
+	cfg, err := forgeAPIInstancesConfig(c, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.AgentUIDs("stn_2"); len(got) != 2 || got[1] != 2003 {
+		t.Errorf("mapped uids = %v", got)
+	}
+	if got := cfg.AgentUIDs("stn_unmapped"); len(got) != 1 || got[0] != os.Geteuid() {
+		t.Errorf("unmapped station = %v, want the node's own uid", got)
+	}
+	if cfg.AllowSharedAgentUID {
+		t.Error("shared uid is acknowledged by default")
+	}
+	for _, v := range []string{"1", "true"} {
+		cfg, _ = forgeAPIInstancesConfig(c, func(k string) string {
+			if k == "AGENTPOD_ALLOW_SHARED_AGENT_UID" {
+				return v
+			}
+			return ""
+		})
+		if !cfg.AllowSharedAgentUID {
+			t.Errorf("env %q not honoured", v)
+		}
+	}
+	c.AllowSharedAgentUID = true
+	if cfg, _ = forgeAPIInstancesConfig(c, func(string) string { return "" }); !cfg.AllowSharedAgentUID {
+		t.Error("config acknowledgement not honoured")
+	}
+}
+
+func TestForgeAPISetupStationPassesTheSharedUIDAcknowledgement(t *testing.T) {
+	var got bool
+	d := forgeAPIDeps{station: func(_ context.Context, _ string, _ []int, allow bool) (forgeapi.SetupResult, forgeapi.Instance, error) {
+		got = allow
+		return forgeapi.SetupResult{}, forgeapi.Instance{}, nil
+	}}
+	var o, e bytes.Buffer
+	if code := forgeAPICmdWith([]string{"setup", "--station", "s", "--allow-shared-agent-uid"}, &o, &e, d); code != 0 || !got {
+		t.Fatalf("code %d allow %v: %s", code, got, e.String())
 	}
 }

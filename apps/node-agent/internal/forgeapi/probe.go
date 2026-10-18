@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -103,13 +105,17 @@ func reasonOf(err error) string {
 	return "stk-not-runnable"
 }
 
-// CapabilityProbe decides whether the node may advertise `forge.api`: stk answers `version` with
-// at least MinStkVersion, and `doctor --json` parses and names an isolation level. It never
-// installs anything. Refresh runs on every (re)connect; Available is a cheap read of the last
+// CapabilityProbe decides whether the node may advertise `forge.api`: the node is root on Linux
+// (every station gets its own stk instance, and creating one needs both; a node that cannot would
+// otherwise fail every grant opaquely, where withholding the capability makes the hub say
+// capability-missing), stk answers `version` with at least MinStkVersion, and `doctor --json`
+// parses and names an isolation level. It never installs anything. Refresh runs on every (re)connect; Available is a cheap read of the last
 // answer for the detect path.
 type CapabilityProbe struct {
 	newClient func() stkclient.Client
 	timeout   time.Duration
+	goos      string // test seams: the machine
+	euid      int
 
 	mu      sync.Mutex
 	last    Availability
@@ -123,7 +129,7 @@ func NewCapabilityProbe(newClient func() stkclient.Client, timeout time.Duration
 	if timeout <= 0 {
 		timeout = DefaultProbeTimeout
 	}
-	return &CapabilityProbe{newClient: newClient, timeout: timeout}
+	return &CapabilityProbe{newClient: newClient, timeout: timeout, goos: runtime.GOOS, euid: os.Geteuid()}
 }
 
 // Available is the last Refresh's verdict; false until the first Refresh. It runs nothing.
@@ -173,6 +179,12 @@ func (p *CapabilityProbe) Refresh(ctx context.Context) Availability {
 }
 
 func (p *CapabilityProbe) check(ctx context.Context) Availability {
+	if p.goos != "linux" {
+		return Availability{Reason: "unsupported-platform"}
+	}
+	if p.euid != 0 {
+		return Availability{Reason: "not-root"}
+	}
 	c := p.newClient()
 	v, err := c.Version(ctx)
 	if err != nil {

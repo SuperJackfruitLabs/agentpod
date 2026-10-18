@@ -36,7 +36,7 @@ type forgeAPIDeps struct {
 	setup     func(ctx context.Context, newClient func() stkclient.Client, o forgeapi.SetupOptions) (forgeapi.SetupResult, error)
 	harness   func() []int
 	// station creates one station's own instance (`setup --station`).
-	station func(ctx context.Context, stationID string, uids []int) (forgeapi.SetupResult, forgeapi.Instance, error)
+	station func(ctx context.Context, stationID string, uids []int, allowSharedUID bool) (forgeapi.SetupResult, forgeapi.Instance, error)
 }
 
 func defaultForgeAPIDeps() forgeAPIDeps {
@@ -45,7 +45,7 @@ func defaultForgeAPIDeps() forgeAPIDeps {
 
 // setupStation is `forge-api setup --station`: it creates the station's instance the way the node
 // would at its first deliver, with the same names, port and registry.
-func setupStation(ctx context.Context, stationID string, uids []int) (forgeapi.SetupResult, forgeapi.Instance, error) {
+func setupStation(ctx context.Context, stationID string, uids []int, allowSharedUID bool) (forgeapi.SetupResult, forgeapi.Instance, error) {
 	var c config.Config
 	if loaded, err := config.Load(config.DefaultPath()); err == nil {
 		c = loaded
@@ -58,12 +58,12 @@ func setupStation(ctx context.Context, stationID string, uids []int) (forgeapi.S
 	if err != nil {
 		return forgeapi.SetupResult{}, forgeapi.Instance{}, err
 	}
-	cfg.AgentUIDs = func(string) []int {
-		if len(uids) > 0 {
-			return uids
-		}
-		return forgeapi.CLIHarnessUIDs()
+	if len(uids) > 0 {
+		cfg.AgentUIDs = func(string) []int { return uids }
+	} else if len(fc.StationUIDs) == 0 {
+		cfg.AgentUIDs = func(string) []int { return forgeapi.CLIHarnessUIDs() }
 	}
+	cfg.AllowSharedAgentUID = cfg.AllowSharedAgentUID || allowSharedUID
 	m, err := forgeapi.NewStationInstances(cfg)
 	if err != nil {
 		return forgeapi.SetupResult{}, forgeapi.Instance{}, err
@@ -131,8 +131,17 @@ func newInstanceClient(inst forgeapi.Instance) stkclient.Client {
 func forgeAPIInstancesConfig(c config.ForgeAPI, getenv func(string) string) (forgeapi.InstancesConfig, error) {
 	cfg := forgeapi.InstancesConfig{
 		RegistryPath: c.Registry, SharedPolicyPath: c.SharedPolicy, PortMin: c.ProxyPortMin, PortMax: c.ProxyPortMax,
-		NewClient: newInstanceClient,
+		NewClient: newInstanceClient, AllowSharedAgentUID: c.AllowSharedAgentUID,
+		AgentUIDs: func(station string) []int {
+			if u := c.StationUIDs[station]; len(u) > 0 {
+				return u
+			}
+			return forgeapi.NodeHarnessUIDs()
+		},
 		Lifecycle: &forgeapi.SystemLifecycle{Roots: []string{forgeapi.DefaultStateRoot, forgeapi.DefaultConfigRoot, forgeapi.DefaultRuntimeRoot}},
+	}
+	if v := strings.ToLower(strings.TrimSpace(getenv("AGENTPOD_ALLOW_SHARED_AGENT_UID"))); v == "1" || v == "true" || v == "yes" {
+		cfg.AllowSharedAgentUID = true
 	}
 	if v := getenv("AGENTPOD_STK_REGISTRY"); v != "" {
 		cfg.RegistryPath = v
@@ -194,6 +203,7 @@ func forgeAPICmdWith(args []string, out, errw io.Writer, d forgeAPIDeps) int {
 	svcUser := fs.String("user", "stk", "OS user stk runs as")
 	stateDir := fs.String("state-dir", "", "stk state directory (default: stk's own)")
 	bin := fs.String("stk", "stk", "path to the stk binary")
+	allowShared := fs.Bool("allow-shared-agent-uid", false, "acknowledge that stations sharing an agent uid are not isolated from each other")
 	station := fs.String("station", "", "create this station's own stk instance (user, state, port, unit derived from the id)")
 	var uids uidList
 	fs.Var(&uids, "agent-uid", "uid allowed to use the broker (repeatable; default: the uid harnesses run as)")
@@ -213,7 +223,7 @@ func forgeAPICmdWith(args []string, out, errw io.Writer, d forgeAPIDeps) int {
 			fmt.Fprintln(errw, "forge-api setup: --station derives the user and state directory itself; do not combine it with --user, --state-dir or --stk")
 			return 2
 		}
-		res, inst, err := d.station(ctx, *station, uids)
+		res, inst, err := d.station(ctx, *station, uids, *allowShared)
 		if res.Report.Isolation.Level != "" {
 			forgeapi.WriteSummary(out, res)
 		}

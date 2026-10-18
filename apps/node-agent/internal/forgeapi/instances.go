@@ -103,8 +103,13 @@ type InstancesConfig struct {
 	NewClient func(Instance) stkclient.Client
 	// Lifecycle starts and removes units and users. Required.
 	Lifecycle Lifecycle
-	// AgentUIDs is who may use a station's broker; default: the uid the node spawns harnesses as.
+	// AgentUIDs is the uid(s) a station's agents run as, which is who may use that station's
+	// broker. Default: the uid the node spawns harnesses as, the same for every station, so a
+	// second station is refused (station-uid-shared) unless AllowSharedAgentUID is set.
 	AgentUIDs func(station string) []int
+	// AllowSharedAgentUID is the operator's explicit acknowledgement that stations whose agents
+	// share a uid are not isolated from each other. Default false (fail closed).
+	AllowSharedAgentUID bool
 	// Unwire removes the harness wiring for a grant (Task 5); Bypass is the bypass check (Task 6).
 	Unwire func(grantID string) error
 	Bypass func(ctx context.Context, c stkclient.Client) any
@@ -120,11 +125,18 @@ type StationInstances struct {
 	cfg InstancesConfig
 	env sysEnv
 
+	// mu guards states, removing and warned. The registry file is not cached: it is read afresh
+	// (and written only under an flock on <registry>.lock) because `apn forge-api setup
+	// --station` writes it from another process.
 	mu       sync.Mutex
-	loaded   bool
-	records  map[string]record // by station id
 	states   map[string]*stationState
 	removing map[string]bool
+	warned   map[string]bool
+	seedWarn map[string]string // station -> why the shared base policy was not seeded
+
+	refreshMu  sync.Mutex // serialises shared-policy refreshes
+	sharedHash string
+	sharedSeen bool
 }
 
 type stationState struct {
@@ -137,6 +149,9 @@ type record struct {
 	Station string `json:"station"`
 	Name    string `json:"name"`
 	Port    int    `json:"port"`
+	// AgentUIDs are the uids the station's agents ran as when the instance was last used; the
+	// next station's uids are compared with them.
+	AgentUIDs []int `json:"agentUids,omitempty"`
 }
 
 type registryFile struct {
@@ -175,7 +190,7 @@ func NewStationInstances(cfg InstancesConfig) (*StationInstances, error) {
 	if cfg.portFree == nil {
 		cfg.portFree = tcpPortFree
 	}
-	m := &StationInstances{cfg: cfg, env: hostEnv(), states: map[string]*stationState{}, removing: map[string]bool{}}
+	m := &StationInstances{cfg: cfg, env: hostEnv(), states: map[string]*stationState{}, removing: map[string]bool{}, warned: map[string]bool{}, seedWarn: map[string]string{}}
 	if cfg.env != nil {
 		m.env = *cfg.env
 	}
@@ -250,39 +265,46 @@ func (m *StationInstances) instanceFor(r record) Instance {
 
 // ---- registry ----
 
-func (m *StationInstances) loadLocked() error {
-	if m.loaded {
-		return nil
-	}
+// readRecords reads and validates the registry as it is on disk right now.
+func (m *StationInstances) readRecords() (map[string]record, error) {
 	data, _, err := readPolicyFile(m.cfg.RegistryPath)
 	if err != nil {
-		return coded("registry-unreadable", err)
+		return nil, coded("registry-unreadable", err)
 	}
 	recs := map[string]record{}
 	if len(strings.TrimSpace(string(data))) > 0 {
 		var f registryFile
 		if err := json.Unmarshal(data, &f); err != nil {
-			return coded("registry-invalid", fmt.Errorf("%s is not valid JSON; fix or remove it by hand: %v", m.cfg.RegistryPath, err))
+			return nil, coded("registry-invalid", fmt.Errorf("%s is not valid JSON; fix or remove it by hand: %v", m.cfg.RegistryPath, err))
 		}
 		if f.Version != registryVersion || f.ManagedBy != registryMarker {
-			return codedf("registry-invalid", "%s is not this node's registry (version %d, managedBy %q)", m.cfg.RegistryPath, f.Version, f.ManagedBy)
+			return nil, codedf("registry-invalid", "%s is not this node's registry (version %d, managedBy %q)", m.cfg.RegistryPath, f.Version, f.ManagedBy)
 		}
 		names, ports := map[string]bool{}, map[int]bool{}
 		for _, r := range f.Instances {
-			if r.Station == "" || !instanceNameRE.MatchString(r.Name) || r.Port < 1 || r.Port > 65535 || names[r.Name] || ports[r.Port] || recs[r.Station].Name != "" {
-				return codedf("registry-invalid", "%s holds an entry the node did not write; fix or remove it by hand", m.cfg.RegistryPath)
+			if r.Station == "" || !instanceNameRE.MatchString(r.Name) || r.Port < 1 || r.Port > 65535 || names[r.Name] || ports[r.Port] || recs[r.Station].Name != "" || !validUIDs(r.AgentUIDs) {
+				return nil, codedf("registry-invalid", "%s holds an entry the node did not write; fix or remove it by hand", m.cfg.RegistryPath)
 			}
 			names[r.Name], ports[r.Port] = true, true
 			recs[r.Station] = r
 		}
 	}
-	m.records, m.loaded = recs, true
-	return nil
+	return recs, nil
 }
 
-func (m *StationInstances) saveLocked() error {
+func validUIDs(uids []int) bool {
+	for _, u := range uids {
+		if u < 0 || int64(u) > maxUID {
+			return false
+		}
+	}
+	return true
+}
+
+// writeRecords replaces the registry file. The caller holds the registry lock.
+func (m *StationInstances) writeRecords(recs map[string]record) error {
 	f := registryFile{Version: registryVersion, ManagedBy: registryMarker, Instances: []record{}}
-	for _, r := range m.records {
+	for _, r := range recs {
 		f.Instances = append(f.Instances, r)
 	}
 	sort.Slice(f.Instances, func(i, j int) bool { return f.Instances[i].Port < f.Instances[j].Port })
@@ -291,6 +313,62 @@ func (m *StationInstances) saveLocked() error {
 		return err
 	}
 	return writeFileAtomic(m.cfg.RegistryPath, append(b, '\n'), 0o600)
+}
+
+// updateRecords runs fn on the registry as it is on disk under the registry lock and writes it
+// back when fn says it changed it. Every change to the registry goes through here, so a record
+// another process wrote a moment ago is never lost to a stale copy.
+func (m *StationInstances) updateRecords(fn func(recs map[string]record) (changed bool, err error)) error {
+	unlock, err := lockRegistry(m.cfg.RegistryPath)
+	if err != nil {
+		return coded("registry-lock-failed", err)
+	}
+	defer unlock()
+	recs, err := m.readRecords()
+	if err != nil {
+		return err
+	}
+	changed, err := fn(recs)
+	if err != nil || !changed {
+		return err
+	}
+	if err := m.writeRecords(recs); err != nil {
+		return coded("registry-write-failed", err)
+	}
+	return nil
+}
+
+func sameUIDs(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	x := append([]int(nil), a...)
+	y := append([]int(nil), b...)
+	sort.Ints(x)
+	sort.Ints(y)
+	for i := range x {
+		if x[i] != y[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// sharesUID reports whether the station's uids overlap those of any OTHER registered instance.
+func sharesUID(recs map[string]record, station string, uids []int) bool {
+	for st, r := range recs {
+		if st == station {
+			continue
+		}
+		for _, u := range uids {
+			for _, v := range r.AgentUIDs {
+				if u == v {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // writeFileAtomic replaces path via a temporary file in the same directory, fsynced and renamed.
@@ -329,12 +407,12 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	return nil
 }
 
-// allocateLocked picks the station's name and port and records them. A name another station
-// already holds (a hash prefix collision) is lengthened until it is free.
-func (m *StationInstances) allocateLocked(station string) (record, error) {
+// allocate picks the station's name and port in recs (the registry as just read under the lock).
+// A name another station already holds (a hash prefix collision) is lengthened until it is free.
+func (m *StationInstances) allocate(recs map[string]record, station string, uids []int) (record, error) {
 	taken := map[string]bool{}
 	usedPorts := map[int]bool{}
-	for _, r := range m.records {
+	for _, r := range recs {
 		taken[r.Name] = true
 		usedPorts[r.Port] = true
 	}
@@ -352,54 +430,86 @@ func (m *StationInstances) allocateLocked(station string) (record, error) {
 		if usedPorts[p] || !m.cfg.portFree(p) {
 			continue
 		}
-		r := record{Station: station, Name: name, Port: p}
-		m.records[station] = r
-		if err := m.saveLocked(); err != nil {
-			delete(m.records, station)
-			return record{}, coded("registry-write-failed", err)
-		}
-		return r, nil
+		return record{Station: station, Name: name, Port: p, AgentUIDs: append([]int(nil), uids...)}, nil
 	}
 	return record{}, codedf("port-range-exhausted", "no free stk proxy port between %d and %d for this station; widen the range or remove stations that are gone", m.cfg.PortMin, m.cfg.PortMax)
 }
 
+const sharedUIDMessage = "stations on this node share an agent uid, so per-station isolation cannot hold; give each station's agents their own uid through the node's per-station uid mapping (forgeApi.stationUids), or acknowledge the risk with allowSharedAgentUid"
+
 // ---- per-station state ----
 
-// lookup returns the station's state, creating its record (not the instance on the host) when
-// create is set. A station with no record and create unset is (nil, nil).
-func (m *StationInstances) lookup(station string, create bool) (*stationState, error) {
+// lookup returns the station's state. With create it registers the station (name, port, uids; no
+// instance on the host yet) under the registry lock, refusing `station-uid-shared` when its agents
+// share a uid with another registered station and the operator has not acknowledged that. shared
+// reports an acknowledged overlap. A station with no record and create unset is (nil, false, nil).
+func (m *StationInstances) lookup(station string, create bool) (st *stationState, shared bool, err error) {
 	if err := checkStationID(station); err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	m.mu.Lock()
+	removing := m.removing[station]
+	m.mu.Unlock()
+	if removing {
+		return nil, false, codedf("station-instance-removing", "this station's stk instance is being removed")
+	}
+
+	var r record
+	if !create {
+		recs, err := m.readRecords()
+		if err != nil {
+			return nil, false, err
+		}
+		var ok bool
+		if r, ok = recs[station]; !ok {
+			return nil, false, nil
+		}
+		shared = sharesUID(recs, station, r.AgentUIDs)
+	} else {
+		uids := m.cfg.AgentUIDs(station)
+		err := m.updateRecords(func(recs map[string]record) (bool, error) {
+			shared = sharesUID(recs, station, uids)
+			if shared && !m.cfg.AllowSharedAgentUID {
+				return false, codedf("station-uid-shared", "%s", sharedUIDMessage)
+			}
+			var ok bool
+			if r, ok = recs[station]; ok {
+				if sameUIDs(r.AgentUIDs, uids) {
+					return false, nil
+				}
+				r.AgentUIDs = append([]int(nil), uids...)
+				recs[station] = r
+				return true, nil
+			}
+			// Reserve nothing for an instance this node cannot create: a non-root node asked
+			// about many stations must not use up the port range.
+			if m.env.goos != "linux" || m.env.euid != 0 {
+				return false, coded("station-instance-unavailable", fmt.Errorf("%w (this node: %s, uid %d)", ErrInstanceUnavailable, m.env.goos, m.env.euid))
+			}
+			nr, err := m.allocate(recs, station, uids)
+			if err != nil {
+				return false, err
+			}
+			r = nr
+			recs[station] = r
+			return true, nil
+		})
+		if err != nil {
+			return nil, false, err
+		}
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.loadLocked(); err != nil {
-		return nil, err
+	if shared && !m.warned[station] {
+		m.warned[station] = true
+		logf("forgeapi: WARNING: station %s shares an agent uid with another station; per-station isolation does NOT hold (acknowledged by the operator)", station)
 	}
-	if m.removing[station] {
-		return nil, codedf("station-instance-removing", "this station's stk instance is being removed")
+	if cached := m.states[station]; cached != nil {
+		return cached, shared, nil
 	}
-	if st := m.states[station]; st != nil {
-		return st, nil
-	}
-	r, ok := m.records[station]
-	if !ok {
-		if !create {
-			return nil, nil
-		}
-		// Reserve nothing for an instance this node cannot create: a non-root node asked about
-		// many stations must not use up the port range.
-		if m.env.goos != "linux" || m.env.euid != 0 {
-			return nil, coded("station-instance-unavailable", fmt.Errorf("%w (this node: %s, uid %d)", ErrInstanceUnavailable, m.env.goos, m.env.euid))
-		}
-		var err error
-		if r, err = m.allocateLocked(station); err != nil {
-			return nil, err
-		}
-	}
-	st := m.build(m.instanceFor(r))
+	st = m.build(m.instanceFor(r))
 	m.states[station] = st
-	return st, nil
+	return st, shared, nil
 }
 
 func (m *StationInstances) build(inst Instance) *stationState {
@@ -435,19 +545,29 @@ func (m *StationInstances) build(inst Instance) *stationState {
 // starts. A problem is logged, not fatal: the instance works without it, and the next policy
 // write reports the shared file's error to the hub.
 func (m *StationInstances) seedPolicy(inst Instance) {
+	warn := func(format string, a ...any) {
+		msg := fmt.Sprintf(format, a...)
+		logf("forgeapi: %s", msg)
+		m.mu.Lock()
+		m.seedWarn[inst.Station] = "the shared base policy was not copied into this station's policy: " + msg
+		m.mu.Unlock()
+	}
+	m.mu.Lock()
+	delete(m.seedWarn, inst.Station)
+	m.mu.Unlock()
 	shared, _, err := readPolicyFile(m.cfg.SharedPolicyPath)
 	if err != nil {
-		logf("forgeapi: shared base policy unreadable, not seeded into %s: %v", inst.Name, clean(err.Error()))
+		warn("shared base policy unreadable: %v", clean(err.Error()))
 		return
 	}
 	prev, _, err := readPolicyFile(inst.ConfigPath)
 	if err != nil {
-		logf("forgeapi: policy of %s unreadable, shared base policy not seeded: %v", inst.Name, clean(err.Error()))
+		warn("policy of %s unreadable: %v", inst.Name, clean(err.Error()))
 		return
 	}
 	out, skipped, err := ApplyShared(prev, shared, inst.Station)
 	if err != nil {
-		logf("forgeapi: shared base policy not seeded into %s: %v", inst.Name, clean(err.Error()))
+		warn("shared base policy not usable: %v", clean(err.Error()))
 		return
 	}
 	for _, s := range skipped {
@@ -457,13 +577,13 @@ func (m *StationInstances) seedPolicy(inst Instance) {
 		return
 	}
 	if err := writePolicyFile(inst.ConfigPath, out); err != nil {
-		logf("forgeapi: shared base policy not written into %s: %v", inst.Name, clean(err.Error()))
+		warn("shared base policy not written into %s: %v", inst.Name, clean(err.Error()))
 	}
 }
 
 // Instance returns a station's instance if the node has one on record.
 func (m *StationInstances) Instance(station string) (Instance, bool) {
-	st, err := m.lookup(station, false)
+	st, _, err := m.lookup(station, false)
 	if err != nil || st == nil {
 		return Instance{}, false
 	}
@@ -472,13 +592,18 @@ func (m *StationInstances) Instance(station string) (Instance, bool) {
 
 // Ensure creates the station's instance now (the CLI's `forge-api setup --station`).
 func (m *StationInstances) Ensure(ctx context.Context, station string) (SetupResult, Instance, error) {
-	st, err := m.lookup(station, true)
+	st, _, err := m.lookup(station, true)
 	if err != nil {
 		return SetupResult{}, Instance{}, err
 	}
 	res, err := st.svc.Ensure(ctx)
 	return res, st.inst, err
 }
+
+// IsolationSharedUID is the detail an acknowledged shared-uid station reports beside the contract's
+// `same-user`: the contract's isolation enum has only separate-user and same-user, and a word the
+// hub's schema does not know would make the whole reply unreadable.
+const IsolationSharedUID = "shared-uid"
 
 // ---- the verbs, routed by station ----
 
@@ -487,18 +612,24 @@ func (m *StationInstances) Deliver(ctx context.Context, p DeliverParams) (Delive
 	if _, err := validateDeliver(p); err != nil {
 		return DeliverAck{}, err
 	}
-	st, err := m.lookup(p.StationID, true)
+	m.maybeRefreshShared(ctx)
+	st, shared, err := m.lookup(p.StationID, true)
 	if err != nil {
 		return DeliverAck{}, err
 	}
-	return st.svc.Deliver(ctx, p)
+	ack, err := st.svc.Deliver(ctx, p)
+	if err == nil && shared {
+		ack.Isolation, ack.IsolationDetail, ack.Reason = "same-user", IsolationSharedUID, sharedUIDMessage
+	}
+	return ack, err
 }
 
 func (m *StationInstances) Policy(ctx context.Context, p PolicyParams) (PolicyAck, error) {
 	if strings.TrimSpace(p.StationID) == "" || strings.TrimSpace(p.GrantID) == "" {
 		return PolicyAck{}, codedf("invalid-params", "stationId and grantId are required")
 	}
-	st, err := m.lookup(p.StationID, false)
+	m.maybeRefreshShared(ctx)
+	st, _, err := m.lookup(p.StationID, false)
 	if err != nil {
 		return PolicyAck{OK: false, Error: err.Error()}, nil
 	}
@@ -512,21 +643,25 @@ func (m *StationInstances) Verify(ctx context.Context, p VerifyParams) (VerifyAc
 	if strings.TrimSpace(p.StationID) == "" || strings.TrimSpace(p.GrantID) == "" || strings.TrimSpace(p.ExpectLogin) == "" {
 		return VerifyAck{}, codedf("invalid-params", "stationId, grantId and expectLogin are required")
 	}
-	st, err := m.lookup(p.StationID, false)
+	st, shared, err := m.lookup(p.StationID, false)
 	if err != nil {
 		return VerifyAck{}, err
 	}
 	if st == nil {
 		return VerifyAck{}, codedf("unknown-grant", "this node holds no entry for grant %s", p.GrantID)
 	}
-	return st.svc.Verify(ctx, p)
+	ack, err := st.svc.Verify(ctx, p)
+	if err == nil && shared {
+		ack.Isolation, ack.IsolationDetail = "same-user", IsolationSharedUID
+	}
+	return ack, err
 }
 
 func (m *StationInstances) Revoke(ctx context.Context, p RevokeParams) (RevokeAck, error) {
 	if strings.TrimSpace(p.StationID) == "" || strings.TrimSpace(p.GrantID) == "" {
 		return RevokeAck{}, codedf("invalid-params", "stationId and grantId are required")
 	}
-	st, err := m.lookup(p.StationID, false)
+	st, _, err := m.lookup(p.StationID, false)
 	if err != nil {
 		return RevokeAck{}, err
 	}
@@ -544,13 +679,31 @@ func (m *StationInstances) Revoke(ctx context.Context, p RevokeParams) (RevokeAc
 
 // Status creates the station's instance if there is none: the hub fetches the station's public
 // key through status before the first grant, and the key belongs to the instance's own store.
-// On a node that cannot create it, status fails with `station-instance-unavailable`.
+// On a node that cannot create it, status fails with `station-instance-unavailable`; on a node
+// where the station shares an agent uid with another, with `station-uid-shared` unless
+// acknowledged. A problem seeding the shared base policy is reported in `warnings`.
 func (m *StationInstances) Status(ctx context.Context, p StatusParams) (StatusAck, error) {
-	st, err := m.lookup(p.StationID, true)
+	m.maybeRefreshShared(ctx)
+	st, shared, err := m.lookup(p.StationID, true)
 	if err != nil {
 		return StatusAck{}, err
 	}
-	return st.svc.Status(ctx, p)
+	ack, err := st.svc.Status(ctx, p)
+	if err != nil {
+		return ack, err
+	}
+	if shared {
+		for i := range ack.Grants {
+			ack.Grants[i].Isolation, ack.Grants[i].IsolationDetail = "same-user", IsolationSharedUID
+		}
+		ack.Warnings = append(ack.Warnings, sharedUIDMessage)
+	}
+	m.mu.Lock()
+	if w := m.seedWarn[p.StationID]; w != "" {
+		ack.Warnings = append(ack.Warnings, w)
+	}
+	m.mu.Unlock()
+	return ack, nil
 }
 
 // ---- removal ----
@@ -565,13 +718,13 @@ func (m *StationInstances) PruneUnhosted(ctx context.Context, hosted []string) (
 	for _, h := range hosted {
 		keep[h] = true
 	}
-	m.mu.Lock()
-	if err := m.loadLocked(); err != nil {
-		m.mu.Unlock()
+	recs, err := m.readRecords()
+	if err != nil {
 		return nil, err
 	}
 	var stale []record
-	for st, r := range m.records {
+	m.mu.Lock()
+	for st, r := range recs {
 		if !keep[st] && !m.removing[st] {
 			stale = append(stale, r)
 		}
@@ -639,14 +792,95 @@ func (m *StationInstances) removeInstance(ctx context.Context, r record) error {
 			return coded("instance-remove-failed", fmt.Errorf("%s: %w", s.what, err))
 		}
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.records, r.Station)
-	delete(m.states, r.Station)
-	if err := m.saveLocked(); err != nil {
-		m.records[r.Station] = r // the host is clean; keep the record so a retry rewrites the file
-		return coded("registry-write-failed", err)
+	// The host is clean. Drop the record from the registry as it is now (another process may have
+	// added records since it was read); on a write failure the record stays so a retry finishes.
+	if err := m.updateRecords(func(recs map[string]record) (bool, error) {
+		cur, ok := recs[r.Station]
+		if !ok || cur.Name != r.Name {
+			return false, nil
+		}
+		delete(recs, r.Station)
+		return true, nil
+	}); err != nil {
+		return err
 	}
+	m.mu.Lock()
+	delete(m.states, r.Station)
+	delete(m.seedWarn, r.Station)
+	delete(m.warned, r.Station)
+	m.mu.Unlock()
 	logf("forgeapi: removed the stk instance of station %s", r.Station)
 	return nil
+}
+
+// ---- shared base policy refresh ----
+
+// sharedFingerprint is a cheap change detector for the shared base policy file ("" when absent).
+func (m *StationInstances) sharedFingerprint() (string, error) {
+	b, existed, err := readPolicyFile(m.cfg.SharedPolicyPath)
+	if err != nil {
+		return "", err
+	}
+	if !existed {
+		return "absent", nil
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// maybeRefreshShared refreshes every registered instance when the shared base policy differs from
+// the one last applied (and once at the node's first frame, when nothing has been applied yet).
+// Called before deliver, policy and status for ANY station, so a service the operator removed is
+// gone from every station's policy, credential forgotten first, without waiting for that
+// station's own next write. Problems are logged; the fingerprint is kept only after a clean pass,
+// so a failure is retried on the next frame.
+func (m *StationInstances) maybeRefreshShared(ctx context.Context) {
+	if m.env.goos != "linux" || m.env.euid != 0 {
+		return // such a node has no instances to refresh
+	}
+	m.refreshMu.Lock()
+	defer m.refreshMu.Unlock()
+	fp, err := m.sharedFingerprint()
+	if err != nil {
+		logf("forgeapi: shared base policy unreadable: %v", clean(err.Error()))
+		return
+	}
+	if m.sharedSeen && fp == m.sharedHash {
+		return
+	}
+	if err := m.refreshAllShared(ctx); err != nil {
+		logf("forgeapi: shared base policy not refreshed everywhere: %v", clean(err.Error()))
+		return
+	}
+	m.sharedHash, m.sharedSeen = fp, true
+}
+
+// RefreshShared refreshes every registered instance now (the node calls it once at start).
+func (m *StationInstances) RefreshShared(ctx context.Context) {
+	m.maybeRefreshShared(ctx)
+}
+
+func (m *StationInstances) refreshAllShared(ctx context.Context) error {
+	recs, err := m.readRecords()
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for station, r := range recs {
+		m.mu.Lock()
+		removing := m.removing[station]
+		st := m.states[station]
+		if st == nil && !removing {
+			st = m.build(m.instanceFor(r))
+			m.states[station] = st
+		}
+		m.mu.Unlock()
+		if removing || !m.cfg.userExists(st.inst.User()) {
+			continue // being removed, or never installed: no policy to refresh
+		}
+		if err := st.svc.RefreshShared(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("station %s: %w", station, err))
+		}
+	}
+	return errors.Join(errs...)
 }

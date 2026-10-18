@@ -88,10 +88,15 @@ type DeliverAck struct {
 	OK        bool   `json:"ok"`
 	Stored    bool   `json:"stored"`
 	Isolation string `json:"isolation"`
-	Reason    string `json:"reason,omitempty"`
+	// IsolationDetail refines Isolation for readers that know it ("shared-uid"); the hub's schema
+	// is lenient about extra result fields.
+	IsolationDetail string `json:"isolationDetail,omitempty"`
+	Reason          string `json:"reason,omitempty"`
 }
 
-// PolicyAck: the hub reads ok and error.
+// PolicyAck: the hub reads ok and error (station-forge-api.ts: "node rejected the policy: <error>"),
+// so a policy failure is an ack with ok:false and the coded text in error, not a Go error like the
+// other verbs'. Only a malformed frame (invalid-params) is an error.
 type PolicyAck struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
@@ -103,7 +108,9 @@ type VerifyAck struct {
 	Login     string `json:"login,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 	Isolation string `json:"isolation"`
-	Bypass    any    `json:"bypass,omitempty"`
+	// IsolationDetail: see DeliverAck.
+	IsolationDetail string `json:"isolationDetail,omitempty"`
+	Bypass          any    `json:"bypass,omitempty"`
 }
 
 // RevokeAck: Removed is false when there was nothing on this node to remove.
@@ -117,6 +124,8 @@ type StatusGrant struct {
 	GrantID   string `json:"grantId"`
 	Present   bool   `json:"present"`
 	Isolation string `json:"isolation"`
+	// IsolationDetail: see DeliverAck.
+	IsolationDetail string `json:"isolationDetail,omitempty"`
 }
 
 // StatusAck carries the station's handover PUBLIC key even with no grants.
@@ -124,6 +133,10 @@ type StatusAck struct {
 	Grants     []StatusGrant `json:"grants"`
 	PublicKey  string        `json:"publicKey"`
 	StkVersion string        `json:"stkVersion,omitempty"`
+	// Warnings are problems that do not stop the station working (the shared base policy could
+	// not be copied in, stations share an agent uid). The hub's result schema is lenient, so an
+	// older hub ignores them.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // CodedError is a failure with a stable code first in its message.
@@ -249,6 +262,69 @@ func (s *Service) sharedBytes() ([]byte, error) {
 	return b, err
 }
 
+// forgetDropped forgets the credential of every shared copy that prev holds and next no longer
+// does. It runs BEFORE the policy file changes: stk resolves a service through the policy, so once
+// the entry is gone the forget could not find it.
+func (s *Service) forgetDropped(ctx context.Context, client stkclient.Client, prev, next []byte) error {
+	still := map[string]bool{}
+	for _, n := range SharedServices(next) {
+		still[n] = true
+	}
+	for _, n := range SharedServices(prev) {
+		if still[n] {
+			continue
+		}
+		if err := client.RevokeLocal(ctx, n); err != nil && !nothingToWithdraw(err) {
+			return coded("revoke-failed", err)
+		}
+	}
+	return nil
+}
+
+// RefreshShared brings this station's shared copies in line with the shared base policy without a
+// grant being written: a service the operator removed leaves the policy and its credential is
+// forgotten first; a changed one is rewritten. No policy file means nothing to do.
+func (s *Service) RefreshShared(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	path := s.path()
+	prev, existed, err := readPolicyFile(path)
+	if err != nil {
+		return coded("policy-read-failed", err)
+	}
+	if !existed {
+		return nil
+	}
+	next, err := s.withShared(prev, s.Station, true)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(prev, next) {
+		return nil
+	}
+	if s.NewClient == nil {
+		return codedf("stk-unavailable", "forge API access is not configured on this node")
+	}
+	client := s.NewClient()
+	if err := s.forgetDropped(ctx, client, prev, next); err != nil {
+		return err
+	}
+	if err := writePolicyFile(path, next); err != nil {
+		return coded("policy-write-failed", err)
+	}
+	if _, err := client.Reload(ctx); err != nil {
+		code := "reload-failed"
+		if errors.Is(err, stkclient.ErrReloadRejected) {
+			code = "reload-rejected"
+		}
+		if rbErr := restorePolicyFile(path, prev, existed); rbErr != nil {
+			return codedf(code, "%v; ROLLBACK FAILED: %v", clean(err.Error()), clean(rbErr.Error()))
+		}
+		return coded(code, err)
+	}
+	return nil
+}
+
 // withShared brings prev's shared entries in line with the shared file. strict: an unusable
 // shared file is an error (writes that add or change something); otherwise it is logged and prev
 // is returned (a revoke must not be blocked by an operator's broken file).
@@ -335,6 +411,9 @@ func (s *Service) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, err
 	merged, err := MergePolicy(base, entry)
 	if err != nil {
 		return DeliverAck{}, coded(entryCode(err), err)
+	}
+	if err := s.forgetDropped(ctx, client, prev, merged); err != nil {
+		return DeliverAck{}, err
 	}
 	_, hadEntry, err := FindGrant(prev, "", p.GrantID)
 	if err != nil {
@@ -428,6 +507,11 @@ func (s *Service) Policy(ctx context.Context, p PolicyParams) (PolicyAck, error)
 		return PolicyAck{OK: false, Error: "unknown-grant"}, nil
 	}
 	changed := !bytes.Equal(prev, updated)
+	if changed && s.NewClient != nil {
+		if err := s.forgetDropped(ctx, s.NewClient(), prev, updated); err != nil {
+			return PolicyAck{OK: false, Error: err.Error()}, nil
+		}
+	}
 	if changed {
 		if err := writePolicyFile(path, updated); err != nil {
 			return PolicyAck{OK: false, Error: coded("policy-write-failed", err).Error()}, nil

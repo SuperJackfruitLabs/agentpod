@@ -261,6 +261,9 @@ func runCmd() {
 		os.Exit(1)
 	}
 	h = gateway.NewForgeAPIHandler(h, instances)
+	// A service the operator removed from the shared base policy while the node was down leaves
+	// every station's policy, credential forgotten, as soon as the node is up.
+	go instances.RefreshShared(ctx)
 	// "forge.api" is a STATION capability (the hub gates on what detect reports per station, and
 	// drops unknown node-level ones from hello), so it rides on DetectAll. The probe runs in
 	// Extras.Prepare on every (re)connect; detect only reads its last answer.

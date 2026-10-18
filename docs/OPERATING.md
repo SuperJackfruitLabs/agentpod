@@ -2120,9 +2120,23 @@ to), `apps/hub/src/services/station-forge-api.ts` (lifecycle), and
 **Needs a node that supports it.** A station's node must advertise the `forge.api` capability;
 an older node answers `capability-missing` rather than doing nothing.
 
-**One broker per station.** A node that hosts several stations runs several `stk` instances, one
-per station, so one station's agent cannot use another station's brokered credential and two
-stations can hold grants for the same forge host. Each instance has its own OS user
+**One broker per station, and one agent uid per station.** A node that hosts several stations runs
+several `stk` instances, one per station, so one station's agent cannot use another station's
+brokered credential and two stations can hold grants for the same forge host. **That holds only if
+each station's agents run as a different OS user.** Agents that share a uid can read each other's
+process environment and the harness drop-in files (where the loopback proxy key lives), and the
+broker's control socket admits agents by uid, so one station's agent could act as the other. The
+node does not switch uids itself; you tell it which uid each station's agents run as
+(`forgeApi.stationUids`, a map of station id to uids in the node config; a station not listed is
+taken to run as the node's own uid) and start the harnesses that way. A second station whose uids
+overlap another's is **refused** (`station-uid-shared`, on deliver and on the status call that
+fetches the key); the first station on a node is never refused. To accept the weaker isolation
+anyway set `forgeApi.allowSharedAgentUid` (or `AGENTPOD_ALLOW_SHARED_AGENT_UID=1`, or
+`--allow-shared-agent-uid` on `forge-api setup --station`): the stations are then served, every
+reply reports isolation `same-user` (with `isolationDetail: "shared-uid"`) and the node logs a
+warning once per instance. The node advertises the `forge.api` capability only when it is root on
+Linux, since a node that cannot create instances would fail every grant; elsewhere the hub says
+`capability-missing`. Each instance has its own OS user
 (`stk-<station>-<hash>`, derived from the station id), state directory (`/var/lib/<name>`), policy
 file (`/etc/<name>/supertoolkit.yaml`), runtime directory (`/run/<name>`), proxy port, proxy key
 and systemd unit. The node creates the instance itself, the first time the hub asks for the
@@ -2140,7 +2154,8 @@ node never falls back to a shared broker. When a station is no longer hosted its
 
 The registry remembers which name and port belong to which station, so a restart reuses them. When
 the port range is used up the next station is refused with `port-range-exhausted` (widen the range
-or remove stations that are gone). Do not edit the registry by hand; if the node reports
+or remove stations that are gone). The registry is read and written under a file lock (`<registry>.lock`), so the daemon and `forge-api
+setup --station` in another process never lose each other's records. Do not edit the registry by hand; if the node reports
 `registry-invalid` it has stopped touching instances until the file is fixed or removed.
 
 **Shared base policy.** An optional stk policy file (same format as `supertoolkit.yaml`, only its
@@ -2153,7 +2168,9 @@ it is skipped for that station (the node logs it). A grant for a host a shared e
 is refused with `policy-conflict`. A shared file that cannot be read stops grants and policy
 changes with `shared-policy-invalid`, but never a revoke. **Credentials for shared services are not
 delivered by the hub or the node**: the node copies the entries only, and loading a shared service's
-credential into each instance is yours to do.
+credential into each instance is yours to do. When you remove a service from the shared file, its
+copy leaves every station's policy and its credential is forgotten (`stk revoke`) first; the node
+checks the file at start and before each deliver, policy and status.
 
 ### 12a. Limits
 

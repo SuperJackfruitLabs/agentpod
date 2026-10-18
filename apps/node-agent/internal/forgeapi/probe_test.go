@@ -75,7 +75,9 @@ func captureLogs(t *testing.T) *[]string {
 }
 
 func probeOf(s stkclient.Client, timeout time.Duration) *CapabilityProbe {
-	return NewCapabilityProbe(func() stkclient.Client { return s }, timeout)
+	p := NewCapabilityProbe(func() stkclient.Client { return s }, timeout)
+	p.goos, p.euid = "linux", 0 // the machine the capability needs
+	return p
 }
 
 func TestCompareVersions(t *testing.T) {
@@ -299,4 +301,24 @@ type installCounter struct {
 func (i *installCounter) Install(context.Context, stkclient.InstallPlan) (stkclient.InstallReport, error) {
 	i.installs.Add(1)
 	return stkclient.InstallReport{}, nil
+}
+
+func TestProbeWithholdsTheCapabilityWithoutRootOnLinux(t *testing.T) {
+	for _, c := range []struct {
+		goos   string
+		euid   int
+		reason string
+	}{{"linux", 1000, "not-root"}, {"darwin", 0, "unsupported-platform"}, {"windows", 0, "unsupported-platform"}} {
+		s := okStk() // stk itself is fine; the machine is not
+		p := probeOf(s, time.Second)
+		p.goos, p.euid = c.goos, c.euid
+		a := p.Refresh(context.Background())
+		if a.Available || a.Reason != c.reason || p.Available() {
+			t.Errorf("%s uid %d: %+v", c.goos, c.euid, a)
+		}
+	}
+	p := probeOf(okStk(), time.Second)
+	if !p.Refresh(context.Background()).Available {
+		t.Error("root on linux with a good stk must be available")
+	}
 }

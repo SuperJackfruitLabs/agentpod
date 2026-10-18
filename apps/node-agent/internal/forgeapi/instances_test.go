@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -114,7 +115,7 @@ func newFixture(t *testing.T, mod ...func(*fixture, *InstancesConfig)) *fixture 
 		SharedPolicyPath: filepath.Join(root, "agentpod", "stk-shared.yaml"),
 		StateRoot:        filepath.Join(root, "var"), ConfigRoot: filepath.Join(root, "etc"), RuntimeRoot: filepath.Join(root, "run"),
 		Lifecycle:  fx.lc,
-		AgentUIDs:  func(string) []int { return []int{1001} },
+		AgentUIDs:  uidFor,
 		userExists: func(n string) bool { fx.mu.Lock(); defer fx.mu.Unlock(); return fx.installed[n] },
 		portFree:   func(int) bool { return true },
 		env:        &sysEnv{goos: "linux", euid: 0},
@@ -189,6 +190,13 @@ func (fx *fixture) planFor(name string) stkclient.InstallPlan {
 	return stkclient.InstallPlan{}
 }
 
+// uidFor gives each test station its own agent uid, as an operator following the docs would.
+func uidFor(station string) []int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(station))
+	return []int{1000 + int(h.Sum32()%1_000_000)}
+}
+
 // ---- naming and ports ----
 
 func TestEachStationGetsItsOwnDistinctInstallPlan(t *testing.T) {
@@ -213,7 +221,7 @@ func TestEachStationGetsItsOwnDistinctInstallPlan(t *testing.T) {
 	if pa.User != pa.UnitName || pa.User != pa.Group || pa.User != a.Name {
 		t.Errorf("user/group/unit differ: %+v", pa)
 	}
-	if !reflectEq(pa.AgentUIDs, []int{1001}) {
+	if !reflectEq(pa.AgentUIDs, uidFor("stn_1")) {
 		t.Errorf("agent uids = %v", pa.AgentUIDs)
 	}
 	if pa.StateDir != filepath.Join(fx.cfg.StateRoot, a.Name) || pa.ConfigPath != filepath.Join(fx.cfg.ConfigRoot, a.Name, "supertoolkit.yaml") || pa.RuntimeDir != filepath.Join(fx.cfg.RuntimeRoot, a.Name) {
@@ -814,8 +822,8 @@ func TestSharedEntriesAreSeededBeforeTheUnitStartsAndRefreshedOnWrites(t *testin
 	if !strings.Contains(string(fx.policyOf("stn_1")), "hooks9.example.com") {
 		t.Error("stn_1 copy not refreshed")
 	}
-	if strings.Contains(string(fx.policyOf("stn_2")), "hooks9") {
-		t.Error("stn_2 refreshed without a write for it")
+	if !strings.Contains(string(fx.policyOf("stn_2")), "hooks9") {
+		t.Error("stn_2 copy not refreshed by a frame for another station")
 	}
 	// removing the shared entries never removes the station's own grant
 	if err := os.WriteFile(fx.cfg.SharedPolicyPath, nil, 0o644); err != nil {
@@ -1063,5 +1071,288 @@ func TestAnInstanceIsInstalledEvenWhenAnUnboundClientReportsSeparateUser(t *test
 	}
 	if len(fx.plans) != 1 {
 		t.Fatalf("installs = %d; the answer of a client bound to no instance must not count", len(fx.plans))
+	}
+}
+
+// ---- registry shared between processes ----
+
+func TestTwoProcessesAllocatingConcurrentlyGetDistinctPortsAndLoseNoRecord(t *testing.T) {
+	a := newFixture(t)
+	b := newFixtureAt(t, a) // a second process over the SAME registry file
+	var wg sync.WaitGroup
+	const per = 8
+	for i := 0; i < per; i++ {
+		for _, fx := range []*fixture{a, b} {
+			fx, st := fx, fmt.Sprintf("stn_%c%d", 'a'+rune(map[*fixture]int{a: 0, b: 1}[fx]), i)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if _, _, err := fx.m.Ensure(context.Background(), st); err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+	}
+	wg.Wait()
+	recs, err := a.m.readRecords()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 2*per {
+		t.Fatalf("%d records, want %d: a record was lost", len(recs), 2*per)
+	}
+	ports := map[int]string{}
+	for st, r := range recs {
+		if other, dup := ports[r.Port]; dup {
+			t.Errorf("port %d given to both %s and %s", r.Port, st, other)
+		}
+		ports[r.Port] = st
+	}
+}
+
+func TestAStaleViewNeverOverwritesARecordAnotherProcessWrote(t *testing.T) {
+	daemon := newFixture(t)
+	if _, err := daemon.deliver("stn_1", "fag_1", "forge.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	// `apn forge-api setup --station` (another process) registers stn_2 after the daemon started.
+	cli := newFixtureAt(t, daemon)
+	if _, _, err := cli.m.Ensure(context.Background(), "stn_2"); err != nil {
+		t.Fatal(err)
+	}
+	cliInst, _ := cli.m.Instance("stn_2")
+	// The daemon then registers stn_3 and later prunes stn_1: neither may drop or reuse stn_2.
+	if _, err := daemon.deliver("stn_3", "fag_3", "forge.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := daemon.m.Instance("stn_2"); !ok || got != cliInst {
+		t.Fatalf("stn_2 lost or changed: %+v %v, want %+v", got, ok, cliInst)
+	}
+	if p3, _ := daemon.m.Instance("stn_3"); p3.Port == cliInst.Port {
+		t.Fatalf("stn_3 reuses stn_2's port %d", p3.Port)
+	}
+	if _, err := daemon.m.PruneUnhosted(context.Background(), []string{"stn_2", "stn_3"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := daemon.m.Instance("stn_2"); !ok || got != cliInst {
+		t.Fatalf("prune dropped the other process's record: %+v %v", got, ok)
+	}
+	if _, ok := daemon.m.Instance("stn_1"); ok {
+		t.Error("stn_1 not pruned")
+	}
+}
+
+// ---- agent uids ----
+
+func TestASecondStationOnTheSameAgentUIDIsRefusedAndReservesNothing(t *testing.T) {
+	fx := newFixture(t, func(_ *fixture, c *InstancesConfig) { c.AgentUIDs = func(string) []int { return []int{1001} } })
+	if _, err := fx.deliver("stn_1", "fag_1", "forge.example.com"); err != nil {
+		t.Fatalf("the first station is never refused: %v", err)
+	}
+	regBefore, _ := os.ReadFile(fx.cfg.RegistryPath)
+	plansBefore, callsBefore := len(fx.plans), len(fx.lc.list())
+	_, err := fx.deliver("stn_2", "fag_2", "forge.example.com")
+	if err == nil || !strings.HasPrefix(err.Error(), "station-uid-shared:") || !strings.Contains(err.Error(), "own uid") {
+		t.Fatalf("deliver err = %v", err)
+	}
+	if _, err := fx.m.Status(context.Background(), StatusParams{StationID: "stn_2"}); err == nil || !strings.HasPrefix(err.Error(), "station-uid-shared:") {
+		t.Fatalf("status err = %v", err)
+	}
+	if _, _, err := fx.m.Ensure(context.Background(), "stn_2"); err == nil {
+		t.Fatal("the CLI path must refuse too")
+	}
+	regAfter, _ := os.ReadFile(fx.cfg.RegistryPath)
+	if string(regBefore) != string(regAfter) || len(fx.plans) != plansBefore || len(fx.lc.list()) != callsBefore {
+		t.Errorf("an instance or port was reserved for the refused station:\n%s", regAfter)
+	}
+	if _, ok := fx.m.Instance("stn_2"); ok {
+		t.Error("refused station is registered")
+	}
+	// the first station keeps working
+	if _, err := fx.deliver("stn_1", "fag_other", "other.example.com"); err != nil {
+		t.Errorf("first station after a refusal: %v", err)
+	}
+}
+
+func TestAcknowledgedSharedUIDProceedsAndSaysSo(t *testing.T) {
+	fx := newFixture(t, func(_ *fixture, c *InstancesConfig) {
+		c.AgentUIDs = func(string) []int { return []int{1001} }
+		c.AllowSharedAgentUID = true
+	})
+	first, err := fx.deliver("stn_1", "fag_1", "forge.example.com")
+	if err != nil || first.Isolation != "separate-user" || first.IsolationDetail != "" {
+		t.Fatalf("a lone station is separate-user: %+v %v", first, err)
+	}
+	ack, err := fx.deliver("stn_2", "fag_2", "forge.example.com")
+	if err != nil || !ack.OK || !ack.Stored {
+		t.Fatalf("%+v %v", ack, err)
+	}
+	// "same-user" is the contract's word for anything short of separate-user; the detail says why.
+	if ack.Isolation == "separate-user" || ack.IsolationDetail != IsolationSharedUID || !strings.Contains(ack.Reason, "share an agent uid") {
+		t.Fatalf("ack = %+v", ack)
+	}
+	st, err := fx.m.Status(context.Background(), StatusParams{StationID: "stn_2"})
+	if err != nil || len(st.Grants) != 1 || st.Grants[0].Isolation == "separate-user" || st.Grants[0].IsolationDetail != IsolationSharedUID || len(st.Warnings) == 0 {
+		t.Fatalf("status = %+v %v", st, err)
+	}
+	// station 1 now shares as well
+	v, err := fx.m.Verify(context.Background(), VerifyParams{StationID: "stn_1", GrantID: "fag_1", ExpectLogin: "agent-press"})
+	if err != nil || v.IsolationDetail != IsolationSharedUID {
+		t.Fatalf("verify = %+v %v", v, err)
+	}
+	// a loud warning once per instance
+	warnings := 0
+	fx.mu.Lock()
+	for _, l := range fx.logs {
+		if strings.Contains(l, "WARNING") && strings.Contains(l, "stn_2") {
+			warnings++
+		}
+	}
+	fx.mu.Unlock()
+	if warnings != 1 {
+		t.Errorf("warnings for stn_2 = %d, want exactly 1", warnings)
+	}
+}
+
+func TestDistinctAgentUIDsAreSeparateUser(t *testing.T) {
+	fx := newFixture(t)
+	for _, st := range []string{"stn_1", "stn_2"} {
+		ack, err := fx.deliver(st, "fag_"+st, "forge.example.com")
+		if err != nil || ack.Isolation != "separate-user" || ack.IsolationDetail != "" || ack.Reason != "" {
+			t.Fatalf("%s: %+v %v", st, ack, err)
+		}
+	}
+	rec, _ := fx.m.readRecords()
+	if !reflectEq(rec["stn_1"].AgentUIDs, uidFor("stn_1")) || !reflectEq(rec["stn_2"].AgentUIDs, uidFor("stn_2")) {
+		t.Errorf("registry uids = %+v", rec)
+	}
+}
+
+func TestOverlapWithJustOneOfSeveralStationsIsRefused(t *testing.T) {
+	uids := map[string][]int{"stn_1": {1}, "stn_2": {2, 3}, "stn_3": {3}}
+	fx := newFixture(t, func(_ *fixture, c *InstancesConfig) { c.AgentUIDs = func(s string) []int { return uids[s] } })
+	for _, st := range []string{"stn_1", "stn_2"} {
+		if _, err := fx.deliver(st, "fag_"+st, "forge.example.com"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := fx.deliver("stn_3", "fag_3", "forge.example.com"); err == nil || !strings.HasPrefix(err.Error(), "station-uid-shared:") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// ---- a removed shared service ----
+
+func TestARemovedSharedServiceLeavesEveryStationAndItsCredentialIsForgotten(t *testing.T) {
+	fx := newFixture(t)
+	_ = os.MkdirAll(filepath.Dir(fx.cfg.SharedPolicyPath), 0o700)
+	if err := os.WriteFile(fx.cfg.SharedPolicyPath, []byte(sharedBase), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range []string{"stn_1", "stn_2"} {
+		if _, err := fx.m.Status(context.Background(), StatusParams{StationID: st}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// the instances are running with a shared "slack" copy; remove it from the shared file
+	trimmed := sharedBase[:strings.Index(sharedBase, "  shared-forge:")]
+	trimmed = strings.Replace(trimmed, "  slack:", "  keepme:", 1)
+	if err := os.WriteFile(fx.cfg.SharedPolicyPath, []byte(trimmed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range []string{"stn_1", "stn_2"} {
+		fx.stub(st).brokerStub.onRevoke = func() error {
+			return nil
+		}
+	}
+	// any frame, for any station, triggers the refresh
+	if _, err := fx.m.Status(context.Background(), StatusParams{StationID: "stn_1"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range []string{"stn_1", "stn_2"} {
+		pol := fx.policyOf(st)
+		if serviceNode(t, pol, "slack") != nil || serviceNode(t, pol, "shared-forge") != nil || serviceNode(t, pol, "keepme") == nil {
+			t.Errorf("%s policy not refreshed:\n%s", st, pol)
+		}
+		calls := fx.stub(st).callList()
+		if !contains(calls, "revoke:slack") || !contains(calls, "revoke:shared-forge") {
+			t.Errorf("%s: stale copies' credentials not forgotten: %v", st, calls)
+		}
+	}
+}
+
+func TestTheCredentialIsForgottenBeforeTheCopyLeavesThePolicy(t *testing.T) {
+	fx := newFixture(t)
+	_ = os.MkdirAll(filepath.Dir(fx.cfg.SharedPolicyPath), 0o700)
+	_ = os.WriteFile(fx.cfg.SharedPolicyPath, []byte(sharedBase), 0o644)
+	if _, err := fx.m.Status(context.Background(), StatusParams{StationID: "stn_1"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(fx.cfg.SharedPolicyPath, nil, 0o644)
+	var sawEntry []bool
+	fx.stub("stn_1").brokerStub.onRevoke = func() error {
+		sawEntry = append(sawEntry, strings.Contains(string(fx.policyOf("stn_1")), "slack:"))
+		return nil
+	}
+	if _, err := fx.m.Status(context.Background(), StatusParams{StationID: "stn_1"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sawEntry) == 0 {
+		t.Fatal("nothing forgotten")
+	}
+	for _, saw := range sawEntry {
+		if !saw {
+			t.Error("a credential was forgotten after its policy entry was already gone: stk could not have found it")
+		}
+	}
+}
+
+func TestAFailedForgetKeepsTheCopyAndIsRetried(t *testing.T) {
+	fx := newFixture(t)
+	_ = os.MkdirAll(filepath.Dir(fx.cfg.SharedPolicyPath), 0o700)
+	_ = os.WriteFile(fx.cfg.SharedPolicyPath, []byte(sharedBase), 0o644)
+	if _, err := fx.m.Status(context.Background(), StatusParams{StationID: "stn_1"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(fx.cfg.SharedPolicyPath, nil, 0o644)
+	stub := fx.stub("stn_1").brokerStub
+	stub.onRevoke = func() error { return errors.New("stk down") }
+	_, _ = fx.m.Status(context.Background(), StatusParams{StationID: "stn_1"})
+	if serviceNode(t, fx.policyOf("stn_1"), "slack") == nil {
+		t.Fatal("the copy left the policy although its credential could not be forgotten")
+	}
+	stub.onRevoke = nil
+	_, _ = fx.m.Status(context.Background(), StatusParams{StationID: "stn_1"})
+	if serviceNode(t, fx.policyOf("stn_1"), "slack") != nil {
+		t.Fatal("not retried on the next frame")
+	}
+}
+
+func TestSharedPolicyIsRefreshedAtNodeStart(t *testing.T) {
+	fx := newFixture(t)
+	_ = os.MkdirAll(filepath.Dir(fx.cfg.SharedPolicyPath), 0o700)
+	_ = os.WriteFile(fx.cfg.SharedPolicyPath, []byte(sharedBase), 0o644)
+	if _, err := fx.m.Status(context.Background(), StatusParams{StationID: "stn_1"}); err != nil {
+		t.Fatal(err)
+	}
+	// the operator removes the service while the node is down
+	_ = os.WriteFile(fx.cfg.SharedPolicyPath, nil, 0o644)
+	fx2 := newFixtureAt(t, fx)
+	fx2.m.RefreshShared(context.Background())
+	if serviceNode(t, fx.policyOf("stn_1"), "slack") != nil {
+		t.Fatal("stale copy survived the restart")
+	}
+	if !contains(fx2.stub("stn_1").callList(), "revoke:slack") {
+		t.Fatal("credential not forgotten at start")
+	}
+}
+
+func TestStatusReportsASharedPolicyThatCouldNotBeSeeded(t *testing.T) {
+	fx := newFixture(t)
+	_ = os.MkdirAll(filepath.Dir(fx.cfg.SharedPolicyPath), 0o700)
+	_ = os.WriteFile(fx.cfg.SharedPolicyPath, []byte("services: [x]"), 0o644)
+	st, err := fx.m.Status(context.Background(), StatusParams{StationID: "stn_1"})
+	if err != nil || len(st.Warnings) != 1 || !strings.Contains(st.Warnings[0], "shared base policy") {
+		t.Fatalf("%+v %v", st, err)
 	}
 }

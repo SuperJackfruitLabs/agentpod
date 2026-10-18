@@ -252,6 +252,20 @@ returned, sealed within the same call.* Docs and schema comments must say so.
   hosted; it records name and proxy port in a node-owned registry so a restart
   finds the same instance. Proxy ports come from a configurable range (default
   8900-8999); an exhausted range is a refusal, not a reuse.
+- **Per-station isolation needs a distinct agent uid per station.** Agents that
+  share a uid can read each other's `/proc/<pid>/environ`, the harness drop-in
+  files and the loopback proxy key, and stk's control-socket allowlist is by uid,
+  so station A's agent could act as station B. The node therefore records each
+  instance's agent uids in its registry and **refuses** (`station-uid-shared`, on
+  deliver and on the status call that fetches the key) a station whose uids
+  overlap any other registered instance's; the first station on a node is never
+  refused. An explicit operator acknowledgement (`allowSharedAgentUid`) lets it
+  proceed, and every reply then reports isolation `same-user` with detail
+  `shared-uid` (the contract's isolation enum is `separate-user | same-user`; a
+  new word would make replies unreadable to the hub) plus a node warning. The
+  node does not switch uids; the operator maps stations to uids
+  (`forgeApi.stationUids`) and starts harnesses accordingly. So "one stk per
+  station" is isolation only together with "one uid per station".
 - **Two policy layers per station.** (a) A *shared base policy*: an
   operator-authored node-level file (default `/etc/agentpod/stk-shared.yaml`)
   of services every station needs. The node copies its entries into each

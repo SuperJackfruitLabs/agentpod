@@ -5,6 +5,10 @@ package forgeapi
 // instances.go) when the instance is created and on every policy write, and marks the copies so
 // they can be refreshed or removed later. The hub never edits them.
 //
+// When the operator removes a service from the shared file its copy leaves every station's policy
+// and its credential is forgotten (stk `revoke`) BEFORE the policy file changes, since stk resolves
+// a service through the policy (see Service.forgetDropped and StationInstances.maybeRefreshShared).
+//
 // What this does NOT do: deliver credentials. A shared service's credential is not the hub's to
 // send and the node invents no path for it; whoever runs the station's stk loads it (for example
 // `stk connect` against the instance), or the service is one that needs none.

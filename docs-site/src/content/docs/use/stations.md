@@ -195,7 +195,11 @@ an older node answers `capability-missing` rather than doing nothing.
 
 **One broker per station.** Each station gets its own broker on the node, with its own OS user,
 store, policy and proxy key, so one station's agent cannot use another station's credential, and
-two stations can hold grants for the same forge host. The node creates it the first time it is
+two stations can hold grants for the same forge host, **provided each station's agents run as a
+different OS user**: agents that share a uid can read each other's environment and use each other's
+broker, so the node refuses a second station on a uid already in use (`station-uid-shared`) unless
+the operator acknowledges the weaker isolation, in which case grants report `same-user`. The node
+creates it the first time it is
 needed and needs to run as root on Linux with systemd to do so; otherwise grants fail with
 `station-instance-unavailable`. An operator can also list services every station needs in a
 *shared base policy* file, which the node copies into each station's own policy

@@ -61,6 +61,7 @@ Each command's text below is what `apn help <command>` prints, from the same tab
 | `$AGENTPOD_TOKEN` | `apn acp`: a person's access token. Prefer it to `--token`, which lands in shell history. |
 | `$OTEL_EXPORTER_OTLP_ENDPOINT` | `apn run`: the OTLP/HTTP collector to export traces to; unset exports nothing. Normally written to `otel.env` by `apn telemetry enable`. |
 | `$OTEL_SDK_DISABLED` | `apn run`: `true` turns export off even with an endpoint set. |
+| `$AGENTPOD_ALLOW_SHARED_AGENT_UID` | `apn run`, `apn forge-api setup --station`: `1` acknowledges that stations whose agents share a uid are not isolated from each other. Default off: a second station on a uid already in use is refused with `station-uid-shared`. Same as `allowSharedAgentUid` in the node config. |
 | `$AGENTPOD_STK_SHARED_POLICY` | `apn run`, `apn forge-api setup --station`: the shared base policy, an stk policy file of services every station needs, copied into each station's own stk policy. Default `/etc/agentpod/stk-shared.yaml`; an absent file means none. Overrides `forgeApi.sharedPolicy` in the node config. |
 | `$AGENTPOD_STK_PORTS` | `apn run`, `apn forge-api setup --station`: the proxy port range for the per-station stk instances, as `MIN-MAX`. Default `8900-8999`. Overrides `forgeApi.proxyPortMin` and `proxyPortMax` in the node config. |
 | `$AGENTPOD_STK_REGISTRY` | `apn run`, `apn forge-api setup --station`: the node-owned file (mode 0600) that remembers which stk instance and port belong to which station. Default `/var/lib/agentpod/forge-api/stk-instances.json`. |
@@ -1044,7 +1045,7 @@ Set up stk as this station's forge credential broker (setup).
 
 ```text
 apn forge-api setup [--user NAME] [--agent-uid N]... [--state-dir DIR] [--stk PATH]
-apn forge-api setup --station ID [--agent-uid N]...
+apn forge-api setup --station ID [--agent-uid N]... [--allow-shared-agent-uid]
 ```
 
 | Flag | Type | Default | Meaning |
@@ -1053,13 +1054,14 @@ apn forge-api setup --station ID [--agent-uid N]...
 | `--agent-uid N` | string | — | A uid allowed to use the broker; repeatable. Default: the uid harnesses run as (the user who ran sudo). |
 | `--state-dir DIR` | string | stk's own (`/var/lib/stk`) | Stk state directory (default: stk's own). |
 | `--stk PATH` | string | `stk` | The stk binary. |
+| `--allow-shared-agent-uid` | bool | `false` | With `--station`: acknowledge that stations whose agents share a uid are not isolated from each other (otherwise a second station on a uid already in use is refused with `station-uid-shared`). Same as `allowSharedAgentUid` in the node config. |
 | `--station ID` | string | — | Create this station's own stk instance now, as the node would at its first grant: own OS user, state, policy file, proxy port and systemd unit, all derived from the id. Cannot be combined with `--user`, `--state-dir` or `--stk`. |
 
 `apn help forge-api` prints:
 
 ```text
 apn forge-api setup [--user stk] [--agent-uid N]... [--state-dir DIR] [--stk PATH]
-apn forge-api setup --station ID [--agent-uid N]...
+apn forge-api setup --station ID [--agent-uid N]... [--allow-shared-agent-uid]
 
 Installs stk as its own OS user so the agent can use forge credentials
 without being able to read them. Run it once with sudo; it is safe to
@@ -1074,6 +1076,11 @@ state, policy file, proxy port and systemd unit, derived from the id)
 ahead of time. The node does the same on its own at a station's first
 grant when it runs as root, so this is only for preparing a station
 or for a node that does not run as root.
+
+A second station whose agents run as a uid another station already uses
+is refused (station-uid-shared): isolation between stations needs a
+distinct uid per station. --allow-shared-agent-uid acknowledges the
+risk; the station's grants then report same-user isolation.
 
 Exit 0 on separate-user or on a clearly reported same-user; 1 on errors.
 ```
