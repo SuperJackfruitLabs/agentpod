@@ -125,9 +125,9 @@
   behind a scroll nobody would find. The detail wraps instead, and the result
   is a column of its own that never shrinks.
 -->
-<div data-testid="activity-feed">
+<div data-testid="activity-feed" class="ap-feed">
   {#if groups.length === 0}
-    <p data-testid="activity-empty" class="py-6 text-sm text-muted-foreground">
+    <p data-testid="activity-empty" class="ap-feed__empty py-6 text-sm text-muted-foreground">
       No activity yet. What the fleet does will show up here.
     </p>
   {:else}
@@ -144,7 +144,7 @@
           data-testid="activity-row"
           class="relative flex items-baseline gap-3 border-b border-border/50 py-1.5 text-xs last:border-b-0"
         >
-          <span class="w-16 shrink-0 font-mono text-muted-foreground">
+          <span class="ap-feed__time w-16 shrink-0 font-mono text-muted-foreground">
             {relativeTime(group.head.createdAt)}
           </span>
 
@@ -153,31 +153,31 @@
           </span>
 
           <span data-testid="activity-detail" class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-0.5">
-            <span class="font-mono text-foreground">{group.verb}</span>
+            <span class="ap-feed__verb font-mono text-foreground">{group.verb}</span>
 
             {#if group.count > 1}
               <span
                 data-testid="activity-repeat"
-                class="rounded-sm bg-muted px-1 font-mono text-[10px] text-muted-foreground"
+                class="ap-feed__rep rounded-sm bg-muted px-1 font-mono text-[10px] text-muted-foreground"
                 title="{group.count} in a row"
               >
                 ×{group.count}
               </span>
             {/if}
 
-            <span class="min-w-0 break-all font-mono text-muted-foreground">{subject(group.head)}</span>
+            <span class="ap-feed__subject min-w-0 break-all font-mono text-muted-foreground">{subject(group.head)}</span>
 
             <!-- The detail: which node it happened on, when the subject was a
                  station and so did not already say. GET /api/activity returns
                  no free-text detail of its own — see the task report. -->
             {#if group.head.stationKey && group.head.nodeId}
-              <span class="min-w-0 break-all font-mono text-muted-foreground/60">
+              <span class="ap-feed__where min-w-0 break-all font-mono text-muted-foreground/60">
                 on {nodeName(group.head.nodeId)}
               </span>
             {/if}
           </span>
 
-          <span data-testid="activity-result" class={cn("shrink-0 pl-1", STATE_TEXT_CLASS[state.token])}>
+          <span data-testid="activity-result" class={cn("ap-feed__res shrink-0 pl-1", STATE_TEXT_CLASS[state.token])}>
             {group.result}
           </span>
         </li>

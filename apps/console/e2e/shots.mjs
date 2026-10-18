@@ -6,10 +6,13 @@
  *
  *   PUBLIC_HUB_URL=https://hub.agentpod.dev pnpm build
  *   node e2e/shots.mjs [--path=/] [--vibes=daylight,paper,studio,quiet] [--themes=light,dark]
- *                      [--sizes=desktop,phone] [--menu] [--more] [--out=e2e/shots]
+ *                      [--sizes=desktop,phone] [--menu] [--more] [--state=populated|loading|error|empty]
+ *                      [--signedout] [--out=e2e/shots]
  *
  * --menu opens the account menu with Appearance expanded (desktop); --more opens the phone's More
- * sheet. Uses playwright-core with an already installed Chromium (its own revision in the
+ * sheet. --state answers the fleet's reads as populated (default), never (loading), 500 (error)
+ * or with nothing enrolled (empty). --signedout answers get-session with no session, so the
+ * console shows its sign-in page (the hub without an account plane). --path=/nope shows the 404. Uses playwright-core with an already installed Chromium (its own revision in the
  * Playwright cache, or PLAYWRIGHT_CHROMIUM); it never downloads a browser. Output is git-ignored.
  */
 import { createServer } from "node:http";
@@ -34,8 +37,15 @@ const VIBES = list(args.vibes, ["daylight", "paper", "studio", "quiet"]);
 const THEMES = list(args.themes, ["light", "dark"]);
 const SIZES = list(args.sizes, ["desktop", "phone"]);
 const PATH = typeof args.path === "string" ? args.path : "/";
+const STATE = typeof args.state === "string" ? args.state : "populated";
+const SIGNED_OUT = !!args.signedout;
+/** The fleet's own reads: what --state=loading|error|empty changes (sign-in and plane reads stay). */
+const FLEET_READ = /^\/api\/(fleet|nodes|runtimes|activity|admin\/principals)/;
 const OUT = resolve(typeof args.out === "string" ? args.out : join(here, "shots"));
 const VIEWPORT = { desktop: { width: 1440, height: 900 }, phone: { width: 390, height: 844 } };
+// --height=N makes the desktop viewport taller (the stage scrolls inside the shell, so a full-page
+// shot would not show more): for comparing a long page with its mockup.
+if (typeof args.height === "string") VIEWPORT.desktop.height = Number(args.height);
 
 // ---- the sample fleet (contract shapes: NodeSummary, FleetAgent, FleetStats, StationRow) ----
 // The page's clock is fixed at today's noon (Daylight's noon sky); the sample times count back from it.
@@ -44,7 +54,8 @@ NOON.setHours(12, 0, 0, 0);
 const ago = (min) => new Date(NOON.getTime() - min * 60_000).toISOString();
 const node = (id, name, os, arch, status, agentVersion, latestVersion, lastSeen) => ({
   id, name, hostname: name, os, arch, cpuCount: 8, status, lastSeenAt: lastSeen, createdAt: ago(60 * 24 * 30),
-  agentVersion, latestVersion, updateAvailable: latestVersion !== null && agentVersion !== latestVersion, capabilities: null, purpose: null, provisioned: null,
+  agentVersion, latestVersion, updateAvailable: latestVersion !== null && agentVersion !== latestVersion,
+  capabilities: status === "online" ? ["posture"] : null, purpose: null, provisioned: null,
 });
 const NODES = [
   node("n_ashram", "ashram", "linux", "amd64", "online", "v0.1.96", "v0.1.97", ago(0)),
@@ -83,21 +94,41 @@ const ACTIVITY = [
   { id: "a4", verb: "node.update", nodeId: "n_guild", result: "ok", createdAt: ago(180) },
   { id: "a5", verb: "fs.write", stationKey: "openclaw:annapurna", nodeId: "n_ashram", result: "ok", createdAt: ago(60 * 48) },
 ];
+const RUNTIMES = [
+  { id: "rt_sandbox", ownerId: "u_rakesh", provider: "docker", externalId: "c1", status: "online", nodeId: "n_guild", name: "sandbox-pi", resourceTier: "small", harness: "pi", runtime: "runsc", statusReason: null, createdAt: ago(60 * 48), updatedAt: ago(60) },
+  { id: "rt_edge", ownerId: "u_rakesh", provider: "cloudflare", externalId: "c2", status: "asleep", nodeId: null, name: "edge-opencode", resourceTier: "medium", harness: "opencode", runtime: null, statusReason: null, createdAt: ago(60 * 24 * 5), updatedAt: ago(60) },
+  { id: "rt_scratch", ownerId: "u_rakesh", provider: "docker", externalId: "c3", status: "error", nodeId: null, name: "scratch-1", resourceTier: "small", harness: "none", runtime: "runc", statusReason: "no node enrolled within 2m of the start request", createdAt: ago(1), updatedAt: ago(1) },
+];
+const detected = (nodeId) =>
+  AGENTS.filter((a) => a.nodeId === nodeId)
+    .map((a) => ({ key: `${a.harness}:${a.agentName}`, harness: a.harness, kind: "leaf", displayName: a.agentName, parentKey: null, workspacePath: a.workspacePath, capabilities: a.capabilities, adopted: true }))
+    .concat(nodeId === "n_ashram" ? [{ key: "codex:scratch", harness: "codex", kind: "leaf", displayName: "scratch", parentKey: null, workspacePath: "/home/rakesh/code/scratch", capabilities: [], adopted: false }] : []);
 const USER = { id: "u_rakesh", email: "rakesh@example.com", name: "Rakesh Gangwar", image: null, role: "admin", emailVerified: true, createdAt: ago(1e5), updatedAt: ago(1e5) };
 
 function answer(path) {
   if (path === "/health") return { status: "ok" };
   if (path === "/public/org-plane") return null; // 404: no plane, so the session comes from get-session
+  if (path === "/api/auth/get-session" && SIGNED_OUT) return null;
+  if (path === "/api/auth/signup-status") return { enabled: false, message: null };
+  if (STATE === "empty" && FLEET_READ.test(path)) {
+    if (path === "/api/fleet/agents") return { stats: { nodes: { total: 0, online: 0 }, agents: { total: 0 }, updatesAvailable: 0, running: 0 }, agents: [] };
+    if (path === "/api/fleet/stats") return { nodes: { total: 0, online: 0 }, agents: { total: 0 }, updatesAvailable: 0, running: 0 };
+    if (path === "/api/admin/principals") return { principals: [] };
+    return [];
+  }
   if (path === "/api/auth/get-session") return { user: USER, session: { id: "s1", userId: USER.id, expiresAt: ago(-60 * 24) } };
   if (path === "/api/me") return { id: USER.id, email: USER.email, isAdmin: true };
   if (path === "/api/fleet/agents") return { stats: STATS, agents: AGENTS };
   if (path === "/api/fleet/stats") return STATS;
   if (path === "/api/nodes") return NODES;
-  if (path === "/api/runtimes") return [];
+  if (path === "/api/runtimes") return RUNTIMES;
+  if (path === "/api/runtimes/providers") return [];
   if (path === "/api/activity") return ACTIVITY;
   if (path === "/api/admin/principals")
-    return { principals: AGENTS.map((a) => ({ id: `p_${a.agentName}`, kind: "agent", displayName: a.agentName, suspendedAt: null })) };
+    return { principals: AGENTS.map((a) => ({ id: `p_${a.agentName}`, kind: "agent", handle: a.agentName, displayName: a.agentName, userId: null, suspendedAt: null })) };
   if (path === "/api/admin/stats") return { users: 1, nodes: 3, stations: 5 };
+  const det = path.match(/^\/api\/nodes\/([^/]+)\/detected$/);
+  if (det) return detected(det[1]);
   const st = path.match(/^\/api\/nodes\/([^/]+)\/stations$/);
   if (st) return AGENTS.filter((a) => a.nodeId === st[1]).map(station);
   const one = path.match(/^\/api\/nodes\/([^/]+)$/);
@@ -150,6 +181,9 @@ try {
           const url = new URL(route.request().url());
           if (url.origin === origin) return route.continue();
           if (url.origin !== HUB) return route.abort();
+          if (STATE === "loading" && FLEET_READ.test(url.pathname)) return; // never answered
+          if (STATE === "error" && FLEET_READ.test(url.pathname))
+            return route.fulfill({ status: 500, json: { error: "The hub could not read the fleet." } });
           const body = answer(url.pathname);
           if (body === undefined) {
             unknown.add(url.pathname);
@@ -159,8 +193,11 @@ try {
           return route.fulfill({ status: 200, json: body });
         });
         await page.goto(origin + PATH);
-        await page.waitForSelector('[data-testid="app-shell"]', { timeout: 15_000 });
-        await page.waitForSelector('[data-testid="roster-row"]', { timeout: 15_000 }).catch(() => {});
+        if (SIGNED_OUT) await page.waitForSelector(".ap-auth__card", { timeout: 15_000 });
+        else {
+          await page.waitForSelector('[data-testid="app-shell"]', { timeout: 15_000 });
+          if (STATE === "populated") await page.waitForSelector('[data-testid="roster-row"]', { timeout: 15_000 }).catch(() => {});
+        }
         let suffix = "";
         if (args.menu && size === "desktop") {
           await page.click('[data-testid="account-chip"]');
@@ -173,6 +210,8 @@ try {
           suffix = "-more";
         }
         await page.waitForTimeout(400);
+        if (STATE !== "populated") suffix += `-${STATE}`;
+        if (SIGNED_OUT) suffix += "-signedout";
         const name = `${PATH === "/" ? "fleet" : PATH.replace(/\W+/g, "_").replace(/^_|_$/g, "")}-${vibe}-${theme}-${size}${suffix}.png`;
         await page.screenshot({ path: join(OUT, name) });
         console.log(join(OUT, name));

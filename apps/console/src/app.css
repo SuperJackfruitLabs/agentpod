@@ -11,6 +11,7 @@
 /* Each vibe's look for the shadcn primitives (unlayered: outranks their utilities). */
 @import "./lib/styles/primitives.css";
 @import "./lib/styles/shell.css";
+@import "./lib/styles/pages.css";
 
 /* Dark is a vibekit theme on <html> (data-theme), never a .dark class. */
 @custom-variant dark (&:is([data-theme="dark"] *));
@@ -76,19 +77,21 @@
   /* Fleet status: fixed meanings, from the vibe. */
   --status-running: var(--vk-color-success);
   --status-degraded: var(--vk-color-signal);
-  --status-starting: var(--vk-color-accent);
+  --status-starting: var(--ap-info);
   --status-stopped: var(--vk-color-faint);
-  --status-error: var(--vk-color-danger);
+  /* Quiet keeps its ink danger for buttons, but its mockups draw a failed STATE in red (--ap-danger). */
+  --ap-danger: var(--vk-color-danger);
+  --status-error: var(--ap-danger);
   --status-sleeping: var(--ap-violet);
-  --status-unknown: var(--vk-color-signal);
+  --status-unknown: var(--ap-warn);
   /* Status as TEXT: the fills above are too light to read as words in some vibes. */
   --status-running-text: var(--vk-color-success-text);
   --status-degraded-text: var(--vk-color-signal-text);
-  --status-starting-text: var(--vk-color-accent-text);
+  --status-starting-text: var(--ap-info-text);
   --status-stopped-text: var(--vk-color-muted);
-  --status-error-text: var(--vk-color-danger);
+  --status-error-text: var(--ap-danger);
   --status-sleeping-text: var(--ap-violet);
-  --status-unknown-text: var(--vk-color-signal-text);
+  --status-unknown-text: var(--ap-warn-text);
 
   /* Local tones vibekit has no token for (hexes from the approved mockups' --ap-* values).
      Daylight is the default; Paper and Quiet below; Studio draws warnings with its signal. */
@@ -138,6 +141,7 @@
   --ap-violet: #6448b0;
 }
 [data-vibe="quiet"][data-theme="light"] {
+  --ap-danger: #b42318;
   --ap-warn: #8a5300;
   --ap-warn-text: #8a5300;
   --ap-warn-wash: var(--vk-color-raised);
@@ -146,6 +150,7 @@
   --ap-info-wash: var(--vk-color-raised);
 }
 [data-vibe="quiet"][data-theme="dark"] {
+  --ap-danger: #f2877c;
   --ap-warn: #e3b55a;
   --ap-warn-text: #e3b55a;
   --ap-warn-wash: var(--vk-color-raised);

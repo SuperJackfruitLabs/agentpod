@@ -38,18 +38,18 @@
   let { state, withLabel = false, pulse = false, size = "md" }: Props = $props();
 </script>
 
-<span class="inline-flex items-center gap-1.5" title={state.label}>
+<span class="ap-st inline-flex items-center gap-1.5" data-state={state.token} title={state.label}>
   <span
     aria-hidden="true"
     class={cn(
-      "inline-block shrink-0 rounded-full",
+      "ap-st__dot inline-block shrink-0 rounded-full",
       STATE_BG_CLASS[state.token],
       size === "sm" ? "size-1.5" : "size-2",
       pulse && "animate-pulse",
     )}
   ></span>
   {#if withLabel}
-    <span class="text-sm">{state.label}</span>
+    <span class="ap-st__word text-sm">{state.label}</span>
   {:else}
     <span class="sr-only">{state.label}</span>
   {/if}

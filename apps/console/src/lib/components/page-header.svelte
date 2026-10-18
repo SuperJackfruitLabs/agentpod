@@ -127,7 +127,8 @@
 
 <header
   class={cn(
-    "z-40 border-b bg-background/90 backdrop-blur-md pt-[env(safe-area-inset-top,0px)]",
+    tabs.length === 0 && "ap-ph--plain",
+    "ap-ph z-40 border-b bg-background/90 backdrop-blur-md pt-[env(safe-area-inset-top,0px)]",
     sticky && "sticky top-0",
   )}
 >
@@ -148,7 +149,7 @@
         {/if}
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2.5 overflow-hidden">
-            <h1 class="truncate text-lg font-semibold tracking-tight">{title}</h1>
+            <h1 class="ap-ph__title truncate text-lg font-semibold tracking-tight">{title}</h1>
             {#if status}
               <Status form="badge" status={status.variant} label={status.label} />
             {/if}
@@ -158,7 +159,7 @@
                  and a person must compare character by character — handles, station
                  keys, ids, versions. Setting "Fleet event log" in it is what made
                  every page header read like a config file. -->
-            <p class="mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p>
+            <p class="ap-ph__sub mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p>
           {/if}
         </div>
       </div>
