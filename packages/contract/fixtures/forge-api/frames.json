@@ -109,7 +109,8 @@
           }
         ],
         "brokered": false,
-        "wiringBlocked": "the harness environment already sets HTTPS_PROXY"
+        "wiringBlocked": "the harness environment already sets HTTPS_PROXY",
+        "measured": "partial"
       }
     }
   }

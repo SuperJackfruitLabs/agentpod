@@ -59,7 +59,10 @@ type ClientOutcome struct {
 type ClientRunner func(ctx context.Context, harness string) (outcome string, known bool, err error)
 
 // stkProbeTimeout bounds stk's probe (it starts a broker and four clients).
-var stkProbeTimeout = 60 * time.Second
+//
+// The hub's request timeout for forge.api.verify must exceed this (45 s) plus the harness probe
+// (10 s) and stk's own verify; a verify whose stk verify already failed skips the probe.
+var stkProbeTimeout = 45 * time.Second
 
 // harnessProbeTimeout bounds one harness probe.
 var harnessProbeTimeout = 10 * time.Second
@@ -94,7 +97,7 @@ func cleanClient(s string) string {
 // CheckBypass reports, for the station behind c, which clients went through its broker. harness
 // names the station's harness ("" for none); run probes the harness's own client and may be nil.
 func CheckBypass(ctx context.Context, c stkclient.Client, harness string, run ClientRunner) []ClientOutcome {
-	var out []ClientOutcome
+	out := []ClientOutcome{}
 	pctx, cancel := context.WithTimeout(ctx, stkProbeTimeout)
 	rows, err := c.Probe(pctx)
 	cancel()
@@ -172,8 +175,39 @@ type BypassReport struct {
 	// nothing blocks the wiring: a reader must not assume brokered coverage beyond it.
 	Paths    []BypassPath `json:"paths,omitempty"`
 	Brokered bool         `json:"brokered"`
+	Measured string       `json:"measured,omitempty"`
 	// WiringBlocked is why a path is not routed (a proxy variable the harness already sets).
 	WiringBlocked string `json:"wiringBlocked,omitempty"`
+}
+
+// finalize derives Measured and Brokered from the rows, the paths and the wiring block. Brokered
+// is never true while a client is bypassed, failed or refused-ca, or when the probe itself did
+// not run (an `stk-probe` row is the probe failing or finding nothing).
+func (r *BypassReport) finalize() {
+	if r.Clients == nil {
+		r.Clients = []ClientOutcome{}
+	}
+	clean, complete := true, len(r.Clients) > 0
+	for _, c := range r.Clients {
+		if c.Outcome != OutcomeHonoured {
+			complete = false
+		}
+		switch {
+		case c.Client == "stk-probe":
+			clean = false
+		case c.Outcome == OutcomeBypassed || c.Outcome == OutcomeFailed || c.Outcome == OutcomeRefusedCA:
+			clean = false
+		}
+	}
+	r.Measured = "partial"
+	if complete {
+		r.Measured = "complete"
+	}
+	wired := len(r.Paths) > 0 && r.WiringBlocked == ""
+	for _, p := range r.Paths {
+		wired = wired && p.Wired
+	}
+	r.Brokered = wired && clean && len(r.Clients) > 0
 }
 
 // bypassedClients lists the clients seen bypassing the broker.
@@ -229,6 +263,9 @@ func (a *VerifyAck) applyCoverage() {
 // only the local stand-in (ProbeHost, localhost or a loopback address), and the station's proxy
 // must be a loopback address; otherwise nothing is run.
 //
+// The command runs as the node's uid with no process-group kill, so NewStationInstances refuses a
+// configured probe when the node is root (see InstancesConfig.HarnessProbes). None is shipped.
+//
 // The command prints one outcome word (honoured|bypassed|refused-ca) as its first line.
 type ExecRunner struct {
 	// Probes: harness -> argv. A harness not in it is not known (`untested`).
@@ -259,7 +296,10 @@ func isLocalHost(h string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// checkLocalArgv refuses a probe command that names anything but the local stand-in.
+// checkLocalArgv refuses a probe command containing a URL that names anything but the local
+// stand-in. It is a guard against a mistaken configuration, not a sandbox: it does not stop a
+// command from connecting to a bare host name it builds itself. The probe command is operator
+// configuration, trusted as much as the node's own config.
 func checkLocalArgv(argv []string) error {
 	if len(argv) == 0 || argv[0] == "" {
 		return errors.New("empty probe command")
@@ -396,7 +436,7 @@ func (m *StationInstances) coverage(station string) (harness string, paths []Byp
 	// A long-lived gateway is a second path with its own environment: wired only through a unit
 	// that belongs to this station alone. A gateway that serves several stations (OpenClaw's, a
 	// Hermes root gateway) has no such unit and is not routed.
-	if harness == "hermes" || harness == "openclaw" {
+	if hasPath(harness, "gateway") {
 		gw := BypassPath{Path: "gateway"}
 		var units []string
 		if h != nil {
@@ -415,6 +455,24 @@ func (m *StationInstances) coverage(station string) (harness string, paths []Byp
 	return harness, paths, m.WiringBlocked(station)
 }
 
+// HarnessPaths names the paths the bypass check reports for a harness: sessions and terminals the
+// node spawns, and for harnesses with a long-lived gateway that gateway too.
+func HarnessPaths(harness string) []string {
+	if harness == "hermes" || harness == "openclaw" {
+		return []string{"spawn", "gateway"}
+	}
+	return []string{"spawn"}
+}
+
+func hasPath(harness, p string) bool {
+	for _, x := range HarnessPaths(harness) {
+		if x == p {
+			return true
+		}
+	}
+	return false
+}
+
 func anyWired(paths []BypassPath) bool {
 	for _, p := range paths {
 		if p.Wired {
@@ -431,6 +489,9 @@ func (m *StationInstances) bypassHook(station string, stGet func() *stationState
 		if m.cfg.Bypass != nil {
 			return m.cfg.Bypass(ctx, c)
 		}
+		if rows, ok := m.probeCached(station); ok {
+			return rows
+		}
 		harness, paths, _ := m.coverage(station)
 		var run ClientRunner
 		if anyWired(paths) && len(m.cfg.HarnessProbes) > 0 {
@@ -445,6 +506,59 @@ func (m *StationInstances) bypassHook(station string, stGet func() *stationState
 				}}
 			run = r.Run
 		}
-		return CheckBypass(ctx, c, harness, run)
+		rows := CheckBypass(ctx, c, harness, run)
+		m.storeProbe(station, rows)
+		return rows
 	}
+}
+
+// probeCacheTTL is how long a clean probe result is reused for a station.
+const probeCacheTTL = 60 * time.Second
+
+type cachedProbe struct {
+	at   time.Time
+	rows []ClientOutcome
+}
+
+func (m *StationInstances) clockNow() time.Time {
+	if m.cfg.now != nil {
+		return m.cfg.now()
+	}
+	return time.Now()
+}
+
+func (m *StationInstances) probeCached(station string) ([]ClientOutcome, bool) {
+	m.probeMu.Lock()
+	defer m.probeMu.Unlock()
+	c, ok := m.probes[station]
+	if !ok || m.clockNow().Sub(c.at) >= probeCacheTTL {
+		return nil, false
+	}
+	return append([]ClientOutcome{}, c.rows...), true
+}
+
+// storeProbe caches rows only when every one is honoured or untested and the probe itself ran: a
+// bypass, a failure or a CA refusal is looked at again every time, never remembered.
+func (m *StationInstances) storeProbe(station string, rows []ClientOutcome) {
+	if len(rows) == 0 {
+		return
+	}
+	for _, r := range rows {
+		if r.Client == "stk-probe" || (r.Outcome != OutcomeHonoured && r.Outcome != OutcomeUntested) {
+			return
+		}
+	}
+	m.probeMu.Lock()
+	defer m.probeMu.Unlock()
+	if m.probes == nil {
+		m.probes = map[string]cachedProbe{}
+	}
+	m.probes[station] = cachedProbe{at: m.clockNow(), rows: append([]ClientOutcome{}, rows...)}
+}
+
+// dropProbe forgets a station's cached probe: its grants or wiring changed.
+func (m *StationInstances) dropProbe(station string) {
+	m.probeMu.Lock()
+	delete(m.probes, station)
+	m.probeMu.Unlock()
 }

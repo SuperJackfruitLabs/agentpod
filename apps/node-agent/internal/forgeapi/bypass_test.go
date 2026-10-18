@@ -563,3 +563,221 @@ func TestBypassedHarnessClientFailsVerifyThroughTheInstances(t *testing.T) {
 		t.Fatalf("%+v", ack)
 	}
 }
+
+// ---- fix round 1 ----
+
+func rows(pairs ...string) []ClientOutcome {
+	out := []ClientOutcome{}
+	for i := 0; i+1 < len(pairs); i += 2 {
+		out = append(out, ClientOutcome{Client: pairs[i], Outcome: pairs[i+1]})
+	}
+	return out
+}
+
+func TestBrokeredAndMeasuredTable(t *testing.T) {
+	wired := []BypassPath{{Path: "spawn", Wired: true}}
+	cases := []struct {
+		name     string
+		clients  []ClientOutcome
+		paths    []BypassPath
+		blocked  string
+		brokered bool
+		measured string
+	}{
+		{"all honoured", rows("curl", "honoured", "hermes", "honoured"), wired, "", true, "complete"},
+		{"one untested", rows("curl", "honoured", "hermes", "untested"), wired, "", true, "partial"},
+		{"refused-ca", rows("curl", "honoured", "go", "refused-ca"), wired, "", false, "partial"},
+		{"bypassed", rows("curl", "honoured", "node", "bypassed"), wired, "", false, "partial"},
+		{"a client failed", rows("curl", "honoured", "node", "failed"), wired, "", false, "partial"},
+		{"the probe errored", rows("stk-probe", "failed"), wired, "", false, "partial"},
+		{"the probe was empty", rows("stk-probe", "untested"), wired, "", false, "partial"},
+		{"no probe ran", rows(), wired, "", false, "partial"},
+		{"nil clients", nil, wired, "", false, "partial"},
+		{"all honoured but a path unwired", rows("curl", "honoured"), []BypassPath{{Path: "spawn", Wired: true}, {Path: "gateway"}}, "", false, "complete"},
+		{"all honoured but blocked", rows("curl", "honoured"), wired, "HTTPS_PROXY", false, "complete"},
+		{"all honoured but no path", rows("curl", "honoured"), nil, "", false, "complete"},
+	}
+	for _, c := range cases {
+		r := &BypassReport{Clients: c.clients, Paths: c.paths, WiringBlocked: c.blocked}
+		r.finalize()
+		if r.Brokered != c.brokered || r.Measured != c.measured {
+			t.Errorf("%s: brokered=%v measured=%q, want %v %q", c.name, r.Brokered, r.Measured, c.brokered, c.measured)
+		}
+		if r.Clients == nil {
+			t.Errorf("%s: Clients is nil", c.name)
+		}
+	}
+}
+
+func TestVerifySkipsTheProbeWhenStksOwnVerifyFailed(t *testing.T) {
+	fx, _ := newWiringFixture(t)
+	fx.deliverKey("stn_1", "hermes:stn_1", "fag_aaa111")
+	s := fx.stub("stn_1")
+	s.verify = stkclient.VerifyResult{OK: false, Reason: "unauthorized"}
+	s.probe = rows2(honouredCurl)
+	ack, err := fx.m.Verify(context.Background(), VerifyParams{StationID: "stn_1", GrantID: "fag_aaa111", ExpectLogin: "agent-press"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.probes != 0 {
+		t.Fatalf("the 45s probe ran for a credential that already failed (%d)", s.probes)
+	}
+	if ack.OK || !strings.HasPrefix(ack.Reason, "unauthorized") || ack.Bypass == nil || ack.Bypass.Brokered || len(ack.Bypass.Paths) == 0 {
+		t.Fatalf("%+v %+v", ack, ack.Bypass)
+	}
+	b, _ := json.Marshal(ack)
+	if !strings.Contains(string(b), `"clients":[]`) {
+		t.Errorf("clients must marshal as [], got %s", b)
+	}
+}
+
+func rows2(p ...stkclient.ProbeOutcome) []stkclient.ProbeOutcome { return p }
+
+func TestClientsAreNeverNullInAnyAckBranch(t *testing.T) {
+	// CheckBypass itself
+	if CheckBypass(context.Background(), &brokerStub{}, "", nil) == nil {
+		t.Error("nil")
+	}
+	// instances: no key (no harness), probe ok / probe error / stk failure
+	for name, mod := range map[string]func(*instStk){
+		"ok":        func(s *instStk) { s.probe = rows2(honouredCurl) },
+		"probe err": func(s *instStk) { s.probeErr = errors.New("x") },
+		"stk fail":  func(s *instStk) { s.verify = stkclient.VerifyResult{OK: false, Reason: "forbidden"} },
+	} {
+		fx, _ := newWiringFixture(t)
+		fx.deliverKey("stn_1", "hermes:stn_1", "fag_aaa111")
+		s := fx.stub("stn_1")
+		s.verify = stkclient.VerifyResult{OK: true, Login: "agent-press"}
+		mod(s)
+		ack, err := fx.m.Verify(context.Background(), VerifyParams{StationID: "stn_1", GrantID: "fag_aaa111", ExpectLogin: "agent-press"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(ack)
+		if strings.Contains(string(b), `"clients":null`) || !strings.Contains(string(b), `"clients":[`) {
+			t.Errorf("%s: %s", name, b)
+		}
+	}
+}
+
+type clock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *clock) now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
+func (c *clock) add(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
+}
+
+func cachedFixture(t *testing.T) (*fixture, *clock) {
+	clk := &clock{t: time.Unix(1_800_000_000, 0)}
+	fx, _ := newWiringFixture(t, func(_ *fixture, c *InstancesConfig) { c.now = clk.now })
+	fx.deliverKey("stn_1", "hermes:stn_1", "fag_aaa111")
+	return fx, clk
+}
+
+func TestProbeResultIsCachedPerStationFor60sOnlyWhenClean(t *testing.T) {
+	fx, clk := cachedFixture(t)
+	fx.verify("stn_1", "fag_aaa111", honouredCurl)
+	fx.verify("stn_1", "fag_aaa111", honouredCurl)
+	if n := fx.stub("stn_1").probes; n != 1 {
+		t.Fatalf("probes = %d, want 1 (cached)", n)
+	}
+	clk.add(59 * time.Second)
+	fx.verify("stn_1", "fag_aaa111", honouredCurl)
+	if n := fx.stub("stn_1").probes; n != 1 {
+		t.Fatalf("probes = %d at 59s", n)
+	}
+	clk.add(2 * time.Second)
+	fx.verify("stn_1", "fag_aaa111", honouredCurl)
+	if n := fx.stub("stn_1").probes; n != 2 {
+		t.Fatalf("probes = %d after 61s, want 2", n)
+	}
+	// untested rows are still cacheable (partial)
+	fx2, _ := cachedFixture(t)
+	missing := stkclient.ProbeOutcome{Client: "python3", Outcome: "missing"}
+	fx2.verify("stn_1", "fag_aaa111", honouredCurl, missing)
+	fx2.verify("stn_1", "fag_aaa111", honouredCurl, missing)
+	if n := fx2.stub("stn_1").probes; n != 1 {
+		t.Fatalf("partial not cached: %d", n)
+	}
+}
+
+func TestAFailureIsNeverCached(t *testing.T) {
+	for _, bad := range []stkclient.ProbeOutcome{{Client: "node", Outcome: "bypassed"}, {Client: "node", Outcome: "failed"}, {Client: "go", Outcome: "refused-ca"}} {
+		fx, _ := cachedFixture(t)
+		fx.verify("stn_1", "fag_aaa111", honouredCurl, bad)
+		fx.verify("stn_1", "fag_aaa111", honouredCurl, bad)
+		if n := fx.stub("stn_1").probes; n != 2 {
+			t.Errorf("%s was cached (%d probes)", bad.Outcome, n)
+		}
+	}
+	// a probe that errored is not cached either
+	fx, _ := cachedFixture(t)
+	fx.stub("stn_1").probeErr = errors.New("boom")
+	fx.verify("stn_1", "fag_aaa111")
+	fx.verify("stn_1", "fag_aaa111")
+	if n := fx.stub("stn_1").probes; n != 2 {
+		t.Errorf("an errored probe was cached (%d)", n)
+	}
+}
+
+func TestCacheIsPerStationAndInvalidatedByDeliverPolicyRevoke(t *testing.T) {
+	fx, _ := cachedFixture(t)
+	fx.deliverKey("stn_2", "hermes:stn_2", "fag_bbb222")
+	fx.verify("stn_1", "fag_aaa111", honouredCurl)
+	fx.verify("stn_2", "fag_bbb222", honouredCurl)
+	if fx.stub("stn_1").probes != 1 || fx.stub("stn_2").probes != 1 {
+		t.Fatal("each station probes under its own client")
+	}
+	// deliver for stn_1 drops only stn_1's entry
+	fx.deliverKey("stn_1", "hermes:stn_1", "fag_aaa111")
+	fx.verify("stn_1", "fag_aaa111", honouredCurl)
+	fx.verify("stn_2", "fag_bbb222", honouredCurl)
+	if fx.stub("stn_1").probes != 2 || fx.stub("stn_2").probes != 1 {
+		t.Fatalf("after deliver: %d %d", fx.stub("stn_1").probes, fx.stub("stn_2").probes)
+	}
+	if _, err := fx.m.Policy(context.Background(), PolicyParams{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "read", Rules: []Rule{}}); err != nil {
+		t.Fatal(err)
+	}
+	fx.verify("stn_1", "fag_aaa111", honouredCurl)
+	if fx.stub("stn_1").probes != 3 {
+		t.Fatalf("policy did not invalidate: %d", fx.stub("stn_1").probes)
+	}
+	fx.m.NoteBlocked("hermes:stn_1", []string{"HTTPS_PROXY"})
+	fx.verify("stn_1", "fag_aaa111", honouredCurl)
+	if fx.stub("stn_1").probes != 4 {
+		t.Fatalf("a wiring change did not invalidate: %d", fx.stub("stn_1").probes)
+	}
+	if _, err := fx.m.Revoke(context.Background(), RevokeParams{StationID: "stn_2", GrantID: "fag_bbb222"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := fx.m.probeCached("stn_2"); ok {
+		t.Fatal("revoke did not invalidate")
+	}
+}
+
+func TestAHarnessProbeIsRefusedWhenTheNodeIsRoot(t *testing.T) {
+	base := func(euid int, exec func(context.Context, []string, []string) (string, error)) error {
+		fx := newFixture(t)
+		cfg := fx.cfg
+		cfg.HarnessProbes = map[string][]string{"hermes": {"/opt/p"}}
+		cfg.ProbeExec = exec
+		cfg.geteuid = func() int { return euid }
+		_, err := NewStationInstances(cfg)
+		return err
+	}
+	if err := base(0, nil); err == nil || !strings.Contains(err.Error(), "root") {
+		t.Fatalf("root with the real process runner: %v", err)
+	}
+	if err := base(1000, nil); err != nil {
+		t.Fatalf("non-root: %v", err)
+	}
+	// a supplied runner is the caller's (tests, a future agent-uid runner)
+	if err := base(0, func(context.Context, []string, []string) (string, error) { return "", nil }); err != nil {
+		t.Fatalf("injected runner: %v", err)
+	}
+}

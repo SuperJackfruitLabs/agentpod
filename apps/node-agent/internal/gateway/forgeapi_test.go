@@ -257,6 +257,7 @@ func TestVerifyAckBypassSectionMatchesTheHubsFixture(t *testing.T) {
 			{Path: "gateway", Reason: "no unit of this station's own starts the gateway"},
 		},
 		WiringBlocked: "the harness environment already sets HTTPS_PROXY",
+		Measured:      "partial",
 	}}
 	if got := asJSON(t, ack); !reflect.DeepEqual(got, want) {
 		t.Fatalf("ack = %v\nfixture = %v", got, want)

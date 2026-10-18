@@ -39,6 +39,7 @@ test("the verify result fixture carries the bypass section the node sends", () =
   if (!r.success) return;
   expect(r.data.bypass?.clients.map((c) => c.outcome)).toEqual(["honoured", "refused-ca", "untested"]);
   expect(r.data.bypass?.brokered).toBe(false);
+  expect(r.data.bypass?.measured).toBe("partial");
   expect(r.data.bypass?.wiringBlocked).toContain("HTTPS_PROXY");
   // an older node omits it, and a newer node adding a field or an outcome word is still readable
   expect(VERB_RESULTS["forge.api.verify"].safeParse({ ok: true, isolation: "separate-user" }).success).toBe(true);
@@ -49,4 +50,13 @@ test("the verify result fixture carries the bypass section the node sends", () =
       bypass: { clients: [{ client: "x", outcome: "new-word", extra: 1 }], brokered: true, extra: 1 },
     }).success,
   ).toBe(true);
+});
+
+test("measured is complete|partial only, and brokered is a required boolean", () => {
+  const base = { ok: true, isolation: "separate-user" };
+  const ok = (bypass: unknown) => VERB_RESULTS["forge.api.verify"].safeParse({ ...base, bypass }).success;
+  expect(ok({ clients: [], brokered: false, measured: "complete" })).toBe(true);
+  expect(ok({ clients: [], brokered: false })).toBe(true);
+  expect(ok({ clients: [], brokered: false, measured: "everything" })).toBe(false);
+  expect(ok({ clients: [] })).toBe(false);
 });

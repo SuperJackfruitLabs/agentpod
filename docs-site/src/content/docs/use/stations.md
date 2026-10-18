@@ -229,8 +229,13 @@ The proxy port range and the file locations are settings in the node config; the
   `ok: false` with a reason starting `bypassed:`. The station's own harness client is `untested`
   unless a safe probe command is configured (none ships), and is never reported `honoured`
   without one. `bypass.paths` says which harness paths the node routed through the broker
-  (`spawn`, and `gateway` for hermes/openclaw), `bypass.wiringBlocked` why a path is not, and
-  `bypass.brokered` is true only when every path is. A station with no wired path at all is
+  (`spawn`, and `gateway` for hermes/openclaw) and `bypass.wiringBlocked` why a path is not.
+  `bypass.brokered` is wiring AND measurement: true only when every path is wired, the probe ran,
+  and no client is `bypassed`, `failed` or `refused-ca`. `bypass.measured` is `complete` only when
+  every client row (including the harness's own) is `honoured`, else `partial`; an untested client
+  is never evidence. The probe takes up to 45 s, is skipped when stk's own verify already failed,
+  and a clean result is reused for 60 s per station (never a failure; any deliver, policy, revoke
+  or wiring change drops it). Harness probes are refused on a root node. A station with no wired path at all is
   `ok: false` with `not-wired:`. The hub does not read `bypass` yet: it sees the reason as
   inconclusive, never verified.
 - **Body-level rules cover JSON REST only.** A rule that would have to read a GraphQL or non-JSON

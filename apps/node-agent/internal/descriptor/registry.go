@@ -3,6 +3,7 @@ package descriptor
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -26,6 +27,16 @@ func NewRegistry() *Registry {
 // entry for the same harness.
 func (r *Registry) Register(d Descriptor) {
 	r.descriptors[d.Harness()] = d
+}
+
+// Harnesses lists the registered harness names, sorted.
+func (r *Registry) Harnesses() []string {
+	out := make([]string, 0, len(r.descriptors))
+	for n := range r.descriptors {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // DetectAll aggregates station discovery across all registered descriptors.

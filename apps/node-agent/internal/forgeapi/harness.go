@@ -446,6 +446,7 @@ func (m *StationInstances) NoteBlocked(key string, names []string) {
 	if n != 1 {
 		return
 	}
+	m.dropProbe(station)
 	reason := ""
 	if len(names) > 0 {
 		reason = "the harness environment already sets " + strings.Join(names, ", ")

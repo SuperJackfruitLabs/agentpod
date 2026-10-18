@@ -32,6 +32,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
@@ -121,6 +122,8 @@ type InstancesConfig struct {
 	Harness *HarnessWiring
 
 	// test seams
+	now        func() time.Time
+	geteuid    func() int
 	env        *sysEnv
 	userExists func(string) bool
 	portFree   func(int) bool
@@ -145,6 +148,8 @@ type StationInstances struct {
 	refreshMu  sync.Mutex                   // serialises shared-policy refreshes
 	sharedHash string
 	sharedSeen bool
+	probeMu    sync.Mutex
+	probes     map[string]cachedProbe // station -> last clean bypass probe
 }
 
 type stationState struct {
@@ -175,6 +180,15 @@ type registryFile struct {
 func NewStationInstances(cfg InstancesConfig) (*StationInstances, error) {
 	if cfg.NewClient == nil || cfg.Lifecycle == nil {
 		return nil, errors.New("forgeapi: StationInstances needs NewClient and Lifecycle")
+	}
+	if len(cfg.HarnessProbes) > 0 && cfg.ProbeExec == nil {
+		geteuid := cfg.geteuid
+		if geteuid == nil {
+			geteuid = os.Geteuid
+		}
+		if geteuid() == 0 {
+			return nil, errors.New("forgeapi: harness probes are refused on a root node: the command would run as root without a process-group kill")
+		}
 	}
 	d := func(v *string, def string) {
 		if *v == "" {
@@ -621,6 +635,7 @@ const IsolationSharedUID = "shared-uid"
 // ---- the verbs, routed by station ----
 
 func (m *StationInstances) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, error) {
+	m.dropProbe(p.StationID)
 	// A bad frame must not cost an instance.
 	if _, err := validateDeliver(p); err != nil {
 		return DeliverAck{}, err
@@ -655,6 +670,7 @@ func (m *StationInstances) Policy(ctx context.Context, p PolicyParams) (PolicyAc
 	if strings.TrimSpace(p.StationID) == "" || strings.TrimSpace(p.GrantID) == "" {
 		return PolicyAck{}, codedf("invalid-params", "stationId and grantId are required")
 	}
+	m.dropProbe(p.StationID)
 	m.maybeRefreshShared(ctx)
 	st, _, err := m.lookup(p.StationID, false)
 	if err != nil {
@@ -687,19 +703,17 @@ func (m *StationInstances) Verify(ctx context.Context, p VerifyParams) (VerifyAc
 	// What the node wired, beside what was measured: the ack never implies brokered coverage the
 	// node did not set up.
 	if ack.Bypass == nil {
-		ack.Bypass = &BypassReport{}
+		ack.Bypass = &BypassReport{Clients: []ClientOutcome{}}
 	}
 	harness, paths, blocked := m.coverage(p.StationID)
 	ack.Bypass.Harness, ack.Bypass.Paths, ack.Bypass.WiringBlocked = harness, paths, blocked
-	ack.Bypass.Brokered = blocked == "" && len(paths) > 0
-	for _, pa := range paths {
-		ack.Bypass.Brokered = ack.Bypass.Brokered && pa.Wired
-	}
+	ack.Bypass.finalize()
 	ack.applyCoverage()
 	return ack, nil
 }
 
 func (m *StationInstances) Revoke(ctx context.Context, p RevokeParams) (RevokeAck, error) {
+	m.dropProbe(p.StationID)
 	if strings.TrimSpace(p.StationID) == "" || strings.TrimSpace(p.GrantID) == "" {
 		return RevokeAck{}, codedf("invalid-params", "stationId and grantId are required")
 	}

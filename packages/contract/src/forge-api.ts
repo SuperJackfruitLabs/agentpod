@@ -127,6 +127,10 @@ export type ForgeApiBypassOutcome = (typeof ForgeApiBypassOutcomes)[number];
  * through the station's broker. A node sets `ok: false` with a `reason` starting `bypassed:` when a
  * client bypassed the broker and `not-wired:` when no path of the harness is routed; neither is one
  * of stk's codes, so the hub reads them as not verified. Older nodes omit the whole field.
+ *
+ * The probe can take up to 45 s (plus up to 10 s for the harness's own probe): the hub's request
+ * timeout for forge.api.verify must exceed that. A verify whose stk check already failed carries
+ * no client rows (`clients: []`) because the probe is skipped.
  */
 export const ForgeApiBypass = z.object({
   clients: z.array(z.object({ client: z.string(), outcome: z.string() })),
@@ -141,8 +145,18 @@ export const ForgeApiBypass = z.object({
       }),
     )
     .optional(),
-  /** True only when every path is wired and nothing blocks the wiring. */
+  /**
+   * "Wired AND measured clean", not wiring alone: true only when every path is wired, nothing
+   * blocks the wiring, the probe itself ran, and no client row is `bypassed`, `failed` or
+   * `refused-ca`. It proves nothing for clients nobody probed; `measured` says how much was seen.
+   */
   brokered: z.boolean(),
+  /**
+   * `complete` only when every client row (stk's generic clients and the harness's own) is
+   * `honoured`; `partial` when any is `untested`, refused, bypassed or failed, or no probe ran.
+   * Older nodes omit it.
+   */
+  measured: z.enum(["complete", "partial"]).optional(),
   /** Why a path is not routed (a proxy variable the harness already sets); names only. */
   wiringBlocked: z.string().optional(),
 });

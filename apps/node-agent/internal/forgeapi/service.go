@@ -590,8 +590,10 @@ func (s *Service) Verify(ctx context.Context, p VerifyParams) (VerifyAck, error)
 			ack.Reason = "unexpected-response"
 		}
 	}
-	if s.Bypass != nil {
+	// stk's own verify already failed: its reason stands, and the (slow) probe tells nothing more.
+	if s.Bypass != nil && vr.OK {
 		ack.Bypass = &BypassReport{Clients: s.Bypass(ctx, client)}
+		ack.Bypass.finalize()
 		ack.applyBypass()
 	}
 	return ack, nil
