@@ -8,6 +8,7 @@
  *   node e2e/shots.mjs [--path=/] [--vibes=daylight,paper,studio,quiet] [--themes=light,dark]
  *                      [--sizes=desktop,phone] [--menu] [--more] [--state=populated|loading|error|empty]
  *                      [--signedout] [--out=e2e/shots]
+ *                      [--tab=chat|health|logs] [--about] [--chat=live|none|ended] [--health=running|stopped|error]
  *
  * --menu opens the account menu with Appearance expanded (desktop); --more opens the phone's More
  * sheet. --state answers the fleet's reads as populated (default), never (loading), 500 (error)
@@ -39,10 +40,16 @@ const SIZES = list(args.sizes, ["desktop", "phone"]);
 const PATH = typeof args.path === "string" ? args.path : "/";
 const STATE = typeof args.state === "string" ? args.state : "populated";
 const SIGNED_OUT = !!args.signedout;
+// The station page (--path=/nodes/n_ashram/stations/st_annapurna): --tab picks the tab, --about opens
+// the phone's About sheet, --chat the session the transcript shows (a live one waiting on a permission,
+// none at all, or an ended one), --health what the station reports. --sizes may include tablet (1024).
+const TAB = typeof args.tab === "string" ? args.tab : null;
+const CHAT = typeof args.chat === "string" ? args.chat : "live";
+const HEALTH = typeof args.health === "string" ? args.health : "running";
 /** The fleet's own reads: what --state=loading|error|empty changes (sign-in and plane reads stay). */
 const FLEET_READ = /^\/api\/(fleet|nodes|runtimes|activity|admin\/principals)/;
 const OUT = resolve(typeof args.out === "string" ? args.out : join(here, "shots"));
-const VIEWPORT = { desktop: { width: 1440, height: 900 }, phone: { width: 390, height: 844 } };
+const VIEWPORT = { desktop: { width: 1440, height: 900 }, tablet: { width: 1024, height: 800 }, phone: { width: 390, height: 844 } };
 // --height=N makes the desktop viewport taller (the stage scrolls inside the shell, so a full-page
 // shot would not show more): for comparing a long page with its mockup.
 if (typeof args.height === "string") VIEWPORT.desktop.height = Number(args.height);
@@ -84,7 +91,8 @@ const STATS = { nodes: { total: 3, online: 2 }, agents: { total: 5 }, updatesAva
 const station = (a) => ({
   id: a.stationId, userId: "u_rakesh", nodeId: a.nodeId, harness: a.harness, stationKey: `${a.harness}:${a.agentName}`,
   kind: "harness", parentStationId: null, displayName: a.agentName, workspacePath: a.workspacePath,
-  capabilities: a.capabilities, matrixId: null, bridgeMatrixId: null, matrixIdentityMode: "bridge", purpose: null,
+  capabilities: a.capabilities, matrixId: null, bridgeMatrixId: `@agent_${a.agentName}:id.agentpod.dev`, matrixIdentityMode: "bridge",
+  purpose: a.agentName === "annapurna" ? "personal" : null,
   principalId: `p_${a.agentName}`, adoptedAt: ago(60 * 24 * 10), createdAt: ago(60 * 24 * 10),
 });
 const ACTIVITY = [
@@ -103,6 +111,45 @@ const detected = (nodeId) =>
   AGENTS.filter((a) => a.nodeId === nodeId)
     .map((a) => ({ key: `${a.harness}:${a.agentName}`, harness: a.harness, kind: "leaf", displayName: a.agentName, parentKey: null, workspacePath: a.workspacePath, capabilities: a.capabilities, adopted: true }))
     .concat(nodeId === "n_ashram" ? [{ key: "codex:scratch", harness: "codex", kind: "leaf", displayName: "scratch", parentKey: null, workspacePath: "/home/rakesh/code/scratch", capabilities: [], adopted: false }] : []);
+// ---- the station page: annapurna (openclaw on ashram), its session and its log ----
+const SESSION = {
+  id: "as_1", stationId: "st_annapurna", userId: "u_rakesh", mode: "ask", status: CHAT === "ended" ? "ended" : "waiting",
+  endedReason: CHAT === "ended" ? "ended by you" : null, createdAt: ago(3), lastEventAt: ago(0),
+  title: "Your IDENTITY.md still says you live on superchotu", lastSeq: 6,
+};
+const ev = (seq, type, payload) => ({ sessionId: SESSION.id, seq, type, payload, createdAt: ago(3 - seq * 0.3) });
+const EVENTS = [
+  ev(1, "user-prompt", { text: "Your IDENTITY.md still says you live on superchotu. The node is called ashram now. Can you fix that?" }),
+  ev(2, "agent-update", { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "The file is in the workspace root; read it, then edit the host line." } }),
+  ev(3, "agent-update", { sessionUpdate: "tool_call", toolCallId: "tc_read", title: "Read IDENTITY.md", kind: "read", status: "completed" }),
+  ev(4, "agent-update", { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "It says `host: superchotu`. I'll change it to **ashram**." } }),
+  ev(5, "permission-request", {
+    toolCall: { toolCallId: "tc_edit", title: "Edit IDENTITY.md", kind: "edit" },
+    options: [
+      { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+      { optionId: "allow_always", name: "Always allow", kind: "allow_always" },
+      { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+    ],
+  }),
+  ev(6, "state", { status: CHAT === "ended" ? "ended" : "waiting", ...(CHAT === "ended" ? { reason: "ended by you" } : {}) }),
+];
+const HEALTHS = {
+  running: { running: true, pid: 4242, cpuPct: 2.5, memBytes: 210_000_000, diskBytes: 1_400_000_000, uptimeSec: 86_400, lastActivity: ago(1), note: null },
+  stopped: { running: false, pid: null, cpuPct: null, memBytes: null, diskBytes: 1_400_000_000, uptimeSec: null, lastActivity: ago(90), note: null },
+};
+const OFF = { enabled: false, url: null, model: null, maxSeconds: null, source: "none" };
+const TRANSCRIPTION = { mode: "inherit", hasApiKey: false, effective: OFF };
+const SPEECH = {
+  mode: "inherit", hasApiKey: false, assignedVoice: "af_heart", inheritedVoice: "af_heart", inheritedVoiceSource: "assigned",
+  effective: { enabled: false, url: null, voice: "af_heart", voiceSource: "assigned", speakMode: "off", maxChars: 600, source: "none" },
+};
+const LOG_LINES = [
+  "INFO openclaw gateway listening on 127.0.0.1:18789",
+  "INFO gateway session attached (ask)",
+  "WARN gateway slow upstream response: 4120 ms",
+  "INFO tool read IDENTITY.md via gateway",
+  "INFO matrix synced @agent_annapurna:id.agentpod.dev",
+];
 const USER = { id: "u_rakesh", email: "rakesh@example.com", name: "Rakesh Gangwar", image: null, role: "admin", emailVerified: true, createdAt: ago(1e5), updatedAt: ago(1e5) };
 
 function answer(path) {
@@ -127,6 +174,15 @@ function answer(path) {
   if (path === "/api/admin/principals")
     return { principals: AGENTS.map((a) => ({ id: `p_${a.agentName}`, kind: "agent", handle: a.agentName, displayName: a.agentName, userId: null, suspendedAt: null })) };
   if (path === "/api/admin/stats") return { users: 1, nodes: 3, stations: 5 };
+  if (/^\/api\/stations\/[^/]+\/acp\/sessions$/.test(path)) return CHAT === "none" ? [] : [SESSION];
+  if (/^\/api\/stations\/[^/]+\/health$/.test(path)) return HEALTHS[HEALTH] ?? HEALTHS.running;
+  if (/^\/api\/stations\/[^/]+\/transcription$/.test(path)) return TRANSCRIPTION;
+  if (/^\/api\/stations\/[^/]+\/speech$/.test(path)) return SPEECH;
+  if (path === "/api/speech/voices") return { voices: [], default: null, aliases: {} };
+  if (/^\/api\/admin\/stations\/[^/]+\/setup$/.test(path))
+    return { principalId: "p_annapurna", matrix: { status: "provisioned", address: "@agent_annapurna:id.agentpod.dev", roomId: "!room:id.agentpod.dev", mode: "bridge" } };
+  if (path === "/api/admin/grants")
+    return { enforced: true, grants: [{ principalId: "p_rakesh", mayDispatch: ["p_annapurna"], mayGrantReach: [] }] };
   const det = path.match(/^\/api\/nodes\/([^/]+)\/detected$/);
   if (det) return detected(det[1]);
   const st = path.match(/^\/api\/nodes\/([^/]+)\/stations$/);
@@ -182,6 +238,14 @@ try {
           if (url.origin === origin) return route.continue();
           if (url.origin !== HUB) return route.abort();
           if (STATE === "loading" && FLEET_READ.test(url.pathname)) return; // never answered
+          if (/^\/api\/stations\/[^/]+\/logs$/.test(url.pathname))
+            return route.fulfill({
+              status: 200,
+              headers: { "content-type": "text/event-stream" },
+              body: LOG_LINES.map((l) => `data: ${l}\n\n`).join(""),
+            });
+          if (HEALTH === "error" && /^\/api\/stations\/[^/]+\/health$/.test(url.pathname))
+            return route.fulfill({ status: 502, json: { error: "The node did not answer." } });
           if (STATE === "error" && FLEET_READ.test(url.pathname))
             return route.fulfill({ status: 500, json: { error: "The hub could not read the fleet." } });
           const body = answer(url.pathname);
@@ -192,7 +256,15 @@ try {
           if (body === null) return route.fulfill({ status: 404, json: { error: "not found" } });
           return route.fulfill({ status: 200, json: body });
         });
-        await page.goto(origin + PATH);
+        // The session's socket: on subscribe, replay the transcript, then stay open.
+        await page.routeWebSocket(/\/api\/acp\/sessions\/[^/]+\/ws/, (ws) => {
+          ws.onMessage(() => {
+            ws.send(JSON.stringify({ t: "session", session: SESSION }));
+            for (const event of EVENTS) ws.send(JSON.stringify({ t: "event", event }));
+            ws.send(JSON.stringify({ t: "replay-done", lastSeq: 6 }));
+          });
+        });
+        await page.goto(origin + PATH + (TAB ? `?tab=${TAB}` : ""));
         if (SIGNED_OUT) await page.waitForSelector(".ap-auth__card", { timeout: 15_000 });
         else {
           await page.waitForSelector('[data-testid="app-shell"]', { timeout: 15_000 });
@@ -209,6 +281,14 @@ try {
           await page.waitForSelector('[data-testid="more-sheet"]');
           suffix = "-more";
         }
+        if (args.about && size === "phone") {
+          await page.click(".ap-st-about");
+          await page.waitForSelector('[data-testid="station-about"]');
+          suffix += "-about";
+        }
+        if (TAB) suffix += `-${TAB}`;
+        if (CHAT !== "live") suffix += `-chat${CHAT}`;
+        if (HEALTH !== "running") suffix += `-health${HEALTH}`;
         await page.waitForTimeout(400);
         if (STATE !== "populated") suffix += `-${STATE}`;
         if (SIGNED_OUT) suffix += "-signedout";
