@@ -179,7 +179,11 @@ func ensureF(ctx context.Context, newClient func() stkclient.Client, opts SetupO
 		bin = defaultStkBinary
 	}
 	c := newClient()
-	if _, err := c.Version(ctx); err != nil {
+	if v, err := c.Version(ctx); err == nil {
+		if verr := checkStkVersion(v); verr != nil {
+			return SetupResult{}, fmt.Errorf("stk at %q: %w; upgrade stk (supertoolkit %s or newer)", bin, verr, MinStkVersion)
+		}
+	} else {
 		switch {
 		case errors.Is(err, stkclient.ErrStkMissing):
 			return SetupResult{}, fmt.Errorf("stk not found (%q): install stk (supertoolkit, 0.0.1 or newer with the station-service commands) and put it on PATH, then retry: %w", bin, err)

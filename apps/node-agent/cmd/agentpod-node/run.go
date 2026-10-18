@@ -257,11 +257,17 @@ func runCmd() {
 	h = gateway.NewGitIdentityHandler(h, gitIdentityRoot)
 	// forge.api: the lazy "make sure stk is installed" seam. The deliver handler (wired in a later
 	// change) calls ensureStk on every delivery; concurrent first deliveries share one setup and
-	// nothing runs stk until the first call. The verbs are registered here but the capability is
-	// not advertised yet (that follows once stk usability is checked on connect).
+	// nothing runs stk until the first call. The capability is advertised only while the probe
+	// below says stk is usable; the verbs are registered regardless and answer an error ack naming
+	// the reason when it is not.
 	ensurer := newStationEnsurer()
 	ensureStk = ensurer.Ensure
 	h = gateway.NewForgeAPIHandler(h, newForgeAPIService(ensurer.Ensure))
+	// "forge.api" is a STATION capability (the hub gates on what detect reports per station, and
+	// drops unknown node-level ones from hello), so it rides on DetectAll. The probe runs in
+	// Extras.Prepare on every (re)connect; detect only reads its last answer.
+	forgeProbe := newForgeAPIProbe()
+	reg.SetForgeAPIProbe(forgeProbe.Available)
 	h = gateway.NewPostureHandler(h, func() int { return len(reg.DetectAll()) })
 	// A station with a provisioned git identity gets GIT_SSH_COMMAND — and GIT_AUTHOR_* /
 	// GIT_COMMITTER_* once the hub has sent its author — in its harness's environment.
@@ -287,6 +293,7 @@ func runCmd() {
 	h = gateway.NewUpdateHandler(h, version)
 	startStationTokens(ctx, cfg)
 	extras := startIntakes(ctx)
+	extras.Prepare = func(ctx context.Context) { forgeProbe.Refresh(ctx) }
 	if mcpProxy != nil {
 		extras.Capabilities = append(extras.Capabilities, "mcp.proxy", "mcp.proxy.manage")
 	}

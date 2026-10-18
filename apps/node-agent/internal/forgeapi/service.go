@@ -178,6 +178,20 @@ func isolationOf(res SetupResult) string {
 	return "same-user"
 }
 
+// stkUnavailableCode is the stable reason code for "stk cannot be used at all", the same words the
+// capability probe logs and the hub shows.
+func stkUnavailableCode(err error) (string, bool) {
+	switch {
+	case errors.Is(err, stkclient.ErrStkMissing):
+		return "stk-missing", true
+	case errors.Is(err, stkclient.ErrStkTooOld):
+		return "stk-too-old", true
+	case errors.Is(err, stkclient.ErrStkNotRunnable):
+		return "stk-not-runnable", true
+	}
+	return "", false
+}
+
 // ready ensures stk and returns a client built for the world as it is now.
 func (s *Service) ready(ctx context.Context) (stkclient.Client, SetupResult, error) {
 	if s.Ensure == nil || s.NewClient == nil {
@@ -186,13 +200,8 @@ func (s *Service) ready(ctx context.Context) (stkclient.Client, SetupResult, err
 	res, err := s.Ensure(ctx)
 	if err != nil {
 		code := "stk-setup-failed"
-		switch {
-		case errors.Is(err, stkclient.ErrStkMissing):
-			code = "stk-missing"
-		case errors.Is(err, stkclient.ErrStkTooOld):
-			code = "stk-too-old"
-		case errors.Is(err, stkclient.ErrStkNotRunnable):
-			code = "stk-not-runnable"
+		if c, ok := stkUnavailableCode(err); ok {
+			code = c
 		}
 		return nil, SetupResult{}, coded(code, err)
 	}
@@ -375,6 +384,8 @@ func (s *Service) Policy(ctx context.Context, p PolicyParams) (PolicyAck, error)
 		code := "reload-failed"
 		if errors.Is(err, stkclient.ErrReloadRejected) {
 			code = "reload-rejected"
+		} else if c, ok := stkUnavailableCode(err); ok {
+			code = c
 		}
 		msg := coded(code, err).Error()
 		if rbErr := restoreIf(changed, path, prev, existed); rbErr != nil {

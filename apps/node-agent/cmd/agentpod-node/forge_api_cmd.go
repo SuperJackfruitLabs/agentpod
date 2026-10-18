@@ -79,6 +79,12 @@ func newStationEnsurer() *forgeapi.Ensurer {
 	return forgeapi.NewEnsurer(func() stkclient.Client { return newStkClient("stk", "stk", "") }, forgeapi.SetupOptions{})
 }
 
+// newForgeAPIProbe is the capability probe: a client for the machine as it is now, 5s deadline.
+// It never needs root (a non-root node runs stk directly) and never installs.
+func newForgeAPIProbe() *forgeapi.CapabilityProbe {
+	return forgeapi.NewCapabilityProbe(func() stkclient.Client { return newStkClient("stk", "stk", "") }, forgeapi.DefaultProbeTimeout)
+}
+
 // newForgeAPIService wires the forge.api verbs to the real stk. STK_CONFIG, when set, names the
 // policy file (it is the variable stk itself reads); otherwise stk's install default is used.
 func newForgeAPIService(ensure func(context.Context) (forgeapi.SetupResult, error)) *forgeapi.Service {

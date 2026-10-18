@@ -24,6 +24,7 @@ type fakeStk struct {
 
 	mu          sync.Mutex
 	versionErr  error
+	version     string                   // default 0.0.3
 	doctors     []stkclient.DoctorReport // consumed in order; last one repeats
 	doctorErr   error
 	installOut  string
@@ -34,7 +35,12 @@ type fakeStk struct {
 	stateful    bool          // doctors[0] before any install started, doctors[1] after
 }
 
-func (f *fakeStk) Version(context.Context) (string, error) { return "0.0.3", f.versionErr }
+func (f *fakeStk) Version(context.Context) (string, error) {
+	if f.version != "" {
+		return f.version, f.versionErr
+	}
+	return "0.0.3", f.versionErr
+}
 
 func (f *fakeStk) Doctor(context.Context) (stkclient.DoctorReport, error) {
 	f.mu.Lock()

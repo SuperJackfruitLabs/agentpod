@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
@@ -862,5 +863,90 @@ func TestRefusedNewEntryIsForgottenBeforeThePolicyIsRestored(t *testing.T) {
 	}
 	if h.policy() != nil {
 		t.Fatal("policy not restored")
+	}
+}
+
+// The hub must read a reason, promptly, for each way stk can be unusable: a verb the node cannot
+// serve is an error ack, never a timeout.
+func TestVerbsAnswerErrorAcksWhenUnavailableNotTimeouts(t *testing.T) {
+	reasons := []struct {
+		name string
+		err  error
+		code string
+	}{
+		{"missing", fmt.Errorf("stk not found: %w", stkclient.ErrStkMissing), "stk-missing"},
+		{"too old by json", fmt.Errorf("old: %w", stkclient.ErrStkTooOld), "stk-too-old"},
+		{"not runnable", fmt.Errorf("perm: %w", stkclient.ErrStkNotRunnable), "stk-not-runnable"},
+	}
+	for _, r := range reasons {
+		t.Run(r.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.svc.Ensure = func(context.Context) (SetupResult, error) { return SetupResult{}, r.err }
+			verbs := map[string]func() error{
+				"deliver": func() error {
+					_, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "forge.example.com"))
+					return err
+				},
+				"verify": func() error {
+					_, err := h.svc.Verify(t.Context(), VerifyParams{StationID: "stn_1", GrantID: "fag_aaa111", ExpectLogin: "bot"})
+					return err
+				},
+				"status": func() error { _, err := h.svc.Status(t.Context(), StatusParams{StationID: "stn_1"}); return err },
+			}
+			for verb, call := range verbs {
+				start := time.Now()
+				err := call()
+				if time.Since(start) > time.Second {
+					t.Errorf("%s took %v", verb, time.Since(start))
+				}
+				if err == nil || !strings.HasPrefix(err.Error(), r.code+":") {
+					t.Errorf("%s = %v, want the %s code first", verb, err, r.code)
+				}
+			}
+		})
+	}
+}
+
+// policy does not call Ensure (it must not install anything): with a grant on file and stk gone,
+// the reload failure carries the same reason code in an error ack.
+func TestPolicyAnswersTheReasonCodeWhenStkIsGone(t *testing.T) {
+	for code, cause := range map[string]error{
+		"stk-missing":      stkclient.ErrStkMissing,
+		"stk-too-old":      stkclient.ErrStkTooOld,
+		"stk-not-runnable": stkclient.ErrStkNotRunnable,
+	} {
+		h := newHarness(t)
+		if ack, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "forge.example.com")); err != nil || !ack.Stored {
+			t.Fatalf("deliver = %+v, %v", ack, err)
+		}
+		h.stub.reloadErr = fmt.Errorf("stk reload: %w", cause)
+		start := time.Now()
+		ack, err := h.svc.Policy(t.Context(), PolicyParams{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "none", Rules: []Rule{}})
+		if time.Since(start) > time.Second {
+			t.Errorf("%s: policy was slow", code)
+		}
+		if err != nil || ack.OK || !strings.HasPrefix(ack.Error, code+":") {
+			t.Errorf("%s: policy = %+v, %v; want an error ack with the code first", code, ack, err)
+		}
+	}
+}
+
+// Ensure itself maps a version below the floor to stk-too-old (the --json-less case is already
+// ErrStkTooOld from the client; this is the numeric one).
+func TestEnsureRefusesAVersionBelowTheFloor(t *testing.T) {
+	f := &fakeStk{doctors: []stkclient.DoctorReport{rep(LevelSeparateUser)}, version: "0.0.0"}
+	_, err := ensure(t.Context(), f, SetupOptions{}, sysEnv{goos: "linux", euid: 1000})
+	if !errors.Is(err, stkclient.ErrStkTooOld) {
+		t.Fatalf("err = %v, want ErrStkTooOld", err)
+	}
+	if f.doctorCalls != 0 {
+		t.Error("doctor ran against a stk that is too old")
+	}
+	h := newHarness(t)
+	h.svc.Ensure = func(ctx context.Context) (SetupResult, error) {
+		return ensure(ctx, f, SetupOptions{}, sysEnv{goos: "linux", euid: 1000})
+	}
+	if _, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "forge.example.com")); err == nil || !strings.HasPrefix(err.Error(), "stk-too-old:") {
+		t.Errorf("Deliver = %v, want stk-too-old first", err)
 	}
 }

@@ -13,6 +13,8 @@ type Registry struct {
 	nativeSkillManagement bool
 	pluginManagement      bool
 	configManagement      bool
+	// forgeAPIUsable reports whether stk is usable right now; nil means forge.api is never advertised.
+	forgeAPIUsable func() bool
 }
 
 // NewRegistry returns an empty Registry.
@@ -31,6 +33,8 @@ func (r *Registry) Register(d Descriptor) {
 // harness does not prevent others from reporting their stations.
 func (r *Registry) DetectAll() []Station {
 	var all []Station
+	// Asked once per detect, not per station, and it must be cheap (it reads the last probe result).
+	forgeAPI := r.forgeAPIUsable != nil && r.forgeAPIUsable()
 	for _, d := range r.descriptors {
 		stations, err := d.Detect()
 		if err == nil {
@@ -49,6 +53,9 @@ func (r *Registry) DetectAll() []Station {
 				}
 				if r.configManagement && configurable && !isCompositeRoot(station) && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
 					station.Capabilities = append(append([]string(nil), station.Capabilities...), "config.manage")
+				}
+				if forgeAPI {
+					station.Capabilities = append(append([]string(nil), station.Capabilities...), "forge.api")
 				}
 				all = append(all, station)
 			}
@@ -85,6 +92,11 @@ func (r *Registry) EnableNativeSkillManagement() { r.nativeSkillManagement = tru
 // configuration permits reading managed settings. Detection then advertises
 // config.manage on stations whose descriptor implements ConfigManager.
 func (r *Registry) EnableConfigManagement() { r.configManagement = true }
+
+// SetForgeAPIProbe makes detect advertise "forge.api" on every station while usable() is true.
+// The hub gates forge access on the station's capabilities, so this is where the capability
+// lives; usable must be a cheap read of the last probe, never a probe itself.
+func (r *Registry) SetForgeAPIProbe(usable func() bool) { r.forgeAPIUsable = usable }
 
 // For resolves the Descriptor responsible for key.
 //
