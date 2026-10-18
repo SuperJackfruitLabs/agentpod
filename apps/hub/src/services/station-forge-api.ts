@@ -380,9 +380,12 @@ async function fetchStationStatus(
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 export const SAME_USER_ACK_REQUIRED = "same-user-acknowledgement-required";
 
-/** Every preset except `read` is a write preset; so is `read` with an allow rule for a write method. */
-export function isWriteGrant(p: { preset: ForgeApiPreset; rules: readonly unknown[] }): boolean {
-  if (p.preset !== "read") return true;
+/**
+ * Every preset except `read` is a write preset; so is `read` with an allow rule for a write method,
+ * and so is any grant that allows GraphQL (its mutations cannot be rule-checked).
+ */
+export function isWriteGrant(p: { preset: ForgeApiPreset; rules: readonly unknown[]; allowGraphql?: boolean }): boolean {
+  if (p.preset !== "read" || p.allowGraphql === true) return true;
   return (p.rules as ForgeApiRule[]).some(
     (r) => typeof r?.allow === "string" && !READ_METHODS.has(r.allow.trim().split(/\s+/)[0]!.toUpperCase()),
   );

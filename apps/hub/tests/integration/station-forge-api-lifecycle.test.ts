@@ -1524,6 +1524,14 @@ describe("same-user acknowledgement for write grants", () => {
     expect(err?.code).toBe("same-user-acknowledgement-required");
   });
 
+  test("read with GraphQL allowed counts as a write grant (its mutations cannot be rule-checked)", async () => {
+    const h = harness();
+    const st = await freshStation();
+    const err = await createForgeApiGrant(h.deps, input(st.id, { allowGraphql: true })).catch((e) => e);
+    expect(err?.code).toBe("same-user-acknowledgement-required");
+    expect(h.minted).toEqual([]);
+  });
+
   test("read-only grants are never blocked", async () => {
     const h = harness();
     const st = await freshStation();
