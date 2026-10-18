@@ -8,6 +8,7 @@
   import { autoSignIn, watchSession } from "$lib/auth/org-plane";
   import { VibeRoot } from "@superjackfruit/vibekit";
   import { appearance } from "$lib/appearance.svelte";
+  import { startWidgetColours } from "$lib/utils/vk-colors";
   import { commandPalette } from "$lib/stores/command-palette.svelte";
   import { Toaster } from "$lib/components/ui/sonner";
   import * as Tooltip from "$lib/components/ui/tooltip";
@@ -49,11 +50,14 @@
   }
 
   let stopReachabilityProbe: (() => void) | undefined;
+  let stopWidgetColours: (() => void) | undefined;
   let stopWatchingSession: (() => void) | undefined;
 
   onMount(async () => {
     // app.html painted the first frame from the same cookie; this keeps it current.
     appearance.init();
+    // Code colours (Shiki variables) follow the vibe and theme from here on.
+    stopWidgetColours = startWidgetColours();
 
     await initConnection(); // must run before initAuth — sets the auth client base URL
     await initAuth();
@@ -69,6 +73,7 @@
 
   onDestroy(() => {
     appearance.dispose();
+    stopWidgetColours?.();
     stopReachabilityProbe?.();
     stopWatchingSession?.();
     if (typeof window !== "undefined") {

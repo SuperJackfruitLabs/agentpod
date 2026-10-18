@@ -1,11 +1,10 @@
 <script lang="ts">
-  import { codeToHtml, type BundledTheme } from "shiki";
+  import { codeToHtml } from "shiki";
+  import { vibeShikiTheme } from "$lib/utils/shiki-theme";
 
   interface Props {
     code: string;
     language?: string;
-    lightTheme?: BundledTheme;
-    darkTheme?: BundledTheme;
     showLineNumbers?: boolean;
     class?: string;
   }
@@ -13,15 +12,12 @@
   let {
     code,
     language = "plaintext",
-    lightTheme,
-    darkTheme,
     showLineNumbers = false,
     class: className = "",
   }: Props = $props();
 
-  // Shiki's GitHub pair unless the caller names its own.
-  const effectiveLightTheme = $derived(lightTheme ?? "github-light");
-  const effectiveDarkTheme = $derived(darkTheme ?? "github-dark");
+  // The vibe's css-variables theme: colours follow the vibe and theme in CSS, no re-highlight.
+  const themeOptions = { theme: vibeShikiTheme };
 
   let highlightedHtml = $state<string>("");
   let isLoading = $state(true);
@@ -39,28 +35,14 @@
       // Shiki handles language detection - pass extension directly
       const lang = language.toLowerCase() || "plaintext";
       
-      const html = await codeToHtml(code, {
-        lang,
-        themes: {
-          light: effectiveLightTheme,
-          dark: effectiveDarkTheme,
-        },
-        defaultColor: false, // Let CSS handle the theme switching
-      });
+      const html = await codeToHtml(code, { lang, ...themeOptions });
 
       highlightedHtml = html;
     } catch (err) {
       // If language is not supported, try plaintext
       console.warn(`Shiki: language "${language}" not supported, falling back to plaintext`);
       try {
-        const html = await codeToHtml(code, {
-          lang: "plaintext",
-          themes: {
-            light: effectiveLightTheme,
-            dark: effectiveDarkTheme,
-          },
-          defaultColor: false,
-        });
+        const html = await codeToHtml(code, { lang: "plaintext", ...themeOptions });
         highlightedHtml = html;
       } catch {
         // Final fallback to raw HTML
@@ -86,8 +68,6 @@
     // Track dependencies
     code;
     language;
-    effectiveLightTheme;
-    effectiveDarkTheme;
     // Highlight
     highlightCode();
   });
@@ -142,25 +122,11 @@
     word-wrap: normal;
   }
 
-  /* Dual theme support - Shiki sets --shiki-light and --shiki-dark on each span */
-  /* We just need to tell spans which variable to use based on theme */
-  
-  /* Light mode (default) - use --shiki-light variables */
+  /* One Shiki treatment (the markdown preview uses the same): the vibe's code ground. */
   .code-block :global(.shiki) {
-    background-color: transparent !important;
-  }
-  
-  .code-block :global(.shiki span) {
-    color: var(--shiki-light);
+    background-color: var(--shiki-background) !important;
+    color: var(--shiki-foreground);
   }
 
-  /* Dark mode - use --shiki-dark variables */
-  :global([data-theme="dark"]) .code-block :global(.shiki) {
-    background-color: transparent !important;
-  }
-  
-  :global([data-theme="dark"]) .code-block :global(.shiki span) {
-    color: var(--shiki-dark);
-  }
 </style>
 

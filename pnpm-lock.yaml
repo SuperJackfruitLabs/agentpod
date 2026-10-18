@@ -50,6 +50,9 @@ importers:
       diff:
         specifier: ^9.0.0
         version: 9.0.0
+      dompurify:
+        specifier: 3.4.13
+        version: 3.4.13
       marked:
         specifier: ^17.0.6
         version: 17.0.6

@@ -9,7 +9,7 @@
    */
   import { Streamdown } from "svelte-streamdown";
   import Code from "svelte-streamdown/code";
-  import { appearance } from "$lib/appearance.svelte";
+  import { VIBE_SHIKI_THEME, vibeShikiTheme } from "$lib/utils/shiki-theme";
 
   interface Props {
     text: string;
@@ -18,17 +18,17 @@
 
   let { text, streaming = false }: Props = $props();
 
-  // Shiki's GitHub pair, by the appearance's light/dark (the colour schemes that picked other
-  // Shiki themes are gone; token-driven code colours come with the widget theming).
-  const shikiTheme = $derived(appearance.theme === "dark" ? "github-dark" : "github-light");
+  // The same Shiki treatment as code blocks and the markdown preview: the vibe's
+  // css-variables theme, so replies repaint with the vibe and theme in CSS.
+  const shikiThemes = { [VIBE_SHIKI_THEME]: vibeShikiTheme };
 
   // Minimal overrides on the tailwind base theme (mergeTheme defaults true):
-  // swap its hard-coded grays/blues for Crisp tokens so borders and muted
-  // text track the active scheme in both modes, and scale headings for chat.
-  const crispTheme = {
+  // swap its hard-coded grays/blues for tokens so borders and muted text
+  // track the vibe in both themes, and scale headings for chat.
+  const vibeTheme = {
     code: {
       base: "my-3 flex w-full flex-col overflow-hidden rounded-md border border-border",
-      container: "relative overflow-visible bg-muted/50 p-2 font-mono text-sm",
+      container: "relative overflow-visible bg-[var(--shiki-background)] text-[var(--shiki-foreground)] p-2 font-mono text-sm",
       header:
         "flex items-center justify-between border-b border-border bg-muted/50 p-2 text-xs text-muted-foreground",
       pre: "overflow-x-auto p-0 font-mono",
@@ -57,7 +57,8 @@
   parseIncompleteMarkdown={streaming}
   renderHtml={false}
   allowedLinkPrefixes={["https://", "http://"]}
-  {shikiTheme}
-  theme={crispTheme}
+  shikiTheme={VIBE_SHIKI_THEME}
+  {shikiThemes}
+  theme={vibeTheme}
   class="t-body max-w-none"
 />

@@ -138,6 +138,22 @@
   --ap-info-text: #9bbcf0;
   --ap-info-wash: var(--vk-color-raised);
 }
+/* Code (Shiki's css-variables theme, every code surface): token defaults for the first paint;
+   startWidgetColours() then writes contrast-checked hex on <html> (src/lib/utils/vk-colors.ts).
+   :root only, so a nested [data-vibe] inherits the written values. */
+:root {
+  --shiki-foreground: var(--vk-color-text);
+  --shiki-background: var(--vk-color-raised);
+  --shiki-token-comment: var(--vk-color-muted);
+  --shiki-token-keyword: var(--vk-color-accent-text);
+  --shiki-token-string: var(--vk-color-success-text);
+  --shiki-token-string-expression: var(--vk-color-success-text);
+  --shiki-token-constant: var(--vk-color-danger);
+  --shiki-token-function: var(--ap-violet);
+  --shiki-token-parameter: var(--vk-color-text);
+  --shiki-token-punctuation: var(--vk-color-muted);
+  --shiki-token-link: var(--vk-color-accent-text);
+}
 @theme inline {
   /* Radii follow the vibe (2px in Studio to 24px in Daylight). shadcn: md = controls, lg = cards,
      xl = dialogs and sheets. */
