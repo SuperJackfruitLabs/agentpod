@@ -116,7 +116,7 @@ async function call(a: Hono, method: string, path: string, body?: unknown, raw?:
   try {
     json = JSON.parse(text);
   } catch {}
-  return { status: res.status, json: json as Record<string, any>, text };
+  return { status: res.status, json: json as Record<string, any>, text, headers: res.headers };
 }
 
 async function freshStation(opts: { occupied?: boolean } = {}) {
@@ -695,4 +695,32 @@ describe("GET /stations/:id/forge-api/key: the station's stk handover public key
     const none = await call(asAdmin(), "GET", `/stations/${st.id}/forge-api/key`);
     expect(none.status).toBe(502);
   });
+});
+
+describe("node preparing and node refusals", () => {
+  test("a node still preparing the station's broker: 503 station-preparing with Retry-After, no grant", async () => {
+    const st = await freshStation();
+    replies["forge.api.status"] = () => ({ ok: false, error: "station-instance-preparing: installing stk NODE-TEXT" });
+    const r = await call(asAdmin(), "POST", `/stations/${st.id}/forge-api`, grantBody());
+    resetReplies();
+    expect(r.status).toBe(503);
+    expect(r.json.error).toBe("station-preparing");
+    expect(Number(r.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(r.text).not.toContain("NODE-TEXT");
+    const rows = await db.select().from(g).where(eq(g.stationIdSnapshot, st.id));
+    expect(rows).toEqual([]);
+  });
+
+  for (const code of ["station-not-hosted", "station-key-changed", "station-uid-shared", "stk-unavailable"]) {
+    test(`a node refusal ${code} is a 409 with a fixed message and no node text`, async () => {
+      const st = await freshStation();
+      replies["forge.api.status"] = () => ({ ok: false, error: `${code}: NODE-TEXT details` });
+      const r = await call(asAdmin(), "POST", `/stations/${st.id}/forge-api`, grantBody());
+      resetReplies();
+      expect(r.status).toBe(409);
+      expect(r.json.error).toBe(code);
+      expect(r.json.message).not.toContain("refused (");
+      expect(r.text).not.toContain("NODE-TEXT");
+    });
+  }
 });

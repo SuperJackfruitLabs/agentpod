@@ -40,7 +40,12 @@ export type ForgeApiGrantErrorCode =
   | "bad-expected-login"
   | "bad-sealed-blob"
   | "bad-policy"
-  | "grant-revoking";
+  | "grant-revoking"
+  | "station-preparing"
+  | "station-not-hosted"
+  | "station-key-changed"
+  | "station-uid-shared"
+  | "stk-unavailable";
 
 const GRANT_ERROR_STATUS: Record<ForgeApiGrantErrorCode, number> = {
   "station-not-found": 404,
@@ -70,6 +75,13 @@ const GRANT_ERROR_STATUS: Record<ForgeApiGrantErrorCode, number> = {
   "bad-policy": 422,
   // Revocation began while this step was under way; nothing (more) was sent.
   "grant-revoking": 409,
+  // The node is installing the station's broker: retry (the route adds Retry-After).
+  "station-preparing": 503,
+  // The node refuses the station (its coded errors); fixed text, never the node's.
+  "station-not-hosted": 409,
+  "station-key-changed": 409,
+  "station-uid-shared": 409,
+  "stk-unavailable": 409,
 };
 
 /**

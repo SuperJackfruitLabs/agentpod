@@ -70,6 +70,8 @@ import {
 const log = createLogger("forge-api-reconcile");
 
 export const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
+/** How long a not-brokered verify result keeps the sweep from verifying that grant again. */
+export const UNBROKERED_REVERIFY_MS = 30 * 60 * 1000;
 /** Consecutive same-signature failures before the audit log hears of it. */
 export const REPEATED_FAILURE_THRESHOLD = 3;
 const AUDIT_ACTOR = "system:forge-reconcile";
@@ -112,8 +114,14 @@ function nextStep(row: Grant, now: Date): Step | null {
   if (row.state === "revoking" || row.stationId === null) return { action: "revoke", needsNode: false };
   const h = row.tokenHandle;
   if (h && (h.previous?.disposition === "revoke" || h.orphan)) return { action: "revoke-stray", needsNode: false };
+  // A verify that was not brokered within the last 30 minutes is not repeated by the sweep: on a
+  // structurally unwired station it would fail the same way, holding a claim for up to 90 s each
+  // time. An operator's verify still runs.
+  const recentlyUnbrokered =
+    !!row.stateReason?.startsWith("coverage-incomplete") && now.getTime() - row.updatedAt.getTime() < UNBROKERED_REVERIFY_MS;
   if (rotationOf(row).rotating) {
     if (row.sealedBlob && !blobIsLive(row, now)) return { action: "undo-rotation", needsNode: false };
+    if (recentlyUnbrokered) return null;
     return { action: "verify", needsNode: true };
   }
   const settled = row.state === "delivered" || row.state === "verified";
@@ -123,7 +131,7 @@ function nextStep(row: Grant, now: Date): Step | null {
     return null;
   }
   if (blobIsLive(row, now)) return { action: "deliver", needsNode: true };
-  if (row.stateReason?.includes(VERIFY_PENDING)) return { action: "verify", needsNode: true };
+  if (row.stateReason?.includes(VERIFY_PENDING) && !recentlyUnbrokered) return { action: "verify", needsNode: true };
   // The flag, not the reason: a lifecycle reason (rotation-failed, …) must not hide a policy the
   // node never confirmed.
   if (row.policyPendingSince !== null) return { action: "policy", needsNode: true };

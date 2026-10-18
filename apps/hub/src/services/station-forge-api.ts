@@ -51,7 +51,7 @@ import {
 import { stations } from "../db/schema/stations";
 import { createLogger } from "../utils/logger";
 import { recordAudit } from "./audit";
-import { ForgeApiConfigError, ForgeApiGrantError } from "./forge-api/errors";
+import { ForgeApiConfigError, ForgeApiGrantError, type ForgeApiGrantErrorCode } from "./forge-api/errors";
 import { isConfiguredForge } from "./forge-api/instance";
 import { nextGeneration } from "./forge-api/generation";
 import { tokenName } from "./forge-api/forgejo";
@@ -337,11 +337,20 @@ export async function fetchStationPublicKey(
     new ForgeApiGrantError("station-key-unavailable", `station ${station.id}: no stk handover key (${why}).`);
   let res: BrokerReply;
   try {
-    res = await deps.broker.request(station.nodeId, "forge.api.status", params);
+    res = await deps.broker.request(station.nodeId, "forge.api.status", params, { timeoutMs: FORGE_STATUS_TIMEOUT_MS });
   } catch (err) {
     throw unavailable(scrub(err));
   }
-  if (!res.ok) throw unavailable(scrub(res.error ?? "node error"));
+  if (!res.ok) {
+    const code = nodeCode(res.error ?? "");
+    if (code === NODE_PREPARING) {
+      throw new ForgeApiGrantError("station-preparing", `station ${station.id}: the node is preparing its broker; retry shortly.`);
+    }
+    if (code && NODE_REFUSALS[code]) {
+      throw new ForgeApiGrantError(code as ForgeApiGrantErrorCode, `station ${station.id}: ${NODE_REFUSALS[code]}.`);
+    }
+    throw unavailable(scrub(res.error ?? "node error"));
+  }
   const parsed = VERB_RESULTS["forge.api.status"].safeParse(res.data);
   if (!parsed.success) throw unavailable("unreadable status reply");
   if (!parsed.data.publicKey) throw unavailable("the node did not report one");
@@ -765,12 +774,15 @@ async function relayDeliver(deps: ForgeApiDeps, row: Grant, station: StationRow,
 
   let res: BrokerReply;
   try {
-    res = await deps.broker.request(station.nodeId, "forge.api.deliver", frame.data);
+    res = await deps.broker.request(station.nodeId, "forge.api.deliver", frame.data, { timeoutMs: FORGE_DELIVER_TIMEOUT_MS });
   } catch (err) {
     return { kind: "transient", reason: `delivery not attempted: ${scrub(err, sealed)}` };
   }
   if (!res.ok) {
     const error = scrub(res.error ?? "node error", sealed);
+    const code = nodeCode(error);
+    if (code === NODE_PREPARING) return { kind: "transient", reason: "delivery deferred: the node is preparing its broker; will retry" };
+    if (code && NODE_REFUSALS[code]) return { kind: "refused", reason: `node refused delivery: ${code}: ${NODE_REFUSALS[code]}` };
     return TRANSIENT.has(error)
       ? { kind: "transient", reason: `delivery failed: ${error}; will retry` }
       : { kind: "refused", reason: `node refused delivery: ${error}` };
@@ -921,6 +933,32 @@ const NODE_REASON_MAX = 200;
  * one at a time and verifies only rotating or verify-pending rows, so it holds at most one slot.
  */
 export const FORGE_VERIFY_TIMEOUT_MS = 90_000;
+/**
+ * `forge.api.status` and `forge.api.deliver` may be the node's FIRST touch of a station: it then
+ * creates the station's stk instance (install, systemd unit, doctor) before answering. The broker's
+ * 15 s default would read that as "timeout". A node that is already installing answers
+ * `station-instance-preparing` at once instead (retryable, see NODE_PREPARING).
+ */
+export const FORGE_STATUS_TIMEOUT_MS = 120_000;
+export const FORGE_DELIVER_TIMEOUT_MS = 120_000;
+
+/** The node's coded error for an stk install already in flight: retry later, nothing failed. */
+const NODE_PREPARING = "station-instance-preparing";
+/**
+ * Node codes that refuse the station outright (`<code>: <detail>`). The hub keeps the code and
+ * replaces the node's detail with fixed text; the route answers 409 with the code.
+ */
+const NODE_REFUSALS: Record<string, string> = {
+  "station-not-hosted": "the node does not host this station",
+  "station-key-changed": "the station's key changed on the node; prune its instance there first",
+  "station-uid-shared": "stations on the node share an agent uid; map uids per station or acknowledge it on the node",
+  "stk-unavailable": "forge API access is not configured or is disabled on the node",
+};
+/** The stable code a node error starts with (`code: detail`), or null. */
+function nodeCode(error: string): string | null {
+  const m = /^([a-z][a-z0-9-]*):/.exec(error.trim());
+  return m ? m[1]! : null;
+}
 
 /** A node-supplied string, safe to store: control characters removed, length capped. */
 export function untrusted(s: unknown): string {
@@ -1012,7 +1050,7 @@ function notWiredText(b: Bypass | undefined): string {
 type VerifyAnswer =
   | { kind: "ok"; login: string; isolation: "separate-user" | "same-user"; note?: string }
   /** The identity matched but the node did not show the broker carries the traffic. */
-  | { kind: "unbrokered"; reason: string }
+  | { kind: "unbrokered"; reason: string; isolation: "separate-user" | "same-user" }
   /** The grant fails. `code` is the definitive reason, `node-too-old`, or `verify-failed`. */
   | { kind: "failed"; code: string; reason: string }
   | { kind: "offline"; reason: string }
@@ -1071,7 +1109,7 @@ async function askVerify(deps: ForgeApiDeps, row: Grant, station: { id: string; 
   }
   // Older nodes send no bypass evidence: verified as before (cannot tell old from silent).
   if (r.bypass && r.bypass.brokered !== true) {
-    return { kind: "unbrokered", reason: `coverage-incomplete: ${incompleteWords(r.bypass)}` };
+    return { kind: "unbrokered", reason: `coverage-incomplete: ${incompleteWords(r.bypass)}`, isolation: r.isolation };
   }
   const untested = clientsWith(r.bypass, ["untested"]);
   const note =
@@ -1083,7 +1121,8 @@ async function askVerify(deps: ForgeApiDeps, row: Grant, station: { id: string; 
 
 export interface VerifyResult {
   /** rotation-failed: an interrupted or refused rotation was undone; the previous token is current again. */
-  outcome: "verified" | "failed" | "node-offline" | "provider-unavailable" | "inconclusive" | "rotation-failed";
+  /** unbrokered: identity matched but the node could not show the broker carries the traffic. */
+  outcome: "verified" | "failed" | "node-offline" | "provider-unavailable" | "inconclusive" | "rotation-failed" | "unbrokered";
   grant: Grant;
 }
 
@@ -1194,13 +1233,31 @@ async function settleVerify(deps: ForgeApiDeps, row: Grant, answer: VerifyAnswer
       // (its lifecycle reason is not overwritten); otherwise the grant is `delivered`, a verified
       // one included — `verified` claims the broker is in the path.
       log.warn("forge grant not verified: traffic not shown to go through the broker", { grantId: row.id, reason: answer.reason });
-      if (rotating || !["delivered", "verified", "failed"].includes(row.state)) return { outcome: "inconclusive", grant: row };
-      const grant = await transition(deps.db, row, [row.state], "delivered", {
+      // The TOKEN lifecycle does not depend on harness wiring: the identity matched, so an acked
+      // rotation settles its swap (previous revoked per its disposition) exactly as a verified one
+      // would; only the grant's coverage claim stays `delivered`. Unacked: the match may be n.
+      if (rotating && !acked) return { outcome: "unbrokered", grant: row };
+      if (!["delivered", "verified", "failed"].includes(row.state)) return { outcome: "unbrokered", grant: row };
+      let grant = await transition(deps.db, row, [row.state], "delivered", {
         now: deps.now(),
         verifiedAt: null,
+        isolation: answer.isolation,
         stateReason: answer.reason,
       });
-      return { outcome: "inconclusive", grant };
+      if (rotating && handle && prev) {
+        const { previous: _p, ...rest } = handle;
+        try {
+          await revokeTolerant(deps.providers(row.provider), row.account, bareHandle(prev));
+          grant = await transition(deps.db, grant, ["delivered"], "delivered", { now: deps.now(), tokenHandle: rest, stateReason: answer.reason });
+        } catch (err) {
+          grant = await transition(deps.db, grant, ["delivered"], "delivered", {
+            now: deps.now(),
+            tokenHandle: { ...rest, previous: { ...prev, disposition: "revoke" } },
+            stateReason: `previous-revoke-pending: ${scrub(err)}`,
+          });
+        }
+      }
+      return { outcome: "unbrokered", grant };
     }
     case "failed": {
       if (acked && handle && prev) {
@@ -1454,6 +1511,8 @@ async function rotateClaimed(
     return settled.grant;
   }
   if (settled.outcome === "failed") return settled.grant;
+  // Swap settled (or, unacked, left for verifyGrant): either way the row already says why.
+  if (settled.outcome === "unbrokered" && !rotationOf(settled.grant).rotating) return settled.grant;
   // Unverified for now: keep `rotation-pending` (plus why) so verifyGrant finishes it.
   return transition(deps.db, settled.grant, ["delivered"], "delivered", {
     now: deps.now(),

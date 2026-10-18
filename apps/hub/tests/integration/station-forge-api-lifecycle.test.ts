@@ -35,6 +35,8 @@ import {
   updateGrantPolicy,
   verifyGrant,
   FORGE_VERIFY_TIMEOUT_MS,
+  FORGE_STATUS_TIMEOUT_MS,
+  FORGE_DELIVER_TIMEOUT_MS,
   ForgeApiGrantError,
   type ForgeApiDeps,
 } from "../../src/services/station-forge-api";
@@ -1411,5 +1413,89 @@ describe("verify: bypass evidence", () => {
     expect(seen.length).toBe(1);
     expect(seen[0]).toBeGreaterThanOrEqual(90_000);
     expect(FORGE_VERIFY_TIMEOUT_MS).toBe(seen[0]!);
+  });
+});
+
+// ─── wave 2: rotation on an unbrokered station; node timeouts and codes ───────
+
+describe("rotation on a station that cannot show brokered traffic", () => {
+  const unbrokered = (h: H, login: string) => {
+    h.replies["forge.api.verify"] = () => ({
+      ok: true,
+      data: { ok: true, login, isolation: "same-user", bypass: { clients: [], brokered: false, paths: [{ path: "env", wired: false }] } },
+    });
+  };
+
+  test("an acked rotation whose verify is unbrokered still finishes: previous revoked, delivered + coverage note", async () => {
+    const h = harness();
+    const { st, grant, ref } = await delivered(h);
+    unbrokered(h, st.handle);
+    const out = await rotateGrant(h.deps, ref);
+    expect(out.tokenHandle!.previous).toBeUndefined();
+    expect(out.tokenHandle!.name).not.toBe(grant.tokenHandle!.name);
+    expect(h.revoked.map((r) => r.handle.name)).toEqual([grant.tokenHandle!.name]);
+    expect(out.state).toBe("delivered");
+    expect(out.verifiedAt).toBeNull();
+    expect(out.stateReason).toStartWith("coverage-incomplete");
+    await assertNoLeak(h, grant.id);
+  });
+
+  test("bypassed during a rotation still fails it", async () => {
+    const h = harness();
+    const { ref } = await delivered(h);
+    h.replies["forge.api.verify"] = () => ({
+      ok: true,
+      data: { ok: false, reason: "bypassed", isolation: "same-user", bypass: { clients: [{ client: "gh", outcome: "bypassed" }], brokered: false } },
+    });
+    const err = await h.attempt(rotateGrant(h.deps, ref));
+    expect(err).toBeUndefined();
+    expect((h.errors[0] as ForgeApiGrantError).code).toBe("rotation-failed");
+  });
+});
+
+describe("node timeouts and node codes", () => {
+  function timed(h: H) {
+    const seen: Record<string, number | undefined> = {};
+    const inner = h.deps.broker.request.bind(h.deps.broker);
+    h.deps.broker = {
+      request: (nodeId: string, verb: string, params: unknown, opts?: { timeoutMs?: number }) => {
+        seen[verb] = opts?.timeoutMs;
+        return inner(nodeId, verb, params);
+      },
+    } as typeof h.deps.broker;
+    return seen;
+  }
+
+  test("status and deliver wait for a node that is installing the broker (>= 120 s)", async () => {
+    const h = harness();
+    const seen = timed(h);
+    await delivered(h);
+    expect(seen["forge.api.status"]).toBe(FORGE_STATUS_TIMEOUT_MS);
+    expect(seen["forge.api.deliver"]).toBe(FORGE_DELIVER_TIMEOUT_MS);
+    expect(FORGE_STATUS_TIMEOUT_MS).toBeGreaterThanOrEqual(120_000);
+    expect(FORGE_DELIVER_TIMEOUT_MS).toBeGreaterThanOrEqual(120_000);
+  });
+
+  test("a deliver answered station-instance-preparing is transient: provisioned, blob kept, no re-mint", async () => {
+    const h = harness();
+    const st = await freshStation();
+    h.replies["forge.api.deliver"] = () => ({ ok: false, error: "station-instance-preparing: installing" });
+    const g1 = await createForgeApiGrant(h.deps, input(st.id));
+    expect(g1.state).toBe("provisioned");
+    expect(g1.sealedBlob).not.toBeNull();
+    h.replies["forge.api.deliver"] = () => ACK;
+    const g2 = await deliverGrant(h.deps, { tenantId: tenant, grantId: g1.id });
+    expect(g2.state).toBe("delivered");
+    expect(h.minted.length).toBe(1);
+  });
+
+  test("a deliver refused with a node code keeps a fixed reason, no node text", async () => {
+    const h = harness();
+    const st = await freshStation();
+    h.replies["forge.api.deliver"] = () => ({ ok: false, error: "station-uid-shared: NODE-TEXT long story" });
+    const g1 = await createForgeApiGrant(h.deps, input(st.id));
+    expect(g1.state).toBe("failed");
+    expect(g1.stateReason).toStartWith("node refused delivery: station-uid-shared");
+    expect(g1.stateReason).not.toContain("NODE-TEXT");
   });
 });

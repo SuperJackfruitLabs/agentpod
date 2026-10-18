@@ -604,3 +604,16 @@ describe("final review fixes", () => {
     expect(String(err?.message)).toContain("revocation is in progress");
   });
 });
+
+describe("unbrokered stations are not re-verified every sweep", () => {
+  test("a rotating row whose verify was unbrokered within 30 min is not re-verified by the sweep", async () => {
+    const h = harness();
+    const node = await freshNode();
+    const { grant } = await granted(h, node);
+    const handle = { name: `agentpod-${grant.id}-g9`, previous: { ...grant.tokenHandle!, disposition: "live-until-verified", generation: 1, deliveredAt: null } };
+    await rawSql`UPDATE station_forge_api_grants SET token_handle = ${JSON.stringify(handle)}::jsonb, state_reason = 'coverage-incomplete: unwired', updated_at = now() WHERE id = ${grant.id}`;
+    h.reset();
+    await run(h, node);
+    expect(h.callsOf("forge.api.verify")).toEqual([]);
+  });
+});

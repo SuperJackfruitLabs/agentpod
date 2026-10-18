@@ -199,7 +199,15 @@ const MESSAGES: Record<string, string> = {
   "bad-sealed-blob": "The credential must be a sealed stk handover envelope.",
   "preset-none-needs-no-token": "Preset 'none' needs no token.",
   "instance-not-forge": "A minted grant's instance must be this hub's configured forge.",
+  "station-preparing": "The station's node is still preparing its broker; retry shortly.",
+  "station-not-hosted": "The station's node does not host this station.",
+  "station-key-changed": "The station's key changed on its node; prune its broker instance there (apn forge-api prune) first.",
+  "station-uid-shared": "Stations on this node share an agent uid, so per-station isolation cannot hold; map uids per station on the node or acknowledge it there.",
+  "stk-unavailable": "Forge API access is not configured or is disabled on the station's node.",
 };
+
+/** Seconds a client should wait before retrying a `station-preparing` answer. */
+export const STATION_PREPARING_RETRY_AFTER_S = 30;
 
 const messageFor = (code: string) => MESSAGES[code] ?? `The forge grant step was refused (${code}).`;
 
@@ -210,8 +218,10 @@ function mapError(err: unknown): { status: number; code: string } {
   return { status: 500, code: "internal" };
 }
 
-const fail = (c: Context, status: number, code: string) =>
-  c.json({ error: code, message: messageFor(code) }, status as 400);
+const fail = (c: Context, status: number, code: string) => {
+  if (code === "station-preparing") c.header("Retry-After", String(STATION_PREPARING_RETRY_AFTER_S));
+  return c.json({ error: code, message: messageFor(code) }, status as 400);
+};
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
