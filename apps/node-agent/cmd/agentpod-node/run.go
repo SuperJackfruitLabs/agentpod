@@ -17,7 +17,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetreport"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/mcpproxy"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
@@ -30,7 +30,7 @@ import (
 )
 
 // ensureStk is set by runCmd; see newStationEnsurer.
-var ensureStk func(context.Context) (stkclient.DoctorReport, error)
+var ensureStk func(context.Context) (forgeapi.SetupResult, error)
 
 func runCmd() {
 	cfg, err := config.Load(config.DefaultPath())

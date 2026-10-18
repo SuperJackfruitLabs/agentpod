@@ -38,11 +38,11 @@ var (
 
 // SetupOptions configures EnsureStk. Zero values mean defaults.
 type SetupOptions struct {
-	StkBinary   string // only used in messages; the Client already knows the path
+	StkBinary   string // message text only: the Client already knows the path; this is never used to select a binary
 	ServiceUser string // OS user stk runs as; default "stk" (group is the same name)
 	AgentUIDs   []int  // uids allowed to use the broker; default: the uid the node spawns harnesses as
 	StateDir    string // stk state directory; default is stk's own (/var/lib/stk)
-	Interactive bool   // a human is watching (the CLI); callers use it to decide how much to print
+	Interactive bool   // informational only (a human is watching); setup behaves identically either way
 }
 
 // SetupResult is what setup learned, beyond stk's doctor report.
@@ -51,7 +51,13 @@ type SetupResult struct {
 	Installed bool   // this call ran `stk install`
 	Degraded  bool   // isolation is anything other than separate-user
 	Reason    string // why and how to fix, when Degraded; scrubbed
+	Notice    string // something to do next that is not a degradation (e.g. restart the service)
 }
+
+const (
+	reasonRootAgent = "agents run as root; root can read the store"
+	noticeRestart   = "the allowlist was written for these agent uid(s); restart the stk service for a changed unit to take effect: `systemctl daemon-reload && systemctl restart stk`"
+)
 
 // sysEnv is what setup needs to know about the machine, injectable for tests.
 type sysEnv struct {
@@ -127,6 +133,11 @@ func Explain(report stkclient.DoctorReport, euid int) string {
 
 func explain(report stkclient.DoctorReport, euid int, goos string) string {
 	level := report.Isolation.Level
+	for _, r := range report.Isolation.Reasons {
+		if r == reasonRootAgent {
+			return reasonRootAgent + "; the broker's separate user protects nothing from a root agent"
+		}
+	}
 	if level == LevelSeparateUser {
 		return ""
 	}
@@ -149,16 +160,25 @@ func EnsureStk(ctx context.Context, c stkclient.Client, opts SetupOptions) (stkc
 	return res.Report, err
 }
 
-// Setup is EnsureStk with the full result (reason, whether install ran).
-func Setup(ctx context.Context, c stkclient.Client, opts SetupOptions) (SetupResult, error) {
-	return ensure(ctx, c, opts, hostEnv())
+// Setup is the CLI entry: it takes a client factory (see ensureF) and returns
+// the full result (reason, notice, whether install ran).
+func Setup(ctx context.Context, newClient func() stkclient.Client, opts SetupOptions) (SetupResult, error) {
+	return ensureF(ctx, newClient, opts, hostEnv())
 }
 
 func ensure(ctx context.Context, c stkclient.Client, opts SetupOptions, env sysEnv) (SetupResult, error) {
+	return ensureF(ctx, func() stkclient.Client { return c }, opts, env)
+}
+
+// ensureF takes a client factory: it is called for the pre-check and again
+// after install, so the re-check runs with a client built for the world that
+// now exists (the service user, its state directory).
+func ensureF(ctx context.Context, newClient func() stkclient.Client, opts SetupOptions, env sysEnv) (SetupResult, error) {
 	bin := opts.StkBinary
 	if bin == "" {
 		bin = defaultStkBinary
 	}
+	c := newClient()
 	if _, err := c.Version(ctx); err != nil {
 		switch {
 		case errors.Is(err, stkclient.ErrStkMissing):
@@ -173,13 +193,34 @@ func ensure(ctx context.Context, c stkclient.Client, opts SetupOptions, env sysE
 	if err != nil {
 		return SetupResult{}, scrubErr("stk doctor", err)
 	}
-	if rep.Isolation.Level == LevelSeparateUser {
-		return SetupResult{Report: cleanReport(rep)}, nil
+
+	explicit := len(opts.AgentUIDs) > 0
+	canInstall := env.goos == "linux" && env.euid == 0
+	uids := opts.AgentUIDs
+	if !explicit && env.harnessUIDs != nil {
+		uids = env.harnessUIDs()
 	}
 
 	degraded := func(r stkclient.DoctorReport, installed bool) SetupResult {
 		r = cleanReport(r)
 		return SetupResult{Report: r, Installed: installed, Degraded: true, Reason: explain(r, env.euid, env.goos)}
+	}
+	// finish labels a protected-looking result honestly when an agent runs as root.
+	finish := func(r stkclient.DoctorReport, installed bool, notice string) SetupResult {
+		res := SetupResult{Report: cleanReport(r), Installed: installed, Notice: notice}
+		if containsUID(uids, 0) {
+			res.Report.Isolation.Reasons = append(res.Report.Isolation.Reasons, reasonRootAgent)
+			res.Degraded = true
+			res.Reason = reasonRootAgent
+		}
+		return res
+	}
+
+	// An existing separate-user install is left alone, except that an explicit
+	// allowlist from a root operator is always (re)applied: `stk install` is
+	// idempotent and a different --agent-uid set must not be silently ignored.
+	if rep.Isolation.Level == LevelSeparateUser && !(explicit && canInstall) {
+		return finish(rep, false, ""), nil
 	}
 
 	if env.goos != "linux" {
@@ -192,15 +233,11 @@ func ensure(ctx context.Context, c stkclient.Client, opts SetupOptions, env sysE
 		return degraded(rep, false), nil
 	}
 
-	uids := opts.AgentUIDs
-	if len(uids) == 0 && env.harnessUIDs != nil {
-		uids = env.harnessUIDs()
-	}
 	if len(uids) == 0 {
 		return degraded(rep, false), fmt.Errorf("%w: pass --agent-uid; an empty allowlist would leave no agent able to use the broker", ErrNoAgentUID)
 	}
 	for _, u := range uids {
-		if u < 0 {
+		if u < 0 || int64(u) > maxUID {
 			return degraded(rep, false), fmt.Errorf("%w: invalid uid %d", ErrNoAgentUID, u)
 		}
 	}
@@ -215,7 +252,7 @@ func ensure(ctx context.Context, c stkclient.Client, opts SetupOptions, env sysE
 		return degraded(rep, false), scrubErr("stk install failed", err)
 	}
 
-	after, err := c.Doctor(ctx)
+	after, err := newClient().Doctor(ctx)
 	if err != nil {
 		return degraded(rep, true), scrubErr("stk doctor after install", err)
 	}
@@ -224,7 +261,23 @@ func ensure(ctx context.Context, c stkclient.Client, opts SetupOptions, env sysE
 			ErrNotSeparateUser, clean(after.Isolation.Level), clean(strings.Join(after.Isolation.Reasons, "; ")))
 	}
 	logf("forgeapi: stk isolation is %s (user %q)", after.Isolation.Level, user)
-	return SetupResult{Report: cleanReport(after), Installed: true}, nil
+	notice := ""
+	if rep.Isolation.Level == LevelSeparateUser {
+		notice = noticeRestart
+	}
+	return finish(after, true, notice), nil
+}
+
+// maxUID is the largest uid Linux accepts (uid_t is 32 bits).
+const maxUID = 4294967295
+
+func containsUID(uids []int, want int) bool {
+	for _, u := range uids {
+		if u == want {
+			return true
+		}
+	}
+	return false
 }
 
 func cleanReport(r stkclient.DoctorReport) stkclient.DoctorReport {
@@ -259,40 +312,48 @@ func WriteSummary(w io.Writer, res SetupResult) {
 	if res.Reason != "" {
 		fmt.Fprintf(w, "note:      %s\n", res.Reason)
 	}
+	if res.Notice != "" {
+		fmt.Fprintf(w, "next:      %s\n", res.Notice)
+	}
 }
 
 // Ensurer is the lazy seam the deliver handler calls on every delivery: the
 // first call does the work (single-flight across concurrent callers); a
-// separate-user result is cached. Failures and degraded results are not, so a
-// later `sudo agentpod-node forge-api setup` is noticed without a restart.
+// protected separate-user result is cached. Failures and degraded results
+// (including an agent running as root) are not, so a later
+// `sudo agentpod-node forge-api setup` is noticed without a restart.
 type Ensurer struct {
-	run func(context.Context) (stkclient.DoctorReport, error)
+	run func(context.Context) (SetupResult, error)
 
 	mu       sync.Mutex
-	cached   *stkclient.DoctorReport
+	cached   *SetupResult
 	inflight *flight
 }
 
 type flight struct {
 	done chan struct{}
-	rep  stkclient.DoctorReport
+	res  SetupResult
 	err  error
 }
 
-// NewEnsurer returns the seam for run.go.
-func NewEnsurer(c stkclient.Client, opts SetupOptions) *Ensurer {
-	return newEnsurer(c, opts, hostEnv())
+// NewEnsurer returns the seam for run.go. newClient is called per attempt and
+// again after an install.
+func NewEnsurer(newClient func() stkclient.Client, opts SetupOptions) *Ensurer {
+	return newEnsurerF(newClient, opts, hostEnv())
 }
 
 func newEnsurer(c stkclient.Client, opts SetupOptions, env sysEnv) *Ensurer {
-	return &Ensurer{run: func(ctx context.Context) (stkclient.DoctorReport, error) {
-		res, err := ensure(ctx, c, opts, env)
-		return res.Report, err
+	return newEnsurerF(func() stkclient.Client { return c }, opts, env)
+}
+
+func newEnsurerF(newClient func() stkclient.Client, opts SetupOptions, env sysEnv) *Ensurer {
+	return &Ensurer{run: func(ctx context.Context) (SetupResult, error) {
+		return ensureF(ctx, newClient, opts, env)
 	}}
 }
 
-// Ensure returns the current doctor report, running setup at most once at a time.
-func (e *Ensurer) Ensure(ctx context.Context) (stkclient.DoctorReport, error) {
+// Ensure returns the current setup result, running setup at most once at a time.
+func (e *Ensurer) Ensure(ctx context.Context) (SetupResult, error) {
 	e.mu.Lock()
 	if e.cached != nil {
 		r := *e.cached
@@ -303,25 +364,33 @@ func (e *Ensurer) Ensure(ctx context.Context) (stkclient.DoctorReport, error) {
 		e.mu.Unlock()
 		select {
 		case <-f.done:
-			return f.rep, f.err
+			return f.res, f.err
 		case <-ctx.Done():
-			return stkclient.DoctorReport{}, ctx.Err()
+			return SetupResult{}, ctx.Err()
 		}
 	}
 	f := &flight{done: make(chan struct{})}
 	e.inflight = f
 	e.mu.Unlock()
 
-	// The work outlives the first caller's cancellation: others are waiting on it.
-	f.rep, f.err = e.run(context.WithoutCancel(ctx))
+	e.lead(ctx, f)
+	return f.res, f.err
+}
 
-	e.mu.Lock()
-	e.inflight = nil
-	if f.err == nil && f.rep.Isolation.Level == LevelSeparateUser {
-		r := f.rep
-		e.cached = &r
-	}
-	e.mu.Unlock()
-	close(f.done)
-	return f.rep, f.err
+// lead runs the work. The deferred cleanup runs even if run panics, so the
+// in-flight marker can never wedge later callers.
+func (e *Ensurer) lead(ctx context.Context, f *flight) {
+	f.err = errors.New("stk setup did not complete")
+	defer func() {
+		e.mu.Lock()
+		e.inflight = nil
+		if f.err == nil && !f.res.Degraded && f.res.Report.Isolation.Level == LevelSeparateUser {
+			r := f.res
+			e.cached = &r
+		}
+		e.mu.Unlock()
+		close(f.done)
+	}()
+	// The work outlives the first caller's cancellation: others are waiting on it.
+	f.res, f.err = e.run(context.WithoutCancel(ctx))
 }

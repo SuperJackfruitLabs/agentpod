@@ -100,8 +100,8 @@ func TestSetupRunsStkInstallOnceAndIsIdempotent(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 
-	// Second call: doctor already says separate-user, install must not run again.
-	res, err = ensure(context.Background(), f, opts, rootLinux())
+	// Second (lazy, defaulted-uid) call: doctor already says separate-user, install must not run again.
+	res, err = ensure(context.Background(), f, SetupOptions{}, rootLinux(1001))
 	if err != nil || res.Installed || f.installCount() != 1 {
 		t.Fatalf("second call: err=%v installed=%v installs=%d", err, res.Installed, f.installCount())
 	}
@@ -291,7 +291,7 @@ func TestEnsurerSingleFlightsConcurrentFirstCalls(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			r, err := e.Ensure(context.Background())
-			if err != nil || r.Isolation.Level != "separate-user" {
+			if err != nil || r.Report.Isolation.Level != "separate-user" {
 				bad.Add(1)
 			}
 		}()
@@ -327,7 +327,7 @@ func TestEnsurerDoesNotCacheFailureOrDegraded(t *testing.T) {
 	f.versionErr = nil
 	f.mu.Unlock()
 	r, err := e.Ensure(context.Background())
-	if err != nil || r.Isolation.Level != "same-user" {
+	if err != nil || r.Report.Isolation.Level != "same-user" {
 		t.Fatalf("retry after failure: %v %+v", err, r)
 	}
 	n := f.doctorCalls
@@ -348,5 +348,116 @@ func TestCLIHarnessUIDsPreferSudoUID(t *testing.T) {
 	env["SUDO_UID"] = "junk"
 	if got := cliHarnessUIDs(0, get); len(got) != 1 || got[0] != 0 {
 		t.Fatalf("junk SUDO_UID falls back to euid: %v", got)
+	}
+}
+
+func TestExplicitUIDsReinstallEvenWhenAlreadySeparateUser(t *testing.T) {
+	f := &fakeStk{doctors: []stkclient.DoctorReport{rep("separate-user")}}
+	res, err := ensure(context.Background(), f, SetupOptions{AgentUIDs: []int{2000}}, rootLinux())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.installCount() != 1 || f.installs[0].AgentUIDs[0] != 2000 {
+		t.Fatalf("installs = %+v", f.installs)
+	}
+	if !res.Installed || !strings.Contains(res.Notice, "systemctl restart stk") {
+		t.Fatalf("result = %+v", res)
+	}
+	var out bytes.Buffer
+	WriteSummary(&out, res)
+	if !strings.Contains(out.String(), "systemctl restart stk") {
+		t.Fatalf("summary omits the restart note:\n%s", out.String())
+	}
+}
+
+func TestLazyPathNeverInstallsWhenAlreadySeparateUser(t *testing.T) {
+	f := &fakeStk{doctors: []stkclient.DoctorReport{rep("separate-user")}}
+	// Defaulted uids (none explicit), even as root.
+	if _, err := ensure(context.Background(), f, SetupOptions{}, rootLinux(1000)); err != nil {
+		t.Fatal(err)
+	}
+	if f.installCount() != 0 {
+		t.Fatal("lazy path must not install over an existing separate-user install")
+	}
+	// Explicit uids but not root: cannot install, returns the report.
+	res, err := ensure(context.Background(), f, SetupOptions{AgentUIDs: []int{5}}, sysEnv{goos: "linux", euid: 1000})
+	if err != nil || f.installCount() != 0 || res.Degraded {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+}
+
+func TestRootAgentUIDIsDegradedAndNotCached(t *testing.T) {
+	f := &fakeStk{stateful: true, doctors: []stkclient.DoctorReport{rep("same-user"), rep("separate-user")}}
+	res, err := ensure(context.Background(), f, SetupOptions{}, rootLinux(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.installCount() != 1 {
+		t.Fatal("the allowlist is still installed")
+	}
+	const want = "agents run as root; root can read the store"
+	if !res.Degraded || !strings.Contains(res.Reason, want) {
+		t.Fatalf("result = %+v", res)
+	}
+	if got := Explain(res.Report, 0); !strings.Contains(got, want) {
+		t.Fatalf("Explain = %q", got)
+	}
+	var out bytes.Buffer
+	WriteSummary(&out, res)
+	if !strings.Contains(out.String(), "(DEGRADED)") || !strings.Contains(out.String(), want) {
+		t.Fatalf("summary:\n%s", out.String())
+	}
+
+	// Already installed + lazy path with a root harness uid: also degraded, never cached.
+	g := &fakeStk{doctors: []stkclient.DoctorReport{rep("separate-user")}}
+	e := newEnsurer(g, SetupOptions{}, rootLinux(0))
+	for i := 0; i < 2; i++ {
+		r, err := e.Ensure(context.Background())
+		if err != nil || !r.Degraded {
+			t.Fatalf("call %d: %+v %v", i, r, err)
+		}
+	}
+	if g.doctorCalls != 2 {
+		t.Fatalf("root-agent result was cached (doctor calls = %d)", g.doctorCalls)
+	}
+}
+
+func TestClientIsRebuiltAfterInstallForTheRecheck(t *testing.T) {
+	f := &fakeStk{stateful: true, doctors: []stkclient.DoctorReport{rep("same-user"), rep("separate-user")}}
+	var installsSeenAtBuild []int
+	factory := func() stkclient.Client {
+		installsSeenAtBuild = append(installsSeenAtBuild, f.installCount())
+		return f
+	}
+	if _, err := ensureF(context.Background(), factory, SetupOptions{AgentUIDs: []int{1}}, rootLinux()); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(installsSeenAtBuild); n < 2 || installsSeenAtBuild[n-1] != 1 {
+		t.Fatalf("builds saw installs %v; the re-check client must be built after install", installsSeenAtBuild)
+	}
+}
+
+func TestEnsurerPanicDoesNotWedgeLaterCalls(t *testing.T) {
+	calls := 0
+	e := &Ensurer{run: func(context.Context) (SetupResult, error) {
+		calls++
+		if calls == 1 {
+			panic("boom")
+		}
+		return SetupResult{Report: rep("separate-user")}, nil
+	}}
+	func() {
+		defer func() { _ = recover() }()
+		_, _ = e.Ensure(context.Background())
+	}()
+	done := make(chan error, 1)
+	go func() { _, err := e.Ensure(context.Background()); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a panic in the first run left the in-flight marker set")
 	}
 }

@@ -15,8 +15,8 @@ func runForgeAPI(t *testing.T, args []string, res forgeapi.SetupResult, err erro
 	t.Helper()
 	var o, e bytes.Buffer
 	d := forgeAPIDeps{
-		newClient: func(string, string) stkclient.Client { return nil },
-		setup: func(_ context.Context, _ stkclient.Client, so forgeapi.SetupOptions) (forgeapi.SetupResult, error) {
+		newClient: func(string, string, string) stkclient.Client { return nil },
+		setup: func(_ context.Context, _ func() stkclient.Client, so forgeapi.SetupOptions) (forgeapi.SetupResult, error) {
 			got = so
 			return res, err
 		},
@@ -69,5 +69,38 @@ func TestForgeAPISetupErrorsExitNonZero(t *testing.T) {
 func TestForgeAPIIsRegisteredInHelp(t *testing.T) {
 	if !isCommand("forge-api") || commandHelp("forge-api") == "" {
 		t.Fatal("forge-api must be in the commands registry")
+	}
+}
+
+func TestStkOptionsStateDirReachesTheClientEnv(t *testing.T) {
+	yes := func(string) bool { return true }
+	no := func(string) bool { return false }
+	if o := stkOptions(0, no, "stk", "/srv/stk"); o.Env["STK_HOME"] != "/srv/stk" || o.RunAs != "" {
+		t.Fatalf("explicit state dir before the user exists: %+v", o)
+	}
+	if o := stkOptions(0, yes, "stk", "/srv/stk"); o.Env["STK_HOME"] != "/srv/stk" || o.RunAs != "stk" {
+		t.Fatalf("explicit state dir after install: %+v", o)
+	}
+	if o := stkOptions(0, yes, "stk", ""); o.Env["STK_HOME"] != "/var/lib/stk" || o.RunAs != "stk" {
+		t.Fatalf("default service dir: %+v", o)
+	}
+	if o := stkOptions(1000, yes, "stk", ""); o.RunAs != "" || len(o.Env) != 0 {
+		t.Fatalf("a non-root node uses its own stk home: %+v", o)
+	}
+	if o := stkOptions(0, no, "stk", ""); o.RunAs != "" || len(o.Env) != 0 {
+		t.Fatalf("root before install: %+v", o)
+	}
+}
+
+func TestAgentUIDRejectsOutOfRange(t *testing.T) {
+	for _, bad := range []string{"4294967296", "-1", "x", ""} {
+		var u uidList
+		if u.Set(bad) == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	var u uidList
+	if err := u.Set("4294967295"); err != nil || u[0] != 4294967295 {
+		t.Fatalf("max uid: %v %v", err, u)
 	}
 }
