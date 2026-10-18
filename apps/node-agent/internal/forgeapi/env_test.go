@@ -34,6 +34,8 @@ type wiringFake struct {
 	running map[string]bool
 	reloads int
 	chowns  []chownCall
+	unitEnv []string
+	fchowns []chownCall
 	extra   map[string]string // extra variables stk "reports" (a bad stk, a NO_PROXY ...)
 	envErr  error
 }
@@ -96,7 +98,7 @@ func (s *instStk) Env(context.Context) (stkclient.Env, error) {
 			vars[k] = val
 		}
 	}
-	return stkclient.Env{ProxyURL: proxy, CAPath: ca, Vars: vars}, nil
+	return stkclient.Env{ProxyURL: vars["HTTPS_PROXY"], CAPath: ca, Vars: vars}, nil
 }
 
 func unitOf(key string) string {
@@ -133,6 +135,17 @@ func newWiringFixture(t *testing.T, mod ...func(*fixture, *InstancesConfig)) (*f
 				w.chowns = append(w.chowns, chownCall{path, uid, gid})
 				w.mu.Unlock()
 				return nil
+			},
+			FChown: func(f *os.File, uid, gid int) error {
+				w.mu.Lock()
+				w.fchowns = append(w.fchowns, chownCall{f.Name(), uid, gid})
+				w.mu.Unlock()
+				return nil
+			},
+			UnitEnv: func(context.Context, string) []string {
+				w.mu.Lock()
+				defer w.mu.Unlock()
+				return append([]string(nil), w.unitEnv...)
 			},
 		}
 	}}, mod...)
@@ -271,10 +284,10 @@ func captureEnvLogs(t *testing.T) *[]string {
 
 func TestWithBrokerEnvDescriptorValuesWinOnlyWhenTheySetTheSameName(t *testing.T) {
 	captureEnvLogs(t)
-	env := []string{"FOO=1", "HTTPS_PROXY=http://descriptor-chose-this"}
+	env := []string{"FOO=1", "SSL_CERT_FILE=/descriptor.pem"}
 	add := map[string]string{"HTTPS_PROXY": "http://stk:K@127.0.0.1:1", "SSL_CERT_FILE": "/ca.pem"}
 	got := WithBrokerEnv(env, add)
-	want := map[string]string{"FOO": "1", "HTTPS_PROXY": "http://descriptor-chose-this", "SSL_CERT_FILE": "/ca.pem"}
+	want := map[string]string{"FOO": "1", "SSL_CERT_FILE": "/descriptor.pem", "HTTPS_PROXY": "http://stk:K@127.0.0.1:1"}
 	m := map[string]string{}
 	for _, e := range got {
 		k, v, _ := strings.Cut(e, "=")
@@ -589,9 +602,16 @@ func TestASystemdHarnessGetsA0600DropInOwnedByTheStationsAgentUID(t *testing.T) 
 		t.Errorf("mode = %v, want 0600", st.Mode().Perm())
 	}
 	uid := uidFor("stn_1")[0]
-	owned := w.chownsOf(f)
-	if len(owned) == 0 || owned[len(owned)-1].uid != uid {
-		t.Errorf("chown calls on the env file = %+v, want uid %d", owned, uid)
+	// owner is set on the open temp file BEFORE content is written, never on the final path
+	// (which an agent could have replaced with a symlink)
+	w.mu.Lock()
+	fc := append([]chownCall(nil), w.fchowns...)
+	w.mu.Unlock()
+	if len(fc) == 0 || fc[len(fc)-1].uid != uid || filepath.Dir(fc[len(fc)-1].path) != filepath.Dir(f) || !strings.HasPrefix(filepath.Base(fc[len(fc)-1].path), ".env-") {
+		t.Errorf("fchown calls = %+v, want the temp file in %s owned by uid %d", fc, filepath.Dir(f), uid)
+	}
+	if len(w.chownsOf(f)) != 0 {
+		t.Error("the final path was chowned by path: a symlink there would be followed")
 	}
 	dir := filepath.Dir(f)
 	if dst, _ := os.Stat(dir); dst.Mode().Perm() != 0o700 {
@@ -739,7 +759,7 @@ func TestAHarnessUIDThatIsTheNodesOwnRootUIDIsRefusedUnlessAcknowledged(t *testi
 	if err == nil || !strings.HasPrefix(err.Error(), "harness-uid-is-node:") {
 		t.Fatalf("err = %v", err)
 	}
-	if exists(fx.envFile("stn_1")) || len(w.chowns) != 0 {
+	if exists(fx.envFile("stn_1")) || len(w.chowns) != 0 || len(w.fchowns) != 0 {
 		t.Error("a drop-in was written for a harness that shares the node's uid")
 	}
 
@@ -750,7 +770,7 @@ func TestAHarnessUIDThatIsTheNodesOwnRootUIDIsRefusedUnlessAcknowledged(t *testi
 	if _, err := fx2.deliverKeyed("stn_1", "fag_aaa111", "forge.example.com"); err != nil {
 		t.Fatalf("acknowledged: %v", err)
 	}
-	if !exists(fx2.envFile("stn_1")) || len(w2.chowns) == 0 {
+	if !exists(fx2.envFile("stn_1")) || len(w2.fchowns) == 0 {
 		t.Error("an acknowledged shared uid must still get its drop-in")
 	}
 }

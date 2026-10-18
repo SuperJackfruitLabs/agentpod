@@ -28,3 +28,13 @@ func TestUserUnitDropInDirFollowsXDGConfigHome(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
+
+func TestUnitEnvironmentIsParsedIntoNameValuePairs(t *testing.T) {
+	got := parseUnitEnvironment("FOO=1 https_proxy=http://p:3128 \"QUOTED=x\"\n")
+	if len(got) != 3 || got[1] != "https_proxy=http://p:3128" || got[2] != "QUOTED=x" {
+		t.Fatalf("got %v", got)
+	}
+	if len(parseUnitEnvironment("")) != 0 {
+		t.Fatal("empty")
+	}
+}

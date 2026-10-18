@@ -93,6 +93,8 @@ export const ForgeApiDeliverResult = z.object({
    * does not restart it itself (it cannot know the agent is not mid-turn). Older nodes omit it.
    */
   needsRestart: z.boolean().optional(),
+  /** The systemd units whose environment file the node wrote for this station. Older nodes omit it. */
+  wired: z.array(z.string()).optional(),
 });
 export const ForgeApiPolicyResult = z.object({ ok: z.boolean(), error: z.string().optional() });
 /**
@@ -125,6 +127,8 @@ export const ForgeApiRevokeResult = z.object({
   removed: z.boolean(),
   /** See ForgeApiDeliverResult.needsRestart: a running harness still holds the revoked wiring. */
   needsRestart: z.boolean().optional(),
+  /** What remains wired after the revoke. */
+  wired: z.array(z.string()).optional(),
 });
 export const ForgeApiStatusResult = z
   .object({

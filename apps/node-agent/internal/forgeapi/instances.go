@@ -138,8 +138,9 @@ type StationInstances struct {
 	warned   map[string]bool
 	seedWarn map[string]string // station -> why the shared base policy was not seeded
 
-	wiringMu   sync.Mutex // serialises harness wiring (env files and drop-ins)
-	refreshMu  sync.Mutex // serialises shared-policy refreshes
+	wiringMu   sync.Mutex                   // serialises harness wiring (env files and drop-ins)
+	blocked    map[string]map[string]string // station -> source ("spawn", "unit") -> why wiring is blocked; guarded by mu
+	refreshMu  sync.Mutex                   // serialises shared-policy refreshes
 	sharedHash string
 	sharedSeen bool
 }
@@ -621,6 +622,10 @@ func (m *StationInstances) Deliver(ctx context.Context, p DeliverParams) (Delive
 		return DeliverAck{}, err
 	}
 	m.maybeRefreshShared(ctx)
+	// A key that already belongs to another station is refused before an instance is created.
+	if err := m.checkKeyFree(p.StationID, p.StationKey); err != nil {
+		return DeliverAck{}, err
+	}
 	st, shared, err := m.lookup(p.StationID, true)
 	if err != nil {
 		return DeliverAck{}, err
@@ -634,11 +639,11 @@ func (m *StationInstances) Deliver(ctx context.Context, p DeliverParams) (Delive
 	}
 	// The harness is wired only once stk holds the credential. A failure here is the deliver's
 	// failure: the grant would otherwise look usable while the agent has no route to it.
-	restart, werr := m.wireStation(ctx, st, p.StationKey)
+	res, werr := m.wireStation(ctx, st, p.StationKey)
 	if werr != nil {
 		return DeliverAck{}, werr
 	}
-	ack.NeedsRestart = restart
+	ack.NeedsRestart, ack.Wired = res.restart, res.wired
 	return ack, nil
 }
 
@@ -698,11 +703,11 @@ func (m *StationInstances) Revoke(ctx context.Context, p RevokeParams) (RevokeAc
 	}
 	// Whatever the revoke found, leave the harness wiring as the grants that remain say (an
 	// interrupted revoke is healed by the next one).
-	restart, werr := m.wireStation(ctx, st, "")
+	res, werr := m.wireStation(ctx, st, "")
 	if werr != nil {
 		return RevokeAck{}, coded("unwire-failed", werr)
 	}
-	ack.NeedsRestart = restart
+	ack.NeedsRestart, ack.Wired = res.restart, res.wired
 	return ack, nil
 }
 

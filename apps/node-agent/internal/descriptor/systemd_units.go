@@ -56,3 +56,23 @@ func UserUnitDropInDir(unit string) string {
 	}
 	return filepath.Join(base, "systemd", "user", unit+".d")
 }
+
+// UserUnitEnvironment returns the unit's own Environment= entries (NAME=value), so the forge API
+// wiring can see a proxy variable the unit already sets. Nil when systemd cannot be asked.
+func UserUnitEnvironment(unit string) []string {
+	out, err := userSystemctl("show", "-p", "Environment", "--value", unit).Output()
+	if err != nil {
+		return nil
+	}
+	return parseUnitEnvironment(string(out))
+}
+
+func parseUnitEnvironment(s string) []string {
+	var env []string
+	for _, f := range strings.Fields(s) {
+		if strings.Contains(strings.Trim(f, `"'`), "=") {
+			env = append(env, strings.Trim(f, `"'`))
+		}
+	}
+	return env
+}

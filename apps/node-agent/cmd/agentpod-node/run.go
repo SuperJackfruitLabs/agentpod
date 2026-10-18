@@ -290,6 +290,7 @@ func runCmd() {
 			descriptor.NewCapabilityHandler(reg).ACPCommand,
 		)),
 		instances.EnvForKey,
+		instances.NoteBlocked,
 	)), mcpProxy)
 	// The daemon's otel.env comes from its own cgroup (otelenv.DaemonPath), not from uid: a
 	// system unit with User= still reads the system file, and a node that is not the

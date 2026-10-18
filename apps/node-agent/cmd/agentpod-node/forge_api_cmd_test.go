@@ -247,7 +247,7 @@ func TestTheNodeWiresStationHarnessesThroughSystemdUserUnits(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := cfg.Harness
-	if h == nil || h.Units == nil || h.DropInDir == nil || h.Running == nil || h.DaemonReload == nil {
+	if h == nil || h.Units == nil || h.DropInDir == nil || h.Running == nil || h.DaemonReload == nil || h.UnitEnv == nil {
 		t.Fatalf("harness wiring is not configured: %+v", h)
 	}
 	// the root station and a station of a harness no per-station unit starts have no unit

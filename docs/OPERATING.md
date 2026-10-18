@@ -2176,8 +2176,13 @@ it started with**, so when a deliver or revoke changes the environment under a r
 ack says `needsRestart: true`; the node does not restart it (it cannot know the agent is not
 mid-turn), restart the station from lifecycle. The node never sets or changes `NO_PROXY` /
 `no_proxy`; if one already covers a forge host (or is `*`) the harness bypasses the broker, and
-the node logs a warning once. The proxy credential is only in the harness environment and that
-file: never in a log, an ack or an error.
+the node logs a warning once. A proxy variable the harness environment or unit already sets
+(`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, either case) blocks the broker for that harness: it is
+started unchanged, never half-wired, and the node logs the variable's name (never its value). A
+station key belongs to one station (`station-key-in-use`), and one unit serves one station
+(`harness-unit-in-use`). The node never follows a symlink in the agent-owned wiring directory.
+The ack's `wired` lists the units that carry the station's file. The proxy credential is only in
+the harness environment and that file: never in a log, an ack or an error.
 
 **Shared base policy.** An optional stk policy file (same format as `supertoolkit.yaml`, only its
 `services:` are read) listing services every station needs. The node copies each entry into every

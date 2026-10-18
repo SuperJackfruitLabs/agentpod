@@ -76,10 +76,17 @@ func BrokerEnv(ctx context.Context, c stkclient.Client, stationID string) (map[s
 	if placeholders == 0 {
 		return map[string]string{}, nil
 	}
-	// stk's own fields are the source of truth for where the proxy and the CA are.
+	// One proxy under every name: a client that reads the lower-case variable and one that reads the
+	// upper-case one must not be sent to two different places. stk's own proxy_url is the source.
+	proxy := e.ProxyURL
 	for _, k := range proxyURLVars {
-		if out[k] == "" && e.ProxyURL != "" {
-			out[k] = e.ProxyURL
+		if proxy == "" {
+			proxy = out[k]
+		}
+	}
+	if proxy != "" {
+		for _, k := range proxyURLVars {
+			out[k] = proxy
 		}
 	}
 	for _, k := range caVars {
@@ -108,35 +115,76 @@ func EnvList(m map[string]string) []string {
 	return out
 }
 
-// WithBrokerEnv adds the station's broker environment to env. The result is appended to
-// os.Environ() by the spawner, where the LAST duplicate wins, so a name env already sets is left
-// to env (the descriptor knows things this package does not) and a name it does not set is added.
-// With nothing to add, env is returned as it came. NO_PROXY and no_proxy are never added.
+// blockingProxyVars are the proxy variables that, once a descriptor has set one, make the broker
+// impossible for that spawn: the broker's proxy would either lose to it or sit beside it under the
+// other case, and a client would then use whichever it reads first.
+var blockingProxyVars = []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"}
+
+// ApplyBrokerEnv adds the station's broker environment to env, or says why it cannot.
 //
-// forgeHosts are the hosts the station's grants reach. A NO_PROXY in env, or in the node's own
-// environment (which the harness inherits), that covers one of them (or is "*") is warned about
-// once: the node does not rewrite it, but a harness that bypasses the proxy defeats the broker.
-func WithBrokerEnv(env []string, add map[string]string, forgeHosts ...string) []string {
+// If env already sets a proxy variable (either case, ALL_PROXY too) the broker is NOT applied: env
+// is returned as it came and blocked names those variables (names only, never values). A
+// half-applied broker, with some clients on the descriptor's proxy and some on stk's, is worse than
+// none. Otherwise the result is appended to os.Environ() by the spawner, where the LAST duplicate
+// wins, so a name env already sets (a CA variable, say) is left to env, and warned about by name
+// when its value differs from the broker's. NO_PROXY and no_proxy are never added.
+func ApplyBrokerEnv(env []string, add map[string]string, forgeHosts ...string) (out []string, blocked []string) {
 	if len(add) == 0 {
-		return env
+		return env, nil
 	}
-	set := make(map[string]bool, len(env))
+	set := make(map[string]string, len(env))
 	for _, e := range env {
-		set[strings.SplitN(e, "=", 2)[0]] = true
+		k, v, _ := strings.Cut(e, "=")
+		set[k] = v
 	}
-	keys := make([]string, 0, len(add))
-	for k := range add {
-		if !isNoProxy(k) && !set[k] {
-			keys = append(keys, k)
+	for _, k := range blockingProxyVars {
+		if _, ok := set[k]; ok {
+			blocked = append(blocked, k)
 		}
 	}
+	if len(blocked) > 0 {
+		return env, blocked
+	}
+	keys := make([]string, 0, len(add))
+	for k, v := range add {
+		if isNoProxy(k) {
+			continue
+		}
+		if cur, ok := set[k]; ok {
+			if cur != v {
+				warnOnceByName("ca|"+k, "forgeapi: WARNING: the harness environment sets %s itself, so the broker's value is not used; TLS to the forge through the broker will fail unless it trusts the broker's CA", clean(k))
+			}
+			continue
+		}
+		keys = append(keys, k)
+	}
 	sort.Strings(keys)
-	out := append(make([]string, 0, len(env)+len(keys)), env...)
+	out = append(make([]string, 0, len(env)+len(keys)), env...)
 	for _, k := range keys {
 		out = append(out, k+"="+add[k])
 	}
 	warnNoProxy(env, forgeHosts)
+	return out, nil
+}
+
+// WithBrokerEnv is ApplyBrokerEnv for a caller that has no use for the reason; a blocked broker is
+// logged (names only) once and env is returned unchanged.
+func WithBrokerEnv(env []string, add map[string]string, forgeHosts ...string) []string {
+	out, blocked := ApplyBrokerEnv(env, add, forgeHosts...)
+	if len(blocked) > 0 {
+		warnOnceByName("blocked|"+strings.Join(blocked, ","), "forgeapi: WARNING: the harness environment already sets %s, so it is started WITHOUT the stk broker", strings.Join(blocked, ", "))
+	}
 	return out
+}
+
+func warnOnceByName(id, format string, a ...any) {
+	noProxyMu.Lock()
+	seen := noProxyWarned[id]
+	noProxyWarned[id] = true
+	noProxyMu.Unlock()
+	if !seen {
+		logf(format, a...)
+	}
 }
 
 // lookupProcessEnv reads the node's own environment (a test seam).
@@ -222,14 +270,26 @@ type CommandFunc func(key string) (argv []string, dir string, env []string, err 
 // WithBrokerCommand gives a station's harness its own broker environment, the way
 // gitidentity.WithSSHCommand gives it its push key: lookup(key) returns the station's environment
 // (nil for a station with no grants, which is then left exactly as it was) and the forge hosts it
-// reaches. The descriptor stays free of this package.
-func WithBrokerCommand(inner CommandFunc, lookup func(key string) (map[string]string, []string)) CommandFunc {
+// reaches. The descriptor stays free of this package. When the descriptor's own environment sets a
+// proxy variable the spawn is left unchanged and onBlocked is told which variables (and, for a
+// spawn that can be wired, with no names so a stale reason clears); the loud line is logged once
+// per key, by variable name only.
+func WithBrokerCommand(inner CommandFunc, lookup func(key string) (map[string]string, []string), onBlocked ...func(key string, names []string)) CommandFunc {
 	return func(key string) ([]string, string, []string, error) {
 		argv, dir, env, err := inner(key)
 		if err != nil {
 			return argv, dir, env, err
 		}
 		add, hosts := lookup(key)
-		return argv, dir, WithBrokerEnv(env, add, hosts...), nil
+		out, blocked := ApplyBrokerEnv(env, add, hosts...)
+		if len(add) > 0 {
+			if len(blocked) > 0 {
+				warnOnceByName("blocked|"+key+"|"+strings.Join(blocked, ","), "forgeapi: WARNING: the environment of %s already sets %s, so it is started WITHOUT the stk broker; remove the variable from the harness's configuration", clean(key), strings.Join(blocked, ", "))
+			}
+			for _, f := range onBlocked {
+				f(key, blocked)
+			}
+		}
+		return argv, dir, out, nil
 	}
 }

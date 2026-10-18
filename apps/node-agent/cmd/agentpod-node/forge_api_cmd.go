@@ -136,6 +136,7 @@ func nodeHarnessWiring() *forgeapi.HarnessWiring {
 		DropInDir:    descriptor.UserUnitDropInDir,
 		Running:      func(_ context.Context, unit string) bool { return descriptor.UserUnitActive(unit) },
 		DaemonReload: func(context.Context) error { return descriptor.UserDaemonReload() },
+		UnitEnv:      func(_ context.Context, unit string) []string { return descriptor.UserUnitEnvironment(unit) },
 	}
 }
 

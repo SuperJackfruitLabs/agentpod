@@ -54,8 +54,13 @@ type HarnessWiring struct {
 	Running func(ctx context.Context, unit string) bool
 	// DaemonReload tells systemd that unit files changed.
 	DaemonReload func(ctx context.Context) error
-	// Chown sets a path's owner; os.Chown when nil.
+	// Chown sets a directory's owner without following a symlink (os.Lchown when nil).
 	Chown func(path string, uid, gid int) error
+	// FChown sets an open file's owner (f.Chown, an fchown on the descriptor, when nil).
+	FChown func(f *os.File, uid, gid int) error
+	// UnitEnv returns the unit's own environment (NAME=value entries) so the node can see a proxy
+	// variable the unit already sets; nil when it cannot be read.
+	UnitEnv func(ctx context.Context, unit string) []string
 }
 
 func (h *HarnessWiring) root() string {
@@ -69,7 +74,14 @@ func (h *HarnessWiring) chown(path string, uid, gid int) error {
 	if h.Chown != nil {
 		return h.Chown(path, uid, gid)
 	}
-	return os.Chown(path, uid, gid)
+	return os.Lchown(path, uid, gid)
+}
+
+func (h *HarnessWiring) fchown(f *os.File, uid, gid int) error {
+	if h.FChown != nil {
+		return h.FChown(f, uid, gid)
+	}
+	return f.Chown(uid, gid)
 }
 
 func (h *HarnessWiring) units(key string) []string {
@@ -154,12 +166,11 @@ func (m *StationInstances) EnvForKey(key string) (map[string]string, []string) {
 		m.warnOnce("registry", "forgeapi: no broker environment for spawns: "+clean(err.Error()))
 		return nil, nil
 	}
-	station := ""
-	for st, r := range recs {
-		if r.StationKey == key {
-			station = st
-			break
-		}
+	station, n := stationOfKey(recs, key)
+	if n > 1 {
+		// Never pick one: whichever the map yields first would hand one station another's proxy.
+		m.warnOnce("dupkey|"+key, fmt.Sprintf("forgeapi: more than one station claims the key %s; none of them gets a broker environment until the registry is fixed", clean(key)))
+		return nil, nil
 	}
 	if station == "" {
 		return nil, nil
@@ -196,6 +207,9 @@ func (m *StationInstances) recordKey(station, key string) error {
 		return nil
 	}
 	return m.updateRecords(func(recs map[string]record) (bool, error) {
+		if holder := keyHolder(recs, key, station); holder != "" {
+			return false, codedf("station-key-in-use", "the key %s already belongs to another station on this node", clean(key))
+		}
 		r, ok := recs[station]
 		if !ok || r.StationKey == key {
 			return false, nil
@@ -206,6 +220,43 @@ func (m *StationInstances) recordKey(station, key string) error {
 	})
 }
 
+// stationOfKey returns the station recorded for key and how many records claim it.
+func stationOfKey(recs map[string]record, key string) (string, int) {
+	station, n := "", 0
+	for st, r := range recs {
+		if r.StationKey == key {
+			station = st
+			n++
+		}
+	}
+	return station, n
+}
+
+// keyHolder is a station other than except that holds key ("" when none does).
+func keyHolder(recs map[string]record, key, except string) string {
+	for st, r := range recs {
+		if st != except && r.StationKey == key {
+			return st
+		}
+	}
+	return ""
+}
+
+// checkKeyFree refuses a deliver whose key another station holds, before anything is created.
+func (m *StationInstances) checkKeyFree(station, key string) error {
+	if m.cfg.Harness == nil || strings.TrimSpace(key) == "" {
+		return nil
+	}
+	recs, err := m.readRecords()
+	if err != nil {
+		return err
+	}
+	if keyHolder(recs, key, station) != "" {
+		return codedf("station-key-in-use", "the key %s already belongs to another station on this node", clean(key))
+	}
+	return nil
+}
+
 func (m *StationInstances) keyOf(station string) string {
 	recs, err := m.readRecords()
 	if err != nil {
@@ -214,82 +265,207 @@ func (m *StationInstances) keyOf(station string) string {
 	return recs[station].StationKey
 }
 
+// wireResult is what a wiring pass did: whether a running unit needs a restart to see it, and
+// which units now carry the station's environment file.
+type wireResult struct {
+	restart bool
+	wired   []string
+}
+
 // wireStation brings the station's systemd harness files in line with its grants: written when it
-// holds any, removed when it holds none. It reports whether a unit that is running now needs a
-// restart to see the change. Idempotent. key, when not empty, is recorded first.
-func (m *StationInstances) wireStation(ctx context.Context, st *stationState, key string) (bool, error) {
+// holds any, removed when it holds none. A unit whose own environment already sets a proxy
+// variable gets nothing (a half-applied broker is worse than none) and the reason is kept for
+// WiringBlocked. Idempotent. key, when not empty, is recorded first.
+func (m *StationInstances) wireStation(ctx context.Context, st *stationState, key string) (wireResult, error) {
 	h := m.cfg.Harness
 	if h == nil {
-		return false, nil
+		return wireResult{}, nil
 	}
 	m.wiringMu.Lock()
 	defer m.wiringMu.Unlock()
 	station := st.inst.Station
 	if key != "" {
 		if err := m.recordKey(station, key); err != nil {
-			return false, err
+			return wireResult{}, err
 		}
 	} else {
 		key = m.keyOf(station)
 	}
-	env, _, err := m.stationEnv(ctx, st)
+	env, hosts, err := m.stationEnv(ctx, st)
 	if err != nil {
-		return false, coded("harness-wiring-failed", err)
+		return wireResult{}, coded("harness-wiring-failed", err)
 	}
 	if env == nil {
-		return m.unwireInstance(ctx, st.inst)
+		m.setBlocked(station, "unit", "")
+		restart, err := m.unwireInstance(ctx, st.inst)
+		return wireResult{restart: restart}, err
 	}
 	units := h.units(key)
-	want := map[string]bool{}
 	for _, u := range units {
 		if !unitNameRE.MatchString(u) {
-			return false, codedf("harness-wiring-failed", "refusing unit name %q", clean(u))
+			return wireResult{}, codedf("harness-wiring-failed", "refusing unit name %q", clean(u))
 		}
-		want[u] = true
+		if other := m.otherInstanceHoldsUnit(st.inst, u); other {
+			return wireResult{}, codedf("harness-unit-in-use", "the unit %s already carries another station's environment file; one unit serves one station", clean(u))
+		}
 	}
-	restart := false
+	want := map[string]bool{}
+	var res wireResult
 	changedAny := false
+	var reasons []string
 	if len(units) > 0 {
 		uid, err := m.harnessOwner(station)
 		if err != nil {
-			return false, err
+			return wireResult{}, err
 		}
 		dir := filepath.Join(h.root(), st.inst.Name)
 		if err := m.ensureWiringDir(dir, uid); err != nil {
-			return false, coded("harness-wiring-failed", err)
+			return wireResult{}, coded("harness-wiring-failed", err)
 		}
-		content := renderEnvFile(env)
 		for _, u := range units {
+			var unitEnv []string
+			if h.UnitEnv != nil {
+				unitEnv = h.UnitEnv(ctx, u)
+			}
+			_, blocked := ApplyBrokerEnv(unitEnv, env, hosts...)
+			if len(blocked) > 0 {
+				reasons = append(reasons, fmt.Sprintf("unit %s already sets %s", u, strings.Join(blocked, ", ")))
+				warnOnceByName("blocked|"+station+"|"+u+"|"+strings.Join(blocked, ","), "forgeapi: WARNING: the unit %s of station %s already sets %s, so it gets NO broker environment file; remove the variable from the unit", clean(u), clean(station), strings.Join(blocked, ", "))
+				continue
+			}
+			want[u] = true
 			path := filepath.Join(dir, u+".env")
-			changed, err := m.writeEnvFile(path, content, uid)
+			changed, err := m.writeEnvFile(path, renderEnvFile(unitAdd(env, unitEnv)), uid)
 			if err != nil {
-				return false, coded("harness-wiring-failed", err)
+				return wireResult{}, coded("harness-wiring-failed", err)
 			}
 			dchanged, err := m.writeDropIn(u, path)
 			if err != nil {
-				return false, coded("harness-wiring-failed", err)
+				return wireResult{}, coded("harness-wiring-failed", err)
 			}
+			res.wired = append(res.wired, u)
 			if changed || dchanged {
 				changedAny = true
 				if h.Running != nil && h.Running(ctx, u) {
-					restart = true
+					res.restart = true
+					logf("forgeapi: the harness unit %s of station %s is running and needs a restart to use its changed broker environment", clean(u), clean(station))
 				}
 			}
 		}
 	}
-	// a unit that no longer starts this station's harness leaves nothing behind
+	m.setBlocked(station, "unit", strings.Join(reasons, "; "))
+	// a unit that no longer starts this station's harness, or is blocked, leaves nothing behind
 	staleRestart, staleChanged, err := m.removeStale(ctx, st.inst, want)
 	if err != nil {
-		return false, err
+		return wireResult{}, err
+	}
+	if staleRestart {
+		logf("forgeapi: a harness unit of station %s is running and needs a restart to drop its broker environment", clean(station))
 	}
 	if changedAny || staleChanged {
 		if h.DaemonReload != nil {
 			if err := h.DaemonReload(ctx); err != nil {
-				return false, coded("harness-wiring-failed", fmt.Errorf("systemd daemon-reload: %w", err))
+				return wireResult{}, coded("harness-wiring-failed", fmt.Errorf("systemd daemon-reload: %w", err))
 			}
 		}
 	}
-	return restart || staleRestart, nil
+	res.restart = res.restart || staleRestart
+	return res, nil
+}
+
+// unitAdd is the broker environment minus what the unit already sets under the same name (a CA
+// variable it chose itself wins, as at spawn).
+func unitAdd(env map[string]string, unitEnv []string) map[string]string {
+	set := map[string]bool{}
+	for _, e := range unitEnv {
+		set[strings.SplitN(e, "=", 2)[0]] = true
+	}
+	out := make(map[string]string, len(env))
+	for k, v := range env {
+		if !set[k] && !isNoProxy(k) {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// otherInstanceHoldsUnit reports whether another instance's directory already has an env file for
+// the unit: two stations must never share one unit's drop-in.
+func (m *StationInstances) otherInstanceHoldsUnit(inst Instance, unit string) bool {
+	root := m.cfg.Harness.root()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.Name() == inst.Name || !e.IsDir() {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(root, e.Name(), unit+".env")); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// ---- what blocks a station's wiring (for the verify and status acks) ----
+
+func (m *StationInstances) setBlocked(station, source, reason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.blocked == nil {
+		m.blocked = map[string]map[string]string{}
+	}
+	if reason == "" {
+		if b := m.blocked[station]; b != nil {
+			delete(b, source)
+			if len(b) == 0 {
+				delete(m.blocked, station)
+			}
+		}
+		return
+	}
+	if m.blocked[station] == nil {
+		m.blocked[station] = map[string]string{}
+	}
+	m.blocked[station][source] = reason
+}
+
+// NoteBlocked records (or, with no names, clears) that the spawn for the station with this key was
+// left without the broker because the descriptor's own environment sets a proxy variable. Names
+// only, never values.
+func (m *StationInstances) NoteBlocked(key string, names []string) {
+	if m.cfg.Harness == nil {
+		return
+	}
+	recs, err := m.readRecords()
+	if err != nil {
+		return
+	}
+	station, n := stationOfKey(recs, key)
+	if n != 1 {
+		return
+	}
+	reason := ""
+	if len(names) > 0 {
+		reason = "the harness environment already sets " + strings.Join(names, ", ")
+	}
+	m.setBlocked(station, "spawn", reason)
+}
+
+// WiringBlocked is why the station's harness is not routed through its broker (a proxy variable
+// already set by the harness's environment or unit), or "" when nothing blocks it. Names only.
+func (m *StationInstances) WiringBlocked(station string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b := m.blocked[station]
+	var parts []string
+	for _, src := range []string{"spawn", "unit"} {
+		if r := b[src]; r != "" {
+			parts = append(parts, r)
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 // harnessOwner is the uid that owns the station's env file, refusing the node's own uid unless the
@@ -309,22 +485,62 @@ func (m *StationInstances) harnessOwner(station string) (int, error) {
 	return uids[0], nil
 }
 
+// requireDir makes sure path is a real directory (not a symlink), creating it with mode when
+// absent. The node runs as root: a symlink here would send its chmod and chown elsewhere.
+func requireDir(path string, mode os.FileMode) error {
+	fi, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.Mkdir(path, mode); err != nil && !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		fi, err = os.Lstat(path)
+		if err != nil {
+			return err
+		}
+	case err != nil:
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("refusing %s: it is not a plain directory (a symlink or file)", path)
+	}
+	return nil
+}
+
 func (m *StationInstances) ensureWiringDir(dir string, uid int) error {
 	h := m.cfg.Harness
-	root := h.root()
-	if err := os.MkdirAll(root, 0o711); err != nil {
+	if err := requireDir(h.root(), 0o711); err != nil {
 		return err
 	}
-	if err := os.Chmod(root, 0o711); err != nil {
+	if err := os.Chmod(h.root(), 0o711); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := requireDir(dir, 0o700); err != nil {
 		return err
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
 	return h.chown(dir, uid, -1)
+}
+
+// readRegular returns the file's content; a missing file is (nil, nil). A symlink or anything that
+// is not a regular file is refused: the directory belongs to the agent's uid, which can plant one.
+func readRegular(path string) ([]byte, error) {
+	fi, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("refusing %s: it is not a regular file (a symlink?)", path)
+	}
+	return os.ReadFile(path)
 }
 
 // renderEnvFile renders systemd EnvironmentFile syntax: NAME="value", with the characters that
@@ -345,10 +561,21 @@ func renderEnvFile(env map[string]string) []byte {
 }
 
 // writeEnvFile writes the file 0600 owned by uid, atomically, and reports whether its content
-// changed. The owner and mode are applied every time, so a changed uid mapping is picked up.
+// changed.
+//
+// The directory is owned by the agent's uid, so the agent can plant a symlink in it. The node
+// therefore never chowns or opens a path there by name: the temporary file is created with O_EXCL
+// (which does not follow a link), chmodded and chowned through its OPEN DESCRIPTOR before any
+// content is written, and renamed over the final name (rename replaces a link, it does not follow
+// it, and keeps the owner). An existing symlink at the final name is refused. The temp file stays
+// in the agent's directory rather than a root-owned staging directory because rename needs one
+// filesystem and the node cannot know that /var/lib/agentpod and the instance directory are.
 func (m *StationInstances) writeEnvFile(path string, data []byte, uid int) (bool, error) {
 	h := m.cfg.Harness
-	prev, _ := os.ReadFile(path)
+	prev, err := readRegular(path)
+	if err != nil {
+		return false, err
+	}
 	changed := string(prev) != string(data)
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".env-*.tmp")
 	if err != nil {
@@ -359,7 +586,7 @@ func (m *StationInstances) writeEnvFile(path string, data []byte, uid int) (bool
 	if err := tmp.Chmod(0o600); err != nil {
 		return fail(err)
 	}
-	if err := h.chown(name, uid, -1); err != nil {
+	if err := h.fchown(tmp, uid, -1); err != nil {
 		return fail(err)
 	}
 	if _, err := tmp.Write(data); err != nil {
@@ -376,10 +603,6 @@ func (m *StationInstances) writeEnvFile(path string, data []byte, uid int) (bool
 		_ = os.Remove(name)
 		return false, err
 	}
-	// Again on the final path: the owner is part of the contract of the file that stays.
-	if err := h.chown(path, uid, -1); err != nil {
-		return false, err
-	}
 	return changed, nil
 }
 
@@ -392,7 +615,10 @@ func (m *StationInstances) writeDropIn(unit, envPath string) (bool, error) {
 	dir := h.DropInDir(unit)
 	path := filepath.Join(dir, dropInName)
 	data := []byte("# managed by agentpod-node (forge API); do not edit\n[Service]\nEnvironmentFile=-" + envPath + "\n")
-	prev, _ := os.ReadFile(path)
+	prev, err := readRegular(path)
+	if err != nil {
+		return false, err
+	}
 	if string(prev) == string(data) {
 		return false, nil
 	}
@@ -406,6 +632,9 @@ func (m *StationInstances) writeDropIn(unit, envPath string) (bool, error) {
 func (m *StationInstances) removeStale(ctx context.Context, inst Instance, keep map[string]bool) (restart, changed bool, err error) {
 	h := m.cfg.Harness
 	dir := filepath.Join(h.root(), inst.Name)
+	if fi, lerr := os.Lstat(dir); lerr == nil && !fi.IsDir() {
+		return false, false, coded("harness-wiring-failed", fmt.Errorf("refusing %s: not a plain directory", dir))
+	}
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, false, nil

@@ -133,3 +133,18 @@ describe("needsRestart (the harness was running when its environment changed)", 
     expect(VERB_RESULTS["forge.api.revoke"].safeParse({ removed: true, needsRestart: "yes" }).success).toBe(false);
   });
 });
+
+describe("wired (the units whose environment file the node wrote)", () => {
+  it("deliver and revoke results keep an optional list of unit names", () => {
+    const d = VERB_RESULTS["forge.api.deliver"].safeParse({ ok: true, stored: true, isolation: "separate-user", wired: ["hermes-gateway-a.service"] });
+    expect(d.success).toBe(true);
+    if (d.success) expect((d.data as { wired?: string[] }).wired).toEqual(["hermes-gateway-a.service"]);
+    const r = VERB_RESULTS["forge.api.revoke"].safeParse({ removed: true, wired: [] });
+    expect(r.success).toBe(true);
+    if (r.success) expect((r.data as { wired?: string[] }).wired).toEqual([]);
+  });
+  it("must be a list of strings, and an older node omits it", () => {
+    expect(VERB_RESULTS["forge.api.revoke"].safeParse({ removed: true, wired: "x" }).success).toBe(false);
+    expect(VERB_RESULTS["forge.api.deliver"].safeParse({ ok: true, stored: true, isolation: "same-user" }).success).toBe(true);
+  });
+});

@@ -96,6 +96,8 @@ type DeliverAck struct {
 	// process keeps the environment it started with. The hub's result schema is lenient, so an
 	// older hub ignores it.
 	NeedsRestart bool `json:"needsRestart,omitempty"`
+	// Wired names the systemd units whose environment file the node wrote for this station.
+	Wired []string `json:"wired,omitempty"`
 }
 
 // PolicyAck: the hub reads ok and error (station-forge-api.ts: "node rejected the policy: <error>"),
@@ -122,6 +124,8 @@ type RevokeAck struct {
 	Removed bool `json:"removed"`
 	// NeedsRestart: see DeliverAck.
 	NeedsRestart bool `json:"needsRestart,omitempty"`
+	// Wired: see DeliverAck; what remains wired after the revoke.
+	Wired []string `json:"wired,omitempty"`
 }
 
 // StatusGrant: Present means the node holds a policy entry for the grant (not that the
