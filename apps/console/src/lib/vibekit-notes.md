@@ -76,3 +76,28 @@ All kept local and restyled; none switched in this part:
 - Tabs, DataTable, CommandPalette: the console's are bits-ui based with link tabs, sortable tables and a command list whose groups and strings the tests pin; the shell and pages are rebuilt in Parts 2+, where these swaps belong.
 - Notice: no warning tone (`needs` is the signal colour) and it adds an icon and `role="note"`; WarnBox was built instead.
 - EmptyState, Loading, Toast, StateLabel, Face: no caller is touched by this part; svelte-sonner stays (its toaster already follows the theme and reads the token bridge).
+
+## Part 2: shell, navigation, appearance, phone chrome
+
+### What the shell is now
+
+- `AppShell`: one grid, rows head / lane / columns / phone bar (`grid-rows-[auto_auto_minmax(0,1fr)_auto]`, still `h-screen`, the stage still scrolls its own `<main>`). The head holds `TopBar` and `Navigation`; in Daylight it carries the sky (`vk-sky`, phase from the appearance store, the sun at 56%). The three columns are unchanged (roster 272px, stage, context rail 320px at >= 1241px).
+- `nav.ts` is the one source for sections (Fleet, Agents, Nodes, Runtimes, Activity, Settings, Admin for admins), the current section by path (a station page is Agents), the phone's four places (More is current for Nodes, Runtimes, Settings, Admin) and what More lists. Admin = `auth.user.role === "admin"` (from `/api/me`'s `isAdmin`).
+- `Navigation`: one markup, three looks by `data-vibe` in `src/lib/styles/shell.css`: a row of pills on the sky (Daylight), a serif ruled row with Settings/Admin to the right (Paper), the black ink rail with labelled icons spanning every row at >= 901px (Studio: the head becomes `display: contents`), a plain list of underlined links (Quiet). Current = `aria-current="page"` plus weight and a bar/underline/filled cell, never colour alone. Hidden under 901px.
+- `AccountMenu` replaces the top bar's Appearance link, avatar and sign-out button: the chip (initials and email), a disclosure panel (`role="dialog"`, Escape returns focus to the chip, click outside closes) with the email, Appearance (expands `AppearanceControl` in place) and Sign out. Hidden under 901px, where More holds it.
+- `AppearanceControl`: vibe (4), Light / Dark / Follow the sun (`sun`), accent (Cobalt product default, then the Superpipeline, Superlibrary and Superwitness colours = gold, plum, jade, as the mockups label them). No time-of-day control. Settings will reuse it in Part 3.
+- `PhoneBar` (Fleet, Agents, Activity, More) and `MoreSheet` (console Sheet, bottom side: Nodes, Runtimes, Settings, Admin for admins, Appearance, the account email, Sign out). The roster/stage toggle stays in the top bar.
+- `AttentionLane` drops any `permission` item: an approval never shows in the lane (deriveAttention never emits one; the filter makes it a rule, tested).
+- Cmd/Ctrl+K moved into `palette-shortcut.ts` (tested); the layout calls it. Sign-out is one helper (`shell/sign-out.ts`).
+- Shell styles are CSS (`shell.css`, unlayered, after primitives.css) keyed on `.ap-*` classes and the existing `data-testid`s, and never set `display` on an element whose visibility a responsive utility decides.
+- vibekit's accent variables are `--vk-color-accent*` in the console (the mockups' `--vk-accent*` are the canvas's own names).
+
+### Wrap or build
+
+- AppShell, AppNav, Masthead, PhoneTabBar (vibekit): kept local. The console's shell carries behaviour the tests pin (the capped `h-screen` grid with the stage's own scroller, the roster/stage view switch at 900px, the per-route context rail snippet, the shared fleet poll, the attention lane row); vibekit's AppShell lays out a document-scrolling page with its own slots, and AppNav/PhoneTabBar take item lists without the console's section rule (station pages under Agents, More current for four sections). Restyled to the mockups instead.
+- AppearancePicker (vibekit): not used. It includes the time-of-day strength and location controls the mockups leave out ("no Time of day control") and lays out as a page section; `AppearanceControl` draws exactly the mockups' three fieldsets.
+- Sheet (vibekit): the More sheet uses the console's Sheet (bits-ui dialog, the Part 1 decision).
+
+### Screenshot harness
+
+`e2e/shots.mjs` (playwright-core 1.63.0, the version whose Chromium revision is in the local Playwright cache; nothing is downloaded): serves `build/`, answers the hub with the canonical sample fleet (no plane, so the session comes from `/api/auth/get-session`), fixes the clock at noon, and shoots vibe x theme at 1440x900 and 390x844 into `e2e/shots/` (git-ignored). `--menu` opens the account menu with Appearance expanded, `--more` the More sheet, `--path=` another page.

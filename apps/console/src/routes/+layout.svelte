@@ -13,6 +13,7 @@
   import { Toaster } from "$lib/components/ui/sonner";
   import * as Tooltip from "$lib/components/ui/tooltip";
   import AppShell from "$lib/components/shell/AppShell.svelte";
+  import { onPaletteShortcut } from "$lib/components/shell/palette-shortcut";
   import { contextRailSlot } from "$lib/stores/context-rail.svelte";
   import CommandPalette from "$lib/components/command-palette.svelte";
   import { Spinner } from "$lib/components/ui/spinner";
@@ -43,10 +44,7 @@
   let showAppShell = $derived(!isPublicRoute && !shouldShowLoading);
 
   function handleGlobalKeydown(e: KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-      e.preventDefault();
-      commandPalette.toggle();
-    }
+    onPaletteShortcut(e, () => commandPalette.toggle());
   }
 
   let stopReachabilityProbe: (() => void) | undefined;

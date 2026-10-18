@@ -36,12 +36,12 @@ beforeEach(() => {
   mockGoto.mockClear();
 });
 
-test("the bar has a labelled sign-out button that signs out, then goes to /login", async () => {
-  const { getByTestId } = render(TopBar);
-  const button = getByTestId("topbar-sign-out");
+test("the account chip's menu signs out, then goes to /login", async () => {
+  const { getByTestId, getByRole } = render(TopBar);
+  await fireEvent.click(getByTestId("account-chip"));
+  const button = getByRole("button", { name: "Sign out" });
 
   expect(button.tagName).toBe("BUTTON");
-  expect(button.getAttribute("aria-label")).toBe("Sign out");
   await fireEvent.click(button);
   await vi.waitFor(() => expect(mockGoto).toHaveBeenCalledWith("/login"));
   expect(mockLogout).toHaveBeenCalledTimes(1);
@@ -159,10 +159,11 @@ test("the roster toggle calls back and is hidden above the one-column breakpoint
   expect(getByTestId("roster-toggle").className).toContain("min-[901px]:hidden");
 });
 
-test("appearance leads to settings", () => {
+test("the account chip sits in the bar above the phone breakpoint; on a phone More holds it", () => {
   const { getByTestId } = render(TopBar);
 
-  expect(getByTestId("appearance-link").getAttribute("href")).toBe("/settings");
+  expect(getByTestId("account-slot").className).toContain("max-[900px]:hidden");
+  expect(getByTestId("account-chip").textContent).toContain("RG");
 });
 
 test("below 901px, and on any touch screen, every control in the bar is a 44px target", () => {
@@ -174,7 +175,7 @@ test("below 901px, and on any touch screen, every control in the bar is a 44px t
   const cue = getByTestId("palette-cue").className;
   expect(cue).toContain("max-[900px]:size-11");
   expect(cue).toContain("pointer-coarse:h-11");
-  for (const id of ["roster-toggle", "appearance-link", "topbar-sign-out"]) {
+  for (const id of ["roster-toggle"]) {
     const cls = getByTestId(id).className;
     expect(cls, id).toContain("max-[900px]:size-11");
     expect(cls, id).toContain("pointer-coarse:size-11");

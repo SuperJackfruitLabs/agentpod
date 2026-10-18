@@ -10,6 +10,7 @@
 @import "@superjackfruit/vibekit/vibekit.css";
 /* Each vibe's look for the shadcn primitives (unlayered: outranks their utilities). */
 @import "./lib/styles/primitives.css";
+@import "./lib/styles/shell.css";
 
 /* Dark is a vibekit theme on <html> (data-theme), never a .dark class. */
 @custom-variant dark (&:is([data-theme="dark"] *));

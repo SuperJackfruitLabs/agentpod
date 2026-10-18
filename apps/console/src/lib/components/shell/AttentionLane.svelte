@@ -17,7 +17,13 @@
     items: AttentionItem[];
   }
 
-  let { items }: Props = $props();
+  let { items: given }: Props = $props();
+
+  /**
+   * Only the kinds the lane is for: node offline, runtime error, drift, unoccupied. An approval
+   * (a permission request) is answered in the agent's conversation, never from this strip.
+   */
+  const items = $derived(given.filter((i) => i.kind !== "permission"));
 </script>
 
 <section

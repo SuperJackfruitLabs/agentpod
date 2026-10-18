@@ -119,3 +119,21 @@ test("on a phone or a touch screen each item is a 44px target, and the lane says
   expect(cls).toContain("max-[900px]:min-h-11");
   expect(cls).toContain("pointer-coarse:min-h-11");
 });
+
+test("the lane never shows an approval: only node offline, runtime error, drift and unoccupied", () => {
+  const withApproval: AttentionItem[] = [
+    ...items,
+    {
+      kind: "permission",
+      token: "unknown",
+      what: "Waiting on your answer",
+      who: "quill",
+      detail: "wants to run a shell command",
+      href: "/nodes/n1/stations/s1",
+    },
+  ];
+  const { getAllByTestId, getByTestId, queryByText } = render(AttentionLane, { props: { items: withApproval } });
+  expect(getAllByTestId("attention-item")).toHaveLength(3);
+  expect(getByTestId("attention-count").textContent?.trim()).toBe("3");
+  expect(queryByText("Waiting on your answer")).toBeNull();
+});
