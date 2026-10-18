@@ -617,3 +617,20 @@ describe("unbrokered stations are not re-verified every sweep", () => {
     expect(h.callsOf("forge.api.verify")).toEqual([]);
   });
 });
+
+describe("same-user refusals are not retried by the sweep", () => {
+  test("a grant refused for want of the acknowledgement is left alone until one is recorded", async () => {
+    const h = harness();
+    const node = await freshNode();
+    const agent = await newAgent(f);
+    const st = await insertStation(f, node, { principalId: agent.principalId });
+    h.replies["forge.api.status"] = () => ({ ok: true, data: { grants: [{ grantId: "x", present: true, isolation: "separate-user" }], publicKey: "stk-handover-v1:" + "A".repeat(43) } });
+    const grant = await create(h.deps, grantInput(f, st.id, { preset: "issues" }));
+    expect(grant.state).toBe("failed");
+    expect(grant.stateReason).toStartWith("same-user-acknowledgement-required");
+    h.reset();
+    for (let i = 0; i < 2; i++) await run(h, node);
+    expect(h.minted).toEqual([]);
+    expect(h.callsOf("forge.api.deliver")).toEqual([]);
+  });
+});

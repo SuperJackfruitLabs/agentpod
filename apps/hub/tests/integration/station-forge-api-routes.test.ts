@@ -741,6 +741,9 @@ describe("same-user acknowledgement (routes)", () => {
     expect(keys).not.toContain("sameUserAckBy");
     const [row] = await db.select().from(g).where(eq(g.id, yes.json.grant.id));
     expect(row!.sameUserAckBy).toBe(ADMIN);
+    const audit = await rawSql`SELECT user_id, params_summary FROM station_audit WHERE verb = 'forge.api.route.grant' AND params_summary->>'kind' = 'acknowledge-same-user' AND station_key = ${"claude-code:" + st.id}`;
+    expect(audit.length).toBe(1);
+    expect(audit[0]!.user_id).toBe(ADMIN);
   });
 
   test("who acknowledged comes from the auth context, never the body", async () => {

@@ -217,6 +217,9 @@ const MESSAGES: Record<string, string> = {
     "The station's broker runs in same-user mode, so a write grant (any preset except read, or a write allow rule) needs your acknowledgement: send acknowledgeSameUser: true (fleet: --acknowledge-same-user).",
 };
 
+/** The audit `kind` of a request that carried the operator's same-user acknowledgement. */
+const SAME_USER_ACK_AUDIT = "acknowledge-same-user";
+
 /** Seconds a client should wait before retrying a `station-preparing` answer. */
 export const STATION_PREPARING_RETRY_AFTER_S = 30;
 
@@ -351,7 +354,7 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
     c: Context,
     a: { user: AuthUser; station: Station },
     action: string,
-    params: { grantId?: string; provider?: string; mode?: string; preset?: string; generation?: number },
+    params: { grantId?: string; provider?: string; mode?: string; preset?: string; generation?: number; kind?: string },
     run: () => Promise<T>,
     respond: (out: T) => Response | Promise<Response>,
   ): Promise<Response> {
@@ -445,7 +448,7 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
           c,
           a,
           "grant",
-          { provider: b.provider, mode: b.mode, preset: b.preset },
+          { provider: b.provider, mode: b.mode, preset: b.preset, ...(b.acknowledgeSameUser ? { kind: SAME_USER_ACK_AUDIT } : {}) },
           async () => {
             // Early, before any claim or key fetch; the service repeats it and is the authority.
             if (b.mode === "minted" && !isConfiguredForge(b.instance, a.forge.baseUrl)) {
@@ -517,7 +520,7 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
             c,
             a,
             "policy",
-            { ...paramsOf(grant), preset: b.preset },
+            { ...paramsOf(grant), preset: b.preset, ...(b.acknowledgeSameUser ? { kind: SAME_USER_ACK_AUDIT } : {}) },
             () => updateGrantPolicy(serviceDeps(a.forge), { ...refOf(grant), ...b, actor: a.user.id }),
             (r) => c.json({ outcome: r.outcome, grant: viewOf(r.grant) }),
           );

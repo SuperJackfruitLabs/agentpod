@@ -233,14 +233,22 @@ The proxy port range and the file locations are settings in the node config; the
 
 - **No protection against root.** An agent or user with root on the station can read the broker's
   store.
-- **Same-user mode is weak, and today it is every station.** When the broker runs as the agent's
-  own user, only file permissions separate them. Agents spawned by the node run as the node's uid,
-  so every station currently reports isolation `same-user` (`isolationDetail` `node-uid`, or
-  `shared-uid` when acknowledged on the node). The design calls for an operator acknowledgement
-  before a write preset is granted in this mode, but **the hub does not implement it**: it records
-  the isolation the node reports and does not refuse anything because of it, so grants (write
-  presets included) succeed in `same-user` mode. Check `list` and grant write presets knowing that
-  the agent can read the broker's store.
+- **Same-user mode is weak, and today it is every station; write grants need your acknowledgement.**
+  When the broker runs as the agent's own user, only file permissions separate them, and the agent
+  can read the broker's store. Agents spawned by the node run as the node's uid, so every station
+  currently reports isolation `same-user` (`isolationDetail` `node-uid`, or `shared-uid` when
+  acknowledged on the node). A **write grant** is any preset except `read` (`issues`,
+  `pull-requests`, `maintain` and `none` all count), or `read` with an `allow` rule for a method
+  other than GET, HEAD or OPTIONS. The hub refuses a write grant (409
+  `same-user-acknowledgement-required`) unless the operator passes `--acknowledge-same-user`
+  (`acknowledgeSameUser: true`), on `grant` and on a `policy` that moves a grant to write. It
+  assumes same-user unless the node has shown `separate-user` for the station's grants, so a
+  supplied or app write grant always needs it today. If a node's delivery reports `same-user`
+  for an unacknowledged write grant anyway, the grant is not delivered: the node's copy is wiped,
+  a minted token is revoked, and the grant is `failed` with that reason. The acknowledgement is an
+  operator decision: the hub records who gave it and when (from the signed-in account, never the
+  request body), the audit row records the request, `list` shows only that it was given, and a
+  rotation keeps it. Read-only grants never need it. Agents must never pass the flag.
 - **A node preparing its broker answers later, not never.** The first grant on a station can make
   the node install its broker instance; the hub waits up to 120 s for that (`forge.api.status`,
   `forge.api.deliver`). If an install is already running the grant answers 503 `station-preparing`
