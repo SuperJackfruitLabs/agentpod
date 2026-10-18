@@ -3,7 +3,7 @@
   import { createTerminalClient } from "$lib/api/terminal";
   import { socketToken } from "$lib/api/client";
   import type { TerminalClient, TerminalCloseReason } from "$lib/api/terminal";
-  import { themeStore } from "$lib/themes/store.svelte";
+  import { appearance } from "$lib/appearance.svelte";
   import { Button } from "$lib/components/ui/button";
   import { cn } from "$lib/utils";
   import { Status as StatusIndicator } from "$lib/components/ui/status";
@@ -72,20 +72,20 @@
     };
   }
 
-  // Recomputes the xterm theme whenever the resolved mode or active colour
-  // scheme changes, so switching themes re-paints the live terminal.
+  // Recomputes the xterm theme whenever the vibe or light/dark changes, so
+  // switching appearance re-paints the live terminal.
   $effect(() => {
-    const _mode = themeStore.resolvedMode;
-    const _scheme = themeStore.colorSchemeId;
+    const _theme = appearance.theme;
+    const _vibe = appearance.value.vibe;
     if (term) {
       term.options.theme = computeXtermTheme();
     }
   });
 
-  // Follow font-pairing switches too: re-resolve the concrete mono stack
-  // (xterm can't read CSS variables) and refit to the new cell metrics.
+  // Each vibe has its own mono font: re-resolve the concrete stack (xterm
+  // can't read CSS variables) and refit to the new cell metrics.
   $effect(() => {
-    const _font = themeStore.fontPairingId;
+    const _vibe = appearance.value.vibe;
     if (term) {
       const themeMono = getComputedStyle(document.documentElement)
         .getPropertyValue("--font-mono")

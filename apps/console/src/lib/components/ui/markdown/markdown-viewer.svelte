@@ -1,7 +1,6 @@
 <script lang="ts">
   import { marked } from "marked";
   import { codeToHtml } from "shiki";
-  import { themeStore } from "$lib/themes/store.svelte";
 
   interface Props {
     content: string;
@@ -16,8 +15,8 @@
   let renderedHtml = $state<string>("");
   let isLoading = $state(true);
 
-  // Use theme store for dynamic Shiki themes
-  const shikiThemes = $derived(themeStore.shikiThemes);
+  // Shiki's GitHub pair (dual-theme output; the light/dark switch is in the styles below).
+  const shikiThemes = { light: "github-light", dark: "github-dark" } as const;
 
   // Configure marked with custom renderer for code blocks
   async function renderMarkdown() {
@@ -94,10 +93,9 @@
     return lang.toLowerCase() || "plaintext";
   }
 
-  // Re-render when content or theme changes
+  // Re-render when the content changes (the light/dark switch is pure CSS)
   $effect(() => {
     content;
-    shikiThemes;
     renderMarkdown();
   });
 </script>
@@ -240,11 +238,11 @@
   }
 
   /* Dark mode */
-  :global(.dark) .markdown-content :global(.shiki) {
+  :global([data-theme="dark"]) .markdown-content :global(.shiki) {
     background-color: var(--shiki-dark-bg) !important;
   }
   
-  :global(.dark) .markdown-content :global(.shiki span) {
+  :global([data-theme="dark"]) .markdown-content :global(.shiki span) {
     color: var(--shiki-dark);
   }
 

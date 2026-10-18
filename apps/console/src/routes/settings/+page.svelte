@@ -3,7 +3,6 @@
   import { auth, logout, currentPlane } from "$lib/stores/auth.svelte";
   import ManagedByPlane from "$lib/components/org-plane/ManagedByPlane.svelte";
   import { connection, disconnect } from "$lib/stores/connection.svelte";
-  import ThemeSettings from "$lib/components/theme-settings.svelte";
   import PageHeader from "$lib/components/page-header.svelte";
   import DeviceList from "$lib/components/device-list.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -31,12 +30,6 @@
 <PageHeader title="Settings" />
 
 <div class="page-width py-6 space-y-6">
-
-  <!-- Appearance -->
-  <div class="rounded-lg border bg-card p-6 space-y-4">
-    <h2 class="t-section">Appearance</h2>
-    <ThemeSettings />
-  </div>
 
   <!-- Connection -->
   <div class="rounded-lg border bg-card p-6 space-y-4">

@@ -23,10 +23,9 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   };
 }
 
-// jsdom has no matchMedia. The theme store resolves the "system" colour scheme
-// with it at module-initialisation time (src/lib/themes/store.svelte.ts), and
-// components use it for structural breakpoints, so any test that transitively
-// imports a themed component crashes during module evaluation without it.
+// jsdom has no matchMedia. Components use it for structural breakpoints (and
+// the appearance store asks it about reduced motion), so any test that
+// transitively imports one crashes without it.
 //
 // It answers as a nominal 1280px-wide desktop rather than returning `matches:
 // false` to everything. A blanket false is not a neutral default — it makes
@@ -56,9 +55,9 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
 }
 
 // jsdom 25 installs no Storage implementation on Node 22+, so `localStorage`
-// exists as a property of globalThis whose value is undefined. The theme store
-// reads it at module-initialisation time (src/lib/themes/store.svelte.ts), so
-// on a newer Node every test that transitively imports a themed component dies
+// exists as a property of globalThis whose value is undefined. Stores read it
+// (the appearance store forgets the old theme keys and keeps a rough place), so
+// on a newer Node every test that transitively imports one dies
 // with "Cannot read properties of undefined (reading 'getItem')" — 132 of them.
 // CI pins Node 20, where jsdom still provides it, which is why this only ever
 // bites in a developer's checkout. An in-memory Storage is enough: tests assert

@@ -9,8 +9,7 @@
    */
   import { Streamdown } from "svelte-streamdown";
   import Code from "svelte-streamdown/code";
-  import { bundledThemes, type BundledTheme, type ThemeRegistration } from "shiki";
-  import { themeStore } from "$lib/themes/store.svelte";
+  import { appearance } from "$lib/appearance.svelte";
 
   interface Props {
     text: string;
@@ -19,41 +18,9 @@
 
   let { text, streaming = false }: Props = $props();
 
-  // The active color scheme's shiki theme for the current light/dark mode.
-  const schemeTheme = $derived(
-    themeStore.isDark ? themeStore.shikiThemes.dark : themeStore.shikiThemes.light,
-  );
-
-  // svelte-streamdown only bundles github-light/github-dark. Any other theme
-  // name must be registered as a loaded ThemeRegistration via `shikiThemes`,
-  // or code blocks never leave their loading skeleton (documented streamdown
-  // behavior). Load the active scheme's theme lazily from shiki's bundle.
-  const BUILTIN = new Set<string>(["github-light", "github-dark"]);
-  let registry = $state<Record<string, ThemeRegistration>>({});
-
-  $effect(() => {
-    const name = schemeTheme;
-    if (BUILTIN.has(name) || name in registry) return;
-    const load = bundledThemes[name as BundledTheme];
-    if (!load) return;
-    let cancelled = false;
-    load().then((mod) => {
-      if (!cancelled) registry = { ...registry, [name]: mod.default as ThemeRegistration };
-    });
-    return () => {
-      cancelled = true;
-    };
-  });
-
-  // Fall back to the matching builtin until the scheme's theme has loaded so
-  // streamed code highlights immediately instead of sitting in a skeleton.
-  const shikiTheme = $derived(
-    BUILTIN.has(schemeTheme) || schemeTheme in registry
-      ? schemeTheme
-      : themeStore.isDark
-        ? "github-dark"
-        : "github-light",
-  );
+  // Shiki's GitHub pair, by the appearance's light/dark (the colour schemes that picked other
+  // Shiki themes are gone; token-driven code colours come with the widget theming).
+  const shikiTheme = $derived(appearance.theme === "dark" ? "github-dark" : "github-light");
 
   // Minimal overrides on the tailwind base theme (mergeTheme defaults true):
   // swap its hard-coded grays/blues for Crisp tokens so borders and muted
@@ -91,7 +58,6 @@
   renderHtml={false}
   allowedLinkPrefixes={["https://", "http://"]}
   {shikiTheme}
-  shikiThemes={registry}
   theme={crispTheme}
   class="t-body max-w-none"
 />

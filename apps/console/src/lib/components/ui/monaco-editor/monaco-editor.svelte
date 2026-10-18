@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { themeStore } from "$lib/themes/store.svelte";
+  import { appearance } from "$lib/appearance.svelte";
 
   interface Props {
     code: string;
@@ -110,7 +110,7 @@
 
   // Get Monaco theme based on app theme
   function getMonacoTheme(): string {
-    return themeStore.isDark ? "vs-dark" : "vs";
+    return appearance.theme === "dark" ? "vs-dark" : "vs";
   }
 
   async function initMonaco() {

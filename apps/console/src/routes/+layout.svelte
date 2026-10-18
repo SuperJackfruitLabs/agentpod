@@ -6,7 +6,8 @@
   import { connection, initConnection, startReachabilityProbe } from "$lib/stores/connection.svelte";
   import { auth, currentPlane, initAuth, signedOutElsewhere } from "$lib/stores/auth.svelte";
   import { autoSignIn, watchSession } from "$lib/auth/org-plane";
-  import { themeStore } from "$lib/themes/store.svelte";
+  import { VibeRoot } from "@superjackfruit/vibekit";
+  import { appearance } from "$lib/appearance.svelte";
   import { commandPalette } from "$lib/stores/command-palette.svelte";
   import { Toaster } from "$lib/components/ui/sonner";
   import * as Tooltip from "$lib/components/ui/tooltip";
@@ -51,7 +52,8 @@
   let stopWatchingSession: (() => void) | undefined;
 
   onMount(async () => {
-    themeStore.initialize();
+    // app.html painted the first frame from the same cookie; this keeps it current.
+    appearance.init();
 
     await initConnection(); // must run before initAuth — sets the auth client base URL
     await initAuth();
@@ -66,6 +68,7 @@
   });
 
   onDestroy(() => {
+    appearance.dispose();
     stopReachabilityProbe?.();
     stopWatchingSession?.();
     if (typeof window !== "undefined") {
@@ -107,6 +110,8 @@
   });
 </script>
 
+<!-- The person's vibe and theme (vibekit). data-vibe / data-theme live on <html>. -->
+<VibeRoot vibe={appearance.value.vibe} theme={appearance.theme}>
 <!-- Tooltip Provider - required for all Tooltip components -->
 <Tooltip.Provider>
   <!-- Toast notifications - positioned to avoid bottom nav on mobile -->
@@ -136,3 +141,4 @@
 
   <CommandPalette />
 </Tooltip.Provider>
+</VibeRoot>

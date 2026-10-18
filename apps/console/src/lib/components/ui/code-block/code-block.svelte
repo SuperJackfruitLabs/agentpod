@@ -1,6 +1,5 @@
 <script lang="ts">
   import { codeToHtml, type BundledTheme } from "shiki";
-  import { themeStore } from "$lib/themes/store.svelte";
 
   interface Props {
     code: string;
@@ -20,9 +19,9 @@
     class: className = "",
   }: Props = $props();
 
-  // Use theme store for dynamic Shiki themes, with prop fallback
-  const effectiveLightTheme = $derived(lightTheme ?? themeStore.shikiThemes.light);
-  const effectiveDarkTheme = $derived(darkTheme ?? themeStore.shikiThemes.dark);
+  // Shiki's GitHub pair unless the caller names its own.
+  const effectiveLightTheme = $derived(lightTheme ?? "github-light");
+  const effectiveDarkTheme = $derived(darkTheme ?? "github-dark");
 
   let highlightedHtml = $state<string>("");
   let isLoading = $state(true);
@@ -156,11 +155,11 @@
   }
 
   /* Dark mode - use --shiki-dark variables */
-  :global(.dark) .code-block :global(.shiki) {
+  :global([data-theme="dark"]) .code-block :global(.shiki) {
     background-color: transparent !important;
   }
   
-  :global(.dark) .code-block :global(.shiki span) {
+  :global([data-theme="dark"]) .code-block :global(.shiki span) {
     color: var(--shiki-dark);
   }
 </style>

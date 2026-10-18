@@ -62,39 +62,6 @@ vi.mock("$lib/stores/connection.svelte", () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// ThemeSettings imports the theme store which calls window.matchMedia at
-// module-init time — mock the entire store so ThemeSettings renders safely.
-// ---------------------------------------------------------------------------
-
-vi.mock("$lib/themes/store.svelte", () => ({
-  themeStore: {
-    mode: "system",
-    resolvedMode: "dark",
-    colorSchemeId: "default",
-    fontPairingId: "default",
-    autoSchedule: { darkStartHour: 18, darkEndHour: 6 },
-    currentColorScheme: null,
-    currentFontPairing: null,
-    customThemes: [],
-    shikiThemes: { light: "github-light", dark: "github-dark" },
-    setMode: vi.fn(),
-    setColorScheme: vi.fn(),
-    setFontPairing: vi.fn(),
-    saveCustomTheme: vi.fn(),
-    deleteCustomTheme: vi.fn(),
-    applyCustomTheme: vi.fn(),
-    getColorSchemePreview: vi.fn(() => ({ background: "#000", primary: "#fff", foreground: "#ccc" })),
-  },
-  colorSchemes: [],
-  fontPairings: [],
-  colorSchemeCategories: [],
-  fontPairingCategories: [],
-  ThemeMode: {},
-  DEFAULT_COLOR_SCHEME_ID: "default",
-  DEFAULT_FONT_PAIRING_ID: "default",
-}));
-
-// ---------------------------------------------------------------------------
 // Static import — compiled once
 // ---------------------------------------------------------------------------
 
