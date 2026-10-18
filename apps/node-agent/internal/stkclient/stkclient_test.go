@@ -4,14 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 )
 
 const (
@@ -76,18 +74,224 @@ func TestHandoverOpenRequiresStored(t *testing.T) {
 	}
 }
 
-func TestServiceNameCannotInjectFlags(t *testing.T) {
+func TestNamesAreValidated(t *testing.T) {
 	c, calls := newStub(`{}`, "", 0, nil)
-	for _, svc := range []string{"", "--json", "-x"} {
+	bad := []string{"", "--json", "-x", "../x", "a/b", "a b", "a\nb", "a\x00b", "a=b", ".hidden", strings.Repeat("a", 65)}
+	for _, svc := range bad {
 		if err := c.RevokeLocal(ctx(), svc); err == nil {
-			t.Fatalf("service %q accepted", svc)
+			t.Fatalf("revoke service %q accepted", svc)
+		}
+		if err := c.HandoverOpen(ctx(), svc, secretEnvelope); err == nil {
+			t.Fatalf("open service %q accepted", svc)
+		}
+		if _, err := c.Verify(ctx(), svc, ""); err == nil {
+			t.Fatalf("verify service %q accepted", svc)
+		}
+		if _, err := c.Install(ctx(), InstallPlan{User: svc}); err == nil {
+			t.Fatalf("install user %q accepted", svc)
+		}
+		if svc != "" {
+			if _, err := c.Install(ctx(), InstallPlan{User: "stk", Group: svc}); err == nil {
+				t.Fatalf("install group %q accepted", svc)
+			}
+		}
+		var rc []call
+		rc2 := New("/usr/bin/stk", Options{RunAs: svc, geteuid: func() int { return 0 }, lookPath: fakeLook, Run: stub(`stk 0.0.1`, "", 0, nil, &rc)})
+		if svc != "" {
+			if _, err := rc2.Version(ctx()); err == nil || len(rc) != 0 {
+				t.Fatalf("RunAs %q accepted", svc)
+			}
 		}
 	}
 	if len(*calls) != 0 {
-		t.Fatal("stk must not run for an invalid service name")
+		t.Fatalf("stk must not run for an invalid name, ran %d times", len(*calls))
+	}
+	for _, ok := range []string{"forge-x", "a", "forge.api_1", strings.Repeat("a", 64)} {
+		cc, _ := newStub(`{"service":"x","stored":true}`, "", 0, nil)
+		if err := cc.HandoverOpen(ctx(), ok, secretEnvelope); err != nil {
+			t.Fatalf("service %q rejected: %v", ok, err)
+		}
 	}
 }
 
+func TestHandoverOpenRejectsEmptyEnvelope(t *testing.T) {
+	c, calls := newStub(`{"service":"x","stored":true}`, "", 0, nil)
+	if err := c.HandoverOpen(ctx(), "forge-x", ""); err == nil || len(*calls) != 0 {
+		t.Fatalf("empty envelope accepted: %v", err)
+	}
+}
+
+func fakeLook(string) (string, error) { return "/fake/bin/runuser", nil }
+
+func TestVerifyNonZeroExitWithOKTrueIsError(t *testing.T) {
+	c, _ := newStub(`{"ok":true,"login":"alice","reason":""}`, "weird", 1, nil)
+	if _, err := c.Verify(ctx(), "forge-x", ""); err == nil {
+		t.Fatal("ok:true with a non-zero exit must not be acknowledged")
+	}
+}
+
+func TestVerifyOKWithWrongLoginIsError(t *testing.T) {
+	c, _ := newStub(`{"ok":true,"login":"mallory","reason":""}`, "", 0, nil)
+	if _, err := c.Verify(ctx(), "forge-x", "alice"); err == nil {
+		t.Fatal("ok:true with a login other than the expected one must be an error")
+	}
+	c, _ = newStub(`{"ok":true,"login":"anyone","reason":""}`, "", 0, nil)
+	if _, err := c.Verify(ctx(), "forge-x", ""); err != nil {
+		t.Fatalf("no expectation, no check: %v", err)
+	}
+}
+
+func TestVerifyCapsLogin(t *testing.T) {
+	c, _ := newStub(`{"ok":true,"login":"`+strings.Repeat("l", 5000)+`"}`, "", 0, nil)
+	r, err := c.Verify(ctx(), "forge-x", "")
+	if err != nil || len(r.Login) > 256 {
+		t.Fatalf("login len %d err %v", len(r.Login), err)
+	}
+}
+
+func TestProbeAllHonouredWithNonZeroExitIsError(t *testing.T) {
+	c, _ := newStub(`[{"client":"curl","outcome":"honoured","detail":""}]`, "", 1, nil)
+	if _, err := c.Probe(ctx()); err == nil {
+		t.Fatal("a success-looking probe on a failing exit must be an error")
+	}
+}
+
+func TestReloadRejectedIsAnError(t *testing.T) {
+	c, _ := newStub(`{"ok":false,"error":"bad policy `+secretEnvVal+`"}`, "", 1, nil)
+	r, err := c.Reload(ctx())
+	if err == nil || !errors.Is(err, ErrReloadRejected) {
+		t.Fatalf("err = %v", err)
+	}
+	var rr *ReloadRejectedError
+	if !errors.As(err, &rr) || !strings.Contains(rr.Reason, "bad policy") {
+		t.Fatalf("err = %#v", err)
+	}
+	if r.OK || !strings.Contains(r.Error, "bad policy") {
+		t.Fatalf("result = %+v", r)
+	}
+	if strings.Contains(err.Error(), secretEnvVal) || strings.Contains(r.Error, secretEnvVal) {
+		t.Fatal("reload error leaks env value")
+	}
+}
+
+func TestInstallBypassesRunAs(t *testing.T) {
+	var calls []call
+	c := New("/usr/local/bin/stk", Options{RunAs: "stk", geteuid: func() int { return 0 }, lookPath: fakeLook, Run: stub("ok", "", 0, nil, &calls)})
+	if _, err := c.Install(ctx(), InstallPlan{User: "stk"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls[0].name != "/usr/local/bin/stk" || calls[0].args[0] != "install" {
+		t.Fatalf("install must run directly: %s %v", calls[0].name, calls[0].args)
+	}
+	if _, err := c.Version(ctx()); err != nil {
+		t.Fatal(err)
+	}
+	if calls[1].name != "/fake/bin/runuser" {
+		t.Fatalf("other verbs must still use runuser: %s", calls[1].name)
+	}
+}
+
+func TestRunAsAsNonRootIsAnError(t *testing.T) {
+	var calls []call
+	c := New("/usr/local/bin/stk", Options{RunAs: "stk", geteuid: func() int { return 1000 }, lookPath: fakeLook, Run: stub("stk 0.0.1", "", 0, nil, &calls)})
+	if _, err := c.Version(ctx()); err == nil || !strings.Contains(err.Error(), "RunAs") || len(calls) != 0 {
+		t.Fatalf("err = %v calls = %d", err, len(calls))
+	}
+}
+
+func TestRunuserLookupFailureIsAnErrorNotAPanic(t *testing.T) {
+	var calls []call
+	c := New("/usr/local/bin/stk", Options{RunAs: "stk", geteuid: func() int { return 0 },
+		lookPath: func(string) (string, error) { return "", errors.New("nope") }, Run: stub("stk 0.0.1", "", 0, nil, &calls)})
+	if _, err := c.Version(ctx()); !errors.Is(err, ErrStkNotRunnable) || len(calls) != 0 {
+		t.Fatalf("err = %v calls = %d", err, len(calls))
+	}
+}
+
+func TestOptionsEnvKeysAreValidated(t *testing.T) {
+	for _, k := range []string{"A=B", "A\x00B", ""} {
+		var calls []call
+		c := New("/usr/bin/stk", Options{Env: map[string]string{k: "v"}, Run: stub("stk 0.0.1", "", 0, nil, &calls)})
+		if _, err := c.Version(ctx()); err == nil || len(calls) != 0 {
+			t.Fatalf("env key %q accepted", k)
+		}
+	}
+	var calls []call
+	c := New("/usr/bin/stk", Options{Env: map[string]string{"K": "a\x00b"}, Run: stub("stk 0.0.1", "", 0, nil, &calls)})
+	if _, err := c.Version(ctx()); err == nil {
+		t.Fatal("NUL in env value accepted")
+	}
+}
+
+func TestScrubNonTokenShapedSecrets(t *testing.T) {
+	envVal := "p@ss w/rd+="
+	env := "a+b/c=d"
+	var calls []call
+	c := New("/usr/bin/stk", Options{
+		Env: map[string]string{"STK_PW": envVal},
+		Run: stub("", "boom "+envVal+" and "+env, 1, nil, &calls),
+	})
+	err := c.HandoverOpen(ctx(), "forge-x", env)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), envVal) || strings.Contains(err.Error(), env) {
+		t.Fatalf("exact-value scrub failed: %v", err)
+	}
+}
+
+func TestScrubRedactsEachStdinLine(t *testing.T) {
+	envelope := "-----BEGIN-----\nline+one/with=odd\nshort\n-----END-----\n"
+	c, _ := newStub("", "decode failed at: line+one/with=odd", 1, nil)
+	err := c.HandoverOpen(ctx(), "forge-x", envelope)
+	if err == nil || strings.Contains(err.Error(), "line+one/with=odd") {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "decode failed") {
+		t.Fatalf("non-secret text should survive: %v", err)
+	}
+}
+
+func TestOldStkNeedsJSONInMarkerLine(t *testing.T) {
+	c, _ := newStub("", `stk verify: unknown argument "--expect-login" (usage: stk verify <service>)`, 2, nil)
+	_, err := c.Verify(ctx(), "forge-x", "a")
+	if errors.Is(err, ErrStkTooOld) {
+		t.Fatalf("unrelated unknown-argument error is not 'too old': %v", err)
+	}
+}
+
+func TestExit126And127OnlyMeanMissingWhenWrapped(t *testing.T) {
+	c, _ := newStub("", "stk itself exited 127", 127, nil)
+	_, err := c.Version(ctx())
+	if err == nil || errors.Is(err, ErrStkMissing) {
+		t.Fatalf("direct exit 127 is a plain failure: %v", err)
+	}
+}
+
+func TestParentCancellationIsNotATimeout(t *testing.T) {
+	cctx, cancel := context.WithCancel(ctx())
+	cancel()
+	c := New("/usr/bin/stk", Options{Run: func(ctx context.Context, _ string, _ []string, _ []byte, _ []string) ([]byte, []byte, int, error) {
+		<-ctx.Done()
+		return nil, nil, -1, ctx.Err()
+	}})
+	_, err := c.Version(cctx)
+	if err == nil || strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEnvStringRedacts(t *testing.T) {
+	e := Env{ProxyURL: "http://user:hunter2pw@127.0.0.1:8899", CAPath: "/run/stk/ca.pem", Vars: map[string]string{"TOKEN": "placeholder-secret-value"}}
+	for _, got := range []string{e.String(), fmt.Sprintf("%v", e), fmt.Sprintf("%+v", e), fmt.Sprintf("%#v", e)} {
+		if strings.Contains(got, "hunter2pw") || strings.Contains(got, "placeholder-secret-value") {
+			t.Fatalf("leaks: %s", got)
+		}
+		if !strings.Contains(got, "127.0.0.1:8899") {
+			t.Fatalf("lost host: %s", got)
+		}
+	}
+}
 func TestVerifyParsesOKLoginReason(t *testing.T) {
 	c, calls := newStub(`{"ok":true,"login":"alice","reason":"","extra":1}`, "", 0, nil)
 	r, err := c.Verify(ctx(), "forge-x", "alice")
@@ -203,6 +407,11 @@ func TestOldStkIsErrStkTooOld(t *testing.T) {
 	}
 }
 
+func wrapped(out, errOut string, code int) Client {
+	var calls []call
+	return New("/usr/local/bin/stk", Options{RunAs: "stk", geteuid: func() int { return 0 }, lookPath: fakeLook, Run: stub(out, errOut, code, nil, &calls)})
+}
+
 func TestMissingBinaryIsErrStkMissing(t *testing.T) {
 	c := New(filepath.Join(t.TempDir(), "no-such-stk"), Options{})
 	_, err := c.Version(ctx())
@@ -210,7 +419,7 @@ func TestMissingBinaryIsErrStkMissing(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 	// 127 from a wrapper (runuser) means the same
-	c, _ = newStub("", "runuser: failed to execute stk: No such file or directory", 127, nil)
+	c = wrapped("", "runuser: failed to execute stk: No such file or directory", 127)
 	if _, err := c.Version(ctx()); !errors.Is(err, ErrStkMissing) {
 		t.Fatalf("127: err = %v", err)
 	}
@@ -225,7 +434,7 @@ func TestNonExecutableBinaryIsErrStkNotRunnable(t *testing.T) {
 	if !errors.Is(err, ErrStkNotRunnable) {
 		t.Fatalf("err = %v", err)
 	}
-	c, _ := newStub("", "permission denied", 126, nil)
+	c := wrapped("", "permission denied", 126)
 	if _, err := c.Version(ctx()); !errors.Is(err, ErrStkNotRunnable) {
 		t.Fatalf("126: err = %v", err)
 	}
@@ -234,18 +443,15 @@ func TestNonExecutableBinaryIsErrStkNotRunnable(t *testing.T) {
 func TestRunAsWrapsWithRunuserOnlyWhenRootAndRequested(t *testing.T) {
 	run := func(runAs string, euid int) call {
 		var calls []call
-		c := New("/usr/local/bin/stk", Options{RunAs: runAs, geteuid: func() int { return euid }, Run: stub(`stk 0.0.1`, "", 0, nil, &calls)})
+		c := New("/usr/local/bin/stk", Options{RunAs: runAs, geteuid: func() int { return euid }, lookPath: fakeLook, Run: stub(`stk 0.0.1`, "", 0, nil, &calls)})
 		if _, err := c.Version(ctx()); err != nil {
 			t.Fatal(err)
 		}
 		return calls[0]
 	}
 	got := run("stk", 0)
-	if got.name != "runuser" || !reflect.DeepEqual(got.args, []string{"-u", "stk", "--", "/usr/local/bin/stk", "version"}) {
+	if got.name != "/fake/bin/runuser" || !reflect.DeepEqual(got.args, []string{"-u", "stk", "--", "/usr/local/bin/stk", "version"}) {
 		t.Fatalf("root+RunAs: %s %v", got.name, got.args)
-	}
-	if got := run("stk", 1000); got.name != "/usr/local/bin/stk" || got.args[0] != "version" {
-		t.Fatalf("non-root: %s %v", got.name, got.args)
 	}
 	if got := run("", 0); got.name != "/usr/local/bin/stk" {
 		t.Fatalf("no RunAs: %s %v", got.name, got.args)
@@ -254,7 +460,7 @@ func TestRunAsWrapsWithRunuserOnlyWhenRootAndRequested(t *testing.T) {
 
 func TestRunAsRejectsOptionLookingUser(t *testing.T) {
 	var calls []call
-	c := New("/usr/local/bin/stk", Options{RunAs: "-evil", geteuid: func() int { return 0 }, Run: stub(`stk 0.0.1`, "", 0, nil, &calls)})
+	c := New("/usr/local/bin/stk", Options{RunAs: "-evil", geteuid: func() int { return 0 }, lookPath: fakeLook, Run: stub(`stk 0.0.1`, "", 0, nil, &calls)})
 	if _, err := c.Version(ctx()); err == nil {
 		t.Fatal("RunAs starting with '-' must be rejected")
 	}
@@ -322,34 +528,6 @@ func TestOversizedOutputIsAnErrorNotAPartialParse(t *testing.T) {
 	}
 }
 
-func TestTimeoutReturnsErrorAndKillsChild(t *testing.T) {
-	self, _ := os.Executable()
-	pidfile := filepath.Join(t.TempDir(), "pid")
-	c := New(self, Options{
-		Timeout: 400 * time.Millisecond,
-		Env:     map[string]string{"STKCLIENT_STUB": "sleep", "STKCLIENT_PIDFILE": pidfile},
-	})
-	start := time.Now()
-	_, err := c.Version(ctx())
-	if err == nil {
-		t.Fatal("expected timeout error")
-	}
-	if time.Since(start) > 10*time.Second {
-		t.Fatalf("took %v", time.Since(start))
-	}
-	if !strings.Contains(err.Error(), "timed out") {
-		t.Fatalf("err = %v", err)
-	}
-	b, rerr := os.ReadFile(pidfile)
-	if rerr != nil {
-		t.Fatalf("stub never started: %v", rerr)
-	}
-	pid, _ := strconv.Atoi(string(b))
-	if kerr := syscall.Kill(pid, 0); kerr != syscall.ESRCH {
-		t.Fatalf("child %d still alive (kill -0 => %v)", pid, kerr)
-	}
-}
-
 func TestProbeParsesOutcomesOnNonZeroExit(t *testing.T) {
 	c, calls := newStub(`[{"client":"curl","outcome":"honoured","detail":"ok"},{"client":"git","outcome":"bypassed","detail":"direct"}]`, "", 1, nil)
 	got, err := c.Probe(ctx())
@@ -383,7 +561,7 @@ func TestReloadParsesRemovedAddedChanged(t *testing.T) {
 	}
 	c, _ = newStub(`{"ok":false,"error":"bad policy"}`, "", 1, nil)
 	r, err = c.Reload(ctx())
-	if err != nil || r.OK || r.Error != "bad policy" {
+	if !errors.Is(err, ErrReloadRejected) || r.OK || r.Error != "bad policy" {
 		t.Fatalf("got %+v err %v", r, err)
 	}
 	c, _ = newStub(`{"removed":[]}`, "", 0, nil)

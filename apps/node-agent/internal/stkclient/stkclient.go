@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -38,7 +39,8 @@ type Options struct {
 	Timeout time.Duration
 	Run     Runner
 
-	geteuid func() int
+	geteuid  func() int
+	lookPath func(string) (string, error)
 }
 
 type Client interface {
@@ -141,8 +143,10 @@ func DefaultRunner(ctx context.Context, name string, args []string, stdin []byte
 }
 
 type client struct {
-	bin  string
-	opts Options
+	bin      string
+	opts     Options
+	runuser  string // absolute path, resolved once in New
+	setupErr error  // surfaced on the first call, never a panic
 }
 
 // New returns a Client that runs the stk binary at binary.
@@ -156,18 +160,47 @@ func New(binary string, opts Options) Client {
 	if opts.geteuid == nil {
 		opts.geteuid = os.Geteuid
 	}
-	return &client{bin: binary, opts: opts}
+	if opts.lookPath == nil {
+		opts.lookPath = exec.LookPath
+	}
+	c := &client{bin: binary, opts: opts}
+	for k, v := range opts.Env {
+		if k == "" || strings.ContainsAny(k, "=\x00") || strings.ContainsRune(v, 0) {
+			c.setupErr = errors.New("stk: Options.Env has an invalid key or value")
+			break
+		}
+	}
+	if opts.RunAs != "" {
+		p, err := opts.lookPath("runuser")
+		if err != nil {
+			c.setupErr = fmt.Errorf("stk: runuser not found for RunAs: %w", ErrStkNotRunnable)
+		}
+		c.runuser = p
+	}
+	return c
 }
+
+var nameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 var tokenLike = regexp.MustCompile(`[A-Za-z0-9_\-]{24,}`)
 
 // scrub removes every value this client was handed (stdin, env) and anything
 // that looks like a token, strips control characters, and truncates to max
 // bytes on a rune boundary.
+//
+// Side effects, by design: any 24+ char [A-Za-z0-9_-] run (paths, hashes,
+// long words) is also replaced, newlines and tabs become spaces (except when
+// max <= 0, where newlines are kept), and other control characters are
+// dropped. Over-redaction is preferred to a leak.
 func (c *client) scrub(s string, stdin []byte, max int) string {
-	secrets := make([]string, 0, len(c.opts.Env)+1)
+	secrets := make([]string, 0, len(c.opts.Env)+4)
 	if len(stdin) > 0 {
 		secrets = append(secrets, strings.TrimSpace(string(stdin)))
+		for _, line := range strings.Split(string(stdin), "\n") {
+			if line = strings.TrimSpace(line); len(line) >= 8 {
+				secrets = append(secrets, line)
+			}
+		}
 	}
 	for _, v := range c.opts.Env {
 		secrets = append(secrets, v)
@@ -228,19 +261,31 @@ type result struct {
 // some subcommands report a result on stdout and exit non-zero. Callers that
 // need success check code themselves via fail().
 func (c *client) run(ctx context.Context, sub string, args []string, stdin []byte) (result, string, error) {
-	if c.opts.RunAs != "" && strings.HasPrefix(c.opts.RunAs, "-") {
-		return result{}, "", fmt.Errorf("stk %s: invalid RunAs user", sub)
+	if c.setupErr != nil {
+		return result{}, "", fmt.Errorf("stk %s: %w", sub, c.setupErr)
 	}
 	name, full := c.bin, args
-	if c.opts.RunAs != "" && c.opts.geteuid() == 0 {
-		name = "runuser"
+	wrapped := false
+	// Install creates the service user and needs root itself: never wrapped.
+	if c.opts.RunAs != "" && sub != "install" {
+		if !nameRE.MatchString(c.opts.RunAs) {
+			return result{}, "", fmt.Errorf("stk %s: invalid RunAs user", sub)
+		}
+		if c.opts.geteuid() != 0 {
+			return result{}, "", fmt.Errorf("stk %s: RunAs %q is set but the node is not root; clear RunAs or run the node as root", sub, c.opts.RunAs)
+		}
+		name = c.runuser
 		full = append([]string{"-u", c.opts.RunAs, "--", c.bin}, args...)
+		wrapped = true
 	}
 	cctx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
 	defer cancel()
 	stdout, stderr, code, err := c.opts.Run(cctx, name, full, stdin, c.environ())
 	if cctx.Err() != nil {
-		return result{}, "", fmt.Errorf("stk %s: timed out after %s", sub, c.opts.Timeout)
+		if ctx.Err() == nil && errors.Is(cctx.Err(), context.DeadlineExceeded) {
+			return result{}, "", fmt.Errorf("stk %s: timed out after %s", sub, c.opts.Timeout)
+		}
+		return result{}, "", fmt.Errorf("stk %s: canceled: %w", sub, ctx.Err())
 	}
 	if err != nil {
 		switch {
@@ -251,19 +296,25 @@ func (c *client) run(ctx context.Context, sub string, args []string, stdin []byt
 		}
 		return result{}, "", fmt.Errorf("stk %s: could not run: %s", sub, c.scrub(err.Error(), stdin, stderrInError))
 	}
-	switch code {
-	case 127:
-		return result{}, "", fmt.Errorf("stk %s: %w", sub, ErrStkMissing)
-	case 126:
-		return result{}, "", fmt.Errorf("stk %s: %w", sub, ErrStkNotRunnable)
+	if wrapped {
+		// Only the runuser wrapper uses 126/127 for "cannot exec"; a direct
+		// stk exiting 126/127 is an ordinary failure.
+		switch code {
+		case 127:
+			return result{}, "", fmt.Errorf("stk %s: %w", sub, ErrStkMissing)
+		case 126:
+			return result{}, "", fmt.Errorf("stk %s: %w", sub, ErrStkNotRunnable)
+		}
 	}
 	se := string(stderr)
 	if code != 0 {
-		low := strings.ToLower(se)
-		for _, m := range tooOldMarkers {
-			if strings.Contains(low, m) {
-				for _, a := range args {
-					if a == "--json" {
+		if mentionsJSON(args) {
+			for _, line := range strings.Split(strings.ToLower(se), "\n") {
+				if !strings.Contains(line, "json") {
+					continue
+				}
+				for _, m := range tooOldMarkers {
+					if strings.Contains(line, m) {
 						return result{}, "", fmt.Errorf("stk %s: %w", sub, ErrStkTooOld)
 					}
 				}
@@ -271,6 +322,15 @@ func (c *client) run(ctx context.Context, sub string, args []string, stdin []byt
 		}
 	}
 	return result{stdout: stdout, code: code}, c.scrub(se, stdin, stderrInError), nil
+}
+
+func mentionsJSON(args []string) bool {
+	for _, a := range args {
+		if a == "--json" {
+			return true
+		}
+	}
+	return false
 }
 
 func failure(sub string, code int, scrubbedStderr string) error {
@@ -301,7 +361,7 @@ func (c *client) call(ctx context.Context, sub string, args []string, stdin []by
 }
 
 func checkService(sub, service string) error {
-	if service == "" || strings.HasPrefix(service, "-") {
+	if !nameRE.MatchString(service) {
 		return fmt.Errorf("stk %s: invalid service name", sub)
 	}
 	return nil
@@ -337,6 +397,9 @@ func (c *client) HandoverKey(ctx context.Context) (string, error) {
 func (c *client) HandoverOpen(ctx context.Context, service, envelope string) error {
 	if err := checkService("handover open", service); err != nil {
 		return err
+	}
+	if strings.TrimSpace(envelope) == "" {
+		return errors.New("stk handover open: empty envelope")
 	}
 	out, err := c.call(ctx, "handover open", []string{"handover", "open", service, "--json"}, []byte(envelope))
 	if err != nil {
@@ -374,7 +437,18 @@ func (c *client) Verify(ctx context.Context, service, expectLogin string) (Verif
 	if json.Unmarshal(r.stdout, &d) != nil || d.OK == nil {
 		return VerifyResult{}, badOutput("verify", r.code, se)
 	}
-	return VerifyResult{OK: *d.OK, Login: d.Login, Reason: d.Reason}, nil
+	login := capString(d.Login, 256)
+	if *d.OK {
+		// Acknowledge only what stk confirmed: success needs a zero exit and
+		// the login we expected.
+		if r.code != 0 {
+			return VerifyResult{}, failure("verify", r.code, se)
+		}
+		if expectLogin != "" && d.Login != expectLogin {
+			return VerifyResult{}, errors.New("stk verify: ok but login does not match the expected login")
+		}
+	}
+	return VerifyResult{OK: *d.OK, Login: login, Reason: d.Reason}, nil
 }
 
 // Reload returns stk's own verdict: {"ok":false,"error":...} is a result, not
@@ -397,7 +471,22 @@ func (c *client) Reload(ctx context.Context) (ReloadResult, error) {
 	if r.code != 0 && *d.OK {
 		return ReloadResult{}, failure("reload", r.code, se)
 	}
-	return ReloadResult{OK: *d.OK, Removed: d.Removed, Added: d.Added, Changed: d.Changed, Error: c.scrub(d.Error, nil, 400)}, nil
+	res := ReloadResult{OK: *d.OK, Removed: d.Removed, Added: d.Added, Changed: d.Changed, Error: c.scrub(d.Error, nil, 400)}
+	if !res.OK {
+		return res, &ReloadRejectedError{Reason: res.Error}
+	}
+	return res, nil
+}
+
+func capString(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	s = s[:max]
+	for !utf8.ValidString(s) && len(s) > 0 {
+		s = s[:len(s)-1]
+	}
+	return s
 }
 
 func (c *client) RevokeLocal(ctx context.Context, service string) error {
@@ -471,18 +560,25 @@ func (c *client) Probe(ctx context.Context) ([]ProbeOutcome, error) {
 		return nil, badOutput("doctor --probe", r.code, se)
 	}
 	res := make([]ProbeOutcome, 0, len(d))
+	allHonoured := len(d) > 0
 	for _, p := range d {
 		if p.Client == "" || p.Outcome == "" {
 			return nil, badOutput("doctor --probe", r.code, se)
 		}
+		if p.Outcome != "honoured" {
+			allHonoured = false
+		}
 		res = append(res, ProbeOutcome{Client: p.Client, Outcome: p.Outcome, Detail: p.Detail})
+	}
+	if r.code != 0 && allHonoured {
+		return nil, failure("doctor --probe", r.code, se)
 	}
 	return res, nil
 }
 
 func (c *client) Install(ctx context.Context, p InstallPlan) (InstallReport, error) {
-	if p.User == "" || strings.HasPrefix(p.User, "-") {
-		return InstallReport{}, errors.New("stk install: invalid user")
+	if !nameRE.MatchString(p.User) || (p.Group != "" && !nameRE.MatchString(p.Group)) {
+		return InstallReport{}, errors.New("stk install: invalid user or group name")
 	}
 	args := []string{"install", "--user", p.User}
 	add := func(flag, val string) {
@@ -508,4 +604,22 @@ func (c *client) Install(ctx context.Context, p InstallPlan) (InstallReport, err
 		return InstallReport{}, err
 	}
 	return InstallReport{Output: c.scrub(string(out), nil, 0)}, nil
+}
+
+var ErrReloadRejected = errors.New("stk rejected the reload")
+
+type ReloadRejectedError struct{ Reason string }
+
+func (e *ReloadRejectedError) Error() string   { return "stk reload rejected: " + e.Reason }
+func (e *ReloadRejectedError) Is(t error) bool { return t == ErrReloadRejected }
+
+func (e Env) String() string   { return "Env{" + e.redacted() + "}" }
+func (e Env) GoString() string { return "stkclient.Env{" + e.redacted() + "}" }
+func (e Env) redacted() string {
+	proxy := "[unparseable]"
+	if u, err := url.Parse(e.ProxyURL); err == nil {
+		u.User = nil
+		proxy = u.String()
+	}
+	return fmt.Sprintf("ProxyURL: %s, CAPath: %s, Vars: <%d redacted>", proxy, e.CAPath, len(e.Vars))
 }
