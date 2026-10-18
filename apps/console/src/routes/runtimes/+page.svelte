@@ -196,7 +196,7 @@
 </PageHeader>
 
 <!-- ── Main content ───────────────────────────────────────────────────────── -->
-<div class="page-width py-6">
+<div class="ap-page">
   {#if isLoading}
     <!-- Loading skeletons -->
     <div class="space-y-2">
@@ -207,17 +207,14 @@
 
   {:else if error}
     <!-- Error state -->
-    <div
-      class="flex items-start justify-between gap-3 rounded-lg border border-status-error/50 bg-status-error/5 p-4"
-      role="alert"
-    >
+    <div class="ap-alert" role="alert">
       <p class="text-sm text-status-error">{error}</p>
       <Button variant="outline" size="sm" onclick={loadRuntimes}>Retry</Button>
     </div>
 
   {:else if runtimes.length === 0}
     <!-- Empty state -->
-    <div data-testid="empty-state">
+    <div data-testid="empty-state" class="ap-card">
       <Empty
         title="No runtimes yet"
         description="Provision your first runtime to get started"
@@ -233,8 +230,9 @@
   {:else}
     <!-- Seven columns do not fit a phone; they scroll in here rather than
          dragging the document sideways. -->
-    <div data-testid="runtimes-table-scroller" class="overflow-x-auto rounded-lg border border-border">
-      <table class="w-full min-w-[880px] text-sm">
+    <section class="ap-card" aria-label="Runtimes">
+    <div data-testid="runtimes-table-scroller" class="ap-tbl-wrap overflow-x-auto">
+      <table class="ap-tbl w-full min-w-[880px] text-sm">
         <thead>
           <tr class="border-b border-border text-left text-xs text-muted-foreground">
             <th scope="col" class="px-3 py-2 font-medium">Runtime</th>
@@ -264,13 +262,13 @@
               <!-- Capped and truncating: a runtime name is free text, and an
                    uncapped one eats the rest of the table. -->
               <td class="max-w-[220px] px-3 py-3">
-                <span class="block truncate font-mono font-medium" title={rt.name}>{rt.name}</span>
+                <span class="block truncate font-bold" title={rt.name}>{rt.name}</span>
                 {#if rt.harness && rt.harness !== "none"}
-                  <span class="block truncate font-mono text-xs text-muted-foreground">
+                  <span class="ap-sub truncate">
                     {rt.harness} · {rt.resourceTier}
                   </span>
                 {:else}
-                  <span class="block truncate font-mono text-xs text-muted-foreground">
+                  <span class="ap-sub truncate">
                     {rt.resourceTier}
                   </span>
                 {/if}
@@ -290,7 +288,7 @@
                   <a
                     href="/nodes/{rt.nodeId}"
                     title={rt.nodeId}
-                    class="block truncate font-mono text-xs text-muted-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    class="ap-link ap-mono ap-keep-mono block truncate text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                   >
                     {rt.nodeId.slice(0, 8)}
                   </a>
@@ -329,8 +327,6 @@
                   {#if rt.status === "stopped" || rt.status === "error"}
                     <Button
                       variant="outline"
-                      size="sm"
-                      class="h-7 px-2 text-xs"
                       disabled={!!actionInFlight[rt.id]}
                       onclick={() => handleStart(rt)}
                       data-testid="start-btn"
@@ -344,8 +340,6 @@
                   {#if rt.status === "asleep"}
                     <Button
                       variant="outline"
-                      size="sm"
-                      class="h-7 px-2 text-xs"
                       disabled={!!actionInFlight[rt.id]}
                       onclick={() => handleWake(rt)}
                       data-testid="wake-btn"
@@ -358,8 +352,6 @@
                   {#if rt.status === "online"}
                     <Button
                       variant="outline"
-                      size="sm"
-                      class="h-7 px-2 text-xs"
                       disabled={!!actionInFlight[rt.id]}
                       onclick={() => handleStop(rt)}
                       data-testid="stop-btn"
@@ -372,8 +364,6 @@
                   {#if rt.status !== "provisioning" && rt.status !== "destroyed"}
                     <Button
                       variant="destructive"
-                      size="sm"
-                      class="h-7 px-2 text-xs"
                       onclick={() => (destroyTarget = rt)}
                       data-testid="destroy-btn"
                     >
@@ -387,6 +377,7 @@
         </tbody>
       </table>
     </div>
+    </section>
   {/if}
 </div>
 

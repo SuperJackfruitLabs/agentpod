@@ -347,12 +347,12 @@
   {/snippet}
 </PageHeader>
 
-<div class="page-width py-6 space-y-6">
+<div class="ap-page">
   {#if mintError}<p class="text-xs text-status-error" role="alert">{mintError}</p>{/if}
   <!-- Enrollment command block (only when nodes/runtimes already exist; in empty state it shows in-place) -->
   {#if lastToken && (nodes.length > 0 || provisioningRuntimes.length > 0)}
-    <div class="space-y-2">
-      <p class="text-xs text-muted-foreground">Run this on the target node to connect it</p>
+    <div class="ap-card space-y-2">
+      <p class="text-sm text-muted-foreground">Run this on the target node to connect it</p>
       <EnrollmentCommand token={lastToken} hubUrl={resolvedHubUrl()} {copied} onCopy={handleCopyEnrollCmd} />
     </div>
   {/if}
@@ -367,10 +367,7 @@
 
   <!-- Error state -->
   {:else if error}
-    <div
-      class="flex items-start justify-between gap-3 rounded-lg border border-status-error/50 bg-status-error/5 p-4"
-      role="alert"
-    >
+    <div class="ap-alert" role="alert">
       <p class="text-sm text-status-error">{error}</p>
       <Button variant="outline" size="sm" onclick={() => loadData()}>Retry</Button>
     </div>
@@ -380,8 +377,8 @@
     <div class="flex flex-col items-center py-8">
       <div class="w-full max-w-2xl">
         {#if lastToken}
-          <div class="space-y-3">
-            <p class="text-xs text-muted-foreground">
+          <div class="ap-card space-y-3">
+            <p class="text-sm text-muted-foreground">
               Enrollment token created — run this on the target node to connect it
             </p>
             <EnrollmentCommand token={lastToken} hubUrl={resolvedHubUrl()} {copied} onCopy={handleCopyEnrollCmd} />
@@ -394,7 +391,7 @@
     </div>
 
   {:else}
-    <div class="space-y-4">
+    <section class="ap-card space-y-4" aria-label="Nodes">
       <!--
         Runtimes the substrate has accepted but no node has come back from yet.
         A line each, not a tinted card: they are the same "ask in flight" the
@@ -402,7 +399,7 @@
         moment their node enrols.
       -->
       {#if provisioningRuntimes.length > 0}
-        <ul class="divide-y divide-border/50 rounded-lg border border-border" data-testid="provisioning-list">
+        <ul class="divide-y divide-border" data-testid="provisioning-list">
           {#each provisioningRuntimes as rt (rt.id)}
             <li class="relative flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
               <StateDot state={STATE.starting} withLabel size="sm" pulse />
@@ -419,7 +416,7 @@
       {/if}
 
       {#if narrow.current}
-        <ul data-testid="nodes-cards" class="divide-y divide-border/50 rounded-lg border border-border">
+        <ul data-testid="nodes-cards" class="divide-y divide-border">
           {#each nodes as node (node.id)}
             {@const nodeAgents = agentsByNode.get(node.id) ?? []}
             {@const runningCount = nodeAgents.filter((a) => stationState(a.status).id === "running").length}
@@ -430,14 +427,14 @@
                   <a
                     href="/nodes/{node.id}"
                     title={node.name}
-                    class="block truncate font-mono text-sm text-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    class="ap-node-link block truncate focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                   >
                     {node.name}
                   </a>
-                  <span class="block truncate text-xs text-muted-foreground" title={node.hostname}>
+                  <span class="ap-sub ap-mono truncate" title={node.hostname}>
                     {node.hostname}
                   </span>
-                  <span class="block truncate text-xs text-muted-foreground">
+                  <span class="ap-sub truncate">
                     {node.os} · {node.arch} · {node.cpuCount} CPU{node.cpuCount === 1 ? "" : "s"}
                     {#if node.provisioned}
                       · provisioned · {node.provisioned.provider}
@@ -463,7 +460,7 @@
                 <dt class="text-muted-foreground">Node agent</dt>
                 <dd>
                   {#if node.updateAvailable}
-                    <span data-testid="node-drift-{node.id}" class="font-mono text-status-unknown">
+                    <span data-testid="node-drift-{node.id}" class="ap-drift font-mono">
                       {node.agentVersion} → {node.latestVersion}
                     </span>
                   {:else}
@@ -499,8 +496,8 @@
       {:else}
       <!-- Seven columns at 768px and up; should they still not fit, they
            scroll in here rather than dragging the document sideways. -->
-      <div data-testid="nodes-table-scroller" class="overflow-x-auto rounded-lg border border-border">
-        <table class="w-full min-w-[820px] text-sm">
+      <div data-testid="nodes-table-scroller" class="ap-tbl-wrap overflow-x-auto">
+        <table class="ap-tbl w-full min-w-[820px] text-sm">
           <thead>
             <tr class="border-b border-border text-left text-xs text-muted-foreground">
               <th scope="col" class="px-3 py-2 font-medium">Node</th>
@@ -536,14 +533,14 @@
                   <a
                     href="/nodes/{node.id}"
                     title={node.name}
-                    class="block truncate font-mono text-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    class="ap-node-link block truncate focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                   >
                     {node.name}
                   </a>
-                  <span class="block truncate text-xs text-muted-foreground" title={node.hostname}>
+                  <span class="ap-sub ap-mono truncate" title={node.hostname}>
                     {node.hostname}
                   </span>
-                  <span class="block truncate text-xs text-muted-foreground">
+                  <span class="ap-sub truncate">
                     {node.os} · {node.arch} · {node.cpuCount} CPU{node.cpuCount === 1 ? "" : "s"}
                     {#if node.provisioned}
                       · provisioned · {node.provisioned.provider}
@@ -574,7 +571,7 @@
                     <!-- Drift is a state worth a colour, and `unknown` is the
                          one it wears: a node on an old binary is not broken,
                          it is unaccounted for until somebody rolls it. -->
-                    <span data-testid="node-drift-{node.id}" class="font-mono text-xs whitespace-nowrap text-status-unknown">
+                    <span data-testid="node-drift-{node.id}" class="ap-drift font-mono text-xs whitespace-nowrap">
                       {node.agentVersion} → {node.latestVersion}
                     </span>
                   {:else}
@@ -589,7 +586,7 @@
                   {#if node.capabilities?.includes("posture")}
                     <a
                       href="/nodes/{node.id}"
-                      class="text-muted-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                      class="ap-link focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                     >
                       Scan
                     </a>
@@ -603,11 +600,10 @@
                     <Button
                       data-testid="node-update-{node.id}"
                       variant="outline"
-                      size="sm"
-                      class="h-7 px-2 text-xs"
                       disabled={!!updatingNodes[node.id]}
                       onclick={() => handleUpdate(node.id)}
                     >
+                      <ArrowUpCircleIcon class="h-4 w-4" aria-hidden="true" />
                       {updatingNodes[node.id] ? "Updating…" : "Update"}
                     </Button>
                   {/if}
@@ -618,7 +614,7 @@
         </table>
       </div>
       {/if}
-    </div>
+    </section>
   {/if}
 </div>
 

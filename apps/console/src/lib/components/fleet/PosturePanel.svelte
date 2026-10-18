@@ -48,7 +48,7 @@
   }
 </script>
 
-<Card.Root>
+<Card.Root class="ap-card">
   <Card.Header>
     <Card.Title>Posture</Card.Title>
     <Card.Description>

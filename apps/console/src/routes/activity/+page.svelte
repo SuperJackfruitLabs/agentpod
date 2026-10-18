@@ -60,7 +60,7 @@
 
 <PageHeader title="Activity" subtitle="Fleet event log" />
 
-<div class="page-width py-6 space-y-3">
+<div class="ap-page">
   {#if isLoading}
     <div class="space-y-2">
       {#each [1, 2, 3, 4, 5] as _}
@@ -69,34 +69,33 @@
     </div>
 
   {:else if error}
-    <div
-      class="flex items-start justify-between gap-3 rounded-lg border border-status-error/50 bg-status-error/5 p-4"
-      role="alert"
-    >
+    <div class="ap-alert" role="alert">
       <p class="text-sm text-status-error">{error}</p>
       <Button variant="outline" size="sm" onclick={load}>Retry</Button>
     </div>
 
   {:else if rows.length === 0}
-    <div data-testid="empty-state">
+    <div data-testid="empty-state" class="ap-card">
       <Empty title="No activity yet" description="Activity from the fleet will appear here." icon={ActivityIcon} />
     </div>
 
   {:else}
-    <div class="relative max-w-sm">
+    <div class="relative max-w-md">
       <SearchIcon
-        class="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+        class="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
         aria-hidden="true"
       />
       <input
         type="search"
         placeholder="Search activity…"
         bind:value={query}
-        class="h-8 w-full rounded-md border bg-transparent py-1.5 pl-7 pr-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
+        class="ap-search h-8 w-full rounded-md border bg-transparent py-1.5 pl-7 pr-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
         aria-label="Search activity"
       />
     </div>
 
-    <ActivityFeed rows={visible} />
+    <section class="ap-card" aria-label="Activity">
+      <ActivityFeed rows={visible} />
+    </section>
   {/if}
 </div>
