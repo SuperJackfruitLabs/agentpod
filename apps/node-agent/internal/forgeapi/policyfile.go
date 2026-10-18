@@ -36,8 +36,13 @@ func readPolicyFile(path string) (data []byte, existed bool, err error) {
 func writePolicyFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	mode := newFileMode
-	existing, err := os.Stat(path)
+	// Lstat: the node runs as root and the directory can be reached by others, so a symlink at
+	// the policy path is refused, not followed.
+	existing, err := os.Lstat(path)
 	if err == nil {
+		if existing.Mode()&os.ModeSymlink != 0 || !existing.Mode().IsRegular() {
+			return fmt.Errorf("refusing %s: it is not a regular file (a symlink?)", path)
+		}
 		mode = existing.Mode().Perm() &^ 0o007
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err

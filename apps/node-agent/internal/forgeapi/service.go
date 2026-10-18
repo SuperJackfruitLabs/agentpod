@@ -402,13 +402,17 @@ func (s *Service) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, err
 		return DeliverAck{}, err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	// stk is made ready BEFORE the lock is taken: the first deliver for a station waits here for
+	// `stk install`, and every other verb for the station (a refresh, a revoke) must not queue
+	// behind that.
 	client, res, err := s.ready(ctx)
 	if err != nil {
 		return DeliverAck{}, err
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	path := s.path()
 	prev, existed, err := readPolicyFile(path)
 	if err != nil {
@@ -637,6 +641,29 @@ func (s *Service) Revoke(ctx context.Context, p RevokeParams) (RevokeAck, error)
 		}
 	}
 	return RevokeAck{Removed: false}, nil
+}
+
+// RollbackGrant takes a just-delivered grant out again: the credential is forgotten while the
+// entry is still in the policy (stk resolves a service through it), then the entry goes and stk
+// reloads. A grant this node does not hold is nothing to do.
+func (s *Service) RollbackGrant(ctx context.Context, station, grantID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, _, err := readPolicyFile(s.path())
+	if err != nil {
+		return coded("policy-read-failed", err)
+	}
+	m, found, err := FindGrant(data, station, grantID)
+	if err != nil {
+		return coded("policy-invalid", err)
+	}
+	if !found {
+		return nil
+	}
+	if s.NewClient == nil {
+		return codedf("stk-unavailable", "forge API access is not configured on this node")
+	}
+	return s.removeLocked(ctx, s.NewClient(), []ManagedEntry{m})
 }
 
 // nothingToWithdraw is stk's answer when the credential is already gone.

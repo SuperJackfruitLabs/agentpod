@@ -248,24 +248,30 @@ returned, sealed within the same call.* Docs and schema comments must say so.
   station's agent cannot use another station's brokered credential, and two
   stations may hold grants for the same forge host. Grants are per station and
   provider. The node creates an instance at its first deliver or status for a
-  station and removes it (unit, state, user) when the station is no longer
-  hosted; it records name and proxy port in a node-owned registry so a restart
-  finds the same instance. Proxy ports come from a configurable range (default
+  station (removal is manual, see below); it records name and proxy port in a
+  node-owned registry so a restart finds the same instance. Proxy ports come from a configurable range (default
   8900-8999); an exhausted range is a refusal, not a reuse.
-- **Per-station isolation needs a distinct agent uid per station.** Agents that
-  share a uid can read each other's `/proc/<pid>/environ`, the harness drop-in
-  files and the loopback proxy key, and stk's control-socket allowlist is by uid,
-  so station A's agent could act as station B. The node therefore records each
-  instance's agent uids in its registry and **refuses** (`station-uid-shared`, on
-  deliver and on the status call that fetches the key) a station whose uids
-  overlap any other registered instance's; the first station on a node is never
-  refused. An explicit operator acknowledgement (`allowSharedAgentUid`) lets it
-  proceed, and every reply then reports isolation `same-user` with detail
-  `shared-uid` (the contract's isolation enum is `separate-user | same-user`; a
-  new word would make replies unreadable to the hub) plus a node warning. The
-  node does not switch uids; the operator maps stations to uids
-  (`forgeApi.stationUids`) and starts harnesses accordingly. So "one stk per
-  station" is isolation only together with "one uid per station".
+- **Isolation is judged on where the agents really run.** Agents that share a uid, or
+  run as root, can read each other's `/proc/<pid>/environ`, the harness files and
+  the loopback proxy key, and stk's control-socket allowlist is by uid, so a
+  per-station stk protects nothing from them. The node starts ACP sessions and
+  terminals with plain exec and no uid switch, so agents it spawns run **as the
+  node's own uid** (root on any node that has instances) whatever
+  `forgeApi.stationUids` says; only a long-lived per-profile unit (Hermes) can run
+  as another user. A station is therefore `separate-user` only if its stk
+  instance is AND every path its harness has runs as a distinct non-node uid
+  (unknown counts as the node's uid), which is never true of a spawn path today.
+  Every station reports `same-user` with detail `node-uid` or `shared-uid` and a
+  reason naming every cause; a second station whose effective uid overlaps
+  another's is refused (`station-uid-shared`) unless the operator sets
+  `allowSharedAgentUid`; the first station is never refused. The contract's
+  isolation enum stays `separate-user | same-user` (a new word would make replies
+  unreadable to the hub). Spawning agents under per-station users is out of scope
+  here. Per-station brokers separate **credentials**, not **agents**.
+- **Instances are removed by hand.** The node never prunes on its own (it cannot
+  tell which stations the hub still owns); `apn forge-api prune --station ID
+  [--dry-run] --yes` removes one registered station's whole instance. A deliver is
+  refused (`station-not-hosted`) for a key the node does not itself detect.
 - **Two policy layers per station.** (a) A *shared base policy*: an
   operator-authored node-level file (default `/etc/agentpod/stk-shared.yaml`)
   of services every station needs. The node copies its entries into each

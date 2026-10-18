@@ -156,7 +156,7 @@ func TestForgeAPIInstancesConfigPrefersEnvironmentOverConfig(t *testing.T) {
 		}
 	}
 	// the range itself is validated when the manager is made
-	if _, err := newStationInstances(config.Config{ForgeAPI: &config.ForgeAPI{ProxyPortMin: 9000, ProxyPortMax: 8000}}, func(string) string { return "" }); err == nil {
+	if _, err := newStationInstances(config.Config{ForgeAPI: &config.ForgeAPI{ProxyPortMin: 9000, ProxyPortMax: 8000}}, func(string) string { return "" }, nil); err == nil {
 		t.Error("an inverted range was accepted")
 	}
 }
@@ -255,5 +255,106 @@ func TestTheNodeWiresStationHarnessesThroughSystemdUserUnits(t *testing.T) {
 		if u := h.Units(key); len(u) != 0 {
 			t.Errorf("Units(%q) = %v", key, u)
 		}
+	}
+}
+
+func TestOnlyAMappedGatewayUnitIsKnownToRunAsAnotherUID(t *testing.T) {
+	cfg, err := forgeAPIInstancesConfig(config.ForgeAPI{StationUIDs: map[string][]int{"stn_1": {os.Geteuid() + 1000}}}, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uid, known := cfg.HarnessRunsAs("stn_1", "spawn"); known {
+		t.Errorf("the node spawns as itself, spawn reported as uid %d", uid)
+	}
+	if uid, known := cfg.HarnessRunsAs("stn_1", "gateway"); !known || uid != os.Geteuid()+1000 {
+		t.Errorf("gateway = %d, %v", uid, known)
+	}
+	if _, known := cfg.HarnessRunsAs("stn_unmapped", "gateway"); known {
+		t.Error("an unmapped station's gateway is unknown")
+	}
+}
+
+// ---- a bad forge-api setting disables forge.api, it does not stop the node ----
+
+func TestABadForgeAPISettingDisablesForgeAPIAndAnswersStkUnavailable(t *testing.T) {
+	env := func(k, v string) func(string) string {
+		return func(key string) string {
+			if key == k {
+				return v
+			}
+			return ""
+		}
+	}
+	for name, c := range map[string]struct {
+		cfg config.Config
+		get func(string) string
+	}{
+		"unparseable AGENTPOD_STK_PORTS": {config.Config{}, env("AGENTPOD_STK_PORTS", "eight-nine")},
+		"no dash in AGENTPOD_STK_PORTS":  {config.Config{}, env("AGENTPOD_STK_PORTS", "8900")},
+		"inverted range from the config": {config.Config{ForgeAPI: &config.ForgeAPI{ProxyPortMin: 9000, ProxyPortMax: 8000}}, env("", "")},
+		"port 0 to 70000":                {config.Config{ForgeAPI: &config.ForgeAPI{ProxyPortMin: 1, ProxyPortMax: 70000}}, env("", "")},
+		"inverted range from the env":    {config.Config{}, env("AGENTPOD_STK_PORTS", "9100-9000")},
+	} {
+		inst, api, ok := forgeAPIForNode(c.cfg, c.get, nil)
+		if ok || inst != nil || api == nil {
+			t.Errorf("%s: enabled=%v instances=%v", name, ok, inst)
+			continue
+		}
+		if _, err := api.Status(context.Background(), forgeapi.StatusParams{StationID: "stn_1"}); err == nil || !strings.HasPrefix(err.Error(), "stk-unavailable:") {
+			t.Errorf("%s: status err = %v", name, err)
+		}
+		if ack, err := api.Policy(context.Background(), forgeapi.PolicyParams{StationID: "s", GrantID: "g"}); err != nil || ack.OK || !strings.HasPrefix(ack.Error, "stk-unavailable:") {
+			t.Errorf("%s: policy = %+v %v", name, ack, err)
+		}
+	}
+	inst, _, ok := forgeAPIForNode(config.Config{}, func(string) string { return "" }, nil)
+	if !ok || inst == nil {
+		t.Error("a good configuration must enable forge.api")
+	}
+}
+
+// ---- forge-api prune ----
+
+func TestForgeAPIPruneNeedsAStationAndConfirmation(t *testing.T) {
+	called := false
+	d := forgeAPIDeps{prune: func(_ context.Context, id string, dry bool) (forgeapi.Instance, bool, error) {
+		called = true
+		return testInstance(), true, nil
+	}}
+	run := func(args ...string) (int, string, string) {
+		var o, e bytes.Buffer
+		return forgeAPICmdWith(append([]string{"prune"}, args...), &o, &e, d), o.String(), e.String()
+	}
+	if code, _, _ := run(); code != 2 || called {
+		t.Fatalf("no --station: code %d called %v", code, called)
+	}
+	if code, _, msg := run("--station", "stn_1"); code != 2 || called || !strings.Contains(msg, "--yes") {
+		t.Fatalf("no --yes: code %d called %v: %s", code, called, msg)
+	}
+	code, out, _ := run("--station", "stn_1", "--dry-run")
+	if code != 0 || !called || !strings.Contains(out, "would remove instance stk-stn-1-abcdef") {
+		t.Fatalf("dry run: %d %s", code, out)
+	}
+	code, out, _ = run("--station", "stn_1", "--yes")
+	if code != 0 || !strings.Contains(out, "removed instance stk-stn-1-abcdef") {
+		t.Fatalf("prune: %d %s", code, out)
+	}
+}
+
+func TestForgeAPIPruneOfAnUnlistedStationRemovesNothingAndExitsZero(t *testing.T) {
+	d := forgeAPIDeps{prune: func(context.Context, string, bool) (forgeapi.Instance, bool, error) {
+		return forgeapi.Instance{}, false, nil
+	}}
+	var o, e bytes.Buffer
+	if code := forgeAPICmdWith([]string{"prune", "--station", "stn_x", "--yes"}, &o, &e, d); code != 0 || !strings.Contains(o.String(), "nothing to remove") {
+		t.Fatalf("%d %s %s", code, o.String(), e.String())
+	}
+	d.prune = func(context.Context, string, bool) (forgeapi.Instance, bool, error) {
+		return testInstance(), true, errors.New("userdel: busy")
+	}
+	o.Reset()
+	e.Reset()
+	if code := forgeAPICmdWith([]string{"prune", "--station", "stn_1", "--yes"}, &o, &e, d); code != 1 || !strings.Contains(e.String(), "busy") {
+		t.Fatalf("%d %s", code, e.String())
 	}
 }

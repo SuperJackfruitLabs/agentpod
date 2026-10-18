@@ -195,7 +195,8 @@ var commands = []struct {
 		name: "forge-api", group: "Node",
 		oneline: "Set up stk as this station's forge credential broker (setup)",
 		detail: "apn forge-api setup [--user stk] [--agent-uid N]... [--state-dir DIR] [--stk PATH]\n" +
-			"apn forge-api setup --station ID [--agent-uid N]... [--allow-shared-agent-uid]\n\n" +
+			"apn forge-api setup --station ID [--agent-uid N]... [--allow-shared-agent-uid]\n" +
+			"apn forge-api prune --station ID [--dry-run] [--yes]\n\n" +
 			"Installs stk as its own OS user so the agent can use forge credentials\n" +
 			"without being able to read them. Run it once with sudo; it is safe to\n" +
 			"repeat (an existing separate-user install is left alone).\n\n" +
@@ -211,6 +212,11 @@ var commands = []struct {
 			"is refused (station-uid-shared): isolation between stations needs a\n" +
 			"distinct uid per station. --allow-shared-agent-uid acknowledges the\n" +
 			"risk; the station's grants then report same-user isolation.\n\n" +
+			"prune removes ONE station's whole stk instance (its unit, user, state,\n" +
+			"policy and every credential it holds, and the harness wiring) when the\n" +
+			"station is gone from this node. It is manual: nothing removes an instance\n" +
+			"for you. --dry-run says what it would remove; without it --yes is\n" +
+			"required. A station the node's registry does not list is left alone.\n\n" +
 			"Exit 0 on separate-user or on a clearly reported same-user; 1 on errors.",
 	},
 	{

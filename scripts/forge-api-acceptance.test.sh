@@ -157,6 +157,14 @@ out="$(AGENTPOD_ACCEPT_AGENT_SHELL=agent-shell AGENTPOD_ACCEPT_EXPECT_LOGIN=chot
   run --dry-run --write --yes-i-have-operator-approval file-issue st1 --repo o/r --title-file "$WORK/title" --body-file "$WORK/body" 2>&1)"
 [ ! -s "$LOG" ]; check "dry-run file-issue makes no request" $?
 
+: >"$LOG"
+for bad in "https://forge.example';touch /tmp/pwned;'" 'https://forge.example $(id)' 'https://forge.example"x'; do
+  out="$(AGENTPOD_ACCEPT_AGENT_SHELL=agent-shell AGENTPOD_ACCEPT_EXPECT_LOGIN=chotu FORGE_URL="$bad" \
+    run --write --yes-i-have-operator-approval file-issue st1 --repo o/r --title-file "$WORK/title" --body-file "$WORK/body" 2>&1)"; rc=$?
+  [ "$rc" = 2 ]; check "file-issue refuses a FORGE_URL with shell characters ($bad)" $?
+done
+[ ! -s "$LOG" ]; check "a bad FORGE_URL makes no request" $?
+
 # 6. preflight never prints values
 out="$(FORGE_ADMIN_TOKEN="$SECRET" AGENTPOD_ACCEPT_OLD_TOKEN="$SECRET" run preflight 2>&1)"
 echo "$out" | "$REAL_GREP" -q 'FORGE_ADMIN_TOKEN: set'; check "preflight reports set/unset" $?

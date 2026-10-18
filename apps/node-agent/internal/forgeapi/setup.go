@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
@@ -56,6 +57,10 @@ type SetupOptions struct {
 	// AfterInstall runs once install succeeded, before the isolation re-check: the instance's
 	// policy is seeded and its unit started here.
 	AfterInstall func(context.Context) error
+	// EffectiveUIDs are the uids the station's agents really run as, when that differs from the
+	// allowlist (AgentUIDs): an agent that runs as root makes the result degraded however the
+	// allowlist reads.
+	EffectiveUIDs func() []int
 }
 
 // SetupResult is what setup learned, beyond stk's doctor report.
@@ -226,7 +231,11 @@ func ensureF(ctx context.Context, newClient func() stkclient.Client, opts SetupO
 	// finish labels a protected-looking result honestly when an agent runs as root.
 	finish := func(r stkclient.DoctorReport, installed bool, notice string) SetupResult {
 		res := SetupResult{Report: cleanReport(r), Installed: installed, Notice: notice}
-		if containsUID(uids, 0) {
+		runs := uids
+		if opts.EffectiveUIDs != nil {
+			runs = append(append([]int(nil), uids...), opts.EffectiveUIDs()...)
+		}
+		if containsUID(runs, 0) {
 			res.Report.Isolation.Reasons = append(res.Report.Isolation.Reasons, reasonRootAgent)
 			res.Degraded = true
 			res.Reason = reasonRootAgent
@@ -354,10 +363,29 @@ func WriteSummary(w io.Writer, res SetupResult) {
 // `sudo agentpod-node forge-api setup` is noticed without a restart.
 type Ensurer struct {
 	run func(context.Context) (SetupResult, error)
+	// fingerprint, when set, names what a cached verdict was true of (the agent uids): a cached
+	// verdict is dropped when it changes.
+	fingerprint func() string
+	// recheck, when set, is a cheap look at whether the broker is still separate-user (doctor).
+	// A cached verdict is rechecked at most once per recheckEvery and dropped when it says no.
+	recheck func(context.Context) bool
+	now     func() time.Time
 
-	mu       sync.Mutex
-	cached   *SetupResult
-	inflight *flight
+	mu        sync.Mutex
+	cached    *SetupResult
+	cachedFP  string
+	checkedAt time.Time
+	inflight  *flight
+}
+
+// recheckEvery is how often a cached "separate-user" verdict is looked at again.
+const recheckEvery = 60 * time.Second
+
+func (e *Ensurer) clock() time.Time {
+	if e.now != nil {
+		return e.now()
+	}
+	return time.Now()
 }
 
 type flight struct {
@@ -385,6 +413,18 @@ func newEnsurerF(newClient func() stkclient.Client, opts SetupOptions, env sysEn
 // Ensure returns the current setup result, running setup at most once at a time.
 func (e *Ensurer) Ensure(ctx context.Context) (SetupResult, error) {
 	e.mu.Lock()
+	if e.cached != nil && e.fingerprint != nil && e.fingerprint() != e.cachedFP {
+		e.cached = nil // what the verdict was true of changed
+	}
+	if e.cached != nil && e.recheck != nil && e.clock().Sub(e.checkedAt) >= recheckEvery {
+		e.checkedAt = e.clock()
+		e.mu.Unlock()
+		still := e.recheck(ctx)
+		e.mu.Lock()
+		if !still {
+			e.cached = nil
+		}
+	}
 	if e.cached != nil {
 		r := *e.cached
 		e.mu.Unlock()
@@ -403,8 +443,15 @@ func (e *Ensurer) Ensure(ctx context.Context) (SetupResult, error) {
 	e.inflight = f
 	e.mu.Unlock()
 
-	e.lead(ctx, f)
-	return f.res, f.err
+	// The work runs on its own goroutine: the frame that started it may be cancelled (the hub
+	// disconnected) and `stk install` must still run to the end, not stop halfway.
+	go e.lead(ctx, f)
+	select {
+	case <-f.done:
+		return f.res, f.err
+	case <-ctx.Done():
+		return SetupResult{}, ctx.Err()
+	}
 }
 
 // lead runs the work. The deferred cleanup runs even if run panics, so the
@@ -412,11 +459,20 @@ func (e *Ensurer) Ensure(ctx context.Context) (SetupResult, error) {
 func (e *Ensurer) lead(ctx context.Context, f *flight) {
 	f.err = errors.New("stk setup did not complete")
 	defer func() {
+		// This runs on its own goroutine: a panic in setup must fail the setup, not the node.
+		if r := recover(); r != nil {
+			logf("forgeapi: stk setup panicked: %v", clean(fmt.Sprint(r)))
+			f.err = errors.New("stk setup panicked")
+		}
 		e.mu.Lock()
 		e.inflight = nil
 		if f.err == nil && !f.res.Degraded && f.res.Report.Isolation.Level == LevelSeparateUser {
 			r := f.res
 			e.cached = &r
+			e.checkedAt = e.clock()
+			if e.fingerprint != nil {
+				e.cachedFP = e.fingerprint()
+			}
 		}
 		e.mu.Unlock()
 		close(f.done)

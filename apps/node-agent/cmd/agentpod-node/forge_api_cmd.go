@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
 
@@ -38,10 +41,33 @@ type forgeAPIDeps struct {
 	harness   func() []int
 	// station creates one station's own instance (`setup --station`).
 	station func(ctx context.Context, stationID string, uids []int, allowSharedUID bool) (forgeapi.SetupResult, forgeapi.Instance, error)
+	// prune removes one station's instance by hand (`forge-api prune`).
+	prune func(ctx context.Context, stationID string, dryRun bool) (forgeapi.Instance, bool, error)
 }
 
 func defaultForgeAPIDeps() forgeAPIDeps {
-	return forgeAPIDeps{newClient: newStkClient, setup: forgeapi.Setup, harness: forgeapi.CLIHarnessUIDs, station: setupStation}
+	return forgeAPIDeps{newClient: newStkClient, setup: forgeapi.Setup, harness: forgeapi.CLIHarnessUIDs, station: setupStation, prune: pruneStation}
+}
+
+// pruneStation is `forge-api prune`.
+func pruneStation(ctx context.Context, stationID string, dryRun bool) (forgeapi.Instance, bool, error) {
+	var c config.Config
+	if loaded, err := config.Load(config.DefaultPath()); err == nil {
+		c = loaded
+	}
+	var fc config.ForgeAPI
+	if c.ForgeAPI != nil {
+		fc = *c.ForgeAPI
+	}
+	cfg, err := forgeAPIInstancesConfig(fc, os.Getenv)
+	if err != nil {
+		return forgeapi.Instance{}, false, err
+	}
+	m, err := forgeapi.NewStationInstances(cfg)
+	if err != nil {
+		return forgeapi.Instance{}, false, err
+	}
+	return m.PruneStation(ctx, stationID, dryRun)
 }
 
 // setupStation is `forge-api setup --station`: it creates the station's instance the way the node
@@ -146,6 +172,15 @@ func forgeAPIInstancesConfig(c config.ForgeAPI, getenv func(string) string) (for
 	cfg := forgeapi.InstancesConfig{
 		RegistryPath: c.Registry, SharedPolicyPath: c.SharedPolicy, PortMin: c.ProxyPortMin, PortMax: c.ProxyPortMax,
 		NewClient: newInstanceClient, AllowSharedAgentUID: c.AllowSharedAgentUID,
+		// The node spawns ACP sessions and terminals as itself, so "spawn" is never known to run
+		// as another uid. A long-lived gateway unit (a per-profile Hermes user unit) runs as the
+		// uid the operator mapped the station to, which the node cannot read back from systemd.
+		HarnessRunsAs: func(station, path string) (int, bool) {
+			if u := c.StationUIDs[station]; path == "gateway" && len(u) > 0 && u[0] != os.Geteuid() {
+				return u[0], true
+			}
+			return 0, false
+		},
 		AgentUIDs: func(station string) []int {
 			if u := c.StationUIDs[station]; len(u) > 0 {
 				return u
@@ -178,7 +213,7 @@ func forgeAPIInstancesConfig(c config.ForgeAPI, getenv func(string) string) (for
 
 // newStationInstances is what run.go hands to the forge.api handler. Nothing runs stk, reads the
 // registry or touches the host until the first frame for a station.
-func newStationInstances(c config.Config, getenv func(string) string) (*forgeapi.StationInstances, error) {
+func newStationInstances(c config.Config, getenv func(string) string, hosted func(key string) bool) (*forgeapi.StationInstances, error) {
 	var fc config.ForgeAPI
 	if c.ForgeAPI != nil {
 		fc = *c.ForgeAPI
@@ -187,13 +222,87 @@ func newStationInstances(c config.Config, getenv func(string) string) (*forgeapi
 	if err != nil {
 		return nil, err
 	}
+	cfg.Hosted = hosted
 	return forgeapi.NewStationInstances(cfg)
+}
+
+// forgeAPIForNode builds forge API access for `apn run`. A bad forge-api setting (an unparseable
+// port range, an inverted one) must not stop the node: the cause is logged once, enabled is false
+// (the node does not advertise `forge.api`) and the verbs answer `stk-unavailable` with the cause.
+// instances is nil then, and the spawn-path hooks that take it are nil-safe.
+func forgeAPIForNode(c config.Config, getenv func(string) string, hosted func(key string) bool) (instances *forgeapi.StationInstances, api gateway.ForgeAPI, enabled bool) {
+	inst, err := newStationInstances(c, getenv, hosted)
+	if err != nil {
+		log.Printf("forge.api: disabled, not advertised: %v", err)
+		return nil, forgeapi.Unavailable{Cause: err}, false
+	}
+	return inst, inst, true
+}
+
+// detectedKey reports whether the node itself detects a station with this key.
+func detectedKey(reg *descriptor.Registry) func(string) bool {
+	return func(key string) bool {
+		for _, s := range reg.DetectAll() {
+			if s.Key == key {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // newForgeAPIProbe is the capability probe: a client for the machine as it is now, 5s deadline.
 // It never needs root (a non-root node runs stk directly) and never installs.
 func newForgeAPIProbe() *forgeapi.CapabilityProbe {
 	return forgeapi.NewCapabilityProbe(func() stkclient.Client { return newStkClient("stk", "stk", "") }, forgeapi.DefaultProbeTimeout)
+}
+
+// forgeAPIPrune is `apn forge-api prune --station ID [--dry-run] [--yes]`: it removes ONE
+// registered station's whole stk instance (unit, user, state, policy, the harness wiring), by hand.
+// Nothing prunes automatically. A station the node's registry does not list is left alone.
+func forgeAPIPrune(args []string, out, errw io.Writer, d forgeAPIDeps) int {
+	fs := flag.NewFlagSet("forge-api prune", flag.ContinueOnError)
+	fs.SetOutput(errw)
+	station := fs.String("station", "", "the station whose stk instance to remove")
+	dry := fs.Bool("dry-run", false, "say what would be removed and remove nothing")
+	yes := fs.Bool("yes", false, "confirm: remove the instance, its stored credentials and its harness wiring")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if *station == "" {
+		fmt.Fprintln(errw, "forge-api prune: --station is required")
+		return 2
+	}
+	if !*dry && !*yes {
+		fmt.Fprintln(errw, "forge-api prune: this deletes the station's stk user, state and every credential it holds; pass --yes to do it, or --dry-run to see what it would remove")
+		return 2
+	}
+	if d.prune == nil {
+		fmt.Fprintln(errw, "forge-api prune: not available")
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	inst, found, err := d.prune(ctx, *station, *dry)
+	if !found && err == nil {
+		fmt.Fprintf(out, "station %s has no stk instance in this node's registry; nothing to remove\n", *station)
+		return 0
+	}
+	verb := "removed"
+	if *dry {
+		verb = "would remove"
+	}
+	if found {
+		fmt.Fprintf(out, "%s instance %s (unit %s, user %s, state %s, config %s)\n", verb, inst.Name, inst.Unit(), inst.User(), inst.StateDir, filepath.Dir(inst.ConfigPath))
+	}
+	if err != nil {
+		fmt.Fprintf(errw, "forge-api prune: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func forgeAPICmd(args []string, out, errw io.Writer) int {
@@ -205,8 +314,11 @@ func forgeAPICmdWith(args []string, out, errw io.Writer, d forgeAPIDeps) int {
 		fmt.Fprintln(out, commandHelp("forge-api"))
 		return 0
 	}
+	if args[0] == "prune" {
+		return forgeAPIPrune(args[1:], out, errw, d)
+	}
 	if args[0] != "setup" {
-		fmt.Fprintf(errw, "forge-api: unknown verb %q (try: setup)\n", args[0])
+		fmt.Fprintf(errw, "forge-api: unknown verb %q (try: setup, prune)\n", args[0])
 		return 2
 	}
 	fs := flag.NewFlagSet("forge-api setup", flag.ContinueOnError)

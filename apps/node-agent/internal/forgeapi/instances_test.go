@@ -114,11 +114,14 @@ func newFixture(t *testing.T, mod ...func(*fixture, *InstancesConfig)) *fixture 
 		RegistryPath:     filepath.Join(root, "agentpod", "stk-instances.json"),
 		SharedPolicyPath: filepath.Join(root, "agentpod", "stk-shared.yaml"),
 		StateRoot:        filepath.Join(root, "var"), ConfigRoot: filepath.Join(root, "etc"), RuntimeRoot: filepath.Join(root, "run"),
-		Lifecycle:  fx.lc,
-		AgentUIDs:  uidFor,
-		userExists: func(n string) bool { fx.mu.Lock(); defer fx.mu.Unlock(); return fx.installed[n] },
-		portFree:   func(int) bool { return true },
-		env:        &sysEnv{goos: "linux", euid: 0},
+		Lifecycle: fx.lc,
+		AgentUIDs: uidFor,
+		// The test node can start every path of a station as that station's own uid; the real
+		// node cannot (see TestSpawnPath...).
+		HarnessRunsAs: func(st, _ string) (int, bool) { return fx.cfg.AgentUIDs(st)[0], true },
+		userExists:    func(n string) bool { fx.mu.Lock(); defer fx.mu.Unlock(); return fx.installed[n] },
+		portFree:      func(int) bool { return true },
+		env:           &sysEnv{goos: "linux", euid: 0},
 	}
 	fx.cfg.NewClient = func(inst Instance) stkclient.Client {
 		fx.mu.Lock()
@@ -1229,7 +1232,7 @@ func TestDistinctAgentUIDsAreSeparateUser(t *testing.T) {
 }
 
 func TestOverlapWithJustOneOfSeveralStationsIsRefused(t *testing.T) {
-	uids := map[string][]int{"stn_1": {1}, "stn_2": {2, 3}, "stn_3": {3}}
+	uids := map[string][]int{"stn_1": {1}, "stn_2": {3}, "stn_3": {3}}
 	fx := newFixture(t, func(_ *fixture, c *InstancesConfig) { c.AgentUIDs = func(s string) []int { return uids[s] } })
 	for _, st := range []string{"stn_1", "stn_2"} {
 		if _, err := fx.deliver(st, "fag_"+st, "forge.example.com"); err != nil {
@@ -1308,7 +1311,8 @@ func TestTheCredentialIsForgottenBeforeTheCopyLeavesThePolicy(t *testing.T) {
 }
 
 func TestAFailedForgetKeepsTheCopyAndIsRetried(t *testing.T) {
-	fx := newFixture(t)
+	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	fx := newFixture(t, func(_ *fixture, c *InstancesConfig) { c.now = func() time.Time { return now } })
 	_ = os.MkdirAll(filepath.Dir(fx.cfg.SharedPolicyPath), 0o700)
 	_ = os.WriteFile(fx.cfg.SharedPolicyPath, []byte(sharedBase), 0o644)
 	if _, err := fx.m.Status(context.Background(), StatusParams{StationID: "stn_1"}); err != nil {
@@ -1322,6 +1326,7 @@ func TestAFailedForgetKeepsTheCopyAndIsRetried(t *testing.T) {
 		t.Fatal("the copy left the policy although its credential could not be forgotten")
 	}
 	stub.onRevoke = nil
+	now = now.Add(2 * refreshBackoff)
 	_, _ = fx.m.Status(context.Background(), StatusParams{StationID: "stn_1"})
 	if serviceNode(t, fx.policyOf("stn_1"), "slack") != nil {
 		t.Fatal("not retried on the next frame")
@@ -1354,5 +1359,82 @@ func TestStatusReportsASharedPolicyThatCouldNotBeSeeded(t *testing.T) {
 	st, err := fx.m.Status(context.Background(), StatusParams{StationID: "stn_1"})
 	if err != nil || len(st.Warnings) != 1 || !strings.Contains(st.Warnings[0], "shared base policy") {
 		t.Fatalf("%+v %v", st, err)
+	}
+}
+
+// ---- isolation is judged on where agents REALLY run ----
+
+func TestSpawnPathStationsRunAtTheNodeUIDWhateverStationUIDsSays(t *testing.T) {
+	// stationUids maps each station to its own uid, but the node spawns with plain exec: the
+	// agents it starts run as the node (root on any node that has instances).
+	fx := newFixture(t, func(_ *fixture, c *InstancesConfig) { c.HarnessRunsAs = nil })
+	ack, err := fx.deliver("stn_1", "fag_1", "forge.example.com")
+	if err != nil || !ack.OK {
+		t.Fatalf("%+v %v", ack, err)
+	}
+	if ack.Isolation != "same-user" || ack.IsolationDetail != IsolationNodeUID {
+		t.Fatalf("a spawn-path agent runs as the node, not separate-user: %+v", ack)
+	}
+	if !strings.Contains(ack.Reason, "agents run as root") {
+		t.Errorf("reason = %q, want the root-agent reason", ack.Reason)
+	}
+	st, err := fx.m.Status(context.Background(), StatusParams{StationID: "stn_1"})
+	if err != nil || len(st.Grants) != 1 || st.Grants[0].Isolation != "same-user" || st.Grants[0].IsolationDetail != IsolationNodeUID {
+		t.Fatalf("status = %+v %v", st, err)
+	}
+	v, err := fx.m.Verify(context.Background(), VerifyParams{StationID: "stn_1", GrantID: "fag_1", ExpectLogin: "agent-press"})
+	if err != nil || v.Isolation != "same-user" || v.IsolationDetail != IsolationNodeUID {
+		t.Fatalf("verify = %+v %v", v, err)
+	}
+	// distinct stationUids do not save a second station
+	_, err = fx.deliver("stn_2", "fag_2", "forge.example.com")
+	if err == nil || !strings.HasPrefix(err.Error(), "station-uid-shared:") {
+		t.Fatalf("second station err = %v", err)
+	}
+	if _, ok := fx.m.Instance("stn_2"); ok {
+		t.Error("the refused station is registered")
+	}
+}
+
+func TestSpawnPathStationsAcknowledgedReportSharedUIDAndJoinTheReasons(t *testing.T) {
+	fx := newFixture(t, func(_ *fixture, c *InstancesConfig) { c.HarnessRunsAs = nil; c.AllowSharedAgentUID = true })
+	if _, err := fx.deliver("stn_1", "fag_1", "forge.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	ack, err := fx.deliver("stn_2", "fag_2", "forge.example.com")
+	if err != nil || ack.Isolation != "same-user" || ack.IsolationDetail != IsolationSharedUID {
+		t.Fatalf("%+v %v", ack, err)
+	}
+	// the root-agent reason and the shared-uid message are BOTH told, not one replacing the other
+	if !strings.Contains(ack.Reason, "agents run as root") || !strings.Contains(ack.Reason, "share an agent uid") {
+		t.Fatalf("reason = %q", ack.Reason)
+	}
+}
+
+func TestEveryPathRunningAsADistinctNonNodeUIDIsSeparateUser(t *testing.T) {
+	// A per-profile Hermes user unit as the only path, under its own uid.
+	fx := newFixture(t, func(_ *fixture, c *InstancesConfig) {
+		c.HarnessRunsAs = func(st, path string) (int, bool) { return uidFor(st)[0], true }
+	})
+	for _, st := range []string{"stn_1", "stn_2"} {
+		ack, err := fx.deliver(st, "fag_"+st, "forge.example.com")
+		if err != nil || ack.Isolation != "separate-user" || ack.IsolationDetail != "" || ack.Reason != "" {
+			t.Fatalf("%s: %+v %v", st, ack, err)
+		}
+	}
+}
+
+func TestOneUnknownPathMakesTheWholeStationRunAtTheNodeUID(t *testing.T) {
+	fx := newFixture(t, func(_ *fixture, c *InstancesConfig) {
+		c.HarnessRunsAs = func(st, path string) (int, bool) {
+			if path == "gateway" {
+				return uidFor(st)[0], true
+			}
+			return 0, false // spawn: unknown
+		}
+	})
+	ack, err := fx.deliver("stn_1", "fag_1", "forge.example.com")
+	if err != nil || ack.Isolation != "same-user" || ack.IsolationDetail != IsolationNodeUID {
+		t.Fatalf("%+v %v", ack, err)
 	}
 }

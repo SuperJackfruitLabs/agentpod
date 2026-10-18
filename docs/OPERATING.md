@@ -2136,37 +2136,60 @@ to), `apps/hub/src/services/station-forge-api.ts` (lifecycle), and
 **Needs a node that supports it.** A station's node must advertise the `forge.api` capability;
 an older node answers `capability-missing` rather than doing nothing.
 
-**One broker per station, and one agent uid per station.** A node that hosts several stations runs
-several `stk` instances, one per station, so one station's agent cannot use another station's
-brokered credential and two stations can hold grants for the same forge host. **That holds only if
-each station's agents run as a different OS user.** Agents that share a uid can read each other's
-process environment and the harness drop-in files (where the loopback proxy key lives), and the
-broker's control socket admits agents by uid, so one station's agent could act as the other. The
-node does not switch uids itself; you tell it which uid each station's agents run as
-(`forgeApi.stationUids`, a map of station id to uids in the node config; a station not listed is
-taken to run as the node's own uid) and start the harnesses that way. A second station whose uids
-overlap another's is **refused** (`station-uid-shared`, on deliver and on the status call that
-fetches the key); the first station on a node is never refused. To accept the weaker isolation
-anyway set `forgeApi.allowSharedAgentUid` (or `AGENTPOD_ALLOW_SHARED_AGENT_UID=1`, or
-`--allow-shared-agent-uid` on `forge-api setup --station`): the stations are then served, every
-reply reports isolation `same-user` (with `isolationDetail: "shared-uid"`) and the node logs a
-warning once per instance. The node advertises the `forge.api` capability only when it is root on
-Linux, since a node that cannot create instances would fail every grant; elsewhere the hub says
-`capability-missing`. Each instance has its own OS user
-(`stk-<station>-<hash>`, derived from the station id), state directory (`/var/lib/<name>`), policy
-file (`/etc/<name>/supertoolkit.yaml`), runtime directory (`/run/<name>`), proxy port, proxy key
-and systemd unit. The node creates the instance itself, the first time the hub asks for the
-station's key (`status`) or delivers a grant, and only when it runs as root on Linux with
-systemd; on a node that cannot, deliver and status fail with `station-instance-unavailable` (run
-`sudo agentpod-node forge-api setup --station <stationId>` instead, or run the node as root). The
-node never falls back to a shared broker. When a station is no longer hosted its whole instance
-(unit, state, user) is removed, and only instances in the node's registry are ever touched.
+**One broker per station, and what "isolated" means here.** A node that hosts several stations runs
+several `stk` instances, one per station, each with its own OS user (`stk-<station>-<hash>`), state
+directory (`/var/lib/<name>`), policy file (`/etc/<name>/supertoolkit.yaml`), runtime directory
+(`/run/<name>`), proxy port, proxy key and systemd unit, so two stations can hold grants for the
+same forge host and one station's credential is never in another's store. The node creates the
+instance itself, the first time the hub asks for the station's key (`status`) or delivers a grant,
+and only when it runs as root on Linux with systemd; on a node that cannot, deliver and status
+fail with `station-instance-unavailable` (run `sudo agentpod-node forge-api setup --station
+<stationId>` instead), and the node does not advertise `forge.api` at all, so the hub says
+`capability-missing`. The node never falls back to a shared broker.
+
+**An agent only counts as isolated if it runs as a user of its own, and today the node cannot make
+that so.** The node starts ACP sessions and terminals with a plain exec and no uid switch: the
+agents it spawns run as **the node's own user, root on any node that has instances**. A broker
+protects nothing from an agent that is root or that shares a uid with another station: such an agent
+can read other processes' environment and the harness files (where the loopback proxy key lives),
+and the broker's control socket admits agents by uid. So the node judges isolation on where each
+agent path of a station REALLY runs, and does not take `forgeApi.stationUids` (a declaration) as
+proof: a station is `separate-user` only if the stk instance is separate-user AND every path its
+harness has (`spawn` always; a long-lived `gateway` unit for Hermes) runs as a distinct non-node uid.
+Spawned sessions run as the node and an unknown path counts as the node's uid, so **today every
+station is reported `same-user`**, with `isolationDetail` `node-uid` (a lone station) or
+`shared-uid` (two stations at the same uid), and a reason that names every cause (agents run as
+root; stations share an agent uid). Nothing here spawns an agent as another user. Consequences:
+
+- A second station is **refused** (`station-uid-shared`, on deliver and on the status call that
+  fetches the key); the first station on a node is never refused. `forgeApi.stationUids` does not
+  lift the refusal for spawn-path stations (it still sets who may use the broker's control socket
+  and who owns a systemd-started harness's environment file).
+- To run several stations on one node anyway, acknowledge the weaker isolation with
+  `forgeApi.allowSharedAgentUid` (or `AGENTPOD_ALLOW_SHARED_AGENT_UID=1`, or
+  `--allow-shared-agent-uid` on `forge-api setup --station`). The stations are then served, every
+  reply reports isolation `same-user` with `isolationDetail: "shared-uid"`, and the node logs a
+  warning once per instance. Treat those stations as able to act as each other.
+- Station-by-station separation of agents (each one under its own user) is a different job from
+  this one; until it exists, per-station brokers keep **credentials** apart, not **agents**.
 
 | Setting | Node config (`forgeApi`) | Environment | Default |
 |---|---|---|---|
 | Proxy port range | `proxyPortMin`, `proxyPortMax` | `AGENTPOD_STK_PORTS=MIN-MAX` | `8900-8999` |
 | Shared base policy | `sharedPolicy` | `AGENTPOD_STK_SHARED_POLICY` | `/etc/agentpod/stk-shared.yaml` |
 | Instance registry (0600) | `registry` | `AGENTPOD_STK_REGISTRY` | `/var/lib/agentpod/forge-api/stk-instances.json` |
+
+**Removing a station's instance is manual.** Nothing removes an instance for you: a station that
+leaves the node keeps its user, unit, state, credentials and proxy port until you run
+`sudo agentpod-node forge-api prune --station <stationId> --dry-run` (says what would go) and then
+`... prune --station <stationId> --yes`. It removes that one station's whole instance (stops and
+removes the unit, deletes the user, state and policy, removes the harness files) and frees its port,
+and it only ever touches instances in the registry. Without a way for the node to learn which
+stations the hub still owns, an automatic removal could delete live credentials, so none exists. The
+node also refuses a deliver for a station key it does not itself detect (`station-not-hosted`) and a
+status for a station whose recorded key it no longer detects, without creating anything; a station
+can only be bound to one key (`station-key-changed`), and a first status for a station the node has
+never seen cannot be checked (the frame carries no key).
 
 The registry remembers which name and port belong to which station, so a restart reuses them. When
 the port range is used up the next station is refused with `port-range-exhausted` (widen the range
@@ -2190,7 +2213,9 @@ The node refuses to write the file for a station whose agent uid is the node's o
 other default-mapped station can read isolates nothing. **A running process keeps the environment
 it started with**, so when a deliver or revoke changes the environment under a running unit the
 ack says `needsRestart: true`; the node does not restart it (it cannot know the agent is not
-mid-turn), restart the station from lifecycle. The node never sets or changes `NO_PROXY` /
+mid-turn). **The hub ignores `needsRestart` today**, so nothing tells the operator: after a grant
+or a revoke on a station whose harness unit is running, restart the station from lifecycle
+yourself, or the old environment stays in force. The node never sets or changes `NO_PROXY` /
 `no_proxy`; if one already covers a forge host (or is `*`) the harness bypasses the broker, and
 the node logs a warning once. A proxy variable the harness environment or unit already sets
 (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, either case) blocks the broker for that harness: it is

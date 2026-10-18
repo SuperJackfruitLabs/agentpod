@@ -1046,6 +1046,7 @@ Set up stk as this station's forge credential broker (setup).
 ```text
 apn forge-api setup [--user NAME] [--agent-uid N]... [--state-dir DIR] [--stk PATH]
 apn forge-api setup --station ID [--agent-uid N]... [--allow-shared-agent-uid]
+apn forge-api prune --station ID [--dry-run] [--yes]
 ```
 
 | Flag | Type | Default | Meaning |
@@ -1055,13 +1056,16 @@ apn forge-api setup --station ID [--agent-uid N]... [--allow-shared-agent-uid]
 | `--state-dir DIR` | string | stk's own (`/var/lib/stk`) | Stk state directory (default: stk's own). |
 | `--stk PATH` | string | `stk` | The stk binary. |
 | `--allow-shared-agent-uid` | bool | `false` | With `--station`: acknowledge that stations whose agents share a uid are not isolated from each other (otherwise a second station on a uid already in use is refused with `station-uid-shared`). Same as `allowSharedAgentUid` in the node config. |
-| `--station ID` | string | — | Create this station's own stk instance now, as the node would at its first grant: own OS user, state, policy file, proxy port and systemd unit, all derived from the id. Cannot be combined with `--user`, `--state-dir` or `--stk`. |
+| `--dry-run` | bool | `false` | With `prune`: say what would be removed and remove nothing. |
+| `--yes` | bool | `false` | With `prune`: confirm. `prune` deletes the station's stk user, state, every credential it holds and its harness wiring, and nothing runs it automatically. |
+| `--station ID` | string | — | `setup`: create this station's own stk instance now, as the node would at its first grant: own OS user, state, policy file, proxy port and systemd unit, all derived from the id. Cannot be combined with `--user`, `--state-dir` or `--stk`. |
 
 `apn help forge-api` prints:
 
 ```text
 apn forge-api setup [--user stk] [--agent-uid N]... [--state-dir DIR] [--stk PATH]
 apn forge-api setup --station ID [--agent-uid N]... [--allow-shared-agent-uid]
+apn forge-api prune --station ID [--dry-run] [--yes]
 
 Installs stk as its own OS user so the agent can use forge credentials
 without being able to read them. Run it once with sudo; it is safe to
@@ -1081,6 +1085,12 @@ A second station whose agents run as a uid another station already uses
 is refused (station-uid-shared): isolation between stations needs a
 distinct uid per station. --allow-shared-agent-uid acknowledges the
 risk; the station's grants then report same-user isolation.
+
+prune removes ONE station's whole stk instance (its unit, user, state,
+policy and every credential it holds, and the harness wiring) when the
+station is gone from this node. It is manual: nothing removes an instance
+for you. --dry-run says what it would remove; without it --yes is
+required. A station the node's registry does not list is left alone.
 
 Exit 0 on separate-user or on a clearly reported same-user; 1 on errors.
 ```

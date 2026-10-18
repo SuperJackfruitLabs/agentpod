@@ -210,16 +210,23 @@ new occupant starts with nothing.
 an older node answers `capability-missing` rather than doing nothing.
 
 **One broker per station.** Each station gets its own broker on the node, with its own OS user,
-store, policy and proxy key, so one station's agent cannot use another station's credential, and
-two stations can hold grants for the same forge host, **provided each station's agents run as a
-different OS user**: agents that share a uid can read each other's environment and use each other's
-broker, so the node refuses a second station on a uid already in use (`station-uid-shared`) unless
-the operator acknowledges the weaker isolation, in which case grants report `same-user`. The node
-creates it the first time it is
-needed and needs to run as root on Linux with systemd to do so; otherwise grants fail with
-`station-instance-unavailable`. An operator can also list services every station needs in a
-*shared base policy* file, which the node copies into each station's own policy
-(`/etc/agentpod/stk-shared.yaml` by default; its credentials are not delivered for you).
+store, policy and proxy key, so one station's credential is never in another's store, and two
+stations can hold grants for the same forge host. The node creates it the first time it is needed
+and must run as root on Linux with systemd to do so; otherwise the node does not offer forge API
+access at all.
+
+**What that does not do.** The node starts agent sessions and terminals as itself, not as a user of
+the station's own, so the agents it starts run as the node's user (root, on a node with brokers). An
+agent that is root, or that shares a user with another station, can read what the broker protects, so
+such a station's grants report isolation `same-user` (`isolationDetail`: `node-uid` or `shared-uid`)
+and the node refuses a second station on a node (`station-uid-shared`) unless the operator
+acknowledges that the stations are not isolated from each other. Separate brokers keep credentials
+apart, not agents. An instance is never removed automatically: `apn forge-api prune --station
+<stationId> --yes` does it, by hand. A grant's `present` in `list` means the node holds a policy entry
+for it, not that the credential was delivered or works; `verify` says that. An operator can also list
+services every station needs in a *shared base policy* file, which the node copies into each
+station's own policy (`/etc/agentpod/stk-shared.yaml` by default; its credentials are not delivered
+for you).
 The proxy port range and the file locations are settings in the node config; the operating guide lists them.
 
 ### Limits

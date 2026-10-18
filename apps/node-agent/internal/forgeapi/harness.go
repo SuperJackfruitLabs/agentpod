@@ -158,7 +158,7 @@ func checkOwnProxy(env map[string]string, inst Instance) error {
 // its own, and when the environment cannot be had (logged, never with a value): the harness then
 // starts as it would have, with no route to the forge rather than a wrong one.
 func (m *StationInstances) EnvForKey(key string) (map[string]string, []string) {
-	if m.cfg.Harness == nil || strings.TrimSpace(key) == "" {
+	if m == nil || m.cfg.Harness == nil || strings.TrimSpace(key) == "" {
 		return nil, nil
 	}
 	recs, err := m.readRecords()
@@ -253,6 +253,39 @@ func (m *StationInstances) checkKeyFree(station, key string) error {
 	}
 	if keyHolder(recs, key, station) != "" {
 		return codedf("station-key-in-use", "the key %s already belongs to another station on this node", clean(key))
+	}
+	if have := recs[station].StationKey; have != "" && have != key {
+		return codedf("station-key-changed", "this station is bound to the key %s on this node and cannot take another; prune its instance first (apn forge-api prune)", clean(have))
+	}
+	return nil
+}
+
+// precheckWiring makes the checks wireStation would make that need no credential and no instance:
+// the unit names, a unit another instance already serves, and the owner of the env file. A deliver
+// that would fail the wiring fails here, before anything is stored.
+func (m *StationInstances) precheckWiring(station, key string) error {
+	h := m.cfg.Harness
+	if h == nil || strings.TrimSpace(key) == "" {
+		return nil
+	}
+	units := h.units(key)
+	if len(units) == 0 {
+		return nil
+	}
+	name := ""
+	if recs, err := m.readRecords(); err == nil {
+		name = recs[station].Name
+	}
+	for _, u := range units {
+		if !unitNameRE.MatchString(u) {
+			return codedf("harness-wiring-failed", "refusing unit name %q", clean(u))
+		}
+		if m.otherInstanceHoldsUnit(Instance{Name: name}, u) {
+			return codedf("harness-unit-in-use", "the unit %s already carries another station's environment file; one unit serves one station", clean(u))
+		}
+	}
+	if _, err := m.harnessOwner(station); err != nil {
+		return err
 	}
 	return nil
 }
@@ -435,7 +468,7 @@ func (m *StationInstances) setBlocked(station, source, reason string) {
 // left without the broker because the descriptor's own environment sets a proxy variable. Names
 // only, never values.
 func (m *StationInstances) NoteBlocked(key string, names []string) {
-	if m.cfg.Harness == nil {
+	if m == nil || m.cfg.Harness == nil {
 		return
 	}
 	recs, err := m.readRecords()

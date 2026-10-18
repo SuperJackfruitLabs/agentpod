@@ -342,6 +342,8 @@ cmd_file_issue() {
   [[ "$var" =~ ^[A-Z][A-Z0-9_]{0,63}$ ]] || die "AGENTPOD_ACCEPT_ENV_VAR must look like FORGEJO_TOKEN"
   [ -n "$login" ] || die "set AGENTPOD_ACCEPT_EXPECT_LOGIN (the account the issue must be authored by)"
   [ -n "$forge" ] || die "set FORGE_URL"
+  # FORGE_URL ends up inside a command run in the agent's shell; hold it to the same shape as --url.
+  [[ "$forge" =~ ^https?://[A-Za-z0-9._:/@%+-]+$ ]] || die "FORGE_URL has unexpected characters"
   command -v jq >/dev/null 2>&1 || die "jq is required to build and read back the issue"
   local scheme="${AGENTPOD_ACCEPT_AUTH_SCHEME:-token}" word
   case "$scheme" in token) word=token ;; bearer) word=Bearer ;; *) die "AGENTPOD_ACCEPT_AUTH_SCHEME must be token or bearer" ;; esac

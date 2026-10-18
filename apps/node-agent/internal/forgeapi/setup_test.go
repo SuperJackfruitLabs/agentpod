@@ -452,10 +452,10 @@ func TestEnsurerPanicDoesNotWedgeLaterCalls(t *testing.T) {
 		}
 		return SetupResult{Report: rep("separate-user")}, nil
 	}}
-	func() {
-		defer func() { _ = recover() }()
-		_, _ = e.Ensure(context.Background())
-	}()
+	// the panic fails that setup (an error), and does not crash the process
+	if _, err := e.Ensure(context.Background()); err == nil || !strings.Contains(err.Error(), "panicked") {
+		t.Fatalf("first call err = %v", err)
+	}
 	done := make(chan error, 1)
 	go func() { _, err := e.Ensure(context.Background()); done <- err }()
 	select {

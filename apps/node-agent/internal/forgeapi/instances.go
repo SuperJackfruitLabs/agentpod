@@ -111,6 +111,20 @@ type InstancesConfig struct {
 	// AllowSharedAgentUID is the operator's explicit acknowledgement that stations whose agents
 	// share a uid are not isolated from each other. Default false (fail closed).
 	AllowSharedAgentUID bool
+	// HarnessRunsAs says which uid a path of a station's harness really runs as: "spawn" (ACP
+	// sessions and terminals the node starts) or "gateway" (a long-lived unit of the station's
+	// own). known is false when the node cannot tell, and an unknown path counts as running at
+	// the NODE's uid. The node spawns with plain exec and no uid switch, so its own supply says
+	// "spawn" runs as the node: an isolation verdict of separate-user is only possible when every
+	// path the station has runs as a distinct non-node uid. Nil: nothing is known.
+	HarnessRunsAs func(station, path string) (uid int, known bool)
+	// Hosted says whether this node itself detects a station with this key (the descriptor
+	// registry). A deliver for a key it does not detect, and a status for a station whose
+	// recorded key it no longer detects, is refused `station-not-hosted` without creating
+	// anything. Nil: not checked (tests, the CLI). The node cannot know a hub station id, only
+	// keys, so a first status for a station that has no recorded key is the one case it cannot
+	// bind.
+	Hosted func(key string) bool
 	// Unwire removes the harness wiring for a grant (Task 5); Bypass is the bypass check (Task 6).
 	Unwire        func(grantID string) error
 	Bypass        func(ctx context.Context, c stkclient.Client) []ClientOutcome
@@ -122,6 +136,7 @@ type InstancesConfig struct {
 	Harness *HarnessWiring
 
 	// test seams
+	onRefresh  func(station string) // a shared-policy refresh was attempted for the station
 	now        func() time.Time
 	geteuid    func() int
 	env        *sysEnv
@@ -143,13 +158,13 @@ type StationInstances struct {
 	warned   map[string]bool
 	seedWarn map[string]string // station -> why the shared base policy was not seeded
 
-	wiringMu   sync.Mutex                   // serialises harness wiring (env files and drop-ins)
-	blocked    map[string]map[string]string // station -> source ("spawn", "unit") -> why wiring is blocked; guarded by mu
-	refreshMu  sync.Mutex                   // serialises shared-policy refreshes
-	sharedHash string
-	sharedSeen bool
-	probeMu    sync.Mutex
-	probes     map[string]cachedProbe // station -> last clean bypass probe
+	wiringMu    sync.Mutex                   // serialises harness wiring (env files and drop-ins)
+	blocked     map[string]map[string]string // station -> source ("spawn", "unit") -> why wiring is blocked; guarded by mu
+	refreshMu   sync.Mutex                   // serialises shared-policy refreshes
+	sharedFP    map[string]string            // station -> fingerprint of the shared file last applied to it
+	sharedRetry map[string]time.Time         // station -> do not retry its failed refresh before
+	probeMu     sync.Mutex
+	probes      map[string]cachedProbe // station -> last clean bypass probe
 }
 
 type stationState struct {
@@ -462,39 +477,125 @@ func (m *StationInstances) allocate(recs map[string]record, station string, uids
 
 const sharedUIDMessage = "stations on this node share an agent uid, so per-station isolation cannot hold; give each station's agents their own uid through the node's per-station uid mapping (forgeApi.stationUids), or acknowledge the risk with allowSharedAgentUid"
 
+// ---- where a station's agents really run ----
+
+// isolationInfo is the part of the isolation verdict that comes from uids: Shared when the
+// station's agents share a uid with another registered station, NodeUID when they run as the uid
+// the node itself runs as.
+type isolationInfo struct{ Shared, NodeUID bool }
+
+// effectiveUIDs are the uids the station's agent paths REALLY run as: every path its harness has
+// ("spawn" always; a long-lived "gateway" for Hermes and OpenClaw), each asked of HarnessRunsAs,
+// with an unknown path counting as the node's own uid. A station whose key the node does not yet
+// know has the spawn path only. forgeApi.stationUids is not consulted: the node starts ACP
+// sessions and terminals with plain exec, so they run as the node whatever the operator mapped.
+func (m *StationInstances) effectiveUIDs(station, key string) []int {
+	paths := []string{"spawn"}
+	if strings.TrimSpace(key) != "" {
+		paths = HarnessPaths(harnessOf(key))
+	}
+	var out []int
+	seen := map[int]bool{}
+	for _, p := range paths {
+		uid, known := 0, false
+		if m.cfg.HarnessRunsAs != nil {
+			uid, known = m.cfg.HarnessRunsAs(station, p)
+		}
+		if !known {
+			uid = m.env.euid
+		}
+		if !seen[uid] {
+			seen[uid] = true
+			out = append(out, uid)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+func (m *StationInstances) isolationOf(recs map[string]record, station string, uids []int) isolationInfo {
+	info := isolationInfo{Shared: sharesUID(recs, station, uids)}
+	for _, u := range uids {
+		if u == m.env.euid {
+			info.NodeUID = true
+		}
+	}
+	return info
+}
+
+const nodeUIDMessage = "this station's agents run as the uid the node itself runs as (the node starts agent sessions and terminals without switching users), so the broker's separate user protects nothing from them"
+
+// joinReasons joins the distinct non-empty reasons: a degraded verdict tells every cause.
+func joinReasons(rs ...string) string {
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range rs {
+		if r = strings.TrimSpace(r); r != "" && !seen[r] {
+			seen[r] = true
+			out = append(out, r)
+		}
+	}
+	return strings.Join(out, "; ")
+}
+
+// degrade applies the uid part of the verdict to an ack's isolation fields. reason may be nil.
+func (i isolationInfo) degrade(isolation, detail, reason *string) {
+	switch {
+	case i.Shared:
+		*isolation, *detail = "same-user", IsolationSharedUID
+		if reason != nil {
+			*reason = joinReasons(*reason, nodeUIDIf(i), sharedUIDMessage)
+		}
+	case i.NodeUID:
+		*isolation, *detail = "same-user", IsolationNodeUID
+		if reason != nil {
+			*reason = joinReasons(*reason, nodeUIDMessage)
+		}
+	}
+}
+
+func nodeUIDIf(i isolationInfo) string {
+	if i.NodeUID {
+		return nodeUIDMessage
+	}
+	return ""
+}
+
 // ---- per-station state ----
 
 // lookup returns the station's state. With create it registers the station (name, port, uids; no
 // instance on the host yet) under the registry lock, refusing `station-uid-shared` when its agents
 // share a uid with another registered station and the operator has not acknowledged that. shared
 // reports an acknowledged overlap. A station with no record and create unset is (nil, false, nil).
-func (m *StationInstances) lookup(station string, create bool) (st *stationState, shared bool, err error) {
+func (m *StationInstances) lookup(station string, create bool) (st *stationState, iso isolationInfo, err error) {
 	if err := checkStationID(station); err != nil {
-		return nil, false, err
+		return nil, isolationInfo{}, err
 	}
 	m.mu.Lock()
 	removing := m.removing[station]
 	m.mu.Unlock()
 	if removing {
-		return nil, false, codedf("station-instance-removing", "this station's stk instance is being removed")
+		return nil, isolationInfo{}, codedf("station-instance-removing", "this station's stk instance is being removed")
 	}
 
 	var r record
 	if !create {
 		recs, err := m.readRecords()
 		if err != nil {
-			return nil, false, err
+			return nil, isolationInfo{}, err
 		}
 		var ok bool
 		if r, ok = recs[station]; !ok {
-			return nil, false, nil
+			return nil, isolationInfo{}, nil
 		}
-		shared = sharesUID(recs, station, r.AgentUIDs)
+		iso = m.isolationOf(recs, station, r.AgentUIDs)
 	} else {
-		uids := m.cfg.AgentUIDs(station)
 		err := m.updateRecords(func(recs map[string]record) (bool, error) {
-			shared = sharesUID(recs, station, uids)
-			if shared && !m.cfg.AllowSharedAgentUID {
+			// Judged on where the agents REALLY run, not on what the operator mapped (see
+			// effectiveUIDs).
+			uids := m.effectiveUIDs(station, recs[station].StationKey)
+			iso = m.isolationOf(recs, station, uids)
+			if iso.Shared && !m.cfg.AllowSharedAgentUID {
 				return false, codedf("station-uid-shared", "%s", sharedUIDMessage)
 			}
 			var ok bool
@@ -520,21 +621,21 @@ func (m *StationInstances) lookup(station string, create bool) (st *stationState
 			return true, nil
 		})
 		if err != nil {
-			return nil, false, err
+			return nil, isolationInfo{}, err
 		}
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if shared && !m.warned[station] {
+	if iso.Shared && !m.warned[station] {
 		m.warned[station] = true
 		logf("forgeapi: WARNING: station %s shares an agent uid with another station; per-station isolation does NOT hold (acknowledged by the operator)", station)
 	}
 	if cached := m.states[station]; cached != nil {
-		return cached, shared, nil
+		return cached, iso, nil
 	}
 	st = m.build(m.instanceFor(r))
 	m.states[station] = st
-	return st, shared, nil
+	return st, iso, nil
 }
 
 func (m *StationInstances) build(inst Instance) *stationState {
@@ -549,6 +650,7 @@ func (m *StationInstances) build(inst Instance) *stationState {
 	}
 	env := m.env
 	env.harnessUIDs = func() []int { return m.cfg.AgentUIDs(inst.Station) }
+	opts.EffectiveUIDs = func() []int { return m.effectiveUIDs(inst.Station, m.keyOf(inst.Station)) }
 	ens := &Ensurer{run: func(ctx context.Context) (SetupResult, error) {
 		if env.goos != "linux" || env.euid != 0 {
 			return SetupResult{}, fmt.Errorf("%w (this node: %s, uid %d)", ErrInstanceUnavailable, env.goos, env.euid)
@@ -558,7 +660,17 @@ func (m *StationInstances) build(inst Instance) *stationState {
 		// some other store.
 		o.ForceInstall = !m.cfg.userExists(inst.User())
 		return ensureF(ctx, newClient, o, env)
-	}}
+	},
+		// A verdict is true of these uids and of the broker as doctor sees it now.
+		fingerprint: func() string {
+			return fmt.Sprint(m.cfg.AgentUIDs(inst.Station), m.effectiveUIDs(inst.Station, m.keyOf(inst.Station)))
+		},
+		recheck: func(ctx context.Context) bool {
+			rep, err := newClient().Doctor(ctx)
+			return err == nil && rep.Isolation.Level == LevelSeparateUser
+		},
+		now: m.clockNow,
+	}
 	st := &stationState{inst: inst}
 	st.svc = &Service{
 		Ensure: ens.Ensure, NewClient: newClient, PolicyPath: inst.ConfigPath,
@@ -632,6 +744,9 @@ func (m *StationInstances) Ensure(ctx context.Context, station string) (SetupRes
 // hub's schema does not know would make the whole reply unreadable.
 const IsolationSharedUID = "shared-uid"
 
+// IsolationNodeUID: the station's agents run as the uid the node itself runs as.
+const IsolationNodeUID = "node-uid"
+
 // ---- the verbs, routed by station ----
 
 func (m *StationInstances) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, error) {
@@ -640,12 +755,20 @@ func (m *StationInstances) Deliver(ctx context.Context, p DeliverParams) (Delive
 	if _, err := validateDeliver(p); err != nil {
 		return DeliverAck{}, err
 	}
+	if err := m.checkHosted(p.StationKey); err != nil {
+		return DeliverAck{}, err
+	}
 	m.maybeRefreshShared(ctx)
-	// A key that already belongs to another station is refused before an instance is created.
+	// A key that already belongs to another station, or a station taking a different key than the
+	// one it has, is refused before an instance is created.
 	if err := m.checkKeyFree(p.StationID, p.StationKey); err != nil {
 		return DeliverAck{}, err
 	}
-	st, shared, err := m.lookup(p.StationID, true)
+	// Every wiring check that can be made without the credential is made before it is stored.
+	if err := m.precheckWiring(p.StationID, p.StationKey); err != nil {
+		return DeliverAck{}, err
+	}
+	st, iso, err := m.lookup(p.StationID, true)
 	if err != nil {
 		return DeliverAck{}, err
 	}
@@ -653,13 +776,19 @@ func (m *StationInstances) Deliver(ctx context.Context, p DeliverParams) (Delive
 	if err != nil {
 		return ack, err
 	}
-	if shared {
-		ack.Isolation, ack.IsolationDetail, ack.Reason = "same-user", IsolationSharedUID, sharedUIDMessage
-	}
+	iso.degrade(&ack.Isolation, &ack.IsolationDetail, &ack.Reason)
 	// The harness is wired only once stk holds the credential. A failure here is the deliver's
 	// failure: the grant would otherwise look usable while the agent has no route to it.
 	res, werr := m.wireStation(ctx, st, p.StationKey)
 	if werr != nil {
+		// The credential is stored and the entry is in the policy: take both out again, so a
+		// grant the hub is told failed is not left brokered. The hub redelivers to try again.
+		if rerr := st.svc.RollbackGrant(ctx, p.StationID, p.GrantID); rerr != nil {
+			return DeliverAck{}, codedf("harness-wiring-failed", "%s; ROLLBACK FAILED, stk may still broker this grant: %s", clean(werr.Error()), clean(rerr.Error()))
+		}
+		if _, cerr := m.wireStation(ctx, st, ""); cerr != nil {
+			logf("forgeapi: could not clear the harness wiring of station %s after a failed deliver: %v", clean(p.StationID), clean(cerr.Error()))
+		}
 		return DeliverAck{}, werr
 	}
 	ack.NeedsRestart, ack.Wired = res.restart, res.wired
@@ -686,7 +815,7 @@ func (m *StationInstances) Verify(ctx context.Context, p VerifyParams) (VerifyAc
 	if strings.TrimSpace(p.StationID) == "" || strings.TrimSpace(p.GrantID) == "" || strings.TrimSpace(p.ExpectLogin) == "" {
 		return VerifyAck{}, codedf("invalid-params", "stationId, grantId and expectLogin are required")
 	}
-	st, shared, err := m.lookup(p.StationID, false)
+	st, iso, err := m.lookup(p.StationID, false)
 	if err != nil {
 		return VerifyAck{}, err
 	}
@@ -697,9 +826,7 @@ func (m *StationInstances) Verify(ctx context.Context, p VerifyParams) (VerifyAc
 	if err != nil {
 		return ack, err
 	}
-	if shared {
-		ack.Isolation, ack.IsolationDetail = "same-user", IsolationSharedUID
-	}
+	iso.degrade(&ack.Isolation, &ack.IsolationDetail, nil)
 	// What the node wired, beside what was measured: the ack never implies brokered coverage the
 	// node did not set up.
 	if ack.Bypass == nil {
@@ -750,8 +877,13 @@ func (m *StationInstances) Revoke(ctx context.Context, p RevokeParams) (RevokeAc
 // where the station shares an agent uid with another, with `station-uid-shared` unless
 // acknowledged. A problem seeding the shared base policy is reported in `warnings`.
 func (m *StationInstances) Status(ctx context.Context, p StatusParams) (StatusAck, error) {
+	if key := m.keyOf(p.StationID); key != "" {
+		if err := m.checkHosted(key); err != nil {
+			return StatusAck{}, err
+		}
+	}
 	m.maybeRefreshShared(ctx)
-	st, shared, err := m.lookup(p.StationID, true)
+	st, iso, err := m.lookup(p.StationID, true)
 	if err != nil {
 		return StatusAck{}, err
 	}
@@ -759,11 +891,13 @@ func (m *StationInstances) Status(ctx context.Context, p StatusParams) (StatusAc
 	if err != nil {
 		return ack, err
 	}
-	if shared {
-		for i := range ack.Grants {
-			ack.Grants[i].Isolation, ack.Grants[i].IsolationDetail = "same-user", IsolationSharedUID
-		}
+	for i := range ack.Grants {
+		iso.degrade(&ack.Grants[i].Isolation, &ack.Grants[i].IsolationDetail, nil)
+	}
+	if iso.Shared {
 		ack.Warnings = append(ack.Warnings, sharedUIDMessage)
+	} else if iso.NodeUID {
+		ack.Warnings = append(ack.Warnings, nodeUIDMessage)
 	}
 	m.mu.Lock()
 	if w := m.seedWarn[p.StationID]; w != "" {
@@ -773,7 +907,59 @@ func (m *StationInstances) Status(ctx context.Context, p StatusParams) (StatusAc
 	return ack, nil
 }
 
+// checkHosted refuses a key the node does not itself detect.
+func (m *StationInstances) checkHosted(key string) error {
+	if m.cfg.Hosted == nil {
+		return nil
+	}
+	if strings.TrimSpace(key) == "" || !m.cfg.Hosted(key) {
+		return codedf("station-not-hosted", "this node does not host a station with the key %s, so it will not create a broker for it", clean(key))
+	}
+	return nil
+}
+
 // ---- removal ----
+
+// Stations lists the stations the registry holds an instance for.
+func (m *StationInstances) Stations() ([]string, error) {
+	recs, err := m.readRecords()
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for st := range recs {
+		out = append(out, st)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// PruneStation removes one registered station's whole instance (the CLI's `forge-api prune`), or,
+// with dryRun, only says what it would remove. A station the registry does not list is (_, false)
+// and nothing is touched. It is the manual counterpart of PruneUnhosted, which no automatic
+// trigger calls.
+func (m *StationInstances) PruneStation(ctx context.Context, station string, dryRun bool) (Instance, bool, error) {
+	recs, err := m.readRecords()
+	if err != nil {
+		return Instance{}, false, err
+	}
+	r, ok := recs[station]
+	if !ok {
+		return Instance{}, false, nil
+	}
+	inst := m.instanceFor(r)
+	if dryRun {
+		return inst, true, nil
+	}
+	var others []string
+	for st := range recs {
+		if st != station {
+			others = append(others, st)
+		}
+	}
+	_, err = m.PruneUnhosted(ctx, others)
+	return inst, true, err
+}
 
 // PruneUnhosted removes the whole instance (unit, state, runtime, policy, user) of every
 // registered station that is not in hosted, and returns those stations. Only instances in the
@@ -903,12 +1089,17 @@ func (m *StationInstances) sharedFingerprint() (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// maybeRefreshShared refreshes every registered instance when the shared base policy differs from
-// the one last applied (and once at the node's first frame, when nothing has been applied yet).
-// Called before deliver, policy and status for ANY station, so a service the operator removed is
-// gone from every station's policy, credential forgotten first, without waiting for that
-// station's own next write. Problems are logged; the fingerprint is kept only after a clean pass,
-// so a failure is retried on the next frame.
+// refreshBackoff is how long a station whose shared-policy refresh failed is left alone.
+const refreshBackoff = 60 * time.Second
+
+// maybeRefreshShared brings every registered instance in line with the shared base policy when it
+// differs from what that instance last had applied. Called before deliver, policy and status for
+// ANY station (and at node start), so a service the operator removed is gone from every station's
+// policy, credential forgotten first, without waiting for that station's own next write.
+//
+// The fingerprint is kept PER STATION: a station that is current is skipped, and one that failed
+// is left alone for refreshBackoff, so one broken station never makes every later frame redo the
+// refresh of all the others (or of itself, in a tight loop).
 func (m *StationInstances) maybeRefreshShared(ctx context.Context) {
 	if m.env.goos != "linux" || m.env.euid != 0 {
 		return // such a node has no instances to refresh
@@ -920,28 +1111,33 @@ func (m *StationInstances) maybeRefreshShared(ctx context.Context) {
 		logf("forgeapi: shared base policy unreadable: %v", clean(err.Error()))
 		return
 	}
-	if m.sharedSeen && fp == m.sharedHash {
-		return
-	}
-	if err := m.refreshAllShared(ctx); err != nil {
+	if err := m.refreshAllShared(ctx, fp); err != nil {
 		logf("forgeapi: shared base policy not refreshed everywhere: %v", clean(err.Error()))
-		return
 	}
-	m.sharedHash, m.sharedSeen = fp, true
 }
 
 // RefreshShared refreshes every registered instance now (the node calls it once at start).
 func (m *StationInstances) RefreshShared(ctx context.Context) {
+	if m == nil {
+		return
+	}
 	m.maybeRefreshShared(ctx)
 }
 
-func (m *StationInstances) refreshAllShared(ctx context.Context) error {
+func (m *StationInstances) refreshAllShared(ctx context.Context, fp string) error {
 	recs, err := m.readRecords()
 	if err != nil {
 		return err
 	}
+	if m.sharedFP == nil {
+		m.sharedFP, m.sharedRetry = map[string]string{}, map[string]time.Time{}
+	}
 	var errs []error
+	now := m.clockNow()
 	for station, r := range recs {
+		if m.sharedFP[station] == fp || now.Before(m.sharedRetry[station]) {
+			continue
+		}
 		m.mu.Lock()
 		removing := m.removing[station]
 		st := m.states[station]
@@ -953,9 +1149,16 @@ func (m *StationInstances) refreshAllShared(ctx context.Context) error {
 		if removing || !m.cfg.userExists(st.inst.User()) {
 			continue // being removed, or never installed: no policy to refresh
 		}
-		if err := st.svc.RefreshShared(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("station %s: %w", station, err))
+		if m.cfg.onRefresh != nil {
+			m.cfg.onRefresh(station)
 		}
+		if err := st.svc.RefreshShared(ctx); err != nil {
+			m.sharedRetry[station] = now.Add(refreshBackoff)
+			errs = append(errs, fmt.Errorf("station %s: %w", station, err))
+			continue
+		}
+		m.sharedFP[station] = fp
+		delete(m.sharedRetry, station)
 	}
 	return errors.Join(errs...)
 }
