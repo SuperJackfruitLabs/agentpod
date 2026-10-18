@@ -8,6 +8,7 @@
   import { autoSignIn, watchSession } from "$lib/auth/org-plane";
   import { VibeRoot } from "@superjackfruit/vibekit";
   import { appearance } from "$lib/appearance.svelte";
+  import AuthFrame from "$lib/components/brand/AuthFrame.svelte";
   import { startWidgetColours } from "$lib/utils/vk-colors";
   import { commandPalette } from "$lib/stores/command-palette.svelte";
   import { Toaster } from "$lib/components/ui/sonner";
@@ -16,7 +17,6 @@
   import { onPaletteShortcut } from "$lib/components/shell/palette-shortcut";
   import { contextRailSlot } from "$lib/stores/context-rail.svelte";
   import CommandPalette from "$lib/components/command-palette.svelte";
-  import { Spinner } from "$lib/components/ui/spinner";
 
   let { children } = $props();
   let isInitializing = $state(true);
@@ -122,12 +122,12 @@
 
   <div class="min-h-screen bg-background text-foreground">
     {#if shouldShowLoading}
-      <div class="flex min-h-screen items-center justify-center bg-background">
-        <div class="flex flex-col items-center gap-3">
-          <Spinner size="lg" />
-          <p class="text-sm text-muted-foreground">Connecting…</p>
+      <AuthFrame center>
+        <div class="grid justify-items-center gap-3.5" role="status">
+          <div class="ap-spin" aria-hidden="true"></div>
+          <p class="ap-big">Connecting…</p>
         </div>
-      </div>
+      </AuthFrame>
     {:else if showAppShell}
       <!-- Authenticated routes: wrap in AppShell with bottom navigation.
            The third column belongs to the route, which cannot pass a prop up

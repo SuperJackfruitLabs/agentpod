@@ -237,3 +237,15 @@ test("legacy mode (no plane) keeps the password form", () => {
   expect(getByLabelText("Email")).toBeTruthy();
   expect(queryByRole("button", { name: "Continue with your Super Jackfruit account" })).toBeNull();
 });
+
+test("a failed sign-in under the plane offers Try again, which starts authorize again", async () => {
+  connectionState.isConnected = true;
+  connectionState.apiUrl = "https://hub.x";
+  planeState.value = PLANE;
+  authState.error = "The hub did not accept the sign-in.";
+  const { getByRole } = render(LoginPage);
+  const alert = getByRole("alert");
+  expect(alert.textContent).toContain("The hub did not accept the sign-in.");
+  await fireEvent.click(getByRole("button", { name: "Try again" }));
+  expect(beginSignIn).toHaveBeenCalledWith(PLANE, { returnTo: "/" });
+});

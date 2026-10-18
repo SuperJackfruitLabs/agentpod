@@ -101,3 +101,19 @@ All kept local and restyled; none switched in this part:
 ### Screenshot harness
 
 `e2e/shots.mjs` (playwright-core 1.63.0, the version whose Chromium revision is in the local Playwright cache; nothing is downloaded): serves `build/`, answers the hub with the canonical sample fleet (no plane, so the session comes from `/api/auth/get-session`), fixes the clock at noon, and shoots vibe x theme at 1440x900 and 390x844 into `e2e/shots/` (git-ignored). `--menu` opens the account menu with Appearance expanded, `--more` the More sheet, `--path=` another page.
+
+## Part 3: fleet pages
+
+- `src/lib/styles/pages.css` (unlayered, after shell.css) draws the fleet pages per vibe on a few classes: `.ap-page`, `.ap-card` (a raised card in Daylight, a ruled section in Paper, Studio and Quiet), `.ap-sec-h`/`.ap-h2`, `.ap-tbl`, `.ap-hero`/`.ap-need`/`.ap-figs`, `.ap-feed`, `.ap-ph--plain` (PageHeader without tabs; the station header with tabs is untouched until Part 4), `.ap-nh` (node header), `.ap-kv`, `.ap-alert`, `.ap-auth*`, `.ap-err*`. State tones come from `data-state` on StateDot, StateBar segments and the agent table's status pill.
+- Status tones now follow the mockups: unknown wears the local warn tone, starting the local info tone (they were signal and accent). Quiet draws a failed state in its mockups' red (`--ap-danger`) while its destructive buttons keep vibekit's ink.
+- Studio's figures (Agents, Running, Nodes online of total, Updates available) are counts the page already has; the other vibes hide them. Studio numbers its section heads with a CSS counter.
+- The agent table's status pill colours by `stationState` (so unknown is the unknown tone); the text and the severity sort are unchanged.
+- `AuthFrame` (brand) frames boot, sign-in and the sign-in callback: Daylight's sky band, the content over it.
+- Defect fixes: `/agents?action=create` opens Create an agent (the palette's command did nothing); the error page offers Reload; a failed sign-in under the plane offers Try again; Settings regains Appearance (the Part 2 control) before Connection, Devices and Account.
+
+### Wrap or build
+
+- Face (vibekit): used in the agent table rows (decorative, `aria-hidden`, beside the link so the link's text stays the name). Mood: running = working, otherwise resting.
+- DataTable (vibekit): not used. AgentTable's sort buttons with `aria-sort`, collapsible group rows with a ribbon and the Grouped/Flat and Updates-only toggles are pinned by tests; restyled instead.
+- StateLabel (vibekit): not used. Its vocabulary (needs, failed, stopped ...) is not the console's six fleet states, and StateDot's sr-only and title behaviour is tested; StateDot restyled per vibe.
+- Notice, EmptyState, Loading: kept the console's `ap-alert`, `Empty` and skeletons (copy and roles pinned); restyled.

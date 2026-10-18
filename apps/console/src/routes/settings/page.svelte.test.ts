@@ -112,3 +112,19 @@ test("under the plane, devices are the plane's: a link instead of the list", () 
   expect(getByTestId("managed-by-plane").textContent?.replace(/\s+/g, " ")).toContain("Devices are managed in your Super Jackfruit account");
   expect(getByRole("link", { name: /Super Jackfruit account/ }).getAttribute("href")).toBe("https://accounts.test");
 });
+
+test("Settings has Appearance, Connection, Devices and Account, in that order", () => {
+  // Under the plane, so the Devices heading is the page's own (the legacy list draws its own).
+  planeState.value = { issuer: "https://accounts.test", url: "https://accounts.test", audience: "https://hub.x" };
+  const { getAllByRole } = render(SettingsPage);
+  const sections = getAllByRole("heading", { level: 2 }).map((h) => h.textContent?.trim());
+  expect(sections).toEqual(["Appearance", "Connection", "Devices", "Account"]);
+});
+
+test("Settings' Appearance is the vibekit control (vibe, light or dark, accent), no theme picker", () => {
+  const { getByRole, queryByText } = render(SettingsPage);
+  expect(getByRole("group", { name: "Vibe" })).toBeTruthy();
+  expect(getByRole("group", { name: "Light or dark" })).toBeTruthy();
+  expect(getByRole("group", { name: "Accent" })).toBeTruthy();
+  expect(queryByText(/colou?r scheme|font pairing/i)).toBeNull();
+});
