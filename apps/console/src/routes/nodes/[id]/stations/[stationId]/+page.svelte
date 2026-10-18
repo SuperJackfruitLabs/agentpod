@@ -59,6 +59,7 @@
   import IdCardIcon from "@lucide/svelte/icons/id-card";
   import LockIcon from "@lucide/svelte/icons/lock";
   import * as Sheet from "$lib/components/ui/sheet";
+  import { Face } from "@superjackfruit/vibekit";
 
   const nodeId = $derived($page.params.id as string);
   const stationId = $derived($page.params.stationId as string);
@@ -554,17 +555,20 @@
   their own scrolling. A page that scrolled as a whole would take the header
   and the tab bar off screen with it and put the composer below the fold.
 -->
-<div class="flex min-h-0 flex-1 flex-col" data-testid="station-page">
+<div class="ap-station flex min-h-0 flex-1 flex-col" data-testid="station-page">
   <!-- `relative`: StateDot's sr-only word is position:absolute, and with no
        positioned ancestor inside the stage's scroller it escapes every
        overflow-hidden between here and the document. -->
   <header class="ap-st-head relative shrink-0 border-b border-border bg-background" data-testid="station-header">
     <div class="flex flex-wrap items-start justify-between gap-3 px-4 pt-4 pb-3 sm:px-6">
       <div class="min-w-0 flex-1">
-        <div class="flex min-w-0 items-center gap-2">
+        <div class="ap-st-title flex min-w-0 items-center gap-2">
+          <span aria-hidden="true" class="ap-st-face"
+            ><Face id={stationId} label={station?.displayName ?? stationId} mood={liveState.id === "running" ? "working" : "resting"} size={44} /></span
+          >
           <StateDot state={liveState} />
           <h1
-            class="truncate font-mono text-[21px] leading-tight font-medium"
+            class="ap-st-name truncate font-mono text-[21px] leading-tight font-medium"
             data-testid="station-handle"
             title={station?.displayName ?? stationId}
           >
@@ -572,7 +576,7 @@
               (stationLoad === "loaded" || stationLoad === "loading" ? stationId : "Agent")}
           </h1>
         </div>
-        <p class="mt-1 truncate text-sm text-muted-foreground" data-testid="station-summary">
+        <p class="ap-st-sub mt-1 truncate text-sm text-muted-foreground" data-testid="station-summary">
           {#if station}
             <!-- Mono for the machine-issued halves only; the joins are prose. -->
             <span class="font-mono" data-testid="station-key">{station.stationKey}</span>
@@ -667,7 +671,7 @@
        their own (chat, logs, files, terminal) fill it exactly and never
        overflow; the shorter ones (health, activity, changes, cleanup) scroll
        here, under a header that stays put. -->
-  <div class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6" data-testid="station-panes">
+  <div class="ap-st-panes flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6" data-testid="station-panes">
     {#if stationLoad === "notFound"}
       <div
         class="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"

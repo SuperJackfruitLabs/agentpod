@@ -117,3 +117,18 @@ All kept local and restyled; none switched in this part:
 - DataTable (vibekit): not used. AgentTable's sort buttons with `aria-sort`, collapsible group rows with a ribbon and the Grouped/Flat and Updates-only toggles are pinned by tests; restyled instead.
 - StateLabel (vibekit): not used. Its vocabulary (needs, failed, stopped ...) is not the console's six fleet states, and StateDot's sr-only and title behaviour is tested; StateDot restyled per vibe.
 - Notice, EmptyState, Loading: kept the console's `ap-alert`, `Empty` and skeletons (copy and roles pinned); restyled.
+
+## Part 4: station page
+
+- Three widths: >= 1241px the rail is the shell's context column; 901 to 1240px it is the Identity tab (second, after Chat); <= 900px there is no Identity tab and the header gains "About {agent}", which opens a bottom sheet (the console's Sheet) holding the same `ContextRail` plus Restart and Stop. Restart and Stop also stay in the header; every lifecycle button goes through the same confirm (the sheet closes first). An `?tab=identity` link on a phone falls back to the default tab.
+- `src/lib/styles/station.css` (unlayered, after pages.css) draws the header, the tab strip (Daylight: pills on a surface card; Paper, Studio, Quiet: an underlined strip, Studio keeps the icons), the chat card, the permission mode chips as a segmented control, the user bubble, tool calls, the permission ask (warn-ringed in Daylight and Paper, ink in Studio and Quiet; 44px options, full width on a phone), the composer, Health (metric tiles) and Logs, the rail (one card per section in Daylight, ruled sections elsewhere, facts as a two-column grid) and the About sheet. Hooks: `.ap-st-*`, `.ap-chat*`, `.ap-modes`, `.ap-bubble`, `.chat-item[data-kind]`, `.ap-perm*`, `.ap-composer`, `.ap-rail*`, `.ap-about*`, `.ap-health`, `.ap-tile`, `.ap-logs`.
+- The transcript's words are never restyled into another voice: Paper keeps the body font for the bubble and replies (no letters). A test renders the same transcript in all four vibes and checks the words and the three permission options.
+- The header's name keeps its `font-mono` class (a test pins it) while Daylight, Paper and Quiet set it in the display face and Studio in mono, as the mockups draw it.
+
+### Wrap or build
+
+- Face (vibekit): in the station header (Daylight only, decorative, `aria-hidden`); the other vibes and phones show the StateDot as their mockups do.
+- Sheet (vibekit): not used for About; the console's Sheet (bits-ui dialog) as for More (Part 2 decision; dialog role and focus trap pinned by tests).
+- Tabs (vibekit): not used; the station strip has a roving tabindex, capability gating, a locked Terminal tab and keep-alive panels the tests pin.
+- StateLabel, Notice, Loading: not used (HealthPanel's error with Retry, skeletons and status text are pinned); restyled.
+- Streamdown/Shiki in replies: the Part 1 treatment, unchanged.

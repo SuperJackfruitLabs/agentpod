@@ -320,7 +320,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -- keydown only listens for
      "/" bubbling up from focused descendants to jump focus to the search box -->
 <div
-  class="flex flex-col h-full min-h-[200px] rounded-lg border bg-background font-mono text-xs"
+  class="ap-logs flex flex-col h-full min-h-[200px] rounded-lg border bg-background font-mono text-xs"
   onkeydown={handleRootKeydown}
 >
   <!-- Toolbar -->

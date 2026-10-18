@@ -114,7 +114,7 @@
 </script>
 
 {#if isLoading}
-  <div class="p-4 space-y-3">
+  <div class="ap-health p-4 space-y-3">
     
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       {#each Array(8) as _, i (i)}
@@ -123,7 +123,7 @@
     </div>
   </div>
 {:else if error}
-  <div class="p-4">
+  <div class="ap-health p-4">
     <div
       class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
       role="alert"
@@ -133,7 +133,7 @@
     </div>
   </div>
 {:else if health}
-  <div class="p-4 space-y-4">
+  <div class="ap-health p-4 space-y-4">
     <!-- Status row: the one fact this panel exists for, full width, with the
          contextual action beside it — Start/Stop/Restart are state-aware
          instead of three always-on buttons. -->
@@ -173,33 +173,33 @@
 
     <!-- Live metrics -->
     <dl class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <div class="rounded-lg border p-3 flex flex-col gap-1">
+      <div class="ap-tile rounded-lg border p-3 flex flex-col gap-1">
         <dt class="text-xs text-muted-foreground">CPU</dt>
         <dd class="font-mono tabular-nums text-lg text-foreground">
           {health.cpuPct !== null ? `${health.cpuPct}%` : "—"}{#if isGateway && health.cpuPct !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
         </dd>
       </div>
 
-      <div class="rounded-lg border p-3 flex flex-col gap-1">
+      <div class="ap-tile rounded-lg border p-3 flex flex-col gap-1">
         <dt class="text-xs text-muted-foreground">Memory</dt>
         <dd class="font-mono tabular-nums text-lg text-foreground">
           {fmtBytes(health.memBytes)}{#if isGateway && health.memBytes !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
         </dd>
       </div>
 
-      <div class="rounded-lg border p-3 flex flex-col gap-1">
+      <div class="ap-tile rounded-lg border p-3 flex flex-col gap-1">
         <dt class="text-xs text-muted-foreground">Disk</dt>
         <dd class="font-mono tabular-nums text-lg text-foreground">{fmtBytes(health.diskBytes)}</dd>
       </div>
 
-      <div class="rounded-lg border p-3 flex flex-col gap-1">
+      <div class="ap-tile rounded-lg border p-3 flex flex-col gap-1">
         <dt class="text-xs text-muted-foreground">Last activity</dt>
         <dd class="font-mono text-sm text-foreground">{fmtStr(health.lastActivity)}</dd>
       </div>
     </dl>
 
     <!-- Process plumbing, out of the way but one click deep -->
-    <details class="rounded-lg border">
+    <details class="ap-health__more rounded-lg border">
       <summary class="cursor-pointer select-none px-3 py-2 text-xs text-muted-foreground">
         Process details
       </summary>

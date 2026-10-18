@@ -238,7 +238,7 @@
   }
 </script>
 
-<div class="flex h-full min-h-[320px] flex-col overflow-hidden rounded-lg border bg-background">
+<div class="ap-chat flex h-full min-h-[320px] flex-col overflow-hidden rounded-lg border bg-background">
   <div class="shrink-0 border-b px-3 py-2">
     <ChatHeader
       session={chat.session}
@@ -281,7 +281,7 @@
     </div>
   {/if}
 
-  <div class="shrink-0 border-t p-3">
+  <div class="ap-composer shrink-0 border-t p-3">
     {#if endedNotice}
       <!-- Not a live region: the header owns the ONE status announcement. This is
            the composer's description, read when focus lands on it. -->

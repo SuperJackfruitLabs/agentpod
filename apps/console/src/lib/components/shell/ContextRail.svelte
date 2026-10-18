@@ -163,16 +163,16 @@
   clipping entirely and adds to the document's scroll width. That has already
   broken two pages in this redesign.
 -->
-<div class="relative flex flex-col gap-5 p-4 text-sm" data-testid="station-context">
+<div class="ap-rail relative flex flex-col gap-5 p-4 text-sm" data-testid="station-context">
   {#if station === null}
     <p class="text-muted-foreground">Nothing selected.</p>
   {:else}
     <!-- ── Identity ─────────────────────────────────────────────────────── -->
-    <section data-testid="rail-identity">
-      <h2 class="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+    <section class="ap-rail__sec" data-testid="rail-identity">
+      <h2 class="ap-rail__h mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
         Identity
       </h2>
-      <dl class="space-y-2">
+      <dl class="ap-rail__kv space-y-2">
         <div>
           <dt class="text-xs text-muted-foreground">Handle</dt>
           <!-- The agent's principal handle is not on the station row, and the
@@ -220,11 +220,11 @@
     </section>
 
     <!-- ── Placement ────────────────────────────────────────────────────── -->
-    <section class="border-t border-border pt-4" data-testid="rail-placement">
-      <h2 class="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+    <section class="ap-rail__sec border-t border-border pt-4" data-testid="rail-placement">
+      <h2 class="ap-rail__h mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
         Placement
       </h2>
-      <dl class="space-y-2">
+      <dl class="ap-rail__kv space-y-2">
         <div>
           <dt class="text-xs text-muted-foreground">Station key</dt>
           <dd class="font-mono break-all" data-testid="rail-station-key">{station.stationKey}</dd>
@@ -270,8 +270,8 @@
     <!-- ── Voice notes ──────────────────────────────────────────────────── -->
     <!-- Keyed on the station: the field reads its setting on mount, and a
          rail that moves to another station must read that one's. -->
-    <section class="border-t border-border pt-4" data-testid="rail-voice-notes">
-      <h2 class="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+    <section class="ap-rail__sec border-t border-border pt-4" data-testid="rail-voice-notes">
+      <h2 class="ap-rail__h mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
         Voice notes
       </h2>
       {#key station.id}
@@ -285,8 +285,8 @@
     </section>
 
     <!-- ── Voice replies ────────────────────────────────────────────────── -->
-    <section class="border-t border-border pt-4" data-testid="rail-voice-replies">
-      <h2 class="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+    <section class="ap-rail__sec border-t border-border pt-4" data-testid="rail-voice-replies">
+      <h2 class="ap-rail__h mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
         Voice replies
       </h2>
       {#key station.id}
@@ -300,8 +300,8 @@
     </section>
 
     <!-- ── Who may dispatch it ──────────────────────────────────────────── -->
-    <section class="border-t border-border pt-4" data-testid="rail-dispatch">
-      <h2 class="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+    <section class="ap-rail__sec border-t border-border pt-4" data-testid="rail-dispatch">
+      <h2 class="ap-rail__h mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
         Who may dispatch it
       </h2>
       {#if !admin}
