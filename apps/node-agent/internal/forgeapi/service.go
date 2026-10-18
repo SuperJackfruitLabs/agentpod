@@ -115,8 +115,8 @@ type VerifyAck struct {
 	Reason    string `json:"reason,omitempty"`
 	Isolation string `json:"isolation"`
 	// IsolationDetail: see DeliverAck.
-	IsolationDetail string `json:"isolationDetail,omitempty"`
-	Bypass          any    `json:"bypass,omitempty"`
+	IsolationDetail string        `json:"isolationDetail,omitempty"`
+	Bypass          *BypassReport `json:"bypass,omitempty"`
 }
 
 // RevokeAck: Removed is false when there was nothing on this node to remove.
@@ -185,7 +185,7 @@ type Service struct {
 	Unwire func(grantID string) error
 	// Bypass is the per-harness bypass check (Task 6); its result rides in the verify ack. Nil
 	// until then.
-	Bypass func(ctx context.Context, c stkclient.Client) any
+	Bypass func(ctx context.Context, c stkclient.Client) []ClientOutcome
 
 	mu sync.Mutex
 }
@@ -591,7 +591,8 @@ func (s *Service) Verify(ctx context.Context, p VerifyParams) (VerifyAck, error)
 		}
 	}
 	if s.Bypass != nil {
-		ack.Bypass = s.Bypass(ctx, client)
+		ack.Bypass = &BypassReport{Clients: s.Bypass(ctx, client)}
+		ack.applyBypass()
 	}
 	return ack, nil
 }

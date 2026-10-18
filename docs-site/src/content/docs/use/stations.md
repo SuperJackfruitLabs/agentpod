@@ -222,7 +222,17 @@ The proxy port range and the file locations are settings in the node config; the
 - **agentpod cannot revoke a supplied token at its provider.** `revoke` removes it from the station;
   revoke it at the provider yourself, then run `fleet stations forge-api confirm-revoked`.
 - **A client that ignores proxy settings bypasses the broker.** It sends a placeholder and gets a
-  plausible 401; detection is by test, per harness, not by prevention.
+  plausible 401; detection is by test, per harness, not by prevention. `verify` runs stk's probe
+  through the station's own instance (curl, python3, node and a Go client against a local stand-in
+  at a host that cannot resolve) and reports each as `honoured`, `bypassed`, `refused-ca`,
+  `untested` or `failed` in the ack's `bypass.clients`. A `bypassed` client makes the verify
+  `ok: false` with a reason starting `bypassed:`. The station's own harness client is `untested`
+  unless a safe probe command is configured (none ships), and is never reported `honoured`
+  without one. `bypass.paths` says which harness paths the node routed through the broker
+  (`spawn`, and `gateway` for hermes/openclaw), `bypass.wiringBlocked` why a path is not, and
+  `bypass.brokered` is true only when every path is. A station with no wired path at all is
+  `ok: false` with `not-wired:`. The hub does not read `bypass` yet: it sees the reason as
+  inconclusive, never verified.
 - **Body-level rules cover JSON REST only.** A rule that would have to read a GraphQL or non-JSON
   body cannot be enforced.
 - **Forgejo's token listing and repository confinement are to be verified live** against the real

@@ -111,8 +111,10 @@ type InstancesConfig struct {
 	// share a uid are not isolated from each other. Default false (fail closed).
 	AllowSharedAgentUID bool
 	// Unwire removes the harness wiring for a grant (Task 5); Bypass is the bypass check (Task 6).
-	Unwire func(grantID string) error
-	Bypass func(ctx context.Context, c stkclient.Client) any
+	Unwire        func(grantID string) error
+	Bypass        func(ctx context.Context, c stkclient.Client) []ClientOutcome
+	HarnessProbes map[string][]string
+	ProbeExec     func(ctx context.Context, argv, env []string) (string, error)
 	// Harness, when set, routes each station's harness through its own instance: the node records
 	// the station's key at deliver, hands spawns the instance's proxy environment (EnvForKey) and
 	// writes drop-in environment files for systemd-started harnesses. Nil: no harness wiring.
@@ -543,11 +545,13 @@ func (m *StationInstances) build(inst Instance) *stationState {
 		o.ForceInstall = !m.cfg.userExists(inst.User())
 		return ensureF(ctx, newClient, o, env)
 	}}
-	return &stationState{inst: inst, svc: &Service{
+	st := &stationState{inst: inst}
+	st.svc = &Service{
 		Ensure: ens.Ensure, NewClient: newClient, PolicyPath: inst.ConfigPath,
 		SharedPolicyPath: m.cfg.SharedPolicyPath, Station: inst.Station,
-		Unwire: m.cfg.Unwire, Bypass: m.cfg.Bypass,
-	}}
+		Unwire: m.cfg.Unwire, Bypass: m.bypassHook(inst.Station, func() *stationState { return st }),
+	}
+	return st
 }
 
 // seedPolicy copies the shared base policy into a new instance's policy file before its unit
@@ -674,10 +678,25 @@ func (m *StationInstances) Verify(ctx context.Context, p VerifyParams) (VerifyAc
 		return VerifyAck{}, codedf("unknown-grant", "this node holds no entry for grant %s", p.GrantID)
 	}
 	ack, err := st.svc.Verify(ctx, p)
-	if err == nil && shared {
+	if err != nil {
+		return ack, err
+	}
+	if shared {
 		ack.Isolation, ack.IsolationDetail = "same-user", IsolationSharedUID
 	}
-	return ack, err
+	// What the node wired, beside what was measured: the ack never implies brokered coverage the
+	// node did not set up.
+	if ack.Bypass == nil {
+		ack.Bypass = &BypassReport{}
+	}
+	harness, paths, blocked := m.coverage(p.StationID)
+	ack.Bypass.Harness, ack.Bypass.Paths, ack.Bypass.WiringBlocked = harness, paths, blocked
+	ack.Bypass.Brokered = blocked == "" && len(paths) > 0
+	for _, pa := range paths {
+		ack.Bypass.Brokered = ack.Bypass.Brokered && pa.Wired
+	}
+	ack.applyCoverage()
+	return ack, nil
 }
 
 func (m *StationInstances) Revoke(ctx context.Context, p RevokeParams) (RevokeAck, error) {

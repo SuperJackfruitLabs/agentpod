@@ -8,6 +8,7 @@ import { VERB_PARAMS, VERB_RESULTS } from "./protocol";
 const fx = JSON.parse(readFileSync(join(import.meta.dir, "../fixtures/forge-api/frames.json"), "utf8")) as {
   params: Record<string, unknown>;
   results: Record<string, unknown>;
+  resultsWithBypass: Record<string, unknown>;
 };
 
 const verbs = ["deliver", "policy", "verify", "revoke", "status"].map((v) => `forge.api.${v}` as const);
@@ -30,4 +31,22 @@ test("a params frame with an extra key is rejected, never stripped", () => {
   for (const v of verbs) {
     expect(VERB_PARAMS[v].safeParse({ ...(fx.params[v] as object), token: "x" }).success).toBe(false);
   }
+});
+
+test("the verify result fixture carries the bypass section the node sends", () => {
+  const r = VERB_RESULTS["forge.api.verify"].safeParse(fx.resultsWithBypass["forge.api.verify"]);
+  expect(r.success).toBe(true);
+  if (!r.success) return;
+  expect(r.data.bypass?.clients.map((c) => c.outcome)).toEqual(["honoured", "refused-ca", "untested"]);
+  expect(r.data.bypass?.brokered).toBe(false);
+  expect(r.data.bypass?.wiringBlocked).toContain("HTTPS_PROXY");
+  // an older node omits it, and a newer node adding a field or an outcome word is still readable
+  expect(VERB_RESULTS["forge.api.verify"].safeParse({ ok: true, isolation: "separate-user" }).success).toBe(true);
+  expect(
+    VERB_RESULTS["forge.api.verify"].safeParse({
+      ok: true,
+      isolation: "separate-user",
+      bypass: { clients: [{ client: "x", outcome: "new-word", extra: 1 }], brokered: true, extra: 1 },
+    }).success,
+  ).toBe(true);
 });

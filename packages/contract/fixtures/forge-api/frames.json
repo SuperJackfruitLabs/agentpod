@@ -75,5 +75,42 @@
       ],
       "publicKey": "stk-handover-v1:PUB"
     }
+  },
+  "resultsWithBypass": {
+    "forge.api.verify": {
+      "ok": true,
+      "login": "agent-press",
+      "isolation": "separate-user",
+      "bypass": {
+        "clients": [
+          {
+            "client": "curl",
+            "outcome": "honoured"
+          },
+          {
+            "client": "go net/http",
+            "outcome": "refused-ca"
+          },
+          {
+            "client": "hermes",
+            "outcome": "untested"
+          }
+        ],
+        "harness": "hermes",
+        "paths": [
+          {
+            "path": "spawn",
+            "wired": true
+          },
+          {
+            "path": "gateway",
+            "wired": false,
+            "reason": "no unit of this station's own starts the gateway"
+          }
+        ],
+        "brokered": false,
+        "wiringBlocked": "the harness environment already sets HTTPS_PROXY"
+      }
+    }
   }
 }

@@ -41,6 +41,16 @@ type brokerStub struct {
 	onReload   func(policy []byte) error
 	onRevoke   func() error
 	onOpen     func() // runs inside HandoverOpen, before it returns
+	probe      []stkclient.ProbeOutcome
+	probeErr   error
+	probes     int
+}
+
+func (b *brokerStub) Probe(context.Context) ([]stkclient.ProbeOutcome, error) {
+	b.mu.Lock()
+	b.probes++
+	b.mu.Unlock()
+	return append([]stkclient.ProbeOutcome(nil), b.probe...), b.probeErr
 }
 
 func (b *brokerStub) rec(s string) {
@@ -675,7 +685,9 @@ func TestVerifyBypassHookRidesInTheAck(t *testing.T) {
 	if ack.Bypass != nil {
 		t.Fatal("no hook, no bypass field")
 	}
-	h.svc.Bypass = func(context.Context, stkclient.Client) any { return []string{"curl:honoured"} }
+	h.svc.Bypass = func(context.Context, stkclient.Client) []ClientOutcome {
+		return []ClientOutcome{{Client: "curl", Outcome: "honoured"}}
+	}
 	ack, _ = h.svc.Verify(t.Context(), VerifyParams{StationID: "stn_1", GrantID: "fag_aaa111", ExpectLogin: "agent-press"})
 	if ack.Bypass == nil {
 		t.Fatal("hook result missing")

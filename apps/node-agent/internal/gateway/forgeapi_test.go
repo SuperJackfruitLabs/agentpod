@@ -231,3 +231,34 @@ func TestForgeAPIPassesOtherVerbsThroughAndForwardsFrames(t *testing.T) {
 		t.Fatalf("frame not forwarded: %v %q", err, inner.gotType)
 	}
 }
+
+// The bypass section of a verify ack is the shape the hub's schema reads: the fixture is the node's
+// own ack, field for field.
+func TestVerifyAckBypassSectionMatchesTheHubsFixture(t *testing.T) {
+	b, err := os.ReadFile(frameFixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		ResultsWithBypass map[string]json.RawMessage `json:"resultsWithBypass"`
+	}
+	if err := json.Unmarshal(b, &f); err != nil {
+		t.Fatal(err)
+	}
+	var want map[string]any
+	if err := json.Unmarshal(f.ResultsWithBypass["forge.api.verify"], &want); err != nil {
+		t.Fatal(err)
+	}
+	ack := forgeapi.VerifyAck{OK: true, Login: "agent-press", Isolation: "separate-user", Bypass: &forgeapi.BypassReport{
+		Clients: []forgeapi.ClientOutcome{{Client: "curl", Outcome: "honoured"}, {Client: "go net/http", Outcome: "refused-ca"}, {Client: "hermes", Outcome: "untested"}},
+		Harness: "hermes",
+		Paths: []forgeapi.BypassPath{
+			{Path: "spawn", Wired: true},
+			{Path: "gateway", Reason: "no unit of this station's own starts the gateway"},
+		},
+		WiringBlocked: "the harness environment already sets HTTPS_PROXY",
+	}}
+	if got := asJSON(t, ack); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ack = %v\nfixture = %v", got, want)
+	}
+}

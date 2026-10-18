@@ -116,12 +116,45 @@ export const ForgeApiVerifyReasons = [
 ] as const;
 export type ForgeApiVerifyReason = (typeof ForgeApiVerifyReasons)[number];
 
+/** The outcomes of the node's bypass check for one client. A newer node may add one: stay lenient. */
+export const ForgeApiBypassOutcomes = ["honoured", "bypassed", "refused-ca", "untested", "failed"] as const;
+export type ForgeApiBypassOutcome = (typeof ForgeApiBypassOutcomes)[number];
+
+/**
+ * What the node measured and what it wired, on a verify. `clients` are measured against a local
+ * stand-in (stk's probe, then the station's harness client where a safe probe exists: otherwise
+ * `untested`, never `honoured`); `paths` and `brokered` are the node's record of what it routed
+ * through the station's broker. A node sets `ok: false` with a `reason` starting `bypassed:` when a
+ * client bypassed the broker and `not-wired:` when no path of the harness is routed; neither is one
+ * of stk's codes, so the hub reads them as not verified. Older nodes omit the whole field.
+ */
+export const ForgeApiBypass = z.object({
+  clients: z.array(z.object({ client: z.string(), outcome: z.string() })),
+  harness: z.string().optional(),
+  paths: z
+    .array(
+      z.object({
+        path: z.string(),
+        wired: z.boolean(),
+        units: z.array(z.string()).optional(),
+        reason: z.string().optional(),
+      }),
+    )
+    .optional(),
+  /** True only when every path is wired and nothing blocks the wiring. */
+  brokered: z.boolean(),
+  /** Why a path is not routed (a proxy variable the harness already sets); names only. */
+  wiringBlocked: z.string().optional(),
+});
+export type ForgeApiBypass = z.infer<typeof ForgeApiBypass>;
+
 export const ForgeApiVerifyResult = z
   .object({
     ok: z.boolean(),
     login: z.string().optional(),
     reason: z.string().optional(),
     isolation: ForgeApiIsolation,
+    bypass: ForgeApiBypass.optional(),
   });
 export const ForgeApiRevokeResult = z.object({
   removed: z.boolean(),
