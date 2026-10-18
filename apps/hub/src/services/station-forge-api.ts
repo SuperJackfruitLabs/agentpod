@@ -105,6 +105,8 @@ export interface CreateForgeApiGrantInput {
    * `[bot]`). That is the account the operator created by hand, not necessarily the occupant.
    */
   expectedLogin?: string;
+  /** The operator acknowledges a write grant in same-user mode (recorded with `actor`). */
+  acknowledgeSameUser?: boolean;
 }
 
 export type Grant = StationForgeApiGrant;
@@ -332,6 +334,18 @@ export async function fetchStationPublicKey(
   deps: Pick<ForgeApiDeps, "broker">,
   station: { id: string; nodeId: string },
 ): Promise<string> {
+  return (await fetchStationStatus(deps, station)).publicKey;
+}
+
+/**
+ * The status call, with what it says about isolation. The node reports isolation per grant it
+ * holds, not per station, so `separateUser` is true only when it holds grants and every one is
+ * `separate-user`; anything else (no grants, any same-user) is treated as same-user (fail closed).
+ */
+async function fetchStationStatus(
+  deps: Pick<ForgeApiDeps, "broker">,
+  station: { id: string; nodeId: string },
+): Promise<{ publicKey: string; separateUser: boolean }> {
   const params = VERB_PARAMS["forge.api.status"].parse({ stationId: station.id });
   const unavailable = (why: string) =>
     new ForgeApiGrantError("station-key-unavailable", `station ${station.id}: no stk handover key (${why}).`);
@@ -354,7 +368,32 @@ export async function fetchStationPublicKey(
   const parsed = VERB_RESULTS["forge.api.status"].safeParse(res.data);
   if (!parsed.success) throw unavailable("unreadable status reply");
   if (!parsed.data.publicKey) throw unavailable("the node did not report one");
-  return parsed.data.publicKey;
+  const grants = parsed.data.grants;
+  return {
+    publicKey: parsed.data.publicKey,
+    separateUser: grants.length > 0 && grants.every((x) => x.isolation === "separate-user"),
+  };
+}
+
+// ─── same-user acknowledgement (spec: a write preset in same-user mode needs it) ───────────────
+
+const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+export const SAME_USER_ACK_REQUIRED = "same-user-acknowledgement-required";
+
+/** Every preset except `read` is a write preset; so is `read` with an allow rule for a write method. */
+export function isWriteGrant(p: { preset: ForgeApiPreset; rules: readonly unknown[] }): boolean {
+  if (p.preset !== "read") return true;
+  return (p.rules as ForgeApiRule[]).some(
+    (r) => typeof r?.allow === "string" && !READ_METHODS.has(r.allow.trim().split(/\s+/)[0]!.toUpperCase()),
+  );
+}
+
+function sameUserRequired(id: string, grantId?: string): ForgeApiGrantError {
+  return new ForgeApiGrantError(
+    SAME_USER_ACK_REQUIRED,
+    `station ${id}: the broker runs in same-user mode (or the node has not shown otherwise), so a write grant needs the operator's same-user acknowledgement.`,
+    grantId,
+  );
 }
 
 function grantRef(row: Grant): ForgeGrantRef {
@@ -455,7 +494,12 @@ export async function createForgeApiGrant(deps: ForgeApiDeps, input: CreateForge
 
   // BEFORE any mint: no key means no seal, and a token that cannot be sealed is an orphan.
   // supplied/app never mint and never seal: the operator sealed the credential client-side.
-  const publicKey = minted ? await stationPublicKey(deps, station) : null;
+  const status = minted ? await stationStatus(deps, station) : null;
+  const publicKey = status?.publicKey ?? null;
+  // Fail closed: a write grant needs the acknowledgement unless the node showed separate-user
+  // isolation (supplied/app make no status call here, so they always need it for write).
+  const ack = input.acknowledgeSameUser === true;
+  if (isWriteGrant(input) && !ack && !status?.separateUser) throw sameUserRequired(station.id);
 
   const now = deps.now();
   const { row, created } = await deps.db.transaction(async (tx) => {
@@ -500,6 +544,8 @@ export async function createForgeApiGrant(deps: ForgeApiDeps, input: CreateForge
         allowGraphql: input.allowGraphql,
         state: "authorised",
         generation,
+        sameUserAckAt: ack ? now : null,
+        sameUserAckBy: ack ? input.actor : null,
         createdBy: input.actor,
         createdAt: now,
         updatedAt: now,
@@ -557,8 +603,13 @@ export async function createForgeApiGrant(deps: ForgeApiDeps, input: CreateForge
 }
 
 async function stationPublicKey(deps: ForgeApiDeps, station: StationRow): Promise<string> {
-  const lookup = deps.stationPublicKey ?? ((s: { id: string; nodeId: string }) => fetchStationPublicKey(deps, s));
-  return lookup({ id: station.id, nodeId: station.nodeId });
+  return (await stationStatus(deps, station)).publicKey;
+}
+
+async function stationStatus(deps: ForgeApiDeps, station: StationRow): Promise<{ publicKey: string; separateUser: boolean }> {
+  // An injected key lookup says nothing about isolation: same-user (fail closed).
+  if (deps.stationPublicKey) return { publicKey: await deps.stationPublicKey({ id: station.id, nodeId: station.nodeId }), separateUser: false };
+  return fetchStationStatus(deps, { id: station.id, nodeId: station.nodeId });
 }
 
 // ─── deliverGrant ─────────────────────────────────────────────────────────────
@@ -807,6 +858,28 @@ function expectLoginFor(deps: Pick<ForgeApiDeps, "providers">, row: Grant): stri
   return deps.providers(row.provider).expectedIdentity(grantRef(row));
 }
 
+/**
+ * The node stored a write credential but reports `same-user` isolation, and nobody acknowledged
+ * that: never `delivered`. Wipe it from the node (best effort), take a minted token back at the
+ * provider (404 ok), drop the blob, and fail the grant with the acknowledgement reason. Reconcile
+ * leaves it alone until an acknowledgement is recorded (policy with acknowledgeSameUser).
+ */
+async function refuseSameUser(deps: ForgeApiDeps, row: Grant, station: StationRow): Promise<Grant> {
+  const wipe = await wipeOnNode(deps, row);
+  if (row.mode === "minted" && row.tokenHandle) {
+    await compensateRevoke(deps.providers(row.provider), row.account, bareHandle(row.tokenHandle), row.id);
+  }
+  log.warn("forge write grant refused: same-user isolation without acknowledgement", { grantId: row.id, stationId: station.id });
+  return transition(deps.db, row, [row.state], "failed", {
+    now: deps.now(),
+    sealed: null,
+    isolation: "same-user",
+    stateReason:
+      `${SAME_USER_ACK_REQUIRED}: the node reported same-user isolation; a write grant needs the operator's acknowledgement` +
+      (wipe.status === "pending" ? `; ${WIPE_PENDING}: ${wipe.why}` : ""),
+  }).catch((err) => afterAckConflict(deps, row, err));
+}
+
 function revokingError(row: Grant): ForgeApiGrantError {
   return new ForgeApiGrantError("grant-revoking", `forge grant ${row.id} is being revoked; nothing was delivered.`, row.id);
 }
@@ -845,6 +918,9 @@ async function sendDeliver(deps: ForgeApiDeps, row: Grant, station: StationRow, 
     return transition(deps.db, row, [row.state], to, { now: deps.now(), stateReason: out.reason }).catch((err) =>
       afterAckConflict(deps, row, err),
     );
+  }
+  if (out.isolation === "same-user" && isWriteGrant(row) && !row.sameUserAckAt) {
+    return refuseSameUser(deps, row, station);
   }
   const done = await transition(deps.db, row, [row.state], "delivered", {
     now: deps.now(),
@@ -1755,6 +1831,9 @@ export interface UpdatePolicyInput extends Ref {
   preset: ForgeApiPreset;
   rules: ForgeApiRule[];
   allowGraphql: boolean;
+  /** Acknowledge a write policy in same-user mode; recorded with `actor`. */
+  acknowledgeSameUser?: boolean;
+  actor?: string;
 }
 
 export interface PolicyResult {
@@ -1800,6 +1879,11 @@ export async function updateGrantPolicy(deps: ForgeApiDeps, input: UpdatePolicyI
     if (row.state === "revoking" || row.state === "revoked") {
       throw new ForgeApiGrantError("grant-not-deliverable", `forge grant ${row.id} is ${row.state}.`, row.id);
     }
+    const ackNow = input.acknowledgeSameUser === true && !row.sameUserAckAt;
+    if (isWriteGrant(input) && !row.sameUserAckAt && !ackNow && row.isolation !== "separate-user") {
+      throw sameUserRequired(row.stationIdSnapshot, row.id);
+    }
+    const ackAt = ackNow ? deps.now() : undefined;
     const onNode = (row.state === "delivered" || row.state === "verified") && row.stationId !== null;
     const save = async (reason: string | null | undefined, from: ForgeGrantState[], pendingSince?: Date | null) => {
       const set: Partial<typeof g.$inferInsert> = {
@@ -1809,6 +1893,10 @@ export async function updateGrantPolicy(deps: ForgeApiDeps, input: UpdatePolicyI
         updatedAt: deps.now(),
       };
       if (reason !== undefined) set.stateReason = reason;
+      if (ackAt) {
+        set.sameUserAckAt = ackAt;
+        set.sameUserAckBy = input.actor ?? null;
+      }
       // The outstanding-policy flag, independent of the reason: written in the same UPDATE.
       if (pendingSince !== undefined) set.policyPendingSince = pendingSince;
       const [out] = await deps.db

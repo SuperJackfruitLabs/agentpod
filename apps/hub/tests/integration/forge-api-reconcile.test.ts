@@ -223,7 +223,7 @@ describe("delivery retries", () => {
     const h = harness();
     const node = await freshNode();
     const { grant } = await granted(h, node);
-    await rawSql`UPDATE station_forge_api_grants SET state_reason = 'policy-pending: node offline', preset = 'issues', policy_pending_since = now() WHERE id = ${grant.id}`;
+    await rawSql`UPDATE station_forge_api_grants SET state_reason = 'policy-pending: node offline', preset = 'issues', policy_pending_since = now(), same_user_ack_at = now(), same_user_ack_by = 'op' WHERE id = ${grant.id}`;
     h.reset();
     await run(h, node);
     const frames = h.callsOf("forge.api.policy");
@@ -331,7 +331,7 @@ describe("rotations", () => {
     const node = await freshNode();
     const { grant, ref } = await granted(h, node);
     await rawSql`UPDATE station_forge_api_grants SET state_reason = 'rotation-failed: expired; verify-pending' WHERE id = ${grant.id}`;
-    await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false });
+    await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false, acknowledgeSameUser: true });
     expect((await loadGrant(grant.id)).stateReason).toBe("rotation-failed: expired; verify-pending");
   });
 
@@ -548,7 +548,7 @@ describe("final review fixes", () => {
     const node = await freshNode();
     const agent = await newAgent(f);
     const st = await insertStation(f, node, { principalId: agent.principalId });
-    const grant = await create(h.deps, grantInput(f, st.id, { preset: "issues" }));
+    const grant = await create(h.deps, { ...grantInput(f, st.id, { preset: "issues" }), acknowledgeSameUser: true });
     await rawSql`UPDATE station_forge_api_grants SET state_reason = 'rotation-failed: earlier' WHERE id = ${grant.id}`;
     h.replies["forge.api.policy"] = () => OFFLINE;
     const out = await updateGrantPolicy(h.deps, { tenantId: f.tenant, grantId: grant.id, preset: "read", rules: [], allowGraphql: false });

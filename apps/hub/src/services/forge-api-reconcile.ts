@@ -64,6 +64,7 @@ import {
   updateGrantPolicy,
   verifyGrant,
   VERIFY_PENDING,
+  SAME_USER_ACK_REQUIRED,
   type ForgeApiDeps,
 } from "./station-forge-api";
 
@@ -112,6 +113,8 @@ type Step = { action: ReconcileAction; needsNode: boolean };
 function nextStep(row: Grant, now: Date): Step | null {
   if (row.state === "revoked") return null;
   if (row.state === "revoking" || row.stationId === null) return { action: "revoke", needsNode: false };
+  // Refused for want of the same-user acknowledgement: retrying would mint and refuse again.
+  if (row.stateReason?.startsWith(SAME_USER_ACK_REQUIRED) && !row.sameUserAckAt) return null;
   const h = row.tokenHandle;
   if (h && (h.previous?.disposition === "revoke" || h.orphan)) return { action: "revoke-stray", needsNode: false };
   // A verify that was not brokered within the last 30 minutes is not repeated by the sweep: on a

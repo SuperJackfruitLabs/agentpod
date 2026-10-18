@@ -45,7 +45,8 @@ export type ForgeApiGrantErrorCode =
   | "station-not-hosted"
   | "station-key-changed"
   | "station-uid-shared"
-  | "stk-unavailable";
+  | "stk-unavailable"
+  | "same-user-acknowledgement-required";
 
 const GRANT_ERROR_STATUS: Record<ForgeApiGrantErrorCode, number> = {
   "station-not-found": 404,
@@ -82,6 +83,8 @@ const GRANT_ERROR_STATUS: Record<ForgeApiGrantErrorCode, number> = {
   "station-key-changed": 409,
   "station-uid-shared": 409,
   "stk-unavailable": 409,
+  // A write grant in same-user mode without the operator's acknowledgement.
+  "same-user-acknowledgement-required": 409,
 };
 
 /**

@@ -305,3 +305,16 @@ describe("policy outstanding", () => {
     expect(col).toEqual({ data_type: "timestamp with time zone", is_nullable: "YES" });
   });
 });
+
+describe("same-user acknowledgement", () => {
+  test("same_user_ack_at (timestamptz) and same_user_ack_by (text) are nullable", async () => {
+    const cols = await rawSql`
+      SELECT column_name, data_type, is_nullable FROM information_schema.columns
+      WHERE table_name = 'station_forge_api_grants' AND column_name IN ('same_user_ack_at','same_user_ack_by')
+      ORDER BY column_name`;
+    expect(cols.map((c) => ({ ...c }))).toEqual([
+      { column_name: "same_user_ack_at", data_type: "timestamp with time zone", is_nullable: "YES" },
+      { column_name: "same_user_ack_by", data_type: "text", is_nullable: "YES" },
+    ]);
+  });
+});

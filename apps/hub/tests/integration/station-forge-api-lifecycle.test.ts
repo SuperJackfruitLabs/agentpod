@@ -778,6 +778,7 @@ describe("supplied and app modes", () => {
     const st = await freshStation();
     const grant = await registerAppGrant(h.deps, {
       ...input(st.id, { provider: "github", instance: "https://github.com", mode: "app", preset: "none", expectedLogin: "sjl-agents" }),
+      acknowledgeSameUser: true,
       sealed: OPAQUE,
     });
     expect(grant.state).toBe("delivered");
@@ -822,7 +823,7 @@ describe("updateGrantPolicy", () => {
   test("updates the row and sends a validated policy frame with a positive ack", async () => {
     const h = harness();
     const { st, grant, ref } = await delivered(h);
-    const out = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules, allowGraphql: true });
+    const out = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules, allowGraphql: true, acknowledgeSameUser: true });
     expect(out.outcome).toBe("applied");
     expect(out.grant.preset).toBe("issues");
     expect(out.grant.rules).toEqual(rules);
@@ -863,7 +864,7 @@ describe("updateGrantPolicy", () => {
     const h = harness();
     const { grant, ref } = await delivered(h);
     h.replies["forge.api.policy"] = () => ({ ok: false, error: "node offline" });
-    const out = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false });
+    const out = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false, acknowledgeSameUser: true });
     expect(out.outcome).toBe("policy-pending");
     const row = await load(grant.id);
     expect(row.preset).toBe("issues");
@@ -875,7 +876,7 @@ describe("updateGrantPolicy", () => {
     const h = harness();
     const { ref } = await delivered(h);
     h.replies["forge.api.policy"] = () => ({ ok: true, data: { ok: false, error: "bad rule" } });
-    const out = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false });
+    const out = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false, acknowledgeSameUser: true });
     expect(out.outcome).toBe("policy-pending");
     expect(out.grant.stateReason).toMatch(/^policy-pending/);
   });
@@ -884,7 +885,7 @@ describe("updateGrantPolicy", () => {
     const h = harness();
     const { ref } = await delivered(h);
     await revokeGrant(h.deps, ref);
-    const err = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false }).catch((e) => e);
+    const err = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false, acknowledgeSameUser: true }).catch((e) => e);
     expect(err.code).toBe("grant-not-deliverable");
   });
 });
@@ -1047,7 +1048,7 @@ describe("policy never clobbers a lifecycle reason", () => {
     h.replies["forge.api.verify"] = () => ({ ok: false, error: "timeout" });
     await rotateGrant(h.deps, ref);
     h.replies["forge.api.policy"] = () => ({ ok: false, error: "node offline" });
-    const out = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false });
+    const out = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false, acknowledgeSameUser: true });
     expect(out.outcome).toBe("policy-pending");
     expect(out.grant.preset).toBe("issues");
     expect(out.grant.stateReason).toMatch(/^rotation-pending/);
@@ -1061,9 +1062,9 @@ describe("policy never clobbers a lifecycle reason", () => {
     const h = harness();
     const { ref } = await delivered(h);
     h.replies["forge.api.policy"] = () => ({ ok: false, error: "node offline" });
-    await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false });
+    await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false, acknowledgeSameUser: true });
     h.replies["forge.api.policy"] = () => ({ ok: true, data: { ok: true } });
-    const ok = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false });
+    const ok = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false, acknowledgeSameUser: true });
     expect(ok.grant.stateReason).toBeNull();
   });
 });
@@ -1497,5 +1498,98 @@ describe("node timeouts and node codes", () => {
     expect(g1.state).toBe("failed");
     expect(g1.stateReason).toStartWith("node refused delivery: station-uid-shared");
     expect(g1.stateReason).not.toContain("NODE-TEXT");
+  });
+});
+
+// ─── H11: write presets on a same-user station need the operator's acknowledgement ──
+
+describe("same-user acknowledgement for write grants", () => {
+  const SAME = { ok: true, data: { ok: true, stored: true, isolation: "same-user" } };
+  const SEPARATE = { ok: true, data: { ok: true, stored: true, isolation: "separate-user" } };
+
+  test("a write preset without the acknowledgement is refused before anything is minted", async () => {
+    const h = harness();
+    const st = await freshStation();
+    const err = await createForgeApiGrant(h.deps, input(st.id, { preset: "issues" })).catch((e) => e);
+    expect(err?.code).toBe("same-user-acknowledgement-required");
+    expect(err?.status).toBe(409);
+    expect(h.minted).toEqual([]);
+    expect(await rawSql`SELECT id FROM station_forge_api_grants WHERE station_id_snapshot = ${st.id}`).toEqual([]);
+  });
+
+  test("read with a write allow rule counts as a write grant", async () => {
+    const h = harness();
+    const st = await freshStation();
+    const err = await createForgeApiGrant(h.deps, input(st.id, { rules: [{ allow: "POST /repos/org/repo/issues" }] })).catch((e) => e);
+    expect(err?.code).toBe("same-user-acknowledgement-required");
+  });
+
+  test("read-only grants are never blocked", async () => {
+    const h = harness();
+    const st = await freshStation();
+    const g1 = await createForgeApiGrant(h.deps, input(st.id, { rules: [{ allow: "GET /repos/org/repo/issues" }] }));
+    expect(g1.state).toBe("delivered");
+    expect(g1.sameUserAckAt).toBeNull();
+  });
+
+  test("with the acknowledgement a write grant is delivered and records who acknowledged", async () => {
+    const h = harness();
+    const st = await freshStation();
+    const g1 = await createForgeApiGrant(h.deps, { ...input(st.id, { preset: "issues" }), acknowledgeSameUser: true });
+    expect(g1.state).toBe("delivered");
+    expect(g1.sameUserAckAt).not.toBeNull();
+    expect(g1.sameUserAckBy).toBe(OWNER);
+  });
+
+  test("a supplied write grant without the acknowledgement is refused at creation", async () => {
+    const h = harness();
+    const st = await freshStation({ occupied: false });
+    const err = await createForgeApiGrant(h.deps, input(st.id, { mode: "supplied", preset: "issues", expectedLogin: "bot" })).catch((e) => e);
+    expect(err?.code).toBe("same-user-acknowledgement-required");
+  });
+
+  test("a node reporting separate-user for its grants allows a write grant without it", async () => {
+    const h = harness();
+    const st = await freshStation();
+    h.replies["forge.api.status"] = () => ({ ok: true, data: { grants: [{ grantId: "x", present: true, isolation: "separate-user" }], publicKey: PUBLIC_KEY } });
+    h.replies["forge.api.deliver"] = () => SEPARATE;
+    const g1 = await createForgeApiGrant(h.deps, input(st.id, { preset: "issues" }));
+    expect(g1.state).toBe("delivered");
+  });
+
+  test("a deliver ack reporting same-user for an unacknowledged write grant: not delivered, node wiped, token revoked", async () => {
+    const h = harness();
+    const st = await freshStation();
+    h.replies["forge.api.status"] = () => ({ ok: true, data: { grants: [{ grantId: "x", present: true, isolation: "separate-user" }], publicKey: PUBLIC_KEY } });
+    h.replies["forge.api.deliver"] = () => SAME;
+    const g1 = await createForgeApiGrant(h.deps, input(st.id, { preset: "issues" }));
+    expect(g1.state).toBe("failed");
+    expect(g1.stateReason).toStartWith("same-user-acknowledgement-required");
+    expect(g1.sealedBlob).toBeNull();
+    expect(h.callsOf("forge.api.revoke").length).toBe(1);
+    expect(h.revoked.map((r) => r.handle.name)).toEqual([g1.tokenHandle!.name]);
+    await assertNoLeak(h, g1.id);
+  });
+
+  test("policy read → write on a same-user grant needs the acknowledgement; given, it is recorded", async () => {
+    const h = harness();
+    const { ref } = await delivered(h);
+    const err = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false }).catch((e) => e);
+    expect(err?.code).toBe("same-user-acknowledgement-required");
+    const out = await updateGrantPolicy(h.deps, { ...ref, preset: "issues", rules: [], allowGraphql: false, acknowledgeSameUser: true, actor: OWNER });
+    expect(out.outcome).toBe("applied");
+    expect(out.grant.sameUserAckAt).not.toBeNull();
+    expect(out.grant.sameUserAckBy).toBe(OWNER);
+  });
+
+  test("rotation keeps the acknowledgement", async () => {
+    const h = harness();
+    const st = await freshStation();
+    h.setLogin(st.handle);
+    const g1 = await createForgeApiGrant(h.deps, { ...input(st.id, { preset: "issues" }), acknowledgeSameUser: true });
+    const out = await rotateGrant(h.deps, { tenantId: tenant, grantId: g1.id });
+    expect(out.state).toBe("verified");
+    expect(out.sameUserAckAt?.getTime()).toBe(g1.sameUserAckAt!.getTime());
+    expect(out.sameUserAckBy).toBe(OWNER);
   });
 });

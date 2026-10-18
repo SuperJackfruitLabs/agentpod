@@ -126,6 +126,8 @@ const GrantBody = z
     rules: z.array(ForgeApiRule).max(100).optional(),
     allowGraphql: z.boolean().optional(),
     expectedLogin: Login.optional(),
+    /** The operator acknowledges a write grant in same-user mode; who is taken from the auth context. */
+    acknowledgeSameUser: z.boolean().optional(),
   })
   .strict()
   .superRefine((b, ctx) => {
@@ -142,7 +144,12 @@ const SecretBody = z
   .strict();
 
 const PolicyBody = z
-  .object({ preset: ForgeApiPreset, rules: z.array(ForgeApiRule).max(100), allowGraphql: z.boolean() })
+  .object({
+    preset: ForgeApiPreset,
+    rules: z.array(ForgeApiRule).max(100),
+    allowGraphql: z.boolean(),
+    acknowledgeSameUser: z.boolean().optional(),
+  })
   .strict();
 
 const EmptyBody = z.object({}).strict();
@@ -176,6 +183,8 @@ export function viewOf(row: StationForgeApiGrant, now = new Date()) {
     rotation: row.tokenHandle?.previous?.disposition === "live-until-verified" ? ("pending" as const) : null,
     // Only whether a policy change awaits the node's confirmation; never when.
     policyPending: row.policyPendingSince !== null,
+    // Only whether the operator acknowledged same-user mode; who and when stay in the row and audit.
+    sameUserAcknowledged: row.sameUserAckAt !== null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     verifiedAt: row.verifiedAt,
@@ -204,6 +213,8 @@ const MESSAGES: Record<string, string> = {
   "station-key-changed": "The station's key changed on its node; prune its broker instance there (apn forge-api prune) first.",
   "station-uid-shared": "Stations on this node share an agent uid, so per-station isolation cannot hold; map uids per station on the node or acknowledge it there.",
   "stk-unavailable": "Forge API access is not configured or is disabled on the station's node.",
+  "same-user-acknowledgement-required":
+    "The station's broker runs in same-user mode, so a write grant (any preset except read, or a write allow rule) needs your acknowledgement: send acknowledgeSameUser: true (fleet: --acknowledge-same-user).",
 };
 
 /** Seconds a client should wait before retrying a `station-preparing` answer. */
@@ -452,6 +463,7 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
               rules: b.rules ?? [],
               allowGraphql: b.allowGraphql ?? false,
               expectedLogin: b.expectedLogin,
+              acknowledgeSameUser: b.acknowledgeSameUser ?? false,
             });
           },
           (grant) => c.json({ grant: viewOf(grant) }),
@@ -506,7 +518,7 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
             a,
             "policy",
             { ...paramsOf(grant), preset: b.preset },
-            () => updateGrantPolicy(serviceDeps(a.forge), { ...refOf(grant), ...b }),
+            () => updateGrantPolicy(serviceDeps(a.forge), { ...refOf(grant), ...b, actor: a.user.id }),
             (r) => c.json({ outcome: r.outcome, grant: viewOf(r.grant) }),
           );
         }),

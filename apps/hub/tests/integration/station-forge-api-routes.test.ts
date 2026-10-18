@@ -724,3 +724,37 @@ describe("node preparing and node refusals", () => {
     });
   }
 });
+
+describe("same-user acknowledgement (routes)", () => {
+  test("a write grant without acknowledgeSameUser: 409 naming the flag; with it: recorded, view shows only a boolean", async () => {
+    const st = await freshStation();
+    const no = await call(asAdmin(), "POST", `/stations/${st.id}/forge-api`, grantBody({ preset: "issues" }));
+    expect(no.status).toBe(409);
+    expect(no.json.error).toBe("same-user-acknowledgement-required");
+    expect(no.json.message).toContain("acknowledgeSameUser");
+
+    const yes = await call(asAdmin(), "POST", `/stations/${st.id}/forge-api`, grantBody({ preset: "issues", acknowledgeSameUser: true }));
+    expect(yes.status).toBe(200);
+    expect(yes.json.grant.sameUserAcknowledged).toBe(true);
+    const keys = Object.keys(yes.json.grant);
+    expect(keys).not.toContain("sameUserAckAt");
+    expect(keys).not.toContain("sameUserAckBy");
+    const [row] = await db.select().from(g).where(eq(g.id, yes.json.grant.id));
+    expect(row!.sameUserAckBy).toBe(ADMIN);
+  });
+
+  test("who acknowledged comes from the auth context, never the body", async () => {
+    const st = await freshStation();
+    const r = await call(asAdmin(), "POST", `/stations/${st.id}/forge-api`, grantBody({ preset: "issues", acknowledgeSameUser: true, sameUserAckBy: "mallory" }));
+    expect(r.status).toBe(400);
+  });
+
+  test("the policy route accepts acknowledgeSameUser", async () => {
+    const { id, grantId } = await grantedStation();
+    const no = await call(asAdmin(), "PATCH", `/stations/${id}/forge-api/${grantId}/policy`, { preset: "issues", rules: [], allowGraphql: false });
+    expect(no.status).toBe(409);
+    const yes = await call(asAdmin(), "PATCH", `/stations/${id}/forge-api/${grantId}/policy`, { preset: "issues", rules: [], allowGraphql: false, acknowledgeSameUser: true });
+    expect(yes.status).toBe(200);
+    expect(yes.json.grant.sameUserAcknowledged).toBe(true);
+  });
+});

@@ -19,6 +19,8 @@ CREATE TABLE "station_forge_api_grants" (
 	"generation" integer NOT NULL,
 	"isolation" text,
 	"policy_pending_since" timestamp with time zone,
+	"same_user_ack_at" timestamp with time zone,
+	"same_user_ack_by" text,
 	"sealed_blob" text,
 	"sealed_expires_at" timestamp with time zone,
 	"created_by" text NOT NULL,

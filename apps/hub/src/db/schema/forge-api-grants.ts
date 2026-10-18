@@ -108,6 +108,14 @@ export const stationForgeApiGrants = pgTable(
      */
     policyPendingSince: timestamp("policy_pending_since", { withTimezone: true }),
 
+    /**
+     * The operator's acknowledgement that this grant may hold write access while the broker runs in
+     * `same-user` mode (spec: a write preset in that mode needs it). `by` is the acting account from
+     * the auth context, never a request body. Kept across rotations.
+     */
+    sameUserAckAt: timestamp("same_user_ack_at", { withTimezone: true }),
+    sameUserAckBy: text("same_user_ack_by"),
+
     sealedBlob: text("sealed_blob"),
     sealedExpiresAt: timestamp("sealed_expires_at", { withTimezone: true }),
 

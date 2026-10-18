@@ -1,5 +1,5 @@
 {
-  "id": "b9c52ffc-e96f-4b4b-8d9e-64535152709f",
+  "id": "30a4f187-f015-4f98-ad54-0d3a12ee467a",
   "prevId": "d35ffade-9366-4a5c-9952-fabd97d2db31",
   "version": "7",
   "dialect": "postgresql",
@@ -5427,6 +5427,18 @@
         "policy_pending_since": {
           "name": "policy_pending_since",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "same_user_ack_at": {
+          "name": "same_user_ack_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "same_user_ack_by": {
+          "name": "same_user_ack_by",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
