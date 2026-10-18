@@ -438,3 +438,11 @@ test("?updates=1 seeds the updates-only pill pressed and shows only update-avail
     expect(queryByText("kubera")).toBeNull();
   });
 });
+
+test("?action=create opens the Create an agent dialog (the palette's \"Create an agent\")", async () => {
+  vi.spyOn(api, "getFleet").mockResolvedValue({ stats: mockStats, agents: mockAgents });
+  setSearchParam("action", "create");
+  const { findByRole } = render(AgentsPage);
+  const dialog = await findByRole("dialog");
+  expect(dialog.textContent).toContain("Create an agent");
+});

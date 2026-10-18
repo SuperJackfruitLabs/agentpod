@@ -13,6 +13,8 @@
   import StatusRibbon from "./StatusRibbon.svelte";
   import { Metric } from "$lib/components/ui/metric";
   import SearchIcon from "@lucide/svelte/icons/search";
+  import { Face } from "@superjackfruit/vibekit";
+  import { stationState } from "$lib/fleet/state";
 
   // ── External filter (from heatmap) ───────────────────────────────────────────
 
@@ -272,12 +274,13 @@
 {#snippet agentRow(agent: FleetAgent)}
   <Table.Row>
     <Table.Cell>
-      <a
-        href="/nodes/{agent.nodeId}/stations/{agent.stationId}"
-        class="text-sm text-foreground hover:text-primary transition-colors"
-      >
-        {agent.agentName}
-      </a>
+      <!-- The face is decoration: the name beside it is what is read, and the link's text stays the name. -->
+      <span class="ap-agent">
+        <span aria-hidden="true" class="inline-flex"><Face id={agent.stationId} label={agent.agentName} mood={agent.status === "running" ? "working" : "resting"} size={28} /></span>
+        <a href="/nodes/{agent.nodeId}/stations/{agent.stationId}" class="text-sm">
+          {agent.agentName}
+        </a>
+      </span>
     </Table.Cell>
     <Table.Cell class="hidden sm:table-cell text-xs text-muted-foreground">
       {agent.harness}
@@ -286,7 +289,7 @@
       {agent.nodeName}
     </Table.Cell>
     <Table.Cell>
-      <Badge variant="outline" class={statusBadgeClass(agent.status)}>
+      <Badge variant="outline" data-state={stationState(agent.status).id} class={cn("ap-pill", statusBadgeClass(agent.status))}>
         {agent.status}
       </Badge>
     </Table.Cell>
@@ -308,7 +311,9 @@
           type="button"
           disabled={!!updatingNodes[agent.nodeId]}
           onclick={(e) => handleUpdate(e, agent.nodeId)}
-          class="text-xs px-2 py-0.5 rounded-md border transition-colors border-primary/50 text-primary hover:border-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed"
+          data-slot="button"
+          data-variant="outline"
+          class="ap-update inline-flex min-h-9 items-center px-3 text-sm font-bold rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {updatingNodes[agent.nodeId] ? "Updating…" : "Update"}
         </button>
@@ -338,14 +343,14 @@
   <div class="flex items-center gap-2 flex-wrap">
     <div class="relative min-w-[180px] flex-1">
       <SearchIcon
-        class="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+        class="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
         aria-hidden="true"
       />
       <input
         type="search"
         placeholder="Search agents…"
         bind:value={searchQuery}
-        class="h-8 w-full rounded-md border bg-transparent py-1.5 pl-7 pr-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
+        class="ap-search h-8 w-full rounded-md border bg-transparent py-1.5 pl-7 pr-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
         aria-label="Search agents"
       />
     </div>
@@ -354,7 +359,7 @@
     <button
       type="button"
       onclick={() => (filterUpdateAvailable = !filterUpdateAvailable)}
-      class={cn(chipClass(filterUpdateAvailable), "px-2.5 py-1.5 text-xs")}
+      class={cn("ap-chip", chipClass(filterUpdateAvailable), "px-2.5 py-1.5 text-xs")}
       aria-pressed={filterUpdateAvailable}
     >
       Updates only
@@ -365,7 +370,7 @@
       type="button"
       data-testid="group-toggle"
       onclick={() => (groupByNode = !groupByNode)}
-      class={cn(chipClass(groupByNode), "px-2.5 py-1.5 text-xs")}
+      class={cn("ap-chip", chipClass(groupByNode), "px-2.5 py-1.5 text-xs")}
       aria-pressed={groupByNode}
     >
       {groupByNode ? "Grouped" : "Flat"}
@@ -373,8 +378,8 @@
   </div>
 
   <!-- Dense table -->
-  <div class="rounded-lg border overflow-hidden">
-    <Table.Root>
+  <div class="ap-tbl-wrap overflow-x-auto">
+    <Table.Root class="ap-tbl">
       <Table.Header>
         <Table.Row>
           {@render sortHead("agent", "Agent")}
@@ -409,7 +414,7 @@
         {:else if groupByNode}
           {#each groupedAgents as group (group.nodeId)}
             <!-- Group header row -->
-            <Table.Row class="bg-muted/20 hover:bg-muted/20">
+            <Table.Row class="ap-group-row bg-muted/20 hover:bg-muted/20">
               <Table.Cell colspan={9} class="py-1.5">
                 <button
                   type="button"
