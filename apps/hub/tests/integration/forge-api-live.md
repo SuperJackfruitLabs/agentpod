@@ -206,7 +206,20 @@ the station's stk instance at its first deliver/status (user `stk-...`, unit, st
 8900-8999). Watch `list` until it settles; record the instance name, the ack's `isolation`
 (`separate-user` expected; `same-user` with `shared-uid` only under the acknowledgement) and
 `needsRestart` (if `true`, restart the station from lifecycle and note it; **the hub does not
-surface `needsRestart` yet**, read it from the node log or the deliver ack).
+surface `needsRestart` yet** and the node does not log it either, so record it as unknown and
+restart the station's harness anyway if the agent does not pick up the credential).
+
+Where the deliver ack shows up (read from the code, so exact):
+
+- **Node log** (`apn logs`): `forgeapi: delivered grant <grantId> (isolation <separate-user|same-user>)`.
+  It is written only after stk confirmed the store (`apps/node-agent/internal/forgeapi/service.go`).
+- **Hub log** (component `station-forge-api`): `forge grant delivered` with `grantId`, `stationId`
+  and `isolation`, written when the hub has recorded the positive ack. A delivery that did not land
+  logs `forge grant not delivered` with the state and reason instead.
+- **Hub audit** (`station_audit`): the service row with verb `forge.api.grant` ends `result = 'ok'`
+  only when the grant reached `delivered` or `verified` (otherwise `error` with the reason), and the
+  route row with verb `forge.api.route.grant` records that the request completed. Neither row
+  carries the isolation; read that from `list`.
 
 **1b. Verify and read the coverage note**
 

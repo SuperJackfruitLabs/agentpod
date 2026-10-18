@@ -2243,10 +2243,20 @@ checks the file at start and before each deliver, policy and status.
 
 - **No protection against root.** An agent or user with root on the station can read the broker's
   store.
-- **Same-user mode is weak.** When the broker runs as the agent's own user, only file permissions
-  separate them. The design requires an explicit operator acknowledgement before a write preset
-  is granted in this mode; the hub does not ask for one yet, so check `list` and grant write presets
-  only where isolation is `separate-user`.
+- **Same-user mode is weak, and today it is every station.** When the broker runs as the agent's
+  own user, only file permissions separate them. Agents spawned by the node run as the node's uid,
+  so every station currently reports isolation `same-user` (`isolationDetail` `node-uid`, or
+  `shared-uid` when acknowledged on the node). The design calls for an operator acknowledgement
+  before a write preset is granted in this mode, but **the hub does not implement it**: it records
+  the isolation the node reports and does not refuse anything because of it, so grants (write
+  presets included) succeed in `same-user` mode. Check `list` and grant write presets knowing that
+  the agent can read the broker's store.
+- **A node preparing its broker answers later, not never.** The first grant on a station can make
+  the node install its broker instance; the hub waits up to 120 s for that (`forge.api.status`,
+  `forge.api.deliver`). If an install is already running the grant answers 503 `station-preparing`
+  with `Retry-After`, and nothing is created; a delivery that meets it is retried with the same
+  sealed blob. A node that refuses the station answers 409 with its code: `station-not-hosted`,
+  `station-key-changed`, `station-uid-shared` or `stk-unavailable`.
 - **The hub sees a minted token for an instant**, between minting and sealing it. It stores only the
   sealed envelope.
 - **Every forge-api route needs the hub's Forgejo admin configuration.** Without `FORGE_URL` and
@@ -2269,8 +2279,14 @@ checks the file at start and before each deliver, policy and status.
   is never evidence. The probe takes up to 45 s, is skipped when stk's own verify already failed,
   and a clean result is reused for 60 s per station (never a failure; any deliver, policy, revoke
   or wiring change drops it). Harness probes are refused on a root node. A station with no wired path at all is
-  `ok: false` with `not-wired:`. The hub does not read `bypass` yet: it sees the reason as
-  inconclusive, never verified.
+  `ok: false` with `not-wired:`. The hub reads all of this as described under **Status**:
+  `bypassed` fails the grant (a verified one too), `not-wired` is inconclusive (state kept),
+  `brokered: false` keeps or puts the grant at `delivered` with a `coverage-incomplete` note, and
+  `brokered: true` with `measured: partial` verifies with a `coverage: partial` note. A rotation
+  still finishes on a station that cannot show brokered traffic: once the node acknowledged the
+  new token and its identity matched, the old token is revoked; the grant stays `delivered` with
+  the coverage note. The reconcile sweep does not re-verify a not-brokered grant within 30 minutes;
+  `fleet stations forge-api verify` always runs.
 - **Body-level rules cover JSON REST only.** A rule that would have to read a GraphQL or non-JSON
   body cannot be enforced.
 - **Forgejo's token listing and repository confinement are to be verified live** against the real
