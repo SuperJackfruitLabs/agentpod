@@ -208,9 +208,32 @@ func checkNonEmpty(fields map[string]string) error {
 	return nil
 }
 
+// refuseOtherStation is a TEMPORARY fail-closed guard. One node runs one stk with one proxy key,
+// so every harness on the node can use every brokered credential: a second station's grant would
+// let the first station's agent act as it (and vice versa). Until per-station isolation exists
+// (one stk per station, or stk caller identity), a node serves a single station: deliver is
+// refused while the policy holds managed entries labelled with a different station. Several
+// grants for the same station are fine. Remove this when isolation lands.
+func refuseOtherStation(policy []byte, station string) error {
+	all, err := ManagedEntries(policy)
+	if err != nil {
+		return coded("policy-invalid", err)
+	}
+	for _, m := range all {
+		if m.Station != station {
+			return codedf("station-isolation-unsupported", "one broker per node currently serves a single station; this node already holds grants for another station")
+		}
+	}
+	return nil
+}
+
 // Deliver stores the policy entry, opens the sealed credential into stk and reloads. On any
 // failure after the file was written the file is put back byte for byte, so it never holds an
 // entry stk did not accept.
+//
+// Known limit (availability only): the credential is replaced by HandoverOpen BEFORE the reload,
+// so if the reload then rejects an update to an existing grant, the policy is restored but the
+// previous credential is already gone. Re-delivering heals it; nothing is exposed.
 func (s *Service) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, error) {
 	if err := checkNonEmpty(map[string]string{
 		"stationId": p.StationID, "stationKey": p.StationKey, "grantId": p.GrantID, "provider": p.Provider,
@@ -246,6 +269,9 @@ func (s *Service) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, err
 	prev, existed, err := readPolicyFile(path)
 	if err != nil {
 		return DeliverAck{}, coded("policy-read-failed", err)
+	}
+	if err := refuseOtherStation(prev, p.StationID); err != nil {
+		return DeliverAck{}, err
 	}
 	merged, err := MergePolicy(prev, entry)
 	if err != nil {
@@ -283,16 +309,15 @@ func (s *Service) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, err
 		if errors.Is(err, stkclient.ErrReloadRejected) {
 			code = "reload-rejected"
 		}
-		// The credential was stored before the reload. A new entry that stk then refused would
-		// leave it stored under a name the policy no longer has; ask stk to forget it once the file
-		// is back to what stk accepts. Best effort: the next deliver for this grant replaces it.
-		out, ferr := fail(code, err)
+		// The credential was stored before the reload. For a NEW entry stk refused, forget it
+		// BEFORE the file is restored: stk resolves a service through the policy, so once the
+		// entry is gone the forget cannot find it. Best effort; the next deliver replaces it.
 		if !hadEntry {
 			if rerr := client.RevokeLocal(ctx, p.ServiceName); rerr != nil {
 				logf("forgeapi: could not forget the credential of a refused entry for grant %s", p.GrantID)
 			}
 		}
-		return out, ferr
+		return fail(code, err)
 	}
 
 	ack := DeliverAck{OK: true, Stored: true, Isolation: isolationOf(res)}

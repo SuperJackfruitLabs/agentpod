@@ -38,6 +38,7 @@ type brokerStub struct {
 	verifyErr  error
 	policyPath string
 	onReload   func(policy []byte) error
+	onRevoke   func() error
 }
 
 func (b *brokerStub) rec(s string) {
@@ -89,6 +90,9 @@ func (b *brokerStub) Reload(context.Context) (stkclient.ReloadResult, error) {
 
 func (b *brokerStub) RevokeLocal(_ context.Context, service string) error {
 	b.rec("revoke:" + service)
+	if b.onRevoke != nil {
+		return b.onRevoke()
+	}
 	return b.revokeErr
 }
 
@@ -131,6 +135,21 @@ func (h *harness) policy() []byte {
 		h.t.Fatal(err)
 	}
 	return b
+}
+
+// seedOtherStation writes a managed entry for another station straight into the file, as an
+// older node (before the single-station guard) would have left it.
+func (h *harness) seedOtherStation(grant, host, station string) {
+	h.t.Helper()
+	e := baseEntry()
+	e.Service, e.Grant, e.Station, e.Instance = "forge-forgejo-"+strings.TrimPrefix(grant, "fag_"), grant, station, "https://"+host
+	out, err := MergePolicy(h.policy(), e)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if err := os.WriteFile(h.path, out, 0o640); err != nil {
+		h.t.Fatal(err)
+	}
 }
 
 func deliverParams(grant, host string) DeliverParams {
@@ -552,7 +571,7 @@ func TestStatusReturnsPublicKeyEvenWithZeroGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ack.PublicKey != "stk-handover-v1:PUBLICKEY" {
+	if ack.PublicKey == "" || ack.PublicKey != "stk-handover-v1:PUBLICKEY" {
 		t.Fatalf("publicKey = %q", ack.PublicKey)
 	}
 	if ack.Grants == nil {
@@ -569,11 +588,7 @@ func TestStatusListsOnlyThisStationsGrants(t *testing.T) {
 	if _, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "forge.example.com")); err != nil {
 		t.Fatal(err)
 	}
-	other := deliverParams("fag_bbb222", "other.example.com")
-	other.StationID = "stn_2"
-	if _, err := h.svc.Deliver(t.Context(), other); err != nil {
-		t.Fatal(err)
-	}
+	h.seedOtherStation("fag_bbb222", "other.example.com", "stn_2")
 	ack, err := h.svc.Status(t.Context(), StatusParams{StationID: "stn_1"})
 	if err != nil || len(ack.Grants) != 1 || ack.Grants[0].GrantID != "fag_aaa111" || !ack.Grants[0].Present || ack.Grants[0].Isolation != "separate-user" {
 		t.Fatalf("Status = %+v, %v", ack, err)
@@ -670,13 +685,10 @@ func TestPruneUnhostedRemovesOnlyManagedEntriesOfUnhostedStations(t *testing.T) 
 	var unwired []string
 	h.svc.Unwire = func(g string) error { unwired = append(unwired, g); return nil }
 	keep := deliverParams("fag_aaa111", "a.example.com")
-	gone := deliverParams("fag_bbb222", "b.example.com")
-	gone.StationID = "stn_gone"
-	for _, p := range []DeliverParams{keep, gone} {
-		if _, err := h.svc.Deliver(t.Context(), p); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := h.svc.Deliver(t.Context(), keep); err != nil {
+		t.Fatal(err)
 	}
+	h.seedOtherStation("fag_bbb222", "b.example.com", "stn_gone")
 	h.stub.calls = nil
 	ids, err := h.svc.PruneUnhosted(t.Context(), []string{"stn_1"})
 	if err != nil || len(ids) != 1 || ids[0] != "fag_bbb222" {
@@ -768,5 +780,87 @@ func TestConcurrentDeliverAndRevokeLeaveAConsistentFile(t *testing.T) {
 	}
 	if !strings.Contains(string(h.policy()), "slack:") {
 		t.Fatal("operator entry lost")
+	}
+}
+
+// ---- review fix round 1 ----
+
+func TestDeliverRefusesASecondStationWhileTheFirstHoldsAGrant(t *testing.T) {
+	h := newHarness(t)
+	if _, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "a.example.com")); err != nil {
+		t.Fatal(err)
+	}
+	before := h.policy()
+	h.stub.calls = nil
+	other := deliverParams("fag_bbb222", "b.example.com")
+	other.StationID = "stn_2"
+	ack, err := h.svc.Deliver(t.Context(), other)
+	if err == nil || ack.OK || ack.Stored {
+		t.Fatalf("second station accepted: %+v, %v", ack, err)
+	}
+	if !strings.HasPrefix(err.Error(), "station-isolation-unsupported:") || !strings.Contains(err.Error(), "single station") {
+		t.Errorf("error = %q", err)
+	}
+	if !bytes.Equal(before, h.policy()) {
+		t.Error("policy file changed")
+	}
+	if len(h.stub.callList()) != 0 {
+		t.Errorf("stk was called: %v", h.stub.callList())
+	}
+}
+
+func TestDeliverAllowsTheSameStationOnAnotherHost(t *testing.T) {
+	h := newHarness(t)
+	for _, p := range []DeliverParams{deliverParams("fag_aaa111", "a.example.com"), deliverParams("fag_bbb222", "b.example.com")} {
+		if _, err := h.svc.Deliver(t.Context(), p); err != nil {
+			t.Fatalf("same station refused: %v", err)
+		}
+	}
+}
+
+func TestAnotherStationIsAcceptedOnceTheFirstHasNoGrants(t *testing.T) {
+	other := deliverParams("fag_bbb222", "b.example.com")
+	other.StationID = "stn_2"
+	// revoked
+	h := newHarness(t)
+	_, _ = h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "a.example.com"))
+	if _, err := h.svc.Revoke(t.Context(), RevokeParams{StationID: "stn_1", GrantID: "fag_aaa111"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.Deliver(t.Context(), other); err != nil {
+		t.Fatalf("after revoke: %v", err)
+	}
+	// pruned
+	h2 := newHarness(t)
+	_, _ = h2.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "a.example.com"))
+	if _, err := h2.svc.PruneUnhosted(t.Context(), []string{"stn_2"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h2.svc.Deliver(t.Context(), other); err != nil {
+		t.Fatalf("after prune: %v", err)
+	}
+}
+
+// stk resolves a service through the policy, so forgetting a refused entry's credential only
+// works while the entry is still in the file.
+func TestRefusedNewEntryIsForgottenBeforeThePolicyIsRestored(t *testing.T) {
+	h := newHarness(t)
+	h.stub.reloadErr = &stkclient.ReloadRejectedError{Reason: "no"}
+	var forgotten bool
+	h.stub.onRevoke = func() error {
+		if !bytes.Contains(h.policy(), []byte("forge-forgejo-aaa111")) {
+			return errors.New("unknown service")
+		}
+		forgotten = true
+		return nil
+	}
+	if _, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "a.example.com")); err == nil {
+		t.Fatal("want error")
+	}
+	if !forgotten {
+		t.Fatal("credential was not forgotten while the entry was still in the policy")
+	}
+	if h.policy() != nil {
+		t.Fatal("policy not restored")
 	}
 }

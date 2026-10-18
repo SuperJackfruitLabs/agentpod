@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -24,8 +25,10 @@ type wireStk struct {
 	verifyRe stkclient.VerifyResult
 }
 
-func (w *wireStk) Version(context.Context) (string, error)     { return "0.0.3", nil }
-func (w *wireStk) HandoverKey(context.Context) (string, error) { return "stk-handover-v1:PUB", w.keyErr }
+func (w *wireStk) Version(context.Context) (string, error) { return "0.0.3", nil }
+func (w *wireStk) HandoverKey(context.Context) (string, error) {
+	return "stk-handover-v1:PUB", w.keyErr
+}
 func (w *wireStk) HandoverOpen(_ context.Context, s, _ string) error {
 	w.mu.Lock()
 	w.opened = append(w.opened, s)
@@ -54,22 +57,30 @@ func forgeHandler(t *testing.T) (Handler, *wireStk, string) {
 	return NewForgeAPIHandler(gitIdentityPassthrough(), svc), stk, path
 }
 
-// fixtures are the frames as the hub's zod schemas define them. The hub repo has no params
-// fixtures, so these are hand-written from packages/contract/src/forge-api.ts and were checked
-// against VERB_PARAMS with bun; testdata/forge-api-frames.json says so.
-func fixtures(t *testing.T) map[string]json.RawMessage {
+// frameFixtures is hand-written from packages/contract/src/forge-api.ts (the hub produces none)
+// and is parsed by the hub's own schemas in packages/contract/src/forge-api-fixtures.test.ts, so
+// both languages read the same frames.
+const frameFixturePath = "../../../../packages/contract/fixtures/forge-api/frames.json"
+
+func loadFixtures(t *testing.T) (params, results map[string]json.RawMessage) {
 	t.Helper()
-	b, err := os.ReadFile("testdata/forge-api-frames.json")
+	b, err := os.ReadFile(frameFixturePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var f struct {
-		Params map[string]json.RawMessage `json:"params"`
+		Params  map[string]json.RawMessage `json:"params"`
+		Results map[string]json.RawMessage `json:"results"`
 	}
 	if err := json.Unmarshal(b, &f); err != nil {
 		t.Fatal(err)
 	}
-	return f.Params
+	return f.Params, f.Results
+}
+
+func fixtures(t *testing.T) map[string]json.RawMessage {
+	p, _ := loadFixtures(t)
+	return p
 }
 
 func asJSON(t *testing.T, v any) map[string]any {
@@ -89,13 +100,27 @@ func asJSON(t *testing.T, v any) map[string]any {
 func TestForgeAPIVerbsAcceptTheHubsFramesAndAnswerInItsShape(t *testing.T) {
 	h, stk, _ := forgeHandler(t)
 	fx := fixtures(t)
+	secondRevoke := false
 	call := func(verb string) map[string]any {
 		t.Helper()
 		got, streamed, err := h.Handle(t.Context(), verb, fx[verb], nil)
 		if err != nil || streamed {
 			t.Fatalf("%s: %v (streamed %v)", verb, err, streamed)
 		}
-		return asJSON(t, got)
+		ack := asJSON(t, got)
+		// Every field the hub's example result carries is in ours, with the same value.
+		_, results := loadFixtures(t)
+		var want map[string]any
+		_ = json.Unmarshal(results[verb], &want)
+		if verb == "forge.api.revoke" && secondRevoke {
+			return ack
+		}
+		for k, v := range want {
+			if !reflect.DeepEqual(ack[k], v) {
+				t.Errorf("%s: ack[%q] = %v, fixture says %v", verb, k, ack[k], v)
+			}
+		}
+		return ack
 	}
 	// deliver: ok:true AND stored:true AND an isolation word (the hub's three conditions).
 	d := call("forge.api.deliver")
@@ -124,6 +149,7 @@ func TestForgeAPIVerbsAcceptTheHubsFramesAndAnswerInItsShape(t *testing.T) {
 	if r := call("forge.api.revoke"); r["removed"] != true {
 		t.Fatalf("revoke ack = %v", r)
 	}
+	secondRevoke = true
 	if r := call("forge.api.revoke"); r["removed"] != false {
 		t.Fatalf("second revoke ack = %v", r)
 	}
@@ -147,8 +173,11 @@ func TestForgeAPIRejectsUnknownFieldsInEveryVerb(t *testing.T) {
 		}
 		// A nested unknown field (inside a rule) is rejected too.
 		if verb == "forge.api.deliver" {
-			bad := strings.Replace(string(raw), `{ "deny":`, `{ "tokn": "x", "deny":`, 1)
-			if _, _, err := h.Handle(t.Context(), verb, json.RawMessage(bad), nil); err == nil {
+			var f map[string]any
+			_ = json.Unmarshal(raw, &f)
+			f["rules"].([]any)[0].(map[string]any)["tokn"] = "x"
+			bad, _ := json.Marshal(f)
+			if _, _, err := h.Handle(t.Context(), verb, bad, nil); err == nil {
 				t.Errorf("a rule with an unknown key was accepted")
 			}
 		}
