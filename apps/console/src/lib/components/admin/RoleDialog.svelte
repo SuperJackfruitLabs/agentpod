@@ -68,46 +68,43 @@
 </script>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
-  <Dialog.Portal>
-    <Dialog.Overlay />
-    <Dialog.Content showCloseButton={false}>
-      <Dialog.Header>
-        <Dialog.Title>Change role</Dialog.Title>
-        <Dialog.Description>Change role for {user?.email}</Dialog.Description>
-      </Dialog.Header>
+  <Dialog.Content showCloseButton={false}>
+    <Dialog.Header>
+      <Dialog.Title>Change role</Dialog.Title>
+      <Dialog.Description>Change role for {user?.email}</Dialog.Description>
+    </Dialog.Header>
 
-      <div class="space-y-2 py-2">
-        <Label for="role-select">New role</Label>
-        <Select.Root
-          type="single"
-          value={newRole}
-          onValueChange={(v) => {
-            if (v) newRole = v as UserRole;
-          }}
-        >
-          <Select.Trigger class="w-full" id="role-select">
-            {roleLabel[newRole]}
-          </Select.Trigger>
-          <Select.Content>
-            <Select.Item value="user">User</Select.Item>
-            <Select.Item value="admin">Admin</Select.Item>
-          </Select.Content>
-        </Select.Root>
-        {#if newRole === "admin"}
-          <p class="text-xs text-destructive">
-            Admins have full access to manage all users and system settings.
-          </p>
-        {/if}
-      </div>
+    <div class="space-y-2 py-2">
+      <Label for="role-select">New role</Label>
+      <Select.Root
+        type="single"
+        value={newRole}
+        onValueChange={(v) => {
+          if (v) newRole = v as UserRole;
+        }}
+      >
+        <Select.Trigger class="w-full" id="role-select">
+          {roleLabel[newRole]}
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Item value="user">User</Select.Item>
+          <Select.Item value="admin">Admin</Select.Item>
+        </Select.Content>
+      </Select.Root>
+      {#if newRole === "admin"}
+        <p class="text-xs text-destructive">
+          Admins have full access to manage all users and system settings.
+        </p>
+      {/if}
+    </div>
 
-      <Dialog.Footer>
-        <Button variant="outline" onclick={() => (open = false)} disabled={isUpdating}>
-          Cancel
-        </Button>
-        <Button onclick={handleConfirm} disabled={isUpdating || newRole === user?.role}>
-          {isUpdating ? "Changing…" : "Change role"}
-        </Button>
-      </Dialog.Footer>
-    </Dialog.Content>
-  </Dialog.Portal>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={() => (open = false)} disabled={isUpdating}>
+        Cancel
+      </Button>
+      <Button onclick={handleConfirm} disabled={isUpdating || newRole === user?.role}>
+        {isUpdating ? "Changing…" : "Change role"}
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
 </Dialog.Root>

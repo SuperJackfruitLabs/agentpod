@@ -82,3 +82,9 @@ test("TypeToConfirmDialog: not rendered when open=false", () => {
 
   expect(queryByRole("dialog")).toBeNull();
 });
+
+
+test("an open dialog draws one overlay, not two (regression: doubled Portal and Overlay)", () => {
+  render(TypeToConfirmDialog, { props: { ...baseProps, onConfirm: vi.fn(), onCancel: vi.fn() } });
+  expect(document.querySelectorAll("[data-slot=\"dialog-overlay\"]").length).toBe(1);
+});
