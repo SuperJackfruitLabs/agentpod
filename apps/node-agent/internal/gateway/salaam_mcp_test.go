@@ -31,7 +31,7 @@ func TestSalaamGatewayAssignsProxyPrivatelyAndInjectsNoCredentials(t *testing.T)
 	t.Cleanup(mgr.Shutdown)
 	b := salaam.Binding{Version: 1, OrganizationID: "org_00000000000000000001", PrincipalID: "prn_00000000000000000002", NodeID: "node_fixture", StationID: "station_fixture", StationKey: salaam.StationKey("/workspace"), OccupancyEpoch: 3, HubSessionID: "acps_fixture", Workspace: "/workspace", Run: salaam.Run{Source: "superpipeline", ID: "run_fixture", Epoch: 7}}
 	const secret = "offline-private-proxy-credential-never-real"
-	servers := []mcpproxy.Server{{Type: "http", Name: "superlibrary", URL: "http://127.0.0.1:43421/stations/station_fixture/mcp/superlibrary", Headers: []mcpproxy.Header{{Name: mcpproxy.SecretHeader, Value: secret}}, CredentialGeneration: 4}}
+	servers := []mcpproxy.Server{{Type: "http", Name: "superlibrary", URL: "http://127.0.0.1:43421/stations/station_fixture/mcp-managed-v1/" + mcpFingerprint(b) + "/superlibrary", Headers: []mcpproxy.Header{{Name: mcpproxy.SecretHeader, Value: secret}}, CredentialGeneration: 4}}
 	assignments := 0
 	deny := false
 	c := &salaam.Client{NodeID: b.NodeID, Workspace: b.Workspace, HTTP: &http.Client{Transport: salaamMCPTransport(func(r *http.Request) (*http.Response, error) {

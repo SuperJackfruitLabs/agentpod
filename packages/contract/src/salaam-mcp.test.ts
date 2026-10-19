@@ -46,7 +46,7 @@ const assignment = {
     {
       type: "http",
       name: "superlibrary",
-      url: `${profile.proxy_origin}/stations/${authority.station_id}/mcp/superlibrary`,
+      url: corpus.assignments[0]!.value.servers[0]!.url,
       headers: [
         {
           name: "X-Agentpod-Proxy-Key",

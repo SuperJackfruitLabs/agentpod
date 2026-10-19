@@ -133,11 +133,12 @@ export const SalaamMcpAssignment = z
           u.hash ||
           u.href !== s.url ||
           s.url !== u.origin + u.pathname ||
-          parts.length !== 5 ||
+          parts.length !== 6 ||
           parts[1] !== "stations" ||
           decodeURIComponent(parts[2]!) !== a.binding.station_id ||
-          parts[3] !== "mcp" ||
-          parts[4] !== (s.name === "agentpod" ? "hub" : "superlibrary")
+          parts[3] !== "mcp-managed-v1" ||
+          !/^[a-f0-9]{64}$/.test(parts[4]!) ||
+          parts[5] !== (s.name === "agentpod" ? "hub" : "superlibrary")
         )
           return false;
         origins.add(u.origin);
@@ -147,7 +148,7 @@ export const SalaamMcpAssignment = z
       }
     }
     return origins.size === 1 && keys.size === 1;
-  }, "Assignment must identify one station on one loopback proxy with its exact header");
+  }, "Assignment must identify one station on a managed-only proxy route with its exact header; authority admission must verify the binding fingerprint");
 export type SalaamMcpAssignment = z.infer<typeof SalaamMcpAssignment>;
 
 /** Safe protocol/catalog readiness receipt. Shape validation alone grants no authority. */

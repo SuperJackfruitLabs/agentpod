@@ -343,11 +343,15 @@ func (p *Proxy) ServersForHarness(stationID, harness string) []Server {
 // ServeHTTP authenticates, mints and forwards.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
-	if len(parts) != 4 || parts[0] != "stations" || parts[2] != "mcp" {
+	managed := len(parts) == 5 && parts[0] == "stations" && parts[2] == "mcp-managed-v1"
+	if !managed && (len(parts) != 4 || parts[0] != "stations" || parts[2] != "mcp") {
 		http.NotFound(w, r)
 		return
 	}
 	stationID, segment := parts[1], parts[3]
+	if managed {
+		segment = parts[4]
+	}
 	up := p.upstreams[segment]
 	if up == nil {
 		http.NotFound(w, r)
@@ -355,6 +359,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	want, generation, identity, served, stateError := p.store.Snapshot(stationID)
 	served = served && stateError == nil && p.Serves(stationID)
+	if (managed && (identity == nil || parts[3] != identity.BindingDigest || r.URL.RawQuery != "" || r.URL.ForceQuery)) || (!managed && identity != nil) {
+		writeRPCError(w, http.StatusUnauthorized, "managed MCP requires its exact versioned root route")
+		return
+	}
 	got := r.Header.Get(SecretHeader)
 	// Constant time, and the same answer for an unknown station as for a wrong secret, so a
 	// caller cannot probe which stations this node serves.

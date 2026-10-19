@@ -68,12 +68,19 @@ func (a MCPAssignment) Validate() error {
 		if segment == "agentpod" {
 			segment = "hub"
 		}
-		expected := "/stations/" + b.StationID + "/mcp/" + segment
+		parts := strings.Split(u.EscapedPath(), "/")
+		if len(parts) != 6 || parts[1] != "stations" || parts[3] != "mcp-managed-v1" || !mcpHash.MatchString(parts[4]) || parts[5] != segment {
+			return fail()
+		}
+		station, err := url.PathUnescape(parts[2])
+		if err != nil || station != b.StationID {
+			return fail()
+		}
 		host := "127.0.0.1:" + strconv.Itoa(port)
 		if u.Hostname() == "::1" {
 			host = "[::1]:" + strconv.Itoa(port)
 		}
-		if u.Scheme != "http" || port == 80 || u.Host != host || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Path != expected || u.String() != s.URL || s.URL != "http://"+u.Host+u.EscapedPath() {
+		if u.Scheme != "http" || port == 80 || u.Host != host || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.String() != s.URL || s.URL != "http://"+u.Host+u.EscapedPath() {
 			return fail()
 		}
 		current := u.Scheme + "://" + u.Host
@@ -217,6 +224,12 @@ func (c *Client) AssignMCP(ctx context.Context, b Binding, servers []mcpproxy.Se
 	assignment := MCPAssignment{Version: 1, Binding: b, ProfileDigest: health.ManagedMCP.ProfileDigest, CredentialGeneration: generation, Servers: servers}
 	if err := assignment.Validate(); err != nil {
 		return nil, err
+	}
+	for _, server := range servers {
+		u, _ := url.Parse(server.URL)
+		if strings.Split(u.EscapedPath(), "/")[4] != canonicalDigest(b) {
+			return nil, fmt.Errorf("salaam: managed endpoint belongs to another root binding")
+		}
 	}
 	var view MCPView
 	if err := c.call(ctx, "mcp-assign", map[string]any{"binding": b, "assignment": assignment}, &view); err != nil {

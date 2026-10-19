@@ -44,6 +44,12 @@ func TestBoundProxyCannotSubstituteAnotherStationOccupantAndKeepsItsFenceAfterRe
 	if statusOf(t, first[0]) != 200 || calls.Load() != 1 {
 		t.Fatal("admitted station principal did not reach upstream")
 	}
+	if !strings.Contains(first[0].URL, "/mcp-managed-v1/"+identity.BindingDigest+"/") {
+		t.Fatal("managed assignment reused the old transparent proxy namespace")
+	}
+	if statusOf(t, p.Servers("s")[0]) != 401 || calls.Load() != 1 {
+		t.Fatal("a managed credential could use the unbound legacy route")
+	}
 	token = identityToken(b, org)
 	if statusOf(t, first[0]) != 403 || calls.Load() != 1 {
 		t.Fatal("a cached or freshly changed occupant was substituted for the admitted principal")

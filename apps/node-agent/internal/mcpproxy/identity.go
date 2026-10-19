@@ -75,7 +75,11 @@ func (p *Proxy) BindIdentity(station string, identity Identity) ([]Server, error
 	if changed {
 		p.invalidateToken(station)
 	}
-	return p.servers(station, key, generation), nil
+	servers := p.servers(station, key, generation)
+	for i := range servers {
+		servers[i].URL = strings.Replace(servers[i].URL, "/mcp/", "/mcp-managed-v1/"+identity.BindingDigest+"/", 1)
+	}
+	return servers, nil
 }
 func (p *Proxy) invalidateToken(station string) {
 	if cache, ok := p.tokens.(interface{ Invalidate(string) }); ok {
