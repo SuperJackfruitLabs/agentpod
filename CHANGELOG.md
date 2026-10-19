@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
+## Unreleased
+
+### Changed
+
+- **The console is rebuilt on vibekit**, the suite's design system. It comes in four vibes (Daylight, Paper, Studio and Quiet), each in light and dark, chosen under Appearance in the account menu. Navigation stays put as you move between pages, and on a phone it becomes a bottom bar with a More sheet. Tables turn into cards on narrow screens, and every control is at least 44px under 1024px wide.
+- **The old colour schemes, font pairings and custom themes are gone.** A person's old light or dark choice seeds the new Appearance setting once; everything else from the old theme settings is dropped.
+- Building the console now needs Node 22 or newer (vibekit requires it); there are no new build variables.
+
+### Fixed
+
+- Fixes found while rebuilding the console and checking every page with an accessibility sweep, among them: an open file's tab in Files had its close button nested inside the tab, which screen readers cannot reach (Delete now closes the focused tab, and the cross stays for the pointer); the rendered Markdown preview could not be scrolled from the keyboard; on a phone many buttons, links, radio buttons and checkboxes were smaller than a fingertip; and the Cleanup list's checkboxes could only be hit on the box itself, not on their row.
+
 ## v0.1.22 - 2026-08-12
 
 **Posture** — `apn scan`'s findings become fleet-visible, and, more urgently, become correct. Checking the scanner against real machines found it grading them **A** without opening the files it claimed to check.

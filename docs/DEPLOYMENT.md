@@ -19,7 +19,7 @@ On the target box:
 | **Docker** | Required for the Docker provisioner and image builds |
 | **Postgres + pgvector** | Hub's database. See step 2. |
 | **bun** | Runs the hub (`curl -fsSL https://bun.sh/install \| bash`) |
-| **Node.js 20+** | pnpm is a Node program and the console build is `vite build`; a box with only bun cannot run step 5's `pnpm install`. CI uses Node 20. |
+| **Node.js 22+** | pnpm is a Node program and the console build is `vite build`; a box with only bun cannot run step 5's `pnpm install`. The console is built on vibekit, which requires Node 22 or newer; CI's `console` and `deploy-console` jobs use Node 22. |
 | **pnpm** | Builds the console. `corepack enable` is enough — the repo pins `packageManager: pnpm@10.18.2` in the root `package.json` and corepack honours the pin, so do **not** `corepack prepare pnpm@latest`: it can install a different major than the lockfile was written with. |
 | **Go** | Only required when building the node-agent from source. The curl installer downloads prebuilt binaries — no Go needed on target hosts. |
 | **nginx + certbot** | Existing reverse proxy; certbot for TLS |
@@ -766,7 +766,10 @@ overhead depending on syscall frequency.
 > builds with `PUBLIC_HUB_URL=https://hub.agentpod.dev` and uploads to the `agentpod-console`
 > project on every push to `main`. The steps below are for a deployment on your own domain.
 
-Build the static SPA (build locally — the VPS does not need to run this step):
+Build the static SPA (build locally — the VPS does not need to run this step). The build needs
+**Node 22 or newer**: the console's design system, vibekit, is vendored as a tarball in
+`apps/console/vendor/` (see its README) and declares `node >=22`. There are no new build
+variables; `PUBLIC_HUB_URL` is still the only one.
 
 ```bash
 cd /path/to/agentpod   # local checkout
@@ -781,6 +784,9 @@ PUBLIC_HUB_URL=https://hub.<your-domain> pnpm --filter @agentpod/console build
   - Build command: `pnpm build`
   - Build output directory: `build`
   - Environment variable: `PUBLIC_HUB_URL=https://hub.<your-domain>`
+  - Node version: 22 or newer. `apps/console/.node-version` (the root directory above) pins 22, which
+    the Pages build image reads; a `NODE_VERSION` environment variable on the Pages project overrides
+    it, so if one is set there it must be 22 or newer too.
 
 - **Direct upload (Wrangler):**
   ```bash
