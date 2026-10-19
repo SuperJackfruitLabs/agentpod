@@ -10,7 +10,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ### Changed
 
-- **The console is rebuilt on vibekit**, the suite's design system. It comes in four vibes (Daylight, Paper, Studio and Quiet), each in light and dark, chosen under Appearance in the account menu. Navigation stays put as you move between pages, and on a phone it becomes a bottom bar with a More sheet. Tables turn into cards on narrow screens, and every control is at least 44px under 1024px wide.
+- **The console is rebuilt on vibekit**, the suite's design system. It comes in four vibes (Daylight, Paper, Studio and Quiet), each in light and dark, chosen under Appearance in the account menu. With no saved choice the console follows the sun instead of the OS setting. Navigation stays put as you move between pages, and on a phone it becomes a bottom bar with a More sheet. Tables turn into cards on narrow screens, and every control is at least 44px under 1024px wide.
 - **The old colour schemes, font pairings and custom themes are gone.** A person's old light or dark choice seeds the new Appearance setting once; everything else from the old theme settings is dropped.
 - Building the console now needs Node 22 or newer (vibekit requires it); there are no new build variables.
 
