@@ -519,7 +519,7 @@
       {/if}
     {/if}
 
-    <section class="ap-card" aria-label="Agent table">
+    <section class="ap-card ap-card--cards" aria-label="Agent table">
       <AgentTable {agents} {externalFilter} />
     </section>
   {/if}

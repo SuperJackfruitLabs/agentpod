@@ -273,7 +273,7 @@
 <!-- ONE row snippet shared by both the grouped and flat branches below. -->
 {#snippet agentRow(agent: FleetAgent)}
   <Table.Row>
-    <Table.Cell>
+    <Table.Cell data-card="title">
       <!-- The face is decoration: the name beside it is what is read, and the link's text stays the name. -->
       <span class="ap-agent">
         <span aria-hidden="true" class="inline-flex"><Face id={agent.stationId} label={agent.agentName} mood={agent.status === "running" ? "working" : "resting"} size={28} /></span>
@@ -282,30 +282,30 @@
         </a>
       </span>
     </Table.Cell>
-    <Table.Cell class="hidden sm:table-cell text-xs text-muted-foreground">
+    <Table.Cell data-card="hide" class="hidden sm:table-cell text-xs text-muted-foreground">
       {agent.harness}
     </Table.Cell>
-    <Table.Cell class="hidden md:table-cell text-xs text-muted-foreground">
+    <Table.Cell data-label="Node" class="hidden md:table-cell text-xs text-muted-foreground">
       {agent.nodeName}
     </Table.Cell>
-    <Table.Cell>
+    <Table.Cell data-card="status">
       <Badge variant="outline" data-state={stationState(agent.status).id} class={cn("ap-pill", statusBadgeClass(agent.status))}>
         {agent.status}
       </Badge>
     </Table.Cell>
-    <Table.Cell class="hidden lg:table-cell text-xs text-muted-foreground" data-testid="cpu-cell">
+    <Table.Cell data-card="hide" class="hidden lg:table-cell text-xs text-muted-foreground" data-testid="cpu-cell">
       <Metric>{formatCpu(agent.cpuPct)}</Metric>
     </Table.Cell>
-    <Table.Cell class="hidden lg:table-cell text-xs text-muted-foreground" data-testid="mem-cell">
+    <Table.Cell data-card="hide" class="hidden lg:table-cell text-xs text-muted-foreground" data-testid="mem-cell">
       <Metric>{formatMem(agent.memBytes)}</Metric>
     </Table.Cell>
-    <Table.Cell class="hidden lg:table-cell text-xs text-muted-foreground" data-testid="uptime-cell">
+    <Table.Cell data-card="hide" class="hidden lg:table-cell text-xs text-muted-foreground" data-testid="uptime-cell">
       <Metric>{formatUptime(agent.uptimeSec)}</Metric>
     </Table.Cell>
-    <Table.Cell class="hidden sm:table-cell text-xs text-muted-foreground">
+    <Table.Cell data-label="Version" class="hidden sm:table-cell text-xs text-muted-foreground">
       <Metric>{agent.agentVersion ?? "—"}</Metric>
     </Table.Cell>
-    <Table.Cell>
+    <Table.Cell data-card="actions">
       {#if agent.updateAvailable}
         <button
           type="button"
@@ -379,7 +379,7 @@
 
   <!-- Dense table -->
   <div class="ap-tbl-wrap overflow-x-auto">
-    <Table.Root class="ap-tbl">
+    <Table.Root class="ap-tbl ap-tbl--cards">
       <Table.Header>
         <Table.Row>
           {@render sortHead("agent", "Agent")}

@@ -230,9 +230,9 @@
   {:else}
     <!-- Seven columns do not fit a phone; they scroll in here rather than
          dragging the document sideways. -->
-    <section class="ap-card" aria-label="Runtimes">
+    <section class="ap-card ap-card--cards" aria-label="Runtimes">
     <div data-testid="runtimes-table-scroller" class="ap-tbl-wrap overflow-x-auto">
-      <table class="ap-tbl w-full min-w-[880px] text-sm">
+      <table class="ap-tbl ap-tbl--cards w-full min-w-[880px] text-sm">
         <thead>
           <tr class="border-b border-border text-left text-xs text-muted-foreground">
             <th scope="col" class="px-3 py-2 font-medium">Runtime</th>
@@ -261,7 +261,7 @@
             >
               <!-- Capped and truncating: a runtime name is free text, and an
                    uncapped one eats the rest of the table. -->
-              <td class="max-w-[220px] px-3 py-3">
+              <td data-card="title" class="max-w-[220px] px-3 py-3">
                 <span class="block truncate font-bold" title={rt.name}>{rt.name}</span>
                 {#if rt.harness && rt.harness !== "none"}
                   <span class="ap-sub truncate">
@@ -274,16 +274,16 @@
                 {/if}
               </td>
 
-              <td class="px-3 py-3 font-mono text-xs text-muted-foreground">{rt.provider}</td>
+              <td data-label="Provider" class="px-3 py-3 font-mono text-xs text-muted-foreground">{rt.provider}</td>
 
-              <td class="px-3 py-3 font-mono text-xs text-muted-foreground">
+              <td data-label="Isolation" class="px-3 py-3 font-mono text-xs text-muted-foreground">
                 <!-- The runtime the provider REPORTED, not the one requested —
                      blank when not recorded rather than defaulting to "runc",
                      which would be a guess presented as a fact. -->
                 {rt.runtime ?? ""}
               </td>
 
-              <td class="max-w-[140px] px-3 py-3">
+              <td data-label="Node" class="max-w-[140px] px-3 py-3">
                 {#if rt.nodeId}
                   <a
                     href="/nodes/{rt.nodeId}"
@@ -297,7 +297,7 @@
                 {/if}
               </td>
 
-              <td class="px-3 py-3">
+              <td data-card="status" class="px-3 py-3">
                 <div class="flex flex-col items-start gap-1" data-testid="status-badge">
                   <StateDot {state} withLabel size="sm" />
                   <!-- Why, when the status alone doesn't say. An operator who
@@ -317,11 +317,11 @@
                 </div>
               </td>
 
-              <td class="px-3 py-3 font-mono text-xs whitespace-nowrap text-muted-foreground">
+              <td data-label="Created" class="px-3 py-3 font-mono text-xs whitespace-nowrap text-muted-foreground">
                 {relativeTime(rt.createdAt)}
               </td>
 
-              <td class="px-3 py-3">
+              <td data-card="actions" class="px-3 py-3">
                 <div class="flex items-center justify-end gap-1.5">
                   <!-- Start: a runtime an operator stopped, or one that failed -->
                   {#if rt.status === "stopped" || rt.status === "error"}

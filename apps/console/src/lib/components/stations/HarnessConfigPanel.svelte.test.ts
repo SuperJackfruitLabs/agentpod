@@ -715,3 +715,14 @@ test("a plan under review survives being hidden and shown again, and apply still
   // Re-entry refreshed the rows; it must NOT have re-planned.
   expect(planSpy).toHaveBeenCalledTimes(1);
 });
+
+test("under 768px each setting is a card", async () => {
+  const { expectCardTable } = await import("$lib/test-utils/viewport");
+  mockLoad({
+    observations: [observation({ state: "matches", declared: true, observed: true, level: "station" })],
+    settings: [setting({ id: "hermes.plugins.enabled" })],
+  });
+  const view = render(HarnessConfigPanel, { props: { stationId: STATION_ID, nodeId: NODE_ID } });
+  await waitFor(() => expect(view.getByRole("row", { name: /hermes\.plugins\.enabled/ })).toBeTruthy());
+  expectCardTable(view.container.querySelector("table"));
+});

@@ -379,3 +379,34 @@
   .ap-ph--plain, :where([data-vibe]) .ap-ph--plain, .ap-nh, :where([data-vibe]) .ap-nh { padding: 12px 16px 0; margin-inline: 0; }
   .ap-feed [data-testid="activity-row"] { grid-template-columns: 64px 12px minmax(0, 1fr) auto; }
 }
+
+/* ---------- Tables become cards (breakpoints.ts: cards) ----------
+   A table marked `.ap-tbl--cards` keeps its markup and reads as a stack of
+   cards under 768px, as the phone boards draw them: the title cell on the
+   left, the status cell on the right, then each `data-label` cell as a
+   "Label  value" line and the actions as a wrapped row. `data-card="hide"`
+   drops a column the card does not need. No min-width, so the table never
+   widens the page; the scroller around it stops scrolling. A section that is
+   only the table (`.ap-card--cards`) drops its own card so cards do not nest. */
+@media (max-width: 767px) {
+  .ap-tbl-wrap:has(> .ap-tbl--cards) { overflow: visible; border: 0; }
+  .ap-card.ap-card--cards { background: transparent; border: 0; box-shadow: none; padding: 0; }
+  .ap-tbl--cards { display: block; min-width: 0 !important; width: 100%; }
+  .ap-tbl--cards thead { display: none; }
+  .ap-tbl--cards tbody { display: flex; flex-direction: column; gap: 10px; }
+  .ap-tbl--cards tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: center;
+    padding: 14px 16px; border: 1px solid var(--vk-color-line); border-radius: var(--vk-radius-md);
+    background: var(--vk-color-surface);
+  }
+  .ap-tbl--cards tr > :is(td, th) { display: block; padding: 0; border: 0; max-width: none; grid-column: 1 / -1; text-align: left; min-width: 0; }
+  .ap-tbl--cards tr > [data-card="title"] { grid-column: 1; font-size: 1.0625rem; font-weight: 800; }
+  .ap-tbl--cards tr > [data-card="status"] { grid-column: 2; grid-row: 1; justify-self: end; }
+  .ap-tbl--cards tr > [data-card="hide"] { display: none !important; }
+  .ap-tbl--cards tr > [data-label] { display: grid !important; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 12px; font-size: .875rem; }
+  .ap-tbl--cards tr > [data-label]::before { content: attr(data-label); color: var(--vk-color-muted); font-size: .8125rem; }
+  .ap-tbl--cards tr > [data-card="actions"] { display: block; }
+  .ap-tbl--cards tr > [data-card="actions"] > * { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; }
+  .ap-tbl--cards tr > [data-card="actions"]:empty { display: none; }
+  .ap-tbl--cards tr > [colspan] { grid-column: 1 / -1; }
+}

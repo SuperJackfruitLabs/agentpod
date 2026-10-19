@@ -280,7 +280,7 @@
         dragging the document sideways.
       -->
       <div data-testid="detected-table-scroller" class="ap-tbl-wrap overflow-x-auto">
-        <table class="ap-tbl w-full min-w-[640px] text-sm">
+        <table class="ap-tbl ap-tbl--cards w-full min-w-[640px] text-sm">
           <thead>
             <tr class="border-b border-border text-left text-xs text-muted-foreground">
               <th scope="col" class="px-3 py-2 font-medium">Agent</th>
@@ -297,14 +297,14 @@
           <tbody>
             {#each stations.detected as s (s.key)}
               <tr data-testid="detected-row" class="relative border-b border-border/50 last:border-b-0">
-                <td class="max-w-[220px] px-3 py-2">
+                <td data-card="title" class="max-w-[220px] px-3 py-2">
                   <span class="block truncate font-mono font-medium" title={s.displayName}>
                     {s.displayName}
                   </span>
                 </td>
-                <td class="px-3 py-2 font-mono text-xs text-muted-foreground">{s.harness}</td>
-                <td class="px-3 py-2 font-mono text-xs text-muted-foreground">{s.kind}</td>
-                <td class="max-w-[280px] px-3 py-2">
+                <td data-label="Harness" class="px-3 py-2 font-mono text-xs text-muted-foreground">{s.harness}</td>
+                <td data-label="Kind" class="px-3 py-2 font-mono text-xs text-muted-foreground">{s.kind}</td>
+                <td data-label="Workspace" class="max-w-[280px] px-3 py-2">
                   {#if s.workspacePath}
                     <span
                       class="block truncate font-mono text-xs text-muted-foreground"
@@ -316,7 +316,7 @@
                     <span class="text-xs text-muted-foreground">—</span>
                   {/if}
                 </td>
-                <td class="px-3 py-2 text-right">
+                <td data-card="actions" class="px-3 py-2 text-right">
                   {#if !isAlreadyAdopted(s.key)}
                     <Button
                       variant="outline"

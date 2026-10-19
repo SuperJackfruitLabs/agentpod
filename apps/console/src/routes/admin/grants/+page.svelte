@@ -400,7 +400,7 @@
         <!-- Four columns of grant text do not fit a phone; they scroll in here
              rather than dragging the document sideways. -->
         <div class="ap-tbl-wrap overflow-x-auto rounded-lg border border-border">
-          <table class="ap-tbl w-full min-w-[640px] text-sm">
+          <table class="ap-tbl ap-tbl--cards w-full min-w-[640px] text-sm">
             <thead>
               <tr class="border-b border-border text-left text-xs text-muted-foreground">
                 <th scope="col" class="px-3 py-2 font-medium">Principal</th>
@@ -424,7 +424,7 @@
                   data-testid="grant-row"
                   class="relative border-b border-border/50 align-top last:border-b-0"
                 >
-                  <td class="max-w-[260px] px-3 py-3">
+                  <td data-card="title" class="max-w-[260px] px-3 py-3">
                     <div class="flex flex-wrap items-center gap-2">
                       <!--
                         The handle, not the id. `title` keeps the exact string
@@ -455,7 +455,7 @@
                     {/if}
                   </td>
 
-                  <td class="px-3 py-3">
+                  <td data-label="May dispatch" class="px-3 py-3">
                     {#if row.dispatch.length > 0}
                       <ul class="flex flex-wrap gap-1">
                         {#each row.dispatch as value (value.id)}
@@ -486,7 +486,7 @@
                     {/if}
                   </td>
 
-                  <td class="px-3 py-3 text-xs">
+                  <td data-label="May grant reach" class="px-3 py-3 text-xs">
                     {#if row.grant.mayGrantReach}
                       <span class="text-foreground">Yes</span>
                     {:else}
@@ -494,7 +494,7 @@
                     {/if}
                   </td>
 
-                  <td class="px-3 py-3">
+                  <td data-card="actions" class="px-3 py-3">
                     <div class="flex items-center justify-end gap-1">
                       <Button variant="outline" size="sm" class="h-7 px-2 text-xs" onclick={() => openEdit(row)}>
                         <PencilIcon class="mr-1 h-3.5 w-3.5" />

@@ -371,3 +371,10 @@ test("under the plane the page shows only the notice: no banner, count or grant 
   expect(container.textContent).not.toMatch(/principals have a grant/);
   expect(queryByRole("alert")).toBeNull();
 });
+
+test("under 768px each grant is a card", async () => {
+  const { expectCardTable } = await import("$lib/test-utils/viewport");
+  const { findAllByTestId, container } = setup({ grants: [{ principalId: JO, mayDispatch: ["*"], mayGrantReach: false }] });
+  await findAllByTestId("grant-row");
+  for (const table of Array.from(container.querySelectorAll("table"))) expectCardTable(table);
+});

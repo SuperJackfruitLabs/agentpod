@@ -376,8 +376,8 @@
         {/if}
       </WarnBox>
     {/if}
-    <div class="overflow-x-auto">
-      <table class="w-full text-left text-sm">
+    <div class="ap-tbl-wrap overflow-x-auto">
+      <table class="ap-tbl--cards w-full text-left text-sm">
         <caption class="sr-only"
           >Declared harness configuration, one row per registered setting with something declared for this station</caption
         >
@@ -392,16 +392,16 @@
         <tbody>
           {#each rows as row (row.settingId)}
             <tr class="border-b align-top">
-              <th scope="row" class="p-2 font-normal">
+              <th scope="row" data-card="title" class="p-2 font-normal">
                 <span class="font-mono text-xs">{row.settingId}</span>
                 <span class="block text-xs text-muted-foreground">{row.scope ?? "scope unknown"} · {row.policy ?? "policy unknown"}</span>
               </th>
-              <td class="p-2">
+              <td data-label="Declared" class="p-2">
                 <span class="font-mono text-xs">{fmt(row.declared)}</span>
                 <span class="block text-xs text-muted-foreground">from the {row.level} level</span>
               </td>
-              <td class="p-2 font-mono text-xs">{observedText(row)}</td>
-              <td class="p-2">
+              <td data-label="Observed" class="p-2 font-mono text-xs">{observedText(row)}</td>
+              <td data-label="State" class="p-2">
                 <span class="font-medium">{label(row.state)}</span>
                 {#if row.reason}<span class="block text-xs text-muted-foreground">{row.reason}</span>{/if}
                 {#if row.state === "awaiting-restart"}
