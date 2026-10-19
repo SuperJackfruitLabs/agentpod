@@ -76,7 +76,7 @@
   >
     {#if appearance.value.vibe === "daylight"}<div class="vk-sky__sun" aria-hidden="true"></div>{/if}
     <TopBar onToggleRoster={() => (view = view === "roster" ? "stage" : "roster")} />
-    <div class="ap-head__nav max-[900px]:hidden"><Navigation /></div>
+    <div class="ap-head__nav phone:hidden"><Navigation /></div>
   </div>
 
   <AttentionLane {items} />
@@ -91,7 +91,7 @@
   >
     <!--
       Shown/hidden with the SAME min-[901px] the columns switch on: Tailwind's
-      max-[900px] compiles to `not all and (min-width:900px)`, which is
+      a max-[N] variant compiles to an exclusive `not all and (min-width: N)`, which is
       exclusive, so pairing it with min-[901px] leaves exactly 900px in a
       one-column grid with the roster still in it, stacked above the stage.
       The display class is picked by the ternary rather than layered, because

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { above } from "$lib/breakpoints";
   import { readFile, readImage, setMatrixAvatar } from "$lib/api/client";
   import { linkFileToLibrary } from "$lib/api/superlibrary";
   import { toast } from "svelte-sonner";
@@ -62,7 +63,7 @@
    * convention is mobile-first `min-[...]` variants — a `max-[...]` here would
    * be the exclusive-boundary trap the shell already hit once.
    */
-  const SPLIT_FITS = "(min-width: 701px)";
+  const SPLIT_FITS = above("split");
   let splitFits = $state(true);
   let mobilePane = $state<"tree" | "file">("tree");
 

@@ -169,7 +169,7 @@ test("at and below 900px the roster and the stage are two views, not two columns
 
   // Asserted as class tokens, not substrings: "overflow-hidden" contains
   // "hidden". Both columns flip on the same min-[901px] the grid does — see
-  // the comment in AppShell for why max-[900px] cannot be paired with it.
+  // the comment in AppShell for why a max-[N] variant cannot be paired with it.
   expect(getByTestId("roster-rail").classList.contains("hidden")).toBe(true);
   expect(getByTestId("roster-rail").classList.contains("min-[901px]:flex")).toBe(true);
   expect(getByTestId("stage").classList.contains("hidden")).toBe(false);
@@ -189,7 +189,7 @@ test("the head holds the top bar and the one navigation; the phone bar is the la
   expect(head.contains(getByTestId("top-bar"))).toBe(true);
   expect(head.contains(getByTestId("navigation"))).toBe(true);
   // The navigation gives way to the bottom bar on a phone, and the other way round.
-  expect(getByTestId("navigation").parentElement?.className).toContain("max-[900px]:hidden");
+  expect(getByTestId("navigation").parentElement?.className).toContain("phone:hidden");
   expect(getByTestId("phone-slot").className).toContain("min-[901px]:hidden");
   expect(getByTestId("app-shell").lastElementChild).toBe(getByTestId("phone-slot"));
 });

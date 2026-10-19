@@ -16,6 +16,13 @@
 @import "./lib/styles/tabs.css";
 @import "./lib/styles/admin.css";
 
+/* Named breakpoints (src/lib/breakpoints.ts): inclusive max-width variants, so
+   the boundary pixel is in exactly one branch. Use these, never max-[Npx]:. */
+@custom-variant phone (@media (max-width: 900px));
+@custom-variant narrow-header (@media (max-width: 639px));
+/* Touch-sized targets: under 1024px, and on any coarse pointer. */
+@custom-variant touch (@media (max-width: 1023px), (pointer: coarse));
+
 /* Dark is a vibekit theme on <html> (data-theme), never a .dark class. */
 @custom-variant dark (&:is([data-theme="dark"] *));
 

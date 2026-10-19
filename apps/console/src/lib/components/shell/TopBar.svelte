@@ -58,7 +58,7 @@
    * on any coarse pointer (an iPad in landscape is wide but still a finger).
    * The audit measured these at 32×32 on a 390px phone.
    */
-  const touch = "max-[900px]:size-11 pointer-coarse:size-11";
+  const touch = "touch:size-11";
 
   const controlClass =
     "inline-flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground";
@@ -83,24 +83,24 @@
     href="/"
     data-testid="wordmark"
     aria-label="AgentPod home"
-    class="ap-brand flex shrink-0 items-center max-[900px]:min-h-11 max-[900px]:min-w-11 max-[900px]:justify-center pointer-coarse:min-h-11"
+    class="ap-brand flex shrink-0 items-center touch:min-h-11 touch:min-w-11 phone:justify-center"
   >
     <span class="ap-brand__mark"><Mark class="size-[20px]" /></span>
     <!-- The name gives way on a phone: the mark still links home, and the hub pill
          (the bar's one load-bearing fact) keeps its room. -->
-    <span class="ap-brand__name max-[900px]:hidden">AgentPod</span>
+    <span class="ap-brand__name phone:hidden">AgentPod</span>
   </a>
 
   <a
     href="/settings"
     data-testid="hub-pill"
     title={connection.apiUrl ?? "No hub configured"}
-    class="ap-hub flex min-w-0 items-center max-[900px]:min-h-11 pointer-coarse:min-h-11"
+    class="ap-hub flex min-w-0 items-center touch:min-h-11"
   >
     <StateDot state={hubState} size="sm" />
     <span
       data-testid="hub-host"
-      class="truncate font-mono max-[560px]:max-w-32"
+      class="truncate font-mono narrow-header:max-w-32"
     >{hubHost}</span>
   </a>
 
@@ -109,16 +109,16 @@
   <button
     type="button"
     data-testid="palette-cue"
-    class="ap-cue min-w-0 pointer-coarse:h-11 max-[900px]:size-11"
+    class="ap-cue min-w-0 touch:size-11"
     aria-label="Message an agent, or run a command"
     onclick={() => commandPalette.toggle()}
   >
     <Search class="ap-cue__icon shrink-0" aria-hidden="true" />
-    <span class="ap-cue__text truncate max-[900px]:hidden">Message an agent, or run a command</span>
-    <kbd class="ap-kbd max-[900px]:hidden">⌘K</kbd>
+    <span class="ap-cue__text truncate phone:hidden">Message an agent, or run a command</span>
+    <kbd class="ap-kbd phone:hidden">⌘K</kbd>
   </button>
 
-  <div data-testid="account-slot" class="shrink-0 max-[900px]:hidden">
+  <div data-testid="account-slot" class="shrink-0 phone:hidden">
     <AccountMenu />
   </div>
 </header>

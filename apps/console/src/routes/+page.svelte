@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { upTo } from "$lib/breakpoints";
   /**
    * The muster — the console's home.
    *
@@ -147,7 +148,7 @@
   const showSkeleton = $derived(fleet.isLoading && fleet.loadedAt === null);
 
   /** Below 768px a node is a card: the table's seven columns showed two at 390. */
-  const narrow = new MediaQuery("(max-width: 767px)");
+  const narrow = new MediaQuery(upTo("cards"));
 </script>
 
 <svelte:head>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { upTo } from "$lib/breakpoints";
   /**
    * The station page — where you talk to an agent.
    *
@@ -301,8 +302,8 @@
    * Below 1240px the shell renders no context column, so the rail's content
    * becomes a tab instead of disappearing.
    *
-   * A JS media query, not a Tailwind `max-[1240px]:` variant: Tailwind
-   * compiles those to `not all and (min-width:1240px)`, which is exclusive and
+   * A JS media query, not a Tailwind max-[N] variant: Tailwind
+   * compiles those to an exclusive `not all and (min-width: N)`, which is exclusive and
    * leaves 1240px itself in neither branch — the boundary bug this redesign
    * already hit once at 900px.
    */
@@ -314,11 +315,11 @@
   onMount(() => {
     void myReach().then((r) => (mayGrantReach = r.mayGrantReach));
 
-    const mq = window.matchMedia("(max-width: 1240px)");
+    const mq = window.matchMedia(upTo("rail"));
     narrow = mq.matches;
     const onChange = (e: MediaQueryListEvent) => (narrow = e.matches);
     mq.addEventListener("change", onChange);
-    const pq = window.matchMedia("(max-width: 900px)");
+    const pq = window.matchMedia(upTo("phone"));
     phone = pq.matches;
     const onPhone = (e: MediaQueryListEvent) => {
       phone = e.matches;
@@ -646,7 +647,7 @@
             title={tab.disabled ? tab.disabledReason : tab.label}
             tabindex={activeTab === tab.id ? 0 : -1}
             class={cn(
-              "flex shrink-0 items-center gap-2 border-b-2 px-2.5 py-2 text-sm whitespace-nowrap transition-colors max-[900px]:min-h-11 pointer-coarse:min-h-11",
+              "flex shrink-0 items-center gap-2 border-b-2 px-2.5 py-2 text-sm whitespace-nowrap transition-colors touch:min-h-11",
               tab.disabled
                 ? "cursor-not-allowed border-transparent text-muted-foreground/50"
                 : activeTab === tab.id

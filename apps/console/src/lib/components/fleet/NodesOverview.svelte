@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { upTo } from "$lib/breakpoints";
   /**
    * /nodes — the machines, as an ops table.
    *
@@ -310,7 +311,7 @@
    * agents, version and Update off the edge. Below 768px each node is a card.
    * Asked in JS so exactly one variant is in the DOM (and the a11y tree).
    */
-  const narrow = new MediaQuery("(max-width: 767px)");
+  const narrow = new MediaQuery(upTo("cards"));
 </script>
 
 <!--
@@ -332,7 +333,7 @@
         onclick={handleCreateToken}
         disabled={isMinting}
         aria-label={isMinting ? "Creating…" : "Create enrollment token"}
-        class="max-[900px]:min-h-11"
+        class="touch:min-h-11"
       >
         <PlusIcon class="h-4 w-4 mr-2" />
         <!-- Shorter on a phone so the header stays one row; the accessible

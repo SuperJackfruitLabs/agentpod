@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { upTo } from "$lib/breakpoints";
   import type { Snippet, Component } from "svelte";
   import { cn } from "$lib/utils";
   import * as Tooltip from "$lib/components/ui/tooltip";
@@ -72,7 +73,7 @@
 
   // The same 640px as Tailwind's `sm`, asked in JS so exactly one copy of each
   // action exists: CSS-hiding a second copy would leave it in the a11y tree.
-  const phone = new MediaQuery("(max-width: 639px)");
+  const phone = new MediaQuery(upTo("header"));
 
   let tabRefs = $state<(HTMLButtonElement | null)[]>([]);
 
@@ -224,7 +225,7 @@
                   aria-label={tab.label}
                   tabindex={activeTab === tab.id ? 0 : -1}
                   class={cn(
-                    "flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors max-[900px]:min-h-11 pointer-coarse:min-h-11",
+                    "flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors touch:min-h-11",
                     tab.disabled
                       ? "cursor-not-allowed border-transparent text-muted-foreground/50"
                       : activeTab === tab.id

@@ -116,8 +116,7 @@ test("on a phone or a touch screen each item is a 44px target, and the lane says
   });
   expect(getByTestId("attention-items").className).toContain("scroll-strip");
   const cls = getAllByTestId("attention-item")[0].className;
-  expect(cls).toContain("max-[900px]:min-h-11");
-  expect(cls).toContain("pointer-coarse:min-h-11");
+  expect(cls).toContain("touch:min-h-11");
 });
 
 test("the lane never shows an approval: only node offline, runtime error, drift and unoccupied", () => {

@@ -162,7 +162,7 @@ test("the roster toggle calls back and is hidden above the one-column breakpoint
 test("the account chip sits in the bar above the phone breakpoint; on a phone More holds it", () => {
   const { getByTestId } = render(TopBar);
 
-  expect(getByTestId("account-slot").className).toContain("max-[900px]:hidden");
+  expect(getByTestId("account-slot").className).toContain("phone:hidden");
   expect(getByTestId("account-chip").textContent).toContain("RG");
 });
 
@@ -173,16 +173,13 @@ test("below 901px, and on any touch screen, every control in the bar is a 44px t
   // The palette cue is a wide labelled button on a desktop: it grows taller
   // under a finger, and becomes a 44px square below 901px.
   const cue = getByTestId("palette-cue").className;
-  expect(cue).toContain("max-[900px]:size-11");
-  expect(cue).toContain("pointer-coarse:h-11");
+  expect(cue).toContain("touch:size-11");
   for (const id of ["roster-toggle"]) {
     const cls = getByTestId(id).className;
-    expect(cls, id).toContain("max-[900px]:size-11");
-    expect(cls, id).toContain("pointer-coarse:size-11");
+    expect(cls, id).toContain("touch:size-11");
   }
   for (const id of ["hub-pill", "wordmark"]) {
     const cls = getByTestId(id).className;
-    expect(cls, id).toContain("max-[900px]:min-h-11");
-    expect(cls, id).toContain("pointer-coarse:min-h-11");
+    expect(cls, id).toContain("touch:min-h-11");
   }
 });
