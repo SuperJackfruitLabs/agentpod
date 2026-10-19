@@ -18,9 +18,10 @@ const StateFileName = "mcp-proxy.json"
 // proxy last bound — a session's server entry is a URL AND a secret, and a new port kills the URL
 // as surely as a new secret would.
 type state struct {
-	Listen      string            `json:"listen,omitempty"`
-	Secrets     map[string]string `json:"secrets"`
-	Generations map[string]int64  `json:"generations,omitempty"`
+	Listen      string              `json:"listen,omitempty"`
+	Secrets     map[string]string   `json:"secrets"`
+	Generations map[string]int64    `json:"generations,omitempty"`
+	Identities  map[string]Identity `json:"identities,omitempty"`
 }
 
 // Store holds the proxy's secrets in an owner-only (0600) file, written by atomic rename, so a
@@ -44,7 +45,7 @@ type Store struct {
 
 // OpenStore is a Store over path ("" = memory only). Nothing is read until it is used.
 func OpenStore(path string) *Store {
-	return &Store{path: path, st: state{Secrets: map[string]string{}, Generations: map[string]int64{}}}
+	return &Store{path: path, st: state{Secrets: map[string]string{}, Generations: map[string]int64{}, Identities: map[string]Identity{}}}
 }
 
 // refreshLocked re-reads the file when it changed since the last read. A missing file is an empty
@@ -57,7 +58,7 @@ func (s *Store) refreshLocked() error {
 	fi, err := os.Stat(s.path)
 	if errors.Is(err, fs.ErrNotExist) {
 		if !s.loaded {
-			s.st = state{Secrets: map[string]string{}, Generations: map[string]int64{}}
+			s.st = state{Secrets: map[string]string{}, Generations: map[string]int64{}, Identities: map[string]Identity{}}
 			s.loaded = true
 		}
 		return nil
@@ -88,6 +89,15 @@ func (s *Store) refreshLocked() error {
 	if st.Generations == nil {
 		st.Generations = map[string]int64{}
 	}
+	if st.Identities == nil {
+		st.Identities = map[string]Identity{}
+	}
+	for id, identity := range st.Identities {
+		if !identity.valid() || st.Secrets[id] == "" || st.Generations[id] < 1 {
+			return fmt.Errorf("mcpproxy: invalid managed identity state")
+		}
+	}
+
 	for id, generation := range st.Generations {
 		if generation < 1 || generation > 9007199254740991 || st.Secrets[id] == "" {
 			return fmt.Errorf("mcpproxy: invalid credential generation state")
@@ -152,17 +162,25 @@ func (s *Store) Secret(stationID string) (string, bool, error) {
 
 // SecretVersion reads the credential and its owner-assigned generation in one snapshot.
 func (s *Store) SecretVersion(stationID string) (string, int64, bool, error) {
+	key, generation, _, ok, err := s.Snapshot(stationID)
+	return key, generation, ok, err
+}
+func (s *Store) Snapshot(stationID string) (string, int64, *Identity, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.refreshLocked(); err != nil {
-		return "", 0, false, err
+		return "", 0, nil, false, err
 	}
 	v, ok := s.st.Secrets[stationID]
 	generation := s.st.Generations[stationID]
 	if v != "" && generation == 0 {
 		generation = 1
-	} // pre-generation files retain their key
-	return v, generation, ok && v != "", nil
+	}
+	var identity *Identity
+	if bound, ok := s.st.Identities[stationID]; ok {
+		identity = &bound
+	}
+	return v, generation, identity, ok && v != "", nil
 }
 
 // Ensure gives each station without a secret a new one, and persists only if it had to.

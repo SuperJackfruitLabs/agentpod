@@ -46,6 +46,15 @@ func (s *Source) now() time.Time {
 	return time.Now()
 }
 
+// Invalidate discards only this station's cache on an explicit managed identity handoff.
+// Older in-flight mints retain detached entries; they cannot overwrite the new cache.
+// The proxy separately rechecks its credential generation before forwarding an old request.
+func (s *Source) Invalidate(station string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.entries, station)
+}
+
 // Token returns a token for stationID with at least `refreshFloor` of life left, minting one
 // when the cached token is missing or too close to expiry. A failure is returned, never cached.
 func (s *Source) Token(ctx context.Context, stationID string) (string, error) {

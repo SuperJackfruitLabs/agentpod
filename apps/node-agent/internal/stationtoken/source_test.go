@@ -54,6 +54,25 @@ func TestSourceCachesATokenUntilItNearsExpiry(t *testing.T) {
 	}
 }
 
+func TestExplicitIdentityHandoffInvalidatesOnlyThatStationsCachedToken(t *testing.T) {
+	var mints atomic.Int32
+	s := &Source{mint: func(context.Context, string) (string, error) {
+		mints.Add(1)
+		return jwt(time.Now().Add(5 * time.Minute)), nil
+	}}
+	_, _ = s.Token(context.Background(), "a")
+	_, _ = s.Token(context.Background(), "b")
+	s.Invalidate("a")
+	_, _ = s.Token(context.Background(), "b")
+	if mints.Load() != 2 {
+		t.Fatal("unrelated station token was invalidated")
+	}
+	_, _ = s.Token(context.Background(), "a")
+	if mints.Load() != 3 {
+		t.Fatal("identity handoff reused the old token cache entry")
+	}
+}
+
 // A session that runs well past one token's five-minute life never hands out an expired token.
 func TestSourceNeverHandsOutAnExpiredTokenAcrossALongSession(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(1_800_000_000, 0)}

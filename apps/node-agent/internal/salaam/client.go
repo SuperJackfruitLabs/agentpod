@@ -63,6 +63,7 @@ type Client struct {
 	State, NodeID, Workspace string
 	HTTP                     *http.Client
 	Runtime                  *Runtime
+	BindMCP                  MCPBinder
 }
 
 func StationKey(workspace string) string {
@@ -123,7 +124,13 @@ func (c *Client) call(ctx context.Context, action string, body any, out any) err
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	res, err := c.httpClient().Do(req)
+	client := c.httpClient()
+	// Two reviewed servers can each consume their 30-second catalog deadline.
+	// Caller context remains an independent upper bound; model/effect calls never use this path.
+	if action == "mcp-assign" && c.HTTP == nil {
+		client.Timeout = 70 * time.Second
+	}
+	res, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("salaam: authority control unavailable")
 	}

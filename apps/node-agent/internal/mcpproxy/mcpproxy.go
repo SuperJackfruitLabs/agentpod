@@ -311,6 +311,9 @@ func (p *Proxy) Servers(stationID string) []Server {
 	if !ok {
 		return nil
 	}
+	return p.servers(stationID, secret, generation)
+}
+func (p *Proxy) servers(stationID, secret string, generation int64) []Server {
 	var out []Server
 	for _, u := range upstreamOrder {
 		if p.upstreams[u.segment] == nil {
@@ -350,7 +353,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	want, served := p.secretFor(stationID)
+	want, generation, identity, served, stateError := p.store.Snapshot(stationID)
+	served = served && stateError == nil && p.Serves(stationID)
 	got := r.Header.Get(SecretHeader)
 	// Constant time, and the same answer for an unknown station as for a wrong secret, so a
 	// caller cannot probe which stations this node serves.
@@ -370,6 +374,19 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		p.logf("mcp proxy: no station token for %s: %v", stationID, err)
 		writeRPCError(w, http.StatusBadGateway, "the node could not get this station's token")
+		return
+	}
+	current, currentGeneration, currentIdentity, served, stateError := p.store.Snapshot(stationID)
+	if stateError != nil || !served || !p.Serves(stationID) || currentGeneration != generation || !sameCredential(want, current) || !sameIdentity(identity, currentIdentity) {
+		writeRPCError(w, http.StatusUnauthorized, "managed proxy assignment changed during token admission")
+		return
+	}
+	if !tokenMatchesIdentity(token, identity) {
+		p.invalidateToken(stationID)
+		writeRPCError(w, http.StatusForbidden, "station token differs from the admitted managed principal")
+		return
+	}
+	if r.Context().Err() != nil {
 		return
 	}
 	rp := &httputil.ReverseProxy{
@@ -417,7 +434,9 @@ func writeRPCError(w http.ResponseWriter, status int, msg string) {
 //	                               (acp_adapter/server.py new_session → _register_session_mcp_servers)
 //
 // A harness not listed gets no servers, and its prompt names none of their tools.
-var httpMCPHarnesses = map[string]bool{"hermes": true, "claude-code": true, "codex": true, "opencode": true, "muse": true, "kilo": true}
+// Salaam's gateway installs credentials directly into the daemon and verifies its readiness
+// receipt before injecting credential-free declarations. Its reviewed host profile is mandatory.
+var httpMCPHarnesses = map[string]bool{"hermes": true, "claude-code": true, "codex": true, "opencode": true, "muse": true, "kilo": true, "salaam": true}
 
 // SupportsHTTP reports whether a harness takes HTTP MCP servers in session/new.
 func SupportsHTTP(harness string) bool { return httpMCPHarnesses[harness] }

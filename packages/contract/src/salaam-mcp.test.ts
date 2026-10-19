@@ -1,11 +1,16 @@
 import { expect, test } from "bun:test";
 import authority from "./fixtures/salaam-authority-v1.json";
-import { SalaamMcpProfile, SalaamMcpAssignment } from "./salaam-mcp";
+import {
+  SalaamMcpProfile,
+  SalaamMcpAssignment,
+  SalaamMcpAdmission,
+} from "./salaam-mcp";
 import corpus from "./fixtures/salaam-mcp-v1.json";
 
 for (const [cases, schema] of [
   [corpus.profiles, SalaamMcpProfile],
   [corpus.assignments, SalaamMcpAssignment],
+  [corpus.admissions, SalaamMcpAdmission],
 ] as const)
   for (const sample of cases)
     test(`shared managed MCP corpus: ${sample.name}`, () => {

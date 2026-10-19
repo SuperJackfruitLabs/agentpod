@@ -193,6 +193,7 @@ func (h *acpHandler) handleOpen(ctx context.Context, params json.RawMessage) (an
 	if err != nil {
 		return nil, false, fmt.Errorf("acp.open: %w", err)
 	}
+	var managedServers []mcpproxy.Server
 	if strings.HasPrefix(p.Key, "salaam:") {
 		if h.salaam == nil || p.SalaamAuthority == nil || p.SalaamAuthority.HubSessionID != p.Instance || p.SalaamAuthority.StationKey != p.Key {
 			return nil, false, fmt.Errorf("acp.open: Salaam requires a matching trusted authority binding")
@@ -202,6 +203,15 @@ func (h *acpHandler) handleOpen(ctx context.Context, params json.RawMessage) (an
 			return nil, false, err
 		}
 		env = append(env, admissionEnv...)
+		if p.MCPProxy != nil {
+			if p.MCPProxy.StationID != p.SalaamAuthority.StationID || h.mcp == nil {
+				return nil, false, fmt.Errorf("salaam: MCP proxy must name the admitted station")
+			}
+			managedServers, err = h.salaam.AssignMCP(ctx, *p.SalaamAuthority, h.mcp(p.MCPProxy.StationID, p.Key))
+			if err != nil {
+				return nil, false, err
+			}
+		}
 		if err := h.mgr.CloseInstance(p.Key, p.Instance); err != nil {
 			return nil, false, fmt.Errorf("salaam: prior ACP transport did not stop")
 		}
@@ -226,7 +236,10 @@ func (h *acpHandler) handleOpen(ctx context.Context, params json.RawMessage) (an
 	}
 	// Echoed only when the node will actually inject: the hub renders the tools into the card
 	// prompt on this answer alone, so it must never claim servers the session will not get.
-	if p.MCPProxy != nil && p.MCPProxy.StationID != "" && h.mcp != nil {
+	if len(managedServers) > 0 {
+		h.setInjection(sess, managedServers)
+		res["mcpProxy"] = mcpproxy.Names(managedServers)
+	} else if !strings.HasPrefix(p.Key, "salaam:") && p.MCPProxy != nil && p.MCPProxy.StationID != "" && h.mcp != nil {
 		if servers := h.mcp(p.MCPProxy.StationID, p.Key); len(servers) > 0 {
 			h.setInjection(sess, servers)
 			res["mcpProxy"] = mcpproxy.Names(servers)

@@ -539,7 +539,9 @@
             "id": "run_fixture",
             "epoch": 7
           },
-          "mayDispatch": ["*"]
+          "mayDispatch": [
+            "*"
+          ]
         },
         "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "credential_generation": 1,
@@ -744,6 +746,373 @@
         ]
       },
       "accept": true
+    },
+    {
+      "name": "empty-query-marker",
+      "value": {
+        "version": 1,
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_fixture",
+            "epoch": 7
+          }
+        },
+        "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "credential_generation": 1,
+        "servers": [
+          {
+            "type": "http",
+            "name": "superlibrary",
+            "url": "http://127.0.0.1:43421/stations/station_fixture/mcp/superlibrary?",
+            "headers": [
+              {
+                "name": "X-Agentpod-Proxy-Key",
+                "value": "fixture-proxy-key-never-use-as-a-live-secret"
+              }
+            ]
+          }
+        ]
+      },
+      "accept": false
+    },
+    {
+      "name": "empty-fragment-marker",
+      "value": {
+        "version": 1,
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_fixture",
+            "epoch": 7
+          }
+        },
+        "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "credential_generation": 1,
+        "servers": [
+          {
+            "type": "http",
+            "name": "superlibrary",
+            "url": "http://127.0.0.1:43421/stations/station_fixture/mcp/superlibrary#",
+            "headers": [
+              {
+                "name": "X-Agentpod-Proxy-Key",
+                "value": "fixture-proxy-key-never-use-as-a-live-secret"
+              }
+            ]
+          }
+        ]
+      },
+      "accept": false
+    },
+    {
+      "name": "default-port-not-canonical",
+      "value": {
+        "version": 1,
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_fixture",
+            "epoch": 7
+          }
+        },
+        "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "credential_generation": 1,
+        "servers": [
+          {
+            "type": "http",
+            "name": "superlibrary",
+            "url": "http://127.0.0.1:80/stations/station_fixture/mcp/superlibrary",
+            "headers": [
+              {
+                "name": "X-Agentpod-Proxy-Key",
+                "value": "fixture-proxy-key-never-use-as-a-live-secret"
+              }
+            ]
+          }
+        ]
+      },
+      "accept": false
+    },
+    {
+      "name": "encoded-station-segment",
+      "value": {
+        "version": 1,
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_fixture",
+            "epoch": 7
+          }
+        },
+        "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "credential_generation": 1,
+        "servers": [
+          {
+            "type": "http",
+            "name": "superlibrary",
+            "url": "http://127.0.0.1:43421/stations/%73tation_fixture/mcp/superlibrary",
+            "headers": [
+              {
+                "name": "X-Agentpod-Proxy-Key",
+                "value": "fixture-proxy-key-never-use-as-a-live-secret"
+              }
+            ]
+          }
+        ]
+      },
+      "accept": true
+    }
+  ],
+  "admissions": [
+    {
+      "name": "safe-admission-receipt",
+      "value": {
+        "version": 1,
+        "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_digest": "37d598a50bd3d4f6352a3b11515693c8205cfe0ae7d48fa0d6c4d2632b01c14f",
+        "binding_digest": "783c4ade8e5dab39d93645185ac829bc4ebc14a3a9f2816f10934294de5ce6b4",
+        "credential_generation": 1,
+        "servers": [
+          {
+            "name": "superlibrary",
+            "endpoint_digest": "1da720198b517f83cd20cfe469e36eb9f20ae7ee1cea06c73a184665acae973d",
+            "catalog_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "tools": [
+              {
+                "name": "library_search",
+                "schema_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy": "read"
+              }
+            ]
+          }
+        ]
+      },
+      "accept": true
+    },
+    {
+      "name": "receipt-private-headers",
+      "value": {
+        "version": 1,
+        "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_digest": "37d598a50bd3d4f6352a3b11515693c8205cfe0ae7d48fa0d6c4d2632b01c14f",
+        "binding_digest": "783c4ade8e5dab39d93645185ac829bc4ebc14a3a9f2816f10934294de5ce6b4",
+        "credential_generation": 1,
+        "servers": [
+          {
+            "name": "superlibrary",
+            "endpoint_digest": "1da720198b517f83cd20cfe469e36eb9f20ae7ee1cea06c73a184665acae973d",
+            "catalog_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "tools": [
+              {
+                "name": "library_search",
+                "schema_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy": "read"
+              }
+            ]
+          }
+        ],
+        "headers": [
+          {
+            "name": "X-Agentpod-Proxy-Key",
+            "value": "fixture-proxy-key-never-use-as-a-live-secret"
+          }
+        ]
+      },
+      "accept": false
+    },
+    {
+      "name": "receipt-zero-generation",
+      "value": {
+        "version": 1,
+        "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_digest": "37d598a50bd3d4f6352a3b11515693c8205cfe0ae7d48fa0d6c4d2632b01c14f",
+        "binding_digest": "783c4ade8e5dab39d93645185ac829bc4ebc14a3a9f2816f10934294de5ce6b4",
+        "credential_generation": 0,
+        "servers": [
+          {
+            "name": "superlibrary",
+            "endpoint_digest": "1da720198b517f83cd20cfe469e36eb9f20ae7ee1cea06c73a184665acae973d",
+            "catalog_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "tools": [
+              {
+                "name": "library_search",
+                "schema_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy": "read"
+              }
+            ]
+          }
+        ]
+      },
+      "accept": false
+    },
+    {
+      "name": "receipt-unknown-version",
+      "value": {
+        "version": 2,
+        "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_digest": "37d598a50bd3d4f6352a3b11515693c8205cfe0ae7d48fa0d6c4d2632b01c14f",
+        "binding_digest": "783c4ade8e5dab39d93645185ac829bc4ebc14a3a9f2816f10934294de5ce6b4",
+        "credential_generation": 1,
+        "servers": [
+          {
+            "name": "superlibrary",
+            "endpoint_digest": "1da720198b517f83cd20cfe469e36eb9f20ae7ee1cea06c73a184665acae973d",
+            "catalog_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "tools": [
+              {
+                "name": "library_search",
+                "schema_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy": "read"
+              }
+            ]
+          }
+        ]
+      },
+      "accept": false
+    },
+    {
+      "name": "receipt-endpoint-url",
+      "value": {
+        "version": 1,
+        "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_digest": "37d598a50bd3d4f6352a3b11515693c8205cfe0ae7d48fa0d6c4d2632b01c14f",
+        "binding_digest": "783c4ade8e5dab39d93645185ac829bc4ebc14a3a9f2816f10934294de5ce6b4",
+        "credential_generation": 1,
+        "servers": [
+          {
+            "name": "superlibrary",
+            "endpoint_digest": "1da720198b517f83cd20cfe469e36eb9f20ae7ee1cea06c73a184665acae973d",
+            "catalog_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "tools": [
+              {
+                "name": "library_search",
+                "schema_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy": "read"
+              }
+            ],
+            "url": "http://127.0.0.1:43421/stations/station_fixture/mcp/superlibrary"
+          }
+        ]
+      },
+      "accept": false
+    },
+    {
+      "name": "receipt-empty-tools",
+      "value": {
+        "version": 1,
+        "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_digest": "37d598a50bd3d4f6352a3b11515693c8205cfe0ae7d48fa0d6c4d2632b01c14f",
+        "binding_digest": "783c4ade8e5dab39d93645185ac829bc4ebc14a3a9f2816f10934294de5ce6b4",
+        "credential_generation": 1,
+        "servers": [
+          {
+            "name": "superlibrary",
+            "endpoint_digest": "1da720198b517f83cd20cfe469e36eb9f20ae7ee1cea06c73a184665acae973d",
+            "catalog_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "tools": []
+          }
+        ]
+      },
+      "accept": false
+    },
+    {
+      "name": "receipt-invalid-pin",
+      "value": {
+        "version": 1,
+        "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_digest": "37d598a50bd3d4f6352a3b11515693c8205cfe0ae7d48fa0d6c4d2632b01c14f",
+        "binding_digest": "783c4ade8e5dab39d93645185ac829bc4ebc14a3a9f2816f10934294de5ce6b4",
+        "credential_generation": 1,
+        "servers": [
+          {
+            "name": "superlibrary",
+            "endpoint_digest": "unreviewed",
+            "catalog_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "tools": [
+              {
+                "name": "library_search",
+                "schema_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy": "read"
+              }
+            ]
+          }
+        ]
+      },
+      "accept": false
+    },
+    {
+      "name": "receipt-duplicate-server",
+      "value": {
+        "version": 1,
+        "profile_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_digest": "37d598a50bd3d4f6352a3b11515693c8205cfe0ae7d48fa0d6c4d2632b01c14f",
+        "binding_digest": "783c4ade8e5dab39d93645185ac829bc4ebc14a3a9f2816f10934294de5ce6b4",
+        "credential_generation": 1,
+        "servers": [
+          {
+            "name": "superlibrary",
+            "endpoint_digest": "1da720198b517f83cd20cfe469e36eb9f20ae7ee1cea06c73a184665acae973d",
+            "catalog_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "tools": [
+              {
+                "name": "library_search",
+                "schema_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy": "read"
+              }
+            ]
+          },
+          {
+            "name": "superlibrary",
+            "endpoint_digest": "1da720198b517f83cd20cfe469e36eb9f20ae7ee1cea06c73a184665acae973d",
+            "catalog_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "tools": [
+              {
+                "name": "library_search",
+                "schema_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy": "read"
+              }
+            ]
+          }
+        ]
+      },
+      "accept": false
     }
   ]
 }

@@ -132,6 +132,7 @@ export const SalaamMcpAssignment = z
           u.search ||
           u.hash ||
           u.href !== s.url ||
+          s.url !== u.origin + u.pathname ||
           parts.length !== 5 ||
           parts[1] !== "stations" ||
           decodeURIComponent(parts[2]!) !== a.binding.station_id ||
@@ -148,3 +149,45 @@ export const SalaamMcpAssignment = z
     return origins.size === 1 && keys.size === 1;
   }, "Assignment must identify one station on one loopback proxy with its exact header");
 export type SalaamMcpAssignment = z.infer<typeof SalaamMcpAssignment>;
+
+/** Safe protocol/catalog readiness receipt. Shape validation alone grants no authority. */
+export const SalaamMcpAdmission = z
+  .object({
+    version: z.literal(1),
+    profile_digest: sha256,
+    assignment_digest: sha256,
+    binding_digest: sha256,
+    credential_generation: z
+      .number()
+      .int()
+      .positive()
+      .max(Number.MAX_SAFE_INTEGER),
+    servers: z
+      .array(
+        z
+          .object({
+            name: serverName,
+            endpoint_digest: sha256,
+            catalog_digest: sha256,
+            tools: SalaamMcpProfile.shape.servers.element.shape.tools,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(2)
+      .refine(uniqueNames, "Duplicate server name"),
+  })
+  .strict();
+export type SalaamMcpAdmission = z.infer<typeof SalaamMcpAdmission>;
+
+/** ACP extension: HTTP declarations are restricted to the private node assignment. */
+export const SalaamManagedMcpFeatures = z
+  .object({
+    version: z.literal(1),
+    servers: z
+      .array(serverName)
+      .min(1)
+      .max(2)
+      .refine((v) => new Set(v).size === v.length),
+  })
+  .strict();
