@@ -35,4 +35,20 @@ describe("the primitives take the vibe's look", () => {
     expect(b.dataset.variant).toBe("destructive");
     expect(b.dataset.size).toBe("sm");
   });
+
+  // This sheet is unlayered, so it beats Tailwind's layered utilities whatever their specificity:
+  // a caller's font-mono or border-destructive/50 only survives if the rule leaves that element out.
+  it("the field rule leaves the font to the body and never overrides a caller's font-mono", () => {
+    const field = css.match(/:where\(\[data-slot="input"\][^{]*\{[^}]*\}/)![0];
+    expect(field).toContain("font-family: inherit");
+    expect(field).not.toContain("--vk-font-body");
+    expect(field).toContain(':not(.font-mono)');
+  });
+
+  it("no outline-button rule overrides a caller's destructive border", () => {
+    const all = css.match(/\[data-variant="outline"\]/g)!.length;
+    const guarded = css.match(/\[data-variant="outline"\]:not\(\[class\*="border-destructive"\]\)/g)?.length ?? 0;
+    expect(all).toBeGreaterThan(0);
+    expect(guarded).toBe(all);
+  });
 });

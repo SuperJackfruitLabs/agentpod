@@ -26,14 +26,17 @@
   color: var(--vk-color-danger);
   box-shadow: inset 0 0 0 1px var(--vk-color-danger);
 }
-:where([data-slot="button"][data-variant="outline"]) {
+:where([data-slot="button"][data-variant="outline"]:not([class*="border-destructive"])) {
   background: var(--vk-color-surface);
   border-color: var(--vk-color-rule);
+}
+/* This sheet is unlayered, so it beats Tailwind utilities: leave out a field that asks for mono. */
+:where([data-slot="input"]:not(.font-mono), [data-slot="textarea"]:not(.font-mono), [data-slot="select-trigger"]:not(.font-mono)) {
+  font-family: inherit;
 }
 :where([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"]) {
   background: var(--vk-color-surface);
   border-color: var(--vk-color-rule);
-  font-family: var(--vk-font-body);
 }
 :where([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"])[aria-invalid="true"] {
   border-color: var(--vk-color-danger);
@@ -136,7 +139,7 @@
 :where([data-vibe="daylight"]) :where([data-slot="button"][data-variant="default"]) {
   box-shadow: 0 var(--vk-lift, 2px) 0 var(--vk-color-ground);
 }
-:where([data-vibe="daylight"]) :where([data-slot="button"][data-variant="outline"], [data-slot="button"][data-variant="secondary"]) {
+:where([data-vibe="daylight"]) :where([data-slot="button"][data-variant="outline"]:not([class*="border-destructive"]), [data-slot="button"][data-variant="secondary"]) {
   background: var(--vk-color-raised);
   border-color: transparent;
   box-shadow: inset 0 0 0 2px var(--vk-color-line);
@@ -171,7 +174,7 @@
 :where([data-vibe="paper"]) :where([data-slot="button"]) {
   font-weight: 500;
 }
-:where([data-vibe="paper"]) :where([data-slot="button"][data-variant="outline"], [data-slot="button"][data-variant="secondary"]) {
+:where([data-vibe="paper"]) :where([data-slot="button"][data-variant="outline"]:not([class*="border-destructive"]), [data-slot="button"][data-variant="secondary"]) {
   border-color: var(--vk-color-text);
 }
 :where([data-vibe="paper"]) :where([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"]) {
@@ -202,7 +205,7 @@
   background: var(--vk-color-primary);
   color: var(--vk-color-primary-fg);
 }
-:where([data-vibe="studio"]) :where([data-slot="button"][data-variant="outline"]) {
+:where([data-vibe="studio"]) :where([data-slot="button"][data-variant="outline"]:not([class*="border-destructive"])) {
   border-color: var(--vk-color-text);
 }
 :where([data-vibe="studio"]) :where([data-slot="card"]) {
@@ -232,7 +235,7 @@
   background: var(--vk-color-primary);
   color: var(--vk-color-primary-fg);
 }
-:where([data-vibe="quiet"]) :where([data-slot="button"][data-variant="outline"], [data-slot="button"][data-variant="secondary"], [data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"]) {
+:where([data-vibe="quiet"]) :where([data-slot="button"][data-variant="outline"]:not([class*="border-destructive"]), [data-slot="button"][data-variant="secondary"], [data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"]) {
   background: transparent;
   border: 2px solid var(--vk-color-text);
 }
