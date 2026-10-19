@@ -3,7 +3,9 @@
    * AccountMenu — the account chip (initials and email) and its menu: who is signed in,
    * Appearance (expands the control in place) and Sign out. A disclosure rather than a
    * role="menu": the panel holds pressed buttons in fieldsets, which a menu may not contain.
-   * Escape or a click outside closes it; Escape gives focus back to the chip.
+   * Escape or a click outside closes it; Escape gives focus back to the chip. Escape is caught on
+   * the window in the capture phase while open, wherever focus is, so it never reaches the roster's
+   * window shortcut (which would leave a station page). Opening moves focus to the first item.
    */
   import { tick } from "svelte";
   import { auth } from "$lib/stores/auth.svelte";
@@ -26,13 +28,23 @@
     if (focusChip) void tick().then(() => chip?.focus());
   }
 
-  function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") {
+  function open_() {
+    open = true;
+    void tick().then(() => root?.querySelector<HTMLElement>(".ap-acct__item")?.focus());
+  }
+
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (open && e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
       close(true);
     }
   }
+
+  $effect(() => {
+    window.addEventListener("keydown", onWindowKeydown, true);
+    return () => window.removeEventListener("keydown", onWindowKeydown, true);
+  });
 
   function onWindowPointerDown(e: PointerEvent) {
     if (open && root && !root.contains(e.target as Node)) close();
@@ -51,14 +63,13 @@
     aria-expanded={open}
     aria-controls="account-menu"
     aria-label="Signed in as {email || auth.initials}. Appearance and sign out"
-    onclick={() => (open ? close() : (open = true))}
+    onclick={() => (open ? close() : open_())}
   >
     <span data-testid="user-avatar" class="ap-acct__ini" aria-hidden="true">{auth.initials}</span>
     <span class="ap-acct__email">{email}</span>
   </button>
 
   {#if open}
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
       id="account-menu"
       data-testid="account-menu"
@@ -66,7 +77,6 @@
       role="dialog"
       aria-label="Account"
       tabindex="-1"
-      onkeydown={onKeydown}
     >
       <p class="ap-acct__who">{email}</p>
       <button

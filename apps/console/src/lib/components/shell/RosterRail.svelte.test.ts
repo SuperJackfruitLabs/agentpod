@@ -9,7 +9,7 @@
  * one guards a real layout bug (see the comment on that test).
  */
 import { test, expect, vi, beforeEach } from "vitest";
-import { render, fireEvent } from "@testing-library/svelte";
+import { render, fireEvent, within } from "@testing-library/svelte";
 import type { FleetAgent } from "@agentpod/contract";
 
 const { mockFleet, mockPage, goto } = vi.hoisted(() => ({
@@ -27,8 +27,13 @@ const { mockFleet, mockPage, goto } = vi.hoisted(() => ({
 vi.mock("$lib/stores/fleet.svelte", () => ({ fleet: mockFleet }));
 vi.mock("$app/state", () => ({ page: mockPage }));
 vi.mock("$app/navigation", () => ({ goto }));
+vi.mock("$lib/stores/auth.svelte", () => ({
+  auth: { initials: "RG", email: "rakesh@example.com", user: { role: "admin" } },
+  logout: vi.fn(async () => {}),
+}));
 
 import RosterRail from "./RosterRail.svelte";
+import AccountMenu from "./AccountMenu.svelte";
 
 /** Only the fields the rail actually reads; the rest of FleetAgent is filler. */
 function agent(partial: Partial<FleetAgent> & Pick<FleetAgent, "stationId" | "nodeId" | "nodeName" | "agentName">): FleetAgent {
@@ -402,3 +407,41 @@ test("a row with no station row of its own is not flagged", () => {
   expect(queryByTestId("roster-flag")).toBeNull();
   expect(getAllByTestId("roster-aside")).toHaveLength(5);
 });
+
+test("on a station page, Escape on the account chip closes the menu and does not leave the station", async () => {
+  mockPage.url = { pathname: "/nodes/n_orion/stations/st_h1" };
+  const rail = render(RosterRail);
+  const acct = render(AccountMenu);
+  const chip = acct.getByTestId("account-chip");
+  await fireEvent.click(chip);
+  expect(acct.queryByTestId("account-menu")).not.toBeNull();
+
+  await fireEvent.keyDown(chip, { key: "Escape" });
+  expect(acct.queryByTestId("account-menu")).toBeNull();
+  expect(goto).not.toHaveBeenCalled();
+  await vi.waitFor(() => expect(document.activeElement).toBe(chip));
+  acct.unmount();
+  rail.unmount();
+});
+
+test("j and k inside the open account menu do not move the roster", async () => {
+  mockPage.url = { pathname: "/nodes/n_orion/stations/st_h1" };
+  const rail = render(RosterRail);
+  const acct = render(AccountMenu);
+  await fireEvent.click(acct.getByTestId("account-chip"));
+  const item = within(acct.getByTestId("account-menu")).getByRole("button", { name: "Appearance" });
+  await fireEvent.keyDown(item, { key: "j" });
+  await fireEvent.keyDown(item, { key: "k" });
+  expect(goto).not.toHaveBeenCalled();
+  acct.unmount();
+  rail.unmount();
+});
+
+test("opening the account menu moves focus into it", async () => {
+  const acct = render(AccountMenu);
+  await fireEvent.click(acct.getByTestId("account-chip"));
+  const menu = acct.getByTestId("account-menu");
+  await vi.waitFor(() => expect(menu.contains(document.activeElement)).toBe(true));
+  acct.unmount();
+});
+
