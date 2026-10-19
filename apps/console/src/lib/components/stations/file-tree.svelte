@@ -306,7 +306,7 @@
 <!-- Toolbar. Refresh is always available: the file list is a cached view of a
      machine someone else (an agent) is changing, and a read-only viewer needs to
      re-read it just as much as a writer does. -->
-<div class="flex shrink-0 items-center gap-1 border-b border-border/60 px-2 py-1.5 bg-muted/5">
+<div class="ap-ftool flex shrink-0 items-center gap-1 border-b border-border/60 px-2 py-1.5 bg-muted/5">
   <Button
     variant="ghost"
     size="sm"

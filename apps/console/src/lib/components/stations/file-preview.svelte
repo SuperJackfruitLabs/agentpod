@@ -51,7 +51,7 @@
 <div class="flex flex-1 flex-col overflow-hidden">
   {#if truncated}
     <div class="shrink-0 border-b border-border/60 px-3 py-1">
-      <span class="rounded border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-xs text-destructive">
+      <span class="ap-trunc rounded border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-xs text-destructive">
         truncated — showing first portion
       </span>
     </div>
@@ -70,7 +70,7 @@
       {/if}
     {:else if isBinary}
       <div class="flex h-full items-center justify-center p-6">
-        <div class="flex max-w-sm flex-col items-center gap-2 rounded-lg border border-dashed border-border p-8 text-center">
+        <div class="ap-bin flex max-w-sm flex-col items-center gap-2 rounded-lg border border-dashed border-border p-8 text-center">
           <FileIcon filename={entry.name} size="lg" />
           <p class="text-sm font-medium text-foreground">{entry.name}</p>
           <p class="text-xs text-muted-foreground">Binary file</p>
@@ -89,7 +89,7 @@
     {:else if content !== null}
       {#if isMarkdown}
         <div class="flex h-full flex-col">
-          <div class="flex shrink-0 items-center gap-1 border-b border-border/60 px-3 py-1.5">
+          <div class="ap-mdbar flex shrink-0 items-center gap-1 border-b border-border/60 px-3 py-1.5">
             <button
               type="button"
               class="rounded px-2 py-1 text-xs font-medium {mdView === 'rendered' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}"
@@ -126,11 +126,11 @@
   </div>
 
   {#if isImage && imageUrl}
-    <div class="shrink-0 border-t border-border/60 px-3 py-1 font-mono text-xs text-muted-foreground">
+    <div class="ap-pfoot shrink-0 border-t border-border/60 px-3 py-1 font-mono text-xs text-muted-foreground">
       {ext} image · {formatBytes(entry.size)} · modified {relativeTime(entry.modified)}
     </div>
   {:else if content !== null && !isBinary}
-    <div class="shrink-0 border-t border-border/60 px-3 py-1 font-mono text-xs text-muted-foreground">
+    <div class="ap-pfoot shrink-0 border-t border-border/60 px-3 py-1 font-mono text-xs text-muted-foreground">
       {isMarkdown ? "Markdown" : ext || "plain text"} · {formatBytes(entry.size)} · modified {relativeTime(entry.modified)}
     </div>
   {/if}

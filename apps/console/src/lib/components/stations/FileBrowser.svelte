@@ -337,7 +337,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="flex h-full min-h-[300px] border border-border rounded-md overflow-hidden bg-background"
+  class="ap-fb flex h-full min-h-[300px] border border-border rounded-md overflow-hidden bg-background"
   onkeydown={handleKeydown}
 >
   {#snippet treePane()}
@@ -366,14 +366,14 @@
         </div>
       {:else}
         <!-- Tab strip -->
-        <div class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/60 bg-muted/5 px-1" role="tablist">
+        <div class="ap-ftabs flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/60 bg-muted/5 px-1" role="tablist">
           {#each openFiles as f (f.path)}
             <div
               role="tab"
               tabindex="0"
               aria-selected={f.path === activePath}
               aria-label={f.name}
-              class="group flex shrink-0 items-center gap-1.5 border-b-2 px-2 py-1.5 text-xs font-mono cursor-pointer
+              class="ap-ftab group flex shrink-0 items-center gap-1.5 border-b-2 px-2 py-1.5 text-xs font-mono cursor-pointer
                 {f.path === activePath ? 'border-primary bg-background text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
               onclick={() => openFile(entryIndex.get(f.path) ?? fallbackEntry(f))}
               onkeydown={(e: KeyboardEvent) => {
@@ -388,7 +388,7 @@
               <button
                 type="button"
                 aria-label="Close {f.name}"
-                class="rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+                class="rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
                 onclick={(e: MouseEvent) => {
                   e.stopPropagation();
                   closeTab(f.path);
@@ -402,7 +402,7 @@
 
         <!-- Breadcrumb + actions -->
         {#if activePath}
-          <div class="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 py-1.5">
+          <div class="ap-pbar flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 py-1.5">
             <Breadcrumb.Root class="min-w-0">
               <Breadcrumb.List class="flex-nowrap">
                 {#each breadcrumbSegments as seg, i (seg.path)}
@@ -479,18 +479,18 @@
 
   {#if splitFits}
     <ResizablePaneGroup direction="horizontal">
-      <ResizablePane defaultSize={28} minSize={15} class="flex flex-col overflow-hidden bg-muted/10">
+      <ResizablePane defaultSize={28} minSize={15} class="ap-fb-tree flex flex-col overflow-hidden bg-muted/10">
         {@render treePane()}
       </ResizablePane>
 
-      <ResizableHandle withHandle />
+      <ResizableHandle withHandle class="ap-fb-handle" />
 
       <ResizablePane defaultSize={72} class="flex flex-col overflow-hidden">
         {@render previewPane()}
       </ResizablePane>
     </ResizablePaneGroup>
   {:else if mobilePane === "tree"}
-    <div data-testid="file-browser-tree-only" class="flex min-w-0 flex-1 flex-col overflow-hidden bg-muted/10">
+    <div data-testid="file-browser-tree-only" class="ap-fb-tree flex min-w-0 flex-1 flex-col overflow-hidden bg-muted/10">
       {@render treePane()}
     </div>
   {:else}
@@ -499,7 +499,7 @@
       <button
         type="button"
         data-testid="file-browser-back"
-        class="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+        class="ap-fback flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
         onclick={() => (mobilePane = "tree")}
       >
         <ChevronLeft class="h-3.5 w-3.5" />

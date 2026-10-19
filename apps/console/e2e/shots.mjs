@@ -8,7 +8,13 @@
  *   node e2e/shots.mjs [--path=/] [--vibes=daylight,paper,studio,quiet] [--themes=light,dark]
  *                      [--sizes=desktop,phone] [--menu] [--more] [--state=populated|loading|error|empty]
  *                      [--signedout] [--out=e2e/shots]
- *                      [--tab=chat|health|logs] [--about] [--chat=live|none|ended] [--health=running|stopped|error]
+ *                      [--tab=chat|health|logs|files|terminal|changes|cleanup|activity|config] [--about]
+ *                      [--chat=live|none|ended] [--health=running|stopped|error]
+ *                      [--open=IDENTITY.md] [--changes=dirty|clean|error] [--scan] [--activity=rows|empty|error]
+ *
+ * The station tabs: --open opens a file in Files (the tree click), --changes picks the workspace
+ * the Changes tab reads (dirty also opens README.md's patch), --scan presses Cleanup's Scan,
+ * --activity what the station's audit read returns. Terminal replays a short fake PTY stream.
  *
  * --menu opens the account menu with Appearance expanded (desktop); --more opens the phone's More
  * sheet. --state answers the fleet's reads as populated (default), never (loading), 500 (error)
@@ -46,6 +52,9 @@ const SIGNED_OUT = !!args.signedout;
 const TAB = typeof args.tab === "string" ? args.tab : null;
 const CHAT = typeof args.chat === "string" ? args.chat : "live";
 const HEALTH = typeof args.health === "string" ? args.health : "running";
+const OPEN = typeof args.open === "string" ? args.open : null;
+const CHANGES = typeof args.changes === "string" ? args.changes : "dirty";
+const ACTIVITY_STATE = typeof args.activity === "string" ? args.activity : "rows";
 /** The fleet's own reads: what --state=loading|error|empty changes (sign-in and plane reads stay). */
 const FLEET_READ = /^\/api\/(fleet|nodes|runtimes|activity|admin\/principals)/;
 const OUT = resolve(typeof args.out === "string" ? args.out : join(here, "shots"));
@@ -88,10 +97,12 @@ const AGENTS = [
   agent("st_kai", "kai", "pi", "n_guild", "error"),
 ];
 const STATS = { nodes: { total: 3, online: 2 }, agents: { total: 5 }, updatesAvailable: 1, running: 3 };
+// annapurna advertises every station tab (Files with write, Changes, Cleanup, the skill inventory).
+const TAB_CAPS = ["fs.write", "changeset", "cleanup", "skills.inventory"];
 const station = (a) => ({
   id: a.stationId, userId: "u_rakesh", nodeId: a.nodeId, harness: a.harness, stationKey: `${a.harness}:${a.agentName}`,
   kind: "harness", parentStationId: null, displayName: a.agentName, workspacePath: a.workspacePath,
-  capabilities: a.capabilities, matrixId: null, bridgeMatrixId: `@agent_${a.agentName}:id.agentpod.dev`, matrixIdentityMode: "bridge",
+  capabilities: a.agentName === "annapurna" ? [...a.capabilities, ...TAB_CAPS] : a.capabilities, matrixId: null, bridgeMatrixId: `@agent_${a.agentName}:id.agentpod.dev`, matrixIdentityMode: "bridge",
   purpose: a.agentName === "annapurna" ? "personal" : null,
   principalId: `p_${a.agentName}`, adoptedAt: ago(60 * 24 * 10), createdAt: ago(60 * 24 * 10),
 });
@@ -150,9 +161,55 @@ const LOG_LINES = [
   "INFO tool read IDENTITY.md via gateway",
   "INFO matrix synced @agent_annapurna:id.agentpod.dev",
 ];
+// ---- the station tabs (contract shapes: FsEntry, ChangesetStatusResult, CleanupItem, StationAuditRow) ----
+const fsEntry = (path, type, size, min) => ({ name: path.split("/").pop(), path, type, size: type === "dir" ? null : size, modified: min == null ? null : ago(min) });
+const FILES = {
+  "": [fsEntry("memory", "dir"), fsEntry("skills", "dir"), fsEntry("AGENTS.md", "file", 980, 60 * 24 * 3), fsEntry("IDENTITY.md", "file", 142, 60 * 24 * 3), fsEntry("SOUL.md", "file", 2100, 60 * 24 * 9), fsEntry("avatar.png", "file", 48_000, 60 * 24 * 20), fsEntry("openclaw.json", "file", 640, 60 * 5), fsEntry("sessions.db", "file", 2_400_000, 1)],
+  memory: [fsEntry("memory/2026-10-18.md", "file", 512, 60 * 20)],
+  skills: [],
+};
+const FILE_TEXT = {
+  "IDENTITY.md": "# IDENTITY\n\nname: annapurna\nhome: superchotu\npurpose: personal\n\nI keep Rakesh's notes, reminders and day plans.\n",
+  "AGENTS.md": "# AGENTS\n\nRead SOUL.md first.\n",
+  "openclaw.json": '{\n  "gateway": { "port": 18789 },\n  "mode": "ask"\n}\n',
+};
+const CHANGESETS = {
+  dirty: {
+    repo: { branch: "main", head: "abc1234", detached: false },
+    base: { ref: "origin/main", sha: "def5678", reason: "upstream" },
+    uncommitted: { files: [
+      { path: "README.md", oldPath: null, status: "modified", insertions: 6, deletions: 3, binary: false },
+      { path: "notes/plan.md", oldPath: null, status: "untracked", insertions: null, deletions: null, binary: false },
+    ], insertions: 6, deletions: 3 },
+    committed: { files: [{ path: "docs/setup.md", oldPath: "SETUP.md", status: "renamed", insertions: 2, deletions: 1, binary: false }],
+      insertions: 2, deletions: 1, commits: [
+        { sha: "a41c9e2", shortSha: "a41c9e2", subject: "Add setup notes", author: "annapurna", committedAt: ago(60) },
+        { sha: "7be0d13", shortSha: "7be0d13", subject: "Fix typo in README", author: "annapurna", committedAt: ago(90) },
+      ] },
+    truncatedFiles: false,
+  },
+};
+CHANGESETS.clean = { ...CHANGESETS.dirty, uncommitted: { files: [], insertions: 0, deletions: 0 }, committed: { files: [], insertions: 0, deletions: 0, commits: [] } };
+const PATCH = "@@ -1,5 +1,8 @@\n # annapurna\n-Notes for the guild.\n+Notes for the guild, kept by annapurna.\n+\n+See docs/setup.md to get started.\n";
+const CLEANUP = { items: [
+  { path: "/home/agents/annapurna/node_modules/.cache", size: 640_000_000, kind: "cache" },
+  { path: "/home/agents/annapurna/.claude/todos", size: 12_000_000, kind: "session" },
+  { path: "/home/agents/annapurna/dist", size: 48_000_000, kind: "build" },
+], totalBytes: 700_000_000 };
+const STATION_ACTIVITY = [
+  { id: "sa1", userId: "u_rakesh", stationId: "st_annapurna", verb: "fs.write", paramsSummary: { path: "README.md" }, result: "ok", error: null, createdAt: ago(0.2) },
+  { id: "sa2", userId: "u_rakesh", stationId: "st_annapurna", verb: "terminal.open", paramsSummary: { cols: 120, rows: 32 }, result: "ok", error: null, createdAt: ago(3) },
+  { id: "sa3", userId: "u_rakesh", stationId: "st_annapurna", verb: "lifecycle", paramsSummary: { action: "restart" }, result: "error", error: "the gateway did not come back within 30s", createdAt: ago(120) },
+];
+const SKILLS = { stationKey: "openclaw:annapurna", harness: "openclaw", observedAt: ago(1), skills: [], plugins: [],
+  coverage: { complete: true, roots: [{ path: "/home/agents/annapurna/skills", scope: "workspace", status: "scanned" }], limitations: [] }, issues: [] };
+const MCP = { stationId: "st_annapurna", stationKey: "openclaw:annapurna", displayName: "annapurna", harness: "openclaw", eligible: true, declared: true, serving: true, state: "on" };
+// A short fake PTY stream: a prompt, a command, its output, a fresh prompt (ANSI colours from the vibe).
+const PTY = "\x1b[32mannapurna@ashram\x1b[0m:\x1b[34m~/workspace\x1b[0m$ git status --short\r\n M README.md\r\n?? notes/plan.md\r\n\x1b[32mannapurna@ashram\x1b[0m:\x1b[34m~/workspace\x1b[0m$ ";
+
 const USER = { id: "u_rakesh", email: "rakesh@example.com", name: "Rakesh Gangwar", image: null, role: "admin", emailVerified: true, createdAt: ago(1e5), updatedAt: ago(1e5) };
 
-function answer(path) {
+function answer(path, query = new URLSearchParams()) {
   if (path === "/health") return { status: "ok" };
   if (path === "/public/org-plane") return null; // 404: no plane, so the session comes from get-session
   if (path === "/api/auth/get-session" && SIGNED_OUT) return null;
@@ -174,6 +231,13 @@ function answer(path) {
   if (path === "/api/admin/principals")
     return { principals: AGENTS.map((a) => ({ id: `p_${a.agentName}`, kind: "agent", handle: a.agentName, displayName: a.agentName, userId: null, suspendedAt: null })) };
   if (path === "/api/admin/stats") return { users: 1, nodes: 3, stations: 5 };
+  if (/^\/api\/stations\/[^/]+\/files$/.test(path)) return FILES[query.get("path") ?? ""] ?? [];
+  if (/^\/api\/stations\/[^/]+\/changeset\/status$/.test(path)) return CHANGESETS[CHANGES] ?? CHANGESETS.dirty;
+  if (/^\/api\/stations\/[^/]+\/changeset\/diff$/.test(path)) return { content: PATCH, truncated: false, binary: false };
+  if (/^\/api\/stations\/[^/]+\/cleanup\/plan$/.test(path)) return CLEANUP;
+  if (/^\/api\/stations\/[^/]+\/activity$/.test(path)) return ACTIVITY_STATE === "empty" ? [] : STATION_ACTIVITY;
+  if (/^\/api\/stations\/[^/]+\/skills\/inventory$/.test(path)) return SKILLS;
+  if (/^\/api\/stations\/[^/]+\/mcp-proxy$/.test(path)) return MCP;
   if (/^\/api\/stations\/[^/]+\/acp\/sessions$/.test(path)) return CHAT === "none" ? [] : [SESSION];
   if (/^\/api\/stations\/[^/]+\/health$/.test(path)) return HEALTHS[HEALTH] ?? HEALTHS.running;
   if (/^\/api\/stations\/[^/]+\/transcription$/.test(path)) return TRANSCRIPTION;
@@ -244,11 +308,20 @@ try {
               headers: { "content-type": "text/event-stream" },
               body: LOG_LINES.map((l) => `data: ${l}\n\n`).join(""),
             });
+          if (/^\/api\/stations\/[^/]+\/file$/.test(url.pathname)) {
+            const text = FILE_TEXT[url.searchParams.get("path") ?? ""];
+            return text === undefined ? route.fulfill({ status: 404, json: { error: "not found" } })
+              : route.fulfill({ status: 200, headers: { "content-type": "text/plain" }, body: text });
+          }
+          if (CHANGES === "error" && /\/changeset\/status$/.test(url.pathname))
+            return route.fulfill({ status: 500, json: { error: "The hub hit an internal error. Try again in a moment." } });
+          if (ACTIVITY_STATE === "error" && /^\/api\/stations\/[^/]+\/activity$/.test(url.pathname))
+            return route.fulfill({ status: 500, json: { error: "Couldn't load activity." } });
           if (HEALTH === "error" && /^\/api\/stations\/[^/]+\/health$/.test(url.pathname))
             return route.fulfill({ status: 502, json: { error: "The node did not answer." } });
           if (STATE === "error" && FLEET_READ.test(url.pathname))
             return route.fulfill({ status: 500, json: { error: "The hub could not read the fleet." } });
-          const body = answer(url.pathname);
+          const body = answer(url.pathname, url.searchParams);
           if (body === undefined) {
             unknown.add(url.pathname);
             return route.fulfill({ status: 404, json: { error: "not stubbed" } });
@@ -263,6 +336,11 @@ try {
             for (const event of EVENTS) ws.send(JSON.stringify({ t: "event", event }));
             ws.send(JSON.stringify({ t: "replay-done", lastSeq: 6 }));
           });
+        });
+        // The terminal's socket: replay a short PTY stream, then stay open.
+        await page.routeWebSocket(/\/api\/stations\/[^/]+\/terminal/, (ws) => {
+          ws.send(JSON.stringify({ t: "data", data: Buffer.from(PTY, "utf8").toString("base64") }));
+          ws.onMessage(() => {});
         });
         await page.goto(origin + PATH + (TAB ? `?tab=${TAB}` : ""));
         if (SIGNED_OUT) await page.waitForSelector(".ap-auth__card", { timeout: 15_000 });
@@ -286,6 +364,23 @@ try {
           await page.waitForSelector('[data-testid="station-about"]');
           suffix += "-about";
         }
+        if (TAB === "files" && OPEN) {
+          await page.click(`[role="treeitem"][data-tree-path="${OPEN}"] .ap-ftree-row`);
+          await page.waitForSelector(".ap-pbar");
+          suffix += `-${OPEN.replace(/\W+/g, "_")}`;
+        }
+        if (TAB === "changes" && CHANGES === "dirty") {
+          await page.click('[data-testid="changeset-file-README.md"]').catch(() => {});
+          await page.waitForSelector("[data-diff]").catch(() => {});
+        }
+        if (TAB === "changes" && CHANGES !== "dirty") suffix += `-${CHANGES}`;
+        if (TAB === "cleanup" && args.scan) {
+          await page.click('.ap-panel button:has-text("Scan")');
+          await page.waitForSelector('.ap-list');
+          await page.click('.ap-list input[type="checkbox"]');
+          suffix += "-scan";
+        }
+        if (TAB === "activity" && ACTIVITY_STATE !== "rows") suffix += `-${ACTIVITY_STATE}`;
         if (TAB) suffix += `-${TAB}`;
         if (CHAT !== "live") suffix += `-chat${CHAT}`;
         if (HEALTH !== "running") suffix += `-health${HEALTH}`;

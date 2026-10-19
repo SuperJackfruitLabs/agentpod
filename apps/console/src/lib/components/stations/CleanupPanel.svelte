@@ -104,7 +104,7 @@
   }
 </script>
 
-<div class="flex flex-col gap-4 p-4">
+<div class="ap-panel flex flex-col gap-4 p-4">
   <!-- Toolbar: Scan, total bytes, Apply — one row -->
   <div class="flex items-center gap-2">
     <Button size="sm" disabled={scanning} onclick={doScan}>
@@ -144,11 +144,11 @@
     {#if items.length === 0}
       <Empty title="Nothing to clean" />
     {:else}
-      <Card.Root class="overflow-hidden border-border/60">
+      <Card.Root class="ap-list overflow-hidden border-border/60">
         <ul class="divide-y divide-border/40">
           {#each items as item (item.path)}
             <li
-              class="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/40"
+              class="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/40"
             >
               <input
                 type="checkbox"

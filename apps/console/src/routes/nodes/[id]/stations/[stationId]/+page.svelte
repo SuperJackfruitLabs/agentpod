@@ -783,14 +783,14 @@
     -->
     {@render keepAlivePanel("config", configContent)}
     {#snippet configContent()}
-      <div class="flex flex-col">
+      <div class="ap-cfg flex flex-col">
         {#if configSections.length > 1}
-          <nav aria-label="Configuration sections" class="flex gap-1 border-b px-4 pt-4">
+          <nav aria-label="Configuration sections" class="ap-cfg-nav flex gap-1 border-b px-4 pt-4">
             {#each configSections as section (section.id)}
               <button
                 type="button"
                 aria-current={configSection === section.id ? "page" : undefined}
-                class="rounded-t-md border-b-2 px-3 py-1.5 text-sm {configSection === section.id
+                class="min-h-11 rounded-t-md border-b-2 px-3 py-1.5 text-sm {configSection === section.id
                   ? 'border-foreground font-medium text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'}"
                 onclick={() => setConfigSection(section.id)}
@@ -815,7 +815,7 @@
               onRestart={canLifecycle ? () => askFor("restart") : undefined}
             />
           {:else}
-            <div class="space-y-2 p-4">
+            <div class="ap-cfg-placeholder space-y-2 p-4">
               <h2 class="font-semibold">Declared configuration</h2>
               <p class="text-sm text-muted-foreground">
                 This station's node has not enabled configuration management, so nothing can be declared for

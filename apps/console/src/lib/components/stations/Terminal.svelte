@@ -363,13 +363,13 @@
      Escape/⌘F bubbling up from focus already inside this component -->
 <div
   class={cn(
-    "flex flex-col rounded-lg border bg-background",
+    "ap-term flex flex-col rounded-lg border bg-background",
     fullscreen ? "fixed inset-0 z-50 p-2" : "h-full min-h-[200px]",
   )}
   onkeydown={handleRootKeydown}
 >
   <!-- Toolbar -->
-  <div class="flex flex-wrap items-center gap-2 border-b px-3 py-1.5 shrink-0">
+  <div class="ap-term-tool flex flex-wrap items-center gap-2 border-b px-3 py-1.5 shrink-0">
     <span role="status" aria-live="polite" class="inline-flex shrink-0">
       <StatusIndicator
         form="dot"
@@ -399,7 +399,7 @@
         placeholder="Search terminal…"
         bind:value={searchQuery}
         onkeydown={handleSearchKeydown}
-        class="h-6 w-full rounded-md border bg-transparent py-1 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
+        class="ap-term-search h-6 w-full rounded-md border bg-transparent py-1 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
         aria-label="Search terminal"
       />
     </div>
@@ -433,7 +433,7 @@
   <!-- xterm.js mount point -->
   <div
     bind:this={containerEl}
-    class="flex-1 overflow-hidden p-1"
+    class="ap-term-screen flex-1 overflow-hidden p-1"
     style="min-height:0"
     oncontextmenu={handlePasteContextMenu}
   ></div>

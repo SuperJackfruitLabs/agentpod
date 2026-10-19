@@ -132,3 +132,11 @@ All kept local and restyled; none switched in this part:
 - Tabs (vibekit): not used; the station strip has a roving tabindex, capability gating, a locked Terminal tab and keep-alive panels the tests pin.
 - StateLabel, Notice, Loading: not used (HealthPanel's error with Retry, skeletons and status text are pinned); restyled.
 - Streamdown/Shiki in replies: the Part 1 treatment, unchanged.
+
+## Part 5: station tabs
+
+- `src/lib/styles/tabs.css` (unlayered, after station.css) frames Files, Terminal, Changes, Cleanup, Activity, Configuration and the posture banner per vibe on `.ap-fb*`, `.ap-ftree*`, `.ap-ftabs`, `.ap-pbar`, `.ap-mdbar`, `.ap-term*`, `.ap-panel`, `.ap-list`, `.ap-frow`, `.ap-diff-box`, `.ap-cfg*`, `.ap-posture`. Daylight raised cards; Paper, Studio, Quiet ruled frames on the ground; Studio's Rendered/Source switch is ink-filled.
+- The file tree is a WAI-ARIA tree (`tree`/`treeitem`/`group`, `aria-level`, `aria-expanded`, `aria-selected`, one tab stop, arrows, Home/End, Right/Left). Rename/delete (and the preview tab close) are always visible and 44px on a coarse pointer (defect fix).
+- One diff style: `DiffLines` gained a `patch` form (unified diff); ChangesetPanel uses it instead of a Shiki `diff` code block. No other diff renderer remains.
+- xterm and Monaco repaint through the Part 1 `onAppearanceChange` (already pinned by tests).
+- Wrap or build: Dialog, Disclosure, Notice, Loading, EmptyState (vibekit) not used here: TypeToConfirmDialog/ConfirmDialog copy and roles, the `Empty` placeholders and the skeletons are pinned by tests; restyled instead.
