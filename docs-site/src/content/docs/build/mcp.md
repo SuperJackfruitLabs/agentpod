@@ -152,3 +152,17 @@ arbitrary client-supplied servers, stdio commands and station coding tools are n
 ## Next
 
 - [Authentication](/build/auth/) — where the token comes from and how it is verified
+
+### Managed proxy compatibility and responses
+
+A reviewed Salaam assignment uses a versioned route bound to its complete execution
+identity. Older transparent proxies reject that route before forwarding. A bound
+credential cannot use the legacy route; reconnecting through an incompatible node
+requires an upgrade and a fresh readiness check.
+
+The managed route sanitizes exact injected station-token and proxy-key echoes and
+common encodings across streamed response chunks. It forwards only MCP response
+metadata, suppresses cookies and trailers, and rejects opaque content encodings.
+Safe SSE progress continues to stream. Upstream body-copy failures produce fixed
+diagnostics. These controls do not replace product authorization or establish
+that arbitrary malicious response encodings are safe.

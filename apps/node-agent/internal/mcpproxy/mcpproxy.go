@@ -380,7 +380,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := p.tokens.Token(r.Context(), stationID)
 	if err != nil {
-		p.logf("mcp proxy: no station token for %s: %v", stationID, err)
+		if managed {
+			p.logf("mcp proxy: station token unavailable for managed station %s", stationID)
+		} else {
+			p.logf("mcp proxy: no station token for %s: %v", stationID, err)
+		}
 		writeRPCError(w, http.StatusBadGateway, "the node could not get this station's token")
 		return
 	}
@@ -408,13 +412,26 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			pr.Out.Header.Del(SecretHeader)
 			pr.Out.Header.Del("Cookie")
 			pr.Out.Header.Set("Authorization", "Bearer "+token)
+			if managed {
+				pr.Out.Header.Set("Accept-Encoding", "identity")
+			}
 		},
 		// Negative: flush every write, so an SSE event reaches the harness when the upstream sends it.
 		FlushInterval: -1,
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-			p.logf("mcp proxy: upstream %s failed for station %s: %v", segment, stationID, err)
+			if managed {
+				p.logf("mcp proxy: managed upstream %s failed for station %s", segment, stationID)
+			} else {
+				p.logf("mcp proxy: upstream %s failed for station %s: %v", segment, stationID, err)
+			}
 			writeRPCError(w, http.StatusBadGateway, "the upstream MCP server could not be reached")
 		},
+	}
+	if managed {
+		rp.ErrorLog = log.New(managedProxyDiagnostic(func() { p.logf("mcp proxy: managed upstream response incomplete for station %s", stationID) }), "", 0)
+		rp.ModifyResponse = func(response *http.Response) error {
+			return sanitizeManagedResponse(response, credentialPatterns(token, want))
+		}
 	}
 	rp.ServeHTTP(w, r)
 }
