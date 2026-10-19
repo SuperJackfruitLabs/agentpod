@@ -100,6 +100,29 @@ test("editor recovery cannot read another owner's or station's history", async (
     await readEvents(sessionId, 0, { userId, stationId: binding.station_id }),
   ).toEqual([]);
 });
+test("a terminal cancellation receipt can recover its original attempt without changing its outcome", async () => {
+  const rows = await db
+    .select()
+    .from(acpPromptRequests)
+    .where(eq(acpPromptRequests.sessionId, sessionId));
+  for (const row of rows)
+    await updateSalaamPrompt(sessionId, row.requestId, "interrupted");
+  const requestId = crypto.randomUUID(),
+    attemptId = crypto.randomUUID();
+  await bindSalaamPrompt(
+    userId,
+    sessionId,
+    requestId,
+    "cancel before acceptance receipt",
+  );
+  await updateSalaamPrompt(sessionId, requestId, "interrupted");
+  expect(
+    await updateSalaamPrompt(sessionId, requestId, "accepted", attemptId),
+  ).toMatchObject({ state: "interrupted", attemptId });
+  await expect(
+    updateSalaamPrompt(sessionId, requestId, "completed", crypto.randomUUID()),
+  ).rejects.toThrow(/attempt/);
+});
 test("saved receipts survive end/revocation and cannot change attempts or regress a terminal outcome", async () => {
   // The previous prepared identity deliberately fences another instruction until reconciled.
   const rows = await db

@@ -118,6 +118,11 @@ export type TurnErrorAttempt = z.infer<typeof TurnErrorAttempt>;
 export const TurnError = z.object({
   /** The provider's or harness's own words. Never summarised. */
   message: z.string(),
+  /** Local execution correlation; distinct from the Hub chat/session identity. */
+  failureCode: z.string().optional(),
+  logicalRequestId: z.string().uuid().optional(),
+  attemptId: z.string().uuid().optional(),
+  localSessionId: z.string().uuid().optional(),
   kind: TurnErrorKind,
   harness: z.string(),
   provider: z.string().optional(),

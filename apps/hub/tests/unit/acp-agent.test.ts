@@ -25,6 +25,29 @@ function fakeSessions(overrides: Partial<AcpSessionService> = {}): {
 const connect = (service: AcpSessionService) =>
   client().connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
 
+test('Salaam editor errors retain typed cause after an interrupted receipt, while max-output and refusal retain standard stop reasons', async () => {
+  for(const kind of ['quota','max_tokens','refusal'] as const) {
+    const requestId=crypto.randomUUID(),attemptId=crypto.randomUUID(),localSessionId=crypto.randomUUID();
+    let emit:((e:{type:string;seq:number;payload:unknown})=>void)|undefined;
+    const terminal={sessionId:'acps_test',requestId,attemptId,state:'interrupted' as const};
+    const error={kind,message:'Fixture provider detail',harness:'salaam',source:'acp-rejection',failureCode:'provider_'+kind,logicalRequestId:requestId,attemptId,localSessionId};
+    const service={
+      subscribe(_s:string,fn:typeof emit){emit=fn;return ()=>{};},
+      async promptSession(){
+        emit?.({type:'state',seq:1,payload:{status:'working',promptReceipt:terminal}});
+        emit?.({type:'error',seq:2,payload:error});
+        emit?.({type:'state',seq:3,payload:{status:'idle'}});
+        return {...terminal,state:'accepted'};
+      },
+      async readEvents(){return [{type:'error',seq:2,payload:error},{type:'state',seq:3,payload:{status:'idle'}}];},
+    } as unknown as AcpSessionService;
+    const conn=connect(service);await conn.agent.request(AGENT_METHODS.initialize,{protocolVersion:1,clientCapabilities:{}});
+    const promise=conn.agent.request(AGENT_METHODS.session_prompt,{sessionId:'acps_test',prompt:[{type:'text',text:'fixture'}],_meta:{'salaam.dev/requestId':requestId}});
+    if(kind==='quota') await expect(promise).rejects.toMatchObject({code:-32000,data:{'salaam.dev/failure':{kind:'quota',requestId,attemptId,sessionId:localSessionId}}});
+    else expect(await promise).toMatchObject({stopReason:kind,_meta:{'salaam.dev/failure':{kind,requestId,attemptId}}});
+  }
+});
+
 describe("hub ACP agent — initialize", () => {
   test("advertises the loadSession capability", async () => {
     // Doors exists to attach to a station's EXISTING session. An agent that

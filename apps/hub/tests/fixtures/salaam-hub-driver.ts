@@ -88,6 +88,7 @@ const send = (value: unknown) =>
   process.stdout.write(JSON.stringify(value) + "\n");
 send({ kind: "ready", port: server.port });
 let dispatchGate: ReturnType<typeof postgres> | undefined;
+let cancellationGateHeld = false;
 const input = createInterface({ input: process.stdin });
 input.on("line", (line) => {
   void (async () => {
@@ -96,6 +97,20 @@ input.on("line", (line) => {
     try {
       let result: unknown;
       switch (request.method) {
+        case "cancel-gate-start":
+          sessions._setSalaamCancelBeforeNotifyForTest(async () => {
+            cancellationGateHeld = true;
+            await new Promise<void>(() => {});
+          });
+          result = true;
+          break;
+        case "cancel-gate-held":
+          result = cancellationGateHeld;
+          break;
+        case "cancel":
+          await sessions.cancelTurn(cfg.userId, p.id);
+          result = true;
+          break;
         case "gate-start":
           dispatchGate = postgres(process.env.DATABASE_URL!, {
             max: 1,

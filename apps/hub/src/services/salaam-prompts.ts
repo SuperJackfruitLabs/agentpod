@@ -124,7 +124,22 @@ export async function updateSalaamPrompt(
     if (!old) throw Error("Salaam prompt not found");
     if (old.attemptId && attemptId && old.attemptId !== attemptId)
       throw Error("Logical prompt receipt changed its attempt");
-    if (["completed", "interrupted"].includes(old.state)) return receipt(old);
+    if (["completed", "interrupted"].includes(old.state)) {
+      if (!old.attemptId && attemptId) {
+        const [enriched] = await tx
+          .update(acpPromptRequests)
+          .set({ attemptId })
+          .where(
+            and(
+              eq(acpPromptRequests.sessionId, sessionId),
+              eq(acpPromptRequests.requestId, requestId),
+            ),
+          )
+          .returning();
+        return receipt(enriched!);
+      }
+      return receipt(old);
+    }
     if (
       old.state === "accepted" &&
       ["prepared", "dispatched", "unknown"].includes(state)

@@ -30,7 +30,7 @@ The node admission credential stays local and never goes to the Hub or transcrip
 Apply database migration `0101_salaam_execution_authority.sql` before running the
 new Hub; update the daemon and node before opening the opted-in station. Missing
 or old admission support denies execution. Back up Salaam state before upgrading:
-its schema 19 cannot be opened by an older binary. This profile does not enable
+its schema 20 cannot be opened by an older binary. This profile does not enable
 station file access, terminal commands, coding tools, external runtimes or MCP.
 Do not infer isolation from a malicious node administrator or other provisioners.
 
@@ -96,3 +96,93 @@ interrupted execution requires continuation rather than silently starting over.
 Stable source identities deduplicate repeated message parts during load. The Hub's
 user prompt is retained once; materialized tool history can enrich the same tool
 call. Transcript events and their session cursor commit together before publication.
+
+## Reviewed daemon startup
+
+For node-owned cold startup, plan an AgentPod host profile with canonical absolute
+paths. This profile needs no Docker socket and enables no coding, filesystem,
+terminal, MCP or external-runtime authority:
+
+```json
+{
+  "mode": "agentpod",
+  "state": "/private/salaam-state",
+  "agentpod_config": "/private/salaam-pins.json"
+}
+```
+
+Run the pinned Node executable explicitly when planning and starting the host:
+
+```sh
+/private/node/bin/node /private/salaam/bin/salaam.mjs host plan --config /private/host-config.json > /private/host.json
+chmod 600 /private/host.json
+/private/node/bin/node /private/salaam/bin/salaam.mjs host start --manifest /private/host.json
+```
+
+Set `salaamNodeBinary` and `salaamManifest` in the existing node config, alongside
+`salaamBinary`, `salaamStateDir` and `salaamWorkspace`. The binary is the actual
+canonical `bin/salaam.mjs` path, not a PATH alias or npm symlink; the Node path must
+match the reviewed manifest. Discovery, ACP open and authority admission/renewal
+validate that runtime. Existing separately supervised configurations remain
+available by leaving the two new fields unset.
+
+The owner-only manifest binds Node version/path, package source, build, CLI, pinned
+Pi contents, provider route and authority pins. Runtime, pins, manifest and state
+must remain outside the workspace. Startup uses OS-held locks and matching live
+health; concurrent callers do not start duplicate hosts. The host supervises its
+own daemon, stops on configuration drift and uses bounded restart/backoff. A
+supervisor crash closes its daemon's IPC owner connection. Generate a systemd or
+launchd unit with `host unit` when the OS service manager should own the host.
+
+Back up private state before an upgrade, stop the old host deliberately, install
+the reviewed runtime, and regenerate/review its manifest. A partial upgrade or
+changed manifest is refused. Rollback requires compatible backed-up state and
+matching runtime/manifest; restoring files never revives a revoked execution lease.
+No package download, credential transfer or automatic version upgrade happens at
+model admission. A disconnected node keeps the existing bounded authority lease;
+new work requires fresh authority, and expiry still stops execution locally.
+
+The real startup rehearsal uses the same local gateway and synthetic-plane scope:
+
+```sh
+DATABASE_URL=postgres://agentpod:agentpod-dev-password@127.0.0.1:5434/agentpod \
+SALAAM_REPO=/absolute/path/to/salaam SALAAM_RUNTIME_REHEARSAL=1 \
+bun tests/integration/salaam-node-e2e.ts
+```
+
+## Typed outcomes and cancellation
+
+Install the updated daemon/ACP adapter before the Hub. The separate strict
+`salaam.dev/executionFeatures` namespace negotiates version 1 failures,
+cancellation receipts and tool semantics. The existing `salaam.dev/features`
+receipt namespace stays unchanged. The updated Hub refuses a bound adapter that
+lacks these features. Older Hubs receive RPC errors for partial-output failures
+so they cannot mistake a token limit or refusal for a successful turn.
+
+A successful model turn requires a verified `end_turn` outcome. Provider auth,
+quota, rate-limit and other failures retain their typed cause and logical prompt,
+local session and attempt IDs. Token limits and refusals retain their standard
+ACP stop reasons even when the provider already emitted text. Provider credentials
+and arbitrary response bodies are excluded from failure metadata. Legacy attempts
+without a verified durable outcome remain unverified; reconnect never reruns them.
+
+Cancellation records a stable UUID and its target logical prompt before sending.
+A Hub crash before handoff retries that same cancellation; a daemon receipt
+survives client, adapter and daemon restarts. A pre-dispatch cancellation fences
+only that prompt, including a later delayed delivery. `requested` means the stop
+is recorded, `confirmed` requires owned work to have settled and unresolved effects
+to have been reconciled, and `unknown` keeps uncertain work blocked. An abort
+acknowledgment or disconnected process alone cannot confirm cancellation. Ending
+the session separately revokes its entire execution authority.
+
+Clients opt into `salaam.dev/cancellationReceipt` updates. The receipt's session ID
+is the daemon's local session ID, while the enclosing ACP notification uses the
+Hub session ID. Do not substitute one identity for the other. Tool updates preserve
+read/search/edit/delete/execute semantics where supported and use only actual
+absolute guarded workspace locations. Immutable repository snapshots do not claim
+editable source locations. This station profile still grants no coding or MCP tools.
+
+No additional Hub database migration is required beyond the authority and prompt
+ledgers above; cancellation intent and receipts use the durable session event
+ledger. Back up daemon state before upgrading to schema 20. Downgrading requires a
+compatible backup and reviewed runtime; old binaries refuse the newer schema.

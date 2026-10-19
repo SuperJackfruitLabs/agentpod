@@ -94,6 +94,37 @@ useTestTelemetry();
 const TEST_USER = "test-user-acpsess-001";
 const OTHER_USER = "test-user-acpsess-002";
 
+test("partial output followed by max-output, refusal or cancellation is never a successful turn", async () => {
+  for (const reason of ["max_tokens", "refusal", "cancelled"]) {
+    const { server, fake, station } = await setupRig("acpsess-partial-" + reason, {
+      stationKey: "acp-partial-" + reason,
+      hangPrompt: true,
+      quietHang: true,
+      harnessSessionKey: "agent:partial:" + reason,
+    });
+    let sessionId: string | undefined;
+    try {
+      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+      sessionId = row.id;
+      await promptSession(TEST_USER, row.id, "A fixture partial turn");
+      await pollForEvent(row.id, sawSessionKey);
+      fake.agentSays("Partial output does not establish success");
+      fake.releasePrompt(reason);
+      const { hit } = await pollForEvent(row.id, e => e.type === "error", 3000);
+      expect(hit.payload).toMatchObject({ kind: reason, source: "acp-stop-reason" });
+      const audits = await rawSql`SELECT result FROM station_audit
+        WHERE user_id=${TEST_USER} AND node_id=${station.nodeId}
+        AND station_key=${station.stationKey} AND verb='acp.prompt'
+        ORDER BY created_at DESC LIMIT 1`;
+      expect(audits[0]?.result).toBe("error");
+    } finally {
+      if (sessionId) await endSession(TEST_USER, sessionId, "cleanup").catch(() => {});
+      fake.close();
+      server.stop(true);
+    }
+  }
+}, 20000);
+
 // ─── Minimal test app ─────────────────────────────────────────────────────────
 
 const testApp = new Hono().route("/public/nodes", gatewayRoutes);
@@ -553,7 +584,7 @@ test(
       // Audit row: verb acp.prompt, chars only — never the prompt text.
       const audits = await rawSql`
         SELECT verb, params_summary FROM station_audit
-        WHERE user_id = ${TEST_USER} AND verb = 'acp.prompt'`;
+        WHERE user_id = ${TEST_USER} AND node_id = ${station.nodeId} AND station_key = ${station.stationKey} AND verb = 'acp.prompt'`;
       expect(audits.length).toBeGreaterThan(0);
       const summary = audits[0]!.params_summary as Record<string, unknown>;
       expect(summary.chars).toBe("please do the thing".length);

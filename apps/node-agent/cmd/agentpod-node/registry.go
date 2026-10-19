@@ -12,7 +12,7 @@ import (
 // stay unset, and each descriptor resolves what it can from the host).
 func buildRegistry(cfg config.Config) *descriptor.Registry {
 	reg := descriptor.NewRegistry()
-	reg.Register(descriptor.NewSalaamFrom(descriptor.SalaamConfig{Binary: cfg.SalaamBinary, StateDir: cfg.SalaamStateDir, Workspace: cfg.SalaamWorkspace}))
+	reg.Register(descriptor.NewSalaamFrom(descriptor.SalaamConfig{Binary: cfg.SalaamBinary, StateDir: cfg.SalaamStateDir, Workspace: cfg.SalaamWorkspace, NodeBinary: cfg.SalaamNodeBinary, Manifest: cfg.SalaamManifest, NodeID: cfg.NodeID}))
 	reg.Register(descriptor.NewHermes("", cfg.HermesStartCmd))
 	reg.Register(descriptor.NewOpenClawFrom(descriptor.OpenClawConfig{
 		StartCmd:     cfg.OpenClawStartCmd,
