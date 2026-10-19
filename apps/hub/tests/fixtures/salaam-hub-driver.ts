@@ -2,12 +2,14 @@
 import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { Hono } from "hono";
+import postgres from "postgres";
+import { rawSql } from "../../src/db/drizzle";
 import { eq } from "drizzle-orm";
 import { db, closeDatabase } from "../../src/db/drizzle";
 import { stations } from "../../src/db/schema/stations";
 import { nodes } from "../../src/db/schema/nodes";
 import { tenants, BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
-import { acpSessions } from "../../src/db/schema/acp";
+import { acpEvents, acpSessions } from "../../src/db/schema/acp";
 import { bridgeDispatches } from "../../src/db/schema/bridge";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { fakePlane, installFakePlane, TEST_ORG } from "../helpers/fake-plane";
@@ -16,6 +18,7 @@ import { connectionManager } from "../../src/services/connection-manager";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
 import * as sessions from "../../src/services/acp-sessions";
+import { getSalaamPrompt } from "../../src/services/salaam-prompts";
 import * as authority from "../../src/services/salaam-authority";
 
 const cfg = JSON.parse(readFileSync(process.argv[2]!, "utf8"));
@@ -84,6 +87,7 @@ const server = Bun.serve({
 const send = (value: unknown) =>
   process.stdout.write(JSON.stringify(value) + "\n");
 send({ kind: "ready", port: server.port });
+let dispatchGate: ReturnType<typeof postgres> | undefined;
 const input = createInterface({ input: process.stdin });
 input.on("line", (line) => {
   void (async () => {
@@ -92,6 +96,36 @@ input.on("line", (line) => {
     try {
       let result: unknown;
       switch (request.method) {
+        case "gate-start":
+          dispatchGate = postgres(process.env.DATABASE_URL!, {
+            max: 1,
+            prepare: false,
+          });
+          await dispatchGate`SELECT pg_advisory_lock(19192)`;
+          await rawSql.unsafe(
+            `CREATE OR REPLACE FUNCTION test_salaam_dispatch_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.state='dispatched' THEN PERFORM pg_advisory_xact_lock(19192); END IF; RETURN NEW; END; $$`,
+          );
+          await rawSql.unsafe(
+            `CREATE TRIGGER test_salaam_dispatch_gate BEFORE UPDATE ON acp_prompt_requests FOR EACH ROW EXECUTE FUNCTION test_salaam_dispatch_gate()`,
+          );
+          result = true;
+          break;
+        case "gate-held":
+          result =
+            (
+              await rawSql`SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted AND objid=19192`
+            ).length > 0;
+          break;
+        case "gate-clear":
+          await rawSql.unsafe(
+            "DROP TRIGGER IF EXISTS test_salaam_dispatch_gate ON acp_prompt_requests",
+          );
+          await rawSql.unsafe(
+            "DROP FUNCTION IF EXISTS test_salaam_dispatch_gate()",
+          );
+          await dispatchGate?.end();
+          result = true;
+          break;
         case "online":
           result = connectionManager.isOnline(cfg.nodeId);
           break;
@@ -103,7 +137,23 @@ input.on("line", (line) => {
           });
           break;
         case "prompt":
-          result = await sessions.promptSession(cfg.userId, p.id, p.text);
+          result = await sessions.promptSession(
+            cfg.userId,
+            p.id,
+            p.text,
+            [],
+            undefined,
+            p.requestId,
+          );
+          break;
+        case "receipt":
+          result = await getSalaamPrompt(cfg.userId, p.id, p.requestId);
+          break;
+        case "events":
+          result = await db
+            .select()
+            .from(acpEvents)
+            .where(eq(acpEvents.sessionId, p.id));
           break;
         case "record":
           result = (
@@ -159,21 +209,19 @@ input.on("line", (line) => {
           )[0];
           break;
         case "board-create": {
-          await db
-            .insert(bridgeDispatches)
-            .values({
-              externalSource: "superpipeline",
-              externalRunId: p.runId,
-              tenantId: BOOTSTRAP_TENANT_ID,
-              boardId: "board-fixture",
-              externalCardId: p.runId,
-              agentKey: cfg.userId,
-              stationId: cfg.stationId,
-              leaseEpoch: p.epoch,
-              outcome: "working",
-              startedAt: new Date(),
-              updatedAt: new Date(),
-            });
+          await db.insert(bridgeDispatches).values({
+            externalSource: "superpipeline",
+            externalRunId: p.runId,
+            tenantId: BOOTSTRAP_TENANT_ID,
+            boardId: "board-fixture",
+            externalCardId: p.runId,
+            agentKey: cfg.userId,
+            stationId: cfg.stationId,
+            leaseEpoch: p.epoch,
+            outcome: "working",
+            startedAt: new Date(),
+            updatedAt: new Date(),
+          });
           result = await sessions.createSession({
             stationId: cfg.stationId,
             userId: cfg.userId,
@@ -195,6 +243,13 @@ input.on("line", (line) => {
           result = true;
           break;
         case "cleanup":
+          await rawSql.unsafe(
+            "DROP TRIGGER IF EXISTS test_salaam_dispatch_gate ON acp_prompt_requests",
+          );
+          await rawSql.unsafe(
+            "DROP FUNCTION IF EXISTS test_salaam_dispatch_gate()",
+          );
+          await dispatchGate?.end();
           for (const row of await db
             .select()
             .from(acpSessions)
