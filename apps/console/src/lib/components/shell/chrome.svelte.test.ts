@@ -106,6 +106,8 @@ describe("AccountMenu", () => {
     expect(getByTestId("user-avatar").textContent?.trim()).toBe("RG");
     expect(chip.textContent).toContain("rakesh@example.com");
     expect(chip.getAttribute("aria-expanded")).toBe("false");
+    // It opens a non-modal dialog, not a menu.
+    expect(chip.getAttribute("aria-haspopup")).toBe("dialog");
   });
 
   test("the menu holds Appearance and Sign out; Appearance expands the control", async () => {

@@ -47,7 +47,7 @@
     type="button"
     data-testid="account-chip"
     class="ap-acct__chip"
-    aria-haspopup="true"
+    aria-haspopup="dialog"
     aria-expanded={open}
     aria-controls="account-menu"
     aria-label="Signed in as {email || auth.initials}. Appearance and sign out"
