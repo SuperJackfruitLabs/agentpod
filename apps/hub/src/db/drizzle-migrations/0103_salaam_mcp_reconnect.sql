@@ -1,0 +1,1 @@
+ALTER TABLE "acp_sessions" ADD COLUMN "mcp_proxy_requested" boolean DEFAULT false NOT NULL;

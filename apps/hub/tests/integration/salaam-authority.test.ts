@@ -167,6 +167,17 @@ test("admission uses the owner grant and current station facts; suspension and w
     validateSalaamAuthority(execution.binding, owner),
   ).rejects.toThrow(/withdrawn/i);
 });
+
+test("MCP reconnect intent is durable session configuration and defaults off for old rows", async () => {
+  const execution = await makeSalaamExecution(stationId, owner, "acps_" + hex());
+  await save(execution);
+  const [legacy] = await db.select().from(acpSessions).where(eq(acpSessions.id, execution.binding.hub_session_id));
+  expect(legacy!.mcpProxyRequested).toBe(false);
+  await db.update(acpSessions).set({ mcpProxyRequested: true }).where(eq(acpSessions.id, execution.binding.hub_session_id));
+  const [restored] = await db.select().from(acpSessions).where(eq(acpSessions.id, execution.binding.hub_session_id));
+  expect(restored!.mcpProxyRequested).toBe(true);
+  expect(restored!.executionAuthority!.binding).toEqual(execution.binding);
+});
 test("database writers cannot hide an A to B to A occupancy change or invent the generation", async () => {
   const initial = await makeSalaamExecution(stationId, owner, "acps_" + hex());
   await db

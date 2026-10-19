@@ -15,7 +15,7 @@
  * It answers like the plane: 404 is null, a taken handle is `OrgPlaneError(409)`, an unknown
  * principal on a write is `OrgPlaneError(404)`. Imports nothing that touches the database.
  */
-import { SignJWT, exportJWK, generateKeyPair, type CryptoKey, type JWK } from "jose";
+import { SignJWT, exportJWK, generateKeyPair, importJWK, type CryptoKey, type JWK } from "jose";
 import {
   OrgPlaneError,
   orgPlaneClient,
@@ -175,6 +175,18 @@ function signingKey() {
 /** The key set the fake plane publishes — what the hub's verifier is pointed at in tests. */
 export async function fakePlaneJwks(): Promise<{ keys: JWK[] }> {
   return { keys: [(await signingKey()).jwk] };
+}
+
+/** Disposable process-recovery proofs keep their synthetic issuer key stable across Hub boots. */
+export function setFakePlaneSigningKeyForRecovery(privateJwk: JWK): void {
+  keys = (async () => {
+    const privateKey = (await importJWK(privateJwk, "EdDSA")) as CryptoKey;
+    const { d: _private, ...publicJwk } = privateJwk;
+    return {
+      privateKey,
+      jwk: { ...publicJwk, kid: KID, alg: "EdDSA", use: "sig" },
+    };
+  })();
 }
 
 /**

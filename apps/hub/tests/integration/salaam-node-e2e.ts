@@ -16,6 +16,10 @@ import {
   unlinkSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { generateKeyPair, exportJWK } from "jose";
+import { SALAAM_MCP_FIXTURE_TOOLS } from "../fixtures/salaam-mcp-tools";
+
+const mcpMode = process.env.SALAAM_MCP_REHEARSAL === "1";
 
 const repo = resolve(process.env.SALAAM_REPO ?? "");
 assert(
@@ -36,6 +40,12 @@ const dir = realpathSync(mkdtempSync("/tmp/sal-m191-")),
 for (const path of [workspace, state, home]) mkdirSync(path, { mode: 0o700 });
 const hex = () => randomUUID().replaceAll("-", "").slice(0, 20);
 const cfg = {
+  mcpRehearsal: mcpMode,
+  fixtureSigningKey: mcpMode
+    ? await exportJWK(
+        (await generateKeyPair("EdDSA", { extractable: true })).privateKey,
+      )
+    : undefined,
   userId: "prn_" + hex(),
   principalId: "prn_" + hex(),
   otherPrincipalId: "prn_" + hex(),
@@ -140,7 +150,7 @@ assert.equal(await build.exited, 0, await buildErrors);
 let daemon: ReturnType<typeof Bun.spawn> | undefined,
   nodeProcess: ReturnType<typeof Bun.spawn> | undefined,
   hub: ReturnType<typeof bootHub> | undefined;
-const runtimeMode = process.env.SALAAM_RUNTIME_REHEARSAL === "1";
+const runtimeMode = process.env.SALAAM_RUNTIME_REHEARSAL === "1" || mcpMode;
 const manifestPath = join(dir, "host.json");
 const cases: string[] = [];
 const record = (name: string) => {
@@ -443,9 +453,309 @@ async function runtimeCases() {
     "explicit end still revokes and confirms owned execution stopped after runtime recovery",
   );
 }
+function canonicalFixture(value: unknown): string {
+  if (Array.isArray(value))
+    return "[" + value.map(canonicalFixture).join(",") + "]";
+  if (value && typeof value === "object")
+    return (
+      "{" +
+      Object.entries(value)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([k, v]) => JSON.stringify(k) + ":" + canonicalFixture(v))
+        .join(",") +
+      "}"
+    );
+  return JSON.stringify(value)!;
+}
+const mcpFingerprint = (value: unknown) =>
+  createHash("sha256").update(canonicalFixture(value)).digest("hex");
+async function prepareMcpHost() {
+  const configDirs = [
+    join(home, "Library/Application Support/agentpod-node"),
+    join(home, ".config/agentpod-node"),
+  ];
+  const proxyState = await until(
+    () => configDirs.map((p) => join(p, "mcp-proxy.json")).find(existsSync),
+    (p) => !!p,
+  );
+  const listen = JSON.parse(readFileSync(proxyState!, "utf8")).listen as string;
+  assert(/^127\.0\.0\.1:\d+$/.test(listen));
+  const profile = {
+    version: 1,
+    scope: "agentpod-proxy",
+    proxy_origin: "http://" + listen,
+    servers: Object.entries(SALAAM_MCP_FIXTURE_TOOLS).map(([name, tools]) => ({
+      name,
+      protocol_version: "2025-11-25",
+      catalog_digest: mcpFingerprint(
+        [...tools].sort((a, b) =>
+          a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+        ),
+      ),
+      tools: tools.map((tool) => ({
+        name: tool.name,
+        schema_digest: mcpFingerprint(tool),
+        policy: tool.name === "fixture_mutate" ? "approval" : "read",
+      })),
+    })),
+    limits: {
+      request_bytes: 32768,
+      response_bytes: 262144,
+      timeout_ms: 30000,
+      calls_per_attempt: 16,
+    },
+  };
+  const profileFile = join(dir, "managed-mcp.json"),
+    input = join(dir, "host-config.json");
+  writeFileSync(profileFile, JSON.stringify(profile), { mode: 0o600 });
+  writeFileSync(
+    input,
+    JSON.stringify({
+      mode: "agentpod",
+      state,
+      agentpod_config: pins,
+      mcp_config: profileFile,
+    }),
+    { mode: 0o600 },
+  );
+  const planned = execFileSync(
+    node,
+    [join(repo, "bin/salaam.mjs"), "host", "plan", "--config", input],
+    { env: cleanEnv, encoding: "utf8" },
+  );
+  assert.equal(JSON.parse(planned).schema, 3);
+  writeFileSync(manifestPath, planned, { mode: 0o600 });
+  // A wrong key cannot reach either upstream; do not read or print the real proxy key.
+  const refused = await fetch(
+    `${profile.proxy_origin}/stations/${cfg.stationId}/mcp/superlibrary`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Agentpod-Proxy-Key": "deliberately-wrong-offline-fixture-key",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    },
+  );
+  assert.equal(refused.status, 401);
+  record(
+    "node-owned proxy rejects an unassigned key before the station token or MCP upstream",
+  );
+}
+async function mcpCases() {
+  const first = await hub!.request("create"),
+    row = await hub!.request("record", { id: first.id }),
+    session = row.executionAuthority.sessionId;
+  assert.equal(row.mcpProxyRequested, true);
+  assert((await snapshot(session)).capabilities.includes("managed-mcp-v1"));
+  const logical = randomUUID(),
+    text =
+      "[mcp] " +
+      JSON.stringify({
+        action: "call",
+        server: "superlibrary",
+        tool: "library_search",
+        arguments: { query: "synthetic scoped station memory" },
+      });
+  await hub!.request("prompt", { id: first.id, text, requestId: logical });
+  const receipt = await until(
+    () => hub!.request("receipt", { id: first.id, requestId: logical }),
+    (r) => r.state === "completed",
+  );
+  let observed = await hub!.request("mcp-observed");
+  assert.equal(observed.calls.length, 1);
+  assert.equal(observed.calls[0].principal, cfg.principalId);
+  assert.equal((await snapshot(session)).attempts.length, 1);
+  record(
+    "authenticated Hub → node private assignment → persisted proxy → daemon → pinned Pi executes one scoped MCP read",
+  );
+
+  await kill(hub!.p);
+  hub = bootHub();
+  assert.equal(await hub.started, cfg.port);
+  await until(() => hub!.request("online"), Boolean);
+  await until(
+    () => hub!.request("record", { id: first.id }),
+    (r) => r.status === "idle",
+  );
+  const restored = await hub.request("record", { id: first.id });
+  assert.equal(restored.mcpProxyRequested, true);
+  assert.equal(restored.executionAuthority.sessionId, session);
+  assert.equal(
+    (await hub.request("prompt", { id: first.id, text, requestId: logical }))
+      .attemptId,
+    receipt.attemptId,
+  );
+  observed = await hub.request("mcp-observed");
+  assert.equal(observed.calls.length, 0);
+  record(
+    "Hub SIGKILL restores managed MCP intent and the same session/receipt without replaying a tool",
+  );
+
+  execFileSync(binary, ["mcp-proxy", "rotate", cfg.stationId], {
+    env: cleanEnv,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 10000,
+  });
+  await kill(nodeProcess);
+  bootNode();
+  await until(() => hub!.request("online"), Boolean);
+  await until(
+    () => hub!.request("record", { id: first.id }),
+    (r) => r.status === "idle",
+  );
+  assert.equal(
+    (await hub.request("prompt", { id: first.id, text, requestId: logical }))
+      .attemptId,
+    receipt.attemptId,
+  );
+  assert.equal((await hub.request("mcp-observed")).calls.length, 0);
+  const nextId = randomUUID();
+  await hub.request("prompt", {
+    id: first.id,
+    text:
+      "[mcp] " +
+      JSON.stringify({
+        action: "call",
+        server: "superlibrary",
+        tool: "library_search",
+        arguments: { query: "after node restart and key rotation" },
+      }),
+    requestId: nextId,
+  });
+  await until(
+    () => hub!.request("receipt", { id: first.id, requestId: nextId }),
+    (r) => r.state === "completed",
+  );
+  assert.equal((await hub.request("mcp-observed")).calls.length, 1);
+  assert.equal((await snapshot(session)).attempts.length, 2);
+  record(
+    "proxy key rotation and node SIGKILL admit a new generation while retaining prior work without duplicate calls",
+  );
+
+  let activeRoot = first.id,
+    activeSession = session;
+  for (const principal of [cfg.otherPrincipalId, cfg.principalId]) {
+    await hub.request("end", { id: activeRoot });
+    await until(
+      () => hub!.request("status", { id: activeRoot }),
+      (r) => r.revoked && r.owned_execution_stopped,
+    );
+    await hub.request("reassign", { principalId: principal });
+    const next = await hub.request("create");
+    const saved = await hub.request("record", { id: next.id });
+    activeRoot = next.id;
+    activeSession = saved.executionAuthority.sessionId;
+    assert.equal(saved.executionAuthority.binding.principal_id, principal);
+    assert.equal((await snapshot(activeSession)).messages.length, 0);
+    const requestId = randomUUID();
+    await hub.request("prompt", {
+      id: activeRoot,
+      text:
+        "[mcp] " +
+        JSON.stringify({
+          action: "call",
+          server: "superlibrary",
+          tool: "library_search",
+          arguments: { query: "admitted occupant handoff" },
+        }),
+      requestId,
+    });
+    await until(
+      () => hub!.request("receipt", { id: activeRoot, requestId }),
+      (r) => r.state === "completed",
+    );
+    assert.equal(
+      (await hub.request("mcp-observed")).calls.at(-1).principal,
+      principal,
+    );
+  }
+  record(
+    "occupant A → B → A advances the private proxy binding and replaces cached station tokens without importing prior conversation state",
+  );
+  const beforeCalls = (await hub.request("mcp-observed")).calls.length;
+  const beforeAttempts = (await snapshot(activeSession)).attempts.length;
+  await hub.request("mcp-mode", { hold: true });
+  const mutationId = randomUUID(),
+    mutating = hub.request("prompt", {
+      id: activeRoot,
+      text:
+        "[mcp] " +
+        JSON.stringify({
+          action: "call",
+          server: "superlibrary",
+          tool: "fixture_mutate",
+          arguments: { query: "synthetic approved crash proof" },
+        }),
+      requestId: mutationId,
+    });
+  void mutating.catch(() => {});
+  const permission = await until(
+    () => hub!.request("events", { id: activeRoot }),
+    (events) => events.some((e: any) => e.type === "permission-request"),
+  );
+  const question = permission
+    .filter((e: any) => e.type === "permission-request")
+    .at(-1);
+  assert.equal((await hub.request("mcp-observed")).calls.length, beforeCalls);
+  const option = question.payload.options.find(
+    (o: any) => o.kind === "allow_once",
+  );
+  assert(option);
+  await hub.request("permission", {
+    id: activeRoot,
+    seq: question.seq,
+    optionId: option.optionId,
+  });
+  await until(
+    () => hub!.request("mcp-observed"),
+    (o) => o.calls.filter((c: any) => c.tool === "fixture_mutate").length === 1,
+  );
+  const oldHost = JSON.parse(
+    readFileSync(join(state, "host/status.json"), "utf8"),
+  );
+  process.kill(oldHost.daemon_pid, "SIGKILL");
+  await until(
+    () => JSON.parse(readFileSync(join(state, "host/status.json"), "utf8")),
+    (s) => s.daemon_pid !== oldHost.daemon_pid && s.healthy,
+    20000,
+  );
+  await hub.request("renew", { id: activeRoot }).catch((error) => {
+    assert(/revoked|authority|not active/i.test(String(error)));
+  });
+  const recovered = await until(
+    () => snapshot(activeSession),
+    (s) => s.operations.some((o: any) => o.state === "outcome_unknown"),
+  );
+  assert.equal(recovered.attempts.length, beforeAttempts + 1);
+  assert.equal(
+    recovered.operations.filter((o: any) => o.state === "outcome_unknown")
+      .length,
+    1,
+  );
+  observed = await hub.request("mcp-observed");
+  assert.equal(observed.calls.length, beforeCalls + 1);
+  await mutating.catch(() => {});
+  await hub.request("end", { id: activeRoot });
+  const stoppedStatus = await until(
+    () => hub!.request("status", { id: activeRoot }),
+    (s) => s.revoked && s.owned_execution_stopped,
+  );
+  assert.equal(stoppedStatus.unresolved_operations.length, 1);
+  assert.equal(
+    (await hub.request("mcp-observed")).calls.filter(
+      (c: any) => c.tool === "fixture_mutate",
+    ).length,
+    1,
+  );
+  record(
+    "daemon SIGKILL after approved HTTP acceptance preserves one unknown effect; explicit root stop confirms local resources without claiming the mutation settled",
+  );
+}
+
 try {
   if (!runtimeMode) await bootDaemon();
-  else {
+  else if (!mcpMode) {
     const input = join(dir, "host-config.json");
     writeFileSync(
       input,
@@ -469,6 +779,14 @@ try {
     salaamBinary: join(repo, "bin/salaam.mjs"),
     salaamStateDir: state,
     salaamWorkspace: workspace,
+    ...(mcpMode
+      ? {
+          mcpProxy: {
+            stations: [cfg.stationId],
+            superlibraryUrl: `http://127.0.0.1:${cfg.port}/mcp-library`,
+          },
+        }
+      : {}),
     ...(runtimeMode
       ? { salaamNodeBinary: realpathSync(node), salaamManifest: manifestPath }
       : {}),
@@ -484,7 +802,10 @@ try {
   }
   bootNode();
   await until(() => hub!.request("online"), Boolean);
-  if (runtimeMode) await runtimeCases();
+  if (mcpMode) {
+    await prepareMcpHost();
+    await mcpCases();
+  } else if (runtimeMode) await runtimeCases();
   else {
     const first = await hub.request("create"),
       saved = await hub.request("record", { id: first.id }),
@@ -908,8 +1229,9 @@ try {
     },
     cases,
     provider: "pinned Pi offline proof provider",
-    scope:
-      "real authenticated local gateway, real Go node and daemon; synthetic Accounts and board ownership",
+    scope: mcpMode
+      ? "real authenticated local gateway, Go node, persisted proxy, daemon and pinned Pi; synthetic signed Accounts and MCP product data/effects; no live Library/provider acceptance"
+      : "real authenticated local gateway, real Go node and daemon; synthetic Accounts and board ownership",
     fixture_sha256: createHash("sha256")
       .update(JSON.stringify(checked))
       .digest("hex"),

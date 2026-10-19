@@ -74,9 +74,9 @@ for Superlibrary, because that is when `agentpod_link_artifact` exists:
 The card prompt states the third rule on every card, whether the agent reports for itself or the bridge reports for it. It names `agentpod_link_artifact`
 and `library_search` only when the prompt's `libraryTools` is true.
 
-**A claim's session does not yet carry either server.** The bridge's `session/new` passes only the superpipeline
-server, so no agent started from a claim has the hub's tools or Superlibrary's today, and `libraryTools` is never
-set. Until the dispatch offers them, the prompt does not name tools the session lacks.
+The bridge requests the node's proxy when available. Tool availability comes from the node's
+actual response; a request to enable the proxy alone does not establish that the session has it.
+Salaam additionally checks that its adapter reports the same admitted servers.
 
 ## What a human gets
 
@@ -111,7 +111,8 @@ An agent running in a station does not need a token of its own to reach these to
 run a **loopback MCP proxy** that adds two servers to the harness's `session/new` — this endpoint as
 `agentpod` and Superlibrary's as `superlibrary` — reached as the station's own agent through a
 `127.0.0.1` URL and a per-station secret that never leave the machine. Only Hermes, Claude Code,
-Codex, opencode, Muse and Kilo stations can use it; OpenClaw's and Pi's ACP adapters take no HTTP MCP servers.
+Codex, opencode, Muse and Kilo stations can use it. Salaam uses the managed profile described below.
+OpenClaw's and Pi's ACP adapters take no HTTP MCP servers.
 
 ```sh
 fleet mcp-proxy list                  # which stations each node serves, and any drift
@@ -122,6 +123,31 @@ fleet mcp-proxy rotate stn_123        # a new secret; a session holding the old 
 The secrets persist across node restarts, so a session kept open across one keeps its tools. See
 [`fleet mcp-proxy`](/reference/fleet/#fleet-mcp-proxy) and
 [`apn mcp-proxy`](/reference/apn/#apn-mcp-proxy).
+
+### Salaam's managed profile
+
+Salaam requires an explicitly reviewed AgentPod host manifest with `mcp_config`. The private
+profile pins the proxy origin, protocol, catalog, admitted tool schemas and read or approval
+policy. An existing host without this profile keeps MCP disabled. Missing assignments, changed
+schemas or a mismatched adapter fail readiness before the worker can use the tools.
+
+The node sends the credential directly to the daemon. ACP declarations contain empty headers;
+provider payloads receive the progressive `salaam_mcp` interface. To discover a tool, use
+`action: "catalog"`, then the server name, then the server and tool name to retrieve its schema.
+Use `action: "call"` with that schema to invoke it. For example, `library_search` is reached
+through server `superlibrary`, rather than registered as a separate model tool.
+
+The proxy binds its credential to the admitted principal, occupancy and run context. It checks
+the forwarded station token's principal and organization, replaces the cache on a binding
+handoff, and persists that binding across node restarts. The upstream still verifies the
+organization plane's signature, issuer, audience and entitlement. This adds no token issuer or
+audience.
+
+Reconnect preserves saved call identities and receipts. Changed bindings invalidate old
+credentials and decisions. Mutating tools require an operation-bound approval; a protocol reply
+alone does not verify the external effect. An uncertain mutation stays blocked for reconciliation
+and is never automatically dispatched again. This profile enables managed HTTP MCP only;
+arbitrary client-supplied servers, stdio commands and station coding tools are not enabled by it.
 
 ## Next
 
