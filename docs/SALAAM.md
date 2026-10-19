@@ -61,3 +61,38 @@ local gateway, Go node, Salaam and pinned Pi with synthetic Accounts/board
 ownership. It checks restart, lost acknowledgment, suspension, occupant changes,
 stale epochs and real lease expiry. This is local conformance evidence, not a
 production deployment or a live Accounts/Superpipeline acceptance run.
+
+## Logical prompt recovery
+
+Updated console clients save a logical prompt UUID before sending and retain it
+through a lost echo or reload until the daemon's acceptance receipt arrives.
+The Hub binds that UUID to immutable input in `acp_prompt_requests`; changed input
+conflicts, and duplicate retries return the original attempt. Read access to saved
+receipts does not require a new execution lease, but remains scoped to the owner.
+The Doors editor facade forwards the same UUID in ACP `session/prompt` metadata
+`_meta["salaam.dev/requestId"]` and returns `_meta["salaam.dev/promptReceipt"]`.
+Editor history loads verify both the authenticated owner and selected station.
+A completed retry returns its saved outcome without waiting for another turn;
+an accepted retry waits for its own terminal receipt. The prompt ledger carries
+the session tenant, enforced by a composite foreign key.
+Older clients may omit the UUID; retries across separate sends then have no client
+idempotency guarantee.
+
+Install the updated Salaam adapter before the Hub: the two sides negotiate v1
+prompt receipts and stable update IDs, and the new Hub refuses an older adapter
+without them. Older Hubs do not request receipt notifications and keep their
+existing ACP behavior. The Hub advertises `execution.promptReceipts: 1` to the
+console. A newer console connected to an older Hub keeps its legacy prompt
+behavior until that capability is present, so deployment order cannot leave it
+waiting for unsupported acknowledgments. These flags grant no execution authority.
+
+Apply migration `0102_salaam_prompt_recovery.sql` before the updated Hub. A prepared
+instruction whose dispatch marker never committed can recover automatically after
+fresh authority and loading the original session. An uncertain committed dispatch
+is not automatically forwarded again. Reloaded ACP journal receipts reconcile
+accepted/completed/interrupted attempts. Explicit retries preserve the same UUID;
+interrupted execution requires continuation rather than silently starting over.
+
+Stable source identities deduplicate repeated message parts during load. The Hub's
+user prompt is retained once; materialized tool history can enrich the same tool
+call. Transcript events and their session cursor commit together before publication.

@@ -715,6 +715,13 @@
       "when": 1792415219012,
       "tag": "0101_salaam_execution_authority",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1792420317051,
+      "tag": "0102_salaam_prompt_recovery",
+      "breakpoints": true
     }
   ]
 }

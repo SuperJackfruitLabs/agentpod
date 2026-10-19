@@ -28,7 +28,7 @@
 
 import { and, asc, desc, eq, gt, isNotNull, lt, ne, or, sql } from "drizzle-orm";
 import { acpTraceMeta } from "../telemetry/propagation";
-import { SalaamRunAuthority } from '@agentpod/contract';
+import { SalaamAcpFeatures, SalaamPromptReceipt, SalaamRunAuthority } from '@agentpod/contract';
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import {
   client,
@@ -56,9 +56,10 @@ import { resolveTenantForUser } from "../auth/tenant";
 import { ControlPairDenied, isControlPairEnforced } from "./control-pair";
 import { grantAllowsPrincipal } from "./grants";
 import { callerGrant, callerPrincipal, type TokenAuthority } from "../auth/caller-authority";
-import { acpSessions, acpEvents, type StoredSalaamExecution } from "../db/schema/acp";
+import { acpSessions, acpEvents, acpPromptRequests, type StoredSalaamExecution } from "../db/schema/acp";
 import { stations } from "../db/schema/stations";
 import { createLogger } from "../utils/logger";
+import { bindSalaamPrompt, getSalaamPrompt, updateSalaamPrompt } from "./salaam-prompts";
 import { makeSalaamExecution, admitSalaamExecution, renewSalaamExecution, revokeSalaamExecution, validateSalaamAuthority, salaamStationStopped, inspectSalaamExecution } from "./salaam-authority";
 import { getStation } from "./station-registry";
 import { gateCapability } from "../routes/station-writes";
@@ -258,6 +259,7 @@ interface LiveSession {
   authorityRenewing?: boolean;
   transportLost?: boolean;
   recoveredTurn?: boolean;
+  logicalPromptInFlight?: string;
   wire: AcpWire | null;
   connection: ClientConnection | null;
   agent: ClientContext | null;
@@ -396,7 +398,7 @@ function toContract(r: DbRow): AcpSessionRow {
     // every session labelled "Session" no matter what was persisted.
     title: r.title,
     lastSeq: r.lastSeq,
-    ...(r.executionAuthority ? { execution: { state:r.executionAuthority.state,sessionId:r.executionAuthority.sessionId,stopConfirmed:r.executionAuthority.state==='revoked' && r.executionAuthority.receipt?.owned_execution_stopped===true && r.executionAuthority.receipt.unresolved_operations.length===0 } } : {}),
+    ...(r.executionAuthority ? { execution: { promptReceipts:1 as const,state:r.executionAuthority.state,sessionId:r.executionAuthority.sessionId,stopConfirmed:r.executionAuthority.state==='revoked' && r.executionAuthority.receipt?.owned_execution_stopped===true && r.executionAuthority.receipt.unresolved_operations.length===0 } } : {}),
   };
 }
 
@@ -449,13 +451,13 @@ function fanOut(sessionId: string, event: AcpEvent): void {
 
 /** Chain work onto the session's serialized write queue. */
 function enqueue(live: LiveSession, fn: () => Promise<void>): Promise<void> {
-  const p = live.chain.then(fn).catch((err) => {
+  const p = live.chain.then(fn);
+  live.chain = p.catch((err) => {
     log.error("ACP event write failed", {
       sessionId: live.id,
       error: String(err),
     });
   });
-  live.chain = p;
   return p;
 }
 
@@ -474,27 +476,51 @@ function persistEvent(
   live: LiveSession,
   type: AcpEventType,
   payload: unknown,
-  rowSet: SessionRowPatch = {}
+  rowSet: SessionRowPatch = {},
 ): { seq: number; done: Promise<void> } {
   const seq = ++live.seq;
   const createdAt = new Date();
   const done = enqueue(live, async () => {
-    await db.insert(acpEvents).values({
-      sessionId: live.id,
-      // The session's tenant, not a re-resolved one. acp_events carries a
-      // composite FK to (acp_sessions.id, tenant_id), so an event can only ever
-      // sit in its session's tenant — copying it from `live` is the copy the
-      // database checks.
-      tenantId: live.tenantId,
-      seq,
-      type,
-      payload: payload as object,
-      createdAt,
+    const inserted = await db.transaction(async (tx) => {
+      const insert = tx.insert(acpEvents).values({
+        sessionId: live.id,
+        tenantId: live.tenantId,
+        seq,
+        type,
+        payload: payload as object,
+        createdAt,
+      });
+      // Only exact source/request identity duplicates are harmless. A conflicting
+      // transcript sequence must still fail rather than silently losing an event.
+      const data = payload as {
+        _meta?: Record<string, unknown>;
+        requestId?: string;
+      };
+      // Drizzle's column-only conflict API cannot target expression indexes.
+      // Keep the insert built by the ORM, with a fixed, parameter-free target.
+      const conflict =
+        live.executionAuthority &&
+        type === "agent-update" &&
+        typeof data?._meta?.["salaam.dev/updateId"] === "string"
+          ? sql`("session_id", ("payload" #>> '{_meta,salaam.dev/updateId}')) WHERE "type" = 'agent-update' AND "payload" #>> '{_meta,salaam.dev/updateId}' IS NOT NULL`
+          : live.executionAuthority &&
+              type === "user-prompt" &&
+              typeof data?.requestId === "string"
+            ? sql`("session_id", ("payload"->>'requestId')) WHERE "type" = 'user-prompt' AND "payload"->>'requestId' IS NOT NULL`
+            : null;
+      const rows = conflict
+        ? await tx.execute<{ seq: number }>(
+            sql`${insert.getSQL()} ON CONFLICT ${conflict} DO NOTHING RETURNING "seq"`,
+          )
+        : await insert.returning({ seq: acpEvents.seq });
+      if (!rows.length) return false;
+      await tx
+        .update(acpSessions)
+        .set({ lastEventAt: createdAt, lastSeq: seq, ...rowSet })
+        .where(eq(acpSessions.id, live.id));
+      return true;
     });
-    await db
-      .update(acpSessions)
-      .set({ lastEventAt: createdAt, lastSeq: seq, ...rowSet })
-      .where(eq(acpSessions.id, live.id));
+    if (!inserted) return;
     fanOut(live.id, {
       sessionId: live.id,
       seq,
@@ -598,7 +624,9 @@ async function connectAndHandshake(live: LiveSession, wire: AcpWire): Promise<vo
   const initialized = await withDeadline(
     connection.agent.request("initialize", {
       protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: {},
+      clientCapabilities: live.executionAuthority
+        ? { _meta: { "salaam.dev/features": { promptReceipts: 1, updateIds: 1 } } }
+        : {},
       clientInfo: { name: "agentpod-hub", version: "0.1.0" },
     }),
     handshakeTimeoutMs,
@@ -606,6 +634,11 @@ async function connectAndHandshake(live: LiveSession, wire: AcpWire): Promise<vo
   );
   // Read, not assumed: every adapter probed on 2026-09-24 says yes, and the one
   // that someday says no should get a note instead of a failed turn.
+  if (live.executionAuthority) {
+    const meta = (initialized as { _meta?: Record<string, unknown> })._meta;
+    if (!SalaamAcpFeatures.safeParse(meta?.["salaam.dev/features"]).success)
+      throw Error("Upgrade the Salaam adapter: durable prompt receipt and history support is required");
+  }
   live.acceptsImages =
     (initialized as { agentCapabilities?: { promptCapabilities?: { image?: boolean } } } | undefined)
       ?.agentCapabilities?.promptCapabilities?.image === true;
@@ -843,6 +876,29 @@ async function handleWireClosed(live: LiveSession, reason: string, closedWire: A
 
 function handleSessionUpdate(live: LiveSession, params: SessionNotification): void {
   if (live.ended) return;
+  if (live.executionAuthority) {
+    const raw = (params.update as { _meta?: Record<string, unknown> })._meta?.[
+      "salaam.dev/promptReceipt"
+    ];
+    if (raw) {
+      const parsed = SalaamPromptReceipt.safeParse(raw);
+      if (
+        parsed.success &&
+        parsed.data.sessionId === live.executionAuthority.sessionId &&
+        parsed.data.attemptId
+      ) {
+        const { requestId, state, attemptId } = parsed.data;
+        void enqueue(live, async () => {
+          const receipt = await updateSalaamPrompt(live.id, requestId, state, attemptId);
+          // Append after this queue item; do not await a write queued behind itself.
+          persistEvent(live, "state", { status: live.status, promptReceipt: receipt });
+        });
+      }
+      return;
+    }
+    // The Hub already saved the logical user event before dispatch. ACP load replays it.
+    if (params.update.sessionUpdate === "user_message_chunk") return;
+  }
   // `session_info` can rename the session but leaves the chat empty. Only mark
   // a turn productive when the console has an agent update to render.
   const update = params.update as { sessionUpdate?: unknown };
@@ -1388,24 +1444,68 @@ async function projectRecoveredSalaamTurn(live: LiveSession):Promise<void>{
   await setStatus(live,'idle').done;
 }
 
-async function reconnectSalaam(live: LiveSession):Promise<void>{
-  if(live.reattaching || live.ended || !live.executionAuthority || !connectionManager.isOnline(live.nodeId)) return;
-  live.reattaching=true;
+async function reconnectSalaam(live: LiveSession): Promise<void> {
+  if (
+    live.reattaching ||
+    live.ended ||
+    !live.executionAuthority ||
+    !connectionManager.isOnline(live.nodeId)
+  )
+    return;
+  live.reattaching = true;
   try {
-    if(live.executionAuthority.binding.run.source==='agentpod') live.executionAuthority=await renewSalaamExecution(live.id,live.userId);
-    else await validateSalaamAuthority(live.executionAuthority.binding,live.userId);
-    try { live.connection?.close(); await live.wire?.close(); } catch {}
-    const wire=await openAcpWire(live.nodeId,live.stationKey,live.id,proxyOptions(live));
-    if(live.ended) { await wire.close(); return; }
-    live.wire=wire; live.nodeSessionId=wire.nodeSessionId; live.instanceEchoed=wire.instanceEchoed;
-    await connectAndHandshake(live,wire);
-    if(live.graceTimer) { clearTimeout(live.graceTimer); live.graceTimer=null; }
-    live.transportLost=false; live.recoveredTurn=true;
-    await db.update(acpSessions).set({nodeSessionId:wire.nodeSessionId}).where(eq(acpSessions.id,live.id));
+    if (live.executionAuthority.binding.run.source === "agentpod")
+      live.executionAuthority = await renewSalaamExecution(live.id, live.userId);
+    else await validateSalaamAuthority(live.executionAuthority.binding, live.userId);
+    try {
+      live.connection?.close();
+      await live.wire?.close();
+    } catch {}
+    const wire = await openAcpWire(live.nodeId, live.stationKey, live.id, proxyOptions(live));
+    if (live.ended) {
+      await wire.close();
+      return;
+    }
+    live.wire = wire;
+    live.nodeSessionId = wire.nodeSessionId;
+    live.instanceEchoed = wire.instanceEchoed;
+    await connectAndHandshake(live, wire);
+    if (live.graceTimer) {
+      clearTimeout(live.graceTimer);
+      live.graceTimer = null;
+    }
+    live.transportLost = false;
+    live.recoveredTurn = true;
+    await db
+      .update(acpSessions)
+      .set({ nodeSessionId: wire.nodeSessionId })
+      .where(eq(acpSessions.id, live.id));
     await projectRecoveredSalaamTurn(live);
     startSalaamAuthorityWatch(live);
-  } catch { await finalizeEnd(live,'Salaam transport recovery could not revalidate its saved authority'); }
-  finally { live.reattaching=false; }
+    await live.chain;
+    // Prepared means the dispatch marker never committed. Unknown/dispatched work is inspected, never automatically sent again.
+    if (live.status === "idle" && live.executionAuthority?.binding.run.source === "agentpod") {
+      const [prepared] = await db
+        .select()
+        .from(acpPromptRequests)
+        .where(
+          and(eq(acpPromptRequests.sessionId, live.id), eq(acpPromptRequests.state, "prepared")),
+        );
+      if (prepared)
+        await dispatchPrompt(
+          live.userId,
+          live.id,
+          prepared.inputText,
+          [],
+          undefined,
+          prepared.requestId,
+        );
+    }
+  } catch {
+    await finalizeEnd(live, "Salaam transport recovery could not revalidate its saved authority");
+  } finally {
+    live.reattaching = false;
+  }
 }
 
 async function restoreSalaamRow(row:typeof acpSessions.$inferSelect):Promise<void>{
@@ -1466,15 +1566,73 @@ export function sessionHasLibraryTools(sessionId: string): boolean {
  * name, type and size, never its bytes: `acp_events` is a log, not a store
  * of everything anyone ever sent an agent.
  */
+export function promptSession(
+  userId: string,
+  sessionId: string,
+  text: string,
+  images?: PromptImage[],
+  executionRun?: import("@agentpod/contract").SalaamRunAuthority,
+): Promise<void>;
+export function promptSession(
+  userId: string,
+  sessionId: string,
+  text: string,
+  images: PromptImage[],
+  executionRun: import("@agentpod/contract").SalaamRunAuthority | undefined,
+  requestId: string | undefined,
+): Promise<void | SalaamPromptReceipt>;
 export async function promptSession(
   userId: string,
   sessionId: string,
   text: string,
   images: PromptImage[] = [],
-  executionRun?: import('@agentpod/contract').SalaamRunAuthority
+  executionRun?: import("@agentpod/contract").SalaamRunAuthority,
+  requestId?: string,
+): Promise<void | SalaamPromptReceipt> {
+  return withStationOpenLock("prompt:" + sessionId, async () => {
+    const [row] = await db
+      .select()
+      .from(acpSessions)
+      .where(
+        and(eq(acpSessions.id, sessionId), eq(acpSessions.userId, userId)),
+      );
+    if (!row) throw Error("Session not found");
+    if (!row.executionAuthority)
+      return dispatchPrompt(userId, sessionId, text, images, executionRun);
+    if (images.length) throw Error("Salaam image prompts are not enabled");
+    const bound = await bindSalaamPrompt(
+      userId,
+      sessionId,
+      requestId ?? crypto.randomUUID(),
+      text,
+    );
+    const id = bound.receipt.requestId;
+    if (["accepted", "completed", "interrupted"].includes(bound.receipt.state))
+      return bound.receipt;
+    if (!liveById.has(sessionId) && row.status !== "ended")
+      await restoreSalaamRow(row);
+    const live = requireLive(userId, sessionId);
+    if (
+      live.logicalPromptInFlight === id ||
+      (!bound.fresh && live.status !== "idle")
+    )
+      return bound.receipt;
+    await dispatchPrompt(userId, sessionId, text, [], executionRun, id);
+    return getSalaamPrompt(userId, sessionId, id);
+  });
+}
+
+async function dispatchPrompt(
+  userId: string,
+  sessionId: string,
+  text: string,
+  images: PromptImage[] = [],
+  executionRun?: import("@agentpod/contract").SalaamRunAuthority,
+  requestId?: string,
 ): Promise<void> {
   const live = requireLive(userId, sessionId);
-  if (live.executionAuthority) await renewExecution(userId, sessionId, executionRun);
+  if (live.executionAuthority)
+    await renewExecution(userId, sessionId, executionRun);
   if (live.status !== "idle") {
     throw new Error(SESSION_BUSY_MESSAGE);
   }
@@ -1485,18 +1643,27 @@ export async function promptSession(
   // COALESCE is what makes "first" mean first: an existing title always wins,
   // so a long conversation keeps the label the user recognises no matter how
   // many prompts follow (and a whitespace-only prompt sets nothing at all).
-  const logicalRequestId = crypto.randomUUID();
+  const logicalRequestId = requestId ?? crypto.randomUUID();
   const title = deriveSessionTitle(text || images[0]?.name || "");
   const { done: promptWritten } = persistEvent(
     live,
     "user-prompt",
     images.length === 0
-      ? { text, ...(live.executionAuthority ? { requestId: logicalRequestId } : {}) }
+      ? {
+          text,
+          ...(live.executionAuthority ? { requestId: logicalRequestId } : {}),
+        }
       : {
           text,
-          images: images.map(({ name, mimeType, bytes }) => ({ name, mimeType, bytes })),
+          images: images.map(({ name, mimeType, bytes }) => ({
+            name,
+            mimeType,
+            bytes,
+          })),
         },
-    title === null ? {} : { title: sql`COALESCE(${acpSessions.title}, ${title})` }
+    title === null
+      ? {}
+      : { title: sql`COALESCE(${acpSessions.title}, ${title})` },
   );
   const { done: statusWritten } = setStatus(live, "working");
   await Promise.all([promptWritten, statusWritten]);
@@ -1510,17 +1677,28 @@ export async function promptSession(
       nodeId: live.nodeId,
       stationKey: live.stationKey,
       verb: "acp.prompt",
-      params: images.length === 0 ? { chars: text.length } : { chars: text.length, images: images.length },
+      params:
+        images.length === 0
+          ? { chars: text.length }
+          : { chars: text.length, images: images.length },
     });
   } catch (err) {
     persistEvent(
       live,
       "error",
-      turnErrorFromReason("Couldn't record the audit entry — prompt aborted.", live.harness, "hub")
+      turnErrorFromReason(
+        "Couldn't record the audit entry — prompt aborted.",
+        live.harness,
+        "hub",
+      ),
     );
     await setStatus(live, "idle").done;
     throw err;
   }
+
+  if (live.executionAuthority)
+    await updateSalaamPrompt(live.id, logicalRequestId, "dispatched");
+  live.logicalPromptInFlight = logicalRequestId;
 
   // Whether this turn's images can travel. Two things must be true: the agent
   // said at `initialize` that it takes images, and its node reads frames that
@@ -1532,7 +1710,8 @@ export async function promptSession(
     if (!live.acceptsImages) {
       imageRefusal = "this agent cannot view images";
     } else if (!(await nodeReadsLargeFrames(live.nodeId))) {
-      imageRefusal = "this agent's machine needs an AgentPod update before it can receive images";
+      imageRefusal =
+        "this agent's machine needs an AgentPod update before it can receive images";
     }
   }
 
@@ -1553,6 +1732,8 @@ export async function promptSession(
   const settled = () => {
     if (live.turnEpoch !== epoch) return;
     live.turnInFlight = false;
+    if (live.logicalPromptInFlight === logicalRequestId)
+      delete live.logicalPromptInFlight;
     live.lastTurnSettledAt = Date.now();
   };
   const recordError = async (error: TurnError) => {
@@ -1571,9 +1752,28 @@ export async function promptSession(
       sessionId: live.acpSessionId,
       prompt: promptBlocks(text, images, imageRefusal),
       ...acpTraceMeta(),
-      ...(live.executionAuthority ? { _meta: { ...((acpTraceMeta() as {_meta?: object})._meta ?? {}), "salaam.dev/requestId": logicalRequestId } } : {}),
+      ...(live.executionAuthority
+        ? {
+            _meta: {
+              ...((acpTraceMeta() as { _meta?: object })._meta ?? {}),
+              "salaam.dev/requestId": logicalRequestId,
+            },
+          }
+        : {}),
     })
     .then(async (response) => {
+      if (live.executionAuthority) {
+        const metadata = (response as { _meta?: Record<string, unknown> })._meta;
+        const terminal = SalaamPromptReceipt.parse({
+          sessionId: live.id,
+          requestId: metadata?.["salaam.dev/requestId"],
+          attemptId: metadata?.["salaam.dev/attemptId"],
+          state: (response as { stopReason?: string }).stopReason === "end_turn" ? "completed" : "interrupted",
+        });
+        if (terminal.requestId !== logicalRequestId || !terminal.attemptId)
+          throw Error("Salaam returned a receipt for a different logical instruction");
+        await updateSalaamPrompt(live.id, logicalRequestId, terminal.state, terminal.attemptId);
+      }
       if (isCurrentTurn()) {
         // A plugin already said why, during the turn — unless the agent spoke
         // after that report. OpenClaw's plugin reports a failed model once its
@@ -1582,11 +1782,17 @@ export async function promptSession(
         // Rakesh"). Words after the report mean the chain recovered; a report
         // after the last words (a partial answer, or Pi reporting at settled
         // after "Retrying…") is the turn's error.
-        if (live.pendingTurnError && live.lastProducedAt > live.pendingTurnErrorAt) {
-          log.info("a plugin's turn error was followed by an answer; the fallback recovered", {
-            sessionId: live.id,
-            kind: live.pendingTurnError.kind,
-          });
+        if (
+          live.pendingTurnError &&
+          live.lastProducedAt > live.pendingTurnErrorAt
+        ) {
+          log.info(
+            "a plugin's turn error was followed by an answer; the fallback recovered",
+            {
+              sessionId: live.id,
+              kind: live.pendingTurnError.kind,
+            },
+          );
           live.pendingTurnError = null;
         }
         if (live.pendingTurnError) {
@@ -1615,8 +1821,8 @@ export async function promptSession(
             reported ??
               turnErrorForSilentTurn(
                 live.harness,
-                (response as { stopReason?: unknown } | undefined)?.stopReason
-              )
+                (response as { stopReason?: unknown } | undefined)?.stopReason,
+              ),
           );
           settled();
           return;
@@ -1629,19 +1835,44 @@ export async function promptSession(
       settled();
     })
     .catch(async (err) => {
-      if(live.executionAuthority && !live.ended && (live.transportLost || !connectionManager.isOnline(live.nodeId))) {
+      if (live.executionAuthority)
+        await updateSalaamPrompt(live.id, logicalRequestId, "unknown").catch(
+          () => {},
+        );
+      if (
+        live.executionAuthority &&
+        !live.ended &&
+        (live.transportLost || !connectionManager.isOnline(live.nodeId))
+      ) {
         // The accepted prompt belongs to the daemon. Inspect it; never resubmit it.
-        const deadline=Date.now()+90_000;
-        while(!live.ended && Date.now()<deadline) {
-          if(connectionManager.isOnline(live.nodeId)) {
+        const deadline = Date.now() + 90_000;
+        while (!live.ended && Date.now() < deadline) {
+          if (connectionManager.isOnline(live.nodeId)) {
             try {
-              const status=await inspectSalaamExecution(live.executionAuthority);
-              if(status.revoked) break;
-              if(status.interrupted_attempts.length) { await recordError(turnErrorFromReason('Salaam attempt interrupted; explicit continuation required','salaam','hub')); settled(); return; }
-              if(!status.active_attempts.length) { await audit.done('ok'); await setStatus(live,'idle').done; settled(); return; }
+              const status = await inspectSalaamExecution(
+                live.executionAuthority,
+              );
+              if (status.revoked) break;
+              if (status.interrupted_attempts.length) {
+                await recordError(
+                  turnErrorFromReason(
+                    "Salaam attempt interrupted; explicit continuation required",
+                    "salaam",
+                    "hub",
+                  ),
+                );
+                settled();
+                return;
+              }
+              if (!status.active_attempts.length) {
+                await audit.done("ok");
+                await setStatus(live, "idle").done;
+                settled();
+                return;
+              }
             } catch {}
           }
-          await new Promise(r=>setTimeout(r,100));
+          await new Promise((r) => setTimeout(r, 100));
         }
       }
       // The harness's words, with what it put in `data` — Codex's quota
@@ -1660,7 +1891,9 @@ export async function promptSession(
       // reachable" is allowed to replace the harness's own error — see
       // `gatewayUnreachable` for why the asymmetry matters.
       if (rejectionSaidNothing(err)) {
-        const probe = await broker.request(live.nodeId, "acp.transport", { key: live.stationKey });
+        const probe = await broker.request(live.nodeId, "acp.transport", {
+          key: live.stationKey,
+        });
         if (probe.ok && gatewayUnreachable(probe.data)) {
           error = turnErrorForUnreachableGateway(live.harness);
           // Background, deliberately: the reader already has their answer, and the
@@ -1668,9 +1901,7 @@ export async function promptSession(
           void reattachAfterTransportLoss(live);
         }
       }
-      await audit
-        .done("error", error.message)
-        .catch(() => {});
+      await audit.done("error", error.message).catch(() => {});
       // Wire-level failures transition the session via handleWireClosed; only
       // recover to idle when this turn is still the live one. A normal ACP
       // request rejection is different: persist it in the transcript so every
@@ -1690,7 +1921,8 @@ export async function promptSession(
       // A node that dropped rejects its prompt at once, while the session
       // waits at `waiting` for it to come back. That turn is not over — it is
       // lost, and finalizeEnd records why if the node never returns.
-      if (!live.ended && live.turnEpoch === epoch && live.status === "waiting") return;
+      if (!live.ended && live.turnEpoch === epoch && live.status === "waiting")
+        return;
       settled();
     });
 }
@@ -1958,7 +2190,14 @@ export function _subscriberCountForTest(sessionId: string): number {
 export async function readEvents(
   sessionId: string,
   sinceSeq = 0,
+  scope?: { userId: string; stationId: string },
 ): Promise<Array<{ seq: number; type: string; payload: unknown }>> {
+  // Doors must bind an opaque session ID to the authenticated caller and the
+  // station selected by its proxy. A session ID alone is never read authority.
+  if (scope) {
+    const session = await getSession(scope.userId, sessionId);
+    if (!session || session.stationId !== scope.stationId) throw Error("Session not found");
+  }
   const rows = await db
     .select({ seq: acpEvents.seq, type: acpEvents.type, payload: acpEvents.payload })
     .from(acpEvents)

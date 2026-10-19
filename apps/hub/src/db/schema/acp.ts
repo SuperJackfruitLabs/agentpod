@@ -95,6 +95,8 @@ export const acpEvents = pgTable("acp_events", {
   createdAt: timestamp("created_at").notNull(),
 }, (t) => [
   primaryKey({ columns: [t.sessionId, t.seq] }),
+  uniqueIndex("acp_events_salaam_update_id").on(t.sessionId,sql`(${t.payload} #>> '{_meta,salaam.dev/updateId}')`).where(sql`${t.type} = 'agent-update' AND ${t.payload} #>> '{_meta,salaam.dev/updateId}' IS NOT NULL`),
+  uniqueIndex("acp_events_salaam_prompt_id").on(t.sessionId,sql`(${t.payload}->>'requestId')`).where(sql`${t.type} = 'user-prompt' AND ${t.payload}->>'requestId' IS NOT NULL`),
   // Retention shape (Horizon 0 settles the shape; Horizon 3 enforces the policy).
   //
   // This table is authoritative for transcripts, permission decisions and usage,
@@ -207,3 +209,15 @@ export const acpRuns = pgTable("acp_runs", {
     sql`${t.agentPrincipalId} IS NULL OR ${t.agentPrincipalId} ~ '^prn_[0-9a-f]{20}$'`,
   ),
 ]);
+
+
+/** Durable consumer idempotency; a closed socket cannot erase prompt identity. */
+export const acpPromptRequests = pgTable("acp_prompt_requests",{
+  sessionId:text("session_id").notNull().references(()=>acpSessions.id,{onDelete:"cascade"}),
+  tenantId:text("tenant_id").notNull().references(()=>tenants.id,{onDelete:"restrict"}),
+  requestId:text("request_id").notNull(),
+  inputDigest:text("input_digest").notNull(),
+  inputText:text("input_text").notNull(),
+  state:text("state").notNull(),
+  attemptId:text("attempt_id"),
+},t=>[foreignKey({columns:[t.sessionId,t.tenantId],foreignColumns:[acpSessions.id,acpSessions.tenantId],name:"acp_prompt_requests_session_tenant_fk"}).onDelete("cascade"),index("acp_prompt_requests_tenant_id_idx").on(t.tenantId),primaryKey({columns:[t.sessionId,t.requestId]}),check("acp_prompt_requests_state",sql`${t.state} IN ('prepared','dispatched','accepted','completed','interrupted','unknown')`)]);

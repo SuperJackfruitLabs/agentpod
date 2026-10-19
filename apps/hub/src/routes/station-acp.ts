@@ -435,7 +435,8 @@ export const stationAcpRoutes = new Hono()
                   await handleSubscribe(ws, msg.sinceSeq);
                   break;
                 case "prompt":
-                  await acp.promptSession(userId, sessionId, msg.text);
+                  { const receipt=await acp.promptSession(userId, sessionId, msg.text,[],undefined,msg.requestId) as void|import("@agentpod/contract").SalaamPromptReceipt;
+                    if(receipt)send(ws,{t:"prompt-receipt",receipt}); }
                   break;
                 case "cancel":
                   await acp.cancelTurn(userId, sessionId);

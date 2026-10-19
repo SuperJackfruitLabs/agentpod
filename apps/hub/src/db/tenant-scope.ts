@@ -33,7 +33,7 @@ import { and, eq, getTableName, type SQL, type Table } from "drizzle-orm";
 import { TenantId } from "@agentpod/contract";
 
 import { db } from "./drizzle";
-import { acpEvents, acpRuns, acpSessions } from "./schema/acp";
+import { acpEvents, acpRuns, acpSessions, acpPromptRequests } from "./schema/acp";
 import { matrixBoardRooms } from "./schema/board-rooms";
 import { bridgeAgents, bridgeBoardSettings, bridgeDispatches } from "./schema/bridge";
 import { adminAuditLog, systemSettings } from "./schema/admin";
@@ -133,6 +133,7 @@ export const TENANT_SCOPED_TABLES = {
   acpSessions,
   acpEvents,
   acpRuns,
+  acpPromptRequests,
   bridgeAgents,
   bridgeBoardSettings,
   bridgeDispatches,

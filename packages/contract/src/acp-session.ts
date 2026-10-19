@@ -57,7 +57,7 @@ export const AcpSessionRow = z.object({
   // and a new console tolerates rows from an older hub.
   title: z.string().nullable().optional(),   // first prompt, truncated; null until the first prompt
   lastSeq: z.number().int().optional(),      // highest event seq persisted for the session
-  execution: z.object({ state: z.enum(['active','revocation_pending','revoked']), sessionId: z.string().nullable(), stopConfirmed: z.boolean() }).optional(),
+  execution: z.object({ state: z.enum(['active','revocation_pending','revoked']), sessionId: z.string().nullable(), stopConfirmed: z.boolean(), promptReceipts: z.literal(1).optional() }).optional(),
 });
 export type AcpSessionRow = z.infer<typeof AcpSessionRow>;
 
@@ -149,7 +149,7 @@ export type TurnErrorPayload = z.infer<typeof TurnErrorPayload>;
 // Console → hub over the session WS:
 export const AcpClientMsg = z.discriminatedUnion("t", [
   z.object({ t: z.literal("subscribe"), sinceSeq: z.number().int().nonnegative() }),
-  z.object({ t: z.literal("prompt"), text: z.string().min(1) }),
+  z.object({ t: z.literal("prompt"), text: z.string().min(1), requestId: z.string().uuid().optional() }),
   z.object({ t: z.literal("cancel") }),
   z.object({ t: z.literal("permission-answer"), requestSeq: z.number().int(), optionId: z.string() }),
   z.object({ t: z.literal("set-mode"), mode: AcpSessionMode }),
@@ -162,5 +162,27 @@ export const AcpServerMsg = z.discriminatedUnion("t", [
   z.object({ t: z.literal("replay-done"), lastSeq: z.number().int() }),
   z.object({ t: z.literal("session"), session: AcpSessionRow }),
   z.object({ t: z.literal("bye"), reason: z.string() }),
+  z.object({ t: z.literal("prompt-receipt"), receipt: z.lazy(() => SalaamPromptReceipt) }),
 ]);
 export type AcpServerMsg = z.infer<typeof AcpServerMsg>;
+
+/** A logical Salaam prompt receipt, independent of socket/JSON-RPC request ids. */
+export const SalaamPromptReceipt = z.object({
+  requestId: z.string().uuid(),
+  sessionId: z.string(),
+  state: z.enum([
+    "prepared",
+    "dispatched",
+    "accepted",
+    "completed",
+    "interrupted",
+    "unknown",
+  ]),
+  attemptId: z.string().uuid().nullable(),
+});
+export type SalaamPromptReceipt = z.infer<typeof SalaamPromptReceipt>;
+
+/** Versioned affordance negotiation; these flags grant no execution authority. */
+export const SalaamAcpFeatures = z
+  .object({ promptReceipts: z.literal(1), updateIds: z.literal(1) })
+  .strict();

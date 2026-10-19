@@ -70,6 +70,7 @@ import {
   type AcpSessionRow,
   type AcpSocket,
 } from "$lib/api/acp";
+import { rememberPrompt, acknowledgePrompt, PendingPromptConflict } from "./prompt-identity";
 import { socketToken } from "$lib/api/client";
 import {
   addPendingPrompt,
@@ -405,8 +406,17 @@ export class AcpChat {
       this.startConnection();
     }
 
+    let requestId: string | undefined;
+    if (this.#session?.execution?.promptReceipts === 1) {
+      try {
+        requestId = rememberPrompt(sessionStorage, this.#session.id, text);
+      } catch (error) {
+        this.#error = error instanceof PendingPromptConflict ? error.message : "Couldn't save the message for retry.";
+        return;
+      }
+    }
     this.#transcript = addPendingPrompt(this.#transcript, text);
-    this.socket?.send({ t: "prompt", text });
+    this.socket?.send({ t: "prompt", text, ...(requestId ? { requestId } : {}) });
     this.awaitingEcho = true;
     this.promptSocket = this.socket;
     // Nothing above proves the frame LANDED — only the echo does. Arm the
@@ -609,6 +619,11 @@ export class AcpChat {
       case "event":
         this.applyEvent(msg.event);
         break;
+      case "prompt-receipt":
+        if (msg.receipt.sessionId === this.#session?.id && ['accepted', 'completed', 'interrupted'].includes(msg.receipt.state)) {
+          try { acknowledgePrompt(sessionStorage, msg.receipt.sessionId, msg.receipt.requestId); } catch { /* Keep the retry identity if storage is unavailable. */ }
+        }
+        break;
       case "replay-done":
         this.#connection = "connected";
         this.attempt = 0;
@@ -671,6 +686,12 @@ export class AcpChat {
       this.releasePendingPrompt();
     }
 
+    if (ev.type === 'state' && isRecord(ev.payload) && isRecord(ev.payload.promptReceipt)) {
+      const receipt = ev.payload.promptReceipt;
+      if (typeof receipt.requestId === 'string' && ['accepted', 'completed', 'interrupted'].includes(String(receipt.state))) {
+        try { acknowledgePrompt(sessionStorage, ev.sessionId, receipt.requestId); } catch { /* Keep the retry identity if storage is unavailable. */ }
+      }
+    }
     this.#transcript = foldEvent(this.#transcript, ev);
     if (ev.type === "user-prompt") {
       this.awaitingEcho = false; // reconciled

@@ -192,6 +192,170 @@ describe("hub ACP agent — session/prompt", () => {
   });
 });
 
+describe("hub ACP agent — durable Salaam prompts", () => {
+  const requestId = "4a1d156d-e744-4e75-8a77-7f488d0e10f9";
+  const receipt = {
+    sessionId: "acps_test",
+    requestId,
+    attemptId: "9d255eb0-06fa-4ccf-ab82-a7eaa46205b0",
+    state: "completed" as const,
+  };
+  test("forwards the logical identity and returns a completed retry without waiting for another turn", async () => {
+    let args: unknown[] = [];
+    let unsubscribed = false;
+    const { service } = fakeSessions({
+      subscribe: () => () => {
+        unsubscribed = true;
+      },
+      async promptSession(...input) {
+        args = input;
+        return receipt;
+      },
+    });
+    const response = await connect(service).agent.request(
+      AGENT_METHODS.session_prompt,
+      {
+        sessionId: "acps_test",
+        prompt: [{ type: "text", text: "same instruction" }],
+        _meta: { "salaam.dev/requestId": requestId },
+      },
+    );
+    expect(args).toEqual([
+      "usr_1",
+      "acps_test",
+      "same instruction",
+      [],
+      undefined,
+      requestId,
+    ]);
+    expect(response).toMatchObject({
+      stopReason: "end_turn",
+      _meta: { "salaam.dev/promptReceipt": receipt },
+    });
+    expect(unsubscribed).toBe(true);
+  });
+  test("an accepted retry waits for its own receipt rather than an unrelated idle event", async () => {
+    let emit!: Parameters<AcpSessionService["subscribe"]>[1];
+    let dispatched!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      dispatched = resolve;
+    });
+    const { service } = fakeSessions({
+      subscribe(_id, fn) {
+        emit = fn;
+        return () => {};
+      },
+      async promptSession() {
+        emit({ type: "state", seq: 1, payload: { status: "idle" } });
+        dispatched();
+        return { ...receipt, state: "accepted" };
+      },
+    });
+    let settled = false;
+    const pending = connect(service)
+      .agent.request(AGENT_METHODS.session_prompt, {
+        sessionId: "acps_test",
+        prompt: [{ type: "text", text: "same instruction" }],
+        _meta: { "salaam.dev/requestId": requestId },
+      })
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+    await ready;
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    emit({
+      type: "state",
+      seq: 2,
+      payload: { status: "working", promptReceipt: receipt },
+    });
+    expect(await pending).toMatchObject({
+      stopReason: "end_turn",
+      _meta: { "salaam.dev/promptReceipt": receipt },
+    });
+  });
+  test("load binds its history read to the authenticated owner and selected station", async () => {
+    let scope: unknown;
+    const { service } = fakeSessions({
+      async readEvents(_session, _since, caller) {
+        scope = caller;
+        return [];
+      },
+    });
+    await connect(service).agent.request(AGENT_METHODS.session_load, {
+      sessionId: "acps_test",
+      cwd: "/tmp",
+      mcpServers: [],
+    });
+    expect(scope).toEqual({ userId: "usr_1", stationId: "station_1" });
+  });
+  test("load replays a stored logical user prompt once alongside the assistant history", async () => {
+    const updates: unknown[] = [];
+    const { service } = fakeSessions({
+      async readEvents() {
+        return [
+          {
+            seq: 1,
+            type: "user-prompt",
+            payload: { requestId, text: "original question" },
+          },
+          {
+            seq: 2,
+            type: "agent-update",
+            payload: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "saved answer" },
+            },
+          },
+        ];
+      },
+    });
+    const connection = client()
+      .onNotification(CLIENT_METHODS.session_update, ({ params }) => {
+        updates.push(params.update);
+      })
+      .connect(
+        buildAcpAgent({
+          userId: "usr_1",
+          stationId: "station_1",
+          sessions: service,
+        }),
+      );
+    await connection.agent.request(AGENT_METHODS.session_load, {
+      sessionId: "acps_test",
+      cwd: "/tmp",
+      mcpServers: [],
+    });
+    expect(updates).toHaveLength(2);
+    expect(updates[0]).toMatchObject({
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: "original question" },
+    });
+    expect(updates[1]).toMatchObject({
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "saved answer" },
+    });
+  });
+  test("rejects transport counters as logical identities before dispatch", async () => {
+    let called = false;
+    const { service } = fakeSessions({
+      subscribe: () => () => {},
+      async promptSession() {
+        called = true;
+      },
+    });
+    await expect(
+      connect(service).agent.request(AGENT_METHODS.session_prompt, {
+        sessionId: "acps_test",
+        prompt: [{ type: "text", text: "hello" }],
+        _meta: { "salaam.dev/requestId": "jsonrpc-7" },
+      }),
+    ).rejects.toThrow(/logical prompt/i);
+    expect(called).toBe(false);
+  });
+});
+
 describe("hub ACP agent — permissions", () => {
   /** Drives a session and lets a test push events at the agent. */
   function permFake(over: Partial<AcpSessionService> = {}) {

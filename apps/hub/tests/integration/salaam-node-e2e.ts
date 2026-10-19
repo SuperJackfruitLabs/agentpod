@@ -116,11 +116,14 @@ assert.deepEqual(
   checked,
   "Both consumers must use the same authority corpus",
 );
-const build = Bun.spawn(["go", "build", "-o", binary, "./cmd/agentpod-node"], {
-  cwd: nodeDirectory,
-  stdout: "pipe",
-  stderr: "pipe",
-});
+const build = Bun.spawn(
+  ["go", "build", "-p", "1", "-o", binary, "./cmd/agentpod-node"],
+  {
+    cwd: nodeDirectory,
+    stdout: "pipe",
+    stderr: "pipe",
+  },
+);
 const buildErrors = new Response(build.stderr).text();
 assert.equal(await build.exited, 0, await buildErrors);
 let daemon: ReturnType<typeof Bun.spawn> | undefined,
@@ -339,14 +342,48 @@ try {
     true,
   );
   hold();
+  const firstLogical = crypto.randomUUID();
   const firstTurn = hub.request("prompt", {
     id: first.id,
     text: "One durable instruction",
+    requestId: firstLogical,
   });
   void firstTurn.catch(() => {});
   await entered();
+  const accepted = await until(
+    () => hub!.request("receipt", { id: first.id, requestId: firstLogical }),
+    (r) => r.state === "accepted",
+  );
+  const repeated = await hub.request("prompt", {
+    id: first.id,
+    text: "One durable instruction",
+    requestId: firstLogical,
+  });
+  assert.equal(repeated.attemptId, accepted.attemptId);
+  await assert.rejects(
+    hub.request("prompt", {
+      id: first.id,
+      text: "Changed logical input",
+      requestId: firstLogical,
+    }),
+    /different input/,
+  );
   release();
   await firstTurn;
+  await until(
+    () => hub!.request("receipt", { id: first.id, requestId: firstLogical }),
+    (r) => r.state === "completed",
+  );
+  const beforeHistory = await hub.request("events", { id: first.id });
+  const sourceIds = beforeHistory
+    .filter(
+      (e: any) =>
+        e.type === "agent-update" &&
+        e.payload.sessionUpdate === "agent_message_chunk",
+    )
+    .map((e: any) => e.payload._meta?.["salaam.dev/updateId"])
+    .filter(Boolean);
+  assert(sourceIds.length > 0);
   assert.equal((await snapshot(session)).attempts.length, 1);
   record("authenticated Hub → Go node → bound ACP → daemon → real Pi");
   await kill(hub.p);
@@ -363,11 +400,44 @@ try {
     session,
   );
   assert.equal((await snapshot(session)).attempts.length, 1);
+  const recoveredReceipt = await hub.request("prompt", {
+    id: first.id,
+    text: "One durable instruction",
+    requestId: firstLogical,
+  });
+  assert.equal(recoveredReceipt.attemptId, accepted.attemptId);
+  await assert.rejects(
+    hub.request("prompt", {
+      id: first.id,
+      text: "Changed after restart",
+      requestId: firstLogical,
+    }),
+    /different input/,
+  );
+  const afterHistory = await hub.request("events", { id: first.id });
+  assert.equal(
+    afterHistory.filter((e: any) => e.type === "user-prompt").length,
+    1,
+  );
+  const recoveredSources = afterHistory
+    .filter(
+      (e: any) =>
+        e.type === "agent-update" &&
+        e.payload.sessionUpdate === "agent_message_chunk",
+    )
+    .map((e: any) => e.payload._meta?.["salaam.dev/updateId"])
+    .filter(Boolean);
+  assert.equal(new Set(recoveredSources).size, recoveredSources.length);
+  assert.equal(recoveredSources.length, sourceIds.length);
+  record(
+    "logical prompt UUID survives Hub restart; changed input conflicts and load history is not duplicated",
+  );
   record("Hub SIGKILL restores the same session without prompt replay");
   hold();
+  const secondLogical=crypto.randomUUID();
   const secondTurn = hub.request("prompt", {
     id: first.id,
-    text: "Survive node restart",
+    text: "Survive node restart",requestId:secondLogical,
   });
   void secondTurn.catch(() => {});
   await entered();
@@ -385,6 +455,7 @@ try {
     () => snapshot(session),
     (s) => s.attempts.filter((a: any) => a.state === "completed").length === 2,
   );
+  await until(()=>hub!.request('receipt',{id:first.id,requestId:secondLogical}),r=>r.state==='completed');
   record("node SIGKILL preserves the same running attempt and reconnects");
   hold();
   const pending = hub.request("prompt", {
@@ -473,6 +544,59 @@ try {
   await stopped();
   record(
     "daemon SIGKILL requires fresh authority and leaves one interrupted attempt without replay",
+  );
+  const preparedSession = await hub.request("create"),
+    preparedRecord = await hub.request("record", { id: preparedSession.id }),
+    preparedLocal = preparedRecord.executionAuthority.sessionId,
+    preparedId = crypto.randomUUID();
+  await hub.request("gate-start");
+  hold();
+  const preparing = hub.request("prompt", {
+    id: preparedSession.id,
+    text: "Recover before dispatch",
+    requestId: preparedId,
+  });
+  void preparing.catch(() => {});
+  await until(() => hub!.request("gate-held"), Boolean);
+  assert.equal((await snapshot(preparedLocal)).attempts.length, 0);
+  await kill(hub.p);
+  hub = bootHub();
+  assert.equal(await hub.started, cfg.port);
+  await until(() => hub!.request("online"), Boolean);
+  await entered();
+  const preparedReceipt = await until(
+    () =>
+      hub!.request("receipt", {
+        id: preparedSession.id,
+        requestId: preparedId,
+      }),
+    (r) => r.state === "accepted",
+  );
+  assert.equal((await snapshot(preparedLocal)).attempts.length, 1);
+  release();
+  await until(
+    () =>
+      hub!.request("receipt", {
+        id: preparedSession.id,
+        requestId: preparedId,
+      }),
+    (r) => r.state === "completed",
+  );
+  assert.equal(
+    (
+      await hub.request("prompt", {
+        id: preparedSession.id,
+        text: "Recover before dispatch",
+        requestId: preparedId,
+      })
+    ).attemptId,
+    preparedReceipt.attemptId,
+  );
+  await hub.request("gate-clear");
+  await hub.request("end", { id: preparedSession.id });
+  await stopped();
+  record(
+    "Hub SIGKILL before dispatch commit recovers the prepared logical instruction exactly once",
   );
   const runId = "run_" + hex(),
     board = await hub.request("board-create", { runId, epoch: 7 });

@@ -21,7 +21,8 @@ import {
   RequestError,
   type AgentApp,
 } from "@agentclientprotocol/sdk";
-import type { AcpSessionMode } from "@agentpod/contract";
+import { SalaamPromptReceipt, type AcpSessionMode } from "@agentpod/contract";
+import { z } from "zod";
 import * as sessions from "./acp-sessions";
 import { createLogger } from "../utils/logger";
 
@@ -41,7 +42,14 @@ export interface AcpSessionService {
     mode: AcpSessionMode;
   }): Promise<{ id: string }>;
 
-  promptSession(userId: string, sessionId: string, text: string): Promise<void>;
+  promptSession(
+    userId: string,
+    sessionId: string,
+    text: string,
+    images?: Parameters<typeof sessions.promptSession>[3],
+    executionRun?: Parameters<typeof sessions.promptSession>[4],
+    requestId?: string,
+  ): Promise<void | SalaamPromptReceipt>;
 
   /** Returns an unsubscribe function. The hub fans out to N subscribers. */
   subscribe(
@@ -65,6 +73,7 @@ export interface AcpSessionService {
   readEvents(
     sessionId: string,
     sinceSeq: number,
+    scope?: { userId: string; stationId: string },
   ): Promise<Array<{ seq: number; type: string; payload: unknown }>>;
 }
 
@@ -136,6 +145,20 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
     // (params, ctx). That is what the SDK's deprecation note means by "registers
     // typed handlers with a single context object".
     .onRequest(AGENT_METHODS.session_prompt, async ({ params, client }) => {
+      const suppliedId = params._meta?.["salaam.dev/requestId"];
+      const parsedId = z.string().uuid().safeParse(suppliedId);
+      if (suppliedId !== undefined && !parsedId.success)
+        throw new RequestError(
+          INVALID_PARAMS,
+          "A logical prompt ID must be a UUID.",
+        );
+      let logicalRequestId = parsedId.success
+        ? parsedId.data.toLowerCase()
+        : undefined;
+      let receiptMode: boolean | undefined;
+      let idleSeen = false;
+      let latestReceipt: SalaamPromptReceipt | undefined;
+      const terminalReceipts = new Map<string, SalaamPromptReceipt>();
       // Subscribe BEFORE prompting. The agent can emit its first update before
       // promptSession resolves, and a late subscriber drops it silently — a bug
       // that shows up as an occasional missing first line rather than a crash.
@@ -175,7 +198,8 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
           case "permission-answer": {
             // Someone answered — possibly the console, possibly us. Either way
             // this prompt is settled, so stop asking the editor about it.
-            const seq = (event.payload as { requestSeq?: number })?.requestSeq;
+            const seq = (event.payload as { requestSeq?: number })
+              ?.requestSeq;
             if (typeof seq === "number") {
               outstanding.get(seq)?.abort();
               outstanding.delete(seq);
@@ -186,8 +210,30 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
           case "state": {
             // The turn is over when the session returns to idle. Not forwarded
             // to the editor — it is the hub's vocabulary, not an ACP frame.
-            const status = (event.payload as { status?: string })?.status;
-            if (status === "idle") endTurn("end_turn");
+            const state = event.payload as {
+              status?: string;
+              promptReceipt?: unknown;
+            };
+            const parsed = SalaamPromptReceipt.safeParse(
+              state?.promptReceipt,
+            );
+            if (
+              parsed.success &&
+              parsed.data.sessionId === params.sessionId &&
+              ["completed", "interrupted"].includes(parsed.data.state)
+            ) {
+              terminalReceipts.set(parsed.data.requestId, parsed.data);
+              if (parsed.data.requestId === logicalRequestId) {
+                latestReceipt = parsed.data;
+                endTurn(
+                  parsed.data.state === "completed" ? "end_turn" : "refusal",
+                );
+              }
+            }
+            if (state?.status === "idle") {
+              idleSeen = true;
+              if (receiptMode === false) endTurn("end_turn");
+            }
             return;
           }
 
@@ -268,13 +314,34 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
       }
 
       try {
-        await asAcpError(() =>
-          service.promptSession(opts.userId, params.sessionId, textOf(params.prompt)),
+        const receipt = await asAcpError(() =>
+          service.promptSession(
+            opts.userId,
+            params.sessionId,
+            textOf(params.prompt),
+            [],
+            undefined,
+            logicalRequestId,
+          ),
         );
+        receiptMode = !!receipt;
+        if (receipt) {
+          logicalRequestId = receipt.requestId;
+          latestReceipt = terminalReceipts.get(logicalRequestId) ?? receipt;
+          if (["completed", "interrupted"].includes(latestReceipt.state))
+            endTurn(
+              latestReceipt.state === "completed" ? "end_turn" : "refusal",
+            );
+        } else if (idleSeen) endTurn("end_turn");
         // Dispatched. Now wait for the turn to actually finish, so the editor
         // receives the reply rather than an immediate end_turn.
         const stopReason = await turnEnded;
-        return { stopReason };
+        return {
+          stopReason,
+          ...(latestReceipt
+            ? { _meta: { "salaam.dev/promptReceipt": latestReceipt } }
+            : {}),
+        };
       } finally {
         // Only now is nobody waiting on this subscription.
         unsubscribe();
@@ -314,17 +381,27 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
      * rather than a field map.
      */
     .onRequest(AGENT_METHODS.session_load, async ({ params, client }) => {
-      const events = await asAcpError(() => service.readEvents(params.sessionId, 0));
+      const events = await asAcpError(() => service.readEvents(params.sessionId, 0, {
+        userId: opts.userId, stationId: opts.stationId,
+      }));
 
       for (const event of events) {
-        // Same filter as the live path: only agent-update carries a raw ACP
-        // sessionUpdate. Replaying the hub's own vocabulary would hand the
-        // editor frames it cannot parse, and replaying a permission-request
-        // would re-prompt for something already answered.
-        if (event.type !== "agent-update") continue;
+        // Bound Salaam history stores the logical user prompt in the Hub once,
+        // suppressing its ACP echo. Materialize that event only during load.
+        let update = event.payload;
+        if (event.type === "user-prompt") {
+          const prompt = z.object({ text: z.string(), requestId: z.string().uuid() }).safeParse(event.payload);
+          if (!prompt.success) continue;
+          update = {
+            sessionUpdate: "user_message_chunk",
+            content: { type: "text", text: prompt.data.text },
+            _meta: { "salaam.dev/requestId": prompt.data.requestId },
+          };
+        } else if (event.type !== "agent-update") continue;
+        // Permission records are never replayed as fresh requests.
         await client.notify(CLIENT_METHODS.session_update, {
           sessionId: params.sessionId,
-          update: event.payload,
+          update,
         } as never);
       }
 

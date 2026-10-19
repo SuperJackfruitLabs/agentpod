@@ -1274,3 +1274,30 @@ test("legacy mode: the session socket carries no token", async () => {
   expect(MockWebSocket.latest()!.url).toBe("ws://hub.test:3001/api/acp/sessions/s1/ws");
   chat.destroy();
 });
+
+test("an older Salaam Hub does not opt the console into receipt-based retry storage", async () => {
+  sessionStorage.clear();
+  const { chat, ws } = await connectedChat();
+  try {
+    ws.fireMessage({ t: "session", session: row({ execution: { state: "active", sessionId: crypto.randomUUID(), stopConfirmed: false } }) });
+    await chat.prompt("first");
+    expect(ws.frames().at(-1)).toEqual({ t: "prompt", text: "first" });
+    expect(sessionStorage.getItem("agentpod.salaam.pending:s1")).toBeNull();
+    ws.fireMessage({ t: "event", event: ev(1, "user-prompt", { text: "first" }) });
+    await chat.prompt("second");
+    expect(ws.frames().at(-1)).toEqual({ t: "prompt", text: "second" });
+  } finally { chat.destroy(); sessionStorage.clear(); }
+});
+test("an advertising Salaam Hub receives a durable UUID and its receipt clears retry storage", async () => {
+  sessionStorage.clear();
+  const { chat, ws } = await connectedChat();
+  try {
+    ws.fireMessage({ t: "session", session: row({ execution: { state: "active", sessionId: crypto.randomUUID(), stopConfirmed: false, promptReceipts: 1 } }) });
+    await chat.prompt("first");
+    const frame = ws.frames().at(-1) as { requestId: string };
+    expect(frame.requestId).toMatch(/^[a-f0-9-]{36}$/);
+    expect(JSON.parse(sessionStorage.getItem("agentpod.salaam.pending:s1")!).requestId).toBe(frame.requestId);
+    ws.fireMessage({ t: "prompt-receipt", receipt: { sessionId: "s1", requestId: frame.requestId, attemptId: crypto.randomUUID(), state: "accepted" } });
+    expect(sessionStorage.getItem("agentpod.salaam.pending:s1")).toBeNull();
+  } finally { chat.destroy(); sessionStorage.clear(); }
+});
