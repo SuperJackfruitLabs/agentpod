@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "organization_id": "org_00000000000000000001",
+  "principal_id": "prn_00000000000000000002",
+  "node_id": "node_fixture",
+  "station_id": "station_fixture",
+  "station_key": "salaam:c52ddf65534b7b46",
+  "occupancy_epoch": 3,
+  "hub_session_id": "acps_fixture",
+  "workspace": "/workspace",
+  "run": { "source": "superpipeline", "id": "run_fixture", "epoch": 7 }
+}

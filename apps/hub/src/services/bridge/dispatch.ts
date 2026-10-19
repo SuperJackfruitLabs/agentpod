@@ -124,8 +124,11 @@ export interface AcpPort {
     mode: AcpSessionMode;
     mcpServers?: AcpMcpServer[];
     mcpProxy?: boolean;
+    executionRun?: import('@agentpod/contract').SalaamRunAuthority;
+    validateExecutionRun?: () => Promise<unknown>;
   }): Promise<{ id: string; libraryTools?: boolean }>;
-  promptSession(userId: string, sessionId: string, text: string): Promise<void>;
+  promptSession(userId: string, sessionId: string, text: string, run?: import('@agentpod/contract').SalaamRunAuthority): Promise<void>;
+  renewExecution?(userId: string, sessionId: string, run: import('@agentpod/contract').SalaamRunAuthority): Promise<void>;
   subscribe(sessionId: string, fn: (e: AcpEvent) => void): () => void;
   endSession(userId: string, sessionId: string, reason: string): Promise<void>;
   /**
@@ -422,6 +425,8 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
       mode: agent.mode,
       ...(boardTools(deps) ? { mcpServers: boardTools(deps)! } : {}),
       mcpProxy: true,
+      executionRun: { source: 'superpipeline', id: work.runId, epoch: work.leaseEpoch },
+      validateExecutionRun: () => client.heartbeat(work),
     });
     // Rendered after the session opens, because only the open says which tools it carries (S3-R12).
     text = renderCardPrompt({ ...prompt, libraryTools: session.libraryTools === true });
@@ -608,6 +613,7 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
     beat = setInterval(() => {
       queue(async () => {
         await client.heartbeat(work);
+        await acp.renewExecution?.(agent.hubUserId, session.id, { source: 'superpipeline', id: work.runId, epoch: work.leaseEpoch });
       });
     }, deps.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
 
@@ -660,7 +666,8 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
 
     let end: TurnEnd;
     try {
-      await acp.promptSession(agent.hubUserId, session.id, text);
+      if (acp.renewExecution) await client.heartbeat(work);
+      await acp.promptSession(agent.hubUserId, session.id, text, { source: 'superpipeline', id: work.runId, epoch: work.leaseEpoch });
       for (;;) {
         const segment = turn;
         const timeout = new Promise<TurnEnd>((resolve) => {

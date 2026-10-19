@@ -24,6 +24,7 @@
 
 import { z } from "zod";
 import { VERB_RESULTS } from "@agentpod/contract";
+import type { SalaamAuthority } from "@agentpod/contract";
 import * as broker from "./broker";
 import { createLogger } from "../utils/logger";
 
@@ -62,6 +63,7 @@ export interface AcpWire {
 }
 
 export interface OpenAcpWireOptions {
+  salaamAuthority?: SalaamAuthority;
   /** Ask the node to add its loopback MCP proxy for this station. */
   mcpProxy?: { stationId: string };
 }
@@ -116,6 +118,7 @@ export async function openAcpWire(
     key: stationKey,
     instance,
     ...(options.mcpProxy ? { mcpProxy: options.mcpProxy } : {}),
+    ...(options.salaamAuthority ? { salaamAuthority: options.salaamAuthority } : {}),
   });
   if (!opened.ok) {
     throw new Error(
@@ -247,7 +250,8 @@ export async function openAcpWire(
     attach.cancel();
     finish("eof");
     // Best-effort: broker.request never rejects; result is ignored.
-    void broker.request(nodeId, "acp.close", { sessionId });
+    if (options.salaamAuthority) await broker.request(nodeId, "acp.close", { sessionId });
+    else void broker.request(nodeId, "acp.close", { sessionId });
   };
 
   return {

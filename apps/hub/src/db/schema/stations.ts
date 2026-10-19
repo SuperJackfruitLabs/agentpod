@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, index, uniqueIndex, jsonb, foreignKey, boolean, AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, index, uniqueIndex, jsonb, foreignKey, boolean, integer, AnyPgColumn } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { nodes } from "./nodes";
 import { tenants } from "./tenants";
@@ -77,6 +77,8 @@ export const stations = pgTable("stations", {
    * a contradiction the code silently carried both sides of.
    */
   principalId: text("principal_id"),
+  /** Monotonic even when an occupant moves away and back. Maintained by a DB trigger. */
+  occupancyEpoch: integer("occupancy_epoch").notNull().default(1),
   adoptedAt: timestamp("adopted_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [

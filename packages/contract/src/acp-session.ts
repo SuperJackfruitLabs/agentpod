@@ -57,6 +57,7 @@ export const AcpSessionRow = z.object({
   // and a new console tolerates rows from an older hub.
   title: z.string().nullable().optional(),   // first prompt, truncated; null until the first prompt
   lastSeq: z.number().int().optional(),      // highest event seq persisted for the session
+  execution: z.object({ state: z.enum(['active','revocation_pending','revoked']), sessionId: z.string().nullable(), stopConfirmed: z.boolean() }).optional(),
 });
 export type AcpSessionRow = z.infer<typeof AcpSessionRow>;
 
