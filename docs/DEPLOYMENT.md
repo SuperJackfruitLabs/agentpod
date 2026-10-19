@@ -801,6 +801,8 @@ Cloudflare Pages picks this up automatically. Alternatively, enable the "SPA" se
 
 **Custom domain:** In the Pages project → Custom domains, add `console.<your-domain>`. Cloudflare provisions TLS automatically — no certbot needed for the console.
 
+**Content Security Policy:** the console serves no CSP today; `apps/console/src/app.html` has two inline scripts and an inline style (they set the first frame's appearance), so adding a CSP later needs their hashes or nonces.
+
 > **Same-site cookie warning:** auth only works via the custom domain `console.<your-domain>`. Opening the raw `*.pages.dev` URL is a **different registrable domain** from `hub.<your-domain>` — the session cookie (`Domain=.<your-domain>; SameSite=Lax; Secure`) will not be sent cross-site and login will silently break. **Always use the custom domain.**
 
 ---
