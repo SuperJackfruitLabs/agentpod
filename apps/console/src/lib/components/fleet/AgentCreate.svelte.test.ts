@@ -230,3 +230,8 @@ test("the handle field says it cannot be changed after creation", () => {
 
   expect(getByText(/can.?t (be )?change/i)).toBeTruthy();
 });
+
+test("the dialog draws one overlay, not two", () => {
+  render(AgentCreate, { props: { open: true, station, stationOptions: [], onCreated: vi.fn() } });
+  expect(document.querySelectorAll('[data-slot="dialog-overlay"]').length).toBe(1);
+});

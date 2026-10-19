@@ -122,7 +122,7 @@ test("the context rail column only exists when a route supplies one", () => {
 
 // --- the layout contract ----------------------------------------------------
 
-test("the outer grid is a capped-height 46px / auto / 1fr with a single bounded column", () => {
+test("the outer grid is a capped-height head / lane / columns / phone bar with a single bounded column", () => {
   const { getByTestId } = render(AppShell, { props: { children } });
   const shell = getByTestId("app-shell").className;
 
@@ -130,7 +130,7 @@ test("the outer grid is a capped-height 46px / auto / 1fr with a single bounded 
   // implicit column to its own max-content width and shoves the context rail
   // off screen — measured at 1903px on a 1500px viewport in the prototype.
   expect(shell).toContain("grid-cols-[minmax(0,1fr)]");
-  expect(shell).toContain("grid-rows-[46px_auto_1fr]");
+  expect(shell).toContain("grid-rows-[auto_auto_minmax(0,1fr)_auto]");
   // h-screen, not min-h-screen: capping the shell is what makes inner panes
   // (file tree, logs, terminal) scroll in place instead of the document.
   expect(shell).toContain("h-screen");
@@ -169,7 +169,7 @@ test("at and below 900px the roster and the stage are two views, not two columns
 
   // Asserted as class tokens, not substrings: "overflow-hidden" contains
   // "hidden". Both columns flip on the same min-[901px] the grid does — see
-  // the comment in AppShell for why max-[900px] cannot be paired with it.
+  // the comment in AppShell for why a max-[N] variant cannot be paired with it.
   expect(getByTestId("roster-rail").classList.contains("hidden")).toBe(true);
   expect(getByTestId("roster-rail").classList.contains("min-[901px]:flex")).toBe(true);
   expect(getByTestId("stage").classList.contains("hidden")).toBe(false);
@@ -180,4 +180,21 @@ test("at and below 900px the roster and the stage are two views, not two columns
   expect(getByTestId("roster-rail").classList.contains("hidden")).toBe(false);
   expect(getByTestId("stage").classList.contains("hidden")).toBe(true);
   expect(getByTestId("stage").classList.contains("min-[901px]:flex")).toBe(true);
+});
+
+test("the head holds the top bar and the one navigation; the phone bar is the last row", () => {
+  const { getByTestId } = render(AppShell, { props: { children } });
+  const head = getByTestId("shell-head");
+
+  expect(head.contains(getByTestId("top-bar"))).toBe(true);
+  expect(head.contains(getByTestId("navigation"))).toBe(true);
+  // The navigation gives way to the bottom bar on a phone, and the other way round.
+  expect(getByTestId("navigation").parentElement?.className).toContain("phone:hidden");
+  expect(getByTestId("phone-slot").className).toContain("min-[901px]:hidden");
+  expect(getByTestId("app-shell").lastElementChild).toBe(getByTestId("phone-slot"));
+});
+
+test("the roster/stage toggle stays in the top bar on a phone", () => {
+  const { getByTestId } = render(AppShell, { props: { children } });
+  expect(getByTestId("top-bar").contains(getByTestId("roster-toggle"))).toBe(true);
 });

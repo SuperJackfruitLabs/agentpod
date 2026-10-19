@@ -10,6 +10,7 @@
   import { relaySuperlibraryCallback } from "$lib/auth/superlibrary-grant";
   import { auth, currentPlane, getAuthApiUrl, initAuth, resetAuthInit } from "$lib/stores/auth.svelte";
   import { hardNavigate, resolveReturnTo } from "$lib/utils/return-to";
+  import AuthFrame from "$lib/components/brand/AuthFrame.svelte";
 
   let message = $state("Signing you in…");
   let failed = $state(false);
@@ -63,11 +64,16 @@
   <title>Signing in · AgentPod</title>
 </svelte:head>
 
-<main class="flex min-h-screen items-center justify-center bg-background p-4">
-  <div class="space-y-3 text-center">
-    <p role={failed ? "alert" : "status"} class="text-sm {failed ? 'text-destructive' : 'text-muted-foreground'}">{message}</p>
-    {#if failed}
-      <a href="/login" class="text-sm text-primary hover:underline">Back to sign-in</a>
-    {/if}
-  </div>
-</main>
+<AuthFrame center>
+  {#if failed}
+    <div class="ap-fail">
+      <p role="alert" class="ap-fail__text">{message}</p>
+      <a href="/login" class="ap-link">Back to sign-in</a>
+    </div>
+  {:else}
+    <div class="grid justify-items-center gap-3.5">
+      <div class="ap-spin" aria-hidden="true"></div>
+      <p role="status" class="ap-big">{message}</p>
+    </div>
+  {/if}
+</AuthFrame>

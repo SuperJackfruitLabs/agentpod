@@ -265,3 +265,34 @@ test("streaming growth of the trailing item scrolls to bottom while following", 
 
   await waitFor(() => expect(scrollTop).toBe(500));
 });
+
+test("in every vibe the transcript is the user's and the agent's own words, and asks keep their options", () => {
+  const userWords = "Your IDENTITY.md still says you live on superchotu. The node is called ashram now.";
+  const agentWords = "Fixed: IDENTITY.md now says ashram.";
+  for (const vibe of ["daylight", "paper", "studio", "quiet"]) {
+    document.documentElement.dataset.vibe = vibe;
+    const { getByText, getByTestId, getByRole, unmount } = render(Conversation, {
+      props: {
+        items: [
+          { kind: "user", seq: 1, text: userWords },
+          { kind: "assistant", seq: 2, text: agentWords, streaming: false },
+          permissionItem({
+            options: [
+              { optionId: "a1", name: "Allow once", kind: "allow_once" },
+              { optionId: "a2", name: "Always allow", kind: "allow_always" },
+              { optionId: "r1", name: "Reject", kind: "reject_once" },
+            ],
+          }),
+        ],
+        onAnswer: vi.fn(),
+      },
+    });
+    expect(getByText(userWords).textContent).toBe(userWords);
+    expect(getByTestId("response-stub").textContent).toContain(agentWords);
+    for (const name of ["Allow once", "Always allow", "Reject"]) {
+      expect(getByRole("button", { name })).toBeTruthy();
+    }
+    unmount();
+  }
+  delete document.documentElement.dataset.vibe;
+});

@@ -27,10 +27,10 @@
 
   const gradeClass = $derived(
     report?.grade === "A"
-      ? "text-emerald-600 dark:text-emerald-500"
+      ? "text-success-text"
       : report?.grade === "F"
         ? "text-destructive"
-        : "text-amber-600 dark:text-amber-500"
+        : "text-warn-text"
   );
 
   // ─── Actions ──────────────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@
   }
 </script>
 
-<Card.Root>
+<Card.Root class="ap-card">
   <Card.Header>
     <Card.Title>Posture</Card.Title>
     <Card.Description>
@@ -94,7 +94,7 @@
     {/each}
 
     {#each unknowns as f (f.check + (f.path ?? ""))}
-      <div class="border-l-2 border-amber-500/40 pl-3">
+      <div class="border-l-2 border-warn/50 pl-3">
         <p class="text-sm font-medium">{f.title}</p>
         <p class="text-muted-foreground mt-1 text-sm">{f.detail}</p>
       </div>

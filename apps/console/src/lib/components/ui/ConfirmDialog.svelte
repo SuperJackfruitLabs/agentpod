@@ -29,17 +29,14 @@
 </script>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
-  <Dialog.Portal>
-    <Dialog.Overlay />
-    <Dialog.Content showCloseButton={false}>
-      <Dialog.Header>
-        <Dialog.Title>{title}</Dialog.Title>
-        <Dialog.Description>{message}</Dialog.Description>
-      </Dialog.Header>
-      <Dialog.Footer>
-        <Button variant="outline" onclick={onCancel}>Cancel</Button>
-        <Button variant={destructive ? "destructive" : "default"} onclick={onConfirm}>{confirmLabel}</Button>
-      </Dialog.Footer>
-    </Dialog.Content>
-  </Dialog.Portal>
+  <Dialog.Content showCloseButton={false}>
+    <Dialog.Header>
+      <Dialog.Title>{title}</Dialog.Title>
+      <Dialog.Description>{message}</Dialog.Description>
+    </Dialog.Header>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={onCancel}>Cancel</Button>
+      <Button variant={destructive ? "destructive" : "default"} onclick={onConfirm}>{confirmLabel}</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
 </Dialog.Root>

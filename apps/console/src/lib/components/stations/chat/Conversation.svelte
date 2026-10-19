@@ -182,12 +182,12 @@
     {:else}
       <div class="flex flex-col gap-3 p-3">
         {#each items as item (keyOf(item))}
-          <div class="chat-item">
+          <div class="chat-item" data-kind={item.kind}>
             {#if item.kind === "user"}
               <div class="flex justify-end">
                 <div
                   class={cn(
-                    "t-body max-w-[85%] rounded-lg bg-primary/10 px-3 py-2 whitespace-pre-wrap break-words",
+                    "ap-bubble t-body max-w-[85%] rounded-lg bg-primary/10 px-3 py-2 whitespace-pre-wrap break-words",
                     item.pending && "opacity-60",
                   )}
                 >

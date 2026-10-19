@@ -17,7 +17,13 @@
     items: AttentionItem[];
   }
 
-  let { items }: Props = $props();
+  let { items: given }: Props = $props();
+
+  /**
+   * Only the kinds the lane is for: node offline, runtime error, drift, unoccupied. An approval
+   * (a permission request) is answered in the agent's conversation, never from this strip.
+   */
+  const items = $derived(given.filter((i) => i.kind !== "permission"));
 </script>
 
 <section
@@ -64,7 +70,7 @@
         <a
           data-testid="attention-item"
           href={item.href}
-          class="relative flex shrink-0 items-center gap-2 whitespace-nowrap border-r border-border px-3 py-1.5 max-[900px]:min-h-11 pointer-coarse:min-h-11 transition-colors hover:bg-muted focus-visible:outline focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-foreground"
+          class="relative flex shrink-0 items-center gap-2 whitespace-nowrap border-r border-border px-3 py-1.5 touch:min-h-11 transition-colors hover:bg-muted focus-visible:outline focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-foreground"
         >
           <StateDot state={STATE[item.token]} size="sm" />
           <span class="text-sm text-foreground">{item.what}</span>

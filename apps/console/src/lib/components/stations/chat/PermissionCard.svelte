@@ -43,7 +43,7 @@
 </script>
 
 {#if !answer}
-  <div class="rounded-lg border border-border p-3">
+  <div class="ap-perm rounded-lg border border-border p-3">
     <div class="flex items-center gap-2">
       <Status form="dot" status="starting" animate label="awaiting approval" />
       <span class="min-w-0 truncate font-mono text-sm">{item.title}</span>
@@ -51,7 +51,7 @@
         <span class="t-label shrink-0">{item.toolKind}</span>
       {/if}
     </div>
-    <div class="mt-2 flex flex-wrap gap-2">
+    <div class="ap-perm__opts mt-2 flex flex-wrap gap-2">
       {#each item.options as option (option.optionId)}
         <Button size="sm" variant={variantFor(option)} onclick={() => onAnswer(option.optionId)}>
           {option.name}
@@ -60,7 +60,7 @@
     </div>
   </div>
 {:else}
-  <div class="rounded-lg border border-border/60 p-3 text-muted-foreground">
+  <div class="ap-perm ap-perm--done rounded-lg border border-border/60 p-3 text-muted-foreground">
     <div class="flex items-center gap-2">
       <span class="min-w-0 truncate font-mono text-sm">{item.title}</span>
       {#if item.toolKind}

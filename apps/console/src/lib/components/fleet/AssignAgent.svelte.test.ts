@@ -271,3 +271,8 @@ test("the agent already at THIS station is not offered — reassigning it to its
   await waitFor(() => expect(getByRole("option", { name: /stranded-writer/i })).toBeTruthy());
   expect(queryByRole("option", { name: /here-writer/i })).toBeNull();
 });
+
+test("the dialog draws one overlay, not two", () => {
+  render(AssignAgent, { props: { open: true, station, candidates, onAssigned: vi.fn() } });
+  expect(document.querySelectorAll('[data-slot="dialog-overlay"]').length).toBe(1);
+});

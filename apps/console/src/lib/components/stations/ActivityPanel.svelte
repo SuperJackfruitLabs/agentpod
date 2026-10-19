@@ -63,7 +63,7 @@
   }
 </script>
 
-<div class="flex flex-col gap-3 p-4">
+<div class="ap-panel flex flex-col gap-3 p-4">
   <!-- Toolbar -->
   <div class="flex justify-end">
     <Button variant="outline" size="sm" disabled={isLoading} onclick={load} aria-label="Refresh">
@@ -83,11 +83,11 @@
   {:else if rows.length === 0}
     <Empty title="No activity yet" />
   {:else}
-    <Card.Root class="overflow-hidden border-border/60">
+    <Card.Root class="ap-list overflow-hidden border-border/60">
       <ul class="divide-y divide-border/40">
         {#each rows as row (row.id)}
           <li
-            class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-4 py-2.5 text-sm transition-colors hover:bg-muted/40"
+            class="flex min-h-11 flex-wrap items-baseline gap-x-2.5 gap-y-1 px-4 py-2.5 text-sm transition-colors hover:bg-muted/40"
             data-testid="activity-row"
           >
             <span

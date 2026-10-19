@@ -127,8 +127,6 @@
 </script>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
-  <Dialog.Portal>
-    <Dialog.Overlay />
     <Dialog.Content showCloseButton={false}>
       <Dialog.Header>
         <Dialog.Title>New runtime</Dialog.Title>
@@ -232,5 +230,4 @@
         </Button>
       </Dialog.Footer>
     </Dialog.Content>
-  </Dialog.Portal>
 </Dialog.Root>

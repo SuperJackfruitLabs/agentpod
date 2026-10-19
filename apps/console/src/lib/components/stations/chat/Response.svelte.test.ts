@@ -85,3 +85,17 @@ test("raw HTML in agent output is not rendered as elements", async () => {
   await waitFor(() => expect(container.textContent).toContain("before"));
   expect(container.querySelector("img")).toBeNull();
 });
+
+test("code in a reply uses the vibe's Shiki variables, the same treatment as code blocks", async () => {
+  const { container } = render(Response, {
+    props: { text: "```js\nconst a = 1;\n```", streaming: false },
+  });
+  await waitFor(
+    () => {
+      const span = container.querySelector("pre code span span[style*='--shiki-']");
+      expect(span).toBeTruthy();
+    },
+    { timeout: 5000 },
+  );
+  expect(container.innerHTML).not.toMatch(/#[0-9a-f]{6}/i);
+});

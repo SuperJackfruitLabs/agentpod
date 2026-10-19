@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { above } from "$lib/breakpoints";
+  import { scrollStrip } from "$lib/actions/scroll-strip";
   import { readFile, readImage, setMatrixAvatar } from "$lib/api/client";
   import { linkFileToLibrary } from "$lib/api/superlibrary";
   import { toast } from "svelte-sonner";
+  import { tick } from "svelte";
   import type { FsEntry } from "@agentpod/contract";
   import { X, RefreshCw, ChevronLeft, UserRound, Library } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
@@ -62,7 +65,7 @@
    * convention is mobile-first `min-[...]` variants — a `max-[...]` here would
    * be the exclusive-boundary trap the shell already hit once.
    */
-  const SPLIT_FITS = "(min-width: 701px)";
+  const SPLIT_FITS = above("split");
   let splitFits = $state(true);
   let mobilePane = $state<"tree" | "file">("tree");
 
@@ -333,12 +336,80 @@
       activePath = openFiles.length === 0 ? null : openFiles[Math.min(idx, openFiles.length - 1)].path;
     }
   }
+
+  let rootEl = $state<HTMLDivElement | null>(null);
+
+  function tabEl(path: string): HTMLElement | null {
+    const tabs = rootEl?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [];
+    return Array.from(tabs).find((t) => t.dataset.path === path) ?? null;
+  }
+
+  /** Close a tab and keep keyboard focus in the browser: the next tab, else
+   *  the previous one, else the file tree (never the body). */
+  async function closeTabAndFocus(path: string) {
+    const idx = openFiles.findIndex((f) => f.path === path);
+    if (idx === -1) return;
+    const neighbour = openFiles[idx + 1] ?? openFiles[idx - 1];
+    if (neighbour) {
+      activePath = neighbour.path;
+      openFile(entryIndex.get(neighbour.path) ?? fallbackEntry(neighbour));
+    }
+    closeTab(path);
+    await tick();
+    const target =
+      (neighbour && tabEl(neighbour.path)) ||
+      rootEl?.querySelector<HTMLElement>(
+        '.ap-fb-tree [tabindex="0"], .ap-fb-tree button, .ap-fb-tree [role="treeitem"]',
+      );
+    target?.focus();
+  }
+
+  function focusTabAt(i: number) {
+    const n = openFiles.length;
+    if (n === 0) return;
+    const f = openFiles[((i % n) + n) % n];
+    openFile(entryIndex.get(f.path) ?? fallbackEntry(f));
+    tick().then(() => tabEl(f.path)?.focus());
+  }
+
+  function handleTabKeydown(e: KeyboardEvent, f: { path: string; name: string }) {
+    const i = openFiles.findIndex((o) => o.path === f.path);
+    switch (e.key) {
+      case "Enter":
+      case " ":
+        e.preventDefault();
+        openFile(entryIndex.get(f.path) ?? fallbackEntry(f));
+        break;
+      case "Delete":
+      case "Backspace":
+        e.preventDefault();
+        closeTabAndFocus(f.path);
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        focusTabAt(i - 1);
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        focusTabAt(i + 1);
+        break;
+      case "Home":
+        e.preventDefault();
+        focusTabAt(0);
+        break;
+      case "End":
+        e.preventDefault();
+        focusTabAt(openFiles.length - 1);
+        break;
+    }
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="flex h-full min-h-[300px] border border-border rounded-md overflow-hidden bg-background"
+  class="ap-fb flex h-full min-h-[300px] border border-border rounded-md overflow-hidden bg-background"
   onkeydown={handleKeydown}
+  bind:this={rootEl}
 >
   {#snippet treePane()}
     <FileTree
@@ -366,32 +437,41 @@
         </div>
       {:else}
         <!-- Tab strip -->
-        <div class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/60 bg-muted/5 px-1" role="tablist">
+        <div class="ap-ftabs scroll-strip flex shrink-0 items-center gap-0.5 border-b border-border/60 bg-muted/5 px-1" role="tablist" use:scrollStrip={activePath}>
           {#each openFiles as f (f.path)}
+            <!-- The close button is a sibling of the tab, not inside it (axe nested-interactive).
+                 Delete or Backspace on a focused tab also closes it; arrows rove between tabs. -->
             <div
-              role="tab"
-              tabindex="0"
-              aria-selected={f.path === activePath}
-              aria-label={f.name}
-              class="group flex shrink-0 items-center gap-1.5 border-b-2 px-2 py-1.5 text-xs font-mono cursor-pointer
+              class="ap-ftab group flex shrink-0 items-center border-b-2
                 {f.path === activePath ? 'border-primary bg-background text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-              onclick={() => openFile(entryIndex.get(f.path) ?? fallbackEntry(f))}
-              onkeydown={(e: KeyboardEvent) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  openFile(entryIndex.get(f.path) ?? fallbackEntry(f));
-                }
-              }}
             >
-              <FileIcon filename={f.name} size="xs" />
-              <span class="max-w-[140px] truncate">{f.name}</span>
+              <div
+                role="tab"
+                tabindex={f.path === activePath ? 0 : -1}
+                data-path={f.path}
+                aria-selected={f.path === activePath}
+                aria-label={f.name}
+                aria-keyshortcuts="Delete Backspace"
+                class="flex items-center gap-1.5 py-1.5 pl-2 pr-1 text-xs font-mono cursor-pointer"
+                onclick={() => openFile(entryIndex.get(f.path) ?? fallbackEntry(f))}
+                onauxclick={(e: MouseEvent) => {
+                  if (e.button === 1) {
+                    e.preventDefault();
+                    closeTabAndFocus(f.path);
+                  }
+                }}
+                onkeydown={(e: KeyboardEvent) => handleTabKeydown(e, f)}
+              >
+                <FileIcon filename={f.name} size="xs" />
+                <span class="max-w-[140px] truncate">{f.name}</span>
+              </div>
               <button
                 type="button"
                 aria-label="Close {f.name}"
-                class="rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+                class="mr-1 inline-flex items-center justify-center rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus:opacity-100 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100 touch:min-h-11 touch:min-w-11"
                 onclick={(e: MouseEvent) => {
                   e.stopPropagation();
-                  closeTab(f.path);
+                  closeTabAndFocus(f.path);
                 }}
               >
                 <X class="h-3 w-3" />
@@ -402,7 +482,7 @@
 
         <!-- Breadcrumb + actions -->
         {#if activePath}
-          <div class="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 py-1.5">
+          <div class="ap-pbar flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 py-1.5">
             <Breadcrumb.Root class="min-w-0">
               <Breadcrumb.List class="flex-nowrap">
                 {#each breadcrumbSegments as seg, i (seg.path)}
@@ -479,18 +559,18 @@
 
   {#if splitFits}
     <ResizablePaneGroup direction="horizontal">
-      <ResizablePane defaultSize={28} minSize={15} class="flex flex-col overflow-hidden bg-muted/10">
+      <ResizablePane defaultSize={28} minSize={15} class="ap-fb-tree flex flex-col overflow-hidden bg-muted/10">
         {@render treePane()}
       </ResizablePane>
 
-      <ResizableHandle withHandle />
+      <ResizableHandle withHandle class="ap-fb-handle" />
 
       <ResizablePane defaultSize={72} class="flex flex-col overflow-hidden">
         {@render previewPane()}
       </ResizablePane>
     </ResizablePaneGroup>
   {:else if mobilePane === "tree"}
-    <div data-testid="file-browser-tree-only" class="flex min-w-0 flex-1 flex-col overflow-hidden bg-muted/10">
+    <div data-testid="file-browser-tree-only" class="ap-fb-tree flex min-w-0 flex-1 flex-col overflow-hidden bg-muted/10">
       {@render treePane()}
     </div>
   {:else}
@@ -499,7 +579,7 @@
       <button
         type="button"
         data-testid="file-browser-back"
-        class="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+        class="ap-fback flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
         onclick={() => (mobilePane = "tree")}
       >
         <ChevronLeft class="h-3.5 w-3.5" />

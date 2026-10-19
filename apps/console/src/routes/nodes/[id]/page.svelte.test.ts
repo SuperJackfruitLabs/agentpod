@@ -270,3 +270,28 @@ test("a provisioned runtime's node does not: it is destroyed with its runtime", 
   await findByRole("button", { name: /destroy/i });
   expect(queryByRole("button", { name: /remove node/i })).toBeNull();
 });
+
+test("under 768px each detected agent is a card with its Add action", async () => {
+  const { expectCardTable } = await import("$lib/test-utils/viewport");
+  vi.spyOn(api, "listNodes").mockResolvedValue([mockNode]);
+  vi.spyOn(api, "listDetected").mockResolvedValue([detectedStation, secondDetectedStation]);
+  vi.spyOn(api, "listStations").mockResolvedValue([]);
+  const { getAllByTestId, getByTestId } = render(NodeDetailPage);
+  await waitFor(() => expect(getAllByTestId("detected-row").length).toBe(2));
+  expectCardTable(getByTestId("detected-table-scroller").querySelector("table"));
+});
+
+test.each([360, 390])("at %ipx nothing on a node's page is wider than the screen", async (width) => {
+  const { setViewport, expectNoOverflow } = await import("$lib/test-utils/viewport");
+  const restore = setViewport(width);
+  try {
+    vi.spyOn(api, "listNodes").mockResolvedValue([mockNode]);
+    vi.spyOn(api, "listDetected").mockResolvedValue([detectedStation, secondDetectedStation]);
+    vi.spyOn(api, "listStations").mockResolvedValue([]);
+    const { container, getAllByTestId } = render(NodeDetailPage);
+    await waitFor(() => expect(getAllByTestId("detected-row").length).toBe(2));
+    expectNoOverflow(container, width);
+  } finally {
+    restore();
+  }
+});

@@ -61,3 +61,6 @@ docs/reference/agentic-space/
 # .gitignore that lives on one branch disappears when you check out another —
 # which is exactly how these files reached main in 20dc588e.
 .astro/
+
+# Console screenshot harness output
+apps/console/e2e/shots/

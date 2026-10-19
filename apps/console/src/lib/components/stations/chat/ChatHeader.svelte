@@ -214,7 +214,7 @@
   let preambleOpen = $state(false);
 </script>
 
-<div class="flex flex-col gap-1.5">
+<div class="ap-chat-head flex flex-col gap-1.5">
   <div class="flex flex-wrap items-center gap-3">
     <div role="status" aria-live="polite" class="flex min-w-0 items-center gap-2">
       <!-- aria-hidden: the visible label is the ONE accessible text; the dot's
@@ -272,7 +272,7 @@
       </Select.Root>
     {/if}
 
-    <div role="group" aria-label="Permission mode" class="flex items-center gap-1 text-xs">
+    <div role="group" aria-label="Permission mode" class="ap-modes flex items-center gap-1 text-xs">
       {#each MODES as m (m.value)}
         <button
           type="button"

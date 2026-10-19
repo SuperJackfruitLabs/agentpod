@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { upTo } from "$lib/breakpoints";
   /**
    * The muster — the console's home.
    *
@@ -137,28 +138,31 @@
     })();
   });
 
+  // ── Studio's figures (the same counts the rest of the page shows) ─────────────
+
+  const runningCount = $derived(fleet.agents.filter((a) => a.status === "running").length);
+  const onlineCount = $derived(fleet.nodes.filter((n) => n.status === "online").length);
+  const updatesCount = $derived(fleet.nodes.filter((n) => n.updateAvailable).length);
+
   /** True only while we have never had data — a refresh must not flash a skeleton. */
   const showSkeleton = $derived(fleet.isLoading && fleet.loadedAt === null);
 
   /** Below 768px a node is a card: the table's seven columns showed two at 390. */
-  const narrow = new MediaQuery("(max-width: 767px)");
+  const narrow = new MediaQuery(upTo("cards"));
 </script>
 
 <svelte:head>
   <title>Overview · AgentPod</title>
 </svelte:head>
 
-<div class="page-width space-y-8 py-8">
+<div class="ap-page">
   {#if showSkeleton}
-    <Skeleton class="h-16 w-2/3 rounded-lg" />
-    <Skeleton class="h-3 w-full rounded-full" />
+    <Skeleton class="h-48 w-full rounded-lg" />
+    <Skeleton class="h-56 w-full rounded-lg" />
     <Skeleton class="h-40 w-full rounded-lg" />
 
   {:else if fleet.error && nodeCount === 0}
-    <div
-      class="flex items-start justify-between gap-3 rounded-lg border border-status-error/50 bg-status-error/5 p-4"
-      role="alert"
-    >
+    <div class="ap-alert" role="alert">
       <p class="text-sm text-status-error">{fleet.error}</p>
     </div>
 
@@ -167,7 +171,7 @@
          hand over the command that enrolls something. -->
     <div class="mx-auto w-full max-w-2xl">
       {#if lastToken}
-        <div class="space-y-3 rounded-lg border p-6">
+        <div class="ap-card space-y-3">
           <p class="text-xs text-muted-foreground">
             Enrollment token created — run this on the node you want to connect
           </p>
@@ -183,29 +187,37 @@
 
   {:else}
     <!-- ── The hero: the fleet, in a sentence ────────────────────────────── -->
-    <header class="space-y-1">
-      <h1 data-testid="muster-hero" class="text-3xl font-semibold tracking-tight text-foreground">
+    <section class="ap-card ap-hero" aria-labelledby="muster-hero">
+      <h1 id="muster-hero" data-testid="muster-hero" class="ap-hero__h">
         {headline}
       </h1>
       <p
         data-testid="muster-needs-you"
-        class={needsYou > 0 ? "text-lg text-status-unknown" : "text-lg text-status-running"}
+        class={needsYou > 0 ? "ap-need text-status-unknown" : "ap-need text-status-running"}
       >
         {needsYouLine}
       </p>
-    </header>
 
-    <!-- ── One bar, six states, unknown counted as itself ─────────────────── -->
-    <div data-testid="muster-state-bar">
-      <StateBar counts={stateCounts} onselect={(id) => goto(`/agents?status=${id}`)} />
-    </div>
+      <!-- Studio draws the fleet's figures under the hero; the other vibes hide them. -->
+      <dl class="ap-figs" aria-label="Fleet figures">
+        <div class="ap-fig"><dt>Agents</dt><dd>{agentCount}</dd></div>
+        <div class="ap-fig"><dt>Running</dt><dd>{runningCount}</dd></div>
+        <div class="ap-fig"><dt>Nodes online</dt><dd>{onlineCount} <small>of {nodeCount}</small></dd></div>
+        <div class="ap-fig"><dt>Updates available</dt><dd>{updatesCount}</dd></div>
+      </dl>
+
+      <!-- ── One bar, six states, unknown counted as itself ─────────────────── -->
+      <div data-testid="muster-state-bar">
+        <StateBar counts={stateCounts} onselect={(id) => goto(`/agents?status=${id}`)} />
+      </div>
+    </section>
 
     <!-- ── The nodes ──────────────────────────────────────────────────────── -->
-    <section class="space-y-2">
-      <h2 class="text-sm font-medium text-muted-foreground">Where they run</h2>
+    <section class="ap-card" aria-labelledby="muster-where">
+      <div class="ap-sec-h"><h2 id="muster-where" class="ap-h2">Where they run</h2></div>
 
       {#if narrow.current}
-        <ul data-testid="nodes-cards" class="divide-y divide-border/50 rounded-lg border border-border">
+        <ul data-testid="nodes-cards" class="divide-y divide-border">
           {#each fleet.nodes as node (node.id)}
             <!-- `relative`: the StateDot's sr-only label is position:absolute. -->
             <li data-testid="node-row" class="relative space-y-2 px-3 py-3">
@@ -214,11 +226,11 @@
                   <a
                     href="/nodes/{node.id}"
                     title={node.name}
-                    class="block truncate font-mono text-sm text-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    class="ap-node-link block truncate font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                   >
                     {node.name}
                   </a>
-                  <span class="block truncate text-xs text-muted-foreground">{node.os} · {node.arch}</span>
+                  <span class="ap-sub truncate">{node.os} · {node.arch}</span>
                 </div>
                 <span data-testid="node-link-{node.id}" class="relative shrink-0 text-sm">
                   <StateDot state={nodeState(node.status)} withLabel size="sm" />
@@ -232,7 +244,7 @@
                 <dt class="text-muted-foreground">Node agent</dt>
                 <dd>
                   {#if node.updateAvailable}
-                    <span data-testid="node-drift-{node.id}" class="font-mono text-status-unknown">
+                    <span data-testid="node-drift-{node.id}" class="ap-drift font-mono">
                       {node.agentVersion} → {node.latestVersion}
                     </span>
                   {:else}
@@ -257,8 +269,8 @@
       {:else}
       <!-- Seven columns at 768px and up; should they still not fit, they
            scroll in here rather than dragging the document sideways. -->
-      <div data-testid="nodes-table-scroller" class="overflow-x-auto rounded-lg border border-border">
-        <table class="w-full min-w-[720px] text-sm">
+      <div data-testid="nodes-table-scroller" class="ap-tbl-wrap overflow-x-auto">
+        <table class="ap-tbl w-full min-w-[720px] text-sm">
           <thead>
             <tr class="border-b border-border text-left text-xs text-muted-foreground">
               <th scope="col" class="px-3 py-2 font-medium">Node</th>
@@ -293,11 +305,11 @@
                   <a
                     href="/nodes/{node.id}"
                     title={node.name}
-                    class="block truncate font-mono text-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    class="ap-node-link block truncate focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                   >
                     {node.name}
                   </a>
-                  <span class="block truncate text-xs text-muted-foreground">{node.os} · {node.arch}</span>
+                  <span class="ap-sub truncate">{node.os} · {node.arch}</span>
                 </td>
 
                 <td data-testid="node-link-{node.id}" class="relative px-3 py-2">
@@ -314,7 +326,7 @@
 
                 <td class="px-3 py-2">
                   {#if node.updateAvailable}
-                    <span data-testid="node-drift-{node.id}" class="font-mono text-xs text-status-unknown">
+                    <span data-testid="node-drift-{node.id}" class="ap-drift font-mono text-xs">
                       {node.agentVersion} → {node.latestVersion}
                     </span>
                   {:else}
@@ -326,7 +338,7 @@
                   {#if node.capabilities?.includes("posture")}
                     <a
                       href="/nodes/{node.id}"
-                      class="text-muted-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                      class="ap-link focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                     >
                       Scan
                     </a>
@@ -340,8 +352,6 @@
                     <Button
                       data-testid="node-update-{node.id}"
                       variant="outline"
-                      size="sm"
-                      class="h-7 px-2 text-xs"
                       disabled={updating[node.id]}
                       onclick={() => handleUpdate(node.id)}
                     >
@@ -358,12 +368,12 @@
     </section>
 
     <!-- ── What it has been doing ─────────────────────────────────────────── -->
-    <section class="space-y-2">
-      <div class="flex items-baseline justify-between">
-        <h2 class="text-sm font-medium text-muted-foreground">Lately</h2>
+    <section class="ap-card" aria-labelledby="muster-lately">
+      <div class="ap-sec-h">
+        <h2 id="muster-lately" class="ap-h2">Lately</h2>
         <a
           href="/activity"
-          class="text-xs text-muted-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+          class="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
         >
           All activity
         </a>

@@ -37,7 +37,7 @@
 </script>
 
 {#if mine.length > 0}
-  <div class="border-destructive/40 bg-destructive/5 rounded-md border p-3">
+  <div class="ap-posture border-destructive/40 bg-destructive/5 rounded-md border p-3">
     {#each mine as f (f.check + (f.path ?? ""))}
       <p class="text-sm font-medium">{f.title}</p>
       <p class="text-muted-foreground mt-1 text-sm">{f.detail}</p>

@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { WarnBox } from "$lib/components/ui/warn-box";
   import { onMount } from "svelte";
   import { startPolling } from "$lib/utils/poll";
   import { page } from "$app/state";
+  import { replaceState } from "$app/navigation";
   import { getFleet, listStations } from "$lib/api/client";
   import { listPrincipals, type PrincipalSummary } from "$lib/api/grants";
   import { unassignStationAgent } from "$lib/api/agents";
@@ -244,6 +246,26 @@
     createOpen = true;
   }
 
+  // `?action=create` (the palette's "Create an agent") opens the dialog, also when /agents is
+  // already mounted. The same guard as NodesOverview's: a handled value is not handled again
+  // (a back-navigation can restore the stale query), and it resets once the URL has no action.
+  let handledAction = $state<string | null>(null);
+  $effect(() => {
+    const action = (page.url as { searchParams?: URLSearchParams } | undefined)?.searchParams?.get("action") ?? null;
+    if (!action) {
+      handledAction = null;
+      return;
+    }
+    if (action === handledAction) return;
+    handledAction = action;
+    if (action === "create") openCreateGeneric();
+    try {
+      replaceState("/agents", {});
+    } catch {
+      // non-critical where history is unavailable
+    }
+  });
+
   function handleAgentCreated() {
     void loadFleet();
   }
@@ -316,14 +338,14 @@
     {/if}
   {/snippet}
   {#snippet actions()}
-    <Button variant="outline" size="sm" onclick={openCreateGeneric}>
-      <UserPlusIcon class="mr-1 h-3.5 w-3.5" />
+    <Button variant="outline" onclick={openCreateGeneric}>
+      <UserPlusIcon class="h-4 w-4" />
       Create agent
     </Button>
   {/snippet}
 </PageHeader>
 
-<div class="page-width py-6 space-y-4">
+<div class="ap-page">
   {#if isLoading}
     <div class="space-y-3">
       {#each [1, 2, 3] as _}
@@ -332,21 +354,18 @@
     </div>
 
   {:else if error}
-    <div
-      class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
-      role="alert"
-    >
+    <div class="ap-alert" role="alert">
       <p class="text-sm text-destructive">{error}</p>
       <Button variant="outline" size="sm" onclick={() => loadFleet()}>Retry</Button>
     </div>
 
   {:else}
     {#if assignmentsError || principalsError}
-      <div
-        class="flex items-start justify-between gap-3 rounded-lg border border-amber-500/50 bg-amber-500/5 p-3"
+      <WarnBox
+        class="flex items-start justify-between gap-3"
         role="alert"
       >
-        <p class="text-xs text-amber-700 dark:text-amber-400">{assignmentsError ?? principalsError}</p>
+        <p class="text-xs text-warn-text">{assignmentsError ?? principalsError}</p>
         <Button
           variant="outline"
           size="sm"
@@ -357,7 +376,7 @@
         >
           Retry
         </Button>
-      </div>
+      </WarnBox>
     {:else if agents.length > 0}
       {#if blockedStations.length > 0}
         <!-- The point of this task: a station that cannot be dispatched must
@@ -365,9 +384,9 @@
              assigned it an agent, or because the agent it has is suspended.
              Either way a fleet-wide refusal to dispatch otherwise produces no
              signal anywhere in this console. -->
-        <div class="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4" data-testid="unassigned-stations">
+        <WarnBox data-testid="unassigned-stations">
           <div class="flex items-start gap-2">
-            <UserXIcon class="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
+            <UserXIcon class="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
             <div class="space-y-1">
               <p class="text-sm font-medium">
                 {blockedStations.length}
@@ -448,10 +467,10 @@
               </li>
             {/each}
           </ul>
-        </div>
+        </WarnBox>
       {:else}
-        <p class="flex items-center gap-1.5 text-xs text-muted-foreground" data-testid="all-assigned">
-          <UserCheckIcon class="h-3.5 w-3.5" aria-hidden="true" />
+        <p class="ap-card ap-ok flex items-center gap-2 font-semibold" data-testid="all-assigned">
+          <UserCheckIcon class="h-4 w-4 text-status-running" aria-hidden="true" />
           Every adopted station has an active agent assigned.
         </p>
       {/if}
@@ -460,26 +479,25 @@
         <!-- The other half of "wire unassign to a real control": even a
              correctly-assigned station needs a way off, or a mis-assignment
              can only be undone with SQL. -->
-        <div class="rounded-lg border p-3" data-testid="assigned-stations">
-          <p class="mb-2 text-xs font-medium text-muted-foreground">
+        <section class="ap-card" data-testid="assigned-stations" aria-labelledby="assigned-stations-h">
+          <h2 id="assigned-stations-h" class="ap-h2 mb-3">
             {activeStations.length} {activeStations.length === 1 ? "station is" : "stations are"} assigned
-          </p>
-          <ul class="space-y-1.5">
+          </h2>
+          <ul class="ap-asg">
             {#each activeStations as station (station.id)}
               <!-- The name column is a fixed width from sm up, so the actions sit
                    beside the name they act on — at 1920 they were ~1000px
                    away. On a phone the actions wrap under the name rather
                    than squeezing it to its first letter. -->
-              <li class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-1.5 hover:bg-muted/50">
-                <div class="flex min-w-[min(12rem,100%)] flex-1 items-center gap-2 sm:w-72 sm:flex-none">
-                  <span class="truncate text-sm">{station.displayName}</span>
-                  <Badge variant="outline" class="shrink-0 font-mono text-[11px]">{station.principal.handle}</Badge>
+              <li class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <div class="flex min-w-[min(12rem,100%)] flex-1 items-center gap-2">
+                  <span class="ap-asg__name truncate">{station.displayName}</span>
+                  <Badge variant="outline" class="ap-asg__handle shrink-0 font-mono">{station.principal.handle}</Badge>
                 </div>
-                <div class="flex shrink-0 items-center gap-2">
+                <div class="flex shrink-0 items-center gap-1">
                   <Button
                     variant="ghost"
-                    size="sm"
-                    class="text-muted-foreground hover:text-foreground"
+                    class="ap-asg__act"
                     aria-label="Assign a different agent to {station.displayName}"
                     onclick={() => openAssign({ id: station.id, displayName: station.displayName, nodeName: station.nodeName })}
                   >
@@ -487,8 +505,7 @@
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
-                    class="text-muted-foreground hover:text-destructive"
+                    class="ap-asg__act ap-asg__act--danger"
                     aria-label="Unassign {station.displayName}"
                     onclick={() => openUnassign(station)}
                   >
@@ -498,11 +515,13 @@
               </li>
             {/each}
           </ul>
-        </div>
+        </section>
       {/if}
     {/if}
 
-    <AgentTable {agents} {externalFilter} />
+    <section class="ap-card ap-card--cards" aria-label="Agent table">
+      <AgentTable {agents} {externalFilter} />
+    </section>
   {/if}
 </div>
 

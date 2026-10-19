@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { themeStore } from "$lib/themes/store.svelte";
+  import { MONACO_THEME, monacoTheme, onAppearanceChange } from "$lib/utils/vk-colors";
 
   interface Props {
     code: string;
@@ -108,9 +108,11 @@
     return languageMap[normalized] || normalized;
   }
 
-  // Get Monaco theme based on app theme
+  // The editor's theme is defined from the vibe's tokens (re-defined on every
+  // appearance change: Monaco themes are global, so one name serves every editor).
   function getMonacoTheme(): string {
-    return themeStore.isDark ? "vs-dark" : "vs";
+    monaco?.editor.defineTheme(MONACO_THEME, monacoTheme());
+    return MONACO_THEME;
   }
 
   async function initMonaco() {
@@ -198,13 +200,10 @@
     }
   });
 
-  // Update theme when app theme changes
-  $effect(() => {
-    if (editor && monaco) {
-      const theme = getMonacoTheme();
-      monaco.editor.setTheme(theme);
-    }
-  });
+  // Repaint when <html>'s vibe or theme changes.
+  $effect(() => onAppearanceChange(() => {
+    if (editor && monaco) monaco.editor.setTheme(getMonacoTheme());
+  }));
 
   // Update readonly state
   $effect(() => {

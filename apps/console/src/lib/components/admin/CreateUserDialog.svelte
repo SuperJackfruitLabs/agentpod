@@ -96,111 +96,108 @@
 </script>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
-  <Dialog.Portal>
-    <Dialog.Overlay />
-    <Dialog.Content showCloseButton={false}>
-      <Dialog.Header>
-        <Dialog.Title>Create user</Dialog.Title>
-        <Dialog.Description>Create an account directly, even when public signup is off.</Dialog.Description>
-      </Dialog.Header>
+  <Dialog.Content showCloseButton={false}>
+    <Dialog.Header>
+      <Dialog.Title>Create user</Dialog.Title>
+      <Dialog.Description>Create an account directly, even when public signup is off.</Dialog.Description>
+    </Dialog.Header>
 
-      <!-- novalidate: our Field-level validation owns the errors (inline, focused)
-           instead of the browser's native bubbles. -->
-      <form
-        novalidate
-        onsubmit={(e) => {
-          e.preventDefault();
-          handleSubmit();
-        }}
-        class="space-y-4 py-2"
+    <!-- novalidate: our Field-level validation owns the errors (inline, focused)
+         instead of the browser's native bubbles. -->
+    <form
+      novalidate
+      onsubmit={(e) => {
+        e.preventDefault();
+        handleSubmit();
+      }}
+      class="space-y-4 py-2"
+    >
+      <Field label="Name" for="new-user-name">
+        <Input
+          id="new-user-name"
+          name="name"
+          type="text"
+          autocomplete="off"
+          bind:value={name}
+          required
+          disabled={isCreating}
+        />
+      </Field>
+
+      <Field label="Email" for="new-user-email" error={emailError ?? undefined}>
+        <Input
+          id="new-user-email"
+          name="email"
+          type="email"
+          placeholder="user@example.com"
+          autocomplete="off"
+          spellcheck={false}
+          bind:value={email}
+          required
+          disabled={isCreating}
+        />
+      </Field>
+
+      <Field
+        label="Password"
+        for="new-user-password"
+        description={passwordError ? undefined : "Minimum 8 characters"}
+        error={passwordError ?? undefined}
       >
-        <Field label="Name" for="new-user-name">
-          <Input
-            id="new-user-name"
-            name="name"
-            type="text"
-            autocomplete="off"
-            bind:value={name}
-            required
-            disabled={isCreating}
-          />
-        </Field>
+        <Input
+          id="new-user-password"
+          name="new-password"
+          type="password"
+          placeholder="••••••••"
+          autocomplete="new-password"
+          bind:value={password}
+          required
+          minlength={8}
+          disabled={isCreating}
+        />
+      </Field>
 
-        <Field label="Email" for="new-user-email" error={emailError ?? undefined}>
-          <Input
-            id="new-user-email"
-            name="email"
-            type="email"
-            placeholder="user@example.com"
-            autocomplete="off"
-            spellcheck={false}
-            bind:value={email}
-            required
-            disabled={isCreating}
-          />
-        </Field>
-
-        <Field
-          label="Password"
-          for="new-user-password"
-          description={passwordError ? undefined : "Minimum 8 characters"}
-          error={passwordError ?? undefined}
+      <Field label="Role" for="new-user-role">
+        <Select.Root
+          type="single"
+          value={role}
+          onValueChange={(v) => {
+            if (v) role = v as UserRole;
+          }}
         >
-          <Input
-            id="new-user-password"
-            name="new-password"
-            type="password"
-            placeholder="••••••••"
-            autocomplete="new-password"
-            bind:value={password}
-            required
-            minlength={8}
-            disabled={isCreating}
-          />
-        </Field>
+          <Select.Trigger class="w-full" id="new-user-role">
+            {roleLabel[role]}
+          </Select.Trigger>
+          <Select.Content>
+            <Select.Item value="user">User</Select.Item>
+            <Select.Item value="admin">Admin</Select.Item>
+          </Select.Content>
+        </Select.Root>
+        {#if role === "admin"}
+          <p class="text-xs text-destructive">
+            Admins have full access to manage all users and system settings.
+          </p>
+        {/if}
+      </Field>
 
-        <Field label="Role" for="new-user-role">
-          <Select.Root
-            type="single"
-            value={role}
-            onValueChange={(v) => {
-              if (v) role = v as UserRole;
-            }}
-          >
-            <Select.Trigger class="w-full" id="new-user-role">
-              {roleLabel[role]}
-            </Select.Trigger>
-            <Select.Content>
-              <Select.Item value="user">User</Select.Item>
-              <Select.Item value="admin">Admin</Select.Item>
-            </Select.Content>
-          </Select.Root>
-          {#if role === "admin"}
-            <p class="text-xs text-destructive">
-              Admins have full access to manage all users and system settings.
-            </p>
-          {/if}
-        </Field>
-
-        <!-- Footer lives INSIDE the form so Enter in any field submits natively. -->
-        <Dialog.Footer>
-          <Button
-            type="button"
-            variant="outline"
-            onclick={() => (open = false)}
-            disabled={isCreating}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            disabled={isCreating || !name.trim() || !email.trim() || !password}
-          >
-            {#if isCreating}<Spinner size="sm" class="text-primary-foreground" />{/if}
-            {isCreating ? "Creating…" : "Create user"}
-          </Button>
-        </Dialog.Footer>
-      </form>
-    </Dialog.Content>
-  </Dialog.Portal>
+      <!-- Footer lives INSIDE the form so Enter in any field submits natively. -->
+      <Dialog.Footer>
+        <Button
+          type="button"
+          variant="outline"
+          onclick={() => (open = false)}
+          disabled={isCreating}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          disabled={isCreating || !name.trim() || !email.trim() || !password}
+        >
+          {#if isCreating}<Spinner size="sm" class="text-primary-foreground" />{/if}
+          {isCreating ? "Creating…" : "Create user"}
+        </Button>
+      </Dialog.Footer>
+    </form>
+  </Dialog.Content>
 </Dialog.Root>

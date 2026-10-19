@@ -92,3 +92,9 @@ test("failed banUser does not call onBanned", async () => {
     expect(onBanned).not.toHaveBeenCalled();
   });
 });
+
+
+test("an open dialog draws one overlay, not two (regression: doubled Portal and Overlay)", () => {
+  render(BanUserDialog, { props: { open: true, user, onBanned: vi.fn() } });
+  expect(document.querySelectorAll("[data-slot=\"dialog-overlay\"]").length).toBe(1);
+});

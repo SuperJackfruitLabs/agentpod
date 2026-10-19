@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { upTo } from "$lib/breakpoints";
   /**
    * The station page — where you talk to an agent.
    *
@@ -58,6 +59,8 @@
   import MessageSquareIcon from "@lucide/svelte/icons/message-square";
   import IdCardIcon from "@lucide/svelte/icons/id-card";
   import LockIcon from "@lucide/svelte/icons/lock";
+  import * as Sheet from "$lib/components/ui/sheet";
+  import { Face } from "@superjackfruit/vibekit";
 
   const nodeId = $derived($page.params.id as string);
   const stationId = $derived($page.params.stationId as string);
@@ -299,21 +302,34 @@
    * Below 1240px the shell renders no context column, so the rail's content
    * becomes a tab instead of disappearing.
    *
-   * A JS media query, not a Tailwind `max-[1240px]:` variant: Tailwind
-   * compiles those to `not all and (min-width:1240px)`, which is exclusive and
+   * A JS media query, not a Tailwind max-[N] variant: Tailwind
+   * compiles those to an exclusive `not all and (min-width: N)`, which is exclusive and
    * leaves 1240px itself in neither branch — the boundary bug this redesign
    * already hit once at 900px.
    */
   let narrow = $state(false);
+  /** At 900px and below (the phone layout) the rail is the About sheet, not a tab. */
+  let phone = $state(false);
+  let aboutOpen = $state(false);
 
   onMount(() => {
     void myReach().then((r) => (mayGrantReach = r.mayGrantReach));
 
-    const mq = window.matchMedia("(max-width: 1240px)");
+    const mq = window.matchMedia(upTo("rail"));
     narrow = mq.matches;
     const onChange = (e: MediaQueryListEvent) => (narrow = e.matches);
     mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
+    const pq = window.matchMedia(upTo("phone"));
+    phone = pq.matches;
+    const onPhone = (e: MediaQueryListEvent) => {
+      phone = e.matches;
+      if (!e.matches) aboutOpen = false;
+    };
+    pq.addEventListener("change", onPhone);
+    return () => {
+      mq.removeEventListener("change", onChange);
+      pq.removeEventListener("change", onPhone);
+    };
   });
 
   // ─── The header's facts ───────────────────────────────────────────────────
@@ -350,6 +366,7 @@
   let actionError = $state<string | null>(null);
 
   function askFor(action: "stop" | "restart") {
+    aboutOpen = false;
     pendingAction = action;
     confirmOpen = true;
   }
@@ -391,7 +408,7 @@
     // behind a horizontal scroll past seven other tabs, which is the opposite
     // of what the rail does for free. It is the frame for the rest, so it sits
     // where you reach it without hunting: immediately after the conversation.
-    ...(narrow ? [{ id: "identity" as const, label: "Identity", icon: IdCardIcon }] : []),
+    ...(narrow && !phone ? [{ id: "identity" as const, label: "Identity", icon: IdCardIcon }] : []),
     { id: "health" as const, label: "Health", icon: HeartPulseIcon },
     { id: "logs" as const, label: "Logs", icon: ScrollTextIcon },
     { id: "files" as const, label: "Files", icon: FolderIcon },
@@ -539,17 +556,20 @@
   their own scrolling. A page that scrolled as a whole would take the header
   and the tab bar off screen with it and put the composer below the fold.
 -->
-<div class="flex min-h-0 flex-1 flex-col" data-testid="station-page">
+<div class="ap-station flex min-h-0 flex-1 flex-col" data-testid="station-page">
   <!-- `relative`: StateDot's sr-only word is position:absolute, and with no
        positioned ancestor inside the stage's scroller it escapes every
        overflow-hidden between here and the document. -->
-  <header class="relative shrink-0 border-b border-border bg-background">
+  <header class="ap-st-head relative shrink-0 border-b border-border bg-background" data-testid="station-header">
     <div class="flex flex-wrap items-start justify-between gap-3 px-4 pt-4 pb-3 sm:px-6">
       <div class="min-w-0 flex-1">
-        <div class="flex min-w-0 items-center gap-2">
+        <div class="ap-st-title flex min-w-0 items-center gap-2">
+          <span aria-hidden="true" class="ap-st-face"
+            ><Face id={stationId} label={station?.displayName ?? stationId} mood={liveState.id === "running" ? "working" : "resting"} size={44} /></span
+          >
           <StateDot state={liveState} />
           <h1
-            class="truncate font-mono text-[21px] leading-tight font-medium"
+            class="ap-st-name truncate font-mono text-[21px] leading-tight font-medium"
             data-testid="station-handle"
             title={station?.displayName ?? stationId}
           >
@@ -557,7 +577,7 @@
               (stationLoad === "loaded" || stationLoad === "loading" ? stationId : "Agent")}
           </h1>
         </div>
-        <p class="mt-1 truncate text-sm text-muted-foreground" data-testid="station-summary">
+        <p class="ap-st-sub mt-1 truncate text-sm text-muted-foreground" data-testid="station-summary">
           {#if station}
             <!-- Mono for the machine-issued halves only; the joins are prose. -->
             <span class="font-mono" data-testid="station-key">{station.stationKey}</span>
@@ -572,7 +592,7 @@
       </div>
 
       {#if canLifecycle}
-        <div class="flex shrink-0 items-center gap-2">
+        <div class="ap-st-actions flex shrink-0 items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -593,6 +613,14 @@
       {/if}
     </div>
 
+    {#if phone && station}
+      <div class="px-4 pb-3">
+        <button type="button" class="ap-st-about" onclick={() => (aboutOpen = true)}>
+          <IdCardIcon class="size-4" aria-hidden="true" />About {station.displayName}
+        </button>
+      </div>
+    {/if}
+
     {#if actionError}
       <p class="px-4 pb-2 text-sm text-status-error sm:px-6" role="alert">{actionError}</p>
     {/if}
@@ -600,7 +628,7 @@
     {#if stationLoad !== "notFound" && stationLoad !== "error"}
       <!-- svelte-ignore a11y_interactive_supports_focus -- the roving tabindex lives on the tab buttons, not the tablist -->
       <div
-        class="scroll-strip flex min-w-0 gap-1 px-4 sm:px-6"
+        class="ap-st-tabs scroll-strip flex min-w-0 gap-1 px-4 sm:px-6"
         role="tablist"
         onkeydown={handleTablistKeydown}
         use:scrollStrip={`${activeTab}:${tabs.length}`}
@@ -619,7 +647,7 @@
             title={tab.disabled ? tab.disabledReason : tab.label}
             tabindex={activeTab === tab.id ? 0 : -1}
             class={cn(
-              "flex shrink-0 items-center gap-2 border-b-2 px-2.5 py-2 text-sm whitespace-nowrap transition-colors max-[900px]:min-h-11 pointer-coarse:min-h-11",
+              "flex shrink-0 items-center gap-2 border-b-2 px-2.5 py-2 text-sm whitespace-nowrap transition-colors touch:min-h-11",
               tab.disabled
                 ? "cursor-not-allowed border-transparent text-muted-foreground/50"
                 : activeTab === tab.id
@@ -644,7 +672,7 @@
        their own (chat, logs, files, terminal) fill it exactly and never
        overflow; the shorter ones (health, activity, changes, cleanup) scroll
        here, under a header that stays put. -->
-  <div class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6" data-testid="station-panes">
+  <div class="ap-st-panes flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6" data-testid="station-panes">
     {#if stationLoad === "notFound"}
       <div
         class="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
@@ -756,14 +784,14 @@
     -->
     {@render keepAlivePanel("config", configContent)}
     {#snippet configContent()}
-      <div class="flex flex-col">
+      <div class="ap-cfg flex flex-col">
         {#if configSections.length > 1}
-          <nav aria-label="Configuration sections" class="flex gap-1 border-b px-4 pt-4">
+          <nav aria-label="Configuration sections" class="ap-cfg-nav flex gap-1 border-b px-4 pt-4">
             {#each configSections as section (section.id)}
               <button
                 type="button"
                 aria-current={configSection === section.id ? "page" : undefined}
-                class="rounded-t-md border-b-2 px-3 py-1.5 text-sm {configSection === section.id
+                class="min-h-11 rounded-t-md border-b-2 px-3 py-1.5 text-sm {configSection === section.id
                   ? 'border-foreground font-medium text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'}"
                 onclick={() => setConfigSection(section.id)}
@@ -788,7 +816,7 @@
               onRestart={canLifecycle ? () => askFor("restart") : undefined}
             />
           {:else}
-            <div class="space-y-2 p-4">
+            <div class="ap-cfg-placeholder space-y-2 p-4">
               <h2 class="font-semibold">Declared configuration</h2>
               <p class="text-sm text-muted-foreground">
                 This station's node has not enabled configuration management, so nothing can be declared for
@@ -852,7 +880,7 @@
     </div>
   {/snippet}
 
-  {#if narrow}
+  {#if narrow && !phone}
     <!-- The rail's content, for the widths where the shell has no room for a
          third column. Same component, so the two can never say different
          things about the same agent. -->
@@ -862,6 +890,26 @@
     {/snippet}
   {/if}
 {/snippet}
+
+{#if phone && station}
+  <!-- The phone's rail: everything the context column holds, plus Restart and
+       Stop (which also stay in the header). Both still go through the confirm. -->
+  <Sheet.Root bind:open={aboutOpen}>
+    <Sheet.Content side="bottom" class="ap-about" data-testid="station-about">
+      <Sheet.Title class="ap-about__title">About {station.displayName}</Sheet.Title>
+      <Sheet.Description class="sr-only">Identity, placement, voice and who may dispatch this agent</Sheet.Description>
+      <div class="ap-about__body">
+        {@render stationRail()}
+        {#if canLifecycle}
+          <div class="ap-about__actions">
+            <Button variant="outline" disabled={actionInFlight !== null} onclick={() => askFor("restart")}>Restart</Button>
+            <Button variant="destructive" disabled={actionInFlight !== null} onclick={() => askFor("stop")}>Stop</Button>
+          </div>
+        {/if}
+      </div>
+    </Sheet.Content>
+  </Sheet.Root>
+{/if}
 
 <ConfirmDialog
   open={confirmOpen}

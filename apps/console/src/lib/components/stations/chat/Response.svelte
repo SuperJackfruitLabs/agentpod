@@ -9,8 +9,7 @@
    */
   import { Streamdown } from "svelte-streamdown";
   import Code from "svelte-streamdown/code";
-  import { bundledThemes, type BundledTheme, type ThemeRegistration } from "shiki";
-  import { themeStore } from "$lib/themes/store.svelte";
+  import { VIBE_SHIKI_THEME, vibeShikiTheme } from "$lib/utils/shiki-theme";
 
   interface Props {
     text: string;
@@ -19,49 +18,17 @@
 
   let { text, streaming = false }: Props = $props();
 
-  // The active color scheme's shiki theme for the current light/dark mode.
-  const schemeTheme = $derived(
-    themeStore.isDark ? themeStore.shikiThemes.dark : themeStore.shikiThemes.light,
-  );
-
-  // svelte-streamdown only bundles github-light/github-dark. Any other theme
-  // name must be registered as a loaded ThemeRegistration via `shikiThemes`,
-  // or code blocks never leave their loading skeleton (documented streamdown
-  // behavior). Load the active scheme's theme lazily from shiki's bundle.
-  const BUILTIN = new Set<string>(["github-light", "github-dark"]);
-  let registry = $state<Record<string, ThemeRegistration>>({});
-
-  $effect(() => {
-    const name = schemeTheme;
-    if (BUILTIN.has(name) || name in registry) return;
-    const load = bundledThemes[name as BundledTheme];
-    if (!load) return;
-    let cancelled = false;
-    load().then((mod) => {
-      if (!cancelled) registry = { ...registry, [name]: mod.default as ThemeRegistration };
-    });
-    return () => {
-      cancelled = true;
-    };
-  });
-
-  // Fall back to the matching builtin until the scheme's theme has loaded so
-  // streamed code highlights immediately instead of sitting in a skeleton.
-  const shikiTheme = $derived(
-    BUILTIN.has(schemeTheme) || schemeTheme in registry
-      ? schemeTheme
-      : themeStore.isDark
-        ? "github-dark"
-        : "github-light",
-  );
+  // The same Shiki treatment as code blocks and the markdown preview: the vibe's
+  // css-variables theme, so replies repaint with the vibe and theme in CSS.
+  const shikiThemes = { [VIBE_SHIKI_THEME]: vibeShikiTheme };
 
   // Minimal overrides on the tailwind base theme (mergeTheme defaults true):
-  // swap its hard-coded grays/blues for Crisp tokens so borders and muted
-  // text track the active scheme in both modes, and scale headings for chat.
-  const crispTheme = {
+  // swap its hard-coded grays/blues for tokens so borders and muted text
+  // track the vibe in both themes, and scale headings for chat.
+  const vibeTheme = {
     code: {
       base: "my-3 flex w-full flex-col overflow-hidden rounded-md border border-border",
-      container: "relative overflow-visible bg-muted/50 p-2 font-mono text-sm",
+      container: "relative overflow-visible bg-[var(--shiki-background)] text-[var(--shiki-foreground)] p-2 font-mono text-sm",
       header:
         "flex items-center justify-between border-b border-border bg-muted/50 p-2 text-xs text-muted-foreground",
       pre: "overflow-x-auto p-0 font-mono",
@@ -90,8 +57,8 @@
   parseIncompleteMarkdown={streaming}
   renderHtml={false}
   allowedLinkPrefixes={["https://", "http://"]}
-  {shikiTheme}
-  shikiThemes={registry}
-  theme={crispTheme}
+  shikiTheme={VIBE_SHIKI_THEME}
+  {shikiThemes}
+  theme={vibeTheme}
   class="t-body max-w-none"
 />

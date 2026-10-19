@@ -113,3 +113,9 @@ test("valid submission calls createUser with the entered values and fires onCrea
     expect(onCreated).toHaveBeenCalledOnce();
   });
 });
+
+
+test("an open dialog draws one overlay, not two (regression: doubled Portal and Overlay)", () => {
+  render(CreateUserDialog, { props: { open: true, onCreated: vi.fn() } });
+  expect(document.querySelectorAll("[data-slot=\"dialog-overlay\"]").length).toBe(1);
+});

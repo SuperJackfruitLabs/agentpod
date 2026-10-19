@@ -62,39 +62,6 @@ vi.mock("$lib/stores/connection.svelte", () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// ThemeSettings imports the theme store which calls window.matchMedia at
-// module-init time — mock the entire store so ThemeSettings renders safely.
-// ---------------------------------------------------------------------------
-
-vi.mock("$lib/themes/store.svelte", () => ({
-  themeStore: {
-    mode: "system",
-    resolvedMode: "dark",
-    colorSchemeId: "default",
-    fontPairingId: "default",
-    autoSchedule: { darkStartHour: 18, darkEndHour: 6 },
-    currentColorScheme: null,
-    currentFontPairing: null,
-    customThemes: [],
-    shikiThemes: { light: "github-light", dark: "github-dark" },
-    setMode: vi.fn(),
-    setColorScheme: vi.fn(),
-    setFontPairing: vi.fn(),
-    saveCustomTheme: vi.fn(),
-    deleteCustomTheme: vi.fn(),
-    applyCustomTheme: vi.fn(),
-    getColorSchemePreview: vi.fn(() => ({ background: "#000", primary: "#fff", foreground: "#ccc" })),
-  },
-  colorSchemes: [],
-  fontPairings: [],
-  colorSchemeCategories: [],
-  fontPairingCategories: [],
-  ThemeMode: {},
-  DEFAULT_COLOR_SCHEME_ID: "default",
-  DEFAULT_FONT_PAIRING_ID: "default",
-}));
-
-// ---------------------------------------------------------------------------
 // Static import — compiled once
 // ---------------------------------------------------------------------------
 
@@ -144,4 +111,20 @@ test("under the plane, devices are the plane's: a link instead of the list", () 
   expect(queryByTestId("device-list-stub")).toBeNull();
   expect(getByTestId("managed-by-plane").textContent?.replace(/\s+/g, " ")).toContain("Devices are managed in your Super Jackfruit account");
   expect(getByRole("link", { name: /Super Jackfruit account/ }).getAttribute("href")).toBe("https://accounts.test");
+});
+
+test("Settings has Appearance, Connection, Devices and Account, in that order", () => {
+  // Under the plane, so the Devices heading is the page's own (the legacy list draws its own).
+  planeState.value = { issuer: "https://accounts.test", url: "https://accounts.test", audience: "https://hub.x" };
+  const { getAllByRole } = render(SettingsPage);
+  const sections = getAllByRole("heading", { level: 2 }).map((h) => h.textContent?.trim());
+  expect(sections).toEqual(["Appearance", "Connection", "Devices", "Account"]);
+});
+
+test("Settings' Appearance is the vibekit control (vibe, light or dark, accent), no theme picker", () => {
+  const { getByRole, queryByText } = render(SettingsPage);
+  expect(getByRole("group", { name: "Vibe" })).toBeTruthy();
+  expect(getByRole("group", { name: "Light or dark" })).toBeTruthy();
+  expect(getByRole("group", { name: "Accent" })).toBeTruthy();
+  expect(queryByText(/colou?r scheme|font pairing/i)).toBeNull();
 });

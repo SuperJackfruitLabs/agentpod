@@ -111,3 +111,9 @@ test("confirming an elevation calls updateUserRole and fires onChanged on succes
     expect(onChanged).toHaveBeenCalledOnce();
   });
 });
+
+
+test("an open dialog draws one overlay, not two (regression: doubled Portal and Overlay)", () => {
+  render(RoleDialog, { props: { open: true, user, onChanged: vi.fn() } });
+  expect(document.querySelectorAll("[data-slot=\"dialog-overlay\"]").length).toBe(1);
+});

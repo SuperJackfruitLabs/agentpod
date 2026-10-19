@@ -6,14 +6,17 @@
   import { connection, initConnection, startReachabilityProbe } from "$lib/stores/connection.svelte";
   import { auth, currentPlane, initAuth, signedOutElsewhere } from "$lib/stores/auth.svelte";
   import { autoSignIn, watchSession } from "$lib/auth/org-plane";
-  import { themeStore } from "$lib/themes/store.svelte";
+  import { VibeRoot } from "@superjackfruit/vibekit";
+  import { appearance } from "$lib/appearance.svelte";
+  import AuthFrame from "$lib/components/brand/AuthFrame.svelte";
+  import { startWidgetColours } from "$lib/utils/vk-colors";
   import { commandPalette } from "$lib/stores/command-palette.svelte";
   import { Toaster } from "$lib/components/ui/sonner";
   import * as Tooltip from "$lib/components/ui/tooltip";
   import AppShell from "$lib/components/shell/AppShell.svelte";
+  import { onPaletteShortcut } from "$lib/components/shell/palette-shortcut";
   import { contextRailSlot } from "$lib/stores/context-rail.svelte";
   import CommandPalette from "$lib/components/command-palette.svelte";
-  import { Spinner } from "$lib/components/ui/spinner";
 
   let { children } = $props();
   let isInitializing = $state(true);
@@ -41,17 +44,18 @@
   let showAppShell = $derived(!isPublicRoute && !shouldShowLoading);
 
   function handleGlobalKeydown(e: KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-      e.preventDefault();
-      commandPalette.toggle();
-    }
+    onPaletteShortcut(e, () => commandPalette.toggle());
   }
 
   let stopReachabilityProbe: (() => void) | undefined;
+  let stopWidgetColours: (() => void) | undefined;
   let stopWatchingSession: (() => void) | undefined;
 
   onMount(async () => {
-    themeStore.initialize();
+    // app.html painted the first frame from the same cookie; this keeps it current.
+    appearance.init();
+    // Code colours (Shiki variables) follow the vibe and theme from here on.
+    stopWidgetColours = startWidgetColours();
 
     await initConnection(); // must run before initAuth — sets the auth client base URL
     await initAuth();
@@ -66,6 +70,8 @@
   });
 
   onDestroy(() => {
+    appearance.dispose();
+    stopWidgetColours?.();
     stopReachabilityProbe?.();
     stopWatchingSession?.();
     if (typeof window !== "undefined") {
@@ -107,6 +113,8 @@
   });
 </script>
 
+<!-- The person's vibe and theme (vibekit). data-vibe / data-theme live on <html>. -->
+<VibeRoot vibe={appearance.value.vibe} theme={appearance.theme}>
 <!-- Tooltip Provider - required for all Tooltip components -->
 <Tooltip.Provider>
   <!-- Toast notifications - positioned to avoid bottom nav on mobile -->
@@ -114,12 +122,12 @@
 
   <div class="min-h-screen bg-background text-foreground">
     {#if shouldShowLoading}
-      <div class="flex min-h-screen items-center justify-center bg-background">
-        <div class="flex flex-col items-center gap-3">
-          <Spinner size="lg" />
-          <p class="text-sm text-muted-foreground">Connecting…</p>
+      <AuthFrame center>
+        <div class="grid justify-items-center gap-3.5" role="status">
+          <div class="ap-spin" aria-hidden="true"></div>
+          <p class="ap-big">Connecting…</p>
         </div>
-      </div>
+      </AuthFrame>
     {:else if showAppShell}
       <!-- Authenticated routes: wrap in AppShell with bottom navigation.
            The third column belongs to the route, which cannot pass a prop up
@@ -136,3 +144,4 @@
 
   <CommandPalette />
 </Tooltip.Provider>
+</VibeRoot>

@@ -261,3 +261,8 @@ test("unmounted before the token arrives, the log stream is never opened", async
   await new Promise((r) => setTimeout(r, 0));
   expect(MockEventSource.instances).toHaveLength(0);
 });
+
+test("the level filters wrap on a narrow screen rather than running past the panel", () => {
+  const { getByRole } = render(LogTail, { props: { stationId: "st_1" } });
+  expect(getByRole("group", { name: "Filter by level" }).className).toContain("flex-wrap");
+});

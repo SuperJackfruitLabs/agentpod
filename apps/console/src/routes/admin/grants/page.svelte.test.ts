@@ -353,3 +353,28 @@ test("under the plane the hub answers 410 and the page links to where grants are
   const link = await findByRole("link", { name: /Super Jackfruit account/ });
   expect(link.getAttribute("href")).toBe("https://accounts.test/agents");
 });
+
+test("under the plane the page shows only the notice: no banner, count or grant tables", async () => {
+  const { ApiError } = await import("$lib/api/http-error");
+  vi.mocked(adminApi.listUsers).mockResolvedValue({ users: [], total: 0 } as never);
+  vi.mocked(grantsApi.listPrincipals).mockResolvedValue([] as never);
+  vi.mocked(grantsApi.listGrants).mockRejectedValue(
+    new ApiError("This is managed in your Super Jackfruit account.", {
+      status: 410, detail: "GET /api/admin/grants → 410", code: "managed_by_org_plane", url: "https://accounts.test/agents",
+    }),
+  );
+  const { findByTestId, queryByTestId, container, queryByRole } = render(GrantsPage);
+  expect((await findByTestId("managed-by-plane")).textContent).toContain("Grants are managed in your");
+  expect(queryByTestId("enforcement-banner")).toBeNull();
+  expect(queryByTestId("empty-state")).toBeNull();
+  expect(container.querySelector("table")).toBeNull();
+  expect(container.textContent).not.toMatch(/principals have a grant/);
+  expect(queryByRole("alert")).toBeNull();
+});
+
+test("under 768px each grant is a card", async () => {
+  const { expectCardTable } = await import("$lib/test-utils/viewport");
+  const { findAllByTestId, container } = setup({ grants: [{ principalId: JO, mayDispatch: ["*"], mayGrantReach: false }] });
+  await findAllByTestId("grant-row");
+  for (const table of Array.from(container.querySelectorAll("table"))) expectCardTable(table);
+});

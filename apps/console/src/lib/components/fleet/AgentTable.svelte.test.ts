@@ -468,3 +468,23 @@ test("sorting within groups reorders agents but leaves group order untouched", a
     expect(sequence).toEqual(["group", "alpha", "zeta", "group", "bravo", "yankee"]);
   });
 });
+
+test("under 768px each agent row is a card: name, status, node and version lines, the Update action", async () => {
+  const { expectCardTable } = await import("$lib/test-utils/viewport");
+  const { container } = render(AgentTable, { props: { agents: twoAgents } });
+  expectCardTable(container.querySelector("table"), "tbody tr:not(.ap-group-row)");
+  const row = container.querySelector("tbody tr:not(.ap-group-row)")!;
+  const labels = Array.from(row.querySelectorAll("[data-label]")).map((c) => c.getAttribute("data-label"));
+  expect(labels).toEqual(expect.arrayContaining(["Node", "Version"]));
+});
+
+test.each([360, 390])("at %ipx nothing in the agent table is wider than the screen", async (width) => {
+  const { setViewport, expectNoOverflow } = await import("$lib/test-utils/viewport");
+  const restore = setViewport(width);
+  try {
+    const { container } = render(AgentTable, { props: { agents: twoAgents } });
+    expectNoOverflow(container, width);
+  } finally {
+    restore();
+  }
+});

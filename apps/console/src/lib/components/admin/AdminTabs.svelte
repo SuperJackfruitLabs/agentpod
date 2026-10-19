@@ -34,7 +34,7 @@
      sections are 406px, and at 390 the strip used to widen <main> and pan the
      whole page sideways. -->
 <nav
-  class="scroll-strip flex min-w-0 gap-1 border-b"
+  class="ap-atabs scroll-strip flex min-w-0 gap-1 border-b"
   aria-label="Admin sections"
   use:scrollStrip={active}
 >
@@ -43,7 +43,7 @@
       href={section.href}
       aria-current={active === section.id ? "page" : undefined}
       class={cn(
-        "-mb-px inline-flex shrink-0 items-center whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors max-[900px]:min-h-11 pointer-coarse:min-h-11",
+        "-mb-px inline-flex shrink-0 items-center whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors touch:min-h-11",
         active === section.id
           ? "border-primary text-foreground"
           : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"

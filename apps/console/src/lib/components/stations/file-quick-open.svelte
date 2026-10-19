@@ -80,7 +80,7 @@
   }
 </script>
 
-<Command.Dialog bind:open title="Quick open" description="Search files by name or path">
+<Command.Dialog class="ap-pal" bind:open title="Quick open" description="Search files by name or path">
   <Command.Input placeholder="Search files…" />
   <Command.List>
     {#if walking}

@@ -448,7 +448,7 @@ test("FileBrowser: invalidate() on a non-active path evicts the cache without re
   await waitFor(() => expect(api.readFile).toHaveBeenCalledTimes(3));
 });
 
-test("FileBrowser: closes a tab with its close button", async () => {
+async function openTwoTabs() {
   vi.spyOn(api, "listFiles")
     .mockResolvedValueOnce([mockDir, mockFile])
     .mockResolvedValueOnce([mockSubFile]);
@@ -456,18 +456,20 @@ test("FileBrowser: closes a tab with its close button", async () => {
     .mockResolvedValueOnce({ content: "# Hello", truncated: false })
     .mockResolvedValueOnce({ content: "export const x = 1;", truncated: false });
 
-  const { getByText, getByRole, queryByRole } = render(FileBrowser, {
-    props: { stationId: "station_1" },
-  });
-
+  const view = render(FileBrowser, { props: { stationId: "station_1" } });
+  const { getByText, getByRole } = view;
   await waitFor(() => expect(getByText("README.md")).toBeTruthy());
   fireEvent.click(getByText("README.md"));
   await waitFor(() => expect(getByRole("tab", { name: "README.md" })).toBeTruthy());
-
   fireEvent.click(getByText("src"));
   await waitFor(() => expect(getByText("index.ts")).toBeTruthy());
   fireEvent.click(getByText("index.ts"));
   await waitFor(() => expect(getByRole("tab", { name: "index.ts" })).toBeTruthy());
+  return view;
+}
+
+test("FileBrowser: closes a tab with its close button", async () => {
+  const { getByRole, queryByRole } = await openTwoTabs();
 
   fireEvent.click(getByRole("button", { name: "Close README.md" }));
 
@@ -476,6 +478,63 @@ test("FileBrowser: closes a tab with its close button", async () => {
     expect(getByRole("tab", { name: "index.ts" })).toBeTruthy();
   });
   expect(getByRole("tab", { name: "index.ts" }).getAttribute("aria-selected")).toBe("true");
+});
+
+test("FileBrowser: the close button is a sibling of its tab, never nested inside it", async () => {
+  const { getByRole, container } = await openTwoTabs();
+  const close = getByRole("button", { name: "Close README.md" });
+  expect(close.closest('[role="tab"]')).toBeNull();
+  expect(container.querySelectorAll('[role="tab"] button, [role="tab"] [role="button"]').length).toBe(0);
+  expect(close.className).toContain("touch:min-h-11");
+  expect(close.className).toContain("touch:min-w-11");
+  expect(close.getAttribute("tabindex")).not.toBe("-1");
+});
+
+test.each(["Delete", "Backspace"])("FileBrowser: %s on a focused tab closes it and focus moves to the next tab", async (key) => {
+  const { getByRole, queryByRole } = await openTwoTabs();
+  const readme = getByRole("tab", { name: "README.md" });
+  readme.focus();
+  fireEvent.keyDown(readme, { key });
+
+  await waitFor(() => expect(queryByRole("tab", { name: "README.md" })).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(getByRole("tab", { name: "index.ts" })));
+});
+
+test("FileBrowser: closing the last tab moves focus to the previous tab, then to the tree", async () => {
+  const { getByRole, queryByRole, container } = await openTwoTabs();
+  fireEvent.click(getByRole("button", { name: "Close index.ts" }));
+  await waitFor(() => expect(document.activeElement).toBe(getByRole("tab", { name: "README.md" })));
+
+  fireEvent.click(getByRole("button", { name: "Close README.md" }));
+  await waitFor(() => expect(queryByRole("tablist")).toBeNull());
+  await waitFor(() => {
+    expect(document.activeElement).not.toBe(document.body);
+    expect(container.contains(document.activeElement)).toBe(true);
+  });
+});
+
+test("FileBrowser: the tab strip uses roving tabindex with Left/Right/Home/End", async () => {
+  const { getByRole } = await openTwoTabs();
+  const readme = getByRole("tab", { name: "README.md" });
+  const index = getByRole("tab", { name: "index.ts" });
+  // index.ts is active, so it alone is in the tab order.
+  expect(index.getAttribute("tabindex")).toBe("0");
+  expect(readme.getAttribute("tabindex")).toBe("-1");
+
+  index.focus();
+  fireEvent.keyDown(index, { key: "ArrowLeft" });
+  await waitFor(() => expect(document.activeElement).toBe(readme));
+  fireEvent.keyDown(readme, { key: "ArrowLeft" }); // wraps
+  await waitFor(() => expect(document.activeElement).toBe(index));
+  fireEvent.keyDown(index, { key: "Home" });
+  await waitFor(() => expect(document.activeElement).toBe(readme));
+  fireEvent.keyDown(readme, { key: "End" });
+  await waitFor(() => expect(document.activeElement).toBe(index));
+  fireEvent.keyDown(index, { key: "ArrowRight" }); // wraps
+  await waitFor(() => expect(document.activeElement).toBe(readme));
+  expect(readme.getAttribute("aria-selected")).toBe("true");
+  expect(readme.getAttribute("tabindex")).toBe("0");
+  expect(index.getAttribute("tabindex")).toBe("-1");
 });
 
 test("a read-only viewer can still refresh the file list", async () => {
@@ -669,4 +728,14 @@ test("an open path that has become a folder is not offered for linking", async (
   list.mockImplementation(async (_id: string, path: string) => (path === "" ? [asDir] : []));
   await fireEvent.click(getByRole("button", { name: /refresh file list/i }));
   await waitFor(() => expect(queryByRole("button", { name: /link this file/i })).toBeNull());
+});
+
+test("FileBrowser: the open-file tabs are a scroll strip, so many tabs never widen the page", async () => {
+  vi.spyOn(api, "listFiles").mockResolvedValueOnce([mockDir, mockFile]);
+  vi.spyOn(api, "readFile").mockResolvedValueOnce({ content: "# Hello", truncated: false });
+  const { getByText, getByRole } = render(FileBrowser, { props: { stationId: "station_1" } });
+  await waitFor(() => expect(getByText("README.md")).toBeTruthy());
+  fireEvent.click(getByText("README.md"));
+  await waitFor(() => expect(getByRole("tab", { name: "README.md" })).toBeTruthy());
+  expect(getByRole("tablist").classList.contains("scroll-strip")).toBe(true);
 });

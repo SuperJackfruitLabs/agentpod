@@ -10,7 +10,7 @@
 
 <PageHeader title="Admin" subtitle="How voice notes are transcribed" />
 
-<div class="page-width py-6 space-y-6">
+<div class="ap-page">
   <AdminTabs active="transcription" />
   <div class="max-w-xl">
     <HubTranscriptionSettings />

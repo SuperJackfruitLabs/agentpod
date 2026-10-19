@@ -13,7 +13,7 @@
   let { what, href }: Props = $props();
 </script>
 
-<div class="rounded-lg border bg-muted/30 p-4 text-sm" data-testid="managed-by-plane">
+<div class="ap-notice rounded-lg border bg-muted/30 p-4 text-sm" data-testid="managed-by-plane">
   <p class="text-muted-foreground">
     {what} are managed in your
     <a {href} class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">Super Jackfruit account</a>.

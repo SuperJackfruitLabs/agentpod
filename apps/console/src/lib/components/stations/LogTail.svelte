@@ -320,7 +320,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -- keydown only listens for
      "/" bubbling up from focused descendants to jump focus to the search box -->
 <div
-  class="flex flex-col h-full min-h-[200px] rounded-lg border bg-background font-mono text-xs"
+  class="ap-logs flex flex-col h-full min-h-[200px] rounded-lg border bg-background font-mono text-xs"
   onkeydown={handleRootKeydown}
 >
   <!-- Toolbar -->
@@ -352,7 +352,7 @@
       />
     </div>
 
-    <div class="flex items-center gap-1" role="group" aria-label="Filter by level">
+    <div class="flex flex-wrap items-center gap-1" role="group" aria-label="Filter by level">
       <button
         type="button"
         class={chipClass(levelFilter === "all")}
@@ -414,9 +414,13 @@
 
   <!-- Log lines -->
   <div class="relative flex-1 min-h-0">
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex (a scroll region must take focus to scroll by keyboard) -->
     <div
       bind:this={containerEl}
       data-testid="log-scroll-container"
+      role="region"
+      aria-label="Log lines"
+      tabindex="0"
       class="h-full overflow-y-auto py-1"
       onscroll={handleScroll}
     >

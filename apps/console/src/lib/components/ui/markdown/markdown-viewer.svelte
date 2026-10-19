@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { marked } from "marked";
   import { codeToHtml } from "shiki";
-  import { themeStore } from "$lib/themes/store.svelte";
+  import { vibeShikiTheme } from "$lib/utils/shiki-theme";
+  import { escapeHtml, renderMarkdown } from "./render-markdown";
 
   interface Props {
     content: string;
@@ -16,62 +16,13 @@
   let renderedHtml = $state<string>("");
   let isLoading = $state(true);
 
-  // Use theme store for dynamic Shiki themes
-  const shikiThemes = $derived(themeStore.shikiThemes);
+  // The vibe's css-variables Shiki theme: colours follow the vibe and theme in CSS.
+  const highlight = (code: string, lang: string) => codeToHtml(code, { lang, theme: vibeShikiTheme });
 
-  // Configure marked with custom renderer for code blocks
-  async function renderMarkdown() {
+  async function render() {
     isLoading = true;
-
     try {
-      // Create a custom renderer for syntax-highlighted code blocks
-      const renderer = new marked.Renderer();
-      
-      // Store code blocks to process with Shiki later
-      const codeBlocks: Array<{ id: string; code: string; lang: string }> = [];
-      let codeBlockId = 0;
-
-      renderer.code = ({ text, lang }) => {
-        const id = `code-block-${codeBlockId++}`;
-        codeBlocks.push({ id, code: text, lang: lang || "plaintext" });
-        // Return a placeholder that we'll replace with highlighted code
-        return `<div class="code-placeholder" data-id="${id}"></div>`;
-      };
-
-      // Parse markdown first
-      let html = await marked.parse(content, {
-        renderer,
-        gfm: true, // GitHub Flavored Markdown
-        breaks: true, // Convert \n to <br>
-      });
-
-      // Process code blocks with Shiki using dynamic themes
-      for (const block of codeBlocks) {
-        try {
-          const highlighted = await codeToHtml(block.code, {
-            lang: normalizeLanguage(block.lang),
-            themes: {
-              light: shikiThemes.light,
-              dark: shikiThemes.dark,
-            },
-            defaultColor: false,
-          });
-          
-          // Replace placeholder with highlighted code
-          html = html.replace(
-            `<div class="code-placeholder" data-id="${block.id}"></div>`,
-            `<div class="markdown-code-block">${highlighted}</div>`
-          );
-        } catch {
-          // Fallback to plain code block if Shiki fails
-          html = html.replace(
-            `<div class="code-placeholder" data-id="${block.id}"></div>`,
-            `<pre class="markdown-code-block"><code>${escapeHtml(block.code)}</code></pre>`
-          );
-        }
-      }
-
-      renderedHtml = html;
+      renderedHtml = await renderMarkdown(content, highlight);
     } catch (err) {
       console.error("Markdown rendering error:", err);
       renderedHtml = `<pre>${escapeHtml(content)}</pre>`;
@@ -80,25 +31,10 @@
     }
   }
 
-  function escapeHtml(text: string): string {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
-
-  // Shiki handles language detection - just pass directly
-  function normalizeLanguage(lang: string): string {
-    return lang.toLowerCase() || "plaintext";
-  }
-
-  // Re-render when content or theme changes
+  // Re-render when the content changes (the vibe and theme switch is pure CSS).
   $effect(() => {
     content;
-    shikiThemes;
-    renderMarkdown();
+    render();
   });
 </script>
 
@@ -227,25 +163,10 @@
     padding: 0;
   }
 
-  /* Dual theme support for code blocks */
-  /* Shiki sets --shiki-light and --shiki-dark on each span */
-  
-  /* Light mode (default) */
+  /* One Shiki treatment (code-block.svelte uses the same): the vibe's code ground. */
   .markdown-content :global(.shiki) {
-    background-color: var(--shiki-light-bg) !important;
-  }
-  
-  .markdown-content :global(.shiki span) {
-    color: var(--shiki-light);
-  }
-
-  /* Dark mode */
-  :global(.dark) .markdown-content :global(.shiki) {
-    background-color: var(--shiki-dark-bg) !important;
-  }
-  
-  :global(.dark) .markdown-content :global(.shiki span) {
-    color: var(--shiki-dark);
+    background-color: var(--shiki-background) !important;
+    color: var(--shiki-foreground);
   }
 
   /* Blockquotes */

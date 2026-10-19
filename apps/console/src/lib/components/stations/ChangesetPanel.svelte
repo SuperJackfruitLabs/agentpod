@@ -9,7 +9,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { Empty } from "$lib/components/ui/empty";
-  import CodeBlock from "$lib/components/ui/code-block/code-block.svelte";
+  import { DiffLines } from "$lib/components/ui/diff-lines";
 
   interface Props {
     stationId: string;
@@ -106,7 +106,7 @@
     <button
       type="button"
       data-testid="changeset-file-{f.path}"
-      class="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted/60"
+      class="ap-frow flex min-h-11 w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted/60" aria-pressed={openPath === f.path}
       onclick={() => openFile(side, f)}
     >
       <Badge variant="outline" class="shrink-0">{f.status}</Badge>
@@ -127,7 +127,7 @@
   {:else if loadError}
     <Empty title="Couldn't read this workspace" description={loadError} />
   {:else if status}
-    <Card.Root>
+    <Card.Root class="ap-panel">
       <Card.Header>
         <Card.Title>
           {status.repo.detached ? "detached HEAD" : (status.repo.branch ?? "unknown branch")}
@@ -142,7 +142,7 @@
     </Card.Root>
 
     {#if status.truncatedFiles}
-      <p class="text-sm text-amber-600 dark:text-amber-500">
+      <p class="text-sm text-warn-text">
         Too many changed files to list them all — this is a partial view.
       </p>
     {/if}
@@ -154,7 +154,7 @@
       />
     {:else}
       {#if status.uncommitted.files.length > 0}
-        <Card.Root>
+        <Card.Root class="ap-panel">
           <Card.Header>
             <Card.Title>Uncommitted</Card.Title>
             <Card.Description>
@@ -171,7 +171,7 @@
       {/if}
 
       {#if status.committed.files.length > 0}
-        <Card.Root>
+        <Card.Root class="ap-panel">
           <Card.Header>
             <Card.Title>Committed, not on the base</Card.Title>
             <Card.Description>
@@ -195,7 +195,7 @@
     {/if}
 
     {#if openPath}
-      <Card.Root>
+      <Card.Root class="ap-panel">
         <Card.Header>
           <Card.Title class="font-mono text-sm">{openPath}</Card.Title>
           {#if patch?.truncated}
@@ -215,7 +215,7 @@
                 No textual diff to show for this file.
               </p>
             {:else}
-              <CodeBlock code={patch.content} language="diff" />
+              <div class="ap-diff-box"><DiffLines patch={patch.content} /></div>
             {/if}
           {/if}
         </Card.Content>

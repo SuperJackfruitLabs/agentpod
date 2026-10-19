@@ -1,25 +1,20 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-product="agentpod">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" type="image/svg+xml" href="%sveltekit.assets%/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AgentPod</title>
-    <script>
-      // Blocking script to prevent flash of unstyled content (FOUC)
-      // This runs before any CSS is applied
-      (function() {
-        try {
-          // Apply dark mode class immediately
-          const mode = localStorage.getItem('agentpod-theme-mode');
-          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          const isDark = mode === 'dark' || (mode === 'system' && prefersDark) || (!mode && prefersDark);
-          if (isDark) {
-            document.documentElement.classList.add('dark');
-          }
-        } catch (e) {}
-      })();
-    </script>
+    <!-- First frame: the person's vibe and theme, before any stylesheet (vibekit HEAD_SCRIPT; the
+         console serves no CSP, so it is inline). The first script carries a light/dark choice made
+         with the old theme system into the cookie, once (system and auto mean follow the sun).
+         head-script.test.ts fails if the HEAD_SCRIPT copy drifts from the installed vibekit. -->
+    <script>(function(){try{if(!/(?:^|; )vk_appearance=/.test(document.cookie)){var t=localStorage.getItem('agentpod-theme-mode');if(t==='light'||t==='dark'){document.cookie='vk_appearance=daylight.'+t+'.strong.0; Path=/; Max-Age=31536000; SameSite=Lax'+(location.protocol==='https:'?'; Secure':'');}}}catch(_){}})();</script>
+    <script>(function(){try{var d=document,m=/(?:^|; )vk_appearance=([^;]*)/.exec(d.cookie||""),p=(m?m[1]:"").split("."),V=["daylight","paper","studio","quiet"],v=V.indexOf(p[0])>-1?p[0]:"daylight",t=["sun","light","dark"].indexOf(p[1])>-1?p[1]:"sun",s=["strong","subtle","off"].indexOf(p[2])>-1?p[2]:(v==="quiet"?"off":"strong"),n=new Date(),x=n.getHours()*60+n.getMinutes(),h=x<330||x>=1140?"night":x<420?"dawn":x>=1065?"dusk":x>=990?"golden":x<648?"morning":"noon",e=d.documentElement,r=e.getAttribute("data-product"),c="product";(p[4]||"").split("~").forEach(function(y){y=y.split(":");if(y.length===2&&y[0]===r&&"gold moss jade teal azure cobalt violet plum".split(" ").indexOf(y[1])>-1)c=y[1]});e.setAttribute("data-vibe",v);e.setAttribute("data-theme",t==="sun"?(h==="night"?"dark":"light"):t);e.setAttribute("data-phase",h);e.setAttribute("data-time",s);e.setAttribute("data-accent",c)}catch(_){}})();</script>
+    <!-- First frame, before any stylesheet or the app: the vibe's own background (vibekit tokens.css
+         --vk-color-bg), so a load never flashes white. :where() keeps them below vibekit's own rule
+         once its stylesheet is in. head-script.test.ts fails if these drift from vibekit. -->
+    <style>:where(html){background:#fff8ee;color-scheme:light}:where(html[data-vibe=daylight][data-theme=dark]){background:#17162a;color-scheme:dark}:where(html[data-vibe=paper][data-theme=light]){background:#fbf8f2}:where(html[data-vibe=paper][data-theme=dark]){background:#1a1916;color-scheme:dark}:where(html[data-vibe=studio][data-theme=light]){background:#f6f3ec}:where(html[data-vibe=studio][data-theme=dark]){background:#14130f;color-scheme:dark}:where(html[data-vibe=quiet][data-theme=light]){background:#fff}:where(html[data-vibe=quiet][data-theme=dark]){background:#0e0e10;color-scheme:dark}</style>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

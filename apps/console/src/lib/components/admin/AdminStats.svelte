@@ -20,21 +20,21 @@
   let { stats }: Props = $props();
 </script>
 
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-  <div class="rounded-lg border p-4">
-    <p class="text-xs text-muted-foreground">Total users</p>
-    <p class="font-mono text-2xl font-semibold">{stats.totalUsers}</p>
+<dl class="ap-stats">
+  <div class="ap-stat">
+    <dt>Total users</dt>
+    <dd>{stats.totalUsers}</dd>
   </div>
-  <div class="rounded-lg border p-4">
-    <p class="text-xs text-muted-foreground">Admins</p>
-    <p class="font-mono text-2xl font-semibold text-primary">{stats.adminUsers}</p>
+  <div class="ap-stat" data-tone="accent">
+    <dt>Admins</dt>
+    <dd>{stats.adminUsers}</dd>
   </div>
-  <div class="rounded-lg border p-4">
-    <p class="text-xs text-muted-foreground">Banned</p>
-    <p class="font-mono text-2xl font-semibold text-destructive">{stats.bannedUsers}</p>
+  <div class="ap-stat" data-tone={stats.bannedUsers > 0 ? "danger" : undefined}>
+    <dt>Banned</dt>
+    <dd>{stats.bannedUsers}</dd>
   </div>
-  <div class="rounded-lg border p-4">
-    <p class="text-xs text-muted-foreground">This week</p>
-    <p class="font-mono text-2xl font-semibold">{stats.usersThisWeek}</p>
+  <div class="ap-stat">
+    <dt>This week</dt>
+    <dd>{stats.usersThisWeek}</dd>
   </div>
-</div>
+</dl>

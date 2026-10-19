@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { upTo } from "$lib/breakpoints";
   import type { Snippet, Component } from "svelte";
   import { cn } from "$lib/utils";
   import * as Tooltip from "$lib/components/ui/tooltip";
@@ -72,7 +73,7 @@
 
   // The same 640px as Tailwind's `sm`, asked in JS so exactly one copy of each
   // action exists: CSS-hiding a second copy would leave it in the a11y tree.
-  const phone = new MediaQuery("(max-width: 639px)");
+  const phone = new MediaQuery(upTo("header"));
 
   let tabRefs = $state<(HTMLButtonElement | null)[]>([]);
 
@@ -127,7 +128,8 @@
 
 <header
   class={cn(
-    "z-40 border-b bg-background/90 backdrop-blur-md pt-[env(safe-area-inset-top,0px)]",
+    tabs.length === 0 && "ap-ph--plain",
+    "ap-ph z-40 border-b bg-background/90 backdrop-blur-md pt-[env(safe-area-inset-top,0px)]",
     sticky && "sticky top-0",
   )}
 >
@@ -148,7 +150,7 @@
         {/if}
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2.5 overflow-hidden">
-            <h1 class="truncate text-lg font-semibold tracking-tight">{title}</h1>
+            <h1 class="ap-ph__title truncate text-lg font-semibold tracking-tight">{title}</h1>
             {#if status}
               <Status form="badge" status={status.variant} label={status.label} />
             {/if}
@@ -158,7 +160,7 @@
                  and a person must compare character by character — handles, station
                  keys, ids, versions. Setting "Fleet event log" in it is what made
                  every page header read like a config file. -->
-            <p class="mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p>
+            <p class="ap-ph__sub mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p>
           {/if}
         </div>
       </div>
@@ -223,7 +225,7 @@
                   aria-label={tab.label}
                   tabindex={activeTab === tab.id ? 0 : -1}
                   class={cn(
-                    "flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors max-[900px]:min-h-11 pointer-coarse:min-h-11",
+                    "flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors touch:min-h-11",
                     tab.disabled
                       ? "cursor-not-allowed border-transparent text-muted-foreground/50"
                       : activeTab === tab.id

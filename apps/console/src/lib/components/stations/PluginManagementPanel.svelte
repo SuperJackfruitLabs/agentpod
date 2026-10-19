@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { WarnBox } from "$lib/components/ui/warn-box";
   import type { PluginOperationPlan, SkillHubOperation, SkillHubOperationSummary } from "@agentpod/contract";
   import * as api from "$lib/api/plugins";
   import { Button } from "$lib/components/ui/button";
@@ -162,10 +163,10 @@
         </details>
       {/if}
       {#if operation.state === "applied" && plan?.restartRequired}
-        <div class="rounded-md border border-amber-500/40 bg-amber-500/5 p-2">
+        <WarnBox>
           <p>Hermes reads plugins when its gateway starts. Nothing was restarted; restart the station to {operation.action === "enable" ? "load" : "unload"} the plugin, then refresh the skill inventory to see what the gateway reports.</p>
           {#if onRestart}<Button size="sm" variant="outline" class="mt-2" onclick={onRestart}>Restart station…</Button>{/if}
-        </div>
+        </WarnBox>
       {/if}
       <div class="flex flex-wrap gap-2">
         {#if operation.state === "planned" && plan && !plan.noOp && !operation.inFlight}

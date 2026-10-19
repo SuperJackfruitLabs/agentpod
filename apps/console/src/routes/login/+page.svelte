@@ -9,6 +9,7 @@
   import { Field } from "$lib/components/ui/field";
   import { Spinner } from "$lib/components/ui/spinner";
   import Mark from "$lib/components/brand/Mark.svelte";
+  import AuthFrame from "$lib/components/brand/AuthFrame.svelte";
   import Circle from "@lucide/svelte/icons/circle";
   import { statusTextClass } from "$lib/utils/status-badge";
 
@@ -157,20 +158,22 @@
   <title>Sign in · AgentPod</title>
 </svelte:head>
 
-{#snippet errorBanner(message: string)}
-  <div class="rounded-lg border border-destructive/50 bg-destructive/5 p-3" role="alert">
+{#snippet errorBanner(message: string, retry?: () => void)}
+  <div class="ap-alert" role="alert">
     <p class="text-sm text-destructive">{message}</p>
+    {#if retry}
+      <button type="button" class="ap-linkbtn" onclick={retry}>Try again</button>
+    {/if}
   </div>
 {/snippet}
 
-<main class="min-h-screen bg-background flex items-center justify-center p-4 sm:p-6">
-  <div class="w-full max-w-md rounded-lg border bg-card p-6 space-y-6">
+<AuthFrame>
+  <div class="ap-auth__card space-y-5">
     <!-- Brand -->
-    <div class="flex flex-col items-center gap-3 text-center">
-      <Mark class="size-10" />
-      <div>
-        <h1 class="text-lg font-semibold">AgentPod</h1>
-        <p class="mt-1 text-sm text-muted-foreground">
+    <div class="ap-auth__brand">
+      <span class="ap-auth__mark"><Mark class="size-7" /></span>
+      <h1 class="ap-auth__name">AgentPod</h1>
+        <p class="ap-auth__step">
           {#if step === "setup"}
             Connect to your hub
           {:else if plane}
@@ -181,7 +184,6 @@
             Create account
           {/if}
         </p>
-      </div>
     </div>
 
     {#if step === "setup"}
@@ -218,14 +220,15 @@
       <!-- Login Step -->
       <div class="space-y-5">
         <!-- Connection Info -->
-        <div class="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
-          <Circle class="h-2.5 w-2.5 fill-current {statusTextClass('connected')}" />
-          <span class="text-muted-foreground">Connected to</span>
-          <span class="truncate text-foreground">{connection.apiUrl}</span>
+        <div class="ap-conn">
+          <Circle class="h-2.5 w-2.5 shrink-0 fill-current {statusTextClass('connected')}" />
+          <span>Connected to</span>
+          <span class="min-w-0 break-all">{connection.apiUrl}</span>
         </div>
 
         {#if auth.error}
-          {@render errorBanner(auth.error)}
+          <!-- Under the plane a failed sign-in is retried by asking the plane again. -->
+          {@render errorBanner(auth.error, plane ? continueWithPlane : undefined)}
         {/if}
 
         {#if plane}
@@ -308,7 +311,7 @@
               {/if}
             {:else}
               <!-- Signup disabled message -->
-              <div class="rounded-lg border bg-muted/30 p-3">
+              <div class="ap-auth__muted rounded-lg border bg-muted/30 p-3">
                 <p class="text-xs text-muted-foreground">
                   {signupMessage || "Public registration is disabled. Contact an administrator to create an account."}
                 </p>
@@ -318,10 +321,10 @@
         {/if}
 
         <!-- Change server -->
-        <Button variant="ghost" class="w-full text-muted-foreground hover:text-foreground" onclick={disconnect}>
+        <Button variant="ghost" class="ap-auth__ghost w-full" onclick={disconnect}>
           Use a different hub
         </Button>
       </div>
     {/if}
   </div>
-</main>
+</AuthFrame>

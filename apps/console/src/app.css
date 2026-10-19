@@ -1,733 +1,196 @@
+/* Layer order first: vibekit's layers sit between Tailwind's base and its components/utilities,
+   so a Tailwind class always outranks a vibekit default and vibekit outranks the preflight. */
+@layer theme, base, vk, components, utilities;
 @import "tailwindcss";
-
 @import "tw-animate-css";
+/* vibekit 0.0.13: its self-hosted fonts (@font-face only; a font downloads when the active vibe
+   uses it) and its tokens, base and component styles. Its tailwind.css is NOT imported: it defines
+   --color-muted, --color-accent, --font-*, --radius-* with other meanings (see the bridge below). */
+@import "@superjackfruit/vibekit/fonts.css";
+@import "@superjackfruit/vibekit/vibekit.css";
+/* Each vibe's look for the shadcn primitives (unlayered: outranks their utilities). */
+@import "./lib/styles/primitives.css";
+@import "./lib/styles/shell.css";
+@import "./lib/styles/pages.css";
+@import "./lib/styles/station.css";
+@import "./lib/styles/tabs.css";
+@import "./lib/styles/admin.css";
 
-@custom-variant dark (&:is(.dark *));
+/* Named breakpoints (src/lib/breakpoints.ts): inclusive max-width variants, so
+   the boundary pixel is in exactly one branch. Use these, never max-[Npx]:. */
+@custom-variant phone (@media (max-width: 900px));
+@custom-variant narrow-header (@media (max-width: 639px));
+/* Touch-sized targets: under 1024px, and on any coarse pointer. */
+@custom-variant touch (@media (max-width: 1023px), (pointer: coarse));
 
-/* ============================================
-   BUNDLED FONT DEFINITIONS
-   All fonts loaded locally from /static/fonts/
-   ============================================ */
-
-/* Archivo - Signage grotesk, the console's default */
-@font-face {
-  font-family: 'Archivo';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/archivo/archivo-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Archivo';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/archivo/archivo-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Archivo';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/archivo/archivo-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Archivo';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/archivo/archivo-700.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Archivo';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url('/fonts/archivo/archivo-800.woff2') format('woff2');
-}
-
-/* Inter - Clean, modern sans-serif */
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/inter/inter-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/inter/inter-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/inter/inter-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/inter/inter-700.woff2') format('woff2');
-}
-
-/* JetBrains Mono - Developer's favorite monospace */
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/jetbrains-mono/jetbrains-mono-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/jetbrains-mono/jetbrains-mono-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/jetbrains-mono/jetbrains-mono-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/jetbrains-mono/jetbrains-mono-700.woff2') format('woff2');
-}
-
-/* Nunito - Friendly rounded sans-serif */
-@font-face {
-  font-family: 'Nunito';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/nunito/nunito-latin-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Nunito';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/nunito/nunito-latin-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Nunito';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/nunito/nunito-latin-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Nunito';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/nunito/nunito-latin-700.woff2') format('woff2');
-}
-
-/* Orbitron - Futuristic display font */
-@font-face {
-  font-family: 'Orbitron';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/orbitron/orbitron-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Orbitron';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/orbitron/orbitron-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Orbitron';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/orbitron/orbitron-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Orbitron';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/orbitron/orbitron-700.woff2') format('woff2');
-}
-
-/* Rajdhani - Technical, angular sans-serif */
-@font-face {
-  font-family: 'Rajdhani';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/rajdhani/rajdhani-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Rajdhani';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/rajdhani/rajdhani-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Rajdhani';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/rajdhani/rajdhani-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Rajdhani';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/rajdhani/rajdhani-700.woff2') format('woff2');
-}
-
-/* Space Grotesk - Geometric sans with personality */
-@font-face {
-  font-family: 'Space Grotesk';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/space-grotesk/space-grotesk-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Space Grotesk';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/space-grotesk/space-grotesk-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Space Grotesk';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/space-grotesk/space-grotesk-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Space Grotesk';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/space-grotesk/space-grotesk-700.woff2') format('woff2');
-}
-
-/* Fira Code - Ligature-rich monospace */
-@font-face {
-  font-family: 'Fira Code';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/fira-code/fira-code-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Fira Code';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/fira-code/fira-code-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Fira Code';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/fira-code/fira-code-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Fira Code';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/fira-code/fira-code-700.woff2') format('woff2');
-}
-
-/* Quicksand - Rounded, friendly display */
-@font-face {
-  font-family: 'Quicksand';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/quicksand/quicksand-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Quicksand';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/quicksand/quicksand-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Quicksand';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/quicksand/quicksand-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Quicksand';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/quicksand/quicksand-700.woff2') format('woff2');
-}
-
-/* Source Sans 3 - Professional, readable */
-@font-face {
-  font-family: 'Source Sans 3';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/source-sans-3/source-sans-3-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Source Sans 3';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/source-sans-3/source-sans-3-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Source Sans 3';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/source-sans-3/source-sans-3-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Source Sans 3';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/source-sans-3/source-sans-3-700.woff2') format('woff2');
-}
-
-/* Source Code Pro - Adobe's monospace */
-@font-face {
-  font-family: 'Source Code Pro';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/source-code-pro/source-code-pro-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Source Code Pro';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/source-code-pro/source-code-pro-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Source Code Pro';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/source-code-pro/source-code-pro-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Source Code Pro';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/source-code-pro/source-code-pro-700.woff2') format('woff2');
-}
-
-/* Raleway - Elegant display */
-@font-face {
-  font-family: 'Raleway';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/raleway/raleway-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Raleway';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/raleway/raleway-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Raleway';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/raleway/raleway-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Raleway';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/raleway/raleway-700.woff2') format('woff2');
-}
-
-/* Poppins - Geometric, warm */
-@font-face {
-  font-family: 'Poppins';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/poppins/poppins-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Poppins';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/poppins/poppins-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Poppins';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/poppins/poppins-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Poppins';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/poppins/poppins-700.woff2') format('woff2');
-}
-
-/* Playfair Display - Elegant serif */
-@font-face {
-  font-family: 'Playfair Display';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/playfair-display/playfair-display-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Playfair Display';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/playfair-display/playfair-display-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Playfair Display';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/playfair-display/playfair-display-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Playfair Display';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/playfair-display/playfair-display-700.woff2') format('woff2');
-}
-
-/* IBM Plex Sans - Professional IBM design */
-@font-face {
-  font-family: 'IBM Plex Sans';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/ibm-plex-sans/ibm-plex-sans-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'IBM Plex Sans';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/ibm-plex-sans/ibm-plex-sans-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'IBM Plex Sans';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/ibm-plex-sans/ibm-plex-sans-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'IBM Plex Sans';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/ibm-plex-sans/ibm-plex-sans-700.woff2') format('woff2');
-}
-
-/* IBM Plex Mono - Professional monospace */
-@font-face {
-  font-family: 'IBM Plex Mono';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/ibm-plex-mono/ibm-plex-mono-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'IBM Plex Mono';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/ibm-plex-mono/ibm-plex-mono-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'IBM Plex Mono';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/ibm-plex-mono/ibm-plex-mono-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'IBM Plex Mono';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/ibm-plex-mono/ibm-plex-mono-700.woff2') format('woff2');
-}
-
-/* DM Sans - Geometric modern */
-@font-face {
-  font-family: 'DM Sans';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/dm-sans/dm-sans-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'DM Sans';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/dm-sans/dm-sans-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'DM Sans';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/dm-sans/dm-sans-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'DM Sans';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/dm-sans/dm-sans-700.woff2') format('woff2');
-}
-
-/* Exo 2 - Futuristic geometric */
-@font-face {
-  font-family: 'Exo 2';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/exo-2/exo-2-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Exo 2';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/exo-2/exo-2-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Exo 2';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/exo-2/exo-2-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Exo 2';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/exo-2/exo-2-700.woff2') format('woff2');
-}
-
-/* Press Start 2P - Retro pixel font */
-@font-face {
-  font-family: 'Press Start 2P';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/press-start-2p/press-start-2p-400.woff2') format('woff2');
-}
-
-/* Lora - Elegant editorial serif */
-@font-face {
-  font-family: 'Lora';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/lora/lora-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Lora';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/lora/lora-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Lora';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/lora/lora-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Lora';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/lora/lora-700.woff2') format('woff2');
-}
-
-/* Cormorant Garamond - Elegant display serif */
-@font-face {
-  font-family: 'Cormorant Garamond';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/cormorant-garamond/cormorant-garamond-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Cormorant Garamond';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/cormorant-garamond/cormorant-garamond-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Cormorant Garamond';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/cormorant-garamond/cormorant-garamond-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Cormorant Garamond';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/cormorant-garamond/cormorant-garamond-700.woff2') format('woff2');
-}
+/* Dark is a vibekit theme on <html> (data-theme), never a .dark class. */
+@custom-variant dark (&:is([data-theme="dark"] *));
 
 /* ============================================
-   CSS VARIABLES - THEME SYSTEM
+   COMPATIBILITY LAYER: shadcn token names -> vibekit tokens
+   The console keeps its shadcn names (bg-muted, text-muted-foreground, border-border ...) and
+   they read vibekit's --vk-* tokens, so every vibe and theme restyles the whole app without a
+   class change. Mapped deliberately, never renamed: in shadcn `muted`, `accent` and `secondary`
+   are BACKGROUND fills; in vibekit `muted` is a TEXT colour and `accent` the product colour.
+   Declared on every element with a look, so a nested vibe resolves its own values.
+   Decisions: src/lib/vibekit-notes.md.
    ============================================ */
+:root,
+[data-vibe] {
+  --font-sans: var(--vk-font-body);
+  --font-body: var(--vk-font-body);
+  --font-heading: var(--vk-font-display);
+  --font-mono: var(--vk-font-mono);
 
+  --radius: var(--vk-radius-md);
+
+  --background: var(--vk-color-bg);
+  --foreground: var(--vk-color-text);
+  --card: var(--vk-color-surface);
+  --card-foreground: var(--vk-color-text);
+  --popover: var(--vk-color-surface);
+  --popover-foreground: var(--vk-color-text);
+  /* Primary = the vibe's ink button; the product colour (cobalt) is `accent` in vibekit and is
+     reached through --brand / the ring and selection, not through shadcn's `accent` fill. */
+  --primary: var(--vk-color-primary);
+  --primary-foreground: var(--vk-color-primary-fg);
+  /* Fills: hover, zebra, chips. raised for neutral fills, accent-wash for a selected one. */
+  --secondary: var(--vk-color-raised);
+  --secondary-foreground: var(--vk-color-text);
+  --muted: var(--vk-color-raised);
+  --muted-foreground: var(--vk-color-muted);
+  --accent: var(--vk-color-accent-wash);
+  --accent-foreground: var(--vk-color-text);
+  --destructive: var(--vk-color-danger);
+  --destructive-foreground: var(--vk-color-danger-fg);
+  /* Lines: rule (the stronger of vibekit's two) keeps the console's 3:1 control borders. */
+  --border: var(--vk-color-line);
+  --input: var(--vk-color-rule);
+  --ring: var(--vk-color-accent);
+  --brand: var(--vk-color-accent);
+  --brand-foreground: var(--vk-color-accent-fg);
+  --brand-text: var(--vk-color-accent-text);
+  --chart-1: var(--vk-stage-1);
+  --chart-2: var(--vk-stage-2);
+  --chart-3: var(--vk-stage-3);
+  --chart-4: var(--vk-stage-4);
+  --chart-5: var(--vk-stage-5);
+  --sidebar: var(--vk-color-surface);
+  --sidebar-foreground: var(--vk-color-text);
+  --sidebar-primary: var(--vk-color-accent);
+  --sidebar-primary-foreground: var(--vk-color-accent-fg);
+  --sidebar-accent: var(--vk-color-accent-wash);
+  --sidebar-accent-foreground: var(--vk-color-text);
+  --sidebar-border: var(--vk-color-line);
+  --sidebar-ring: var(--vk-color-accent);
+
+  /* Fleet status: fixed meanings, from the vibe. */
+  --status-running: var(--vk-color-success);
+  --status-degraded: var(--vk-color-signal);
+  --status-starting: var(--ap-info);
+  --status-stopped: var(--vk-color-faint);
+  /* Quiet keeps its ink danger for buttons, but its mockups draw a failed STATE in red (--ap-danger). */
+  --ap-danger: var(--vk-color-danger);
+  --status-error: var(--ap-danger);
+  --status-sleeping: var(--ap-violet);
+  --status-unknown: var(--ap-warn);
+  /* Status as TEXT: the fills above are too light to read as words in some vibes. */
+  --status-running-text: var(--vk-color-success-text);
+  --status-degraded-text: var(--vk-color-signal-text);
+  --status-starting-text: var(--ap-info-text);
+  --status-stopped-text: var(--vk-color-muted);
+  --status-error-text: var(--ap-danger);
+  --status-sleeping-text: var(--ap-violet);
+  --status-unknown-text: var(--ap-warn-text);
+
+  /* Local tones vibekit has no token for (hexes from the approved mockups' --ap-* values).
+     Daylight is the default; Paper and Quiet below; Studio draws warnings with its signal. */
+  --ap-warn: #e0a21b;
+  --ap-warn-text: #7a5200;
+  --ap-warn-wash: #fff0c7;
+  --ap-info: #3f97bb;
+  --ap-info-text: #1f5f7a;
+  --ap-info-wash: #dcf1fa;
+  --ap-violet: #7c5cc4;
+}
+[data-theme="dark"] {
+  --ap-warn: #e0a21b;
+  --ap-warn-text: #f2c46a;
+  --ap-warn-wash: #3a2f14;
+  --ap-info: #5fb3d4;
+  --ap-info-text: #8fd0ea;
+  --ap-info-wash: #15303b;
+  --ap-violet: #a68cf0;
+}
+[data-vibe="paper"][data-theme="light"] {
+  --ap-warn: #8a5a06;
+  --ap-warn-text: #7d5205;
+  --ap-warn-wash: #f6ecd6;
+  --ap-info: #50607a;
+  --ap-info-text: #4a586f;
+  --ap-info-wash: #e9edf3;
+}
+[data-vibe="paper"][data-theme="dark"] {
+  --ap-warn: #c9963d;
+  --ap-warn-text: #d4a552;
+  --ap-warn-wash: #33291a;
+  --ap-info: #9aa8bf;
+  --ap-info-text: #a9b5c9;
+  --ap-info-wash: #262b33;
+}
+[data-vibe="studio"] {
+  --ap-warn: var(--vk-color-signal);
+  --ap-warn-text: var(--vk-color-signal-text);
+  --ap-warn-wash: var(--vk-color-signal-wash);
+  --ap-info: var(--vk-color-accent);
+  --ap-info-text: var(--vk-color-accent-text);
+  --ap-info-wash: var(--vk-color-accent-wash);
+}
+[data-vibe="studio"][data-theme="light"] {
+  /* Studio's blue-tinted ground: the default violet falls under 4.5:1 as text. */
+  --ap-violet: #6448b0;
+}
+[data-vibe="quiet"][data-theme="light"] {
+  --ap-danger: #b42318;
+  --ap-warn: #8a5300;
+  --ap-warn-text: #8a5300;
+  --ap-warn-wash: var(--vk-color-raised);
+  --ap-info: #1e3e66;
+  --ap-info-text: #1e3e66;
+  --ap-info-wash: var(--vk-color-raised);
+}
+[data-vibe="quiet"][data-theme="dark"] {
+  --ap-danger: #f2877c;
+  --ap-warn: #e3b55a;
+  --ap-warn-text: #e3b55a;
+  --ap-warn-wash: var(--vk-color-raised);
+  --ap-info: #9bbcf0;
+  --ap-info-text: #9bbcf0;
+  --ap-info-wash: var(--vk-color-raised);
+}
+/* Code (Shiki's css-variables theme, every code surface): token defaults for the first paint;
+   startWidgetColours() then writes contrast-checked hex on <html> (src/lib/utils/vk-colors.ts).
+   :root only, so a nested [data-vibe] inherits the written values. */
 :root {
-  /* Font family CSS variables - controlled by theme store */
-  --font-body: 'Inter';
-  --font-heading: 'Inter';
-  --font-mono: 'JetBrains Mono';
-  
-  --radius: 0.375rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.129 0.042 264.695);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.129 0.042 264.695);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.129 0.042 264.695);
-  --primary: oklch(0.208 0.042 265.755);
-  --primary-foreground: oklch(0.984 0.003 247.858);
-  --secondary: oklch(0.968 0.007 247.896);
-  --secondary-foreground: oklch(0.208 0.042 265.755);
-  --muted: oklch(0.968 0.007 247.896);
-  --muted-foreground: oklch(0.45 0.046 257.417);
-  --accent: oklch(0.968 0.007 247.896);
-  --accent-foreground: oklch(0.208 0.042 265.755);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.70 0.013 255.508);
-  --input: oklch(0.70 0.013 255.508);
-  --ring: oklch(0.50 0.04 256.788);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.984 0.003 247.858);
-  --sidebar-foreground: oklch(0.129 0.042 264.695);
-  --sidebar-primary: oklch(0.208 0.042 265.755);
-  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-accent: oklch(0.968 0.007 247.896);
-  --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
-  --sidebar-border: oklch(0.70 0.013 255.508);
-  --sidebar-ring: oklch(0.50 0.04 256.788);
-  /* Fleet status tokens — overridden per color scheme by the theme store */
-  --status-running: oklch(0.723 0.192 149.58);
-  --status-degraded: oklch(0.769 0.188 70.08);
-  --status-starting: oklch(0.715 0.143 215.221);
-  /* Fixed, not var(--muted-foreground): that token belongs to the active
-     colour scheme, so "stopped" was the one state a theme could still
-     recolour — under Cyberpunk it went near-black. Colour means state, and
-     that has to hold for the colourless state too. */
-  --status-stopped: oklch(0.554 0.021 264.36);
-  --status-error: oklch(0.577 0.245 27.325);
-  --status-sleeping: oklch(0.606 0.25 292.717);
-  --status-unknown: oklch(0.769 0.188 70.08);
+  --shiki-foreground: var(--vk-color-text);
+  --shiki-background: var(--vk-color-raised);
+  --shiki-token-comment: var(--vk-color-muted);
+  --shiki-token-keyword: var(--vk-color-accent-text);
+  --shiki-token-string: var(--vk-color-success-text);
+  --shiki-token-string-expression: var(--vk-color-success-text);
+  --shiki-token-constant: var(--vk-color-danger);
+  --shiki-token-function: var(--ap-violet);
+  --shiki-token-parameter: var(--vk-color-text);
+  --shiki-token-punctuation: var(--vk-color-muted);
+  --shiki-token-link: var(--vk-color-accent-text);
 }
-
-.dark {
-  --background: oklch(0.129 0.042 264.695);
-  --foreground: oklch(0.984 0.003 247.858);
-  --card: oklch(0.208 0.042 265.755);
-  --card-foreground: oklch(0.984 0.003 247.858);
-  --popover: oklch(0.208 0.042 265.755);
-  --popover-foreground: oklch(0.984 0.003 247.858);
-  --primary: oklch(0.929 0.013 255.508);
-  --primary-foreground: oklch(0.208 0.042 265.755);
-  --secondary: oklch(0.279 0.041 260.031);
-  --secondary-foreground: oklch(0.984 0.003 247.858);
-  --muted: oklch(0.279 0.041 260.031);
-  --muted-foreground: oklch(0.704 0.04 256.788);
-  --accent: oklch(0.279 0.041 260.031);
-  --accent-foreground: oklch(0.984 0.003 247.858);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.551 0.027 264.364);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.208 0.042 265.755);
-  --sidebar-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-accent: oklch(0.279 0.041 260.031);
-  --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.551 0.027 264.364);
-  --status-running: oklch(0.792 0.209 151.711);
-  --status-degraded: oklch(0.828 0.189 84.429);
-  --status-starting: oklch(0.789 0.154 211.53);
-  /* Fixed for the same reason as its light counterpart above. */
-  --status-stopped: oklch(0.646 0.019 264.36);
-  --status-error: oklch(0.704 0.191 22.216);
-  --status-sleeping: oklch(0.702 0.183 293.541);
-  --status-unknown: oklch(0.828 0.189 84.429);
-}
-
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* Radii follow the vibe (2px in Studio to 24px in Daylight). shadcn: md = controls, lg = cards,
+     xl = dialogs and sheets. */
+  --radius-sm: max(2px, calc(var(--vk-radius-sm) - 4px));
+  --radius-md: var(--vk-radius-sm);
+  --radius-lg: var(--vk-radius-md);
+  --radius-xl: var(--vk-radius-lg);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -743,6 +206,21 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-text: var(--brand-text);
+  /* vibekit's own tones, for the text and wash a status colour cannot carry (diffs, results). */
+  --color-success: var(--vk-color-success);
+  --color-success-text: var(--vk-color-success-text);
+  --color-success-wash: var(--vk-color-success-wash);
+  --color-danger-wash: var(--vk-color-danger-wash);
+  --color-warn: var(--ap-warn);
+  --color-warn-text: var(--ap-warn-text);
+  --color-warn-wash: var(--ap-warn-wash);
+  --color-info: var(--ap-info);
+  --color-info-text: var(--ap-info-text);
+  --color-info-wash: var(--ap-info-wash);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -779,17 +257,20 @@
      t-metric  big mono numbers (stat bands); pairs with <Metric> for cells
    ============================================ */
 @utility t-page {
+  font-family: var(--vk-font-display);
   font-size: 1.125rem;
   line-height: 1.4;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 @utility t-section {
+  font-family: var(--vk-font-display);
   font-size: 0.875rem;
   line-height: 1.4;
   font-weight: 600;
 }
 @utility t-body {
+  font-family: var(--vk-font-body);
   font-size: 0.875rem;
   line-height: 1.5;
   font-weight: 400;
@@ -801,7 +282,7 @@
   color: var(--muted-foreground);
 }
 @utility t-metric {
-  font-family: var(--font-mono), ui-monospace, monospace;
+  font-family: var(--vk-font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 1.5rem;
   line-height: 1.2;
@@ -812,19 +293,41 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* Touch-sized targets everywhere under 1024px and on a coarse pointer (the `touch` variant's
+     media): every control at least 44px, and a link that stands alone (a block, a row, a cell's
+     only content) too. Inline links in running text keep their line. :where() keeps this at zero
+     specificity, so a component's own touch: sizing still wins. The terminal's and the editor's
+     internals are theirs. e2e/sweep.mjs measures it. */
+  @media (max-width: 1023px), (pointer: coarse) {
+    :where(button, select, summary, [role="tab"], [role="button"], [role="menuitem"], [role="option"],
+      input:not([type="checkbox"], [type="radio"], [type="hidden"]), a.block, a.flex, a.inline-flex, a.inline-block, a.ap-node-link, td > a:only-child, .ap-tbl a):not(:where(.xterm, .monaco-editor) *) {
+      min-height: 44px;
+    }
+    :where(button, [role="button"], summary, [role="tab"]):not(:where(.xterm, .monaco-editor) *) {
+      min-width: 44px;
+    }
+    /* A radio or checkbox is hit through the label that wraps it. */
+    :where(label:has(> input[type="radio"], > input[type="checkbox"])) {
+      min-height: 44px;
+    }
+    :where(td > a:only-child, .ap-tbl a) {
+      display: inline-flex;
+      align-items: center;
+    }
+  }
   body {
     @apply bg-background text-foreground;
-    font-family: var(--font-body), system-ui, sans-serif;
+    font-family: var(--vk-font-body);
   }
   h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-heading), system-ui, sans-serif;
+    font-family: var(--vk-font-display);
   }
   code, pre, .font-mono {
-    font-family: var(--font-mono), ui-monospace, monospace;
+    font-family: var(--vk-font-mono);
   }
   /* Utility class for heading font on non-heading elements */
   .font-heading {
-    font-family: var(--font-heading), system-ui, sans-serif;
+    font-family: var(--vk-font-display);
   }
 }
 
@@ -848,8 +351,7 @@ nav,
 [data-slot="content"],
 [data-slot="sidebar"],
 [role="dialog"],
-[role="menu"],
-[data-radix-popper-content-wrapper] {
+[role="menu"] {
   transition:
     background-color 0.5s ease,
     background 0.5s ease,
@@ -879,7 +381,6 @@ nav,
   [data-slot="sidebar"],
   [role="dialog"],
   [role="menu"],
-  [data-radix-popper-content-wrapper],
   ::-webkit-scrollbar-track,
   ::-webkit-scrollbar-thumb {
     transition: none;
@@ -933,6 +434,9 @@ nav,
    instead of as the end. A mask, not an overlay: it fades whatever the strip
    sits on, in every theme, without a colour of its own. */
 .scroll-strip {
+  /* Never wider than its box: the strip scrolls, the page does not. */
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   -ms-overflow-style: none;
@@ -977,4 +481,33 @@ nav,
   @media (width >= 40rem) {
     padding-inline: 1.5rem;
   }
+}
+
+/* Status words use the readable text tone; dots, cells and borders keep the fill
+   (text-status-* is the class every status surface uses; unlayered so it wins). */
+.text-status-running { color: var(--status-running-text); }
+.text-status-degraded { color: var(--status-degraded-text); }
+.text-status-starting { color: var(--status-starting-text); }
+.text-status-stopped { color: var(--status-stopped-text); }
+.text-status-error { color: var(--status-error-text); }
+.text-status-sleeping { color: var(--status-sleeping-text); }
+.text-status-unknown { color: var(--status-unknown-text); }
+
+/* The touch floor for the product's own sized controls (unlayered, after the imported sheets, so
+   it beats their desktop min-heights at equal specificity): 44px under 1024px and on a coarse
+   pointer. e2e/sweep.mjs measures it. */
+@media (max-width: 1023px), (pointer: coarse) {
+  .ap-ftool [data-slot="button"], .ap-pbar [data-slot="button"], .ap-term-tool [data-slot="button"],
+  .ap-st-tabs [role="tab"], .ap-modes button, .ap-mdbar button, .ap-group-row button, .ap-ftree-row,
+  .ap-ftab, .ap-hub, [data-testid="roster-grouping"], .ap-tbl th button { min-height: 44px; }
+  .ap-term-tool [data-slot="button"] { min-width: 44px; }
+  .ap-term-search { height: 44px !important; }
+  :where([data-vibe="studio"]) .ap-cue, :where([data-vibe="studio"]) [data-testid="roster-filter"] { height: 44px; min-height: 44px; }
+  .ap-legend__item, .ap-atabs a, .ap-nh__back { min-height: 44px; min-width: 44px; justify-content: center; }
+  /* The fleet's state bar: Paper, Studio and Quiet draw it thin; the segments keep that look and
+     take a 44px hit area through a transparent border (the fill stops at the padding box). */
+  :where([data-vibe="paper"], [data-vibe="studio"], [data-vibe="quiet"]) .ap-sbar__seg { box-sizing: border-box; height: 44px; min-height: 44px; border-block: var(--ap-seg-pad) solid transparent !important; background-clip: padding-box; }
+  :where([data-vibe="paper"], [data-vibe="quiet"]) .ap-sbar__seg { --ap-seg-pad: 15px; }
+  :where([data-vibe="studio"]) .ap-sbar__seg { --ap-seg-pad: 8px; }
+  :where([data-vibe="quiet"]) .ap-sbar__track { height: 44px; border: 0; border-radius: 0; }
 }

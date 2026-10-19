@@ -190,3 +190,13 @@ test("a failed diff does not blank the file list", async () => {
   expect(getByTestId("changeset-file-src/a.ts")).toBeTruthy();
   expect(getByTestId("changeset-file-notes.md")).toBeTruthy();
 });
+
+test("the patch uses the one shared diff style (DiffLines), not a second code-block copy", async () => {
+  vi.spyOn(api, "changesetStatus").mockResolvedValue(DIRTY);
+  vi.spyOn(api, "changesetDiff").mockResolvedValue({ content: "@@ -1 +1 @@\n-one\n+two\n", truncated: false, binary: false });
+  const { getByTestId, container } = render(ChangesetPanel, { props: { stationId: "station_1" } });
+  await waitFor(() => getByTestId("changeset-file-src/a.ts"));
+  fireEvent.click(getByTestId("changeset-file-src/a.ts"));
+  await waitFor(() => expect(container.querySelector("[data-diff='added']")?.textContent).toContain("+two"));
+  expect(container.querySelector("[data-diff='removed']")?.textContent).toContain("-one");
+});

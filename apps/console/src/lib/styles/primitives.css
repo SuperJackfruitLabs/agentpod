@@ -1,0 +1,256 @@
+/* ============================================
+   PRIMITIVES ON VIBEKIT
+   The shadcn primitives keep their markup and Tailwind classes; these rules give them each
+   vibe's look (radius, borders, shadows, button tones, density), matching the AP2 mockup
+   boards (Dialogs, Settings, Agents states). Selectors hang off the primitives' data-slot
+   (and Button's data-variant), wrapped in :where() so they add no specificity.
+   Unlayered on purpose: they must outrank the primitives' own Tailwind utilities.
+   Only shape and tone are set here; spacing and layout stay with the caller.
+   Decisions: src/lib/vibekit-notes.md.
+   ============================================ */
+
+/* ---------- every vibe ---------- */
+:where([data-slot="button"]) {
+  font-family: var(--vk-font-body);
+  font-weight: 600;
+}
+:where([data-slot="button"][data-variant="default"]) {
+  background: var(--vk-color-accent);
+  color: var(--vk-color-accent-fg);
+}
+:where([data-slot="button"][data-variant="default"]):hover {
+  background: color-mix(in srgb, var(--vk-color-accent) 88%, var(--vk-color-text));
+}
+:where([data-slot="button"][data-variant="destructive"]) {
+  background: var(--vk-color-danger-wash);
+  color: var(--vk-color-danger);
+  box-shadow: inset 0 0 0 1px var(--vk-color-danger);
+}
+:where([data-slot="button"][data-variant="outline"]:not([class*="border-destructive"])) {
+  background: var(--vk-color-surface);
+  border-color: var(--vk-color-rule);
+}
+/* This sheet is unlayered, so it beats Tailwind utilities: leave out a field that asks for mono. */
+:where([data-slot="input"]:not(.font-mono), [data-slot="textarea"]:not(.font-mono), [data-slot="select-trigger"]:not(.font-mono)) {
+  font-family: inherit;
+}
+:where([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"]) {
+  background: var(--vk-color-surface);
+  border-color: var(--vk-color-rule);
+}
+:where([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"])[aria-invalid="true"] {
+  border-color: var(--vk-color-danger);
+}
+:where([data-slot="badge"]) {
+  font-family: var(--vk-font-body);
+  font-weight: 600;
+}
+:where([data-slot="card"]) {
+  background: var(--vk-color-surface);
+  border-color: var(--vk-color-line);
+}
+:where([data-slot="tabs-list"]) {
+  background: var(--vk-color-raised);
+}
+:where([data-slot="tabs-trigger"])[data-state="active"] {
+  background: var(--vk-color-surface);
+  color: var(--vk-color-text);
+}
+:where([data-slot="table"]) thead,
+:where([data-slot="table-head"]) {
+  color: var(--vk-color-muted);
+}
+:where([data-slot="table-row"]) {
+  border-color: var(--vk-color-line);
+}
+:where([data-slot="dialog-content"], [data-slot="sheet-content"]) {
+  background: var(--vk-color-surface);
+  color: var(--vk-color-text);
+}
+:where([data-slot="dialog-title"], [data-slot="sheet-title"]) {
+  font-family: var(--vk-font-display);
+  font-weight: 700;
+  font-size: 1.125rem;
+}
+:where([data-slot="dialog-overlay"], [data-slot="sheet-overlay"]) {
+  background: color-mix(in srgb, var(--vk-color-text) 40%, transparent);
+  backdrop-filter: none;
+}
+:where([data-slot="dropdown-menu-content"], [data-slot="popover-content"], [data-slot="select-content"], [data-slot="command"]) {
+  background: var(--vk-color-surface);
+  color: var(--vk-color-text);
+}
+:where([data-slot="dropdown-menu-item"], [data-slot="select-item"], [data-slot="command-item"])[data-highlighted],
+:where([data-slot="command-item"])[aria-selected="true"] {
+  background: var(--vk-color-accent-wash);
+  color: var(--vk-color-text);
+}
+:where([data-slot="tooltip-content"]) {
+  background: var(--vk-color-primary);
+  color: var(--vk-color-primary-fg);
+}
+:where([data-slot="skeleton"]) {
+  background: var(--vk-color-raised);
+}
+:where([data-slot="switch"])[data-state="checked"] {
+  background: var(--vk-color-accent);
+}
+:where([data-slot="switch"])[data-state="unchecked"] {
+  background: var(--vk-color-rule);
+}
+:where([data-slot="avatar"]) {
+  background: var(--vk-color-raised);
+}
+:where([data-slot="breadcrumb"]) {
+  color: var(--vk-color-muted);
+}
+:where([data-slot="separator"]) {
+  background: var(--vk-color-line);
+}
+
+/* Touch: the mockups' 44px targets under 1024px and on any coarse pointer
+   (breakpoints.ts: touch). Icon buttons get the width too. */
+@media (max-width: 1023px), (pointer: coarse) {
+  :where([data-slot="button"], [data-slot="input"], [data-slot="select-trigger"], [data-slot="tabs-trigger"], [role="tab"], [data-slot="command-item"], [data-slot="dropdown-menu-item"], [data-slot="select-item"]) {
+    min-height: var(--vk-target-min, 44px);
+  }
+  :where([data-slot="button"][data-size^="icon"]) {
+    min-width: var(--vk-target-min, 44px);
+  }
+}
+
+/* Phone dialogs: the footer stacks (primary on top, from flex-col-reverse)
+   and each action takes the full width. */
+@media (max-width: 639px) {
+  :where([data-slot="dialog-footer"]) > :where([data-slot="button"], button, a) {
+    width: 100%;
+  }
+}
+
+/* A bottom sheet's grab handle. */
+:where([data-slot="sheet-handle"]) {
+  flex: none; width: 44px; height: 5px; margin: 2px auto 10px; border-radius: 3px; background: var(--vk-color-line);
+}
+
+/* ---------- Daylight: soft, rounded, pill buttons with a lift ---------- */
+:where([data-vibe="daylight"]) :where([data-slot="button"]) {
+  border-radius: var(--vk-radius-pill);
+}
+:where([data-vibe="daylight"]) :where([data-slot="button"][data-variant="default"]) {
+  box-shadow: 0 var(--vk-lift, 2px) 0 var(--vk-color-ground);
+}
+:where([data-vibe="daylight"]) :where([data-slot="button"][data-variant="outline"]:not([class*="border-destructive"]), [data-slot="button"][data-variant="secondary"]) {
+  background: var(--vk-color-raised);
+  border-color: transparent;
+  box-shadow: inset 0 0 0 2px var(--vk-color-line);
+}
+:where([data-vibe="daylight"]) :where([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"]) {
+  border-radius: var(--vk-radius-md);
+  background: var(--vk-color-raised);
+  border-color: transparent;
+  box-shadow: inset 0 0 0 2px var(--vk-color-line);
+}
+:where([data-vibe="daylight"]) :where([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"])[aria-invalid="true"] {
+  box-shadow: inset 0 0 0 2px var(--vk-color-danger);
+}
+:where([data-vibe="daylight"]) :where([data-slot="card"]) {
+  border-radius: var(--vk-radius-lg);
+  border-color: transparent;
+  box-shadow: 0 1px 0 var(--vk-color-line), 0 12px 32px -20px var(--vk-color-ground);
+}
+:where([data-vibe="daylight"]) :where([data-slot="dialog-content"], [data-slot="dropdown-menu-content"], [data-slot="popover-content"], [data-slot="command"], [data-slot="select-content"]) {
+  border-radius: var(--vk-radius-lg);
+  box-shadow: 0 18px 48px -18px var(--vk-color-ground);
+  --tw-ring-color: transparent;
+}
+:where([data-vibe="daylight"]) :where([data-slot="badge"], [data-slot="tabs-list"], [data-slot="tabs-trigger"]) {
+  border-radius: var(--vk-radius-pill);
+}
+
+/* ---------- Paper: printed, hairline ink rules, small radius ---------- */
+:where([data-vibe="paper"]) :where([data-slot="button"], [data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"], [data-slot="badge"], [data-slot="tabs-list"], [data-slot="tabs-trigger"]) {
+  border-radius: var(--vk-radius-sm);
+}
+:where([data-vibe="paper"]) :where([data-slot="button"]) {
+  font-weight: 500;
+}
+:where([data-vibe="paper"]) :where([data-slot="button"][data-variant="outline"]:not([class*="border-destructive"]), [data-slot="button"][data-variant="secondary"]) {
+  border-color: var(--vk-color-text);
+}
+:where([data-vibe="paper"]) :where([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"]) {
+  background: var(--vk-color-bg);
+  border-color: var(--vk-color-line);
+}
+:where([data-vibe="paper"]) :where([data-slot="card"]) {
+  border-radius: var(--vk-radius-sm);
+  box-shadow: none;
+}
+:where([data-vibe="paper"]) :where([data-slot="dialog-content"], [data-slot="sheet-content"], [data-slot="dropdown-menu-content"], [data-slot="popover-content"], [data-slot="command"], [data-slot="select-content"]) {
+  border-radius: var(--vk-radius-sm);
+  border: 1px solid var(--vk-color-text);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.18);
+  --tw-ring-color: transparent;
+}
+:where([data-vibe="paper"]) :where([data-slot="dialog-title"], [data-slot="sheet-title"]) {
+  font-family: var(--vk-font-serif, var(--vk-font-display));
+  font-style: italic;
+  font-weight: 500;
+}
+
+/* ---------- Studio: an annual report, square, ink primary, dense ---------- */
+:where([data-vibe="studio"]) :where([data-slot="button"], [data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"], [data-slot="badge"], [data-slot="card"], [data-slot="tabs-list"], [data-slot="tabs-trigger"], [data-slot="dialog-content"], [data-slot="sheet-content"], [data-slot="dropdown-menu-content"], [data-slot="popover-content"], [data-slot="command"], [data-slot="select-content"]) {
+  border-radius: var(--vk-radius-sm);
+}
+:where([data-vibe="studio"]) :where([data-slot="button"][data-variant="default"]) {
+  background: var(--vk-color-primary);
+  color: var(--vk-color-primary-fg);
+}
+:where([data-vibe="studio"]) :where([data-slot="button"][data-variant="outline"]:not([class*="border-destructive"])) {
+  border-color: var(--vk-color-text);
+}
+:where([data-vibe="studio"]) :where([data-slot="card"]) {
+  box-shadow: none;
+  border-color: var(--vk-color-rule);
+}
+:where([data-vibe="studio"]) :where([data-slot="dialog-content"], [data-slot="sheet-content"], [data-slot="dropdown-menu-content"], [data-slot="popover-content"], [data-slot="command"], [data-slot="select-content"]) {
+  border: 1px solid var(--vk-color-rule);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--vk-color-text) 8%, transparent);
+  --tw-ring-color: transparent;
+}
+:where([data-vibe="studio"]) :where([data-slot="table-head"]) {
+  font-family: var(--vk-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.6875rem;
+}
+
+/* ---------- Quiet: plain, 2px ink outlines, no shadows ---------- */
+:where([data-vibe="quiet"]) :where([data-slot="button"], [data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"], [data-slot="badge"], [data-slot="tabs-list"], [data-slot="tabs-trigger"]) {
+  border-radius: var(--vk-radius-sm);
+}
+:where([data-vibe="quiet"]) :where([data-slot="button"]) {
+  font-weight: 700;
+}
+:where([data-vibe="quiet"]) :where([data-slot="button"][data-variant="default"]) {
+  background: var(--vk-color-primary);
+  color: var(--vk-color-primary-fg);
+}
+:where([data-vibe="quiet"]) :where([data-slot="button"][data-variant="outline"]:not([class*="border-destructive"]), [data-slot="button"][data-variant="secondary"], [data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"]) {
+  background: transparent;
+  border: 2px solid var(--vk-color-text);
+}
+:where([data-vibe="quiet"]) :where([data-slot="button"][data-variant="destructive"]) {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--vk-color-danger);
+}
+:where([data-vibe="quiet"]) :where([data-slot="card"]) {
+  border-radius: var(--vk-radius-md);
+  box-shadow: none;
+}
+:where([data-vibe="quiet"]) :where([data-slot="dialog-content"], [data-slot="sheet-content"], [data-slot="dropdown-menu-content"], [data-slot="popover-content"], [data-slot="command"], [data-slot="select-content"]) {
+  background: var(--vk-color-bg);
+  border: 2px solid var(--vk-color-text);
+  border-radius: var(--vk-radius-md);
+  box-shadow: none;
+  --tw-ring-color: transparent;
+}

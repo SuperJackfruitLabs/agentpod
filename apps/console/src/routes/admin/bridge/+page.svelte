@@ -159,9 +159,10 @@
 
 <PageHeader title="Admin" />
 
-<div class="page-width py-6 space-y-6">
+<div class="ap-page">
   <AdminTabs active="bridge" />
 
+  <section class="ap-card space-y-4" aria-label="Bridge">
   <div class="flex items-start justify-between gap-4">
     <p class="text-muted-foreground max-w-2xl text-sm leading-relaxed">
       Which agents claim work from a superpipeline board, and where that work runs. Changes take
@@ -173,14 +174,14 @@
   </div>
 
   {#if showForm}
-    <div class="bg-muted/30 space-y-4 rounded-lg border p-4">
+    <div class="ap-adm-form bg-muted/30 space-y-4 rounded-lg border p-4">
       <div class="grid gap-4 sm:grid-cols-2">
         <label class="space-y-1.5 text-sm">
           <span class="font-medium">Name</span>
           <input
             bind:value={fKey}
             placeholder="coder-kai"
-            class="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
+            class="ap-in border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
           />
           <span class="text-muted-foreground block text-xs">
             Appears in the ledger and every log line, so it must be unique.
@@ -192,7 +193,7 @@
           <input
             bind:value={fBoardId}
             placeholder="brd_6a899b0f0d054046"
-            class="border-input bg-background w-full rounded-md border px-3 py-2 font-mono text-sm"
+            class="ap-in border-input bg-background w-full rounded-md border px-3 py-2 font-mono text-sm"
           />
         </label>
 
@@ -201,7 +202,7 @@
           {#if stations.length > 0}
             <select
               bind:value={fStationId}
-              class="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
+              class="ap-in border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
             >
               <option value="" disabled>Choose a station…</option>
               {#each stations as s (s.id)}
@@ -212,7 +213,7 @@
             <input
               bind:value={fStationId}
               placeholder="station_…"
-              class="border-input bg-background w-full rounded-md border px-3 py-2 font-mono text-sm"
+              class="ap-in border-input bg-background w-full rounded-md border px-3 py-2 font-mono text-sm"
             />
             <span class="text-muted-foreground block text-xs">
               No stations could be listed, so this is a plain field. The hub still refuses one that
@@ -225,7 +226,7 @@
           <span class="font-medium">Permission mode</span>
           <select
             bind:value={fMode}
-            class="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
+            class="ap-in border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
           >
             <option value="full-auto">full-auto — never asks</option>
             <option value="accept-edits">accept-edits — auto-approves edits in the workspace</option>
@@ -252,7 +253,7 @@
             bind:value={fToken}
             type="password"
             placeholder="spa_…"
-            class="border-input bg-background w-full rounded-md border px-3 py-2 font-mono text-sm"
+            class="ap-in border-input bg-background w-full rounded-md border px-3 py-2 font-mono text-sm"
           />
           <span class="text-muted-foreground block text-xs">
             Stored encrypted. It cannot be read back — only replaced.
@@ -265,7 +266,7 @@
             bind:value={fMcpToken}
             type="password"
             placeholder="spa_…"
-            class="border-input bg-background w-full rounded-md border px-3 py-2 font-mono text-sm"
+            class="ap-in border-input bg-background w-full rounded-md border px-3 py-2 font-mono text-sm"
           />
           <span class="text-muted-foreground block text-xs">
             Lets the agent complete or block its own card. Mint it in superpipeline with
@@ -299,7 +300,7 @@
   {:else}
     <div class="space-y-2">
       {#each agents as a (a.key)}
-        <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
+        <div class="ap-brow flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
           <div class="min-w-0 space-y-1">
             <div class="flex items-center gap-2">
               <span class="font-medium">{a.key}</span>
@@ -332,6 +333,7 @@
       {/each}
     </div>
   {/if}
+</section>
 </div>
 
 <ConfirmDialog

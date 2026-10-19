@@ -35,18 +35,19 @@
   );
 </script>
 
-<div class="w-full">
+<div class="ap-sbar w-full">
   <div
     role="group"
     aria-label="Fleet state"
-    class="flex h-3 w-full overflow-hidden rounded-full bg-muted"
+    class="ap-sbar__track flex h-3 w-full overflow-hidden rounded-full bg-muted"
   >
     {#each segments as seg (seg.id)}
       <button
         type="button"
         title="{seg.info.label}: {seg.count}"
+        data-state={seg.id}
         class={cn(
-          "flex items-center justify-center overflow-hidden text-[10px] font-mono text-background transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground",
+          "ap-sbar__seg flex items-center justify-center overflow-hidden text-[10px] font-mono text-background transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground",
           STATE_BG_CLASS[seg.info.token],
         )}
         style="flex-basis: {seg.pct}%; flex-grow: 0; flex-shrink: 0;"
@@ -59,16 +60,17 @@
     {/each}
   </div>
 
-  <ul class="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+  <ul class="ap-legend mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
     {#each segments as seg (seg.id)}
       <li>
         <button
           type="button"
-          class="inline-flex items-center gap-1.5 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+          data-state={seg.id}
+          class="ap-legend__item inline-flex items-center gap-1.5 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
           onclick={() => onselect?.(seg.id)}
         >
           <StateDot state={seg.info} withLabel size="sm" />
-          <span class="font-mono text-xs text-muted-foreground">{seg.count}</span>
+          <span class="ap-legend__n font-mono text-xs text-muted-foreground">{seg.count}</span>
         </button>
       </li>
     {/each}

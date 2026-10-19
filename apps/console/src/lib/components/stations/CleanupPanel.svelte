@@ -104,7 +104,7 @@
   }
 </script>
 
-<div class="flex flex-col gap-4 p-4">
+<div class="ap-panel flex flex-col gap-4 p-4">
   <!-- Toolbar: Scan, total bytes, Apply — one row -->
   <div class="flex items-center gap-2">
     <Button size="sm" disabled={scanning} onclick={doScan}>
@@ -144,24 +144,25 @@
     {#if items.length === 0}
       <Empty title="Nothing to clean" />
     {:else}
-      <Card.Root class="overflow-hidden border-border/60">
+      <Card.Root class="ap-list overflow-hidden border-border/60">
         <ul class="divide-y divide-border/40">
           {#each items as item (item.path)}
             <li
-              class="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/40"
+              class="flex min-h-11 items-center gap-3 px-4 text-sm transition-colors hover:bg-muted/40"
             >
-              <input
-                type="checkbox"
-                id="cleanup-{item.path}"
-                aria-label={item.path}
-                checked={selected.has(item.path)}
-                onchange={() => toggleItem(item.path)}
-                class="h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary"
-              />
               <label
                 for="cleanup-{item.path}"
-                class="flex min-w-0 flex-1 cursor-pointer items-center justify-between gap-3"
+                class="flex min-w-0 flex-1 cursor-pointer items-center gap-3 self-stretch py-2.5"
               >
+                <input
+                  type="checkbox"
+                  id="cleanup-{item.path}"
+                  aria-label={item.path}
+                  checked={selected.has(item.path)}
+                  onchange={() => toggleItem(item.path)}
+                  class="h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary"
+                />
+                <span class="flex min-w-0 flex-1 items-center justify-between gap-3">
                 <span class="truncate font-mono text-xs text-foreground" title={item.path}>
                   {item.path}
                 </span>
@@ -172,6 +173,7 @@
                   <span class="font-mono text-xs tabular-nums text-muted-foreground">
                     {formatBytes(item.size)}
                   </span>
+                </span>
                 </span>
               </label>
             </li>

@@ -1,0 +1,126 @@
+/*
+ * The admin area, the command palette and the fleet dialogs per vibe. Measurements from the
+ * approved AP2 mockups (AP2-Admin-*, AP2-AdminStates-*, AP2-Dialogs-*). Unlayered like
+ * pages.css, so it outranks Tailwind utilities; per-vibe selectors in `:where()`.
+ *
+ * The classes: `.ap-guard` (the admin guard's states), `.ap-atabs` (AdminTabs), `.ap-notice`
+ * (the account-plane notice), `.ap-stats`/`.ap-stat` (AdminStats), `.ap-banner` (the grants
+ * enforcement banner, tone by `data-tone`), `.ap-brow` (a bridge roster row), `.ap-adm-form`
+ * (an admin add form), `.ap-pal` (the command palette dialog).
+ */
+
+/* ---------- guard ---------- */
+.ap-guard { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 60vh; padding: 24px 16px; text-align: center; }
+.ap-guard [data-slot="empty"], .ap-guard > div:not(.ap-alert) { background: none; }
+.ap-guard .ap-alert { text-align: left; }
+
+/* ---------- admin sections ---------- */
+.ap-atabs { display: flex; gap: 4px; min-width: 0; border-bottom: 0 !important; }
+.ap-atabs a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; margin: 0 !important; border: 0 !important; text-decoration: none; font-weight: 700; color: var(--vk-color-text); white-space: nowrap; }
+.ap-atabs a[aria-current="page"] { font-weight: 800; }
+
+:where([data-vibe="daylight"]) .ap-atabs { width: max-content; max-width: 100%; padding: 4px; border-radius: var(--vk-radius-pill); background: var(--vk-color-surface); box-shadow: 0 var(--vk-lift) 0 var(--vk-color-ground); }
+:where([data-vibe="daylight"]) .ap-atabs a { border-radius: var(--vk-radius-pill); padding: 0 18px; }
+:where([data-vibe="daylight"]) .ap-atabs a[aria-current="page"] { background: var(--vk-color-accent-wash); color: var(--vk-color-accent-text); box-shadow: inset 0 -3px 0 var(--vk-color-accent); }
+
+:where([data-vibe="paper"]) .ap-atabs { border-bottom: 1px solid var(--vk-color-text) !important; }
+:where([data-vibe="paper"]) .ap-atabs a { padding: 0 14px; font-weight: 400; font-size: 15px; color: var(--vk-color-muted); }
+:where([data-vibe="paper"]) .ap-atabs a[aria-current="page"] { color: var(--vk-color-text); font-weight: 600; font-style: italic; text-decoration: underline; text-underline-offset: 5px; box-shadow: inset 0 -3px 0 var(--vk-color-accent); }
+
+:where([data-vibe="studio"]) .ap-atabs { gap: 0; border-bottom: 1px solid var(--vk-color-rule) !important; }
+:where([data-vibe="studio"]) .ap-atabs a { padding: 0 14px; font: 600 13.5px var(--vk-font-body); color: var(--vk-color-muted); box-shadow: inset 0 -3px 0 transparent; }
+:where([data-vibe="studio"]) .ap-atabs a[aria-current="page"] { color: var(--vk-color-text); font-weight: 800; box-shadow: inset 0 -3px 0 var(--vk-color-accent); }
+
+:where([data-vibe="quiet"]) .ap-atabs { flex-wrap: wrap; gap: 0 24px; border-bottom: 1px solid var(--vk-color-line) !important; }
+:where([data-vibe="quiet"]) .ap-atabs a { padding: 0; font-weight: 400; text-decoration: underline; text-underline-offset: 3px; }
+:where([data-vibe="quiet"]) .ap-atabs a[aria-current="page"] { font-weight: 700; text-decoration: none; box-shadow: inset 0 -3px 0 var(--vk-color-text); }
+
+/* ---------- the account-plane notice ---------- */
+.ap-notice { padding: 18px 20px !important; border: 0 !important; border-radius: var(--vk-radius-md) !important; background: var(--vk-color-raised) !important; box-shadow: inset 0 0 0 2px var(--vk-color-line); font-size: 1rem !important; font-weight: 600; }
+.ap-notice p { color: var(--vk-color-text) !important; }
+.ap-notice a { color: var(--vk-color-accent-text) !important; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
+/* Daylight dark: the accent text on the raised notice falls under 4.5:1 (axe); ink, still underlined. */
+:where([data-vibe="daylight"][data-theme="dark"]) .ap-notice a { color: var(--vk-color-text) !important; }
+:where([data-vibe="paper"]) .ap-notice { border-radius: var(--vk-radius-sm) !important; background: var(--vk-color-surface) !important; box-shadow: inset 0 0 0 1px var(--vk-color-line); font: 400 19px/1.45 var(--vk-font-display) !important; }
+:where([data-vibe="studio"]) .ap-notice { border-radius: 0 !important; background: var(--vk-color-surface) !important; box-shadow: inset 0 0 0 1px var(--vk-color-line); border-left: 6px solid var(--vk-color-text) !important; }
+:where([data-vibe="quiet"]) .ap-notice { border: 1px solid var(--vk-color-line) !important; border-radius: var(--vk-radius-sm) !important; background: var(--vk-color-surface) !important; box-shadow: none; font-weight: 400; }
+
+/* ---------- stats ---------- */
+.ap-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; }
+.ap-stat { min-width: 0; padding: 14px 16px; border-radius: var(--vk-radius-md); background: var(--vk-color-raised); }
+.ap-stat dt { font-size: .875rem; font-weight: 700; color: var(--vk-color-muted); }
+.ap-stat dd { margin: 0; font: 800 1.5rem/1.2 var(--vk-font-mono); color: var(--vk-color-text); }
+.ap-stat[data-tone="accent"] dd { color: var(--vk-color-accent-text); }
+.ap-stat[data-tone="danger"] dd { color: var(--status-error-text); }
+:where([data-vibe="paper"]) .ap-stat { border-radius: var(--vk-radius-sm); background: none; box-shadow: inset 0 0 0 1px var(--vk-color-line); }
+:where([data-vibe="studio"]) .ap-stat { border-radius: 0; background: none; box-shadow: inset 0 0 0 1px var(--vk-color-line); }
+:where([data-vibe="studio"]) .ap-stat dt { font: 700 11px var(--vk-font-body); letter-spacing: .1em; text-transform: uppercase; }
+:where([data-vibe="studio"]) .ap-stat dd { font-size: 2rem; }
+:where([data-vibe="quiet"]) .ap-stat { border-radius: 0; background: none; padding: 0 0 8px; border-bottom: 1px solid var(--vk-color-line); }
+@media (max-width: 700px) { .ap-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---------- grants enforcement banner ---------- */
+.ap-banner { border: 0 !important; border-radius: var(--vk-radius-md) !important; padding: 14px 16px !important; font-weight: 600; }
+.ap-banner[data-tone="ok"] { background: var(--vk-color-success-wash) !important; box-shadow: inset 0 0 0 2px var(--vk-color-success); }
+.ap-banner[data-tone="warn"] { background: var(--ap-warn-wash) !important; box-shadow: inset 0 0 0 2px var(--ap-warn); }
+.ap-banner[data-tone="ok"] p:first-child { color: var(--vk-color-success-text); }
+.ap-banner[data-tone="warn"] p:first-child { color: var(--ap-warn-text); }
+:where([data-vibe="paper"]) .ap-banner { border-radius: var(--vk-radius-sm) !important; }
+:where([data-vibe="studio"]) .ap-banner, :where([data-vibe="quiet"]) .ap-banner { border-radius: 0 !important; background: var(--vk-color-surface) !important; box-shadow: inset 0 0 0 1px var(--vk-color-line); border-left: 6px solid var(--vk-color-text) !important; }
+
+/* ---------- bridge roster and admin forms ---------- */
+.ap-brow { padding: 16px 18px !important; border: 0 !important; border-radius: var(--vk-radius-md) !important; background: var(--vk-color-raised); }
+.ap-adm-form { padding: 20px !important; border: 0 !important; border-radius: var(--vk-radius-md) !important; background: var(--vk-color-raised); }
+:where([data-vibe="paper"]) .ap-brow, :where([data-vibe="studio"]) .ap-brow, :where([data-vibe="quiet"]) .ap-brow { padding: 16px 0 !important; border-radius: 0 !important; background: none; border-bottom: 1px solid var(--vk-color-line) !important; }
+:where([data-vibe="paper"]) .ap-adm-form { border-radius: var(--vk-radius-sm) !important; background: var(--vk-color-surface); box-shadow: inset 0 0 0 1px var(--vk-color-line); }
+:where([data-vibe="studio"]) .ap-adm-form { border-radius: 0 !important; background: var(--vk-color-surface); box-shadow: inset 0 0 0 1px var(--vk-color-line); }
+:where([data-vibe="quiet"]) .ap-adm-form { border-radius: 0 !important; background: none; padding: 16px 0 !important; border-block: 1px solid var(--vk-color-line) !important; }
+
+/* ---------- command palette ---------- */
+.ap-pal { max-width: 640px !important; padding: 0 !important; }
+/* Phone: the palette spans the screen, docked at the top. */
+@media (max-width: 639px) {
+  .ap-pal { width: 100% !important; max-width: 100% !important; top: 0 !important; translate: -50% 0 !important; border-radius: 0 0 var(--vk-radius-lg) var(--vk-radius-lg) !important; }
+}
+.ap-pal [data-slot="command"] { border-radius: inherit; box-shadow: none !important; border: 0 !important; background: transparent; }
+.ap-pal [data-slot="command-input-wrapper"] { padding: 0; border-bottom: 2px solid var(--vk-color-line); }
+.ap-pal [data-slot="command-input-wrapper"] [data-slot="input-group"] { height: 56px !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; padding-inline: 12px; }
+.ap-pal [data-slot="command-input"] { font-size: 16px; }
+.ap-pal [data-slot="command-group"] { padding: 0 0 4px; }
+.ap-pal [data-command-group-heading] { padding: 10px 20px 4px !important; font: 800 .75rem/1 var(--vk-font-body) !important; letter-spacing: .08em; text-transform: uppercase; color: var(--vk-color-muted) !important; }
+.ap-pal [data-slot="command-item"] { min-height: 44px; padding: 0 20px; border-radius: 0 !important; gap: 10px; }
+.ap-pal [data-slot="command-item"][aria-selected="true"] { background: var(--vk-color-accent-wash) !important; color: var(--vk-color-text); box-shadow: inset 3px 0 0 var(--vk-color-accent); }
+.ap-pal [data-slot="command-shortcut"] { font: 500 12px var(--vk-font-mono); letter-spacing: 0; color: var(--vk-color-muted); }
+.ap-pal [data-slot="command-shortcut"].text-status-error { color: var(--status-error-text); font-weight: 700; }
+.ap-pal [data-slot="command-separator"] { display: none; }
+.ap-pal [data-slot="command-empty"] { padding: 16px 20px; text-align: left; color: var(--vk-color-muted); }
+
+:where([data-vibe="paper"]) .ap-pal { border: 1px solid var(--vk-color-text) !important; border-radius: var(--vk-radius-sm) !important; }
+:where([data-vibe="paper"]) .ap-pal [data-slot="command-input-wrapper"] { border-bottom: 1px solid var(--vk-color-text); }
+:where([data-vibe="paper"]) .ap-pal [data-slot="command-input"] { font: 400 19px/1 var(--vk-font-display); }
+:where([data-vibe="paper"]) .ap-pal [data-command-group-heading] { font: 400 15px/1 var(--vk-font-body) !important; font-variant-caps: all-small-caps; text-transform: none; letter-spacing: .12em; padding-inline: 18px !important; }
+:where([data-vibe="paper"]) .ap-pal [data-slot="command-item"] { padding: 0 18px; font-size: 15px; }
+
+:where([data-vibe="studio"]) .ap-pal { border-radius: 0 !important; background: var(--vk-color-bg) !important; box-shadow: inset 0 0 0 1.5px var(--vk-color-rule), 8px 8px 0 var(--vk-color-line) !important; }
+:where([data-vibe="studio"]) .ap-pal [data-slot="command-input-wrapper"] { border-bottom: 1.5px solid var(--vk-color-rule); }
+:where([data-vibe="studio"]) .ap-pal [data-slot="command-input-wrapper"] [data-slot="input-group"] { height: 54px !important; }
+:where([data-vibe="studio"]) .ap-pal [data-slot="command-input"] { font-size: 17px; }
+:where([data-vibe="studio"]) .ap-pal [data-command-group-heading] { padding: 12px 16px 4px !important; font: 700 11px var(--vk-font-body) !important; letter-spacing: .12em; }
+:where([data-vibe="studio"]) .ap-pal [data-slot="command-item"] { padding: 0 16px; font: 600 14px var(--vk-font-body); }
+:where([data-vibe="studio"]) .ap-pal [data-slot="command-shortcut"].text-status-error { color: var(--vk-color-signal-text, var(--status-error-text)); }
+
+:where([data-vibe="quiet"]) .ap-pal [data-slot="command-input-wrapper"] { border-bottom: 2px solid var(--vk-color-text); }
+:where([data-vibe="quiet"]) .ap-pal [data-slot="command-input-wrapper"] [data-slot="input-group"] { height: 52px !important; }
+:where([data-vibe="quiet"]) .ap-pal [data-command-group-heading] { font: 700 .9375rem/1 var(--vk-font-body) !important; text-transform: none; letter-spacing: 0; padding: 10px 10px 2px !important; }
+:where([data-vibe="quiet"]) .ap-pal [data-slot="command-item"] { padding: 0 10px; font-size: 1rem; }
+:where([data-vibe="quiet"]) .ap-pal [data-slot="command-item"][aria-selected="true"] { background: var(--vk-color-surface) !important; box-shadow: inset 4px 0 0 var(--vk-color-accent); font-weight: 700; }
+:where([data-vibe="quiet"]) .ap-pal [data-slot="command-shortcut"] { font: 400 .9375rem var(--vk-font-body); }
+
+/* ---------- the bridge form's plain fields (same look as Input) ---------- */
+.ap-in { min-height: 44px; border: 0 !important; border-radius: var(--vk-radius-md) !important; background: var(--vk-color-surface) !important; font-size: 16px !important; box-shadow: inset 0 0 0 2px var(--vk-color-line); }
+.ap-in:focus-visible { outline: none; box-shadow: var(--vk-focus, 0 0 0 3px var(--vk-color-accent)); }
+:where([data-vibe="paper"]) .ap-in { border-radius: var(--vk-radius-sm) !important; box-shadow: inset 0 0 0 1px var(--vk-color-rule); }
+:where([data-vibe="studio"]) .ap-in { border-radius: 0 !important; box-shadow: inset 0 0 0 1.5px var(--vk-color-rule); }
+:where([data-vibe="quiet"]) .ap-in { border-radius: var(--vk-radius-sm) !important; box-shadow: inset 0 0 0 2px var(--vk-color-text); }
+.ap-brow.ap-brow { border-width: 0; }
+.ap-card .ap-brow:last-child { border-bottom: 0 !important; }

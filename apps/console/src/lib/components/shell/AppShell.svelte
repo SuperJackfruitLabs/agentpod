@@ -16,6 +16,9 @@
   import AttentionLane from "./AttentionLane.svelte";
   import RosterRail from "./RosterRail.svelte";
   import TopBar from "./TopBar.svelte";
+  import Navigation from "./Navigation.svelte";
+  import PhoneBar from "./PhoneBar.svelte";
+  import { appearance } from "$lib/appearance.svelte";
 
   interface Props {
     children?: Snippet;
@@ -57,11 +60,24 @@
   capped shell is what makes inner panes (file tree, logs, terminal) scroll in
   place instead of scrolling the document.
 -->
+<!--
+  The head is one grid row: the top bar and the navigation. In Daylight it carries the sky (the
+  sun-aware gradient, phase from the appearance store). In Studio shell.css turns it into
+  display:contents so the navigation becomes the ink rail down the left of every row.
+-->
 <div
   data-testid="app-shell"
-  class="grid h-screen grid-cols-[minmax(0,1fr)] grid-rows-[46px_auto_1fr] overflow-hidden max-[900px]:grid-rows-[52px_auto_1fr] bg-background text-foreground"
+  class="ap-shell grid h-screen grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-background text-foreground"
 >
-  <TopBar onToggleRoster={() => (view = view === "roster" ? "stage" : "roster")} />
+  <div
+    data-testid="shell-head"
+    class={cn("ap-head", appearance.value.vibe === "daylight" && "vk-sky")}
+    data-phase={appearance.phase}
+  >
+    {#if appearance.value.vibe === "daylight"}<div class="vk-sky__sun" aria-hidden="true"></div>{/if}
+    <TopBar onToggleRoster={() => (view = view === "roster" ? "stage" : "roster")} />
+    <div class="ap-head__nav phone:hidden"><Navigation /></div>
+  </div>
 
   <AttentionLane {items} />
 
@@ -69,13 +85,13 @@
   <div
     data-testid="shell-columns"
     class={cn(
-      "grid min-h-0 grid-cols-[minmax(0,1fr)] min-[901px]:grid-cols-[272px_1fr]",
+      "ap-cols grid min-h-0 grid-cols-[minmax(0,1fr)] min-[901px]:grid-cols-[272px_1fr]",
       contextRail && "min-[1241px]:grid-cols-[272px_1fr_320px]",
     )}
   >
     <!--
       Shown/hidden with the SAME min-[901px] the columns switch on: Tailwind's
-      max-[900px] compiles to `not all and (min-width:900px)`, which is
+      a max-[N] variant compiles to an exclusive `not all and (min-width: N)`, which is
       exclusive, so pairing it with min-[901px] leaves exactly 900px in a
       one-column grid with the roster still in it, stacked above the stage.
       The display class is picked by the ternary rather than layered, because
@@ -87,7 +103,7 @@
     <div
       data-testid="roster-rail"
       class={cn(
-        "min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-card",
+        "ap-roster min-h-0 min-w-0 flex-col overflow-hidden",
         view === "stage" ? "hidden min-[901px]:flex" : "flex",
       )}
     >
@@ -97,7 +113,7 @@
     <div
       data-testid="stage"
       class={cn(
-        "min-h-0 min-w-0 flex-col overflow-hidden",
+        "ap-stage min-h-0 min-w-0 flex-col overflow-hidden",
         view === "roster" ? "hidden min-[901px]:flex" : "flex",
       )}
     >
@@ -111,10 +127,13 @@
     {#if contextRail}
       <aside
         data-testid="context-rail"
-        class="hidden min-w-0 overflow-y-auto border-l border-border bg-card min-[1241px]:block"
+        class="ap-context hidden min-w-0 overflow-y-auto min-[1241px]:block"
       >
         {@render contextRail()}
       </aside>
     {/if}
   </div>
+
+  <!-- Under 900px the navigation is this bar (Fleet, Agents, Activity, More). -->
+  <div data-testid="phone-slot" class="ap-phone min-[901px]:hidden"><PhoneBar /></div>
 </div>

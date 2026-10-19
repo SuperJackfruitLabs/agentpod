@@ -3,7 +3,7 @@
   import { createTerminalClient } from "$lib/api/terminal";
   import { socketToken } from "$lib/api/client";
   import type { TerminalClient, TerminalCloseReason } from "$lib/api/terminal";
-  import { themeStore } from "$lib/themes/store.svelte";
+  import { mix, onAppearanceChange, terminalTheme, tokenHex } from "$lib/utils/vk-colors";
   import { Button } from "$lib/components/ui/button";
   import { cn } from "$lib/utils";
   import { Status as StatusIndicator } from "$lib/components/ui/status";
@@ -53,80 +53,43 @@
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let searchAddon: any = null;
 
-  // ── Theme-aware palette ────────────────────────────────────────────────────
-  // Reads live design tokens rather than hardcoding hex so the terminal follows
-  // whichever colour scheme / light-dark mode is active.
+  // ── Palette from the vibe ──────────────────────────────────────────────
+  // xterm needs hex: terminalTheme() reads the live vibekit tokens (16 ANSI colours,
+  // each readable on the vibe's ground). It repaints whenever <html>'s vibe or theme
+  // changes, including a change that lands inside a view transition.
   function computeXtermTheme() {
-    const styles = getComputedStyle(document.documentElement);
-    const background = styles.getPropertyValue("--background").trim();
-    const foreground = styles.getPropertyValue("--foreground").trim();
-    const primary = styles.getPropertyValue("--primary").trim();
-    const mutedForeground = styles.getPropertyValue("--muted-foreground").trim();
-    return {
-      background,
-      foreground,
-      cursor: foreground,
-      cursorAccent: background,
-      selectionBackground: `color-mix(in oklab, ${primary} 35%, transparent)`,
-      selectionForeground: mutedForeground,
-    };
+    return terminalTheme();
   }
 
-  // Recomputes the xterm theme whenever the resolved mode or active colour
-  // scheme changes, so switching themes re-paints the live terminal.
-  $effect(() => {
-    const _mode = themeStore.resolvedMode;
-    const _scheme = themeStore.colorSchemeId;
+  $effect(() => onAppearanceChange(() => {
     if (term) {
       term.options.theme = computeXtermTheme();
+      term.options.fontFamily = monoStack();
+      fitAddon?.fit();
     }
-  });
+  }));
 
-  // Follow font-pairing switches too: re-resolve the concrete mono stack
-  // (xterm can't read CSS variables) and refit to the new cell metrics.
-  $effect(() => {
-    const _font = themeStore.fontPairingId;
-    if (term) {
-      const themeMono = getComputedStyle(document.documentElement)
-        .getPropertyValue("--font-mono")
-        .trim();
-      if (themeMono) {
-        term.options.fontFamily = `${themeMono}, ui-monospace, Menlo, monospace`;
-        fitAddon?.fit();
-      }
-    }
-  });
-
-  // Converts a CSS custom property (possibly oklch/etc.) to #rrggbb by letting
-  // the canvas 2D context resolve it — the search addon's decoration colours
-  // require hex, but we still want them theme-derived rather than hardcoded.
-  function cssVarToHex(varName: string): string | null {
-    if (typeof document === "undefined") return null;
-    const value = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-    if (!value) return null;
-    const canvas = document.createElement("canvas");
-    canvas.width = 1;
-    canvas.height = 1;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.fillStyle = value;
-    ctx.fillRect(0, 0, 1, 1);
-    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
-    const hex = (n: number) => n.toString(16).padStart(2, "0");
-    return `#${hex(r)}${hex(g)}${hex(b)}`;
+  // Each vibe has its own mono font: xterm can't read CSS variables, so resolve
+  // the concrete stack (and refit, above, when the vibe changes).
+  function monoStack(): string {
+    const themeMono = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim();
+    return [themeMono || null, "ui-monospace, 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace"]
+      .filter(Boolean)
+      .join(", ");
   }
 
+  // The search addon's decorations need hex: the vibe's signal for matches, its accent for the active one.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function buildSearchOptions(): any {
-    const match = cssVarToHex("--chart-4");
-    const active = cssVarToHex("--primary");
+    const match = tokenHex("signal-wash") || tokenHex("signal");
+    const active = tokenHex("accent");
     if (!match || !active) return {};
     return {
       decorations: {
         matchBackground: match,
-        matchBorder: match,
-        matchOverviewRuler: match,
-        activeMatchBackground: active,
+        matchBorder: tokenHex("signal") || match,
+        matchOverviewRuler: tokenHex("signal") || match,
+        activeMatchBackground: mix(match, active, 0.5),
         activeMatchBorder: active,
         activeMatchColorOverviewRuler: active,
       },
@@ -303,12 +266,7 @@
       const themeMono = getComputedStyle(document.documentElement)
         .getPropertyValue("--font-mono")
         .trim();
-      const fontFamily = [
-        themeMono || null,
-        "ui-monospace, 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace",
-      ]
-        .filter(Boolean)
-        .join(", ");
+      const fontFamily = monoStack();
       try {
         await Promise.race([
           document.fonts.load(`13px ${themeMono.split(",")[0] ?? "monospace"}`),
@@ -405,13 +363,13 @@
      Escape/⌘F bubbling up from focus already inside this component -->
 <div
   class={cn(
-    "flex flex-col rounded-lg border bg-background",
+    "ap-term flex flex-col rounded-lg border bg-background",
     fullscreen ? "fixed inset-0 z-50 p-2" : "h-full min-h-[200px]",
   )}
   onkeydown={handleRootKeydown}
 >
   <!-- Toolbar -->
-  <div class="flex flex-wrap items-center gap-2 border-b px-3 py-1.5 shrink-0">
+  <div class="ap-term-tool flex flex-wrap items-center gap-2 border-b px-3 py-1.5 shrink-0">
     <span role="status" aria-live="polite" class="inline-flex shrink-0">
       <StatusIndicator
         form="dot"
@@ -441,7 +399,7 @@
         placeholder="Search terminal…"
         bind:value={searchQuery}
         onkeydown={handleSearchKeydown}
-        class="h-6 w-full rounded-md border bg-transparent py-1 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
+        class="ap-term-search h-6 w-full rounded-md border bg-transparent py-1 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
         aria-label="Search terminal"
       />
     </div>
@@ -475,7 +433,7 @@
   <!-- xterm.js mount point -->
   <div
     bind:this={containerEl}
-    class="flex-1 overflow-hidden p-1"
+    class="ap-term-screen flex-1 overflow-hidden p-1"
     style="min-height:0"
     oncontextmenu={handlePasteContextMenu}
   ></div>

@@ -65,35 +65,32 @@
 </script>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
-  <Dialog.Portal>
-    <Dialog.Overlay />
-    <Dialog.Content showCloseButton={false}>
-      <Dialog.Header>
-        <Dialog.Title>Ban user</Dialog.Title>
-        <Dialog.Description>
-          Ban {user?.email}? They will be logged out and unable to access the platform.
-        </Dialog.Description>
-      </Dialog.Header>
+  <Dialog.Content showCloseButton={false}>
+    <Dialog.Header>
+      <Dialog.Title>Ban user</Dialog.Title>
+      <Dialog.Description>
+        Ban {user?.email}? They will be logged out and unable to access the platform.
+      </Dialog.Description>
+    </Dialog.Header>
 
-      <div class="space-y-2 py-2">
-        <Label for="ban-reason">Reason (required)</Label>
-        <Textarea
-          id="ban-reason"
-          bind:value={reason}
-          placeholder="Enter the reason for banning this user..."
-          disabled={isBanning}
-          class="w-full"
-        />
-      </div>
+    <div class="space-y-2 py-2">
+      <Label for="ban-reason">Reason (required)</Label>
+      <Textarea
+        id="ban-reason"
+        bind:value={reason}
+        placeholder="Enter the reason for banning this user..."
+        disabled={isBanning}
+        class="w-full"
+      />
+    </div>
 
-      <Dialog.Footer>
-        <Button variant="outline" onclick={() => (open = false)} disabled={isBanning}>
-          Cancel
-        </Button>
-        <Button variant="destructive" onclick={handleConfirm} disabled={isBanning || !reason.trim()}>
-          {isBanning ? "Banning…" : "Ban user"}
-        </Button>
-      </Dialog.Footer>
-    </Dialog.Content>
-  </Dialog.Portal>
+    <Dialog.Footer>
+      <Button variant="outline" onclick={() => (open = false)} disabled={isBanning}>
+        Cancel
+      </Button>
+      <Button variant="destructive" onclick={handleConfirm} disabled={isBanning || !reason.trim()}>
+        {isBanning ? "Banning…" : "Ban user"}
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
 </Dialog.Root>

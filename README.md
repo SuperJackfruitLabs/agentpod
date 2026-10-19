@@ -107,7 +107,9 @@ hub URL; it is embedded at build time:
 PUBLIC_HUB_URL=https://hub.example.com pnpm --filter @agentpod/console build
 ```
 
-The output is `apps/console/build/`. Serve it on a same-site custom domain such as
+The build needs Node 22 or newer (the console is built on the vendored vibekit design system,
+see [`apps/console/vendor/README.md`](apps/console/vendor/README.md)); there are no other build
+variables. The output is `apps/console/build/`. Serve it on a same-site custom domain such as
 `console.example.com` and configure the hub's allowed origins and cookie settings. A raw
 `*.pages.dev` preview is not interchangeable with that authenticated deployment.
 
@@ -123,6 +125,16 @@ Run these commands from the repository root:
 pnpm --filter @agentpod/console check
 pnpm --filter @agentpod/console test
 pnpm --filter @agentpod/console build
+```
+
+The console also has an accessibility and overflow sweep against a stubbed hub (axe-core, no
+horizontal scroll, no console errors, 44px touch targets under 1024px). It is not part of
+`pnpm test`; it needs a build and an already installed Playwright Chromium:
+
+```bash
+cd apps/console
+PUBLIC_HUB_URL=https://hub.agentpod.dev pnpm build
+pnpm e2e:sweep --vibes=daylight   # or paper, studio, quiet; --only=fleet,agents; --detail
 ```
 
 Hub tests need the separate pgvector test database described in [TESTING.md](TESTING.md),

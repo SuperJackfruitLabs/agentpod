@@ -571,3 +571,25 @@ test("a long statusReason wraps inside the table rather than widening it", async
   // never drags the document sideways.
   expect(getByTestId("runtimes-table-scroller").className).toContain("overflow-x-auto");
 });
+
+test("under 768px each runtime is a card, and the section drops its own card", async () => {
+  const { expectCardTable } = await import("$lib/test-utils/viewport");
+  vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
+  const { container, getAllByTestId } = render(RuntimesPage);
+  await waitFor(() => expect(getAllByTestId("runtime-row").length).toBeGreaterThan(0));
+  expectCardTable(container.querySelector("table"));
+  expect(container.querySelector("section.ap-card--cards")).not.toBeNull();
+});
+
+test.each([360, 390])("at %ipx nothing on the runtimes page is wider than the screen", async (width) => {
+  const { setViewport, expectNoOverflow } = await import("$lib/test-utils/viewport");
+  const restore = setViewport(width);
+  try {
+    vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
+    const { container, getAllByTestId } = render(RuntimesPage);
+    await waitFor(() => expect(getAllByTestId("runtime-row").length).toBeGreaterThan(0));
+    expectNoOverflow(container, width);
+  } finally {
+    restore();
+  }
+});

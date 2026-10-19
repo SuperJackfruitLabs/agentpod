@@ -4,6 +4,8 @@
   import { onMount } from "svelte";
   import { toast } from "svelte-sonner";
   import { getUser, unbanUser } from "$lib/api/admin";
+  import { managedByPlaneUrl } from "$lib/api/http-error";
+  import ManagedByPlane from "$lib/components/org-plane/ManagedByPlane.svelte";
   import type { AdminUserView } from "@agentpod/types";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
@@ -28,6 +30,8 @@
   let isLoading = $state(true);
   let user = $state<AdminUserView | null>(null);
   let error = $state<string | null>(null);
+  // Under the org plane the hub answers 410 managed_by_org_plane: where users live now.
+  let managedAt = $state<string | null>(null);
 
   // Action dialogs
   let showBanDialog = $state(false);
@@ -40,11 +44,13 @@
 
     isLoading = true;
     error = null;
+    managedAt = null;
 
     try {
       const response = await getUser(userId);
       user = response.user;
     } catch (e) {
+      managedAt = managedByPlaneUrl(e);
       const err = e as Error;
       error = err.message || "Couldn’t load this user.";
     } finally {
@@ -78,7 +84,7 @@
   <title>{user?.email ?? "User"} · Admin · AgentPod</title>
 </svelte:head>
 
-<main class="flex h-screen flex-col overflow-hidden">
+<div class="flex min-h-full flex-col">
   <!-- Header -->
   <PageHeader
     title={user?.name || user?.email || "User details"}
@@ -105,17 +111,19 @@
   </PageHeader>
 
   <!-- Content -->
-  <div class="flex-1 overflow-y-auto">
-    <div class="page-width space-y-6 py-6 *:max-w-3xl">
+  <div class="flex-1">
+    <div class="ap-page max-w-3xl">
       {#if isLoading}
         <div class="space-y-2">
           {#each [1, 2, 3] as _}
             <Skeleton class="h-16 rounded-lg" />
           {/each}
         </div>
+      {:else if managedAt}
+        <ManagedByPlane what="Users" href={managedAt} />
       {:else if error}
         <div
-          class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
+          class="ap-alert flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
           role="alert"
         >
           <p class="text-sm text-destructive">{error}</p>
@@ -123,7 +131,7 @@
         </div>
       {:else if user}
         <!-- User Info Card -->
-        <div class="rounded-lg border bg-card p-6">
+        <div class="ap-card rounded-lg border bg-card p-6">
           <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <!-- Identity -->
             <div class="flex items-center gap-4">
@@ -208,7 +216,7 @@
       {/if}
     </div>
   </div>
-</main>
+</div>
 
 <BanUserDialog bind:open={showBanDialog} user={user} onBanned={loadUser} />
 <RoleDialog bind:open={showRoleDialog} user={user} onChanged={loadUser} />

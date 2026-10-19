@@ -215,6 +215,8 @@
     if (target) {
       const tag = target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) return;
+      // Keys pressed inside an open dialog, sheet or menu (the account menu among them) are theirs.
+      if (target.closest?.('[role="dialog"], [role="menu"]')) return;
     }
 
     if (event.key === "Escape") {

@@ -2,9 +2,9 @@
  * status-badge.ts
  *
  * Theme-robust status helpers built on the `--status-*` design tokens
- * (Plan A: app.css defines `--status-running/degraded/starting/stopped/
- * error/sleeping` for light+dark, mapped to Tailwind via `--color-status-*`;
- * the theme store writes them per-scheme from the five `cyber-*` accents).
+ * (app.css maps `--status-running/degraded/starting/stopped/error/sleeping/
+ * unknown` onto vibekit tokens for every vibe and theme, and to Tailwind via
+ * `--color-status-*`).
  *
  * All three exports are literal lookups — never string interpolation — so
  * every class stays Tailwind-scannable (JIT needs full class names present

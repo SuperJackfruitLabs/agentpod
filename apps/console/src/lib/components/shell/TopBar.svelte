@@ -9,16 +9,13 @@
    * the hub is unreachable is the same scattered-state defect in miniature.
    */
   import { connection } from "$lib/stores/connection.svelte";
-  import { auth, logout } from "$lib/stores/auth.svelte";
-  import { goto } from "$app/navigation";
   import { commandPalette } from "$lib/stores/command-palette.svelte";
   import { STATE } from "$lib/fleet/state";
   import StateDot from "./StateDot.svelte";
+  import AccountMenu from "./AccountMenu.svelte";
   import Mark from "$lib/components/brand/Mark.svelte";
   import PanelLeft from "@lucide/svelte/icons/panel-left";
   import Search from "@lucide/svelte/icons/search";
-  import SunMoon from "@lucide/svelte/icons/sun-moon";
-  import LogOut from "@lucide/svelte/icons/log-out";
 
   interface Props {
     /** Fires the ≤900px one-column view switch. Desktop never calls it. */
@@ -26,23 +23,6 @@
   }
 
   let { onToggleRoster }: Props = $props();
-
-  /**
-   * The same sign-out as Settings: forget the tokens here and revoke the refresh token at the
-   * organization plane, THEN leave. Going to /login first would let the layout find live tokens
-   * and bounce straight back in. It does not end the plane's own session (accounts.…), so
-   * "Sign in" afterwards is silent.
-   */
-  let signingOut = $state(false);
-  async function signOut() {
-    if (signingOut) return;
-    signingOut = true;
-    try {
-      await logout();
-    } finally {
-      await goto("/login");
-    }
-  }
 
   /**
    * Host only — the scheme and path are noise next to "which machine".
@@ -78,53 +58,49 @@
    * on any coarse pointer (an iPad in landscape is wide but still a finger).
    * The audit measured these at 32×32 on a 390px phone.
    */
-  const touch = "max-[900px]:size-11 pointer-coarse:size-11";
+  const touch = "touch:size-11";
 
   const controlClass =
     "inline-flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground";
 </script>
 
-<header
-  data-testid="top-bar"
-  class="flex min-w-0 items-center gap-2 border-b border-border bg-card px-2 max-[900px]:gap-1"
->
+<header data-testid="top-bar" class="ap-top flex min-w-0 items-center">
   <!-- Only reachable in the one-column layout, where roster and stage are two
        views rather than two columns. -->
   <button
     type="button"
     data-testid="roster-toggle"
-    class="{controlClass} size-8 {touch} shrink-0 min-[901px]:hidden"
+    class="ap-top__icon {controlClass} size-8 {touch} shrink-0 min-[901px]:hidden"
     aria-label="Show the roster"
     onclick={() => onToggleRoster?.()}
   >
-    <PanelLeft class="size-4" aria-hidden="true" />
+    <PanelLeft class="size-5" aria-hidden="true" />
   </button>
 
   <!-- The mark and the name as agentpod.dev and the docs set them: the name in
-       plain text, the colour on the mark. It was "AGENTPOD · MUSTER", and Muster
-       is an internal codename, not something an operator should read. -->
+       plain text, the colour on the mark. -->
   <a
     href="/"
     data-testid="wordmark"
     aria-label="AgentPod home"
-    class="flex shrink-0 items-center gap-2 rounded px-1 max-[900px]:min-h-11 max-[900px]:min-w-11 max-[900px]:justify-center pointer-coarse:min-h-11 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+    class="ap-brand flex shrink-0 items-center touch:min-h-11 touch:min-w-11 phone:justify-center"
   >
-    <Mark class="size-[18px]" />
-    <!-- The name gives way first on a phone: the mark still links home, and
-         the hub pill — the bar's one load-bearing fact — keeps its room. -->
-    <span class="text-sm font-semibold text-foreground max-[479px]:hidden">AgentPod</span>
+    <span class="ap-brand__mark"><Mark class="size-[20px]" /></span>
+    <!-- The name gives way on a phone: the mark still links home, and the hub pill
+         (the bar's one load-bearing fact) keeps its room. -->
+    <span class="ap-brand__name phone:hidden">AgentPod</span>
   </a>
 
   <a
     href="/settings"
     data-testid="hub-pill"
     title={connection.apiUrl ?? "No hub configured"}
-    class="flex min-w-0 items-center gap-1.5 rounded-md border border-border px-2 py-1 max-[900px]:min-h-11 pointer-coarse:min-h-11 transition-colors hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+    class="ap-hub flex min-w-0 items-center touch:min-h-11"
   >
     <StateDot state={hubState} size="sm" />
     <span
       data-testid="hub-host"
-      class="truncate font-mono text-xs text-foreground max-[560px]:max-w-24"
+      class="truncate font-mono narrow-header:max-w-32"
     >{hubHost}</span>
   </a>
 
@@ -133,41 +109,16 @@
   <button
     type="button"
     data-testid="palette-cue"
-    class="{controlClass} h-8 min-w-0 gap-2 border border-border px-2 pointer-coarse:h-11 max-[900px]:size-11 max-[900px]:border-0 max-[900px]:px-0"
+    class="ap-cue min-w-0 touch:size-11"
     aria-label="Message an agent, or run a command"
     onclick={() => commandPalette.toggle()}
   >
-    <Search class="size-3.5 shrink-0" aria-hidden="true" />
-    <span class="truncate text-xs max-[900px]:hidden">Message an agent, or run a command</span>
-    <kbd
-      class="rounded border border-border px-1 font-mono text-[10px] text-muted-foreground max-[900px]:hidden"
-    >⌘K</kbd>
+    <Search class="ap-cue__icon shrink-0" aria-hidden="true" />
+    <span class="ap-cue__text truncate phone:hidden">Message an agent, or run a command</span>
+    <kbd class="ap-kbd phone:hidden">⌘K</kbd>
   </button>
 
-  <a
-    href="/settings"
-    data-testid="appearance-link"
-    class="{controlClass} size-8 {touch} shrink-0"
-    aria-label="Appearance"
-  >
-    <SunMoon class="size-4" aria-hidden="true" />
-  </a>
-
-  <div
-    data-testid="user-avatar"
-    class="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-foreground"
-    aria-label="Signed in as {auth.initials}"
-  >{auth.initials}</div>
-
-  <button
-    type="button"
-    data-testid="topbar-sign-out"
-    class="{controlClass} size-8 {touch} shrink-0"
-    aria-label="Sign out"
-    title="Sign out"
-    disabled={signingOut}
-    onclick={signOut}
-  >
-    <LogOut class="size-4" aria-hidden="true" />
-  </button>
+  <div data-testid="account-slot" class="shrink-0 phone:hidden">
+    <AccountMenu />
+  </div>
 </header>
