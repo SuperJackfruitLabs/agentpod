@@ -75,12 +75,12 @@ func TestTheStateFileIsOwnerOnlyAndHoldsNoTemporaries(t *testing.T) {
 		t.Fatalf("state file mode %v; want 0600", fi.Mode().Perm())
 	}
 	entries, _ := os.ReadDir(dir)
-	if len(entries) != 1 {
+	if len(entries) != 2 || entries[0].Name() != "mcp-proxy.json" || entries[1].Name() != "mcp-proxy.json.lock" {
 		var names []string
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		t.Fatalf("state dir holds %v; want only the state file (writes are atomic renames)", names)
+		t.Fatalf("state dir holds %v; want the state and stable writer lock only", names)
 	}
 }
 

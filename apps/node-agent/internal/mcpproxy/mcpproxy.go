@@ -98,10 +98,11 @@ type Header struct {
 
 // Server is an ACP `session/new` MCP server entry (the `http` form).
 type Server struct {
-	Type    string   `json:"type"`
-	Name    string   `json:"name"`
-	URL     string   `json:"url"`
-	Headers []Header `json:"headers"`
+	Type                 string   `json:"type"`
+	Name                 string   `json:"name"`
+	URL                  string   `json:"url"`
+	Headers              []Header `json:"headers"`
+	CredentialGeneration int64    `json:"-"`
 }
 
 // Proxy is a running loopback MCP proxy.
@@ -299,7 +300,14 @@ func (p *Proxy) secretFor(stationID string) (string, bool) {
 
 // Servers are the ACP MCP entries for a station's session — nil for a station not served.
 func (p *Proxy) Servers(stationID string) []Server {
-	secret, ok := p.secretFor(stationID)
+	if !p.Serves(stationID) {
+		return nil
+	}
+	secret, generation, ok, err := p.store.SecretVersion(stationID)
+	if err != nil {
+		p.logf("mcp proxy: reading its state file: %v", err)
+		return nil
+	}
 	if !ok {
 		return nil
 	}
@@ -309,10 +317,11 @@ func (p *Proxy) Servers(stationID string) []Server {
 			continue
 		}
 		out = append(out, Server{
-			Type:    "http",
-			Name:    u.name,
-			URL:     "http://" + p.Addr() + "/stations/" + url.PathEscape(stationID) + "/mcp/" + u.segment,
-			Headers: []Header{{Name: SecretHeader, Value: secret}},
+			Type:                 "http",
+			Name:                 u.name,
+			URL:                  "http://" + p.Addr() + "/stations/" + url.PathEscape(stationID) + "/mcp/" + u.segment,
+			Headers:              []Header{{Name: SecretHeader, Value: secret}},
+			CredentialGeneration: generation,
 		})
 	}
 	return out
