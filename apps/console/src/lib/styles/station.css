@@ -81,6 +81,7 @@
 :where([data-vibe="paper"]) .ap-st-sub { font: italic 400 1rem/1.4 var(--vk-font-display); }
 :where([data-vibe="paper"]) .ap-st-face { display: none; }
 :where([data-vibe="paper"]) .ap-st-face + * { display: inline-flex; }
+:where([data-vibe="studio"]) .ap-st-actions [data-variant="destructive"] { background: var(--vk-color-text) !important; color: var(--vk-color-bg) !important; box-shadow: none; } /* Stop is ink in Studio (mockup); the confirm carries the danger */
 :where([data-vibe="paper"]) .ap-st-tabs,
 :where([data-vibe="studio"]) .ap-st-tabs,
 :where([data-vibe="quiet"]) .ap-st-tabs { margin-inline: 16px; padding: 0 !important; gap: 0 !important; border-radius: 0; background: none; border-bottom: 1px solid var(--vk-color-line); }

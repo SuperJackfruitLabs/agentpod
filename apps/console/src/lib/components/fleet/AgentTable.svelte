@@ -277,7 +277,7 @@
       <!-- The face is decoration: the name beside it is what is read, and the link's text stays the name. -->
       <span class="ap-agent">
         <span aria-hidden="true" class="inline-flex"><Face id={agent.stationId} label={agent.agentName} mood={agent.status === "running" ? "working" : "resting"} size={28} /></span>
-        <a href="/nodes/{agent.nodeId}/stations/{agent.stationId}" class="text-sm">
+        <a href="/nodes/{agent.nodeId}/stations/{agent.stationId}" class="text-sm touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center">
           {agent.agentName}
         </a>
       </span>
@@ -424,7 +424,7 @@
                 >
                   <span class="text-xs">{collapsedGroups[group.nodeId] ? "▶" : "▾"}</span>
                   <span class="font-medium text-foreground">{group.nodeName}</span>
-                  <span class="text-muted-foreground/60">· {group.agents.length} {group.agents.length === 1 ? "agent" : "agents"}</span>
+                  <span class="text-muted-foreground">· {group.agents.length} {group.agents.length === 1 ? "agent" : "agents"}</span>
                   <!-- The node's whole health in one strip -->
                   <StatusRibbon
                     size="sm"

@@ -370,11 +370,14 @@
         <!-- Tab strip -->
         <div class="ap-ftabs scroll-strip flex shrink-0 items-center gap-0.5 border-b border-border/60 bg-muted/5 px-1" role="tablist" use:scrollStrip={activePath}>
           {#each openFiles as f (f.path)}
+            <!-- A tab holds no control of its own (axe nested-interactive): Delete closes the focused
+                 tab from the keyboard, and the cross is a pointer target hidden from assistive tech. -->
             <div
               role="tab"
               tabindex="0"
               aria-selected={f.path === activePath}
               aria-label={f.name}
+              aria-keyshortcuts="Delete"
               class="ap-ftab group flex shrink-0 items-center gap-1.5 border-b-2 px-2 py-1.5 text-xs font-mono cursor-pointer
                 {f.path === activePath ? 'border-primary bg-background text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
               onclick={() => openFile(entryIndex.get(f.path) ?? fallbackEntry(f))}
@@ -382,22 +385,26 @@
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   openFile(entryIndex.get(f.path) ?? fallbackEntry(f));
+                } else if (e.key === "Delete") {
+                  e.preventDefault();
+                  closeTab(f.path);
                 }
               }}
             >
               <FileIcon filename={f.name} size="xs" />
               <span class="max-w-[140px] truncate">{f.name}</span>
-              <button
-                type="button"
-                aria-label="Close {f.name}"
-                class="rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
+              <span
+                aria-hidden="true"
+                data-testid="close-tab-{f.name}"
+                title="Close {f.name}"
+                class="inline-flex items-center justify-center rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-focus:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 touch:min-h-11 touch:min-w-11"
                 onclick={(e: MouseEvent) => {
                   e.stopPropagation();
                   closeTab(f.path);
                 }}
               >
                 <X class="h-3 w-3" />
-              </button>
+              </span>
             </div>
           {/each}
         </div>

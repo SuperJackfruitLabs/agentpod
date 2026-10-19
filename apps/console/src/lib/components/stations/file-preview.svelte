@@ -107,7 +107,8 @@
               Source
             </button>
           </div>
-          <div class="flex-1 overflow-auto">
+          <!-- Focusable so a keyboard can scroll it (axe scrollable-region-focusable). -->
+          <div class="flex-1 overflow-auto" role="region" aria-label="File preview" tabindex="0">
             {#if mdView === "rendered"}
               <MarkdownViewer {content} />
             {:else}

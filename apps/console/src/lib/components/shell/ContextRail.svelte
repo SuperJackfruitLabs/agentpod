@@ -232,7 +232,7 @@
         <div>
           <dt class="text-xs text-muted-foreground">Node</dt>
           <dd class="truncate" title={node?.name ?? station.nodeId}>
-            <a class="underline-offset-2 hover:underline" href="/nodes/{station.nodeId}">
+            <a class="underline-offset-2 hover:underline touch:inline-flex touch:min-h-11 touch:items-center" href="/nodes/{station.nodeId}">
               {node?.name ?? station.nodeId}
             </a>
           </dd>

@@ -293,6 +293,28 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* Touch-sized targets everywhere under 1024px and on a coarse pointer (the `touch` variant's
+     media): every control at least 44px, and a link that stands alone (a block, a row, a cell's
+     only content) too. Inline links in running text keep their line. :where() keeps this at zero
+     specificity, so a component's own touch: sizing still wins. The terminal's and the editor's
+     internals are theirs. e2e/sweep.mjs measures it. */
+  @media (max-width: 1023px), (pointer: coarse) {
+    :where(button, select, summary, [role="tab"], [role="button"], [role="menuitem"], [role="option"],
+      input:not([type="checkbox"], [type="radio"], [type="hidden"]), a.block, a.flex, a.inline-flex, a.inline-block, a.ap-node-link, td > a:only-child, .ap-tbl a):not(:where(.xterm, .monaco-editor) *) {
+      min-height: 44px;
+    }
+    :where(button, [role="button"], summary, [role="tab"]):not(:where(.xterm, .monaco-editor) *) {
+      min-width: 44px;
+    }
+    /* A radio or checkbox is hit through the label that wraps it. */
+    :where(label:has(> input[type="radio"], > input[type="checkbox"])) {
+      min-height: 44px;
+    }
+    :where(td > a:only-child, .ap-tbl a) {
+      display: inline-flex;
+      align-items: center;
+    }
+  }
   body {
     @apply bg-background text-foreground;
     font-family: var(--vk-font-body);
@@ -470,3 +492,15 @@ nav,
 .text-status-error { color: var(--status-error-text); }
 .text-status-sleeping { color: var(--status-sleeping-text); }
 .text-status-unknown { color: var(--status-unknown-text); }
+
+/* The touch floor for the product's own sized controls (unlayered, after the imported sheets, so
+   it beats their desktop min-heights at equal specificity): 44px under 1024px and on a coarse
+   pointer. e2e/sweep.mjs measures it. */
+@media (max-width: 1023px), (pointer: coarse) {
+  .ap-ftool [data-slot="button"], .ap-pbar [data-slot="button"], .ap-term-tool [data-slot="button"],
+  .ap-st-tabs [role="tab"], .ap-modes button, .ap-mdbar button, .ap-group-row button, .ap-ftree-row,
+  .ap-ftab, .ap-hub, [data-testid="roster-grouping"], .ap-tbl th button { min-height: 44px; }
+  .ap-term-tool [data-slot="button"] { min-width: 44px; }
+  .ap-term-search { height: 44px !important; }
+  :where([data-vibe="studio"]) .ap-cue, :where([data-vibe="studio"]) [data-testid="roster-filter"] { height: 44px; min-height: 44px; }
+}

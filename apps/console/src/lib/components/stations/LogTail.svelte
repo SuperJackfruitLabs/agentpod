@@ -417,6 +417,9 @@
     <div
       bind:this={containerEl}
       data-testid="log-scroll-container"
+      role="region"
+      aria-label="Log lines"
+      tabindex="0"
       class="h-full overflow-y-auto py-1"
       onscroll={handleScroll}
     >

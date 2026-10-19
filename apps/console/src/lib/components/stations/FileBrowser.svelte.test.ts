@@ -456,6 +456,36 @@ test("FileBrowser: closes a tab with its close button", async () => {
     .mockResolvedValueOnce({ content: "# Hello", truncated: false })
     .mockResolvedValueOnce({ content: "export const x = 1;", truncated: false });
 
+  const { getByText, getByRole, queryByRole, getByTestId } = render(FileBrowser, {
+    props: { stationId: "station_1" },
+  });
+
+  await waitFor(() => expect(getByText("README.md")).toBeTruthy());
+  fireEvent.click(getByText("README.md"));
+  await waitFor(() => expect(getByRole("tab", { name: "README.md" })).toBeTruthy());
+
+  fireEvent.click(getByText("src"));
+  await waitFor(() => expect(getByText("index.ts")).toBeTruthy());
+  fireEvent.click(getByText("index.ts"));
+  await waitFor(() => expect(getByRole("tab", { name: "index.ts" })).toBeTruthy());
+
+  fireEvent.click(getByTestId("close-tab-README.md"));
+
+  await waitFor(() => {
+    expect(queryByRole("tab", { name: "README.md" })).toBeNull();
+    expect(getByRole("tab", { name: "index.ts" })).toBeTruthy();
+  });
+  expect(getByRole("tab", { name: "index.ts" }).getAttribute("aria-selected")).toBe("true");
+});
+
+test("FileBrowser: Delete on a focused tab closes it (the tab holds no nested button)", async () => {
+  vi.spyOn(api, "listFiles")
+    .mockResolvedValueOnce([mockDir, mockFile])
+    .mockResolvedValueOnce([mockSubFile]);
+  vi.spyOn(api, "readFile")
+    .mockResolvedValueOnce({ content: "# Hello", truncated: false })
+    .mockResolvedValueOnce({ content: "export const x = 1;", truncated: false });
+
   const { getByText, getByRole, queryByRole } = render(FileBrowser, {
     props: { stationId: "station_1" },
   });
@@ -469,7 +499,8 @@ test("FileBrowser: closes a tab with its close button", async () => {
   fireEvent.click(getByText("index.ts"));
   await waitFor(() => expect(getByRole("tab", { name: "index.ts" })).toBeTruthy());
 
-  fireEvent.click(getByRole("button", { name: "Close README.md" }));
+  expect(queryByRole("button", { name: "Close README.md" })).toBeNull();
+  fireEvent.keyDown(getByRole("tab", { name: "README.md" }), { key: "Delete" });
 
   await waitFor(() => {
     expect(queryByRole("tab", { name: "README.md" })).toBeNull();
