@@ -414,6 +414,7 @@
 
   <!-- Log lines -->
   <div class="relative flex-1 min-h-0">
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex (a scroll region must take focus to scroll by keyboard) -->
     <div
       bind:this={containerEl}
       data-testid="log-scroll-container"

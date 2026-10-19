@@ -503,4 +503,11 @@ nav,
   .ap-term-tool [data-slot="button"] { min-width: 44px; }
   .ap-term-search { height: 44px !important; }
   :where([data-vibe="studio"]) .ap-cue, :where([data-vibe="studio"]) [data-testid="roster-filter"] { height: 44px; min-height: 44px; }
+  .ap-legend__item, .ap-atabs a, .ap-nh__back { min-height: 44px; min-width: 44px; justify-content: center; }
+  /* The fleet's state bar: Paper, Studio and Quiet draw it thin; the segments keep that look and
+     take a 44px hit area through a transparent border (the fill stops at the padding box). */
+  :where([data-vibe="paper"], [data-vibe="studio"], [data-vibe="quiet"]) .ap-sbar__seg { box-sizing: border-box; height: 44px; min-height: 44px; border-block: var(--ap-seg-pad) solid transparent !important; background-clip: padding-box; }
+  :where([data-vibe="paper"], [data-vibe="quiet"]) .ap-sbar__seg { --ap-seg-pad: 15px; }
+  :where([data-vibe="studio"]) .ap-sbar__seg { --ap-seg-pad: 8px; }
+  :where([data-vibe="quiet"]) .ap-sbar__track { height: 44px; border: 0; border-radius: 0; }
 }

@@ -108,6 +108,7 @@
             </button>
           </div>
           <!-- Focusable so a keyboard can scroll it (axe scrollable-region-focusable). -->
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex (a scroll region must take focus to scroll by keyboard) -->
           <div class="flex-1 overflow-auto" role="region" aria-label="File preview" tabindex="0">
             {#if mdView === "rendered"}
               <MarkdownViewer {content} />
