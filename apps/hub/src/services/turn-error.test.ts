@@ -1,5 +1,54 @@
 import { describe, expect, test } from "bun:test";
 import { TurnError } from "@agentpod/contract";
+import corpus from "../../../../packages/contract/src/fixtures/salaam-acp-v1.json";
+
+for (const sample of corpus.failures)
+  test(`Hub consumes shared ACP corpus: ${sample.name}`, () => {
+    const err = Object.assign(new Error("Internal error"), {
+      data: { "salaam.dev/failure": sample.value },
+    });
+    const parsed = turnErrorFromRejection(err, "salaam");
+    expect(TurnError.safeParse(parsed).success).toBe(true);
+    expect(parsed.failureCode).toBe(
+      sample.accept ? sample.value.code : undefined,
+    );
+    if (sample.accept) expect(String(parsed.kind)).toBe(sample.value.kind);
+  });
+
+test("Salaam namespaced failures retain typed cause and immutable execution correlation", () => {
+  const failure = {
+    version: 1,
+    kind: "quota",
+    code: "provider_quota",
+    message: "Timeout in fixture fallback",
+    sessionId: crypto.randomUUID(),
+    requestId: crypto.randomUUID(),
+    attemptId: crypto.randomUUID(),
+    provider: "fixture",
+    model: "fixture-model",
+    httpStatus: 402,
+    retryable: false,
+  };
+  const err = Object.assign(new Error("Internal error"), {
+    data: { "salaam.dev/failure": failure },
+  });
+  expect(turnErrorFromRejection(err, "salaam")).toMatchObject({
+    kind: "quota",
+    message: failure.message,
+    provider: "fixture",
+    model: "fixture-model",
+    httpStatus: 402,
+    retryable: false,
+    failureCode: "provider_quota",
+    logicalRequestId: failure.requestId,
+    attemptId: failure.attemptId,
+  });
+  expect(rejectionSaidNothing(err)).toBe(false);
+  const invalid = Object.assign(new Error("Internal error"), {
+    data: { "salaam.dev/failure": { ...failure, version: 2 } },
+  });
+  expect(turnErrorFromRejection(invalid, "salaam").kind).toBe("unknown");
+});
 import {
   classifyText,
   turnErrorFromReason,
@@ -32,14 +81,18 @@ describe("classifyText — the words a failure arrives in", () => {
     ],
     // OpenClaw log on ashram, 2026-09-25 05:48:59 (buddhimaan).
     [
-      "Couldn't sign in to kimi-coding. Your saved login looks expired or no longer works. (No API key found for provider \"kimi-coding\".)",
+      'Couldn\'t sign in to kimi-coding. Your saved login looks expired or no longer works. (No API key found for provider "kimi-coding".)',
       "auth",
       "missing kimi key",
     ],
     // OpenClaw log on ashram, 2026-09-24 (surya).
     ["FailoverError: LLM request timed out.", "timeout", "provider timeout"],
     // claude-agent-acp 0.66.0: the CLI's result text on a 429.
-    ["API Error: 429 rate_limit_error: Number of requests has exceeded your rate limit", "rate_limit", "Claude 429"],
+    [
+      "API Error: 429 rate_limit_error: Number of requests has exceeded your rate limit",
+      "rate_limit",
+      "Claude 429",
+    ],
     // ACP SDK RequestError.authRequired(), as Claude Code and OpenCode send it.
     ["Authentication required", "auth", "ACP authRequired"],
     // The hub's own words (acp-sessions.ts handleWireClosed).
@@ -60,8 +113,14 @@ describe("classifyText — the words a failure arrives in", () => {
   // "log in" must not become a confident kind. `auth` is not retryable, so a
   // wrong `auth` would hide "try again" from someone who only needed it.
   const notErrors: Array<[string, string]> = [
-    ["Model kimi-k3 not found in the model catalog in this provider", "'catalog in' is not 'log in'"],
-    ["Error: could not read file /var/log in workspace", "a path is not a login"],
+    [
+      "Model kimi-k3 not found in the model catalog in this provider",
+      "'catalog in' is not 'log in'",
+    ],
+    [
+      "Error: could not read file /var/log in workspace",
+      "a path is not a login",
+    ],
     ["tool output truncated after 500 lines", "a count is not a status code"],
     ["retried 3 times over 401 ms", "a duration is not a status code"],
   ];
@@ -72,7 +131,9 @@ describe("classifyText — the words a failure arrives in", () => {
   }
 
   test("a status code still counts where it reads as one", () => {
-    expect(classifyText("HTTP 503 Service Unavailable")).toBe("provider_unavailable");
+    expect(classifyText("HTTP 503 Service Unavailable")).toBe(
+      "provider_unavailable",
+    );
     expect(classifyText("upstream returned status 401")).toBe("auth");
     expect(classifyText("Error code: 429")).toBe("rate_limit");
     // claude-agent-acp: "Please run /login" is its not-signed-in result.
@@ -80,11 +141,15 @@ describe("classifyText — the words a failure arrives in", () => {
   });
 
   test("text that matches nothing is unknown, not a guess", () => {
-    expect(classifyText("Something odd happened in the flux capacitor")).toBe("unknown");
+    expect(classifyText("Something odd happened in the flux capacitor")).toBe(
+      "unknown",
+    );
   });
 
   test("quota wins over rate limit: Kimi's quota message also says 'limit'", () => {
-    expect(classifyText("You've reached your weekly (7-day) usage limit")).toBe("quota");
+    expect(classifyText("You've reached your weekly (7-day) usage limit")).toBe(
+      "quota",
+    );
   });
 });
 
@@ -99,13 +164,16 @@ describe("turnErrorFromRejection — a harness that failed the prompt", () => {
     // message "Internal error", the provider's text in data.message.
     const err = turnErrorFromRejection(
       rejection("Internal error", {
-        message: "You've hit your usage limit. Upgrade to Pro or try again later.",
+        message:
+          "You've hit your usage limit. Upgrade to Pro or try again later.",
         codexErrorInfo: "usageLimitExceeded",
       }),
-      "codex"
+      "codex",
     );
 
-    expect(err.message).toBe("You've hit your usage limit. Upgrade to Pro or try again later.");
+    expect(err.message).toBe(
+      "You've hit your usage limit. Upgrade to Pro or try again later.",
+    );
     expect(err.kind).toBe("quota");
     expect(err.retryable).toBe(false);
     expect(err.source).toBe("acp-rejection");
@@ -118,7 +186,7 @@ describe("turnErrorFromRejection — a harness that failed the prompt", () => {
         message: "stream disconnected before completion",
         codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 502 } },
       }),
-      "codex"
+      "codex",
     );
     expect(err.kind).toBe("provider_unavailable");
     expect(err.retryable).toBe(true);
@@ -126,8 +194,11 @@ describe("turnErrorFromRejection — a harness that failed the prompt", () => {
 
   test("Codex additionalDetails is kept when it says more than message", () => {
     const err = turnErrorFromRejection(
-      rejection("Internal error", { message: "unexpected status 401", additionalDetails: "Your access token could not be refreshed." }),
-      "codex"
+      rejection("Internal error", {
+        message: "unexpected status 401",
+        additionalDetails: "Your access token could not be refreshed.",
+      }),
+      "codex",
     );
     expect(err.message).toContain("unexpected status 401");
     expect(err.message).toContain("Your access token could not be refreshed.");
@@ -137,8 +208,10 @@ describe("turnErrorFromRejection — a harness that failed the prompt", () => {
     // claude-agent-acp: RequestError.internalError({ errorKind }, result),
     // whose message the SDK renders as "Internal error: <result>".
     const err = turnErrorFromRejection(
-      rejection("Internal error: API Error: 529 overloaded_error: Overloaded", { errorKind: "overloaded" }),
-      "claude-code"
+      rejection("Internal error: API Error: 529 overloaded_error: Overloaded", {
+        errorKind: "overloaded",
+      }),
+      "claude-code",
     );
     expect(err.kind).toBe("provider_unavailable");
     expect(err.message).toBe("API Error: 529 overloaded_error: Overloaded");
@@ -146,8 +219,10 @@ describe("turnErrorFromRejection — a harness that failed the prompt", () => {
 
   test("Claude Code billing is quota, whatever the text says", () => {
     const err = turnErrorFromRejection(
-      rejection("Internal error: Credit balance is too low", { errorKind: "billing_error" }),
-      "claude-code"
+      rejection("Internal error: Credit balance is too low", {
+        errorKind: "billing_error",
+      }),
+      "claude-code",
     );
     expect(err.kind).toBe("quota");
   });
@@ -155,8 +230,12 @@ describe("turnErrorFromRejection — a harness that failed the prompt", () => {
   test("OpenCode auth: the provider is only in data, and is kept", () => {
     // opencode 1.18.30 acp/error.ts: authRequired with { providerID } in data.
     const err = turnErrorFromRejection(
-      rejection("Authentication required: provider authentication required", { providerID: "anthropic" }, -32000),
-      "opencode"
+      rejection(
+        "Authentication required: provider authentication required",
+        { providerID: "anthropic" },
+        -32000,
+      ),
+      "opencode",
     );
     expect(err.kind).toBe("auth");
     expect(err.provider).toBe("anthropic");
@@ -166,13 +245,27 @@ describe("turnErrorFromRejection — a harness that failed the prompt", () => {
     // -32000 is ACP auth_required, but adapters reuse it: the hub's own fake
     // node rejects "Provider quota exhausted" with it. Words that say what
     // happened beat a code that only might.
-    expect(turnErrorFromRejection(rejection("Provider quota exhausted", undefined, -32000), "x").kind).toBe("quota");
-    expect(turnErrorFromRejection(rejection("Please sign up first", undefined, -32000), "x").kind).toBe("auth");
+    expect(
+      turnErrorFromRejection(
+        rejection("Provider quota exhausted", undefined, -32000),
+        "x",
+      ).kind,
+    ).toBe("quota");
+    expect(
+      turnErrorFromRejection(
+        rejection("Please sign up first", undefined, -32000),
+        "x",
+      ).kind,
+    ).toBe("auth");
   });
 
   test("a plain Error with nothing but a message still becomes a TurnError", () => {
     const err = turnErrorFromRejection(new Error("exit status 1"), "pi");
-    expect(err).toMatchObject({ kind: "harness_exited", harness: "pi", message: "exit status 1" });
+    expect(err).toMatchObject({
+      kind: "harness_exited",
+      harness: "pi",
+      message: "exit status 1",
+    });
   });
 
   test("something thrown that is not an Error keeps its text", () => {
@@ -191,7 +284,9 @@ describe("turnErrorForSilentTurn — a prompt that resolved with nothing", () =>
   });
 
   test("a refusal says so", () => {
-    expect(turnErrorForSilentTurn("claude-code", "refusal").kind).toBe("refusal");
+    expect(turnErrorForSilentTurn("claude-code", "refusal").kind).toBe(
+      "refusal",
+    );
   });
 
   test("a turn the harness cancelled itself says so", () => {
@@ -199,14 +294,24 @@ describe("turnErrorForSilentTurn — a prompt that resolved with nothing", () =>
   });
 
   test("an output limit hit before any reply says so", () => {
-    expect(turnErrorForSilentTurn("claude-code", "max_tokens").kind).toBe("max_tokens");
+    expect(turnErrorForSilentTurn("claude-code", "max_tokens").kind).toBe(
+      "max_tokens",
+    );
   });
 });
 
 describe("turnErrorFromReason — the hub's own failures", () => {
   test("a node that went away", () => {
-    const err = turnErrorFromReason("Couldn't reach the node.", "openclaw", "session-state");
-    expect(err).toMatchObject({ kind: "node_offline", retryable: true, source: "session-state" });
+    const err = turnErrorFromReason(
+      "Couldn't reach the node.",
+      "openclaw",
+      "session-state",
+    );
+    expect(err).toMatchObject({
+      kind: "node_offline",
+      retryable: true,
+      source: "session-state",
+    });
   });
 });
 
@@ -218,16 +323,30 @@ describe("turnErrorFromPlugin — what a harness plugin reported", () => {
         kind: "quota",
         provider: "kimi-coding",
         model: "k2p6",
-        attempts: [{ provider: "kimi-coding", model: "k2p6", kind: "quota", message: "403" }],
+        attempts: [
+          {
+            provider: "kimi-coding",
+            model: "k2p6",
+            kind: "quota",
+            message: "403",
+          },
+        ],
       },
-      "openclaw"
+      "openclaw",
     );
     expect(err).toEqual({
       message: "⚠️ You've reached your weekly (7-day) usage limit.",
       kind: "quota",
       provider: "kimi-coding",
       model: "k2p6",
-      attempts: [{ provider: "kimi-coding", model: "k2p6", kind: "quota", message: "403" }],
+      attempts: [
+        {
+          provider: "kimi-coding",
+          model: "k2p6",
+          kind: "quota",
+          message: "403",
+        },
+      ],
       harness: "openclaw",
       source: "plugin",
       retryable: false,
@@ -235,8 +354,15 @@ describe("turnErrorFromPlugin — what a harness plugin reported", () => {
   });
 
   test("classifies the words when the plugin gave no kind", () => {
-    const err = turnErrorFromPlugin({ message: "FailoverError: LLM request timed out." }, "openclaw");
-    expect(err).toMatchObject({ kind: "timeout", retryable: true, source: "plugin" });
+    const err = turnErrorFromPlugin(
+      { message: "FailoverError: LLM request timed out." },
+      "openclaw",
+    );
+    expect(err).toMatchObject({
+      kind: "timeout",
+      retryable: true,
+      source: "plugin",
+    });
   });
 
   test("classifies each attempt the plugin listed without a kind", () => {
@@ -244,18 +370,29 @@ describe("turnErrorFromPlugin — what a harness plugin reported", () => {
       {
         message: "You've reached your weekly (7-day) usage limit.",
         attempts: [
-          { provider: "kimi-coding", model: "k2p6", message: "You've reached your weekly (7-day) usage limit." },
-          { provider: "opencode-go", model: "hy3-preview", message: "400 Request is missing x-opencode-session" },
+          {
+            provider: "kimi-coding",
+            model: "k2p6",
+            message: "You've reached your weekly (7-day) usage limit.",
+          },
+          {
+            provider: "opencode-go",
+            model: "hy3-preview",
+            message: "400 Request is missing x-opencode-session",
+          },
         ],
       },
-      "openclaw"
+      "openclaw",
     );
     expect(err.kind).toBe("quota");
     expect(err.attempts!.map((a) => a.kind)).toEqual(["quota", "bad_request"]);
   });
 
   test("a plugin's own retryable wins over the kind's default", () => {
-    const err = turnErrorFromPlugin({ message: "quota", kind: "quota", retryable: true }, "pi");
+    const err = turnErrorFromPlugin(
+      { message: "quota", kind: "quota", retryable: true },
+      "pi",
+    );
     expect(err.retryable).toBe(true);
   });
 });
@@ -265,13 +402,19 @@ describe("the provider's own error type classifies before any words", () => {
     // krishna, ashram, 2026-09-26 05:05: the room said "unknown".
     const err = turnErrorFromPlugin(
       {
-        message: "Request is missing x-opencode-session and cannot be routed efficiently.",
+        message:
+          "Request is missing x-opencode-session and cannot be routed efficiently.",
         providerErrorType: "MissingSessionID",
         attempts: [
-          { provider: "opencode-go", model: "qwen3.7-plus", message: "Request is missing x-opencode-session", providerErrorType: "MissingSessionID" },
+          {
+            provider: "opencode-go",
+            model: "qwen3.7-plus",
+            message: "Request is missing x-opencode-session",
+            providerErrorType: "MissingSessionID",
+          },
         ],
       },
-      "openclaw"
+      "openclaw",
     );
     expect(err.kind).toBe("bad_request");
     expect(err.attempts![0]!.kind).toBe("bad_request");
@@ -279,7 +422,10 @@ describe("the provider's own error type classifies before any words", () => {
 
   test("Anthropic's standard error types map to kinds", () => {
     const kind = (providerErrorType: string) =>
-      turnErrorFromPlugin({ message: "Something failed", providerErrorType }, "openclaw").kind;
+      turnErrorFromPlugin(
+        { message: "Something failed", providerErrorType },
+        "openclaw",
+      ).kind;
     expect(kind("invalid_request_error")).toBe("bad_request");
     expect(kind("authentication_error")).toBe("auth");
     expect(kind("rate_limit_error")).toBe("rate_limit");
@@ -289,26 +435,44 @@ describe("the provider's own error type classifies before any words", () => {
 
   test("permission_error is left to the words: Kimi sends it for a used-up quota", () => {
     const err = turnErrorFromPlugin(
-      { message: "You've reached your weekly (7-day) usage limit.", providerErrorType: "permission_error" },
-      "openclaw"
+      {
+        message: "You've reached your weekly (7-day) usage limit.",
+        providerErrorType: "permission_error",
+      },
+      "openclaw",
     );
     expect(err.kind).toBe("quota");
   });
 });
 
 describe("the HTTP status decides only when type and words cannot", () => {
-  const kind = (message: string, httpStatus: number, providerErrorType?: string) =>
-    turnErrorFromPlugin({ message, httpStatus, ...(providerErrorType ? { providerErrorType } : {}) }, "openclaw").kind;
+  const kind = (
+    message: string,
+    httpStatus: number,
+    providerErrorType?: string,
+  ) =>
+    turnErrorFromPlugin(
+      {
+        message,
+        httpStatus,
+        ...(providerErrorType ? { providerErrorType } : {}),
+      },
+      "openclaw",
+    ).kind;
 
   test("a status the words say nothing about", () => {
     expect(kind("Something went wrong upstream", 401)).toBe("auth");
     expect(kind("Something went wrong upstream", 429)).toBe("rate_limit");
-    expect(kind("Something went wrong upstream", 503)).toBe("provider_unavailable");
+    expect(kind("Something went wrong upstream", 503)).toBe(
+      "provider_unavailable",
+    );
     expect(kind("Something went wrong upstream", 400)).toBe("bad_request");
   });
 
   test("403 alone is not a verdict: Kimi sends it for a used-up quota", () => {
-    expect(kind("You've reached your weekly (7-day) usage limit.", 403)).toBe("quota");
+    expect(kind("You've reached your weekly (7-day) usage limit.", 403)).toBe(
+      "quota",
+    );
     expect(kind("Something went wrong upstream", 403)).toBe("unknown");
   });
 });
@@ -346,7 +510,9 @@ describe("rejectionSaidNothing — when the harness told us nothing at all", () 
   });
 
   test("a rejection carrying real words said something", () => {
-    expect(rejectionSaidNothing(new Error("API Error: 429 rate_limit_error"))).toBe(false);
+    expect(
+      rejectionSaidNothing(new Error("API Error: 429 rate_limit_error")),
+    ).toBe(false);
   });
 
   test("a generic message with detail in data said something", () => {
@@ -354,12 +520,20 @@ describe("rejectionSaidNothing — when the harness told us nothing at all", () 
     // `readableMessage` already prefers it. Probing the node for this would be a
     // round trip to learn what we were just told.
     expect(
-      rejectionSaidNothing({ message: "Internal error", data: { message: "You've reached your weekly usage limit." } }),
+      rejectionSaidNothing({
+        message: "Internal error",
+        data: { message: "You've reached your weekly usage limit." },
+      }),
     ).toBe(false);
   });
 
   test("a generic message with a typed kind said something", () => {
-    expect(rejectionSaidNothing({ message: "Internal error", data: { errorKind: "rate_limit" } })).toBe(false);
+    expect(
+      rejectionSaidNothing({
+        message: "Internal error",
+        data: { errorKind: "rate_limit" },
+      }),
+    ).toBe(false);
   });
 
   test("a non-error value says nothing rather than throwing", () => {
@@ -410,11 +584,23 @@ describe("turnErrorForUnreachableGateway — what the room should have been told
  */
 describe("gatewayUnreachable — only an explicit no counts", () => {
   test("supported and unreachable is the one true case", () => {
-    expect(gatewayUnreachable({ supported: true, reachable: false, detail: "connection refused" })).toBe(true);
+    expect(
+      gatewayUnreachable({
+        supported: true,
+        reachable: false,
+        detail: "connection refused",
+      }),
+    ).toBe(true);
   });
 
   test("supported and reachable is not", () => {
-    expect(gatewayUnreachable({ supported: true, reachable: true, address: "127.0.0.1:18789" })).toBe(false);
+    expect(
+      gatewayUnreachable({
+        supported: true,
+        reachable: true,
+        address: "127.0.0.1:18789",
+      }),
+    ).toBe(false);
   });
 
   test("a harness with no notion of transport is not an unreachable one", () => {
@@ -435,6 +621,8 @@ describe("gatewayUnreachable — only an explicit no counts", () => {
     // entirely. Both fields, or nothing.
     expect(gatewayUnreachable({ reachable: false })).toBe(false);
     expect(gatewayUnreachable({ supported: true })).toBe(false);
-    expect(gatewayUnreachable({ supported: "yes", reachable: false })).toBe(false);
+    expect(gatewayUnreachable({ supported: "yes", reachable: false })).toBe(
+      false,
+    );
   });
 });

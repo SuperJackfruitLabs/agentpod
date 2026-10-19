@@ -116,6 +116,17 @@ assert.deepEqual(
   checked,
   "Both consumers must use the same authority corpus",
 );
+const acpCorpus = readFileSync(
+  join(hubDirectory, "../../packages/contract/src/fixtures/salaam-acp-v1.json"),
+  "utf8",
+);
+assert.deepEqual(
+  JSON.parse(
+    readFileSync(join(repo, "test/fixtures/agentpod-acp-v1.json"), "utf8"),
+  ),
+  JSON.parse(acpCorpus),
+  "Producer and Hub must consume the same ACP outcome corpus",
+);
 const build = Bun.spawn(
   ["go", "build", "-p", "1", "-o", binary, "./cmd/agentpod-node"],
   {
@@ -757,6 +768,103 @@ try {
     );
     await stopped();
     record("stale board run epoch is fenced before another model/tool grant");
+    const adapter = await hub.request("create"),
+      adapterRecord = await hub.request("record", { id: adapter.id }),
+      adapterSession = adapterRecord.executionAuthority.sessionId;
+    hold();
+    const adapterRequest = randomUUID();
+    await hub.request("prompt", {
+      id: adapter.id,
+      text: "Survive an adapter process crash",
+      requestId: adapterRequest,
+    });
+    await entered();
+    const ownedAdapters = execFileSync("/bin/ps", ["-Ao", "pid,ppid,args"], {
+      encoding: "utf8",
+    })
+      .split("\n")
+      .map((line) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line))
+      .filter(
+        (m): m is RegExpExecArray =>
+          !!m &&
+          Number(m[2]) === nodeProcess!.pid &&
+          m[3]!.includes(
+            join(repo, "bin/salaam.mjs") + " acp --state " + state,
+          ),
+      );
+    assert.equal(
+      ownedAdapters.length,
+      1,
+      "Exactly one ACP adapter must belong to this test node",
+    );
+    process.kill(Number(ownedAdapters[0]![1]), "SIGKILL");
+    await until(
+      () => hub!.request("record", { id: adapter.id }),
+      (r) => r.nodeSessionId !== adapterRecord.nodeSessionId,
+    );
+    release();
+    const adapterReceipt = await until(
+      () =>
+        hub!.request("receipt", { id: adapter.id, requestId: adapterRequest }),
+      (r) => r.state === "completed",
+    );
+    const adapterSnapshot = await snapshot(adapterSession);
+    assert.equal(adapterSnapshot.attempts.length, 1);
+    assert.equal(adapterSnapshot.attempts[0].id, adapterReceipt.attemptId);
+    await hub.request("end", { id: adapter.id });
+    await stopped();
+    record(
+      "adapter SIGKILL reattaches the same session and verified attempt without replay",
+    );
+
+    const cancelling = await hub.request("create"),
+      cancelRecord = await hub.request("record", { id: cancelling.id }),
+      cancelSession = cancelRecord.executionAuthority.sessionId,
+      cancelPrompt = randomUUID();
+    hold();
+    await hub.request("prompt", {
+      id: cancelling.id,
+      text: "Cancel across a committed Hub intent crash",
+      requestId: cancelPrompt,
+    });
+    await entered();
+    await hub.request("cancel-gate-start");
+    const cancelCall = hub.request("cancel", { id: cancelling.id });
+    void cancelCall.catch(() => {});
+    await until(() => hub!.request("cancel-gate-held"), Boolean);
+    const intentEvents = await hub.request("events", { id: cancelling.id });
+    const intent = intentEvents.find(
+      (e: any) => e.payload?.cancellation?.targetRequestId === cancelPrompt,
+    )?.payload.cancellation;
+    assert(intent?.requestId && intent.state === "requested");
+    await kill(hub.p);
+    hub = bootHub();
+    await hub.started;
+    await until(() => hub!.request("online"), Boolean);
+    await until(
+      () => hub!.request("events", { id: cancelling.id }),
+      (events) =>
+        events.some(
+          (e: any) =>
+            e.payload?.cancellation?.requestId === intent.requestId &&
+            e.payload.cancellation.state === "confirmed",
+        ),
+    );
+    const cancelled = await snapshot(cancelSession);
+    assert.equal(cancelled.attempts.length, 1);
+    assert.equal(cancelled.attempts[0].state, "cancelled");
+    const cancelReceipt = await hub.request("receipt", {
+      id: cancelling.id,
+      requestId: cancelPrompt,
+    });
+    assert.equal(cancelReceipt.state, "interrupted");
+    assert.equal(cancelReceipt.attemptId, cancelled.attempts[0].id);
+    await hub.request("end", { id: cancelling.id });
+    await stopped();
+    record(
+      "Hub SIGKILL after durable cancellation intent recovers the same target and confirms actual stop",
+    );
+
     const expiring = await hub.request("create"),
       expiresRecord = await hub.request("record", { id: expiring.id }),
       expiresSession = expiresRecord.executionAuthority.sessionId;
@@ -778,7 +886,9 @@ try {
     assert.equal(expired.attempts.length, 1);
     hub = bootHub();
     await hub.started;
-    await until(() => hub!.request("online"), Boolean);
+    // gateway/client.go caps backoff at 30s plus up to 15s jitter after a long
+    // outage. Observe registration rather than assuming a reconnect inside 30s.
+    await until(() => hub!.request("online"), Boolean, 60000);
     await stopped();
     assert((await hub.request("status", { id: expiring.id })).revoked);
     record(
@@ -803,6 +913,7 @@ try {
     fixture_sha256: createHash("sha256")
       .update(JSON.stringify(checked))
       .digest("hex"),
+    acp_fixture_sha256: createHash("sha256").update(acpCorpus).digest("hex"),
   };
   if (process.env.SALAAM_EVIDENCE)
     writeFileSync(

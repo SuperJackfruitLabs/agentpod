@@ -15,8 +15,17 @@
  *
  * Spec: docs/superpowers/specs/2026-09-25-harness-error-standard-design.md.
  */
-import { TurnErrorKind as TurnErrorKindSchema } from "@agentpod/contract";
-import type { TurnError, TurnErrorCard, TurnErrorKind, TurnErrorReport, TurnErrorSource } from "@agentpod/contract";
+import {
+  TurnErrorKind as TurnErrorKindSchema,
+  SalaamAcpFailure,
+} from "@agentpod/contract";
+import type {
+  TurnError,
+  TurnErrorCard,
+  TurnErrorKind,
+  TurnErrorReport,
+  TurnErrorSource,
+} from "@agentpod/contract";
 
 /**
  * An HTTP status, only where it reads as one: leading the message ("400
@@ -31,28 +40,40 @@ function status(codes: string): string {
 /** Order matters: the first match wins. */
 const TEXT_RULES: Array<[RegExp, TurnErrorKind]> = [
   // Before rate_limit: Kimi's quota message says "usage limit".
-  [/usage limit|quota|billing|credit balance|insufficient (credit|balance|funds)/i, "quota"],
-  [new RegExp(String.raw`rate.?limit|too many requests|${status("429")}`, "i"), "rate_limit"],
+  [
+    /usage limit|quota|billing|credit balance|insufficient (credit|balance|funds)/i,
+    "quota",
+  ],
+  [
+    new RegExp(String.raw`rate.?limit|too many requests|${status("429")}`, "i"),
+    "rate_limit",
+  ],
   // Before bad_request: an auth failure can carry a 400 in some providers.
   // "log in" only as words of its own: not "catalog in", not "/var/log in".
   // "/login" is claude-agent-acp's not-signed-in result ("Please run /login").
   [
     new RegExp(
       String.raw`authenticat|unauthori[sz]ed|api key|sign in|(?<![\w/.-])log ?in\b|\/login\b|${status("401")}`,
-      "i"
+      "i",
     ),
     "auth",
   ],
-  [/context (window|length)|maximum context|too many tokens/i, "context_exhausted"],
+  [
+    /context (window|length)|maximum context|too many tokens/i,
+    "context_exhausted",
+  ],
   [/timed? ?out\b/i, "timeout"],
   [
     new RegExp(
       String.raw`overloaded|service unavailable|internal server error|bad gateway|gateway timeout|${status("50[0234]")}`,
-      "i"
+      "i",
     ),
     "provider_unavailable",
   ],
-  [new RegExp(String.raw`bad request|invalid request|${status("400")}`, "i"), "bad_request"],
+  [
+    new RegExp(String.raw`bad request|invalid request|${status("400")}`, "i"),
+    "bad_request",
+  ],
   [/couldn't reach the node|node (is )?offline/i, "node_offline"],
   [/^exit$|exit status \d+|^signal: \w+/i, "harness_exited"],
 ];
@@ -126,7 +147,8 @@ function kindOfStatus(status?: number): TurnErrorKind | undefined {
   if (status === undefined) return undefined;
   if (status === 401) return "auth";
   if (status === 429) return "rate_limit";
-  if (status === 400 || status === 404 || status === 413 || status === 422) return "bad_request";
+  if (status === 400 || status === 404 || status === 413 || status === 422)
+    return "bad_request";
   if (status >= 500) return "provider_unavailable";
   return undefined;
 }
@@ -135,13 +157,17 @@ function kindOfReported(
   message: string,
   kind?: TurnErrorKind,
   providerErrorType?: string,
-  httpStatus?: number
+  httpStatus?: number,
 ): TurnErrorKind {
   if (kind) return kind;
-  const typed = providerErrorType ? PROVIDER_ERROR_TYPES[providerErrorType] : undefined;
+  const typed = providerErrorType
+    ? PROVIDER_ERROR_TYPES[providerErrorType]
+    : undefined;
   if (typed) return typed;
   const worded = classifyText(message);
-  return worded !== "unknown" ? worded : kindOfStatus(httpStatus) ?? "unknown";
+  return worded !== "unknown"
+    ? worded
+    : (kindOfStatus(httpStatus) ?? "unknown");
 }
 
 /** ACP's `auth_required` JSON-RPC code. */
@@ -175,7 +201,7 @@ function build(
   kind: TurnErrorKind,
   harness: string,
   source: TurnErrorSource,
-  extra: Partial<TurnError> = {}
+  extra: Partial<TurnError> = {},
 ): TurnError {
   const retryable = RETRYABLE[kind];
   return {
@@ -193,8 +219,14 @@ function typedKind(data: Record<string, unknown>): TurnErrorKind | undefined {
   if (claude && CLAUDE_ERROR_KINDS[claude]) return CLAUDE_ERROR_KINDS[claude];
 
   const codex = data.codexErrorInfo;
-  const codexKey = typeof codex === "string" ? codex : isRecord(codex) ? Object.keys(codex)[0] : undefined;
-  if (codexKey && CODEX_ERROR_KINDS[codexKey]) return CODEX_ERROR_KINDS[codexKey];
+  const codexKey =
+    typeof codex === "string"
+      ? codex
+      : isRecord(codex)
+        ? Object.keys(codex)[0]
+        : undefined;
+  if (codexKey && CODEX_ERROR_KINDS[codexKey])
+    return CODEX_ERROR_KINDS[codexKey];
 
   return undefined;
 }
@@ -207,7 +239,11 @@ function typedKind(data: Record<string, unknown>): TurnErrorKind | undefined {
 function readableMessage(raw: string, data: Record<string, unknown>): string {
   const own = raw.replace(/^Internal error:\s*/i, "").trim();
   const generic = own === "" || /^internal error$/i.test(own);
-  const parts = [generic ? undefined : own, nonEmpty(data.message), nonEmpty(data.additionalDetails)];
+  const parts = [
+    generic ? undefined : own,
+    nonEmpty(data.message),
+    nonEmpty(data.additionalDetails),
+  ];
 
   const seen: string[] = [];
   for (const part of parts) {
@@ -219,20 +255,56 @@ function readableMessage(raw: string, data: Record<string, unknown>): string {
 }
 
 /** A harness that failed the prompt: the `session/prompt` rejection. */
-export function turnErrorFromRejection(err: unknown, harness: string): TurnError {
+export function turnErrorFromRejection(
+  err: unknown,
+  harness: string,
+): TurnError {
   const raw = err instanceof Error ? err.message : String(err);
   const record = isRecord(err) ? err : {};
   const data = isRecord(record.data) ? record.data : {};
+
+  const salaam =
+    harness === "salaam"
+      ? SalaamAcpFailure.safeParse(data["salaam.dev/failure"])
+      : null;
+  if (salaam?.success) {
+    const f = salaam.data;
+    return build(f.message, f.kind, harness, "acp-rejection", {
+      failureCode: f.code,
+      ...(f.requestId &&
+      /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+        f.requestId,
+      )
+        ? { logicalRequestId: f.requestId }
+        : {}),
+      ...(f.attemptId ? { attemptId: f.attemptId } : {}),
+      ...(f.sessionId ? { localSessionId: f.sessionId } : {}),
+      ...(f.provider ? { provider: f.provider } : {}),
+      ...(f.model ? { model: f.model } : {}),
+      ...(f.httpStatus ? { httpStatus: f.httpStatus } : {}),
+      ...(f.retryable === undefined ? {} : { retryable: f.retryable }),
+    });
+  }
 
   const message = readableMessage(raw, data);
   const fromText = classifyText(message);
   const kind =
     typedKind(data) ??
-    (fromText !== "unknown" ? fromText : record.code === ACP_AUTH_REQUIRED ? "auth" : "unknown");
+    (fromText !== "unknown"
+      ? fromText
+      : record.code === ACP_AUTH_REQUIRED
+        ? "auth"
+        : "unknown");
 
   // OpenCode names the provider only in `data` on an auth failure.
   const provider = nonEmpty(data.providerID) ?? nonEmpty(data.provider);
-  return build(message, kind, harness, "acp-rejection", provider ? { provider } : {});
+  return build(
+    message,
+    kind,
+    harness,
+    "acp-rejection",
+    provider ? { provider } : {},
+  );
 }
 
 /**
@@ -255,7 +327,12 @@ export function turnErrorFromRejection(err: unknown, harness: string): TurnError
  */
 export function rejectionSaidNothing(err: unknown): boolean {
   if (err === null || err === undefined) return true;
-  const raw = err instanceof Error ? err.message : isRecord(err) ? String(err.message ?? "") : String(err);
+  const raw =
+    err instanceof Error
+      ? err.message
+      : isRecord(err)
+        ? String(err.message ?? "")
+        : String(err);
   const record = isRecord(err) ? err : {};
   const data = isRecord(record.data) ? record.data : {};
 
@@ -265,6 +342,8 @@ export function rejectionSaidNothing(err: unknown): boolean {
   if (!(own === "" || /^internal error$/i.test(own))) return false;
   if (nonEmpty(data.message) || nonEmpty(data.additionalDetails)) return false;
   if (typedKind(data)) return false;
+  if (SalaamAcpFailure.safeParse(data["salaam.dev/failure"]).success)
+    return false;
   return true;
 }
 
@@ -303,16 +382,22 @@ export function turnErrorForUnreachableGateway(harness: string): TurnError {
     `${harness}'s gateway stopped answering, so the turn was interrupted. The conversation is intact — send again to carry on.`,
     "harness_disconnected",
     harness,
-    "hub"
+    "hub",
   );
 }
 
 const SILENT: Record<string, { message: string; kind: TurnErrorKind }> = {
   refusal: { message: "The agent declined to answer.", kind: "refusal" },
-  max_tokens: { message: "The agent reached its output limit before replying.", kind: "max_tokens" },
+  max_tokens: {
+    message: "The agent reached its output limit before replying.",
+    kind: "max_tokens",
+  },
   // A user's cancel never reaches here (cancelTurn idles the session first), so
   // this is a harness that stopped its own turn.
-  cancelled: { message: "The agent stopped the turn before replying.", kind: "cancelled" },
+  cancelled: {
+    message: "The agent stopped the turn before replying.",
+    kind: "cancelled",
+  },
 };
 
 /**
@@ -320,14 +405,27 @@ const SILENT: Record<string, { message: string; kind: TurnErrorKind }> = {
  * what a provider failure looks like over ACP — the words are only in the
  * harness's own log until a plugin reports them.
  */
-export function turnErrorForSilentTurn(harness: string, stopReason: unknown): TurnError {
+export function turnErrorForSilentTurn(
+  harness: string,
+  stopReason: unknown,
+): TurnError {
   const known = typeof stopReason === "string" ? SILENT[stopReason] : undefined;
-  if (known) return build(known.message, known.kind, harness, "acp-stop-reason");
-  return build("The agent completed without a reply.", "unknown", harness, "acp-stop-reason");
+  if (known)
+    return build(known.message, known.kind, harness, "acp-stop-reason");
+  return build(
+    "The agent completed without a reply.",
+    "unknown",
+    harness,
+    "acp-stop-reason",
+  );
 }
 
 /** A failure the hub itself names: a node gone, an adapter exited, a failed write. */
-export function turnErrorFromReason(reason: string, harness: string, source: TurnErrorSource): TurnError {
+export function turnErrorFromReason(
+  reason: string,
+  harness: string,
+  source: TurnErrorSource,
+): TurnError {
   return build(reason, classifyText(reason), harness, source);
 }
 
@@ -336,8 +434,16 @@ export function turnErrorFromReason(reason: string, harness: string, source: Tur
  * saw the failure; the hub names whose harness it was and where it came from,
  * because a report must not be able to claim another harness's identity.
  */
-export function turnErrorFromPlugin(reported: NonNullable<TurnErrorReport["error"]>, harness: string): TurnError {
-  const kind = kindOfReported(reported.message, reported.kind, reported.providerErrorType, reported.httpStatus);
+export function turnErrorFromPlugin(
+  reported: NonNullable<TurnErrorReport["error"]>,
+  harness: string,
+): TurnError {
+  const kind = kindOfReported(
+    reported.message,
+    reported.kind,
+    reported.providerErrorType,
+    reported.httpStatus,
+  );
   const { message, kind: _kind, retryable, attempts, ...rest } = reported;
   const classified = attempts?.map((a) => ({
     ...a,
@@ -350,7 +456,8 @@ export function turnErrorFromPlugin(reported: NonNullable<TurnErrorReport["error
   return retryable === undefined ? error : { ...error, retryable };
 }
 
-const clip = (s: string, max: number) => (s.length > max ? s.slice(0, max - 1) + "…" : s);
+const clip = (s: string, max: number) =>
+  s.length > max ? s.slice(0, max - 1) + "…" : s;
 
 /**
  * The card a room's error notice carries (`dev.agentpod.turn_error`), from an
@@ -392,7 +499,9 @@ export function turnErrorCard(payload: unknown): TurnErrorCard | null {
     harness: clip(harness, 100),
     ...(provider ? { provider: clip(provider, 200) } : {}),
     ...(model ? { model: clip(model, 200) } : {}),
-    ...(typeof payload.retryable === "boolean" ? { retryable: payload.retryable } : {}),
+    ...(typeof payload.retryable === "boolean"
+      ? { retryable: payload.retryable }
+      : {}),
     ...(attempts && attempts.length > 0 ? { attempts } : {}),
   };
 }

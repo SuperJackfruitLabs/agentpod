@@ -30,7 +30,7 @@ The node admission credential stays local and never goes to the Hub or transcrip
 Apply database migration `0101_salaam_execution_authority.sql` before running the
 new Hub; update the daemon and node before opening the opted-in station. Missing
 or old admission support denies execution. Back up Salaam state before upgrading:
-its schema 19 cannot be opened by an older binary. This profile does not enable
+its schema 20 cannot be opened by an older binary. This profile does not enable
 station file access, terminal commands, coding tools, external runtimes or MCP.
 Do not infer isolation from a malicious node administrator or other provisioners.
 
@@ -97,7 +97,6 @@ Stable source identities deduplicate repeated message parts during load. The Hub
 user prompt is retained once; materialized tool history can enrich the same tool
 call. Transcript events and their session cursor commit together before publication.
 
-
 ## Reviewed daemon startup
 
 For node-owned cold startup, plan an AgentPod host profile with canonical absolute
@@ -150,3 +149,40 @@ DATABASE_URL=postgres://agentpod:agentpod-dev-password@127.0.0.1:5434/agentpod \
 SALAAM_REPO=/absolute/path/to/salaam SALAAM_RUNTIME_REHEARSAL=1 \
 bun tests/integration/salaam-node-e2e.ts
 ```
+
+## Typed outcomes and cancellation
+
+Install the updated daemon/ACP adapter before the Hub. The separate strict
+`salaam.dev/executionFeatures` namespace negotiates version 1 failures,
+cancellation receipts and tool semantics. The existing `salaam.dev/features`
+receipt namespace stays unchanged. The updated Hub refuses a bound adapter that
+lacks these features. Older Hubs receive RPC errors for partial-output failures
+so they cannot mistake a token limit or refusal for a successful turn.
+
+A successful model turn requires a verified `end_turn` outcome. Provider auth,
+quota, rate-limit and other failures retain their typed cause and logical prompt,
+local session and attempt IDs. Token limits and refusals retain their standard
+ACP stop reasons even when the provider already emitted text. Provider credentials
+and arbitrary response bodies are excluded from failure metadata. Legacy attempts
+without a verified durable outcome remain unverified; reconnect never reruns them.
+
+Cancellation records a stable UUID and its target logical prompt before sending.
+A Hub crash before handoff retries that same cancellation; a daemon receipt
+survives client, adapter and daemon restarts. A pre-dispatch cancellation fences
+only that prompt, including a later delayed delivery. `requested` means the stop
+is recorded, `confirmed` requires owned work to have settled and unresolved effects
+to have been reconciled, and `unknown` keeps uncertain work blocked. An abort
+acknowledgment or disconnected process alone cannot confirm cancellation. Ending
+the session separately revokes its entire execution authority.
+
+Clients opt into `salaam.dev/cancellationReceipt` updates. The receipt's session ID
+is the daemon's local session ID, while the enclosing ACP notification uses the
+Hub session ID. Do not substitute one identity for the other. Tool updates preserve
+read/search/edit/delete/execute semantics where supported and use only actual
+absolute guarded workspace locations. Immutable repository snapshots do not claim
+editable source locations. This station profile still grants no coding or MCP tools.
+
+No additional Hub database migration is required beyond the authority and prompt
+ledgers above; cancellation intent and receipts use the durable session event
+ledger. Back up daemon state before upgrading to schema 20. Downgrading requires a
+compatible backup and reviewed runtime; old binaries refuse the newer schema.

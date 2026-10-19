@@ -149,6 +149,7 @@ describe("the documented typecheck baseline, tests included", () => {
     // override in it would change both at once.
     const src = parseBaseline(readFileSync(BASELINE_FILE, "utf8"));
     const total = Object.values(src).reduce((a, b) => a + b, 0);
-    expect(total, "KNOWN-RED for src is 15 errors").toBe(15);
+    // The typed PromptResponse stop-reason fix removes acp-agent's old error.
+    expect(total, "KNOWN-RED for src is 14 errors").toBe(14);
   });
 });
