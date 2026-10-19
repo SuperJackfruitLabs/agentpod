@@ -445,3 +445,8 @@ test("falls back to the provider's tiers when the hub is too old to narrow them"
 
   expect(getByText("small")).toBeTruthy();
 });
+
+test("the dialog draws one overlay, not two", () => {
+  render(NewRuntimeDialog, { props: { open: true, providers: ["docker"], onClose: vi.fn() } });
+  expect(document.querySelectorAll('[data-slot="dialog-overlay"]').length).toBe(1);
+});

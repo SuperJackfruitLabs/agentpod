@@ -122,8 +122,6 @@
 </script>
 
 <Dialog.Root {open} onOpenChange={(v) => (open = v)}>
-  <Dialog.Portal>
-    <Dialog.Overlay />
     <Dialog.Content showCloseButton={false}>
       <Dialog.Header>
         <Dialog.Title>{station ? `Assign an agent to ${station.displayName}` : "Assign an agent"}</Dialog.Title>
@@ -175,5 +173,4 @@
         </Dialog.Footer>
       </form>
     </Dialog.Content>
-  </Dialog.Portal>
 </Dialog.Root>
