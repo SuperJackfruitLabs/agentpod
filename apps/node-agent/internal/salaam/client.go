@@ -62,6 +62,7 @@ type admission struct {
 type Client struct {
 	State, NodeID, Workspace string
 	HTTP                     *http.Client
+	Runtime                  *Runtime
 }
 
 func StationKey(workspace string) string {
@@ -83,6 +84,9 @@ func (c *Client) httpClient() *http.Client {
 	}}}
 }
 func (c *Client) Healthy(ctx context.Context) bool {
+	if c.Runtime != nil && c.Runtime.Ensure(ctx) != nil {
+		return false
+	}
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://salaam/v1/health", nil)
 	if err != nil {
 		return false
@@ -105,6 +109,11 @@ func (c *Client) Healthy(ctx context.Context) bool {
 	return out.Service == "healthy" && out.AgentPodConfig != nil && *out.AgentPodConfig != ""
 }
 func (c *Client) call(ctx context.Context, action string, body any, out any) error {
+	if c.Runtime != nil && (action == "admit" || action == "renew") {
+		if err := c.Runtime.Ensure(ctx); err != nil {
+			return err
+		}
+	}
 	data, err := json.Marshal(body)
 	if err != nil {
 		return err

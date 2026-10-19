@@ -3,6 +3,7 @@ package salaam
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -59,5 +60,26 @@ func TestSharedAuthorityFixtureAndUnknownFields(t *testing.T) {
 	data = []byte(strings.Replace(string(data), `"version": 1`, `"version": 1, "mayDispatch": ["*"]`, 1))
 	if json.Unmarshal(data, &b) == nil {
 		t.Fatal("unknown authority accepted")
+	}
+}
+
+func TestRuntimeFailureCannotBlockStopOrInspection(t *testing.T) {
+	calls := 0
+	c := &Client{Runtime: &Runtime{Node: "unreviewed"}, HTTP: &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	})}}
+	for _, action := range []string{"status", "revoke"} {
+		if err := c.call(context.Background(), action, map[string]any{}, new(any)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, action := range []string{"admit", "renew"} {
+		if err := c.call(context.Background(), action, map[string]any{}, new(any)); err == nil {
+			t.Fatal(fmt.Sprintf("%s bypassed reviewed runtime", action))
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("stop/inspection were blocked or dispatch escaped: %d", calls)
 	}
 }

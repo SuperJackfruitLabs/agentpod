@@ -59,6 +59,9 @@ func TestSalaamRequiresObservedBoundDaemonAndAdvertisesOnlyProvedCapabilities(t 
 		t.Fatalf("unbound daemon advertised: %v %v", found, err)
 	}
 	bound.Store(true)
+	if found, err := NewSalaamFrom(SalaamConfig{Binary: "sh", StateDir: base, Workspace: workspace}).Detect(); err != nil || len(found) != 0 {
+		t.Fatal("Salaam resolved its binary through PATH")
+	}
 	found, err := d.Detect()
 	if err != nil || len(found) != 1 {
 		t.Fatalf("bound daemon missing: %v %v", found, err)

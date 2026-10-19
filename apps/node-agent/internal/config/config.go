@@ -77,6 +77,9 @@ type Config struct {
 	SalaamBinary    string `json:"salaamBinary,omitempty"`
 	SalaamStateDir  string `json:"salaamStateDir,omitempty"`
 	SalaamWorkspace string `json:"salaamWorkspace,omitempty"`
+	// Explicit private Node and reviewed host manifest opt into deterministic daemon startup.
+	SalaamNodeBinary string `json:"salaamNodeBinary,omitempty"`
+	SalaamManifest   string `json:"salaamManifest,omitempty"`
 	// NativeSkillActivation is an explicit operator opt-in for the separate
 	// native-placement transaction. It is off by default.
 	NativeSkillActivation bool `json:"nativeSkillActivation,omitempty"`

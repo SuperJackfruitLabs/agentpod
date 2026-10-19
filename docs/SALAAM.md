@@ -96,3 +96,57 @@ interrupted execution requires continuation rather than silently starting over.
 Stable source identities deduplicate repeated message parts during load. The Hub's
 user prompt is retained once; materialized tool history can enrich the same tool
 call. Transcript events and their session cursor commit together before publication.
+
+
+## Reviewed daemon startup
+
+For node-owned cold startup, plan an AgentPod host profile with canonical absolute
+paths. This profile needs no Docker socket and enables no coding, filesystem,
+terminal, MCP or external-runtime authority:
+
+```json
+{
+  "mode": "agentpod",
+  "state": "/private/salaam-state",
+  "agentpod_config": "/private/salaam-pins.json"
+}
+```
+
+Run the pinned Node executable explicitly when planning and starting the host:
+
+```sh
+/private/node/bin/node /private/salaam/bin/salaam.mjs host plan --config /private/host-config.json > /private/host.json
+chmod 600 /private/host.json
+/private/node/bin/node /private/salaam/bin/salaam.mjs host start --manifest /private/host.json
+```
+
+Set `salaamNodeBinary` and `salaamManifest` in the existing node config, alongside
+`salaamBinary`, `salaamStateDir` and `salaamWorkspace`. The binary is the actual
+canonical `bin/salaam.mjs` path, not a PATH alias or npm symlink; the Node path must
+match the reviewed manifest. Discovery, ACP open and authority admission/renewal
+validate that runtime. Existing separately supervised configurations remain
+available by leaving the two new fields unset.
+
+The owner-only manifest binds Node version/path, package source, build, CLI, pinned
+Pi contents, provider route and authority pins. Runtime, pins, manifest and state
+must remain outside the workspace. Startup uses OS-held locks and matching live
+health; concurrent callers do not start duplicate hosts. The host supervises its
+own daemon, stops on configuration drift and uses bounded restart/backoff. A
+supervisor crash closes its daemon's IPC owner connection. Generate a systemd or
+launchd unit with `host unit` when the OS service manager should own the host.
+
+Back up private state before an upgrade, stop the old host deliberately, install
+the reviewed runtime, and regenerate/review its manifest. A partial upgrade or
+changed manifest is refused. Rollback requires compatible backed-up state and
+matching runtime/manifest; restoring files never revives a revoked execution lease.
+No package download, credential transfer or automatic version upgrade happens at
+model admission. A disconnected node keeps the existing bounded authority lease;
+new work requires fresh authority, and expiry still stops execution locally.
+
+The real startup rehearsal uses the same local gateway and synthetic-plane scope:
+
+```sh
+DATABASE_URL=postgres://agentpod:agentpod-dev-password@127.0.0.1:5434/agentpod \
+SALAAM_REPO=/absolute/path/to/salaam SALAAM_RUNTIME_REHEARSAL=1 \
+bun tests/integration/salaam-node-e2e.ts
+```
