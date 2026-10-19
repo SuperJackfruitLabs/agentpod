@@ -11,7 +11,8 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "test": "vitest run",
-    "clean": "rm -rf .svelte-kit build dist"
+    "clean": "rm -rf .svelte-kit build dist",
+    "e2e:sweep": "node e2e/sweep.mjs"
   },
   "dependencies": {
     "@agentpod/contract": "workspace:*",
@@ -43,6 +44,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/svelte": "^5.2.0",
     "@types/diff": "^8.0.0",
+    "axe-core": "4.10.3",
     "bits-ui": "^2.19.2",
     "clsx": "^2.1.1",
     "jsdom": "^25.0.0",
