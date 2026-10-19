@@ -144,6 +144,25 @@ func (m *Manager) Get(id string) (*Session, bool) {
 	return s, ok
 }
 
+// CloseInstance discards an ACP transport, never the daemon work it observes.
+// Salaam re-opens a fresh SDK connection against its durable daemon session.
+func (m *Manager) CloseInstance(key, instance string) error {
+	m.mu.Lock()
+	p := m.pending[instanceKey(key, instance)]
+	id := m.byKey[instanceKey(key, instance)]
+	m.mu.Unlock()
+	if p != nil {
+		<-p.done
+		if p.session != nil {
+			id = p.session.ID()
+		}
+	}
+	if id == "" {
+		return nil
+	}
+	return m.Close(id)
+}
+
 func (m *Manager) remove(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

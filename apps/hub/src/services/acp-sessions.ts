@@ -28,6 +28,7 @@
 
 import { and, asc, desc, eq, gt, isNotNull, lt, ne, or, sql } from "drizzle-orm";
 import { acpTraceMeta } from "../telemetry/propagation";
+import { SalaamRunAuthority } from '@agentpod/contract';
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import {
   client,
@@ -55,9 +56,10 @@ import { resolveTenantForUser } from "../auth/tenant";
 import { ControlPairDenied, isControlPairEnforced } from "./control-pair";
 import { grantAllowsPrincipal } from "./grants";
 import { callerGrant, callerPrincipal, type TokenAuthority } from "../auth/caller-authority";
-import { acpSessions, acpEvents } from "../db/schema/acp";
+import { acpSessions, acpEvents, type StoredSalaamExecution } from "../db/schema/acp";
 import { stations } from "../db/schema/stations";
 import { createLogger } from "../utils/logger";
+import { makeSalaamExecution, admitSalaamExecution, renewSalaamExecution, revokeSalaamExecution, validateSalaamAuthority, salaamStationStopped, inspectSalaamExecution } from "./salaam-authority";
 import { getStation } from "./station-registry";
 import { gateCapability } from "../routes/station-writes";
 import { connectionManager } from "./connection-manager";
@@ -219,6 +221,9 @@ export interface CreateSessionInput {
    * `OrgPlaneUnavailable`. Ignored in legacy mode.
    */
   authority?: TokenAuthority;
+  /** Trusted bridge fields, never copied from an HTTP/ACP request body. */
+  executionRun?: import('@agentpod/contract').SalaamRunAuthority;
+  validateExecutionRun?: () => Promise<unknown>;
 }
 
 interface LiveSession {
@@ -248,6 +253,11 @@ interface LiveSession {
   /** Parked ask-mode permission requests keyed by the request event's seq. */
   pending: Map<number, (resp: RequestPermissionResponse) => void>;
   ended: boolean;
+  executionAuthority?: StoredSalaamExecution | null;
+  authorityTimer?: ReturnType<typeof setInterval>;
+  authorityRenewing?: boolean;
+  transportLost?: boolean;
+  recoveredTurn?: boolean;
   wire: AcpWire | null;
   connection: ClientConnection | null;
   agent: ClientContext | null;
@@ -386,6 +396,7 @@ function toContract(r: DbRow): AcpSessionRow {
     // every session labelled "Session" no matter what was persisted.
     title: r.title,
     lastSeq: r.lastSeq,
+    ...(r.executionAuthority ? { execution: { state:r.executionAuthority.state,sessionId:r.executionAuthority.sessionId,stopConfirmed:r.executionAuthority.state==='revoked' && r.executionAuthority.receipt?.owned_execution_stopped===true && r.executionAuthority.receipt.unresolved_operations.length===0 } } : {}),
   };
 }
 
@@ -523,6 +534,50 @@ function setStatus(
  * handshaking differently — which would mean a resumed session quietly having
  * different capabilities from the one it replaced.
  */
+function makeLive(input: Pick<LiveSession, 'id' | 'tenantId' | 'stationId' | 'userId' | 'nodeId' | 'stationKey' | 'harness' | 'mode' | 'workspacePath' | 'mcpProxyRequested'> & { mcpServers?: McpServer[] }): LiveSession {
+  const { id, tenantId, stationId, userId, nodeId, stationKey, harness, mode, workspacePath, mcpProxyRequested } = input;
+  return {
+    id,
+    tenantId,
+    stationId,
+    userId,
+    nodeId,
+    stationKey,
+    harness,
+    mode,
+    status: "starting",
+    seq: 0,
+    chain: Promise.resolve(),
+    turnEpoch: 0,
+    turnProduced: false,
+    pending: new Map(),
+    ended: false,
+    wire: null,
+    connection: null,
+    agent: null,
+    acpSessionId: "",
+    nodeSessionId: null,
+    instanceEchoed: null,
+    graceTimer: null,
+    harnessSessionKey: null,
+    turnInFlight: false,
+    turnErrorRecorded: false,
+    turnErrorSource: null,
+    pendingTurnError: null,
+    pendingTurnErrorAt: 0,
+    lastProducedAt: 0,
+    awaitingTurnError: null,
+    turnResolution: null,
+    lastTurnSettledAt: 0,
+    acceptsImages: false,
+    workspacePath: workspacePath ?? null,
+    mcpServers: input.mcpServers ?? [],
+    mcpProxyRequested,
+    mcpProxied: [],
+    reattaching: false,
+  };
+}
+
 async function connectAndHandshake(live: LiveSession, wire: AcpWire): Promise<void> {
   const app = client({ name: "agentpod-hub" })
     .onNotification("session/update", ({ params }) => {
@@ -536,8 +591,8 @@ async function connectAndHandshake(live: LiveSession, wire: AcpWire): Promise<vo
     // Post-exit stream errors surface here; teardown runs via wire.closed.
   });
   void wire.closed.then(
-    (reason) => void handleWireClosed(live, reason),
-    () => void handleWireClosed(live, "wire error")
+    (reason) => { if (live.wire === wire) void handleWireClosed(live, reason, wire); },
+    () => { if (live.wire === wire) void handleWireClosed(live, "wire error", wire); }
   );
 
   const initialized = await withDeadline(
@@ -555,7 +610,8 @@ async function connectAndHandshake(live: LiveSession, wire: AcpWire): Promise<vo
     (initialized as { agentCapabilities?: { promptCapabilities?: { image?: boolean } } } | undefined)
       ?.agentCapabilities?.promptCapabilities?.image === true;
   const created = await withDeadline(
-    connection.agent.request("session/new", {
+    connection.agent.request(live.executionAuthority?.sessionId ? "session/load" : "session/new", {
+      ...(live.executionAuthority?.sessionId ? { sessionId: live.executionAuthority.sessionId } : {}),
       // The SDK requires an absolute cwd; the station workspace is the natural
       // one, "/" the fallback for workspace-less stations.
       cwd: live.workspacePath ?? "/",
@@ -566,7 +622,11 @@ async function connectAndHandshake(live: LiveSession, wire: AcpWire): Promise<vo
     handshakeTimeoutMs,
     HANDSHAKE_TIMEOUT_MESSAGE
   );
-  live.acpSessionId = created.sessionId;
+  // ACP session/load accepts the supplied id and normally returns no sessionId.
+  const returnedSession = (created as { sessionId?: string }).sessionId;
+  if (live.executionAuthority?.sessionId && returnedSession !== undefined && returnedSession !== live.executionAuthority.sessionId) throw Error("Salaam ACP resumed a different session");
+  live.acpSessionId = (live.executionAuthority?.sessionId ?? returnedSession)!;
+  if (!live.acpSessionId) throw Error("ACP handshake returned no session identity");
 }
 
 /**
@@ -687,6 +747,8 @@ function rejectPendingPermissions(live: LiveSession): void {
 async function finalizeEnd(live: LiveSession, reason: string): Promise<void> {
   if (live.ended) return;
   live.ended = true;
+  clearInterval(live.authorityTimer);
+  if (live.executionAuthority) live.executionAuthority = await revokeSalaamExecution(live.id, reason);
   if (live.graceTimer) {
     clearTimeout(live.graceTimer);
     live.graceTimer = null;
@@ -709,7 +771,7 @@ async function finalizeEnd(live: LiveSession, reason: string): Promise<void> {
     await new Promise((r) => setTimeout(r, 0));
   }
   const { done } = setStatus(live, "ended", {
-    extra: { reason },
+    extra: { reason, ...(live.executionAuthority ? { execution:{state:live.executionAuthority.state,stopConfirmed:live.executionAuthority.state==='revoked'} } : {}) },
     endedReason: reason,
     force: true,
   });
@@ -740,14 +802,27 @@ async function finalizeEnd(live: LiveSession, reason: string): Promise<void> {
  * died → end the session with it. A bare "eof" means the node went offline
  * (or the stream was torn down) → park at `waiting` and start the grace timer.
  */
-async function handleWireClosed(live: LiveSession, reason: string): Promise<void> {
+async function handleWireClosed(live: LiveSession, reason: string, closedWire: AcpWire): Promise<void> {
+  if (live.ended || live.wire !== closedWire) return;
+  if(live.executionAuthority && !live.ended) live.transportLost=true;
   try {
     // Contract note: always close() after `closed` settles (idempotent).
-    await live.wire?.close();
+    await closedWire.close();
   } catch {
     // Already closed — fine.
   }
-  if (live.ended) return;
+  if (live.ended || live.wire !== closedWire) return;
+  if (live.executionAuthority) {
+    live.transportLost=true;
+    rejectPendingPermissions(live);
+    await setStatus(live,'waiting',{extra:{reason:'Salaam transport detached; admitted daemon work retains its identity'},force:true}).done;
+    if(connectionManager.isOnline(live.nodeId)) void reconnectSalaam(live);
+    if(!live.graceTimer) {
+      live.graceTimer=setTimeout(()=>void finalizeEnd(live,'Salaam transport did not recover within its authority window'),offlineGraceMs);
+      live.graceTimer.unref?.();
+    }
+    return;
+  }
   if (reason === "eof") {
     rejectPendingPermissions(live);
     const { done } = setStatus(live, "waiting", {
@@ -929,6 +1004,7 @@ export async function stationReadiness(
   if (!connectionManager.isOnline(station.nodeId)) {
     return { ready: false, reason: "Node is offline." };
   }
+  if (station.harness === "salaam" && !(await salaamStationStopped(station.id))) return { ready: false, reason: "Prior Salaam execution has not been confirmed stopped." };
   return { ready: true };
 }
 
@@ -997,6 +1073,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     throw new Error("Node is offline.");
   }
   const { nodeId, stationKey, workspacePath, harness } = station;
+  if (harness === "salaam" && !(await salaamStationStopped(station.id))) throw Error("Prior Salaam execution has not been confirmed stopped.");
   // Asked only of a node that runs the proxy; read before the sibling check, so no await
   // separates that check from addLive.
   const mcpProxyRequested = input.mcpProxy === true && (await nodeHasCapability(nodeId, "mcp.proxy"));
@@ -1020,46 +1097,15 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
   // session ever writes inherits it, so a transcript cannot end up split across
   // tenants by a later re-resolution.
   const tenantId = await resolveTenantForUser(userId);
-  const live: LiveSession = {
-    id,
-    tenantId,
-    stationId,
-    userId,
-    nodeId,
-    stationKey,
-    harness,
-    mode,
-    status: "starting",
-    seq: 0,
-    chain: Promise.resolve(),
-    turnEpoch: 0,
-    turnProduced: false,
-    pending: new Map(),
-    ended: false,
-    wire: null,
-    connection: null,
-    agent: null,
-    acpSessionId: "",
-    nodeSessionId: null,
-    instanceEchoed: null,
-    graceTimer: null,
-    harnessSessionKey: null,
-    turnInFlight: false,
-    turnErrorRecorded: false,
-    turnErrorSource: null,
-    pendingTurnError: null,
-    pendingTurnErrorAt: 0,
-    lastProducedAt: 0,
-    awaitingTurnError: null,
-    turnResolution: null,
-    lastTurnSettledAt: 0,
-    acceptsImages: false,
-    workspacePath: workspacePath ?? null,
-    mcpServers: input.mcpServers ?? [],
-    mcpProxyRequested,
-    mcpProxied: [],
-    reattaching: false,
-  };
+  const execution = harness === "salaam" ? await makeSalaamExecution(stationId, userId, id, input.executionRun) : null;
+  if (execution && input.mcpServers?.length) throw Error("Salaam managed MCP is not enabled yet");
+  if (execution?.binding.run.source === "superpipeline") {
+    if (!input.validateExecutionRun) throw Error("Salaam board admission requires a fresh run-owner check");
+    await input.validateExecutionRun();
+  }
+  const live = makeLive({ id, tenantId, stationId, userId, nodeId, stationKey, harness, mode, workspacePath: workspacePath ?? null, mcpProxyRequested: harness !== "salaam" && mcpProxyRequested, mcpServers: input.mcpServers });
+  live.executionAuthority = execution;
+
   // Register before any await so siblings (and the layers above) can see this
   // session while it is starting. Every failure exit below MUST run
   // finalizeEnd, which removes these entries — a leaked entry would wedge the
@@ -1079,6 +1125,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
         status: "starting",
         endedReason: null,
         nodeSessionId: null,
+        executionAuthority: execution,
         createdAt: now,
         lastEventAt: now,
       }),
@@ -1088,6 +1135,10 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     // The hub session id doubles as the ACP instance: stable by construction
     // across a re-open of this session, and it correlates node-side processes
     // back to this row in logs.
+    if (execution) {
+      await admitSalaamExecution(id, userId);
+      live.executionAuthority = await renewSalaamExecution(id, userId);
+    }
     const wire = await openAcpWire(nodeId, stationKey, id, proxyOptions(live));
     live.wire = wire;
     live.nodeSessionId = wire.nodeSessionId;
@@ -1115,6 +1166,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
       "record node session id"
     );
     await boundedDb(setStatus(live, "idle").done, "idle state event");
+    startSalaamAuthorityWatch(live);
 
     const rows = await boundedDb(
       db.select().from(acpSessions).where(eq(acpSessions.id, id)),
@@ -1301,8 +1353,94 @@ async function nodeHasCapability(nodeId: string, capability: string): Promise<bo
 }
 
 /** The acp.open options a session's (re-)open sends. */
+export async function renewExecution(userId: string, sessionId: string, run?: import('@agentpod/contract').SalaamRunAuthority): Promise<void> {
+  const live = requireLive(userId, sessionId);
+  if (!live.executionAuthority) return;
+  const expected=live.executionAuthority.binding.run;
+  if (expected.source === 'superpipeline' && (!SalaamRunAuthority.safeParse(run).success || JSON.stringify(SalaamRunAuthority.parse(expected))!==JSON.stringify(SalaamRunAuthority.parse(run)))) throw Error('The board work owner must renew this Salaam run');
+  try { live.executionAuthority=await renewSalaamExecution(sessionId,userId); }
+  catch(error) { await finalizeEnd(live,'Salaam execution authority could not be revalidated'); throw error; }
+}
+
+function startSalaamAuthorityWatch(live: LiveSession): void {
+  if (!live.executionAuthority || live.authorityTimer) return;
+  live.authorityTimer=setInterval(() => {
+    if(live.ended || live.authorityRenewing || !connectionManager.isOnline(live.nodeId)) return;
+    live.authorityRenewing=true;
+    void (async()=>{
+      try {
+        if(live.executionAuthority!.binding.run.source==='agentpod') live.executionAuthority=await renewSalaamExecution(live.id,live.userId);
+        else await validateSalaamAuthority(live.executionAuthority!.binding,live.userId);
+        if(live.recoveredTurn) await projectRecoveredSalaamTurn(live);
+      } catch { await finalizeEnd(live,'Salaam execution authority could not be revalidated'); }
+      finally { live.authorityRenewing=false; }
+    })();
+  },15_000);
+  live.authorityTimer.unref?.();
+}
+
+async function projectRecoveredSalaamTurn(live: LiveSession):Promise<void>{
+  const status=await inspectSalaamExecution(live.executionAuthority!);
+  if(status.revoked) { await finalizeEnd(live,'Salaam execution authority was revoked'); return; }
+  if(status.interrupted_attempts.length) { await setStatus(live,'waiting',{extra:{reason:'Salaam attempt was interrupted; inspect and explicitly continue it'}}).done; return; }
+  if(status.active_attempts.length) { await setStatus(live,'working').done; return; }
+  live.recoveredTurn=false;
+  await setStatus(live,'idle').done;
+}
+
+async function reconnectSalaam(live: LiveSession):Promise<void>{
+  if(live.reattaching || live.ended || !live.executionAuthority || !connectionManager.isOnline(live.nodeId)) return;
+  live.reattaching=true;
+  try {
+    if(live.executionAuthority.binding.run.source==='agentpod') live.executionAuthority=await renewSalaamExecution(live.id,live.userId);
+    else await validateSalaamAuthority(live.executionAuthority.binding,live.userId);
+    try { live.connection?.close(); await live.wire?.close(); } catch {}
+    const wire=await openAcpWire(live.nodeId,live.stationKey,live.id,proxyOptions(live));
+    if(live.ended) { await wire.close(); return; }
+    live.wire=wire; live.nodeSessionId=wire.nodeSessionId; live.instanceEchoed=wire.instanceEchoed;
+    await connectAndHandshake(live,wire);
+    if(live.graceTimer) { clearTimeout(live.graceTimer); live.graceTimer=null; }
+    live.transportLost=false; live.recoveredTurn=true;
+    await db.update(acpSessions).set({nodeSessionId:wire.nodeSessionId}).where(eq(acpSessions.id,live.id));
+    await projectRecoveredSalaamTurn(live);
+    startSalaamAuthorityWatch(live);
+  } catch { await finalizeEnd(live,'Salaam transport recovery could not revalidate its saved authority'); }
+  finally { live.reattaching=false; }
+}
+
+async function restoreSalaamRow(row:typeof acpSessions.$inferSelect):Promise<void>{
+  if(!row.executionAuthority || liveById.has(row.id)) return;
+  const saved=row.executionAuthority;
+  if(saved.state!=='active' || saved.binding.run.source==='superpipeline') {
+    await revokeSalaamExecution(row.id,'Hub restart requires the board work owner to recover explicitly');
+    if(row.status!=='ended') await appendEndedState(row.id,'Hub restart interrupted board execution; no prompt was replayed');
+    return;
+  }
+  if(!connectionManager.isOnline(saved.binding.node_id)) { await db.update(acpSessions).set({status:'waiting'}).where(eq(acpSessions.id,row.id)); return; }
+  const b=saved.binding;
+  const live=makeLive({id:row.id,tenantId:row.tenantId,stationId:row.stationId,userId:row.userId,nodeId:b.node_id,stationKey:b.station_key,harness:'salaam',mode:row.mode as AcpSessionMode,workspacePath:b.workspace,mcpProxyRequested:false});
+  live.seq=row.lastSeq; live.executionAuthority=saved; live.acpSessionId=saved.sessionId ?? ''; live.transportLost=true;
+  addLive(live);
+  await reconnectSalaam(live);
+}
+
+export async function recoverSalaamForNode(nodeId:string):Promise<void>{
+  const rows=await db.select().from(acpSessions).where(sql`${acpSessions.executionAuthority} IS NOT NULL`);
+  for(const row of rows) if(row.executionAuthority!.binding.node_id===nodeId) {
+    if(row.executionAuthority!.state==='revocation_pending') await revokeSalaamExecution(row.id,'Reconcile pending revocation after node reconnect');
+    else if(row.status!=='ended') {
+      const live=liveById.get(row.id);
+      if(live?.transportLost) await reconnectSalaam(live);
+      else if(!live) await restoreSalaamRow(row);
+    }
+  }
+}
+
 function proxyOptions(live: LiveSession): OpenAcpWireOptions {
-  return live.mcpProxyRequested ? { mcpProxy: { stationId: live.stationId } } : {};
+  return {
+    ...(live.mcpProxyRequested ? { mcpProxy: { stationId: live.stationId } } : {}),
+    ...(live.executionAuthority ? { salaamAuthority: live.executionAuthority.binding } : {}),
+  };
 }
 
 /** The names the node's proxy gives its two servers (node-agent internal/mcpproxy). */
@@ -1332,9 +1470,11 @@ export async function promptSession(
   userId: string,
   sessionId: string,
   text: string,
-  images: PromptImage[] = []
+  images: PromptImage[] = [],
+  executionRun?: import('@agentpod/contract').SalaamRunAuthority
 ): Promise<void> {
   const live = requireLive(userId, sessionId);
+  if (live.executionAuthority) await renewExecution(userId, sessionId, executionRun);
   if (live.status !== "idle") {
     throw new Error(SESSION_BUSY_MESSAGE);
   }
@@ -1345,12 +1485,13 @@ export async function promptSession(
   // COALESCE is what makes "first" mean first: an existing title always wins,
   // so a long conversation keeps the label the user recognises no matter how
   // many prompts follow (and a whitespace-only prompt sets nothing at all).
+  const logicalRequestId = crypto.randomUUID();
   const title = deriveSessionTitle(text || images[0]?.name || "");
   const { done: promptWritten } = persistEvent(
     live,
     "user-prompt",
     images.length === 0
-      ? { text }
+      ? { text, ...(live.executionAuthority ? { requestId: logicalRequestId } : {}) }
       : {
           text,
           images: images.map(({ name, mimeType, bytes }) => ({ name, mimeType, bytes })),
@@ -1430,6 +1571,7 @@ export async function promptSession(
       sessionId: live.acpSessionId,
       prompt: promptBlocks(text, images, imageRefusal),
       ...acpTraceMeta(),
+      ...(live.executionAuthority ? { _meta: { ...((acpTraceMeta() as {_meta?: object})._meta ?? {}), "salaam.dev/requestId": logicalRequestId } } : {}),
     })
     .then(async (response) => {
       if (isCurrentTurn()) {
@@ -1487,6 +1629,21 @@ export async function promptSession(
       settled();
     })
     .catch(async (err) => {
+      if(live.executionAuthority && !live.ended && (live.transportLost || !connectionManager.isOnline(live.nodeId))) {
+        // The accepted prompt belongs to the daemon. Inspect it; never resubmit it.
+        const deadline=Date.now()+90_000;
+        while(!live.ended && Date.now()<deadline) {
+          if(connectionManager.isOnline(live.nodeId)) {
+            try {
+              const status=await inspectSalaamExecution(live.executionAuthority);
+              if(status.revoked) break;
+              if(status.interrupted_attempts.length) { await recordError(turnErrorFromReason('Salaam attempt interrupted; explicit continuation required','salaam','hub')); settled(); return; }
+              if(!status.active_attempts.length) { await audit.done('ok'); await setStatus(live,'idle').done; settled(); return; }
+            } catch {}
+          }
+          await new Promise(r=>setTimeout(r,100));
+        }
+      }
       // The harness's words, with what it put in `data` — Codex's quota
       // sentence is only there — classified into one shape for every reader.
       let error = turnErrorFromRejection(err, live.harness);
@@ -1732,6 +1889,7 @@ export async function endSession(
     .from(acpSessions)
     .where(and(eq(acpSessions.id, sessionId), eq(acpSessions.userId, userId)));
   if (!rows[0]) throw new Error("Session not found.");
+  if (rows[0].executionAuthority) await revokeSalaamExecution(sessionId, reason);
   if (rows[0].status === "ended") return;
   await appendEndedState(sessionId, reason);
 }
@@ -1842,6 +2000,7 @@ export async function reconcileOnBoot(): Promise<void> {
     .where(ne(acpSessions.status, "ended"));
 
   for (const row of stale) {
+    if(row.executionAuthority) { await restoreSalaamRow(row); continue; }
     await appendEndedState(row.id, "hub restarted");
 
     if (!row.nodeSessionId) continue;
@@ -1944,6 +2103,7 @@ export async function closeOrphanedProcesses(nodeId: string): Promise<void> {
 // boot-time close path never fires — the real cleanup happens here, when
 // each affected node next connects.
 connectionManager.onNodeOnline((nodeId) => {
+  void recoverSalaamForNode(nodeId).catch((err)=>log.error('Salaam recovery failed',{nodeId,error:String(err)}));
   closeOrphanedProcesses(nodeId).catch((err) => {
     log.error("ACP orphan cleanup failed", { nodeId, error: String(err) });
   });

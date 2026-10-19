@@ -165,7 +165,8 @@ const hubAcpPort: AcpPort = {
     const row = await acpSessions.createSession(input);
     return { id: row.id, libraryTools: acpSessions.sessionHasLibraryTools(row.id) };
   },
-  promptSession: (userId, sessionId, text) => acpSessions.promptSession(userId, sessionId, text),
+  promptSession: (userId, sessionId, text, run) => acpSessions.promptSession(userId, sessionId, text, [], run),
+  renewExecution: (userId,sessionId,run) => acpSessions.renewExecution(userId,sessionId,run),
   subscribe: (sessionId, fn) => acpSessions.subscribe(sessionId, fn),
   endSession: (userId, sessionId, reason) => acpSessions.endSession(userId, sessionId, reason),
   answerPermission: (userId, sessionId, requestSeq, optionId) =>

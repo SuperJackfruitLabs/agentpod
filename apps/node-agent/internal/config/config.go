@@ -73,6 +73,10 @@ type Config struct {
 	KiloDataDir string `json:"kiloDataDir,omitempty"`
 	KiloBinary  string `json:"kiloBinary,omitempty"`
 	NodeBinary  string `json:"nodeBinary,omitempty"`
+	// Salaam is opt-in and uses a separately running, pinned daemon. No station writes are advertised.
+	SalaamBinary    string `json:"salaamBinary,omitempty"`
+	SalaamStateDir  string `json:"salaamStateDir,omitempty"`
+	SalaamWorkspace string `json:"salaamWorkspace,omitempty"`
 	// NativeSkillActivation is an explicit operator opt-in for the separate
 	// native-placement transaction. It is off by default.
 	NativeSkillActivation bool `json:"nativeSkillActivation,omitempty"`

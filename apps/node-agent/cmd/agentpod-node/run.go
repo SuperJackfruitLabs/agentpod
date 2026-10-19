@@ -21,6 +21,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/mcpproxy"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/salaam"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stationtoken"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/telemetry"
@@ -290,6 +291,11 @@ func runCmd() {
 		instances.EnvForKey,
 		instances.NoteBlocked,
 	)), mcpProxy)
+	var salaamClient *salaam.Client
+	if cfg.SalaamStateDir != "" && cfg.SalaamWorkspace != "" {
+		salaamClient = &salaam.Client{State: cfg.SalaamStateDir, NodeID: cfg.NodeID, Workspace: cfg.SalaamWorkspace}
+	}
+	h = gateway.NewSalaamHandler(h, salaamClient)
 	// The daemon's otel.env comes from its own cgroup (otelenv.DaemonPath), not from uid: a
 	// system unit with User= still reads the system file, and a node that is not the
 	// systemd service at all (container, `apn run`) answers unsupported instead of exiting.

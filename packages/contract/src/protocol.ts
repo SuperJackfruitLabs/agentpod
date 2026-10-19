@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SalaamAuthority, SalaamAuthorityParams, SalaamAuthorityStatus } from "./salaam-authority";
 import { Station, StationHealth, FsEntry } from "./station";
 import { ChangesetStatus, ChangesetDiff, ChangesetDiffSide } from "./changeset";
 import { PostureReport } from "./posture";
@@ -43,6 +44,10 @@ export type InputMsg = z.infer<typeof InputMsg>;
 export type ResizeMsg = z.infer<typeof ResizeMsg>;
 
 export const VERB_PARAMS = {
+  "salaam.admit": SalaamAuthorityParams,
+  "salaam.renew": SalaamAuthorityParams.extend({ lease_sequence: z.number().int().positive() }),
+  "salaam.revoke": SalaamAuthorityParams.extend({ reason: z.string().min(1).max(1024) }),
+  "salaam.status": SalaamAuthorityParams,
   "skills.plan": SkillPlanParams,
   "skills.rollback": SkillOperationParams,
   "skills.apply": SkillApplyParams,
@@ -88,6 +93,7 @@ export const VERB_PARAMS = {
   "acp.open":   z.object({
     key: z.string(),
     instance: z.string().optional(),
+    salaamAuthority: SalaamAuthority.optional(),
     mcpProxy: z.object({ stationId: z.string().min(1) }).optional(),
   }),
   "acp.attach": z.object({ sessionId: z.string() }),
@@ -183,6 +189,10 @@ export const VERB_PARAMS = {
 // NOTE: "detect" returns plain Station[] (no adopted field) — the hub
 // annotates adopted:true/false from its DB before forwarding to clients.
 export const VERB_RESULTS = {
+  "salaam.admit": SalaamAuthorityStatus,
+  "salaam.renew": SalaamAuthorityStatus,
+  "salaam.revoke": SalaamAuthorityStatus,
+  "salaam.status": SalaamAuthorityStatus,
   "skills.plan": SkillInstallPlan,
   "skills.rollback": SkillInstallPlan,
   "skills.apply": SkillInstallReceipt,

@@ -11,6 +11,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acptrace"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/mcpproxy"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/salaam"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/turnerror"
 )
 
@@ -86,10 +87,11 @@ func (st *acpAttachState) emitExit(reason string) {
 // are correlated by session ID against the manager, so no attach registry is
 // needed.
 type acpHandler struct {
-	inner Handler
-	mgr   *acp.Manager
-	cmdFn ACPCommandFunc
-	mcp   MCPProxyFunc
+	inner  Handler
+	mgr    *acp.Manager
+	cmdFn  ACPCommandFunc
+	mcp    MCPProxyFunc
+	salaam *salaam.Client
 
 	// injectMu guards inject: node session id → the proxied MCP servers its session/new gets.
 	injectMu sync.Mutex
@@ -156,7 +158,7 @@ func (h *acpHandler) Handle(
 ) (any, bool, error) {
 	switch verb {
 	case "acp.open":
-		return h.handleOpen(params)
+		return h.handleOpen(ctx, params)
 	case "acp.attach":
 		return h.handleAttach(ctx, params, emit)
 	case "acp.close":
@@ -171,11 +173,12 @@ func (h *acpHandler) Handle(
 // echoed instance when the request carried one. The echo is how the hub tells a
 // node that understands per-instance processes from an older one; omitting the
 // field for an instance-less request keeps the legacy result shape byte-exact.
-func (h *acpHandler) handleOpen(params json.RawMessage) (any, bool, error) {
+func (h *acpHandler) handleOpen(ctx context.Context, params json.RawMessage) (any, bool, error) {
 	var p struct {
-		Key      string `json:"key"`
-		Instance string `json:"instance"`
-		MCPProxy *struct {
+		Key             string          `json:"key"`
+		Instance        string          `json:"instance"`
+		SalaamAuthority *salaam.Binding `json:"salaamAuthority"`
+		MCPProxy        *struct {
 			StationID string `json:"stationId"`
 		} `json:"mcpProxy"`
 	}
@@ -189,6 +192,21 @@ func (h *acpHandler) handleOpen(params json.RawMessage) (any, bool, error) {
 	argv, dir, env, err := h.cmdFn(p.Key)
 	if err != nil {
 		return nil, false, fmt.Errorf("acp.open: %w", err)
+	}
+	if strings.HasPrefix(p.Key, "salaam:") {
+		if h.salaam == nil || p.SalaamAuthority == nil || p.SalaamAuthority.HubSessionID != p.Instance || p.SalaamAuthority.StationKey != p.Key {
+			return nil, false, fmt.Errorf("acp.open: Salaam requires a matching trusted authority binding")
+		}
+		admissionEnv, err := h.salaam.ACPEnv(ctx, *p.SalaamAuthority)
+		if err != nil {
+			return nil, false, err
+		}
+		env = append(env, admissionEnv...)
+		if err := h.mgr.CloseInstance(p.Key, p.Instance); err != nil {
+			return nil, false, fmt.Errorf("salaam: prior ACP transport did not stop")
+		}
+	} else if p.SalaamAuthority != nil {
+		return nil, false, fmt.Errorf("acp.open: Salaam authority cannot be passed to another harness")
 	}
 	// The hub session this process serves, for a harness plugin to name when
 	// it reports a failed turn (internal/turnerror; Pi's agentpod-errors

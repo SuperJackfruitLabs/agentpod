@@ -22,6 +22,18 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
+import type { SalaamAuthority, SalaamAuthorityStatus } from "@agentpod/contract";
+import type { z } from "zod";
+
+export interface StoredSalaamExecution {
+  binding: SalaamAuthority;
+  leaseSequence: number;
+  sessionId: string | null;
+  admissionId: string | null;
+  stopRequestId: string;
+  state: "active" | "revocation_pending" | "revoked";
+  receipt?: z.infer<typeof SalaamAuthorityStatus>;
+}
 
 /**
  * What an attempt ran with, as stored on `acp_runs.fingerprint` (contract C3).
@@ -52,11 +64,16 @@ export const acpSessions = pgTable("acp_sessions", {
   status: text("status").notNull(),                                   // starting|idle|working|waiting|ended
   endedReason: text("ended_reason"),
   nodeSessionId: text("node_session_id"),                             // the node-side acp_* id, for reconciliation acp.close
+  executionAuthority: jsonb("execution_authority").$type<StoredSalaamExecution>(),
   title: text("title"),                                               // first prompt, truncated; null until the first prompt
   lastSeq: integer("last_seq").notNull().default(0),                  // highest event seq persisted for this session
   createdAt: timestamp("created_at").notNull(),
   lastEventAt: timestamp("last_event_at").notNull(),
 }, (t) => [
+  // A pending stop continues to own its slots until observed cleanup completes.
+  uniqueIndex("acp_salaam_station_execution").on(sql`(${t.executionAuthority} #>> '{binding,station_id}')`).where(sql`${t.executionAuthority}->>'state' IN ('active','revocation_pending')`),
+  uniqueIndex("acp_salaam_principal_execution").on(sql`(${t.executionAuthority} #>> '{binding,organization_id}')`,sql`(${t.executionAuthority} #>> '{binding,principal_id}')`).where(sql`${t.executionAuthority}->>'state' IN ('active','revocation_pending')`),
+  uniqueIndex("acp_salaam_work_run_epoch").on(sql`(${t.executionAuthority} #>> '{binding,organization_id}')`,sql`(${t.executionAuthority} #>> '{binding,run,source}')`,sql`(${t.executionAuthority} #>> '{binding,run,id}')`,sql`(${t.executionAuthority} #>> '{binding,run,epoch}')`).where(sql`${t.executionAuthority} IS NOT NULL`),
   index("acp_sessions_station_id_idx").on(t.stationId),
   // Ordering index for the paginated per-station history list (newest first).
   index("acp_sessions_station_activity_idx").on(t.stationId, t.lastEventAt.desc()),
