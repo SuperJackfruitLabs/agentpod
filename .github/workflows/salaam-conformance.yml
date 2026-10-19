@@ -1,0 +1,114 @@
+name: Salaam conformance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - apps/node-agent/**
+      - apps/hub/**
+      - packages/contract/**
+      - ci/salaam-conformance.json
+      - .github/workflows/salaam-conformance.yml
+  push:
+    branches: [main]
+    paths:
+      - apps/node-agent/**
+      - apps/hub/**
+      - packages/contract/**
+      - ci/salaam-conformance.json
+      - .github/workflows/salaam-conformance.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: salaam-conformance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  managed-mcp:
+    name: Authenticated managed MCP and recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: agentpod
+          POSTGRES_PASSWORD: agentpod-dev-password
+          POSTGRES_DB: agentpod
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DO_NOT_TRACK: 1
+      NODE_ENV: test
+      DATABASE_URL: postgres://agentpod:agentpod-dev-password@127.0.0.1:5434/agentpod
+    steps:
+      - name: Checkout AgentPod
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.7.0
+      - name: Read the reviewed companion pin
+        id: companion
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const pin = JSON.parse(readFileSync('ci/salaam-conformance.json', 'utf8'));
+          if (pin.schema !== 1 || pin.repository !== 'SuperJackfruitLabs/salaam' || pin.scope !== 'managed-http-mcp' || !/^[a-f0-9]{40}$/.test(pin.revision)) throw Error('Invalid reviewed Salaam companion pin');
+          appendFileSync(process.env.GITHUB_OUTPUT, `revision=${pin.revision}\n`);
+          JS
+          printf '/.salaam-conformance/\n/.ci-evidence/\n' >> .git/info/exclude
+      - name: Checkout the exact Salaam source under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SuperJackfruitLabs/salaam
+          ref: ${{ steps.companion.outputs.revision }}
+          path: .salaam-conformance
+          persist-credentials: false
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/node-agent/go.mod
+          cache-dependency-path: apps/node-agent/go.sum
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Install AgentPod dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build the exact pinned Salaam and Pi runtime
+        run: |
+          npm install --global npm@11.19.0 --ignore-scripts
+          npm --prefix .salaam-conformance ci --ignore-scripts
+          npm --prefix .salaam-conformance run verify:pi
+      - name: Migrate the isolated test database
+        working-directory: apps/hub
+        run: bun -e 'import("./tests/helpers/pg-migrations").then((m) => m.ensurePgMigrations())'
+      - name: Prove the authenticated node, proxy, daemon and worker boundary
+        working-directory: apps/hub
+        env:
+          SALAAM_REPO: ${{ github.workspace }}/.salaam-conformance
+          SALAAM_MCP_REHEARSAL: "1"
+          SALAAM_EVIDENCE: ${{ github.workspace }}/.ci-evidence/managed-mcp.json
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/.ci-evidence"
+          bun tests/integration/salaam-node-e2e.ts
+      - name: Upload conformance evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: salaam-managed-mcp-${{ github.run_attempt }}
+          path: .ci-evidence/managed-mcp.json
+          if-no-files-found: warn
