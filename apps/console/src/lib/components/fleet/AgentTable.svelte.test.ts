@@ -477,3 +477,14 @@ test("under 768px each agent row is a card: name, status, node and version lines
   const labels = Array.from(row.querySelectorAll("[data-label]")).map((c) => c.getAttribute("data-label"));
   expect(labels).toEqual(expect.arrayContaining(["Node", "Version"]));
 });
+
+test.each([360, 390])("at %ipx nothing in the agent table is wider than the screen", async (width) => {
+  const { setViewport, expectNoOverflow } = await import("$lib/test-utils/viewport");
+  const restore = setViewport(width);
+  try {
+    const { container } = render(AgentTable, { props: { agents: twoAgents } });
+    expectNoOverflow(container, width);
+  } finally {
+    restore();
+  }
+});

@@ -6,7 +6,7 @@
  *
  *   PUBLIC_HUB_URL=https://hub.agentpod.dev pnpm build
  *   node e2e/shots.mjs [--path=/] [--vibes=daylight,paper,studio,quiet] [--themes=light,dark]
- *                      [--sizes=desktop,phone] [--menu] [--more] [--state=populated|loading|error|empty]
+ *                      [--sizes=desktop,tablet,phone,phone360] [--jpeg] [--menu] [--more] [--state=populated|loading|error|empty]
  *                      [--signedout] [--out=e2e/shots]
  *                      [--tab=chat|health|logs|files|terminal|changes|cleanup|activity|config] [--about]
  *                      [--chat=live|none|ended] [--health=running|stopped|error]
@@ -65,10 +65,12 @@ const ADMIN = typeof args.admin === "string" ? args.admin : "legacy";
 const KEYS = typeof args.keys === "string" ? args.keys.split(",") : [];
 const CLICKS = typeof args.click === "string" ? args.click.split("|") : [];
 const NAME = typeof args.name === "string" ? args.name : null;
+/** --jpeg writes a smaller JPEG instead of a PNG (phone passes, many shots, little disk). */
+const JPEG = !!args.jpeg;
 /** The fleet's own reads: what --state=loading|error|empty changes (sign-in and plane reads stay). */
 const FLEET_READ = /^\/api\/(fleet|nodes|runtimes|activity|admin\/principals)/;
 const OUT = resolve(typeof args.out === "string" ? args.out : join(here, "shots"));
-const VIEWPORT = { desktop: { width: 1440, height: 900 }, tablet: { width: 1024, height: 800 }, phone: { width: 390, height: 844 } };
+const VIEWPORT = { desktop: { width: 1440, height: 900 }, tablet: { width: 1024, height: 800 }, phone: { width: 390, height: 844 }, phone360: { width: 360, height: 740 } };
 // --height=N makes the desktop viewport taller (the stage scrolls inside the shell, so a full-page
 // shot would not show more): for comparing a long page with its mockup.
 if (typeof args.height === "string") VIEWPORT.desktop.height = Number(args.height);
@@ -433,8 +435,21 @@ try {
         if (STATE !== "populated") suffix += `-${STATE}`;
         if (SIGNED_OUT) suffix += "-signedout";
         const name = `${PATH === "/" ? "fleet" : PATH.replace(/\W+/g, "_").replace(/^_|_$/g, "")}-${vibe}-${theme}-${size}${suffix}.png`;
-        await page.screenshot({ path: join(OUT, name) });
-        console.log(join(OUT, name));
+        // No horizontal page scroll: report the document's overflow and the elements past the edge.
+        const over = await page.evaluate(() => {
+          const w = document.documentElement.clientWidth;
+          const sw = document.documentElement.scrollWidth;
+          if (sw <= w) return null;
+          const past = [...document.querySelectorAll("body *")]
+            .filter((el) => el.getBoundingClientRect().right > w + 1 && el.getClientRects().length)
+            .slice(0, 5)
+            .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 60)}`);
+          return { sw, w, past };
+        });
+        if (over) console.log(`OVERFLOW ${name}: ${over.sw} > ${over.w} ${over.past.join(" | ")}`);
+        const file = JPEG ? name.replace(/\.png$/, ".jpg") : name;
+        await page.screenshot({ path: join(OUT, file), ...(JPEG ? { type: "jpeg", quality: 60 } : {}) });
+        console.log(join(OUT, file));
         await context.close();
       }
 } finally {
