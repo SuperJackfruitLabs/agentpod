@@ -352,7 +352,7 @@
       />
     </div>
 
-    <div class="flex items-center gap-1" role="group" aria-label="Filter by level">
+    <div class="flex flex-wrap items-center gap-1" role="group" aria-label="Filter by level">
       <button
         type="button"
         class={chipClass(levelFilter === "all")}
