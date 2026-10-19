@@ -261,3 +261,38 @@ test("the palette is how you reach agent creation and assignment", async () => {
   expect(await findByTestId("palette-create-agent")).toBeTruthy();
   expect(await findByTestId("palette-assign-agent")).toBeTruthy();
 });
+
+// --- Groups and keyboard (pinned through the restyle) --------------------
+
+test("the groups are Go to and Fleet, and Authority for admins, in that order", async () => {
+  mockAuth.user = { role: "admin" };
+  const { container } = await open();
+  const headings = [...container.ownerDocument.querySelectorAll("[data-command-group-heading]")].map(
+    (h) => h.textContent?.trim(),
+  );
+  expect(headings).toEqual(["Go to", "Fleet", "Authority"]);
+});
+
+test("Create an agent lands on /agents?action=create", async () => {
+  const { getByTestId } = await open();
+  await fireEvent.click(getByTestId("palette-create-agent"));
+  expect(goto).toHaveBeenCalledWith("/agents?action=create");
+});
+
+test("arrows move the selection, Enter runs it, Escape closes", async () => {
+  const { getByPlaceholderText, getAllByTestId } = await open();
+  const input = getByPlaceholderText(PLACEHOLDER);
+  const [first, second] = getAllByTestId("palette-agent");
+  await waitFor(() => expect(first.getAttribute("aria-selected")).toBe("true"));
+  await fireEvent.keyDown(input, { key: "ArrowDown" });
+  await waitFor(() => expect(second.getAttribute("aria-selected")).toBe("true"));
+  await fireEvent.keyDown(input, { key: "ArrowUp" });
+  await waitFor(() => expect(first.getAttribute("aria-selected")).toBe("true"));
+  await fireEvent.keyDown(input, { key: "Enter" });
+  expect(goto).toHaveBeenCalledWith(expect.stringContaining("st_atlas"));
+
+  commandPalette.open();
+  await waitFor(() => expect(getByPlaceholderText(PLACEHOLDER)).toBeTruthy());
+  await fireEvent.keyDown(getByPlaceholderText(PLACEHOLDER), { key: "Escape" });
+  await waitFor(() => expect(commandPalette.isOpen).toBe(false));
+});

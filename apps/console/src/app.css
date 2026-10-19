@@ -14,6 +14,7 @@
 @import "./lib/styles/pages.css";
 @import "./lib/styles/station.css";
 @import "./lib/styles/tabs.css";
+@import "./lib/styles/admin.css";
 
 /* Dark is a vibekit theme on <html> (data-theme), never a .dark class. */
 @custom-variant dark (&:is([data-theme="dark"] *));

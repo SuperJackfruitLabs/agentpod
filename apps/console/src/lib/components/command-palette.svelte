@@ -117,6 +117,7 @@
 </script>
 
 <Command.Dialog
+  class="ap-pal"
   open={commandPalette.isOpen}
   onOpenChange={handleOpenChange}
   title="Command palette"

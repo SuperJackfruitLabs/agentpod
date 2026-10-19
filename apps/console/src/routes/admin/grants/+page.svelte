@@ -320,7 +320,7 @@
 
 <PageHeader title="Admin" subtitle="Who may dispatch which agent" />
 
-<div class="page-width py-6 space-y-6">
+<div class="ap-page">
   <AdminTabs active="grants" />
 
   {#if !isLoading && !error}
@@ -329,9 +329,10 @@
       decorative accent: enforcement is a running control or an unknown one.
     -->
     <div
-      class="flex items-start gap-3 rounded-lg border p-4 {enforced
+      class="ap-banner flex items-start gap-3 rounded-lg border p-4 {enforced
         ? 'border-status-running/40 bg-status-running/5'
         : 'border-status-unknown/50 bg-status-unknown/5'}"
+      data-tone={enforced ? "ok" : "warn"}
       data-testid="enforcement-banner"
     >
       {#if enforced}
@@ -367,7 +368,7 @@
     <ManagedByPlane what="Grants" href={managedAt} />
   {:else if error}
     <div
-      class="flex items-start justify-between gap-3 rounded-lg border border-status-error/50 bg-status-error/5 p-4"
+      class="ap-alert flex items-start justify-between gap-3 rounded-lg border border-status-error/50 bg-status-error/5 p-4"
       role="alert"
     >
       <p class="text-sm text-status-error">{error}</p>
@@ -377,7 +378,7 @@
     <!-- An empty directory reads two ways — "nobody exists yet" and "the load
          quietly returned nothing" — and a bare "0 of 0 principals" said neither.
          This says what zero means. -->
-    <div class="rounded-lg border border-dashed p-8 text-center" data-testid="empty-state">
+    <div class="ap-card rounded-lg border border-dashed p-8 text-center" data-testid="empty-state">
       <p class="text-sm font-medium">No principals yet</p>
       <p class="mt-1 text-xs text-muted-foreground">
         Nobody — human or agent — is registered with this hub, so there is nothing to grant or
@@ -390,7 +391,7 @@
     </p>
 
     {#each grouped as group (group.kind)}
-      <section class="space-y-2" data-testid="grant-group-{group.kind}">
+      <section class="ap-card space-y-2" data-testid="grant-group-{group.kind}">
         <div>
           <h2 class="text-sm font-medium text-foreground">{group.heading}</h2>
           <p class="text-xs text-muted-foreground">{group.blurb}</p>
@@ -398,8 +399,8 @@
 
         <!-- Four columns of grant text do not fit a phone; they scroll in here
              rather than dragging the document sideways. -->
-        <div class="overflow-x-auto rounded-lg border border-border">
-          <table class="w-full min-w-[640px] text-sm">
+        <div class="ap-tbl-wrap overflow-x-auto rounded-lg border border-border">
+          <table class="ap-tbl w-full min-w-[640px] text-sm">
             <thead>
               <tr class="border-b border-border text-left text-xs text-muted-foreground">
                 <th scope="col" class="px-3 py-2 font-medium">Principal</th>

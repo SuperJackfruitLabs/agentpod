@@ -146,7 +146,7 @@
   const MODES: SpeakMode[] = ["voice_in", "always", "off"];
 </script>
 
-<section class="space-y-4" data-testid="hub-speech">
+<section class="ap-card space-y-4" data-testid="hub-speech">
   <div class="space-y-1">
     <h2 class="text-base font-semibold">Voice replies</h2>
     <p class="text-sm text-muted-foreground">

@@ -109,7 +109,7 @@
   }
 </script>
 
-<section class="space-y-4" data-testid="hub-transcription">
+<section class="ap-card space-y-4" data-testid="hub-transcription">
   <div class="space-y-1">
     <h2 class="text-base font-semibold">Voice notes</h2>
     <p class="text-sm text-muted-foreground">

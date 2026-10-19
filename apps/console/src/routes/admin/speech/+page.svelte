@@ -10,7 +10,7 @@
 
 <PageHeader title="Admin" subtitle="How agents speak their replies" />
 
-<div class="page-width py-6 space-y-6">
+<div class="ap-page">
   <AdminTabs active="speech" />
   <div class="max-w-xl">
     <HubSpeechSettings />

@@ -12,6 +12,12 @@
  *                      [--chat=live|none|ended] [--health=running|stopped|error]
  *                      [--open=IDENTITY.md] [--changes=dirty|clean|error] [--scan] [--activity=rows|empty|error]
  *
+ * Admin: --admin=legacy|plane|denied|offline|500 (default legacy) answers the admin reads as a hub
+ * without the account plane (users, signup, grants listed), under the plane (410
+ * managed_by_org_plane for users and grants), or the guard's check as a 403, a network failure or
+ * a 500. Dialogs: --keys=Control+k presses keys after load (the palette), --click="a|b" clicks
+ * each selector in turn (opening a dialog), --name=x adds "-x" to the file name.
+ *
  * The station tabs: --open opens a file in Files (the tree click), --changes picks the workspace
  * the Changes tab reads (dirty also opens README.md's patch), --scan presses Cleanup's Scan,
  * --activity what the station's audit read returns. Terminal replays a short fake PTY stream.
@@ -35,8 +41,8 @@ const HUB = "https://hub.agentpod.dev";
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
-    const [k, v] = a.replace(/^--/, "").split("=");
-    return [k, v ?? true];
+    const [k, ...rest] = a.replace(/^--/, "").split("=");
+    return [k, rest.length ? rest.join("=") : true];
   }),
 );
 const list = (v, d) => (typeof v === "string" ? v.split(",") : d);
@@ -55,6 +61,10 @@ const HEALTH = typeof args.health === "string" ? args.health : "running";
 const OPEN = typeof args.open === "string" ? args.open : null;
 const CHANGES = typeof args.changes === "string" ? args.changes : "dirty";
 const ACTIVITY_STATE = typeof args.activity === "string" ? args.activity : "rows";
+const ADMIN = typeof args.admin === "string" ? args.admin : "legacy";
+const KEYS = typeof args.keys === "string" ? args.keys.split(",") : [];
+const CLICKS = typeof args.click === "string" ? args.click.split("|") : [];
+const NAME = typeof args.name === "string" ? args.name : null;
 /** The fleet's own reads: what --state=loading|error|empty changes (sign-in and plane reads stay). */
 const FLEET_READ = /^\/api\/(fleet|nodes|runtimes|activity|admin\/principals)/;
 const OUT = resolve(typeof args.out === "string" ? args.out : join(here, "shots"));
@@ -230,7 +240,16 @@ function answer(path, query = new URLSearchParams()) {
   if (path === "/api/activity") return ACTIVITY;
   if (path === "/api/admin/principals")
     return { principals: AGENTS.map((a) => ({ id: `p_${a.agentName}`, kind: "agent", handle: a.agentName, displayName: a.agentName, userId: null, suspendedAt: null })) };
-  if (path === "/api/admin/stats") return { users: 1, nodes: 3, stations: 5 };
+  if (path === "/api/admin/stats") return { stats: { totalUsers: 2, adminUsers: 1, bannedUsers: 0, totalSandboxes: 0, runningSandboxes: 0, usersThisWeek: 1 } };
+  if (path === "/api/admin/users") return { users: ADMIN_USERS, total: ADMIN_USERS.length };
+  const au = path.match(/^\/api\/admin\/users\/([^/]+)$/);
+  if (au) return ADMIN_USERS.find((u) => u.id === au[1]) ? { user: ADMIN_USERS.find((u) => u.id === au[1]) } : null;
+  if (path === "/api/admin/settings/signup") return { enabled: false };
+  if (path === "/api/admin/bridge/agents") return { agents: BRIDGE };
+  if (path === "/api/admin/settings/speech")
+    return { enabled: true, url: "http://speech:8841", defaultVoice: "", mode: "on-voice", maxChars: 1200, hasApiKey: true, source: "env" };
+  if (path === "/api/admin/settings/transcription")
+    return { enabled: true, url: "http://transcriber:8840", model: "large-v3-turbo", maxSeconds: 120, hasApiKey: false, source: "settings" };
   if (/^\/api\/stations\/[^/]+\/files$/.test(path)) return FILES[query.get("path") ?? ""] ?? [];
   if (/^\/api\/stations\/[^/]+\/changeset\/status$/.test(path)) return CHANGESETS[CHANGES] ?? CHANGESETS.dirty;
   if (/^\/api\/stations\/[^/]+\/changeset\/diff$/.test(path)) return { content: PATCH, truncated: false, binary: false };
@@ -255,6 +274,17 @@ function answer(path, query = new URLSearchParams()) {
   if (one) return byId[one[1]] ?? null;
   return undefined;
 }
+
+// ---- the admin area (a hub without the account plane) ----
+const ADMIN_USERS = [
+  { id: "u_rakesh", email: "rakesh@example.com", name: "Rakesh", role: "admin", banned: false, bannedReason: null, bannedAt: null, emailVerified: true, image: null, createdAt: "2026-06-29T00:00:00Z", updatedAt: "2026-06-29T00:00:00Z", sandboxCount: 0, runningSandboxCount: 0 },
+  { id: "u_one", email: "u1@x.test", name: "User One", role: "user", banned: false, bannedReason: null, bannedAt: null, emailVerified: true, image: null, createdAt: "2026-10-14T00:00:00Z", updatedAt: "2026-10-14T00:00:00Z", sandboxCount: 0, runningSandboxCount: 0 },
+];
+const BRIDGE = [
+  { key: "coder-kai", boardId: "brd_6a899b0f0d054046", stationId: "st_kai", stationName: "kai", hubUserId: "u_rakesh", mode: "accept-edits", permissionWaitMs: null, maxConcurrency: null, profileKey: null, enabled: true, hasToken: true, hasMcpToken: true, createdAt: "2026-10-01T00:00:00Z" },
+  { key: "writer-quill", boardId: "brd_6a899b0f0d054046", stationId: "st_quill", stationName: "quill", hubUserId: "u_rakesh", mode: "full-auto", permissionWaitMs: null, maxConcurrency: null, profileKey: null, enabled: false, hasToken: true, hasMcpToken: false, createdAt: "2026-10-02T00:00:00Z" },
+];
+const PLANE_OWNED = /^\/api\/admin\/(users|grants|settings\/signup)/;
 
 // ---- a tiny static server with the SPA fallback ----
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".woff2": "font/woff2", ".json": "application/json", ".ico": "image/x-icon", ".webmanifest": "application/manifest+json" };
@@ -319,6 +349,13 @@ try {
             return route.fulfill({ status: 500, json: { error: "Couldn't load activity." } });
           if (HEALTH === "error" && /^\/api\/stations\/[^/]+\/health$/.test(url.pathname))
             return route.fulfill({ status: 502, json: { error: "The node did not answer." } });
+          if (ADMIN === "plane" && PLANE_OWNED.test(url.pathname))
+            return route.fulfill({ status: 410, json: { error: "managed_by_org_plane", url: "https://accounts.superjackfruit.com/members" } });
+          if (url.pathname === "/api/admin/stats") {
+            if (ADMIN === "denied") return route.fulfill({ status: 403, json: { error: "Forbidden" } });
+            if (ADMIN === "500") return route.fulfill({ status: 500, json: {} });
+            if (ADMIN === "offline") return route.abort("internetdisconnected");
+          }
           if (STATE === "error" && FLEET_READ.test(url.pathname))
             return route.fulfill({ status: 500, json: { error: "The hub could not read the fleet." } });
           const body = answer(url.pathname, url.searchParams);
@@ -385,6 +422,14 @@ try {
         if (CHAT !== "live") suffix += `-chat${CHAT}`;
         if (HEALTH !== "running") suffix += `-health${HEALTH}`;
         await page.waitForTimeout(400);
+        for (const key of KEYS) await page.keyboard.press(key);
+        for (const sel of CLICKS) {
+          await page.click(sel);
+          await page.waitForTimeout(250);
+        }
+        if (KEYS.length || CLICKS.length) await page.waitForTimeout(300);
+        if (ADMIN !== "legacy") suffix += `-admin${ADMIN}`;
+        if (NAME) suffix += `-${NAME}`;
         if (STATE !== "populated") suffix += `-${STATE}`;
         if (SIGNED_OUT) suffix += "-signedout";
         const name = `${PATH === "/" ? "fleet" : PATH.replace(/\W+/g, "_").replace(/^_|_$/g, "")}-${vibe}-${theme}-${size}${suffix}.png`;
