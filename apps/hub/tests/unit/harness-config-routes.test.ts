@@ -43,7 +43,7 @@ import type { DetectedStation } from "@agentpod/contract";
 import { rawSql } from "../../src/db/drizzle";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { waitForNodeOnline } from "../helpers/wait";
+import { pollUntil, waitForNodeOnline } from "../helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { adoptStations } from "../../src/services/station-registry";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
@@ -155,6 +155,16 @@ async function enrollTestNode(hostname: string) {
   });
 }
 
+/** Config routes select online candidates from Postgres as well as the live broker.
+ * Gateway registration precedes its status write, so socket readiness alone races it. */
+async function waitForConfigNodeOnline(nodeId: string): Promise<void> {
+  await waitForNodeOnline(nodeId);
+  await pollUntil(async () => {
+    const [node] = await rawSql`SELECT status FROM nodes WHERE id = ${nodeId}`;
+    return node?.status === "online";
+  });
+}
+
 function detectedFor(stationKey: string, harness = "hermes"): DetectedStation[] {
   return [
     {
@@ -255,7 +265,7 @@ async function connectFakeNode(
     );
   };
 
-  await waitForNodeOnline(nodeId);
+  await waitForConfigNodeOnline(nodeId);
   return ws;
 }
 
@@ -531,7 +541,7 @@ test(
           ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true, data: { values: [] } }));
         }
       };
-      await waitForNodeOnline(nodeId);
+      await waitForConfigNodeOnline(nodeId);
 
       const shortRes = await appFetch(baseUrl, `/api/stations/${shortStation.id}/config`, {
         token: TEST_USER,
@@ -644,7 +654,7 @@ test(
           }),
         );
       };
-      await waitForNodeOnline(nodeId);
+      await waitForConfigNodeOnline(nodeId);
 
       for (const settingId of [A_SETTING, B_SETTING]) {
         const res = await appFetch(baseUrl, "/api/fleet/config/declared", {
@@ -711,7 +721,7 @@ test(
           JSON.stringify({ type: "res", id: msg.id, ok: true, data: { settings: HERMES_REGISTRY } }),
         );
       };
-      await waitForNodeOnline(nodeId);
+      await waitForConfigNodeOnline(nodeId);
 
       // An id NO registry carries, so the loop cannot short-circuit on
       // "found" and must exhaust its candidates — the exact shape that cost
