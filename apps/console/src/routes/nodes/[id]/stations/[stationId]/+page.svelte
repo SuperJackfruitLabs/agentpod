@@ -896,7 +896,6 @@
        Stop (which also stay in the header). Both still go through the confirm. -->
   <Sheet.Root bind:open={aboutOpen}>
     <Sheet.Content side="bottom" class="ap-about" data-testid="station-about">
-      <div class="ap-more__grab" aria-hidden="true"></div>
       <Sheet.Title class="ap-about__title">About {station.displayName}</Sheet.Title>
       <Sheet.Description class="sr-only">Identity, placement, voice and who may dispatch this agent</Sheet.Description>
       <div class="ap-about__body">

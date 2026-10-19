@@ -1,5 +1,6 @@
 <script lang="ts">
   import { above } from "$lib/breakpoints";
+  import { scrollStrip } from "$lib/actions/scroll-strip";
   import { readFile, readImage, setMatrixAvatar } from "$lib/api/client";
   import { linkFileToLibrary } from "$lib/api/superlibrary";
   import { toast } from "svelte-sonner";
@@ -367,7 +368,7 @@
         </div>
       {:else}
         <!-- Tab strip -->
-        <div class="ap-ftabs flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/60 bg-muted/5 px-1" role="tablist">
+        <div class="ap-ftabs scroll-strip flex shrink-0 items-center gap-0.5 border-b border-border/60 bg-muted/5 px-1" role="tablist" use:scrollStrip={activePath}>
           {#each openFiles as f (f.path)}
             <div
               role="tab"

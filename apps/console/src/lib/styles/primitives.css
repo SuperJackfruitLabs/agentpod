@@ -105,11 +105,28 @@
   background: var(--vk-color-line);
 }
 
-/* Touch: the mockups' 44px targets on a coarse pointer. */
-@media (pointer: coarse) {
-  :where([data-slot="button"][data-size="default"], [data-slot="button"][data-size="lg"], [data-slot="input"], [data-slot="select-trigger"]) {
+/* Touch: the mockups' 44px targets under 1024px and on any coarse pointer
+   (breakpoints.ts: touch). Icon buttons get the width too. */
+@media (max-width: 1023px), (pointer: coarse) {
+  :where([data-slot="button"], [data-slot="input"], [data-slot="select-trigger"], [data-slot="tabs-trigger"], [role="tab"], [data-slot="command-item"], [data-slot="dropdown-menu-item"], [data-slot="select-item"]) {
     min-height: var(--vk-target-min, 44px);
   }
+  :where([data-slot="button"][data-size^="icon"]) {
+    min-width: var(--vk-target-min, 44px);
+  }
+}
+
+/* Phone dialogs: the footer stacks (primary on top, from flex-col-reverse)
+   and each action takes the full width. */
+@media (max-width: 639px) {
+  :where([data-slot="dialog-footer"]) > :where([data-slot="button"], button, a) {
+    width: 100%;
+  }
+}
+
+/* A bottom sheet's grab handle. */
+:where([data-slot="sheet-handle"]) {
+  flex: none; width: 44px; height: 5px; margin: 2px auto 10px; border-radius: 3px; background: var(--vk-color-line);
 }
 
 /* ---------- Daylight: soft, rounded, pill buttons with a lift ---------- */

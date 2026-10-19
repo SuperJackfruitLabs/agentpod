@@ -40,6 +40,9 @@
 		)}
 		{...restProps}
 	>
+		{#if side === "bottom"}
+			<div data-slot="sheet-handle" aria-hidden="true"></div>
+		{/if}
 		{@render children?.()}
 		{#if showCloseButton}
 			<SheetPrimitive.Close data-slot="sheet-close">

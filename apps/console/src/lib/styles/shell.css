@@ -249,7 +249,6 @@
 
 /* the More sheet */
 .ap-more { gap: 0; padding: 10px 12px 18px; border: 0; border-radius: var(--vk-radius-lg) var(--vk-radius-lg) 0 0; background: var(--vk-color-surface); max-height: 90vh; overflow-y: auto; }
-.ap-more__grab { width: 44px; height: 5px; margin: 2px auto 10px; border-radius: 3px; background: var(--vk-color-line); }
 .ap-more__title { padding: 0 8px 8px; font: 800 1.25rem/1.2 var(--vk-font-display); }
 .ap-more__item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 0 12px; border: 0; border-radius: var(--vk-radius-md); background: none; color: var(--vk-color-text); font-weight: 700; text-decoration: none; text-align: left; cursor: pointer; }
 .ap-more__item:hover { background: var(--vk-color-raised); }

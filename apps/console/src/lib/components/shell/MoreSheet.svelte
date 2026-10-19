@@ -22,7 +22,6 @@
 
 <Sheet.Root bind:open onOpenChange={(o) => { if (!o) appearanceOpen = false; }}>
   <Sheet.Content side="bottom" data-testid="more-sheet" class="ap-more">
-    <div class="ap-more__grab" aria-hidden="true"></div>
     <Sheet.Title class="ap-more__title">More</Sheet.Title>
     <Sheet.Description class="sr-only">Pages, appearance and your account</Sheet.Description>
     <nav aria-label="More pages">

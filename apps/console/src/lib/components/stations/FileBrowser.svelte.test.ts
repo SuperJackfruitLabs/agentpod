@@ -670,3 +670,13 @@ test("an open path that has become a folder is not offered for linking", async (
   await fireEvent.click(getByRole("button", { name: /refresh file list/i }));
   await waitFor(() => expect(queryByRole("button", { name: /link this file/i })).toBeNull());
 });
+
+test("FileBrowser: the open-file tabs are a scroll strip, so many tabs never widen the page", async () => {
+  vi.spyOn(api, "listFiles").mockResolvedValueOnce([mockDir, mockFile]);
+  vi.spyOn(api, "readFile").mockResolvedValueOnce({ content: "# Hello", truncated: false });
+  const { getByText, getByRole } = render(FileBrowser, { props: { stationId: "station_1" } });
+  await waitFor(() => expect(getByText("README.md")).toBeTruthy());
+  fireEvent.click(getByText("README.md"));
+  await waitFor(() => expect(getByRole("tab", { name: "README.md" })).toBeTruthy());
+  expect(getByRole("tablist").classList.contains("scroll-strip")).toBe(true);
+});

@@ -412,6 +412,9 @@ nav,
    instead of as the end. A mask, not an overlay: it fades whatever the strip
    sits on, in every theme, without a colour of its own. */
 .scroll-strip {
+  /* Never wider than its box: the strip scrolls, the page does not. */
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   -ms-overflow-style: none;

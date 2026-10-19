@@ -76,6 +76,10 @@
 
 /* ---------- command palette ---------- */
 .ap-pal { max-width: 640px !important; padding: 0 !important; }
+/* Phone: the palette spans the screen, docked at the top. */
+@media (max-width: 639px) {
+  .ap-pal { width: 100% !important; max-width: 100% !important; top: 0 !important; translate: -50% 0 !important; border-radius: 0 0 var(--vk-radius-lg) var(--vk-radius-lg) !important; }
+}
 .ap-pal [data-slot="command"] { border-radius: inherit; box-shadow: none !important; border: 0 !important; background: transparent; }
 .ap-pal [data-slot="command-input-wrapper"] { padding: 0; border-bottom: 2px solid var(--vk-color-line); }
 .ap-pal [data-slot="command-input-wrapper"] [data-slot="input-group"] { height: 56px !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; padding-inline: 12px; }
