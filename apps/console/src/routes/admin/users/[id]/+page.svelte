@@ -4,6 +4,8 @@
   import { onMount } from "svelte";
   import { toast } from "svelte-sonner";
   import { getUser, unbanUser } from "$lib/api/admin";
+  import { managedByPlaneUrl } from "$lib/api/http-error";
+  import ManagedByPlane from "$lib/components/org-plane/ManagedByPlane.svelte";
   import type { AdminUserView } from "@agentpod/types";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
@@ -28,6 +30,8 @@
   let isLoading = $state(true);
   let user = $state<AdminUserView | null>(null);
   let error = $state<string | null>(null);
+  // Under the org plane the hub answers 410 managed_by_org_plane: where users live now.
+  let managedAt = $state<string | null>(null);
 
   // Action dialogs
   let showBanDialog = $state(false);
@@ -40,11 +44,13 @@
 
     isLoading = true;
     error = null;
+    managedAt = null;
 
     try {
       const response = await getUser(userId);
       user = response.user;
     } catch (e) {
+      managedAt = managedByPlaneUrl(e);
       const err = e as Error;
       error = err.message || "Couldn’t load this user.";
     } finally {
@@ -113,6 +119,8 @@
             <Skeleton class="h-16 rounded-lg" />
           {/each}
         </div>
+      {:else if managedAt}
+        <ManagedByPlane what="Users" href={managedAt} />
       {:else if error}
         <div
           class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"

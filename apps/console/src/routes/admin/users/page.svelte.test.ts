@@ -357,3 +357,21 @@ test("under the plane the hub answers 410 and the page links to where users are 
   const link = await findByRole("link", { name: /Super Jackfruit account/ });
   expect(link.getAttribute("href")).toBe("https://accounts.test/members");
 });
+
+test("under the plane the page shows only the notice: no stats, Create user, signup switch or filters", async () => {
+  const { ApiError } = await import("$lib/api/http-error");
+  vi.mocked(adminApi.listUsers).mockRejectedValue(
+    new ApiError("This is managed in your Super Jackfruit account.", {
+      status: 410, detail: "GET /api/admin/users → 410", code: "managed_by_org_plane", url: "https://accounts.test/members",
+    }),
+  );
+  const { findByTestId, queryByRole, queryByText, queryByPlaceholderText } = render(UsersPage);
+  expect((await findByTestId("managed-by-plane")).textContent).toContain("Users are managed in your");
+  expect(queryByRole("button", { name: /Create user/ })).toBeNull();
+  expect(queryByRole("switch")).toBeNull();
+  expect(queryByText("Public signup")).toBeNull();
+  expect(queryByPlaceholderText(/search/i)).toBeNull();
+  expect(queryByRole("combobox")).toBeNull();
+  expect(queryByText("Total users")).toBeNull();
+  expect(queryByRole("alert")).toBeNull();
+});

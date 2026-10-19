@@ -136,3 +136,19 @@ test("banned user renders the Banned status label", async () => {
   await new Promise((r) => setTimeout(r, 0));
   expect(container.textContent).toContain("Banned");
 });
+
+test("under the plane the detail page shows the plane notice, not a raw error with Retry", async () => {
+  const { getUser } = await import("$lib/api/admin");
+  const { ApiError } = await import("$lib/api/http-error");
+  vi.mocked(getUser).mockRejectedValueOnce(
+    new ApiError("This is managed in your Super Jackfruit account.", {
+      status: 410, detail: "GET /api/admin/users/u1 → 410", code: "managed_by_org_plane", url: "https://accounts.test/members",
+    }),
+  );
+  const { findByRole, queryByRole } = await import("@testing-library/svelte").then(({ render }) => render(UserDetailPage));
+  const link = await findByRole("link", { name: /Super Jackfruit account/ });
+  expect(link.getAttribute("href")).toBe("https://accounts.test/members");
+  expect(link.closest("[data-testid='managed-by-plane']")?.textContent).toContain("Users are managed in your");
+  expect(queryByRole("alert")).toBeNull();
+  expect(queryByRole("button", { name: "Retry" })).toBeNull();
+});

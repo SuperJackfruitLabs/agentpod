@@ -235,19 +235,6 @@ export async function getAuditLog(options: AuditLogOptions = {}): Promise<AuditL
 // Current User Admin Check
 // =============================================================================
 
-/**
- * Check if current user is admin
- * This can be used to determine if admin UI should be shown
- */
-export async function checkIsAdmin(): Promise<boolean> {
-  try {
-    // Try to fetch admin stats - this will fail if not admin
-    await getAdminStats();
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 // =============================================================================
 // Settings Management

@@ -250,13 +250,16 @@
 <div class="page-width py-6 space-y-6">
   <AdminTabs active="users" />
 
-  {#if stats}
-    <AdminStats {stats} />
+  <!-- Under the plane these controls only reach endpoints that answer 410: the notice is all. -->
+  {#if !managedAt}
+    {#if stats}
+      <AdminStats {stats} />
+    {/if}
+
+    <AdminSettingsBar {signupEnabled} {signupLoading} onToggle={handleToggleSignup} onCreateUser={openCreateUserDialog} />
+
+    <UserFilters bind:searchQuery bind:roleFilter bind:bannedFilter onSearch={handleSearch} onRefresh={loadData} onFilterChange={handleSearch} {isLoading} />
   {/if}
-
-  <AdminSettingsBar {signupEnabled} {signupLoading} onToggle={handleToggleSignup} onCreateUser={openCreateUserDialog} />
-
-  <UserFilters bind:searchQuery bind:roleFilter bind:bannedFilter onSearch={handleSearch} onRefresh={loadData} onFilterChange={handleSearch} {isLoading} />
 
   {#if isLoading}
     <div class="space-y-2">
