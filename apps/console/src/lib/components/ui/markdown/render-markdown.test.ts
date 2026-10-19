@@ -33,4 +33,11 @@ describe("the markdown preview is sanitised", () => {
   it("sanitize removes svg onload", () => {
     expect(sanitize('<svg onload="alert(1)"></svg>')).not.toMatch(/onload/);
   });
+
+  it("puts code containing $' and $& in literally", async () => {
+    const raw = async (code: string) => `<pre><code>${code}</code></pre>`;
+    const html = await renderMarkdown("```sh\necho \"$'x\" $& done\n```", raw);
+    expect(html).toContain("echo \"$'x\" $& done");
+    expect(html).not.toContain("code-placeholder");
+  });
 });

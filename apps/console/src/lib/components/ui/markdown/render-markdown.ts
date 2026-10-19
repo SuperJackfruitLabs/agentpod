@@ -46,7 +46,7 @@ export async function renderMarkdown(content: string, highlight: Highlight): Pro
     } catch {
       out = `<pre class="markdown-code-block"><code>${escapeHtml(b.code)}</code></pre>`;
     }
-    html = html.replace(`<div class="code-placeholder" data-id="${b.id}"></div>`, out);
+    html = html.replace(`<div class="code-placeholder" data-id="${b.id}"></div>`, () => out);
   }
   return html;
 }
