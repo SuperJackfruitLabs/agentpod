@@ -319,7 +319,9 @@ export async function settleNeverDispatchedSalaamWork(
           .update(bridgeDispatches)
           .set({
             outcome: "abandoned",
-            reason: "Explicit never-dispatched work cancellation verified",
+            reason: expiredDecisionRequestId
+              ? "Expired unanswered approval cancellation verified"
+              : "Explicit never-dispatched work cancellation verified",
             updatedAt: new Date(),
           })
           .where(

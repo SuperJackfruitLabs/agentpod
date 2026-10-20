@@ -1634,8 +1634,10 @@ test("expired lost question receipt is recovered by exact original GET without p
     .from(acpSessions)
     .where(eq(acpSessions.id, session));
   const authority = structuredClone(before!.executionAuthority!);
-  authority.sessionId = crypto.randomUUID();
-  authority.admissionId = crypto.randomUUID();
+  const daemonSessionId = crypto.randomUUID(),
+    daemonAdmissionId = crypto.randomUUID();
+  authority.sessionId = daemonSessionId;
+  authority.admissionId = daemonAdmissionId;
   const deps = {
     tenantId,
     source: "superpipeline",
@@ -1666,8 +1668,8 @@ test("expired lost question receipt is recovered by exact original GET without p
       endSession: async () => {
         authority.state = "revoked";
         authority.receipt = {
-          admission_id: authority.admissionId,
-          session_id: authority.sessionId,
+          admission_id: daemonAdmissionId,
+          session_id: daemonSessionId,
           binding: authority.binding,
           binding_digest: workDigest(authority.binding),
           lease_sequence: 1,
@@ -1703,7 +1705,7 @@ test("expired lost question receipt is recovered by exact original GET without p
           decision_request_id: decision.request_id,
           approval_id: decision.approval_id,
           operation_digest: decision.operation_digest,
-          session_id: authority.sessionId,
+          session_id: daemonSessionId,
           task_id: completion.task_id,
           plan_revision: 1,
           binding_digest: workDigest(authority.binding),
