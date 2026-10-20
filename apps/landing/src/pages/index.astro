@@ -21,7 +21,8 @@
  * The suite frame adds the claims list, "works on its own", the version and the footer, so
  * this page does not.
  */
-import Mark from '../components/Mark.astro';
+import SuiteHead from '@superjackfruit/frontdoor/components/SuiteHead.astro';
+import Frame from '@superjackfruit/frontdoor/components/Frame.astro';
 
 // The release this page describes. Change it, the harness list and the caveats together,
 // against the ledger. The install commands use releases/latest, so they do not go stale.
@@ -150,27 +151,6 @@ const nodes = [
 
       .wrap { width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 24px; }
 
-      header.mast .wrap {
-        display: flex; align-items: center; justify-content: space-between;
-        padding-top: 26px; padding-bottom: 26px; gap: 20px;
-      }
-      /* The name is plain text in the product's capitalisation; the mark carries the
-         accent. The same treatment is used by the blog header, the console and the docs. */
-      .brand {
-        display: inline-flex; align-items: center; gap: 10px;
-        font-family: var(--display); font-weight: 800; font-size: 21px;
-        letter-spacing: -0.02em; color: var(--text); text-decoration: none;
-        --mark-accent: var(--cyan);
-      }
-      nav { display: flex; gap: 22px; font-size: 15px; }
-      nav a { color: var(--muted); text-decoration: none; }
-      nav a:hover, nav a:focus-visible { color: var(--text); }
-      nav { align-items: center; }
-      #theme {
-        font: inherit; font-size: 14px; color: var(--muted); background: none;
-        border: 1px solid var(--line); border-radius: 7px; padding: 4px 10px; cursor: pointer;
-      }
-      #theme:hover, #theme:focus-visible { color: var(--text); border-color: var(--cyan); }
       .example-tag {
         margin-left: auto; font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase;
         border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; color: var(--muted);
@@ -305,15 +285,6 @@ const nodes = [
         background: var(--raised);
       }
 
-      footer { border-top: 1px solid var(--line); }
-      footer .wrap {
-        display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap;
-        padding-top: 32px; padding-bottom: 44px; font-size: 14.5px; color: var(--muted);
-      }
-      footer a { color: var(--muted); }
-      footer a:hover { color: var(--text); }
-      .fnav { display: flex; gap: 20px; flex-wrap: wrap; }
-
       @media (max-width: 899px) {
         .grid { grid-template-columns: 1fr; gap: 28px; }
         section.band .wrap { padding-top: 64px; padding-bottom: 64px; }
@@ -326,28 +297,11 @@ const nodes = [
         * { transition: none !important; animation: none !important; }
       }
     </style>
-    <script is:inline>
-      // Before paint: honour a remembered choice, otherwise follow the system.
-      try {
-        const t = localStorage.getItem('theme');
-        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
-      } catch (e) {}
-    </script>
+    <SuiteHead product="agentpod" />
   </head>
 
   <body>
-    <header class="mast">
-      <div class="wrap">
-        <a class="brand" href="/"><Mark />AgentPod</a>
-        <nav>
-          <a href={DOCS}>Docs</a>
-          <a href="https://github.com/SuperJackfruitLabs/agentpod">Source</a>
-          <a href="https://superjackfruit.com">SuperJackfruit Labs</a>
-          <button id="theme" type="button" aria-label="Switch light and dark theme">Theme</button>
-        </nav>
-      </div>
-    </header>
-
+    <Frame product="agentpod" cta={{ label: 'Get started', href: `${DOCS}/use/scan/` }}>
     <section class="hero">
       <div class="hero-in hero-grid">
         <div>
@@ -520,32 +474,6 @@ chmod +x agentpod-node-linux-amd64
       </div>
     </section>
 
-    <footer>
-      <div class="wrap">
-        <span>AgentPod · MIT</span>
-        <span class="fnav">
-          <a href={DOCS}>Docs</a>
-          <a href="https://github.com/SuperJackfruitLabs/agentpod">Source</a>
-          <a href="https://superjackfruit.com">SuperJackfruit Labs</a>
-        </span>
-      </div>
-    </footer>
-
-    <script is:inline>
-      (() => {
-        const btn = document.getElementById('theme');
-        if (!btn) return;
-        const root = document.documentElement;
-        const current = () =>
-          root.dataset.theme ||
-          (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-        btn.addEventListener('click', () => {
-          const next = current() === 'light' ? 'dark' : 'light';
-          root.dataset.theme = next;
-          try { localStorage.setItem('theme', next); } catch (e) {}
-        });
-      })();
-    </script>
     <script is:inline>
       // Hero moment: once, ~600ms after the demo is first in view. Never loops.
       (() => {
@@ -563,5 +491,6 @@ chmod +x agentpod-node-linux-amd64
         io.observe(demo);
       })();
     </script>
+    </Frame>
   </body>
 </html>
