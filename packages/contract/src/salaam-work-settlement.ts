@@ -23,3 +23,13 @@ export const SalaamWorkSettlementReceipt = z
     producer_terminal_digest: hash,
   })
   .strict();
+
+export const SalaamWorkExpiry = SalaamWorkSettlement.extend({
+  decision_request_id: z.string().uuid(),
+}).strict();
+export const SalaamWorkExpiryReceipt = SalaamWorkSettlementReceipt.extend({
+  effects: z.literal("expired_approval_unapplied"),
+  decision_request_id: z.string().uuid(),
+  approval_id: z.string().uuid(),
+  operation_digest: hash,
+}).strict();

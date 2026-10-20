@@ -1,4 +1,7 @@
-import { SalaamWorkSettlementReceipt as terminalSettlementReceipt } from "../../../../../packages/contract/src/salaam-work-settlement";
+import {
+  SalaamWorkExpiryReceipt,
+  SalaamWorkSettlementReceipt as terminalSettlementReceipt,
+} from "../../../../../packages/contract/src/salaam-work-settlement";
 import { observeWithLease } from "./salaam-observation";
 /** Strict Salaam controller selected only by a fresh private runtime probe. */
 import { and, eq, sql } from "drizzle-orm";
@@ -12,6 +15,7 @@ import { bridgeDispatches } from "../../db/schema/bridge";
 import {
   salaamWorkOwners,
   salaamWorkReports,
+  salaamWorkDecisions,
 } from "../../db/schema/salaam-work";
 import {
   SalaamWorkPayload,
@@ -195,12 +199,16 @@ const settlementRecord = z
   .object({
     version: z.literal(1),
     request_id: z.string().uuid(),
+    decision_request_id: z.string().uuid().optional(),
     terminal: z.unknown().nullable(),
-    receipt: terminalSettlementReceipt.nullable(),
+    receipt: z
+      .union([terminalSettlementReceipt, SalaamWorkExpiryReceipt])
+      .nullable(),
   })
   .strict();
-/** Explicit operator recovery only: caller quiesces the controller/roster first.
- * Never called by polling, claim, model tools, or generic ACP completion. */
+/** Terminal recovery: never-dispatched mode is explicit operator-only.
+ * Expiry mode is also used by the owning controller for an exact unanswered
+ * expired offer. Both require stopped ownership and an independent daemon proof. */
 export async function settleNeverDispatchedSalaamWork(
   deps: Pick<DispatchDeps, "tenantId" | "source" | "client"> & {
     agent: Pick<
@@ -210,6 +218,7 @@ export async function settleNeverDispatchedSalaamWork(
   },
   runId: string,
   requestId: string,
+  expiredDecisionRequestId?: string,
 ) {
   z.string().uuid().parse(requestId);
   const read = async () => {
@@ -253,6 +262,27 @@ export async function settleNeverDispatchedSalaamWork(
     return { w, s, payload };
   };
   let state = await read();
+  const [expired] = expiredDecisionRequestId
+    ? await db
+        .select()
+        .from(salaamWorkDecisions)
+        .where(
+          and(
+            eq(salaamWorkDecisions.requestId, expiredDecisionRequestId),
+            eq(salaamWorkDecisions.workRequestId, state.w.requestId),
+          ),
+        )
+    : [];
+  if (
+    expiredDecisionRequestId &&
+    (!expired ||
+      expired.answer ||
+      expired.daemonReceipt ||
+      !expired.producerReceipt ||
+      Number((expired.decision as { expires_at: number }).expires_at) >
+        Date.now())
+  )
+    throw Error("Exact expired unanswered decision required");
   const persist = async (next: unknown, expected: unknown, retire = false) =>
     db.transaction(async (tx) => {
       const [current] = await tx
@@ -306,14 +336,25 @@ export async function settleNeverDispatchedSalaamWork(
     });
   if (!state.w.settlement) {
     await persist(
-      { version: 1, request_id: requestId, terminal: null, receipt: null },
+      {
+        version: 1,
+        request_id: requestId,
+        ...(expiredDecisionRequestId
+          ? { decision_request_id: expiredDecisionRequestId }
+          : {}),
+        terminal: null,
+        receipt: null,
+      },
       null,
     );
     state = await read();
   }
   let saved = settlementRecord.parse(state.w.settlement);
-  if (saved.request_id !== requestId)
-    throw Error("Original settlement request required");
+  if (
+    saved.request_id !== requestId ||
+    saved.decision_request_id !== expiredDecisionRequestId
+  )
+    throw Error("Original settlement request and mode required");
   const verifyRun = (value: RunContext) => {
     const r = value.run,
       a = state.payload.admission;
@@ -372,17 +413,24 @@ export async function settleNeverDispatchedSalaamWork(
   state = await read();
   const result = await broker.request(
     state.payload.admission.binding.node_id,
-    "salaam.work-settle",
+    expiredDecisionRequestId ? "salaam.work-expire" : "salaam.work-settle",
     {
       binding: state.payload.admission.binding,
       request_id: requestId,
       work_request_id: state.w.requestId,
       producer_terminal_digest: workDigest(terminal),
+      ...(expiredDecisionRequestId
+        ? { decision_request_id: expiredDecisionRequestId }
+        : {}),
     },
   );
   if (!result.ok)
     throw Error("Daemon terminal settlement unresolved; retain original owner");
-  const receipt = terminalSettlementReceipt.parse(result.data),
+  const receipt = (
+      expiredDecisionRequestId
+        ? SalaamWorkExpiryReceipt
+        : terminalSettlementReceipt
+    ).parse(result.data),
     admitted = state.w.receipt as { task_id: string; plan_revision: number };
   if (
     receipt.request_id !== requestId ||
@@ -394,10 +442,71 @@ export async function settleNeverDispatchedSalaamWork(
     receipt.producer_terminal_digest !== workDigest(terminal)
   )
     throw Error("Daemon settlement receipt mismatch");
+  if (expiredDecisionRequestId) {
+    const r = SalaamWorkExpiryReceipt.parse(receipt),
+      d = expired!.decision as {
+        approval_id: string;
+        operation_digest: string;
+      };
+    if (
+      r.decision_request_id !== expiredDecisionRequestId ||
+      r.approval_id !== d.approval_id ||
+      r.operation_digest !== d.operation_digest
+    )
+      throw Error("Expired decision receipt mismatch");
+  }
   if (saved.receipt && workDigest(saved.receipt) !== workDigest(receipt))
     throw Error("Saved settlement changed");
   await persist({ ...saved, receipt }, saved, true);
   return receipt;
+}
+
+/** Expiry is a terminal non-success recovery, never a substitute answer. */
+export async function recoverExpiredSalaamDecision(
+  deps: DispatchDeps,
+  sessionId: string,
+) {
+  const [work] = await db
+    .select()
+    .from(salaamWorkOwners)
+    .where(eq(salaamWorkOwners.sessionId, sessionId));
+  if (!work) return null;
+  const decisions = await db
+    .select()
+    .from(salaamWorkDecisions)
+    .where(eq(salaamWorkDecisions.workRequestId, work.requestId));
+  const expired = decisions.filter(
+    (d) =>
+      !d.daemonReceipt &&
+      Number((d.decision as { expires_at: number }).expires_at) <= Date.now(),
+  );
+  if (!expired.length) return null;
+  if (expired.length !== 1 || expired[0]!.answer)
+    throw Error("Expired decision recovery is ambiguous");
+  const decision = expired[0]!;
+  await publishSalaamDecision(
+    sessionId,
+    deps.agent.hubUserId,
+    decision.decision,
+    deps.client,
+  );
+  await deps.acp.endSession(
+    deps.agent.hubUserId,
+    sessionId,
+    "Strict decision expired unanswered",
+  );
+  await settleNeverDispatchedSalaamWork(
+    deps,
+    work.externalRunId,
+    decision.requestId,
+    decision.requestId,
+  );
+  return {
+    status: "failed" as const,
+    externalRunId: work.externalRunId,
+    reason:
+      "Expired unanswered approval cancelled and original producer non-success verified",
+  };
 }
 
 /** Recover original owned sessions BEFORE asking the board for any new claim. */
@@ -452,6 +561,46 @@ export async function resumeSalaamWork(
         );
       if (!owner) continue;
       const retired = settlementRecord.safeParse(owner.settlement);
+      if (
+        retired.success &&
+        retired.data.receipt?.effects === "expired_approval_unapplied"
+      ) {
+        const receipt = retired.data.receipt;
+        if (retired.data.decision_request_id !== receipt.decision_request_id) {
+          pending.push(row);
+          continue;
+        }
+        const [decision] = await db
+          .select()
+          .from(salaamWorkDecisions)
+          .where(
+            and(
+              eq(salaamWorkDecisions.requestId, receipt.decision_request_id),
+              eq(salaamWorkDecisions.workRequestId, owner.id),
+            ),
+          );
+        const offer = decision?.decision as
+          | {
+              approval_id?: string;
+              operation_digest?: string;
+              expires_at?: number;
+            }
+          | undefined;
+        if (
+          !decision ||
+          decision.answer ||
+          decision.daemonReceipt ||
+          !decision.producerReceipt ||
+          !offer ||
+          offer.approval_id !== receipt.approval_id ||
+          offer.operation_digest !== receipt.operation_digest ||
+          !offer.expires_at ||
+          offer.expires_at > Date.now()
+        ) {
+          pending.push(row);
+          continue;
+        }
+      }
       if (
         retired.success &&
         retired.data.receipt &&
@@ -670,6 +819,8 @@ async function driveSalaamWork(
         return { status: "reported", externalRunId: runId };
       }
     }
+    const expiredRecovery = await recoverExpiredSalaamDecision(deps, sessionId);
+    if (expiredRecovery) return expiredRecovery;
     const context = await client.context(runId);
     if (
       context.run.status !== "working" ||
@@ -806,6 +957,11 @@ async function driveSalaamWork(
         sessionId,
         agent.hubUserId,
       );
+      const expiredRecovery = await recoverExpiredSalaamDecision(
+        deps,
+        sessionId,
+      );
+      if (expiredRecovery) return expiredRecovery;
       for (const decision of decisions.decisions) {
         await publishSalaamDecision(
           sessionId,

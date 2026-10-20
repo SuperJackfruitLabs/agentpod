@@ -497,6 +497,13 @@ async function reportFixture() {
     .from(salaamWorkOwners)
     .where(eq(salaamWorkOwners.sessionId, session));
   await db
+    .delete(salaamWorkDecisions)
+    .where(eq(salaamWorkDecisions.workRequestId, work!.requestId));
+  await db
+    .update(salaamWorkOwners)
+    .set({ settlement: null })
+    .where(eq(salaamWorkOwners.requestId, work!.requestId));
+  await db
     .delete(salaamWorkReports)
     .where(eq(salaamWorkReports.workRequestId, work!.requestId));
   await db
@@ -1400,6 +1407,7 @@ test("failed create with a hidden terminal session needs exact stop receipt befo
 import {
   settleNeverDispatchedSalaamWork,
   resumeSalaamWork,
+  recoverExpiredSalaamDecision,
 } from "../../src/services/bridge/salaam-dispatch";
 test.each(["crashed", "reclaimed"])(
   "explicit never-dispatched settlement retains original %s owner across lost replies and later leases",
@@ -1557,3 +1565,176 @@ test.each(["crashed", "reclaimed"])(
     }
   },
 );
+
+test("expired lost question receipt is recovered by exact original GET without posting or delivering approval", async () => {
+  const { work, completion } = await reportFixture();
+  const payload = work.payload as (typeof corpus.cases)[0]["payload"];
+  const decision = SalaamWorkDecision.parse({
+    ...decisionFixture.decision,
+    request_id: crypto.randomUUID(),
+    work_request_id: work.requestId,
+    task_id: completion.task_id,
+    binding_digest: workDigest(payload.admission.binding),
+    expires_at: Date.now() - 1000,
+  });
+  const strictDecision = {
+    version: 1 as const,
+    request_id: decision.request_id,
+    decision_digest: workDigest(decision),
+    expires_at: decision.expires_at,
+  };
+  const question = {
+    id: "elc_expired",
+    runId: run,
+    cardId: card,
+    stageKey: "build",
+    question: decision.question,
+    signal: "select",
+    options: decision.options.map((v) => ({ name: v.id, title: v.title })),
+    strictDecision,
+    status: "pending" as const,
+    answer: null,
+    createdAt: new Date().toISOString(),
+  };
+  let posts = 0;
+  const client = {
+    activity: async () => {
+      posts++;
+      throw Error("must not post expired offer");
+    },
+    context: async () => ({ ...context, elicitations: [question] }),
+  };
+  expect(
+    (await publishSalaamDecision(session, user, decision, client))
+      .elicitationId,
+  ).toBe(question.id);
+  expect(posts).toBe(0);
+  await expect(
+    answerSalaamDecision(session, user, decision.request_id, client),
+  ).rejects.toThrow(/expired/);
+  const [saved] = await db
+    .select()
+    .from(salaamWorkDecisions)
+    .where(eq(salaamWorkDecisions.requestId, decision.request_id));
+  expect(saved?.answer).toBeNull();
+  expect(saved?.daemonReceipt).toBeNull();
+  const another = { ...decision, request_id: crypto.randomUUID() };
+  await expect(
+    publishSalaamDecision(session, user, another, client),
+  ).rejects.toThrow(/historical binding/);
+  // Remove only the deliberately mismatched test request; original stays durable.
+  await db
+    .delete(salaamWorkDecisions)
+    .where(eq(salaamWorkDecisions.requestId, another.request_id));
+  let live = { ...context, elicitations: [question] },
+    fails = 0,
+    calls = 0;
+  const [before] = await db
+    .select()
+    .from(acpSessions)
+    .where(eq(acpSessions.id, session));
+  const authority = structuredClone(before!.executionAuthority!);
+  authority.sessionId = crypto.randomUUID();
+  authority.admissionId = crypto.randomUUID();
+  const deps = {
+    tenantId,
+    source: "superpipeline",
+    agent: {
+      key: "proof",
+      boardId: board,
+      stationId: station,
+      hubUserId: user,
+    },
+    client: {
+      ...client,
+      context: async () => live,
+      fail: async () => {
+        fails++;
+        live = {
+          ...live,
+          run: {
+            ...live.run,
+            status: "ended",
+            outcome: "crashed",
+            endedAt: new Date().toISOString(),
+          },
+        };
+        throw Error("lost failure response");
+      },
+    },
+    acp: {
+      endSession: async () => {
+        authority.state = "revoked";
+        authority.receipt = {
+          admission_id: authority.admissionId,
+          session_id: authority.sessionId,
+          binding: authority.binding,
+          binding_digest: workDigest(authority.binding),
+          lease_sequence: 1,
+          expires_at: 1,
+          authorized: false,
+          revoked: true,
+          owned_execution_stopped: true,
+          active_attempts: [],
+          interrupted_attempts: [],
+          unresolved_operations: [],
+        };
+        await db
+          .update(acpSessions)
+          .set({ status: "ended", executionAuthority: authority })
+          .where(eq(acpSessions.id, session));
+      },
+    },
+  } as unknown as DispatchDeps;
+  const mock = spyOn(broker, "request").mockImplementation(
+    async (_node, verb, body: any) => {
+      expect(verb).toBe("salaam.work-expire");
+      expect(body.decision_request_id).toBe(decision.request_id);
+      if (++calls === 1)
+        return { ok: false, error: "lost expiry response" } as never;
+      return {
+        ok: true,
+        data: {
+          version: 1,
+          state: "cancelled",
+          effects: "expired_approval_unapplied",
+          request_id: decision.request_id,
+          work_request_id: work.requestId,
+          decision_request_id: decision.request_id,
+          approval_id: decision.approval_id,
+          operation_digest: decision.operation_digest,
+          session_id: authority.sessionId,
+          task_id: completion.task_id,
+          plan_revision: 1,
+          binding_digest: workDigest(authority.binding),
+          producer_terminal_digest: body.producer_terminal_digest,
+        },
+      } as never;
+    },
+  );
+  try {
+    await expect(recoverExpiredSalaamDecision(deps, session)).rejects.toThrow(
+      /unresolved/,
+    );
+    expect((await recoverExpiredSalaamDecision(deps, session))?.status).toBe(
+      "failed",
+    );
+    expect(fails).toBe(1);
+    expect(posts).toBe(0);
+    expect(await resumeSalaamWork(deps)).toBeNull();
+    const [owner] = await db
+      .select()
+      .from(salaamWorkOwners)
+      .where(eq(salaamWorkOwners.requestId, work.requestId));
+    expect(owner).toBeDefined();
+  } finally {
+    mock.mockRestore();
+    await db
+      .update(acpSessions)
+      .set({
+        status: before!.status,
+        executionAuthority: before!.executionAuthority,
+      })
+      .where(eq(acpSessions.id, session));
+  }
+});

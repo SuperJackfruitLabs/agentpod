@@ -113,7 +113,8 @@ export async function publishSalaamDecision(
   sessionId: string,
   userId: string,
   value: unknown,
-  client: Pick<SuperpipelineClient, "activity">,
+  client: Pick<SuperpipelineClient, "activity"> &
+    Partial<Pick<SuperpipelineClient, "context">>,
 ) {
   const o = await owner(sessionId, userId),
     decision = bound(o, value);
@@ -151,27 +152,67 @@ export async function publishSalaamDecision(
       throw Error("Saved strict producer receipt mismatch");
     return receipt;
   }
-  await fresh(await owner(sessionId, userId), decision);
-  const receipt = producerSchema.parse(
-    await client.activity(
-      {
-        runId: o.execution.binding.run.id,
-        leaseEpoch: o.execution.binding.run.epoch,
-      },
-      {
-        type: "elicitation",
-        signal: "select",
-        body: decision.question,
-        parameter: {
-          options: decision.options.map((v) => ({
-            name: v.id,
-            title: v.title,
-          })),
+  let receipt: z.infer<typeof producerSchema>;
+  if (Date.now() >= decision.expires_at) {
+    // Historical correlation is read-only. Never re-post an expired offer or
+    // treat a recovered producer question as an approval.
+    if (!client.context)
+      throw Error("expired strict question requires original run read");
+    const context = await client.context(o.execution.binding.run.id);
+    if (
+      context.run.runId !== o.execution.binding.run.id ||
+      context.run.leaseEpoch !== o.execution.binding.run.epoch ||
+      context.run.cardId !== o.payload.admission.work.card_id ||
+      context.run.stageKey !== o.payload.admission.work.stage_key
+    )
+      throw Error("Expired strict question original run changed");
+    const questions = (context.elicitations ?? []).filter((q) =>
+      same(q.strictDecision ?? null, correlation(decision)),
+    );
+    const question = questions[0];
+    if (
+      questions.length !== 1 ||
+      !question ||
+      question.runId !== context.run.runId ||
+      question.cardId !== context.run.cardId ||
+      question.stageKey !== context.run.stageKey ||
+      question.question !== decision.question ||
+      question.signal !== "select" ||
+      !same(
+        question.options,
+        decision.options.map((v) => ({ name: v.id, title: v.title })),
+      )
+    )
+      throw Error("Expired strict question historical binding mismatch");
+    receipt = producerSchema.parse({
+      accepted: true,
+      cardState: "input-required",
+      elicitationId: question.id,
+      strictDecision: question.strictDecision,
+    });
+  } else {
+    await fresh(await owner(sessionId, userId), decision);
+    receipt = producerSchema.parse(
+      await client.activity(
+        {
+          runId: o.execution.binding.run.id,
+          leaseEpoch: o.execution.binding.run.epoch,
         },
-        strictDecision: correlation(decision),
-      },
-    ),
-  );
+        {
+          type: "elicitation",
+          signal: "select",
+          body: decision.question,
+          parameter: {
+            options: decision.options.map((v) => ({
+              name: v.id,
+              title: v.title,
+            })),
+          },
+          strictDecision: correlation(decision),
+        },
+      ),
+    );
+  }
   if (!same(receipt.strictDecision, correlation(decision)))
     throw Error("Producer did not bind the exact strict decision");
   await db.transaction(async (tx) => {

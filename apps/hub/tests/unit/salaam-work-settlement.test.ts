@@ -24,3 +24,27 @@ test("shared terminal settlement contract is closed and never reports success", 
   ])
     expect(SalaamWorkSettlementReceipt.safeParse(value).success).toBe(false);
 });
+
+import {
+  SalaamWorkExpiry,
+  SalaamWorkExpiryReceipt,
+} from "../../../../packages/contract/src/salaam-work-settlement";
+import expiry from "../../../../packages/contract/src/fixtures/salaam-work-expiry-v1.json";
+test("expired approval settlement is distinct from never-dispatched settlement", () => {
+  expect(JSON.stringify(SalaamWorkExpiry.parse(expiry.request))).toBe(
+    JSON.stringify(expiry.request),
+  );
+  expect(JSON.stringify(SalaamWorkExpiryReceipt.parse(expiry.receipt))).toBe(
+    JSON.stringify(expiry.receipt),
+  );
+  expect(SalaamWorkSettlement.safeParse(expiry.request).success).toBe(false);
+  expect(SalaamWorkSettlementReceipt.safeParse(expiry.receipt).success).toBe(
+    false,
+  );
+  expect(
+    SalaamWorkExpiryReceipt.safeParse({
+      ...expiry.receipt,
+      effects: "never_dispatched",
+    }).success,
+  ).toBe(false);
+});

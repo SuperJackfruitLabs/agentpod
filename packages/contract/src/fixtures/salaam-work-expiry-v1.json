@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "request": {
+    "binding": {
+      "version": 1,
+      "organization_id": "org_00000000000000000001",
+      "principal_id": "prn_00000000000000000002",
+      "node_id": "node_fixture",
+      "station_id": "station_fixture",
+      "station_key": "salaam:c52ddf65534b7b46",
+      "occupancy_epoch": 3,
+      "hub_session_id": "acps_fixture",
+      "workspace": "/workspace",
+      "run": {
+        "source": "superpipeline",
+        "id": "run_Aa0Bb1",
+        "epoch": 7
+      }
+    },
+    "request_id": "11111111-1111-4111-8111-111111111111",
+    "work_request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+    "producer_terminal_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "decision_request_id": "22222222-2222-4222-8222-222222222222"
+  },
+  "receipt": {
+    "version": 1,
+    "state": "cancelled",
+    "effects": "expired_approval_unapplied",
+    "request_id": "11111111-1111-4111-8111-111111111111",
+    "work_request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+    "session_id": "22222222-2222-4222-8222-222222222222",
+    "task_id": "33333333-3333-4333-8333-333333333333",
+    "plan_revision": 1,
+    "binding_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "producer_terminal_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "decision_request_id": "22222222-2222-4222-8222-222222222222",
+    "approval_id": "33333333-3333-4333-8333-333333333333",
+    "operation_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}

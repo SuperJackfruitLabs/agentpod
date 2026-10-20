@@ -161,3 +161,23 @@ func (c *Client) SettleWork(ctx context.Context, p WorkSettlement, owner Status)
 	}
 	return out, nil
 }
+
+// ExpireWork settles only a daemon-proven expired unapplied approval.
+type WorkExpiry struct {
+	WorkSettlement
+	DecisionRequestID string `json:"decision_request_id"`
+}
+
+func (c *Client) ExpireWork(ctx context.Context, p WorkExpiry, owner Status) (json.RawMessage, error) {
+	if err := c.validate(p.Binding); err != nil {
+		return nil, err
+	}
+	if owner.Binding != p.Binding || owner.BindingDigest != canonicalDigest(p.Binding) || owner.SessionID == "" || p.Binding.Run.Source != "superpipeline" || owner.Authorized || !owner.Revoked || !owner.OwnedExecutionStopped || len(owner.UnresolvedOperations) > 0 || len(owner.ActiveAttempts) > 0 || len(owner.InterruptedAttempts) > 0 || !regexp.MustCompile(`^[a-f0-9-]{36}$`).MatchString(p.RequestID) || !regexp.MustCompile(`^[a-f0-9-]{36}$`).MatchString(p.WorkRequestID) || !regexp.MustCompile(`^[a-f0-9-]{36}$`).MatchString(p.DecisionRequestID) || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(p.ProducerTerminalDigest) {
+		return nil, fmt.Errorf("salaam: expired approval owner or stop proof refused")
+	}
+	var out json.RawMessage
+	if err := c.call(ctx, "work-expire", p, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

@@ -325,3 +325,14 @@ Restart Hub with `ENABLE_SUPERPIPELINE_BRIDGE=false` first; roster pause alone d
 not quiesce an in-flight controller. The exact operator-owned roster must be enabled
 for normal short-lived credential resolution while global loops remain disabled.
 No credentials are returned. Keep the same request ID after an uncertain response.
+
+Expired unanswered decisions use a separate recovery receipt. The controller
+recovers a lost producer question receipt through an exact original-run GET;
+it does not repost an expired question or deliver a late answer. It stops the
+original execution, fails or reads back the original producer run, and requests
+`work-expire`. The daemon must prove the exact approval expired unanswered, its
+operation was cancelled before dispatch, and all owned resources stopped before
+cancelling the task. The durable owner records `expired_approval_unapplied`, not
+`never_dispatched`; request mode, decision, task, run epoch and terminal projection
+remain immutable across retries. Only that receipt retires the old owner for a
+normal subsequent claim. Unknown resources and mismatched receipts keep the fence.
