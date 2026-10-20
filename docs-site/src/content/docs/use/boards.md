@@ -1,11 +1,11 @@
 ---
 title: Working a board
-description: The superpipeline bridge — a hub that claims work from a board and runs it on a station, and the gates and questions that come back to a room.
+description: The SuperPipeline bridge — a hub that claims work from a board and runs it on a station, and the gates and questions that come back to a room.
 ---
 
 AgentPod answers "where does this agent live, and is it healthy". Deciding *what* an agent should
 work on is a different job in a different plane, which is what
-[superpipeline](https://docs.superpipeline.dev) is for.
+[SuperPipeline](https://docs.superpipeline.dev) is for.
 
 The bridge joins them: the hub can **claim work from a board** and run it on a station.
 
@@ -57,7 +57,7 @@ hold the same work, and continuing would have one write over the other.
 
 ## When the agent reports for itself
 
-Give a roster entry an MCP credential and its harness gets superpipeline's own tools **inside the
+Give a roster entry an MCP credential and its harness gets SuperPipeline's own tools **inside the
 session**. The agent can then attach a reference, ask a question, or complete the card itself,
 rather than having the bridge infer an outcome from the shape of its reply.
 
@@ -92,4 +92,4 @@ the room says where it can be answered rather than pretending.
 
 - [Talking to an agent in a room](/use/rooms/) — the bridge these cards arrive on
 - [Dispatch and grants](/use/grants/) — who may answer for which agent
-- [superpipeline's own docs](https://docs.superpipeline.dev) — boards, stages and gates
+- [SuperPipeline's own docs](https://docs.superpipeline.dev) — boards, stages and gates

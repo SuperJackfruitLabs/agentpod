@@ -24,13 +24,13 @@ or credentials are shown; this image illustrates the UI, not a deployment health
   and manage supported lifecycle and cleanup actions. The roster and attention lane surface
   offline nodes, unavailable stations, and node version drift.
 - **Control agent access.** Principals, station occupancy, and dispatch grants connect runtime
-  operations to agent identity. Optional Matrix and Superpipeline integrations connect the
+  operations to agent identity. Optional Matrix and SuperPipeline integrations connect the
   runtime plane to communication and work orchestration.
 - **Roll updates deliberately.** Update a node with `apn update`, or request an individual or
   fleet update from the hub. Node agents do not upgrade on a timer.
 
-AgentPod owns runtime management. [Superpipeline](https://github.com/SuperJackfruitLabs/superpipeline)
-owns boards, cards, runs, and approval gates; [Supermessage](https://github.com/SuperJackfruitLabs/supermessage)
+AgentPod owns runtime management. [SuperPipeline](https://github.com/SuperJackfruitLabs/superpipeline)
+owns boards, cards, runs, and approval gates; [SuperMessage](https://github.com/SuperJackfruitLabs/supermessage)
 is the Matrix client.
 
 ## Architecture

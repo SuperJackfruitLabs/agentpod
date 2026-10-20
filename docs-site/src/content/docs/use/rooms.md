@@ -32,7 +32,7 @@ there is nothing extra to turn on.
 - **A card when a turn fails**, saying what failed rather than going silent — see
   [When a turn fails](/use/errors/)
 - **Approval gates and questions from a board**, if the workspace is linked to a
-  [superpipeline](https://docs.superpipeline.dev) board — see [Working a board](/use/boards/)
+  [SuperPipeline](https://docs.superpipeline.dev) board — see [Working a board](/use/boards/)
 - **Images** you send, passed to the agent rather than just their file name
 
 ## Answering a permission question
@@ -119,5 +119,5 @@ console depends on it.
 
 - [Voice notes](/use/voice/) — speaking to an agent, and being answered
 - [When a turn fails](/use/errors/) — the error card, and the harness plugins behind it
-- [Working a board](/use/boards/) — agents that take work off a superpipeline board
+- [Working a board](/use/boards/) — agents that take work off a SuperPipeline board
 - [Dispatch and grants](/use/grants/) — who may talk to whom
