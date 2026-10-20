@@ -99,8 +99,35 @@ requested harness string, a model tool response, or a profile cannot grant it.
    and verification are required before it can advance anything. Mismatched input
    or unresolved effects block new work rather than trigger a blind second write.
 
-No contract fields above are shipped by this packet. Cross-product producer and
-consumer changes must land together with a versioned shared rejection corpus.
+The next foundation packet defines `SalaamWorkAdmission` version 1 in the canonical
+AgentPod contract and exports pure shape, independent-binding and exact-replay
+checks. It is deliberately not advertised in runtime capabilities or routed to
+execution. Its JSON corpus lives at
+`packages/contract/src/fixtures/salaam-work-v1.json`; the daemon must consume the
+same cases before this can be enabled. No daemon consumer pass is claimed yet.
+
+The minimal admission has `version`, `request_id` (UUID), full existing `binding`,
+and `work` with `board_id`, `card_id`, `stage_key`, `input_digest`, `plan_digest`.
+All objects are strict. Work run source must be Superpipeline; run, board and card
+prefixes follow its canonical base62 ID contract (`card_`, not the old bridge
+fixture's `crd_`). Wire lengths are explicit limits of this opt-in transport.
+A producer must derive digests from actual admitted input and task-plan bytes;
+matching two attacker-supplied strings is not validation. This packet does not
+specify a new canonical payload encoder or duplicate Salaam's task-plan schema.
+
+`checkSalaamWorkAdmission` compares against an independently trusted full binding
+and work definition. `checkSalaamWorkReplay` accepts only the original complete
+request, including run, lease and principal. Neither function persists records,
+grants execution, checks live authority or authorizes receipt reads. Consumers
+must preserve root/principal read scoping, check saved requests before new mutation
+checks, and commit original request plus one-run/task mapping atomically.
+
+Remaining consumer integration must adapt protected station receipts: StationWork's
+check input/configuration/root digests and StationFiles' actual tree digest must
+produce fresh TaskVerification evidence. Do not pretend a coding Docker executor
+exists. Include station calls and uncertain stop/effect state in completion's idle
+closure. Cross-product producer and consumer changes must land together with the
+versioned rejection corpus.
 Old or omitted capability cannot silently opt a Salaam station into generic
 unverified completion. Existing legacy produced rows need explicit reconciliation
 when entering strict mode; do not reinterpret them as verified receipts.

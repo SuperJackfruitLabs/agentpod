@@ -33,3 +33,5 @@ export * from "./forge-api";
 export * from "./salaam-authority";
 export * from "./salaam-acp";
 export * from "./salaam-mcp";
+
+export * from "./salaam-work";
