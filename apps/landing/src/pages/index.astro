@@ -247,6 +247,32 @@ const nodes = [
         font-size: 12.5px; color: var(--muted);
       }
 
+      /* ── hero moment: nodes dial in one by one (plays once, see script) ── */
+      .led { position: relative; }
+      .led::after {
+        content: ''; position: absolute; inset: 0; border-radius: 50%;
+        border: 1.5px solid var(--green); opacity: 0; pointer-events: none;
+      }
+      .led.idle::after { border-color: var(--cyan); }
+      .demo.playing .node {
+        animation: dm-in 380ms cubic-bezier(.2,.7,.3,1) backwards;
+        animation-delay: calc(var(--i) * 650ms);
+      }
+      .demo.playing .led::after {
+        animation: dm-ring 620ms ease-out backwards;
+        animation-delay: calc(var(--i) * 650ms + 200ms);
+      }
+      .demo.playing .station {
+        animation: dm-slide 320ms cubic-bezier(.2,.7,.3,1) backwards;
+        animation-delay: calc(var(--i) * 650ms + 300ms + var(--j) * 120ms);
+      }
+      @keyframes dm-in { from { opacity: 0; transform: translateY(10px); } }
+      @keyframes dm-slide { from { opacity: 0; transform: translateX(-12px); } }
+      @keyframes dm-ring {
+        0% { opacity: .9; transform: scale(1); }
+        100% { opacity: 0; transform: scale(3.2); }
+      }
+
       section.band { border-top: 1px solid var(--line); }
       section.band .wrap { padding-top: 88px; padding-bottom: 88px; }
       section.band p, section.band ul, section.band ol { text-align: left; }
@@ -345,16 +371,16 @@ const nodes = [
             <b>Fleet</b><span>3 nodes · 4 stations</span>
           </div>
           <div class="fleet-body">
-            {nodes.map((n) => (
-              <div class="node">
+            {nodes.map((n, i) => (
+              <div class="node" style={`--i:${i}`}>
                 <div class="node-row">
                   <span class={`led ${n.state}`} aria-hidden="true"></span>
                   <span class="node-name">{n.name}</span>
                   <span class="node-kind">{n.kind}</span>
                 </div>
                 <div class="stations">
-                  {n.stations.map((s) => (
-                    <div class="station">
+                  {n.stations.map((s, j) => (
+                    <div class="station" style={`--j:${j}`}>
                       <span class="s-name">{s.name}</span>
                       <span class="s-detail">{s.detail}</span>
                     </div>
@@ -518,6 +544,23 @@ chmod +x agentpod-node-linux-amd64
           root.dataset.theme = next;
           try { localStorage.setItem('theme', next); } catch (e) {}
         });
+      })();
+    </script>
+    <script is:inline>
+      // Hero moment: once, ~600ms after the demo is first in view. Never loops.
+      (() => {
+        const demo = document.querySelector('.hero .demo');
+        if (!demo || !('IntersectionObserver' in window)) return;
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        const io = new IntersectionObserver((es) => {
+          if (!es.some((e) => e.isIntersecting)) return;
+          io.disconnect();
+          setTimeout(() => {
+            demo.classList.add('playing');
+            setTimeout(() => demo.classList.remove('playing'), 3200);
+          }, 600);
+        });
+        io.observe(demo);
       })();
     </script>
   </body>
