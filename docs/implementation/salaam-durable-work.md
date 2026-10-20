@@ -171,3 +171,28 @@ request identity in the bridge, derive independently trusted board/card/stage fr
 its ledger, route authenticated control, verify the actual protected station, and
 implement exact human decisions and original-run reporting recovery. A closed
 schema and an HTTP test server are not a full authenticated or deployed proof.
+
+## Durable owner and gateway integration packet
+
+Migration 0104 adds an immutable run/session/request owner record, with restrictive
+foreign keys and checked payload joins. The internal bridge reservation uses the
+actual claimed run and read context, compares card/stage/lease, locks its dispatch
+and session, derives input bytes from card/stage/comments/references/handoff, and
+persists the complete payload before delivery. Concurrent callers obtain one
+request. A changed payload/session/lease conflicts. Generic output and report
+writers cannot mark a strict owner successful; generic card replay refuses any
+strict ownership and claim replay cannot reset its outcome or replace its lease.
+
+The authenticated node gateway now handles `salaam.work-admit`, obtains independent
+private daemon authority status and forwards the stored payload. The Hub delivery
+path uses only its persisted payload, validates every receipt join, retains the
+same request after response loss, and caches admission acknowledgement only. A
+cached acknowledgement is readable by its session owner without renewing any
+execution grant. It cannot advance a board or imply successful work.
+
+This supersedes the earlier packet's “not wired into gateway” limitation. Strict
+bridge selection remains disabled/unadvertised: actual daemon composition,
+protected fresh verification, exact human decisions and original-run completion
+reporting must pass before selecting this path automatically. Tests use real
+isolated PostgreSQL with a synthetic organization plane and synthetic broker/HTTP
+receipts. They do not prove the entire deployed transport or a real station.

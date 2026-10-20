@@ -9,7 +9,7 @@ import (
 
 // WorkPayload is private node control input, never ACP/model metadata. Payload
 // bytes are independently parsed and digested by the daemon. No runtime advertises
-// this incomplete capability and no gateway handler routes it yet.
+// this incomplete capability. The authenticated gateway routes private control only.
 type WorkIdentity struct {
 	BoardID     string `json:"board_id"`
 	CardID      string `json:"card_id"`

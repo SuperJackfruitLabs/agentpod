@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/salaam"
+	"io"
 	"strings"
 )
 
@@ -25,6 +26,24 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 	}
 	if h.client == nil {
 		return nil, false, fmt.Errorf("salaam: node authority control is not configured")
+	}
+	if verb == "salaam.work-admit" {
+		var work salaam.WorkPayload
+		decoder := json.NewDecoder(strings.NewReader(string(params)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&work); err != nil {
+			return nil, false, fmt.Errorf("salaam: malformed private work payload")
+		}
+		var extra any
+		if decoder.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing private work payload")
+		}
+		owner, err := h.client.Request(ctx, "status", work.Admission.Binding, "work-owner:"+work.Admission.RequestID, 0, "")
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := h.client.WorkAdmit(ctx, work, owner)
+		return result, false, err
 	}
 	var p struct {
 		Binding       salaam.Binding `json:"binding"`

@@ -27,6 +27,7 @@ import { and, desc, eq, ne } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { acpRuns } from "../../db/schema/acp";
 import { bridgeDispatches, type DispatchOutcome } from "../../db/schema/bridge";
+import { salaamWorkOwners } from "../../db/schema/salaam-work";
 import { tenantScope } from "../../db/tenant-scope";
 import { makeFingerprint, toStored, type Fingerprint } from "../evidence/fingerprint";
 
@@ -85,25 +86,24 @@ const scope = (key: DispatchKey) =>
  */
 export async function openDispatch(input: OpenDispatchInput): Promise<void> {
   const now = new Date();
-  await db
-    .insert(bridgeDispatches)
-    .values({
-      externalSource: input.externalSource,
-      externalRunId: input.externalRunId,
-      tenantId: input.tenantId,
-      boardId: input.boardId,
-      externalCardId: input.externalCardId,
-      agentKey: input.agentKey,
-      stationId: input.stationId,
-      leaseEpoch: input.leaseEpoch,
-      outcome: "working",
-      startedAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [bridgeDispatches.externalSource, bridgeDispatches.externalRunId],
-      set: { leaseEpoch: input.leaseEpoch, outcome: "working", reason: null, updatedAt: now },
-    });
+  await db.transaction(async tx => {
+    await tx.insert(bridgeDispatches).values({
+      externalSource: input.externalSource, externalRunId: input.externalRunId,
+      tenantId: input.tenantId, boardId: input.boardId, externalCardId: input.externalCardId,
+      agentKey: input.agentKey, stationId: input.stationId, leaseEpoch: input.leaseEpoch,
+      outcome: "working", startedAt: now, updatedAt: now,
+    }).onConflictDoNothing();
+    const [current] = await tx.select().from(bridgeDispatches).where(scope(input)).for("update");
+    if (!current) throw Error("Dispatch belongs to another tenant");
+    const [strict] = await tx.select().from(salaamWorkOwners).where(and(
+      eq(salaamWorkOwners.externalSource,input.externalSource),eq(salaamWorkOwners.externalRunId,input.externalRunId)));
+    if (strict) {
+      if (current.boardId!==input.boardId || current.externalCardId!==input.externalCardId || current.stationId!==input.stationId || current.agentKey!==input.agentKey || current.leaseEpoch!==input.leaseEpoch)
+        throw Error("Strict Salaam work must recover its original owner; reclaim cannot replace it");
+      return; // Never reset a strict terminal result to working on claim replay.
+    }
+    await tx.update(bridgeDispatches).set({leaseEpoch:input.leaseEpoch,outcome:"working",reason:null,updatedAt:now}).where(scope(input));
+  });
 }
 
 /**
@@ -160,15 +160,24 @@ export async function endAttempt(attemptId: string, state: string, endSeq: numbe
  * rather than a card that will be worked twice.
  */
 export async function recordProduced(key: DispatchKey, result: unknown): Promise<void> {
-  await db
-    .update(bridgeDispatches)
-    .set({ outcome: "produced", result: result ?? null, updatedAt: new Date() })
-    .where(scope(key));
+  await db.transaction(async tx => {
+    const [current] = await tx.select().from(bridgeDispatches).where(scope(key)).for("update");
+    if (!current) return;
+    const [strict] = await tx.select().from(salaamWorkOwners).where(and(eq(salaamWorkOwners.externalSource,key.externalSource),eq(salaamWorkOwners.externalRunId,key.externalRunId)));
+    if (strict) throw Error("Strict Salaam work requires fresh verified completion, not generic output");
+    await tx.update(bridgeDispatches).set({outcome:"produced",result:result??null,updatedAt:new Date()}).where(scope(key));
+  });
 }
 
 /** The board has been told. Nothing to replay. */
 export async function markReported(key: DispatchKey): Promise<void> {
-  await setOutcome(key, "reported", null);
+  await db.transaction(async tx => {
+    const [current] = await tx.select().from(bridgeDispatches).where(scope(key)).for("update");
+    if (!current) return;
+    const [strict] = await tx.select().from(salaamWorkOwners).where(and(eq(salaamWorkOwners.externalSource,key.externalSource),eq(salaamWorkOwners.externalRunId,key.externalRunId)));
+    if (strict) throw Error("Strict Salaam work requires verified original-run reporting");
+    await tx.update(bridgeDispatches).set({outcome:"reported",reason:null,updatedAt:new Date()}).where(scope(key));
+  });
 }
 
 /**
@@ -237,6 +246,8 @@ async function setOutcome(key: DispatchKey, outcome: DispatchOutcome, reason: st
  * The run being dispatched now is excluded, or the recovery path is a loop.
  */
 export async function findUnreportedOutput(key: DispatchKey): Promise<PriorOutput | null> {
+  const [strict] = await db.select({request:salaamWorkOwners.requestId}).from(salaamWorkOwners).innerJoin(bridgeDispatches,and(eq(salaamWorkOwners.externalSource,bridgeDispatches.externalSource),eq(salaamWorkOwners.externalRunId,bridgeDispatches.externalRunId))).where(tenantScope(bridgeDispatches,key.tenantId,eq(bridgeDispatches.externalSource,key.externalSource),eq(bridgeDispatches.boardId,key.boardId),eq(bridgeDispatches.externalCardId,key.externalCardId))).limit(1);
+  if (strict) throw Error("Strict Salaam work must reconcile its original run; generic cross-run replay is forbidden");
   const rows = await db
     .select({
       externalRunId: bridgeDispatches.externalRunId,

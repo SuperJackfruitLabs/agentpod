@@ -1,0 +1,250 @@
+/** Synthetic plane + real owned Postgres; no model or deployed station. */
+import { beforeAll, afterAll, expect, test, spyOn } from "bun:test";
+import { eq } from "drizzle-orm";
+import { db } from "../../src/db/drizzle";
+import { tenants } from "../../src/db/schema/tenants";
+import { nodes } from "../../src/db/schema/nodes";
+import { stations } from "../../src/db/schema/stations";
+import { acpSessions } from "../../src/db/schema/acp";
+import { bridgeDispatches } from "../../src/db/schema/bridge";
+import { salaamWorkOwners } from "../../src/db/schema/salaam-work";
+import { makeSalaamExecution } from "../../src/services/salaam-authority";
+import {
+  reserveSalaamWork,
+  deliverSalaamWork,
+} from "../../src/services/bridge/salaam-work";
+import {
+  openDispatch,
+  recordProduced,
+  markReported,
+  findUnreportedOutput,
+} from "../../src/services/bridge/ledger";
+import { workDigest } from "../../src/services/salaam-work";
+import * as broker from "../../src/services/broker";
+import { fakePlane } from "../helpers/fake-plane";
+import { ensurePgMigrations } from "../helpers/pg-migrations";
+import corpus from "../../../../packages/contract/src/fixtures/salaam-work-payload-v1.json";
+import type {
+  ClaimedWork,
+  RunContext,
+} from "../../src/services/bridge/superpipeline";
+const hex = () => crypto.randomUUID().replaceAll("-", "").slice(0, 20);
+const tenantId = "fleet_" + hex(),
+  org = "org_" + hex(),
+  user = "prn_" + hex(),
+  principal = "prn_" + hex(),
+  node = "node_" + hex(),
+  station = "station_" + hex(),
+  session = "acps_" + hex(),
+  run = "run_" + hex(),
+  card = "card_" + hex(),
+  board = "brd_" + hex();
+const key = {
+  tenantId,
+  externalSource: "superpipeline",
+  externalRunId: run,
+  externalCardId: card,
+  boardId: board,
+};
+const claim: ClaimedWork = {
+  runId: run,
+  leaseEpoch: 1,
+  card: { id: card, title: "Proof" },
+  stage: { key: "build", name: "Build" },
+  handoff: null,
+};
+const context: RunContext = {
+  run: {
+    runId: run,
+    cardId: card,
+    stageKey: "build",
+    leaseEpoch: 1,
+    status: "working",
+    outcome: null,
+    startedAt: "now",
+    endedAt: null,
+  },
+  card: claim.card,
+  stage: claim.stage,
+  handoff: null,
+  references: [],
+};
+const dispatch = {
+  ...key,
+  stationId: station,
+  agentKey: "proof",
+  leaseEpoch: 1,
+};
+const plan = corpus.cases[0]!.payload.plan;
+beforeAll(async () => {
+  await ensurePgMigrations();
+  fakePlane.addHuman({ id: user, grant: { mayDispatch: [principal] } });
+  fakePlane.addAgent({ id: principal });
+  for (const id of [user, principal])
+    fakePlane.principals.get(id)!.organizationId = org;
+  await db.insert(tenants).values({
+    id: tenantId,
+    name: "strict work proof",
+    externalSource: "org-plane",
+    externalId: org,
+  });
+  await db.insert(nodes).values({
+    id: node,
+    tenantId,
+    userId: user,
+    name: "proof",
+    hostname: "fixture",
+    os: "test",
+    arch: "test",
+    secretHash: "not-real",
+  });
+  await db.insert(stations).values({
+    id: station,
+    tenantId,
+    userId: user,
+    nodeId: node,
+    harness: "salaam",
+    stationKey: "salaam:c52ddf65534b7b46",
+    kind: "leaf",
+    displayName: "proof",
+    workspacePath: "/workspace",
+    capabilities: ["acp"],
+    principalId: principal,
+  });
+  await openDispatch(dispatch);
+  const execution = await makeSalaamExecution(station, user, session, {
+    source: "superpipeline",
+    id: run,
+    epoch: 1,
+  });
+  execution.sessionId = "local-session";
+  execution.admissionId = "local-admission";
+  await db.insert(acpSessions).values({
+    id: session,
+    tenantId,
+    stationId: station,
+    userId: user,
+    mode: "ask",
+    status: "idle",
+    executionAuthority: execution,
+    createdAt: new Date(),
+    lastEventAt: new Date(),
+  });
+});
+afterAll(async () => {
+  await db
+    .delete(salaamWorkOwners)
+    .where(eq(salaamWorkOwners.tenantId, tenantId));
+  await db.delete(acpSessions).where(eq(acpSessions.tenantId, tenantId));
+  await db
+    .delete(bridgeDispatches)
+    .where(eq(bridgeDispatches.tenantId, tenantId));
+  await db.delete(stations).where(eq(stations.tenantId, tenantId));
+  await db.delete(nodes).where(eq(nodes.tenantId, tenantId));
+  await db.delete(tenants).where(eq(tenants.id, tenantId));
+  fakePlane.remove(user);
+  fakePlane.remove(principal);
+});
+test("concurrent reservations own one immutable request and reject changed claim/input/lease", async () => {
+  const [a, b] = await Promise.all([
+    reserveSalaamWork(session, user, claim, context, plan),
+    reserveSalaamWork(session, user, claim, context, plan),
+  ]);
+  expect(a.requestId).toBe(b.requestId);
+  await expect(
+    reserveSalaamWork(
+      session,
+      user,
+      claim,
+      { ...context, card: { ...context.card, title: "changed" } },
+      plan,
+    ),
+  ).rejects.toThrow(/changed/);
+  await expect(
+    reserveSalaamWork(session, "prn_" + hex(), claim, context, plan),
+  ).rejects.toThrow(/owner/);
+  await expect(openDispatch({ ...dispatch, leaseEpoch: 2 })).rejects.toThrow(
+    /original owner/,
+  );
+  await expect(recordProduced(key, { text: "unverified" })).rejects.toThrow(
+    /verified completion/,
+  );
+  await expect(
+    findUnreportedOutput({ ...key, externalRunId: "run_" + hex() }),
+  ).rejects.toThrow(/original run/);
+});
+test("lost admission reply retries original durable bytes; forged receipt is not cached", async () => {
+  const row = await reserveSalaamWork(session, user, claim, context, plan);
+  const payload = row.payload as (typeof corpus.cases)[0]["payload"];
+  const receipt = {
+    version: 1,
+    state: "admitted",
+    session_id: "local-session",
+    task_id: "task-fixture",
+    request_id: row.requestId,
+    binding_digest: workDigest(payload.admission.binding),
+    plan_revision: 1,
+  };
+  let calls = 0;
+  const seen: unknown[] = [];
+  const mock = spyOn(broker, "request").mockImplementation(
+    async (_node, verb, params) => {
+      expect(_node).toBe(node);
+      expect(verb).toBe("salaam.work-admit");
+      seen.push(params);
+      calls++;
+      if (calls === 1) return { ok: false, error: "lost response" };
+      return {
+        ok: true,
+        data: calls === 2 ? { ...receipt, session_id: "foreign" } : receipt,
+      };
+    },
+  );
+  try {
+    await expect(deliverSalaamWork(session, user)).rejects.toThrow(
+      /original request/,
+    );
+    await expect(deliverSalaamWork(session, user)).rejects.toThrow(
+      /another owner/,
+    );
+    expect((await deliverSalaamWork(session, user)).task_id).toBe(
+      "task-fixture",
+    );
+    expect(seen[0]).toEqual(seen[1]);
+    expect(seen[1]).toEqual(seen[2]);
+    await fakePlane.suspend(principal);
+    expect((await deliverSalaamWork(session, user)).task_id).toBe(
+      "task-fixture",
+    );
+    expect(calls).toBe(3); // cached admission is not a fresh grant
+    await expect(deliverSalaamWork(session, "prn_" + hex())).rejects.toThrow(
+      /unavailable/,
+    );
+  } finally {
+    mock.mockRestore();
+    await fakePlane.unsuspend(principal);
+  }
+});
+
+test("owner payload joins cannot be removed and generic reporting stays denied", async () => {
+  await expect(markReported(key)).rejects.toThrow(/verified original-run/);
+  await expect(
+    Promise.resolve(
+      db
+        .update(salaamWorkOwners)
+        .set({ requestId: crypto.randomUUID() })
+        .where(eq(salaamWorkOwners.sessionId, session)),
+    ),
+  ).rejects.toThrow();
+  await expect(
+    Promise.resolve(
+      db
+        .update(salaamWorkOwners)
+        .set({ payload: {} })
+        .where(eq(salaamWorkOwners.sessionId, session)),
+    ),
+  ).rejects.toThrow();
+  await expect(
+    Promise.resolve(db.delete(acpSessions).where(eq(acpSessions.id, session))),
+  ).rejects.toThrow();
+});
