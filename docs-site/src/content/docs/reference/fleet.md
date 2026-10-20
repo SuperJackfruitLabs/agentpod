@@ -1659,7 +1659,7 @@ Which stations each node's loopback MCP proxy serves, and their secrets.
 fleet mcp-proxy <list|enable|disable|rotate> ...
 ```
 
-The proxy gives a station's harness sessions the hub's and Superlibrary's MCP tools as the station's own agent, through a loopback URL and a per-station secret that never leave the node. A change is written to the node's config (`mcpProxy.stations`) and applied without a restart; every change and rotation leaves an audit row per station. The hub records what was **declared** here; `list` compares it with what each node **serves**. With nothing declared, whatever the node's config says stands, so a hand-edited config needs no migration. Needs a node at v0.1.96 or later; an older one answers `unknown`. The node side is [`apn mcp-proxy`](/reference/apn/#apn-mcp-proxy).
+The proxy gives a station's harness sessions the hub's and SuperLibrary's MCP tools as the station's own agent, through a loopback URL and a per-station secret that never leave the node. A change is written to the node's config (`mcpProxy.stations`) and applied without a restart; every change and rotation leaves an audit row per station. The hub records what was **declared** here; `list` compares it with what each node **serves**. With nothing declared, whatever the node's config says stands, so a hand-edited config needs no migration. Needs a node at v0.1.96 or later; an older one answers `unknown`. The node side is [`apn mcp-proxy`](/reference/apn/#apn-mcp-proxy).
 
 Subcommands: [`list`](#fleet-mcp-proxy-list), [`enable`](#fleet-mcp-proxy-enable), [`disable`](#fleet-mcp-proxy-disable), [`rotate`](#fleet-mcp-proxy-rotate).
 
@@ -1674,7 +1674,7 @@ usage:
   fleet mcp-proxy rotate STATION_ID... | --node ID            new secrets; sessions holding old ones are refused
 
 The node's loopback MCP proxy gives a station's harness sessions the hub's and
-Superlibrary's MCP tools, as the station's own agent. Only Hermes, Claude Code,
+SuperLibrary's MCP tools, as the station's own agent. Only Hermes, Claude Code,
 Codex, opencode, Muse and Kilo stations can use it: OpenClaw's and Pi's ACP adapters take
 no HTTP MCP servers in session/new, and enabling one is refused.
 
@@ -2729,9 +2729,9 @@ The four required flags are reported together when missing.
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
 | `--key K` | string | — | Roster key (add). **Required.** |
-| `--board B` | string | — | Superpipeline board id. **Required.** |
+| `--board B` | string | — | SuperPipeline board id. **Required.** |
 | `--station S` | string | — | Station id the work runs on. **Required.** |
-| `--token T` | string | — | Superpipeline agent token (claims). **Required.** |
+| `--token T` | string | — | SuperPipeline agent token (claims). **Required.** |
 | `--mcp-token M` | string | — | Run-scoped token the harness spends. |
 | `--mode M` | string | — | Permission mode. |
 | `--concurrency N` | int | `0` | Max cards at once; 0 leaves the hub's value. |
@@ -2762,9 +2762,9 @@ Refuses a change with no fields, which the hub would otherwise answer 200 for an
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
-| `--board B` | string | — | Superpipeline board id. |
+| `--board B` | string | — | SuperPipeline board id. |
 | `--station S` | string | — | Station id the work runs on. |
-| `--token T` | string | — | Superpipeline agent token (claims). |
+| `--token T` | string | — | SuperPipeline agent token (claims). |
 | `--mcp-token M` | string | — | Run-scoped token the harness spends. |
 | `--mode M` | string | — | Permission mode. |
 | `--concurrency N` | int | `0` | Max cards at once; 0 leaves the hub's value. |
@@ -2804,11 +2804,11 @@ Switch a board's Related prior work section on or off.
 fleet bridge related-work BOARD on|off
 ```
 
-The earlier work Superlibrary finds for a claimed card, put into the card's prompt as reference material. On for every board until switched off; the next claim on the board reads the new value. Anything but `on` or `off` exits 2 without calling the hub.
+The earlier work SuperLibrary finds for a claimed card, put into the card's prompt as reference material. On for every board until switched off; the next claim on the board reads the new value. Anything but `on` or `off` exits 2 without calling the hub.
 
 | Argument | Meaning |
 |---|---|
-| `BOARD` | a superpipeline `brd_` id |
+| `BOARD` | a SuperPipeline `brd_` id |
 | `STATE` | `on` or `off` |
 
 **Needs:** A workspace admin's token. Anyone else is refused with 403.

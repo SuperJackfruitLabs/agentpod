@@ -147,7 +147,7 @@ var commands = []struct {
 		name: "mcp-proxy", group: "Node",
 		oneline: "Show the stations the loopback MCP proxy serves, or rotate their secrets",
 		detail: "apn mcp-proxy <status|rotate [STATION_ID...]> — the node's loopback MCP proxy\n" +
-			"gives a station's harness sessions the hub's and Superlibrary's MCP tools.\n\n" +
+			"gives a station's harness sessions the hub's and SuperLibrary's MCP tools.\n\n" +
 			"Each station's secret persists in mcp-proxy.json (0600) beside the node config,\n" +
 			"so a session kept open across a node restart keeps working. `rotate` replaces\n" +
 			"the named stations' secrets (every served station when none are named); the\n" +
