@@ -145,3 +145,29 @@ when entering strict mode; do not reinterpret them as verified receipts.
   requires separate explicit authorization to send messages.
 - Named disposable Superpipeline/Claude acceptance verifies deployed producer and
   consumer revisions. Offline database fixtures prove only local conformance.
+
+## Private producer/control packet
+
+The closed `SalaamWorkPayload` now carries the admission, admitted input
+(instructions, ordered references, incoming handoff) and a fully expanded explicit
+plan. The Hub producer computes both SHA-256 digests from recursively sorted-key
+JSON. All plan defaults must already be expanded; acceptance commands, deliverables,
+step dependencies/checks and limits are covered by the plan digest. Unknown
+input/plan fields are rejected rather than silently losing policy intent. The
+producer does not obtain identity or authority from model metadata.
+
+`fixtures/salaam-work-payload-v1.json` supplies independently computed bytes/digests
+for the daemon's normalized-plan parity check. The native `Client.WorkAdmit` sends
+only over the existing private daemon control client, binds the response to an
+independently obtained admission/session/request/digest, and rejects successful
+transport with another run's receipt or a completed result. It does not retry or
+renew authority. Receipt recovery is allowed to reach the daemon with a saved
+owner binding; fresh grants remain the daemon's responsibility.
+
+This packet is deliberately **not wired into the gateway or bridge** and is not
+advertised as a runtime capability. The installed node cannot yet dispatch strict
+work through this method. Remaining implementation must persist producer input and
+request identity in the bridge, derive independently trusted board/card/stage from
+its ledger, route authenticated control, verify the actual protected station, and
+implement exact human decisions and original-run reporting recovery. A closed
+schema and an HTTP test server are not a full authenticated or deployed proof.

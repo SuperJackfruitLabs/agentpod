@@ -35,3 +35,4 @@ export * from "./salaam-acp";
 export * from "./salaam-mcp";
 
 export * from "./salaam-work";
+export * from "./salaam-work-payload";

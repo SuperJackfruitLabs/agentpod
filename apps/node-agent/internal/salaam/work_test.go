@@ -1,0 +1,70 @@
+package salaam
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestWorkReceiptBinding(t *testing.T) {
+	b := Binding{Version: 1, OrganizationID: "org_00000000000000000000", PrincipalID: "prn_00000000000000000000", NodeID: "node", StationID: "station", StationKey: StationKey("/work"), Workspace: "/work", OccupancyEpoch: 1, HubSessionID: "hub", Run: Run{Source: "superpipeline", ID: "run_abcdef", Epoch: 1}}
+	owner := Status{Binding: b, SessionID: "session", AdmissionID: "admission", BindingDigest: strings.Repeat("a", 64)}
+	payload := WorkPayload{Admission: WorkAdmission{Version: 1, RequestID: "11111111-1111-4111-8111-111111111111", Binding: b}, Input: json.RawMessage(`{}`), Plan: json.RawMessage(`{}`)}
+	for _, field := range []string{"valid", "session", "digest", "request", "state", "revision"} {
+		t.Run(field, func(t *testing.T) {
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.URL.Path != "/v1/agentpod/work-admit" {
+					t.Error(r.URL.Path)
+				}
+				receipt := WorkReceipt{Version: 1, State: "admitted", SessionID: owner.SessionID, TaskID: "task", RequestID: payload.Admission.RequestID, BindingDigest: owner.BindingDigest, PlanRevision: 1}
+				switch field {
+				case "session":
+					receipt.SessionID = "other"
+				case "digest":
+					receipt.BindingDigest = strings.Repeat("b", 64)
+				case "request":
+					receipt.RequestID = "other"
+				case "state":
+					receipt.State = "completed"
+				case "revision":
+					receipt.PlanRevision = 2
+				}
+				json.NewEncoder(w).Encode(receipt)
+			}))
+			defer server.Close()
+			client := Client{NodeID: "node", Workspace: "/work", HTTP: &http.Client{Transport: roundTripWork{server.URL}}}
+			_, err := client.WorkAdmit(context.Background(), payload, owner)
+			if (err == nil) != (field == "valid") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if calls != 1 {
+				t.Fatal(calls)
+			}
+			bad := payload
+			bad.Admission.Binding.Run.Epoch++
+			if _, err := client.WorkAdmit(context.Background(), bad, owner); err == nil {
+				t.Fatal("accepted changed lease")
+			}
+			if calls != 1 {
+				t.Fatal("invalid lease reached transport")
+			}
+		})
+	}
+}
+
+type roundTripWork struct{ url string }
+
+func (r roundTripWork) RoundTrip(req *http.Request) (*http.Response, error) {
+	copy := req.Clone(req.Context())
+	u := *req.URL
+	copy.URL = &u
+	target, _ := http.NewRequest("GET", r.url, nil)
+	copy.URL.Scheme = target.URL.Scheme
+	copy.URL.Host = target.URL.Host
+	return http.DefaultTransport.RoundTrip(copy)
+}
