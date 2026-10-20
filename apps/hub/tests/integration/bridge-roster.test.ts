@@ -273,6 +273,7 @@ test("station-plane roster stores binding only, rejects drift and can always dis
     .select()
     .from(tenants)
     .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
+  if (!tenant) throw Error("fixture tenant missing");
   const principalId = "prn_12345678901234567890";
   const organizationId = "org_12345678901234567890";
   const source = {
@@ -303,12 +304,15 @@ test("station-plane roster stores binding only, rejects drift and can always dis
       .select()
       .from(bridgeAgents)
       .where(eq(bridgeAgents.key, "coder-kai"));
+    if (!row) throw Error("fixture roster row missing");
     expect(row.tokenEncrypted).toBe("");
     expect(row.mcpTokenEncrypted).toBeNull();
     expect(row.credentialSource).toEqual(source);
     const [view] = await listBridgeAgents(BOOTSTRAP_TENANT_ID);
+    if (!view) throw Error("fixture roster view missing");
     expect(view.hasToken).toBe(false);
     const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+    if (!secret) throw Error("fixture roster secret missing");
     expect(secret.token).toBe("");
     expect(secret.credentialSource).toEqual(source);
     await expect(

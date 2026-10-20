@@ -3190,3 +3190,28 @@ test("the library tools need BOTH servers, and a session that did not ask has no
     server.stop(true);
   }
 }, 30_000);
+
+test("concurrent end waits for the same settled teardown before replacement", async () => {
+  const { server, fake, station } = await setupRig("acpsess-concurrent-stop", {
+    stationKey: "acp-concurrent-stop", permission: { toolKind: "execute" },
+  });
+  let sessionId: string | undefined;
+  let stopping: Promise<void> | undefined;
+  try {
+    const row = await createSession({stationId: station.id,userId: TEST_USER,mode: "ask"});
+    sessionId = row.id;
+    await promptSession(TEST_USER,row.id,"ask before running");
+    await pollForEvent(row.id,event=>event.type==="permission-request");
+    stopping = endSession(TEST_USER,row.id,"first stop");
+    await endSession(TEST_USER,row.id,"concurrent stop");
+    const rows = await rawSql`SELECT status FROM acp_sessions WHERE id = ${row.id}`;
+    expect(rows[0]?.status).toBe("ended");
+    const replacement = await createSession({stationId:station.id,userId:TEST_USER,mode:"ask"});
+    await endSession(TEST_USER,replacement.id,"cleanup");
+    await stopping;
+  } finally {
+    await stopping?.catch(()=>{});
+    if(sessionId)await endSession(TEST_USER,sessionId,"cleanup").catch(()=>{});
+    fake.close();server.stop(true);
+  }
+},20_000);

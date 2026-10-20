@@ -941,10 +941,19 @@ function rejectPendingPermissions(live: LiveSession): void {
   live.pending.clear();
 }
 
-/** Terminal transition: row ended(reason) + state event, wire torn down. */
-async function finalizeEnd(live: LiveSession, reason: string): Promise<void> {
-  if (live.ended) return;
+const finalizations = new WeakMap<LiveSession, Promise<void>>();
+/** Every concurrent stop caller waits for the same authority/teardown barrier. */
+function finalizeEnd(live: LiveSession, reason: string): Promise<void> {
+  const pending = finalizations.get(live);
+  if (pending) return pending;
+  if (live.ended) return Promise.resolve();
   live.ended = true;
+  const completion = Promise.resolve().then(() => finalizeEndOnce(live, reason));
+  finalizations.set(live, completion);
+  return completion;
+}
+/** Terminal transition: row ended(reason) + state event, wire torn down. */
+async function finalizeEndOnce(live: LiveSession, reason: string): Promise<void> {
   clearInterval(live.authorityTimer);
   if (live.executionAuthority)
     live.executionAuthority = await revokeSalaamExecution(live.id, reason);
