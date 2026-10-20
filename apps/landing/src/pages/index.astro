@@ -148,7 +148,7 @@ const nodes = [
         -webkit-font-smoothing: antialiased;
       }
 
-      .wrap { width: 100%; max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+      .wrap { width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 24px; }
 
       header.mast .wrap {
         display: flex; align-items: center; justify-content: space-between;
@@ -177,13 +177,14 @@ const nodes = [
       }
       ol.steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
       ol.steps .cell { counter-increment: step; }
-      ol.steps .cell h3::before {
-        content: counter(step) ". "; color: var(--cyan); font-family: var(--mono); font-weight: 500;
+      ol.steps .cell::before {
+        content: counter(step, decimal-leading-zero); display: block;
+        color: var(--cyan); font-family: var(--mono); font-weight: 500; font-size: 13px;
       }
       .cell .chips { margin-top: 12px; }
       .cell .chips li { font-size: 12px; padding: 4px 9px; }
       h3.run { font-family: var(--display); font-size: 1.1rem; font-weight: 600; margin: 34px 0 8px; }
-      ul.limits { margin: 0; padding-left: 1.2em; max-width: 70ch; }
+      ul.limits { margin: 0; padding-left: 1.2em; max-width: 680px; }
       ul.limits li { margin: 0 0 12px; }
       ul.limits strong { color: var(--text); }
       section.band p, ul.limits { color: var(--muted); }
@@ -193,7 +194,7 @@ const nodes = [
       .hero-in { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
       .hero-grid {
         display: grid; grid-template-columns: minmax(0, 1fr) 500px; gap: 56px;
-        align-items: center; min-height: calc(100svh - 108px); padding: 56px 0 72px;
+        align-items: center; min-height: calc(100svh - 108px); padding-top: 56px; padding-bottom: 72px;
       }
       h1 {
         font-family: var(--display); font-weight: 800;
@@ -247,27 +248,29 @@ const nodes = [
       }
 
       section.band { border-top: 1px solid var(--line); }
-      section.band .wrap { padding-top: 68px; padding-bottom: 68px; }
+      section.band .wrap { padding-top: 88px; padding-bottom: 88px; }
+      section.band p, section.band ul, section.band ol { text-align: left; }
+      section.band > .wrap > p { max-width: 680px; }
       h2 {
         font-family: var(--display); font-weight: 600;
-        font-size: clamp(1.55rem, 3vw, 2.05rem); letter-spacing: -0.025em;
-        margin: 0 0 14px; text-wrap: balance;
+        font-size: clamp(28px, 3vw, 36px); line-height: 1.15; letter-spacing: -0.025em;
+        margin: 0 0 12px; text-wrap: balance;
       }
-      .sub { color: var(--muted); margin: 0 0 36px; max-width: 62ch; }
-      .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; }
+      .sub { color: var(--muted); margin: 0 0 32px; max-width: 640px; font-size: 17px; line-height: 1.6; }
+      .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
       .cell h3 {
-        font-family: var(--display); font-size: 1.1rem; font-weight: 600;
-        margin: 0 0 8px; letter-spacing: -0.015em;
+        font-family: var(--display); font-size: 18px; font-weight: 600;
+        margin: 10px 0 6px; letter-spacing: -0.015em;
       }
       .cell p { margin: 0; color: var(--muted); font-size: 15.5px; }
 
       pre {
         background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
-        padding: 15px 17px; overflow-x: auto; margin: 0 0 14px;
+        padding: 15px 17px; overflow-x: auto; margin: 0 0 14px; max-width: 760px;
         font-family: var(--mono); font-size: 13.5px; line-height: 1.65; color: var(--text);
       }
       pre .c { color: var(--muted); }
-      .note { color: var(--muted); font-size: 14.5px; margin: 0; }
+      .note { color: var(--muted); font-size: 14.5px; margin: 0; max-width: 680px; }
 
       .chips { display: flex; gap: 9px; flex-wrap: wrap; list-style: none; margin: 0; padding: 0; }
       .chips li {
@@ -285,11 +288,12 @@ const nodes = [
       footer a:hover { color: var(--text); }
       .fnav { display: flex; gap: 20px; flex-wrap: wrap; }
 
-      @media (max-width: 860px) {
+      @media (max-width: 899px) {
         .grid { grid-template-columns: 1fr; gap: 28px; }
+        section.band .wrap { padding-top: 64px; padding-bottom: 64px; }
       }
       @media (max-width: 899px) {
-        .hero-grid { grid-template-columns: 1fr; gap: 40px; min-height: auto; padding: 40px 0 56px; }
+        .hero-grid { grid-template-columns: 1fr; gap: 40px; min-height: auto; padding-top: 40px; padding-bottom: 56px; }
         .demo { width: 100%; }
       }
       @media (prefers-reduced-motion: reduce) {
