@@ -774,8 +774,10 @@ test("a disconnected harness is re-attached, and the next prompt works", async (
     failPromptCode: -32603,
     transport: { supported: true, reachable: false, detail: "connect ECONNREFUSED" },
   });
+  let sessionId: string | undefined;
   try {
     const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    sessionId = row.id;
     expect(fake.processes).toHaveLength(1);
 
     await promptSession(TEST_USER, row.id, "hello");
@@ -784,6 +786,14 @@ test("a disconnected harness is re-attached, and the next prompt works", async (
       (event) => event.type === "error" && (event.payload as { kind?: string }).kind === "harness_disconnected",
       8_000,
     );
+
+    // Record the settled OLD turn before letting reattachment proceed. Merely
+    // observing idle later can otherwise match this earlier process's state.
+    await pollUntil(async () => {
+      const rows = await rawSql`SELECT status FROM acp_sessions WHERE id = ${row.id}`;
+      return rows[0]?.status === "idle";
+    }, 8_000);
+    const oldSeq = Math.max(...(await eventsFor(row.id)).map(event => event.seq));
 
     // The gateway comes back, and the harness stops failing with it.
     fake.opts.transport = { supported: true, reachable: true };
@@ -806,9 +816,10 @@ test("a disconnected harness is re-attached, and the next prompt works", async (
     // "Session is busy". Waiting on the state the caller actually depends on is the
     // fix; widening a timeout would only make the race rarer.
     await pollUntil(async () => {
-      const rows = await rawSql`SELECT status FROM acp_sessions WHERE id = ${row.id}`;
-      return rows[0]?.status === "idle";
+      const rows = await rawSql`SELECT status, node_session_id FROM acp_sessions WHERE id = ${row.id}`;
+      return rows[0]?.status === "idle" && rows[0]?.node_session_id === fake.processes[1]!.sessionId;
     }, 15_000);
+    await pollForEvent(row.id, event => event.seq > oldSeq && stateWith("idle")(event), 15_000);
 
     // And the session answers again, with no new session created by the caller.
     await promptSession(TEST_USER, row.id, "are you back?");
@@ -817,6 +828,8 @@ test("a disconnected harness is re-attached, and the next prompt works", async (
     await endSession(TEST_USER, row.id, "cleanup");
     fake.close();
   } finally {
+    if (sessionId) await endSession(TEST_USER, sessionId, "cleanup").catch(() => {});
+    fake.close();
     server.stop(true);
   }
 }, 30_000);
