@@ -203,6 +203,7 @@ export async function reportSalaamCompletion(
         .insert(salaamWorkReports)
         .values({
           workRequestId: o.work.requestId,
+          tenantId: o.work.tenantId,
           requestId,
           completion,
           handoff,

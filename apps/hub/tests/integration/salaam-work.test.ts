@@ -1052,3 +1052,48 @@ test("strict lease loss after progression prevents status, completion and anothe
     mock.mockRestore();
   }
 });
+
+test("durable work rows cannot cross the owning session tenant", async () => {
+  const { work } = await reportFixture();
+  const foreign = "fleet_" + hex();
+  await db.insert(tenants).values({ id: foreign, name: "foreign tenant" });
+  try {
+    await expect(
+      Promise.resolve(
+        db
+          .update(salaamWorkOwners)
+          .set({ tenantId: foreign })
+          .where(eq(salaamWorkOwners.requestId, work.requestId)),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      Promise.resolve(
+        db
+          .insert(salaamWorkDecisions)
+          .values({
+            tenantId: foreign,
+            requestId: crypto.randomUUID(),
+            workRequestId: work.requestId,
+            decision: {},
+          }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      Promise.resolve(
+        db
+          .insert(salaamWorkReports)
+          .values({
+            tenantId: foreign,
+            requestId: crypto.randomUUID(),
+            workRequestId: work.requestId,
+            completion: {},
+            handoff: {},
+            handoffDigest: "a".repeat(64),
+            state: "prepared",
+          }),
+      ),
+    ).rejects.toThrow();
+  } finally {
+    await db.delete(tenants).where(eq(tenants.id, foreign));
+  }
+});

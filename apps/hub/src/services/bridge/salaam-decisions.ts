@@ -128,6 +128,7 @@ export async function publishSalaamDecision(
       .values({
         requestId: decision.request_id,
         workRequestId: o.work.requestId,
+        tenantId: o.work.tenantId,
         decision,
       })
       .onConflictDoNothing();

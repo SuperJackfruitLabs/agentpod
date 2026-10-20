@@ -750,6 +750,13 @@
       "when": 1792503600000,
       "tag": "0106_salaam_work_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1792507200000,
+      "tag": "0107_salaam_work_tenant_scope",
+      "breakpoints": true
     }
   ]
 }
