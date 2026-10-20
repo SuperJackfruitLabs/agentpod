@@ -14,7 +14,7 @@ It uses npm, and it lives at the repo root rather than under `apps/`. Both are d
 
 The site is Astro 7, which brings Vite 8. In a shared pnpm tree that re-resolves the root
 `vitest` against that Vite and breaks vitest-based suites elsewhere in the repo. The same
-change was made in superpipeline for the same reason, where it took out all 556 `apps/api`
+change was made in SuperPipeline for the same reason, where it took out all 556 `apps/api`
 tests on a change that touched no product code.
 
 Excluding it with a `!apps/docs` negation was tried there and rejected: the negation does

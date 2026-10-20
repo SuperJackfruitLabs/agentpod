@@ -44,9 +44,9 @@ func fleetBridge(args []string) {
 
 	fs := flag.NewFlagSet("fleet bridge", flag.ExitOnError)
 	key := fs.String("key", "", "roster key (add)")
-	board := fs.String("board", "", "superpipeline board id")
+	board := fs.String("board", "", "SuperPipeline board id")
 	station := fs.String("station", "", "station id the work runs on")
-	token := fs.String("token", "", "superpipeline agent token (claims)")
+	token := fs.String("token", "", "SuperPipeline agent token (claims)")
 	mcpToken := fs.String("mcp-token", "", "run-scoped token the harness spends")
 	mode := fs.String("mode", "", "permission mode")
 	profile := fs.String("profile", "", "profile key")
