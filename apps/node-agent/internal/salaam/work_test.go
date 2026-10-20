@@ -68,3 +68,46 @@ func (r roundTripWork) RoundTrip(req *http.Request) (*http.Response, error) {
 	copy.URL.Host = target.URL.Host
 	return http.DefaultTransport.RoundTrip(copy)
 }
+
+func TestWorkDecisionControlIsClosed(t *testing.T) {
+	b := Binding{Version: 1, OrganizationID: "org_00000000000000000000", PrincipalID: "prn_00000000000000000000", NodeID: "node", StationID: "station", StationKey: StationKey("/work"), Workspace: "/work", OccupancyEpoch: 1, HubSessionID: "hub", Run: Run{Source: "superpipeline", ID: "run_abcdef", Epoch: 1}}
+	owner := Status{Binding: b, SessionID: "session"}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/v1/agentpod/work-decisions" && r.URL.Path != "/v1/agentpod/work-decision" {
+			t.Fatal(r.URL.Path)
+		}
+		w.Write([]byte(`{"version":1}`))
+	}))
+	defer server.Close()
+	client := Client{NodeID: "node", Workspace: "/work", HTTP: &http.Client{Transport: roundTripWork{server.URL}}}
+	for _, action := range []string{"work-decisions", "work-decision"} {
+		var answer json.RawMessage
+		if action == "work-decision" {
+			answer = json.RawMessage(`{"version":1}`)
+		}
+		if _, err := client.WorkControl(context.Background(), action, b, answer, owner); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 2 {
+		t.Fatal(calls)
+	}
+	for _, action := range []string{"renew", "work-admit", "approve-all"} {
+		if _, err := client.WorkControl(context.Background(), action, b, nil, owner); err == nil {
+			t.Fatal("accepted foreign action")
+		}
+	}
+	if _, err := client.WorkControl(context.Background(), "work-decisions", b, json.RawMessage(`{}`), owner); err == nil {
+		t.Fatal("accepted discovery grant")
+	}
+	changed := owner
+	changed.Binding.Run.Epoch++
+	if _, err := client.WorkControl(context.Background(), "work-decisions", b, nil, changed); err == nil {
+		t.Fatal("accepted stale owner")
+	}
+	if calls != 2 {
+		t.Fatal("invalid controls reached daemon")
+	}
+}

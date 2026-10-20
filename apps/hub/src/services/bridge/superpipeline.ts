@@ -147,6 +147,8 @@ export interface RunReference {
  * agent — stop waiting, nobody is going to answer this.
  */
 export interface RunElicitation {
+  runId?: string; cardId?: string; stageKey?: string;
+  strictDecision?: {version:1;request_id:string;decision_digest:string;expires_at:number};
   id: string;
   question: string;
   signal?: string | null;

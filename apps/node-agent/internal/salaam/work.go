@@ -61,3 +61,33 @@ func (c *Client) WorkAdmit(ctx context.Context, payload WorkPayload, owner Statu
 	}
 	return out, nil
 }
+
+// WorkControl forwards only the two closed private decision verbs. The daemon
+// owns operation validation; no ACP permission or model metadata enters here.
+func (c *Client) WorkControl(ctx context.Context, action string, binding Binding, answer json.RawMessage, owner Status) (json.RawMessage, error) {
+	if err := c.validate(binding); err != nil {
+		return nil, err
+	}
+	if owner.Binding != binding || owner.SessionID == "" || binding.Run.Source != "superpipeline" {
+		return nil, fmt.Errorf("salaam: private decision owner mismatch")
+	}
+	body := map[string]any{"binding": binding}
+	switch action {
+	case "work-decisions":
+		if len(answer) != 0 {
+			return nil, fmt.Errorf("salaam: discovery cannot carry an answer")
+		}
+	case "work-decision":
+		if !json.Valid(answer) || len(answer) > 64*1024 {
+			return nil, fmt.Errorf("salaam: invalid bounded decision answer")
+		}
+		body["answer"] = answer
+	default:
+		return nil, fmt.Errorf("salaam: unsupported work decision action")
+	}
+	var out json.RawMessage
+	if err := c.call(ctx, action, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

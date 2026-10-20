@@ -7,7 +7,10 @@ import { nodes } from "../../src/db/schema/nodes";
 import { stations } from "../../src/db/schema/stations";
 import { acpSessions } from "../../src/db/schema/acp";
 import { bridgeDispatches } from "../../src/db/schema/bridge";
-import { salaamWorkOwners } from "../../src/db/schema/salaam-work";
+import {
+  salaamWorkOwners,
+  salaamWorkDecisions,
+} from "../../src/db/schema/salaam-work";
 import { makeSalaamExecution } from "../../src/services/salaam-authority";
 import {
   reserveSalaamWork,
@@ -133,6 +136,19 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await db
+    .delete(salaamWorkDecisions)
+    .where(
+      eq(
+        salaamWorkDecisions.workRequestId,
+        (
+          await db
+            .select()
+            .from(salaamWorkOwners)
+            .where(eq(salaamWorkOwners.sessionId, session))
+        )[0]?.requestId ?? "none",
+      ),
+    );
+  await db
     .delete(salaamWorkOwners)
     .where(eq(salaamWorkOwners.tenantId, tenantId));
   await db.delete(acpSessions).where(eq(acpSessions.tenantId, tenantId));
@@ -180,7 +196,7 @@ test("lost admission reply retries original durable bytes; forged receipt is not
     version: 1,
     state: "admitted",
     session_id: "local-session",
-    task_id: "task-fixture",
+    task_id: "99999999-9999-4999-8999-999999999999",
     request_id: row.requestId,
     binding_digest: workDigest(payload.admission.binding),
     plan_revision: 1,
@@ -208,13 +224,13 @@ test("lost admission reply retries original durable bytes; forged receipt is not
       /another owner/,
     );
     expect((await deliverSalaamWork(session, user)).task_id).toBe(
-      "task-fixture",
+      "99999999-9999-4999-8999-999999999999",
     );
     expect(seen[0]).toEqual(seen[1]);
     expect(seen[1]).toEqual(seen[2]);
     await fakePlane.suspend(principal);
     expect((await deliverSalaamWork(session, user)).task_id).toBe(
-      "task-fixture",
+      "99999999-9999-4999-8999-999999999999",
     );
     expect(calls).toBe(3); // cached admission is not a fresh grant
     await expect(deliverSalaamWork(session, "prn_" + hex())).rejects.toThrow(
@@ -247,4 +263,202 @@ test("owner payload joins cannot be removed and generic reporting stays denied",
   await expect(
     Promise.resolve(db.delete(acpSessions).where(eq(acpSessions.id, session))),
   ).rejects.toThrow();
+});
+
+import {
+  publishSalaamDecision,
+  answerSalaamDecision,
+} from "../../src/services/bridge/salaam-decisions";
+import decisionFixture from "../../../../packages/contract/src/fixtures/salaam-work-decision-v1.json";
+import { SalaamWorkDecision } from "../../../../packages/contract/src/salaam-work-decision";
+test("strict question pins producer ID, tolerates response loss and never selects latest", async () => {
+  const [work] = await db
+    .select()
+    .from(salaamWorkOwners)
+    .where(eq(salaamWorkOwners.sessionId, session));
+  const payload = work!.payload as (typeof corpus.cases)[0]["payload"];
+  const decision = SalaamWorkDecision.parse({
+    ...decisionFixture.decision,
+    request_id: crypto.randomUUID(),
+    work_request_id: work!.requestId,
+    binding_digest: workDigest(payload.admission.binding),
+    task_id: "99999999-9999-4999-8999-999999999999",
+    expires_at: Date.now() + 60000,
+  });
+  const strict = {
+    version: 1 as const,
+    request_id: decision.request_id,
+    decision_digest: workDigest(decision),
+    expires_at: decision.expires_at,
+  };
+  const producer = {
+    accepted: true as const,
+    cardState: "input-required" as const,
+    elicitationId: "elc_abcdef",
+    strictDecision: strict,
+  };
+  let posts = 0;
+  const offers: unknown[] = [];
+  const client = {
+    activity: async (_lease: unknown, activity: unknown) => {
+      offers.push(activity);
+      if (++posts === 1) throw Error("lost producer reply");
+      return producer;
+    },
+  };
+  await expect(
+    publishSalaamDecision(session, user, decision, client),
+  ).rejects.toThrow(/lost producer reply/);
+  expect(
+    (await publishSalaamDecision(session, user, decision, client))
+      .elicitationId,
+  ).toBe("elc_abcdef");
+  expect(offers[0]).toEqual(offers[1]);
+  await publishSalaamDecision(session, user, decision, client);
+  expect(posts).toBe(2);
+  await expect(
+    publishSalaamDecision(
+      session,
+      user,
+      { ...decision, approval_revision: 2 },
+      client,
+    ),
+  ).rejects.toThrow(/conflict/);
+  const question = {
+    id: producer.elicitationId,
+    runId: run,
+    cardId: card,
+    stageKey: "build",
+    question: decision.question,
+    options: decision.options.map((v) => ({ name: v.id, title: v.title })),
+    strictDecision: strict,
+    status: "answered" as const,
+    createdAt: new Date().toISOString(),
+    answer: {
+      option: "deny",
+      text: null,
+      answeredBy: user,
+      answeredAt: new Date().toISOString(),
+    },
+  };
+  const read = {
+    context: async () => ({
+      ...context,
+      elicitations: [
+        question,
+        {
+          ...question,
+          id: "elc_newest",
+          answer: { ...question.answer, option: "approve" },
+        },
+      ],
+    }),
+  };
+  let sends = 0;
+  const answers: any[] = [];
+  const mock = spyOn(broker, "request").mockImplementation(
+    async (_node, verb, params) => {
+      expect(verb).toBe("salaam.work-decision");
+      const answer = (params as any).answer;
+      answers.push(answer);
+      if (++sends === 1) return { ok: false, error: "lost daemon reply" };
+      return {
+        ok: true,
+        data: {
+          version: 1,
+          request_id: answer.request_id,
+          decision_digest: answer.decision_digest,
+          approval_id: decision.approval_id,
+          decision: answer.option_id,
+        },
+      };
+    },
+  );
+  try {
+    await expect(
+      answerSalaamDecision(session, user, decision.request_id, read),
+    ).rejects.toThrow(/original answer/);
+    const receipt = await answerSalaamDecision(
+      session,
+      user,
+      decision.request_id,
+      read,
+    );
+    expect((receipt as any).decision).toBe("deny");
+    expect(answers[0]).toEqual(answers[1]);
+    await answerSalaamDecision(session, user, decision.request_id, read);
+    expect(sends).toBe(2);
+    await db.update(salaamWorkDecisions).set({daemonReceipt:{...(receipt as object),approval_id:crypto.randomUUID()}}).where(eq(salaamWorkDecisions.requestId,decision.request_id));
+    await expect(answerSalaamDecision(session,user,decision.request_id,read)).rejects.toThrow(/receipt mismatch/);
+    await db.update(salaamWorkDecisions).set({daemonReceipt:receipt}).where(eq(salaamWorkDecisions.requestId,decision.request_id));
+  } finally {
+    mock.mockRestore();
+  }
+});
+test("unsupported producer, mismatched question, expiry and revoked authority never grant", async () => {
+  const [work] = await db
+    .select()
+    .from(salaamWorkOwners)
+    .where(eq(salaamWorkOwners.sessionId, session));
+  const payload = work!.payload as (typeof corpus.cases)[0]["payload"];
+  const decision = SalaamWorkDecision.parse({
+    ...decisionFixture.decision,
+    request_id: crypto.randomUUID(),
+    work_request_id: work!.requestId,
+    binding_digest: workDigest(payload.admission.binding),
+    task_id: "99999999-9999-4999-8999-999999999999",
+    expires_at: Date.now() + 60000,
+  });
+  let calls = 0;
+  const unsupported = {
+    activity: async () => {
+      calls++;
+      return { accepted: true, cardState: "input-required" };
+    },
+  };
+  await expect(
+    publishSalaamDecision(session, user, decision, unsupported),
+  ).rejects.toThrow();
+  await expect(
+    publishSalaamDecision(
+      session,
+      user,
+      {
+        ...decision,
+        request_id: crypto.randomUUID(),
+        expires_at: Date.now() - 1,
+      },
+      unsupported,
+    ),
+  ).rejects.toThrow(/expired/);
+  expect(calls).toBe(1);
+  const strict = {
+    version: 1 as const,
+    request_id: decision.request_id,
+    decision_digest: workDigest(decision),
+    expires_at: decision.expires_at,
+  };
+  await publishSalaamDecision(session, user, decision, {
+    activity: async () => ({
+      accepted: true,
+      cardState: "input-required",
+      elicitationId: "elc_second",
+      strictDecision: strict,
+    }),
+  });
+  await expect(
+    answerSalaamDecision(session, user, decision.request_id, {
+      context: async () => ({ ...context, elicitations: [] }),
+    }),
+  ).rejects.toThrow(/binding/);
+  await fakePlane.suspend(principal);
+  try {
+    await expect(
+      answerSalaamDecision(session, user, decision.request_id, {
+        context: async () => context,
+      }),
+    ).rejects.toThrow(/suspended/);
+  } finally {
+    await fakePlane.unsuspend(principal);
+  }
 });

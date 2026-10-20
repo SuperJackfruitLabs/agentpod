@@ -35,3 +35,13 @@ export const salaamWorkOwners = pgTable(
     }).onDelete("restrict"),
   ],
 );
+export const salaamWorkDecisions = pgTable("salaam_work_decisions", {
+  requestId: text("request_id").primaryKey(),
+  workRequestId: text("work_request_id")
+    .notNull()
+    .references(() => salaamWorkOwners.requestId, { onDelete: "restrict" }),
+  decision: jsonb("decision").notNull(),
+  producerReceipt: jsonb("producer_receipt"),
+  answer: jsonb("answer"),
+  daemonReceipt: jsonb("daemon_receipt"),
+});

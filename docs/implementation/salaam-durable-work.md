@@ -196,3 +196,30 @@ protected fresh verification, exact human decisions and original-run completion
 reporting must pass before selecting this path automatically. Tests use real
 isolated PostgreSQL with a synthetic organization plane and synthetic broker/HTTP
 receipts. They do not prove the entire deployed transport or a real station.
+
+## Exact human decision packet
+
+`SalaamWorkDecision` pins the work request, authority digest, task/plan, operation
+and approval ID/digest/revision, immutable expiry, question and approve/deny offer.
+It comes from private daemon discovery, not generic ACP event metadata. Migration
+0105 reserves the full decision before publishing its question. The producer gets
+`strictDecision` version 1 with request ID, decision digest and expiry, plus the
+exact question/options and `signal: select`.
+
+Only an exact returned `elicitationId` and matching strict correlation is accepted.
+Reads match that ID, run/card/stage/lease, full offer and strict binding; there is no
+“latest” selection. Original producer requests and immutable answers survive lost
+responses. Current execution authority and expiry are checked before delivery;
+the daemon still owns final fresh approval consumption. Saved acknowledgement
+receipts remain scoped and validated, never treated as new grants or completion.
+Old producer replies without strict fields fail closed. Legacy harness question
+behavior is unchanged.
+
+The producer implementation is private Forge Superpipeline `fa7d735` (not deployed
+by this work). Its accepted strict ask response is an ordinary activity result
+with exact `elicitationId` and `strictDecision`; matching fields are on run-read
+elicitation records. It requires the original live run/lease and unexpired question
+for human answers, while exact creation retries are historical reads. AgentPod's
+current database tests use a synthetic producer and node response; actual cross-
+product and daemon decision acceptance still must pass. No Matrix messages were
+sent, and strict automatic bridge selection remains disabled.

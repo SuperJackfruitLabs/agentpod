@@ -45,6 +45,27 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 		result, err := h.client.WorkAdmit(ctx, work, owner)
 		return result, false, err
 	}
+	if verb == "salaam.work-decisions" || verb == "salaam.work-decision" {
+		var work struct {
+			Binding salaam.Binding  `json:"binding"`
+			Answer  json.RawMessage `json:"answer"`
+		}
+		decoder := json.NewDecoder(strings.NewReader(string(params)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&work); err != nil {
+			return nil, false, fmt.Errorf("salaam: malformed decision control")
+		}
+		var extra any
+		if decoder.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing decision control")
+		}
+		owner, err := h.client.Request(ctx, "status", work.Binding, "work-decision-owner", 0, "")
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := h.client.WorkControl(ctx, strings.TrimPrefix(verb, "salaam."), work.Binding, work.Answer, owner)
+		return result, false, err
+	}
 	var p struct {
 		Binding       salaam.Binding `json:"binding"`
 		RequestID     string         `json:"request_id"`
