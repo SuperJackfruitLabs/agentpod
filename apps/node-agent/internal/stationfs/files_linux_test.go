@@ -63,6 +63,28 @@ func patch(t *testing.T, root, tree, path string, before, after *string, id stri
 	t.Helper()
 	return request(t, map[string]any{"version": 1, "action": "patch", "root": root, "expected_tree": tree, "path": path, "expected_hash": before, "content": after, "request_id": strings.Repeat(id, 64), "deadline_ms": time.Now().Add(4500 * time.Millisecond).UnixMilli()})
 }
+
+// Read-only snapshots are intentionally immutable during the test. Restore only
+// this test-owned directory's write bit at teardown, before TempDir removes it.
+// The ordinary CI job runs without root's discretionary-access bypass.
+func snapshotPath(t *testing.T) string {
+	t.Helper()
+	parent := t.TempDir()
+	t.Cleanup(func() {
+		if err := filepath.WalkDir(parent, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return os.Chmod(path, 0700)
+			}
+			return nil
+		}); err != nil {
+			t.Errorf("restore owned snapshot directory for teardown: %v", err)
+		}
+	})
+	return filepath.Join(parent, "snapshot")
+}
 func TestLargeStationMetadataLazyReadAndFilteredSnapshot(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "src"), 0700); err != nil {
@@ -86,7 +108,7 @@ func TestLargeStationMetadataLazyReadAndFilteredSnapshot(t *testing.T) {
 	if read["content"] != "source\n" || read["sha256"] != hash([]byte("source\n")) {
 		t.Fatal(read)
 	}
-	destination := filepath.Join(t.TempDir(), "snapshot")
+	destination := snapshotPath(t)
 	snapshot := request(t, map[string]any{"version": 1, "action": "snapshot", "root": root, "expected_tree": index["tree_digest"], "snapshot": destination, "request_id": strings.Repeat("a", 64)})
 	if snapshot["ok"] != true || snapshot["files"] != float64(50001) {
 		t.Fatal(snapshot)
@@ -218,7 +240,7 @@ func TestCanonicalPrivateStationRequestCorpus(t *testing.T) {
 				case "$TREE":
 					c.Request[k] = tree
 				case "$SNAPSHOT":
-					c.Request[k] = filepath.Join(t.TempDir(), "snapshot")
+					c.Request[k] = snapshotPath(t)
 				case "$DEADLINE":
 					c.Request[k] = time.Now().Add(4500 * time.Millisecond).UnixMilli()
 				}

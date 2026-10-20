@@ -126,6 +126,14 @@ jobs:
             SALAAM_STATION_RUNTIME_IMAGE=sha256:4db36457f406501e6f608802e5da617e5fbd0e80b75901b6a09de1ae5a667d32 \
             SALAAM_EVIDENCE="$GITHUB_WORKSPACE/.ci-evidence/managed-mcp.json" \
             "$(command -v bun)" tests/integration/salaam-node-e2e.ts
+      - name: Return the sanitized receipt to the runner for upload
+        if: always() && matrix.profile == 'protected-station'
+        run: |
+          evidence="$GITHUB_WORKSPACE/.ci-evidence/managed-mcp.json"
+          if sudo test -f "$evidence"; then
+            sudo chown "$(id -u):$(id -g)" "$evidence"
+            chmod 600 "$evidence"
+          fi
       - name: Upload conformance evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

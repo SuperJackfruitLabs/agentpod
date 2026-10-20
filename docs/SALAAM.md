@@ -186,3 +186,58 @@ No additional Hub database migration is required beyond the authority and prompt
 ledgers above; cancellation intent and receipts use the durable session event
 ledger. Back up daemon state before upgrading to schema 20. Downgrading requires a
 compatible backup and reviewed runtime; old binaries refuse the newer schema.
+
+
+## Opt-in managed tools and protected station work
+
+The baseline profile above remains available. New private host references add
+separate capabilities; upgrading binaries alone enables none of them. Install a
+matching reviewed Salaam build and node before the Hub and apply migration
+`0103_salaam_managed_mcp.sql`. Back up daemon state before schema 26; older
+binaries require their compatible backup for rollback.
+
+`mcp_config` admits a closed HTTP MCP catalog through the node-owned loopback
+proxy. It binds the exact tool schemas, server endpoints, policy and limits.
+Enable the proxy only for the adopted station ID in `mcpProxy.stations`. The node
+persists credential generations and binds its fresh station tokens to the current
+principal, organization, station occupant and execution root. A changed catalog
+or assignment requires fresh admission; credentials never enter model context.
+`toolkit_config` separately admits a pinned native Toolkit broker, its private
+configuration and durable owner protocol. No PATH lookup or model-time plugin
+installation is used. These references produce host schemas 3 and 4 respectively.
+
+`station_config` selects host schema 5 and the explicit
+`linux-systemd-station-v1` execution profile. It requires Linux, systemd, cgroups
+v2, a root-owned controller, a verified reviewed runtime root and the pinned Go
+file helper. Unsupported hosts fail readiness. The host must prove its actual
+command boundary before the worker becomes ready. Ordinary station `fs.write`
+and terminal capabilities remain absent; models use the managed station tool.
+
+The helper uses beneath-root, no-symlink/no-mount-crossing resolution and excludes
+credential/control paths. Progressive metadata handles up to 100,000 files without
+loading the repository into model context. A proposed actual-root edit binds the
+observed tree revision, prior file hash and complete new bytes to one durable
+human permission. Stale edits are refused. Checks run as a dynamic user over a
+filtered read-only snapshot with no network, provider credentials, node secret,
+Docker socket or controller socket. Each check is bounded at 30 seconds, 512 MiB,
+one CPU, 64 tasks and 64 KiB output; temporary storage is separately capped.
+
+The daemon journals helper PID/start identities and exact systemd invocation and
+cgroup ownership. Reconnect returns saved work; cancellation, revocation, lease
+expiry and restart stop or fence owned resources. Unknown effects cannot become
+success or justify replay. A verified check needs an actual zero exit status,
+observed cleanup and an unchanged source revision. A model's final message or an
+MCP protocol response alone is not evidence of completed product work.
+
+The conformance workflow pins the exact companion Salaam revision and runs both
+managed HTTP and protected systemd recovery against isolated test databases. The
+protected run exercises 50,001 files, actual reviewed edits/checks, separate Hub
+and node reconnects, daemon SIGKILL, revocation and a real 90-second lease expiry.
+Accounts and product data in this default proof are synthetic. Live Claude and
+scoped Library acceptance, a production rollout and released fleet acceptance
+remain separate evidence.
+
+For the closed profile schemas, limits and recovery details, consult the matching
+Salaam build's `docs/contributor/managed-mcp.md` and
+`docs/contributor/station-execution.md`. Runtime, credentials, private manifests
+and journal state must stay outside the admitted source root.

@@ -79,14 +79,15 @@ describe("published docs", () => {
     const known = new Set(
       [
         ...read("apps/node-agent/cmd/agentpod-node/main.go").matchAll(
-          // `[a-z][a-z-]*`, not `[a-z]+`: six apn commands are hyphenated
+          // Versioned private entries (…-v1) must be scanned as complete names.
+          // `[a-z][a-z0-9-]*`, not `[a-z]+`: six apn commands are hyphenated
           // (`openclaw-errors`, `pi-errors`, `hermes-live`, `hermes-skills`,
           // `native-skills`, `plugin-management`) and `[a-z]+` followed by `"`
           // matched none of them, so none was ever in `known`. The prose scan
           // below had the same bound and captured `openclaw` out of
           // `apn openclaw-errors`, so the first page to name one failed against
           // a set that could not contain it.
-          /^\tcase "([a-z][a-z-]*)"/gm,
+          /^\tcase "([a-z][a-z0-9-]*)"/gm,
         ),
       ].map((m) => m[1]!),
     );
@@ -94,7 +95,7 @@ describe("published docs", () => {
     expect(known.size).toBeGreaterThan(10);
 
     for (const page of all()) {
-      for (const [, cmd] of page.text.matchAll(/`apn ([a-z][a-z-]*)/g)) {
+      for (const [, cmd] of page.text.matchAll(/`apn ([a-z][a-z0-9-]*)/g)) {
         expect(known, `${page.file} names \`apn ${cmd}\``).toContain(cmd);
       }
     }
