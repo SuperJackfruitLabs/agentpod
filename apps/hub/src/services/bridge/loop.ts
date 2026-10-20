@@ -17,7 +17,7 @@ import { resolveTenantForUser } from "../../auth/tenant";
 import * as acpSessions from "../acp-sessions";
 import { BRIDGE_SOURCE, isBridgeEnabled, type BridgeAgentConfig } from "./config";
 import { reconcileRoster, type LoopRegistry, type ReconcileState } from "./reconcile";
-import { readBridgeRoster, type BridgeAgentSecrets } from "./roster";
+import { bridgePlaneCredential, readBridgeRoster, type BridgeAgentSecrets } from "./roster";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { runOnce, type AcpPort, type DispatchResult } from "./dispatch";
 import { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./superpipeline";
@@ -253,6 +253,7 @@ export async function startSuperpipelineBridge(
         baseUrl,
         boardId: agent.boardId,
         token: agent.token,
+        ...(agent.credentialSource ? {credential: bridgePlaneCredential(agent)} : {}),
         fetch: fetchAdapter,
       });
       const handle = startAgentLoop({

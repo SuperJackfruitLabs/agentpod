@@ -21,6 +21,7 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 
 import { AcpSessionMode } from "@agentpod/contract";
+import { BridgeCredentialSource } from "../../../../packages/contract/src/bridge-credential";
 import { resolveTenantForUser } from "../auth/tenant";
 import { createLogger } from "../utils/logger";
 import {
@@ -40,7 +41,8 @@ const createSchema = z.object({
   key: z.string().min(1).max(64),
   boardId: BOARD_ID,
   stationId: z.string().min(1),
-  token: AGENT_TOKEN,
+  token: AGENT_TOKEN.optional(),
+  credentialSource: BridgeCredentialSource.nullish(),
   /**
    * The second, `run`-scoped credential — the one the HARNESS spends over MCP so a dispatched
    * agent can complete or block its own card. Never the same as `token`, which can also claim.

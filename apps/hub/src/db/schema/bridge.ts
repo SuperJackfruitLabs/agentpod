@@ -173,6 +173,7 @@ export const bridgeAgents = pgTable(
      * to a client — the read surface answers `hasToken`, not the token.
      */
     tokenEncrypted: text("token_encrypted").notNull(),
+    credentialSource: jsonb("credential_source").$type<import("../../../../../packages/contract/src/bridge-credential").BridgeCredentialSource>(),
     /**
      * The second, `run`-scoped credential the HARNESS spends over MCP, so a dispatched agent can
      * complete or block its own card. Deliberately not `token`: that one can claim, and an agent

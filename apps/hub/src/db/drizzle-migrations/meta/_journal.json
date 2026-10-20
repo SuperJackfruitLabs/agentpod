@@ -757,6 +757,13 @@
       "when": 1792507200000,
       "tag": "0107_salaam_work_tenant_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1792510800000,
+      "tag": "0108_bridge_plane_credential",
+      "breakpoints": true
     }
   ]
 }

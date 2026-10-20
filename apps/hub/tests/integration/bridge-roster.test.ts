@@ -12,18 +12,27 @@
  */
 
 process.env.DATABASE_URL =
-  process.env.DATABASE_URL || "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
+  process.env.DATABASE_URL ||
+  "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
 process.env.NODE_ENV = "test";
-process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "bridge-roster-test-key-0123456789";
+process.env.ENCRYPTION_KEY =
+  process.env.ENCRYPTION_KEY || "bridge-roster-test-key-0123456789";
 
-import { test, expect, describe, beforeAll, afterAll, beforeEach } from "bun:test";
+import {
+  test,
+  expect,
+  describe,
+  beforeAll,
+  afterAll,
+  beforeEach,
+} from "bun:test";
 import { and, eq } from "drizzle-orm";
 
 import { db } from "../../src/db/drizzle";
 import { bridgeAgents } from "../../src/db/schema/bridge";
 import { stations } from "../../src/db/schema/stations";
 import { nodes } from "../../src/db/schema/nodes";
-import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
+import { tenants, BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
 import {
@@ -77,11 +86,15 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.delete(bridgeAgents).where(eq(bridgeAgents.tenantId, BOOTSTRAP_TENANT_ID));
+  await db
+    .delete(bridgeAgents)
+    .where(eq(bridgeAgents.tenantId, BOOTSTRAP_TENANT_ID));
 });
 
 afterAll(async () => {
-  await db.delete(bridgeAgents).where(eq(bridgeAgents.tenantId, BOOTSTRAP_TENANT_ID));
+  await db
+    .delete(bridgeAgents)
+    .where(eq(bridgeAgents.tenantId, BOOTSTRAP_TENANT_ID));
   await db.delete(stations).where(eq(stations.id, STATION_ID));
   await db.delete(nodes).where(eq(nodes.id, NODE_ID));
 });
@@ -97,16 +110,22 @@ const base = () => ({
 
 describe("what the env var could never check", () => {
   test("a station that does not exist cannot be rostered", async () => {
-    await expect(createBridgeAgent({ ...base(), stationId: "station_nope" })).rejects.toThrow();
+    await expect(
+      createBridgeAgent({ ...base(), stationId: "station_nope" }),
+    ).rejects.toThrow();
   });
 
   test("a board id of the wrong grammar is refused by the database, not by a parser", async () => {
     // The env var was parsed by zod at boot; a typo there produced a hub that claimed nothing.
-    await expect(createBridgeAgent({ ...base(), boardId: "brd_NOTHEX" })).rejects.toThrow();
+    await expect(
+      createBridgeAgent({ ...base(), boardId: "brd_NOTHEX" }),
+    ).rejects.toThrow();
   });
 
   test("a permission wait of zero is refused — it is not a policy, it is a bug", async () => {
-    await expect(createBridgeAgent({ ...base(), permissionWaitMs: 0 })).rejects.toThrow();
+    await expect(
+      createBridgeAgent({ ...base(), permissionWaitMs: 0 }),
+    ).rejects.toThrow();
   });
 
   test("two agents cannot share a key within a tenant", async () => {
@@ -122,7 +141,12 @@ describe("the credentials", () => {
     const [row] = await db
       .select()
       .from(bridgeAgents)
-      .where(and(eq(bridgeAgents.tenantId, BOOTSTRAP_TENANT_ID), eq(bridgeAgents.key, "coder-kai")));
+      .where(
+        and(
+          eq(bridgeAgents.tenantId, BOOTSTRAP_TENANT_ID),
+          eq(bridgeAgents.key, "coder-kai"),
+        ),
+      );
 
     expect(row!.tokenEncrypted).not.toContain(TOKEN);
     expect(row!.mcpTokenEncrypted).not.toContain(MCP_TOKEN);
@@ -134,7 +158,11 @@ describe("the credentials", () => {
 
     const listed = await listBridgeAgents(BOOTSTRAP_TENANT_ID);
     expect(listed).toHaveLength(1);
-    expect(listed[0]).toMatchObject({ key: "coder-kai", hasToken: true, hasMcpToken: true });
+    expect(listed[0]).toMatchObject({
+      key: "coder-kai",
+      hasToken: true,
+      hasMcpToken: true,
+    });
     expect(JSON.stringify(listed)).not.toContain(TOKEN);
     expect(JSON.stringify(listed)).not.toContain(MCP_TOKEN);
   });
@@ -165,7 +193,10 @@ describe("hubUserId is derived, so it cannot disagree with the station", () => {
   });
 
   test("there is no way to set it — the create surface does not take one", async () => {
-    await createBridgeAgent({ ...base(), hubUserId: "usr_someone_else" } as never);
+    await createBridgeAgent({
+      ...base(),
+      hubUserId: "usr_someone_else",
+    } as never);
     const [agent] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
     expect(agent!.hubUserId).toBe(userId);
   });
@@ -174,7 +205,9 @@ describe("hubUserId is derived, so it cannot disagree with the station", () => {
 describe("what the reconciler reads", () => {
   test("a disabled agent is absent from the roster but present in the list", async () => {
     await createBridgeAgent(base());
-    await updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", { enabled: false });
+    await updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", {
+      enabled: false,
+    });
 
     expect(await readBridgeRoster(BOOTSTRAP_TENANT_ID)).toHaveLength(0);
     // Still visible to a human: disabling is not deleting, and the credential is still there.
@@ -199,7 +232,9 @@ describe("what the reconciler reads", () => {
     const before = (await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]!.revision;
 
     const rotated = `spa_${"9876543a".repeat(6)}`;
-    await updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", { token: rotated });
+    await updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", {
+      token: rotated,
+    });
 
     const after = (await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]!;
     expect(after.token).toBe(rotated);
@@ -224,7 +259,95 @@ describe("what the reconciler reads", () => {
 describe("the roster is tenant-scoped, which the env var had no way to be", () => {
   test("a read for another tenant sees nothing", async () => {
     await createBridgeAgent(base());
-    expect(await readBridgeRoster("fleet_ffffffffffffffffffff")).toHaveLength(0);
-    expect(await listBridgeAgents("fleet_ffffffffffffffffffff")).toHaveLength(0);
+    expect(await readBridgeRoster("fleet_ffffffffffffffffffff")).toHaveLength(
+      0,
+    );
+    expect(await listBridgeAgents("fleet_ffffffffffffffffffff")).toHaveLength(
+      0,
+    );
   });
+});
+
+test("station-plane roster stores binding only, rejects drift and can always disable", async () => {
+  const [tenant] = await db
+    .select()
+    .from(tenants)
+    .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
+  const principalId = "prn_12345678901234567890";
+  const organizationId = "org_12345678901234567890";
+  const source = {
+    version: 1 as const,
+    kind: "station-plane" as const,
+    principalId,
+    organizationId,
+    audience: "https://app.superpipeline.dev" as const,
+  };
+  await db
+    .update(tenants)
+    .set({ externalSource: "org-plane", externalId: organizationId })
+    .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
+  await db
+    .update(stations)
+    .set({ harness: "salaam", principalId })
+    .where(eq(stations.id, STATION_ID));
+  try {
+    await expect(
+      createBridgeAgent({ ...base(), credentialSource: source }),
+    ).rejects.toThrow("cannot store tokens");
+    await createBridgeAgent({
+      ...base(),
+      token: undefined,
+      credentialSource: source,
+    });
+    const [row] = await db
+      .select()
+      .from(bridgeAgents)
+      .where(eq(bridgeAgents.key, "coder-kai"));
+    expect(row.tokenEncrypted).toBe("");
+    expect(row.mcpTokenEncrypted).toBeNull();
+    expect(row.credentialSource).toEqual(source);
+    const [view] = await listBridgeAgents(BOOTSTRAP_TENANT_ID);
+    expect(view.hasToken).toBe(false);
+    const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+    expect(secret.token).toBe("");
+    expect(secret.credentialSource).toEqual(source);
+    await expect(
+      updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", { token: TOKEN }),
+    ).rejects.toThrow();
+    await expect(
+      updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", {
+        credentialSource: null,
+      }),
+    ).rejects.toThrow();
+    await db
+      .update(stations)
+      .set({ principalId: "prn_ffffffffffffffffffff" })
+      .where(eq(stations.id, STATION_ID));
+    await expect(
+      updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", { enabled: true }),
+    ).rejects.toThrow();
+    expect(
+      await updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", {
+        enabled: false,
+      }),
+    ).toBe(true);
+    expect(
+      await updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", {
+        credentialSource: null,
+        token: TOKEN,
+      }),
+    ).toBe(true);
+  } finally {
+    await db
+      .update(stations)
+      .set({ harness: "hermes", principalId: null })
+      .where(eq(stations.id, STATION_ID));
+    await db
+      .update(tenants)
+      .set({
+        externalSource: tenant.externalSource,
+        externalId: tenant.externalId,
+      })
+      .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
+  }
 });
