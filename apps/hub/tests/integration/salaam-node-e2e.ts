@@ -1701,11 +1701,14 @@ try {
   if (stationMode && existsSync(join(state, "journal.sqlite"))) {
     for (const query of [
       "SELECT id,state,error FROM sessions",
-      "SELECT session_id,state,kind,helper_state FROM station_calls",
-      "SELECT call_id,state FROM station_units",
+      "SELECT id,session_id,state,kind,helper_pid,helper_identity,helper_state,helper_stop_json FROM station_calls",
+      "SELECT id,call_id,state,unit_json,stop_json FROM station_units",
     ]) {
       try {
-        console.error("Station failure metadata:", JSON.stringify(stationRows(query)));
+        console.error(
+          "Station failure metadata:",
+          JSON.stringify(stationRows(query)),
+        );
       } catch {
         // Preserve the original failure if the diagnostic journal is unavailable.
       }
