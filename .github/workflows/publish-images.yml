@@ -49,6 +49,8 @@ permissions:
 
 jobs:
   publish:
+    # GitHub only: it pushes to GHCR with GitHub's token, which the forge does not have.
+    if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     strategy:
       # Independent images: one failing must not cancel the others, or a Modal
