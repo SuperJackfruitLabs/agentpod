@@ -1,5 +1,6 @@
 import {
   SalaamWorkFailureReceipt,
+  SalaamWorkAbandonReceipt,
   SalaamWorkExpiryReceipt,
   SalaamWorkSettlementReceipt as terminalSettlementReceipt,
 } from "../../../../../packages/contract/src/salaam-work-settlement";
@@ -203,12 +204,14 @@ const settlementRecord = z
     request_id: z.string().uuid(),
     decision_request_id: z.string().uuid().optional(),
     known_effects_failure: z.literal(true).optional(),
+    unreported_local_success: z.literal(true).optional(),
     terminal: z.unknown().nullable(),
     receipt: z
       .union([
         terminalSettlementReceipt,
         SalaamWorkExpiryReceipt,
         SalaamWorkFailureReceipt,
+        SalaamWorkAbandonReceipt,
       ])
       .nullable(),
   })
@@ -227,9 +230,16 @@ export async function settleNeverDispatchedSalaamWork(
   requestId: string,
   expiredDecisionRequestId?: string,
   knownEffectsFailure = false,
+  unreportedLocalSuccess = false,
 ) {
   z.string().uuid().parse(requestId);
-  if (knownEffectsFailure && expiredDecisionRequestId)
+  if (
+    [
+      knownEffectsFailure,
+      unreportedLocalSuccess,
+      Boolean(expiredDecisionRequestId),
+    ].filter(Boolean).length > 1
+  )
     throw Error("Conflicting terminal recovery modes");
   const read = async () => {
     const [w] = await db
@@ -266,6 +276,16 @@ export async function settleNeverDispatchedSalaamWork(
       )
     )
       throw Error("Exact stopped work owner required");
+    if (unreportedLocalSuccess) {
+      const [report] = await db
+        .select({ id: salaamWorkReports.requestId })
+        .from(salaamWorkReports)
+        .where(eq(salaamWorkReports.workRequestId, w.requestId));
+      if (report)
+        throw Error(
+          "Prepared report requires original completion reconciliation",
+        );
+    }
     const payload = SalaamWorkPayload.parse(w.payload);
     if (
       payload.admission.work.board_id !== deps.agent.boardId ||
@@ -335,11 +355,13 @@ export async function settleNeverDispatchedSalaamWork(
           .update(bridgeDispatches)
           .set({
             outcome: "abandoned",
-            reason: knownEffectsFailure
-              ? "Stopped failed work retired with known effects preserved"
-              : expiredDecisionRequestId
-                ? "Expired unanswered approval cancellation verified"
-                : "Explicit never-dispatched work cancellation verified",
+            reason: unreportedLocalSuccess
+              ? "Local success preserved; revoked root retired without producer success"
+              : knownEffectsFailure
+                ? "Stopped failed work retired with known effects preserved"
+                : expiredDecisionRequestId
+                  ? "Expired unanswered approval cancellation verified"
+                  : "Explicit never-dispatched work cancellation verified",
             updatedAt: new Date(),
           })
           .where(
@@ -365,6 +387,9 @@ export async function settleNeverDispatchedSalaamWork(
         ...(knownEffectsFailure
           ? { known_effects_failure: true as const }
           : {}),
+        ...(unreportedLocalSuccess
+          ? { unreported_local_success: true as const }
+          : {}),
         terminal: null,
         receipt: null,
       },
@@ -376,7 +401,8 @@ export async function settleNeverDispatchedSalaamWork(
   if (
     saved.request_id !== requestId ||
     saved.decision_request_id !== expiredDecisionRequestId ||
-    Boolean(saved.known_effects_failure) !== knownEffectsFailure
+    Boolean(saved.known_effects_failure) !== knownEffectsFailure ||
+    Boolean(saved.unreported_local_success) !== unreportedLocalSuccess
   )
     throw Error("Original settlement request and mode required");
   const verifyRun = (value: RunContext) => {
@@ -398,7 +424,13 @@ export async function settleNeverDispatchedSalaamWork(
     try {
       await deps.client.fail(
         { runId, leaseEpoch: r.leaseEpoch },
-        "Operator cancelled never-dispatched stopped work",
+        unreportedLocalSuccess
+          ? "Operator retired unreported local success after execution revocation"
+          : knownEffectsFailure
+            ? "Operator retired stopped failed work with known effects preserved"
+            : expiredDecisionRequestId
+              ? "Expired unanswered approval stopped without dispatch"
+              : "Operator cancelled never-dispatched stopped work",
         async () => {
           await read();
         },
@@ -437,11 +469,13 @@ export async function settleNeverDispatchedSalaamWork(
   state = await read();
   const result = await broker.request(
     state.payload.admission.binding.node_id,
-    knownEffectsFailure
-      ? "salaam.work-fail"
-      : expiredDecisionRequestId
-        ? "salaam.work-expire"
-        : "salaam.work-settle",
+    unreportedLocalSuccess
+      ? "salaam.work-abandon"
+      : knownEffectsFailure
+        ? "salaam.work-fail"
+        : expiredDecisionRequestId
+          ? "salaam.work-expire"
+          : "salaam.work-settle",
     {
       binding: state.payload.admission.binding,
       request_id: requestId,
@@ -455,11 +489,13 @@ export async function settleNeverDispatchedSalaamWork(
   if (!result.ok)
     throw Error("Daemon terminal settlement unresolved; retain original owner");
   const receipt = (
-      knownEffectsFailure
-        ? SalaamWorkFailureReceipt
-        : expiredDecisionRequestId
-          ? SalaamWorkExpiryReceipt
-          : terminalSettlementReceipt
+      unreportedLocalSuccess
+        ? SalaamWorkAbandonReceipt
+        : knownEffectsFailure
+          ? SalaamWorkFailureReceipt
+          : expiredDecisionRequestId
+            ? SalaamWorkExpiryReceipt
+            : terminalSettlementReceipt
     ).parse(result.data),
     admitted = state.w.receipt as { task_id: string; plan_revision: number };
   if (
@@ -587,7 +623,9 @@ export async function resumeSalaamWork(
     const preservesEffects = Boolean(
       knownFailure?.success &&
       knownFailure.data.known_effects_failure &&
-      knownFailure.data.receipt?.effects === "known_effects_preserved",
+      knownFailure.data.receipt &&
+      "effects" in knownFailure.data.receipt &&
+      knownFailure.data.receipt.effects === "known_effects_preserved",
     );
 
     if (
@@ -604,14 +642,32 @@ export async function resumeSalaamWork(
       if (
         retired.success &&
         Boolean(retired.data.known_effects_failure) !==
-          (retired.data.receipt?.effects === "known_effects_preserved")
+          Boolean(
+            retired.data.receipt &&
+            "effects" in retired.data.receipt &&
+            retired.data.receipt.effects === "known_effects_preserved",
+          )
       ) {
         pending.push(row);
         continue;
       }
       if (
         retired.success &&
-        retired.data.receipt?.effects === "expired_approval_unapplied"
+        Boolean(retired.data.unreported_local_success) !==
+          Boolean(
+            retired.data.receipt &&
+            "outcome" in retired.data.receipt &&
+            retired.data.receipt.outcome === "unreported_local_success",
+          )
+      ) {
+        pending.push(row);
+        continue;
+      }
+      if (
+        retired.success &&
+        retired.data.receipt &&
+        "effects" in retired.data.receipt &&
+        retired.data.receipt.effects === "expired_approval_unapplied"
       ) {
         const receipt = retired.data.receipt;
         if (retired.data.decision_request_id !== receipt.decision_request_id) {
@@ -683,6 +739,37 @@ export async function resumeSalaamWork(
     session.executionAuthority.binding.run.source !== "superpipeline"
   )
     return { status: "failed", reason: "Strict run authority unavailable" };
+  if (session.executionAuthority.state === "revoked") {
+    const [workOwner] = await db
+      .select({ id: salaamWorkOwners.requestId })
+      .from(salaamWorkOwners)
+      .where(eq(salaamWorkOwners.sessionId, session.id));
+    const [report] = workOwner
+      ? await db
+          .select({ id: salaamWorkReports.requestId })
+          .from(salaamWorkReports)
+          .where(eq(salaamWorkReports.workRequestId, workOwner.id))
+      : [];
+    if (!report) {
+      const reason =
+        "Execution revoked before report intent; explicit original-run reconciliation required";
+      await db
+        .update(bridgeDispatches)
+        .set({ reason, updatedAt: new Date() })
+        .where(
+          and(
+            eq(bridgeDispatches.tenantId, deps.tenantId),
+            eq(bridgeDispatches.externalRunId, dispatch.externalRunId),
+            eq(bridgeDispatches.externalSource, deps.source),
+          ),
+        );
+      return {
+        status: "failed",
+        externalRunId: dispatch.externalRunId,
+        reason,
+      };
+    }
+  }
   // Do not claim or recreate a session when a report reply may have been lost.
   return driveSalaamWork(deps, dispatch.externalRunId, session.id);
 }

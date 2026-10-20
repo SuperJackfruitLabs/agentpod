@@ -88,7 +88,11 @@ export const adminBridgeAgentsRouter = new Hono()
           runId: z.string().regex(/^run_[A-Za-z0-9]{6,}$/),
           requestId: z.string().uuid(),
           mode: z
-            .enum(["never-dispatched", "known-effects-failure"])
+            .enum([
+              "never-dispatched",
+              "known-effects-failure",
+              "unreported-local-success",
+            ])
             .default("never-dispatched"),
         })
         .strict(),
@@ -142,6 +146,7 @@ export const adminBridgeAgentsRouter = new Hono()
             requestId,
             undefined,
             mode === "known-effects-failure",
+            mode === "unreported-local-success",
           ),
         );
       } catch {

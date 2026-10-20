@@ -346,3 +346,14 @@ cancelled as non-success. The receipt records `known_effects_preserved` and an
 evidence digest. Only this explicit mode may retain interrupted history while
 retiring the failed owner. Every other settlement keeps rejecting interruptions,
 and an unknown operation or resource blocks all retirement.
+
+The distinct operator mode `unreported-local-success` handles a local task that
+finished before its execution root was revoked, with no prepared producer report.
+It calls `work-abandon` only after the exact original producer run has a verified
+non-success terminal outcome. The daemon independently proves its supported local
+completion and stopped-resource evidence and records a `retired` receipt with
+`outcome: unreported_local_success`; it does not cancel the successful local task,
+report producer success, renew execution, or replay effects. Prepared reports must
+use original-run report reconciliation instead. Interrupted attempts and uncertain
+resources remain refused. A revoked owner without a report now retains an explicit
+operator-reconciliation reason instead of repeatedly attempting renewal silently.

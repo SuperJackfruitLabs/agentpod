@@ -1409,7 +1409,12 @@ import {
   resumeSalaamWork,
   recoverExpiredSalaamDecision,
 } from "../../src/services/bridge/salaam-dispatch";
-test.each(["crashed", "reclaimed", "known-effects"])(
+test.each([
+  "crashed",
+  "reclaimed",
+  "known-effects",
+  "unreported-local-success",
+])(
   "explicit terminal settlement retains original %s owner across lost replies and later leases",
   async (terminalOutcome) => {
     const { work, completion } = await reportFixture();
@@ -1482,10 +1487,11 @@ test.each(["crashed", "reclaimed", "known-effects"])(
             run: {
               ...live.run,
               status: "ended",
-              outcome:
-                terminalOutcome === "known-effects"
-                  ? "crashed"
-                  : terminalOutcome,
+              outcome: ["known-effects", "unreported-local-success"].includes(
+                terminalOutcome,
+              )
+                ? "crashed"
+                : terminalOutcome,
               endedAt: "2026-10-20T18:00:00.000Z",
             },
           };
@@ -1496,9 +1502,11 @@ test.each(["crashed", "reclaimed", "known-effects"])(
     const mock = spyOn(broker, "request").mockImplementation(
       async (_node, verb, body: any) => {
         expect(verb).toBe(
-          terminalOutcome === "known-effects"
-            ? "salaam.work-fail"
-            : "salaam.work-settle",
+          terminalOutcome === "unreported-local-success"
+            ? "salaam.work-abandon"
+            : terminalOutcome === "known-effects"
+              ? "salaam.work-fail"
+              : "salaam.work-settle",
         );
         daemonCalls++;
         if (daemonCalls === 1)
@@ -1507,14 +1515,22 @@ test.each(["crashed", "reclaimed", "known-effects"])(
           ok: true,
           data: {
             version: 1,
-            state: "cancelled",
-            effects:
-              terminalOutcome === "known-effects"
-                ? "known_effects_preserved"
-                : "never_dispatched",
-            ...(terminalOutcome === "known-effects"
-              ? { evidence_digest: "a".repeat(64) }
-              : {}),
+            ...(terminalOutcome === "unreported-local-success"
+              ? {
+                  state: "retired",
+                  outcome: "unreported_local_success",
+                  evidence_digest: "a".repeat(64),
+                }
+              : {
+                  state: "cancelled",
+                  effects:
+                    terminalOutcome === "known-effects"
+                      ? "known_effects_preserved"
+                      : "never_dispatched",
+                  ...(terminalOutcome === "known-effects"
+                    ? { evidence_digest: "a".repeat(64) }
+                    : {}),
+                }),
             request_id: request,
             work_request_id: work.requestId,
             session_id: authority.sessionId,
@@ -1533,8 +1549,39 @@ test.each(["crashed", "reclaimed", "known-effects"])(
         id,
         undefined,
         terminalOutcome === "known-effects",
+        terminalOutcome === "unreported-local-success",
       );
     try {
+      if (terminalOutcome === "unreported-local-success") {
+        expect((await resumeSalaamWork(deps))?.reason).toContain(
+          "revoked before report intent",
+        );
+        expect(
+          (
+            await db
+              .select()
+              .from(bridgeDispatches)
+              .where(eq(bridgeDispatches.externalRunId, run))
+          )[0]?.reason,
+        ).toContain("explicit original-run reconciliation");
+        await db
+          .insert(salaamWorkReports)
+          .values({
+            workRequestId: work.requestId,
+            tenantId,
+            requestId: crypto.randomUUID(),
+            completion,
+            handoff: { historical: true },
+            handoffDigest: "a".repeat(64),
+            state: "prepared",
+          });
+        await expect(settle(request)).rejects.toThrow("Prepared report");
+        expect(fails).toBe(0);
+        expect(daemonCalls).toBe(0);
+        await db
+          .delete(salaamWorkReports)
+          .where(eq(salaamWorkReports.workRequestId, work.requestId));
+      }
       if (terminalOutcome === "known-effects")
         await expect(
           settleNeverDispatchedSalaamWork(deps, run, request),
@@ -1545,7 +1592,11 @@ test.each(["crashed", "reclaimed", "known-effects"])(
         "Original settlement",
       );
       const result = await settle(request);
-      expect(result.state).toBe("cancelled");
+      expect(result.state).toBe(
+        terminalOutcome === "unreported-local-success"
+          ? "retired"
+          : "cancelled",
+      );
       expect(await settle(request)).toEqual(result);
       expect(fails).toBe(expectedFails);
       expect(await resumeSalaamWork(deps)).toBe(null);

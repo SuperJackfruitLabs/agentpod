@@ -39,3 +39,14 @@ export const SalaamWorkFailureReceipt = SalaamWorkSettlementReceipt.extend({
   effects: z.literal("known_effects_preserved"),
   evidence_digest: hash,
 }).strict();
+
+export const SalaamWorkAbandon = SalaamWorkSettlement;
+export const SalaamWorkAbandonReceipt = SalaamWorkSettlementReceipt.omit({
+  effects: true,
+})
+  .extend({
+    state: z.literal("retired"),
+    outcome: z.literal("unreported_local_success"),
+    evidence_digest: hash,
+  })
+  .strict();

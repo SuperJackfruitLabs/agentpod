@@ -62,3 +62,22 @@ test("known effects failure retains evidence and cannot report success or no eff
   ])
     expect(SalaamWorkFailureReceipt.safeParse(receipt).success).toBe(false);
 });
+
+import { SalaamWorkAbandonReceipt } from "../../../../packages/contract/src/salaam-work-settlement";
+import abandoned from "../../../../packages/contract/src/fixtures/salaam-work-abandon-v1.json";
+test("unreported local success retirement preserves evidence without producer success or cancellation", () => {
+  expect(
+    JSON.stringify(SalaamWorkAbandonReceipt.parse(abandoned.receipt)),
+  ).toBe(JSON.stringify(abandoned.receipt));
+  for (const patch of [
+    { state: "cancelled" },
+    { state: "succeeded" },
+    { outcome: "completed" },
+    { effects: "never_dispatched" },
+    { evidence_digest: "unknown" },
+  ])
+    expect(
+      SalaamWorkAbandonReceipt.safeParse({ ...abandoned.receipt, ...patch })
+        .success,
+    ).toBe(false);
+});
