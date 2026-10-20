@@ -10,6 +10,7 @@ import { bridgeDispatches } from "../../src/db/schema/bridge";
 import {
   salaamWorkOwners,
   salaamWorkDecisions,
+  salaamWorkReports,
 } from "../../src/db/schema/salaam-work";
 import { makeSalaamExecution } from "../../src/services/salaam-authority";
 import {
@@ -135,6 +136,19 @@ beforeAll(async () => {
   });
 });
 afterAll(async () => {
+  await db
+    .delete(salaamWorkReports)
+    .where(
+      eq(
+        salaamWorkReports.workRequestId,
+        (
+          await db
+            .select()
+            .from(salaamWorkOwners)
+            .where(eq(salaamWorkOwners.sessionId, session))
+        )[0]?.requestId ?? "none",
+      ),
+    );
   await db
     .delete(salaamWorkDecisions)
     .where(
@@ -388,9 +402,22 @@ test("strict question pins producer ID, tolerates response loss and never select
     expect(answers[0]).toEqual(answers[1]);
     await answerSalaamDecision(session, user, decision.request_id, read);
     expect(sends).toBe(2);
-    await db.update(salaamWorkDecisions).set({daemonReceipt:{...(receipt as object),approval_id:crypto.randomUUID()}}).where(eq(salaamWorkDecisions.requestId,decision.request_id));
-    await expect(answerSalaamDecision(session,user,decision.request_id,read)).rejects.toThrow(/receipt mismatch/);
-    await db.update(salaamWorkDecisions).set({daemonReceipt:receipt}).where(eq(salaamWorkDecisions.requestId,decision.request_id));
+    await db
+      .update(salaamWorkDecisions)
+      .set({
+        daemonReceipt: {
+          ...(receipt as object),
+          approval_id: crypto.randomUUID(),
+        },
+      })
+      .where(eq(salaamWorkDecisions.requestId, decision.request_id));
+    await expect(
+      answerSalaamDecision(session, user, decision.request_id, read),
+    ).rejects.toThrow(/receipt mismatch/);
+    await db
+      .update(salaamWorkDecisions)
+      .set({ daemonReceipt: receipt })
+      .where(eq(salaamWorkDecisions.requestId, decision.request_id));
   } finally {
     mock.mockRestore();
   }
@@ -460,5 +487,235 @@ test("unsupported producer, mismatched question, expiry and revoked authority ne
     ).rejects.toThrow(/suspended/);
   } finally {
     await fakePlane.unsuspend(principal);
+  }
+});
+
+import { reportSalaamCompletion } from "../../src/services/bridge/salaam-report";
+async function reportFixture() {
+  const [work] = await db
+    .select()
+    .from(salaamWorkOwners)
+    .where(eq(salaamWorkOwners.sessionId, session));
+  await db
+    .delete(salaamWorkReports)
+    .where(eq(salaamWorkReports.workRequestId, work!.requestId));
+  await db
+    .update(bridgeDispatches)
+    .set({ outcome: "working", result: null })
+    .where(eq(bridgeDispatches.externalRunId, run));
+  const payload = work!.payload as (typeof corpus.cases)[0]["payload"];
+  return {
+    work: work!,
+    completion: {
+      version: 1,
+      state: "verified",
+      work_request_id: work!.requestId,
+      task_id: "99999999-9999-4999-8999-999999999999",
+      plan_revision: 1,
+      binding_digest: workDigest(payload.admission.binding),
+      completion_id: "artifact_completion_fixture",
+      evidence_digest: "c".repeat(64),
+    },
+  };
+}
+test("lost complete response reconciles original run after revocation without another write", async () => {
+  const { work, completion } = await reportFixture();
+  let current: RunContext = {
+    ...context,
+    run: { ...context.run, handoff: null, completion: null },
+  };
+  let writes = 0,
+    checks = 0;
+  const mock = spyOn(broker, "request").mockImplementation(
+    async (_node, verb) => {
+      expect(verb).toBe("salaam.work-completion");
+      checks++;
+      return { ok: true, data: completion };
+    },
+  );
+  const client = {
+    context: async (id: string) => {
+      expect(id).toBe(run);
+      return current;
+    },
+    completeVerified: async (
+      lease: { runId: string; leaseEpoch: number },
+      handoff: unknown,
+    ) => {
+      expect(lease).toEqual({ runId: run, leaseEpoch: 1 });
+      writes++;
+      current = {
+        ...current,
+        handoff: { laterCardOutput: true },
+        run: {
+          ...current.run,
+          status: "ended",
+          outcome: "completed",
+          endedAt: new Date().toISOString(),
+          handoff,
+          completion: { met: true, outcome: "pass" },
+        },
+      };
+      throw Error("lost board reply");
+    },
+  };
+  try {
+    await expect(reportSalaamCompletion(session, user, client)).rejects.toThrow(
+      /lost board reply/,
+    );
+    expect(writes).toBe(1);
+    expect(checks).toBe(2);
+    await fakePlane.suspend(principal);
+    expect((await reportSalaamCompletion(session, user, client)).state).toBe(
+      "reported",
+    );
+    expect(writes).toBe(1);
+    expect(checks).toBe(2);
+    const [saved] = await db
+      .select()
+      .from(salaamWorkReports)
+      .where(eq(salaamWorkReports.workRequestId, work.requestId));
+    expect(saved?.state).toBe("reported");
+    const changed = {
+      ...current,
+      run: { ...current.run, handoff: { otherRunOutput: true } },
+    };
+    await expect(
+      reportSalaamCompletion(session, user, {
+        ...client,
+        context: async () => changed,
+      }),
+    ).rejects.toThrow(/conflicts/);
+    await expect(
+      reportSalaamCompletion(session, user, {
+        ...client,
+        context: async () => ({
+          ...current,
+          run: {
+            ...current.run,
+            completion: { met: true, outcome: "changes-needed" },
+          },
+        }),
+      }),
+    ).rejects.toThrow(/conflicts/);
+  } finally {
+    mock.mockRestore();
+    await fakePlane.unsuspend(principal);
+  }
+});
+test("changed fresh evidence, stale lease, old producer and HTTP success cannot report pass", async () => {
+  const { completion } = await reportFixture();
+  const current: RunContext = {
+    ...context,
+    run: { ...context.run, handoff: null, completion: null },
+  };
+  let checks = 0,
+    writes = 0;
+  const mock = spyOn(broker, "request").mockImplementation(async () => ({
+    ok: true,
+    data:
+      ++checks === 1
+        ? completion
+        : { ...completion, evidence_digest: "d".repeat(64) },
+  }));
+  const client = {
+    context: async () => current,
+    completeVerified: async () => {
+      writes++;
+      return { ok: true };
+    },
+  };
+  try {
+    await expect(reportSalaamCompletion(session, user, client)).rejects.toThrow(
+      /completion changed/,
+    );
+    expect(writes).toBe(0);
+    const [own] = await db
+      .select()
+      .from(salaamWorkOwners)
+      .where(eq(salaamWorkOwners.sessionId, session));
+    const [intent] = await db
+      .select()
+      .from(salaamWorkReports)
+      .where(eq(salaamWorkReports.workRequestId, own!.requestId));
+    if (!intent) throw Error("expected saved intent");
+    const falseHandoff = { model: "looks good" };
+    await db
+      .update(salaamWorkReports)
+      .set({ handoff: falseHandoff, handoffDigest: workDigest(falseHandoff) })
+      .where(eq(salaamWorkReports.workRequestId, intent.workRequestId));
+    await expect(reportSalaamCompletion(session, user, client)).rejects.toThrow(
+      /handoff mismatch/,
+    );
+    await db
+      .update(salaamWorkReports)
+      .set({ handoff: intent.handoff, handoffDigest: intent.handoffDigest })
+      .where(eq(salaamWorkReports.workRequestId, intent.workRequestId));
+    await expect(
+      reportSalaamCompletion(session, user, {
+        ...client,
+        context: async () => ({
+          ...current,
+          run: { ...current.run, leaseEpoch: 2 },
+        }),
+      }),
+    ).rejects.toThrow(/binding changed/);
+    await expect(
+      reportSalaamCompletion(session, user, {
+        ...client,
+        context: async () => context,
+      }),
+    ).rejects.toThrow(/lacks original-run/);
+    mock.mockImplementation(async () => ({ ok: true, data: completion }));
+    await expect(reportSalaamCompletion(session, user, client)).rejects.toThrow(
+      /conflicts/,
+    );
+    expect(writes).toBe(1);
+    await expect(
+      reportSalaamCompletion(session, "prn_" + hex(), client),
+    ).rejects.toThrow(/owner unavailable/);
+  } finally {
+    mock.mockRestore();
+  }
+});
+test("unverified or failed daemon work never creates report intent", async () => {
+  const { work } = await reportFixture();
+  const current: RunContext = {
+    ...context,
+    run: { ...context.run, handoff: null, completion: null },
+  };
+  let writes = 0;
+  const client = {
+    context: async () => current,
+    completeVerified: async () => {
+      writes++;
+    },
+  };
+  const mock = spyOn(broker, "request").mockImplementation(async () => ({
+    ok: true,
+    data: { state: "completed", text: "looks good" },
+  }));
+  try {
+    await expect(
+      reportSalaamCompletion(session, user, client),
+    ).rejects.toThrow();
+    mock.mockImplementation(async () => ({
+      ok: false,
+      error: "checks failed",
+    }));
+    await expect(reportSalaamCompletion(session, user, client)).rejects.toThrow(
+      /Fresh protected/,
+    );
+    expect(writes).toBe(0);
+    expect(
+      (
+        await db
+          .select()
+          .from(salaamWorkReports)
+          .where(eq(salaamWorkReports.workRequestId, work.requestId))
+      ).length,
+    ).toBe(0);
+  } finally {
+    mock.mockRestore();
   }
 });

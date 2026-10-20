@@ -33,9 +33,7 @@
         },
         "input": {
           "instructions": "Inspect source",
-          "references": [
-            "library:card"
-          ],
+          "references": ["library:card"],
           "incoming_handoff": null
         },
         "plan": {
@@ -47,9 +45,7 @@
               "title": "Inspect",
               "instruction": "Read source",
               "depends_on": [],
-              "checks": [
-                "verify"
-              ]
+              "checks": ["verify"]
             }
           ],
           "acceptance": [
@@ -59,9 +55,7 @@
               "cwd": "."
             }
           ],
-          "deliverables": [
-            "src/a.ts"
-          ],
+          "deliverables": ["src/a.ts"],
           "limits": {
             "requests": 2,
             "runtime_ms": 10000,

@@ -10,6 +10,7 @@ import {
 import {
   SalaamWorkDecision,
   SalaamWorkDecisionAnswer,
+  SuperpipelineStrictDecision,
 } from "../../../../../packages/contract/src/salaam-work-decision";
 import {
   SalaamWorkPayload,
@@ -19,14 +20,7 @@ import { workDigest } from "../salaam-work";
 import { validateSalaamAuthority } from "../salaam-authority";
 import * as broker from "../broker";
 import type { SuperpipelineClient } from "./superpipeline";
-const strictSchema = z
-  .object({
-    version: z.literal(1),
-    request_id: z.string().uuid(),
-    decision_digest: z.string().regex(/^[a-f0-9]{64}$/),
-    expires_at: z.number().int().positive(),
-  })
-  .strict();
+const strictSchema = SuperpipelineStrictDecision;
 const producerSchema = z
   .object({
     accepted: z.literal(true),

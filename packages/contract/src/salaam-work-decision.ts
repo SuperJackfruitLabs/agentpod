@@ -45,3 +45,13 @@ export const SalaamWorkDecisionAnswer = z
   })
   .strict();
 export type SalaamWorkDecisionAnswer = z.infer<typeof SalaamWorkDecisionAnswer>;
+
+/** Mirror of Superpipeline's versioned strict elicitation correlation. */
+export const SuperpipelineStrictDecision = z
+  .object({
+    version: z.literal(1),
+    request_id: z.string().uuid(),
+    decision_digest: digest,
+    expires_at: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();

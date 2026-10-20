@@ -52,3 +52,11 @@ test("answer cannot select a permanent or unoffered approval", () => {
     }).success,
   ).toBe(false);
 });
+
+import { SuperpipelineStrictDecision } from "./salaam-work-decision";
+import producerCorpus from "./fixtures/superpipeline-strict-decision-v1.json";
+for (const sample of producerCorpus)
+  test(`producer strict decision parity: ${sample.name}`, () =>
+    expect(SuperpipelineStrictDecision.safeParse(sample.value).success).toBe(
+      sample.valid,
+    ));

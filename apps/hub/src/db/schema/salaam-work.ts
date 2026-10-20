@@ -45,3 +45,14 @@ export const salaamWorkDecisions = pgTable("salaam_work_decisions", {
   answer: jsonb("answer"),
   daemonReceipt: jsonb("daemon_receipt"),
 });
+export const salaamWorkReports = pgTable("salaam_work_reports", {
+  workRequestId: text("work_request_id")
+    .primaryKey()
+    .references(() => salaamWorkOwners.requestId, { onDelete: "restrict" }),
+  requestId: text("request_id").notNull().unique(),
+  completion: jsonb("completion").notNull(),
+  handoff: jsonb("handoff").notNull(),
+  handoffDigest: text("handoff_digest").notNull(),
+  state: text("state").notNull(),
+  boardReceipt: jsonb("board_receipt"),
+});

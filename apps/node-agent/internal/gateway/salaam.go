@@ -45,7 +45,7 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 		result, err := h.client.WorkAdmit(ctx, work, owner)
 		return result, false, err
 	}
-	if verb == "salaam.work-decisions" || verb == "salaam.work-decision" {
+	if verb == "salaam.work-decisions" || verb == "salaam.work-decision" || verb == "salaam.work-completion" {
 		var work struct {
 			Binding salaam.Binding  `json:"binding"`
 			Answer  json.RawMessage `json:"answer"`

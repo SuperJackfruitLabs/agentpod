@@ -223,3 +223,36 @@ for human answers, while exact creation retries are historical reads. AgentPod's
 current database tests use a synthetic producer and node response; actual cross-
 product and daemon decision acceptance still must pass. No Matrix messages were
 sent, and strict automatic bridge selection remains disabled.
+
+## Original-run completion recovery packet
+
+Migration 0106 reserves a structured report intent, completion receipt and handoff
+before any board completion call. Fresh daemon `work-completion` observations must
+match the original work request, task/plan and authority. Before reporting, the
+bridge obtains fresh protected verification again; a changed receipt blocks the
+old intent. The handoff is constructed from the exact stable receipt and report
+request ID, not model final text or arbitrary caller JSON. The report explicitly
+uses `outcome: pass`.
+
+Every retry first reads the original run. An ended run is acknowledged only with
+matching run/card/stage/lease, `outcome: completed`, original verdict
+`{met: true, outcome: pass}`, and exact original run handoff matching the durable
+intent. Neither HTTP success nor a current card's newer handoff is evidence of
+that report. A successful lost response can therefore reconcile after revocation
+without another execution/verification grant or write. A changed lease, missing
+original-run fields, another verdict or output, and unverified daemon output all
+fail closed. Generic cross-run replay remains blocked.
+
+The required producer read is Forge Superpipeline `c62b7dce`: additive
+`run.handoff` and `run.completion` preserve original-run facts even after another
+run changes the card. Older producers lacking these fields cannot use strict
+reporting. Producer strict-decision corpus `722f8f0` is mirrored byte-for-byte in
+`superpipeline-strict-decision-v1.json` and consumed by the AgentPod parser tests.
+The two Salaam payload/decision fixtures now match its formatted mirrors exactly.
+
+Database report tests still use a synthetic fresh daemon receipt and synthetic
+board client. They prove durable reservation/reconciliation, loss/conflict and
+scope behavior, not actual native verifier execution or deployed acceptance.
+Automatic bridge selection remains disabled until the full milestone chain is
+proven. The new native completion forwarding branch still needs the consolidated
+native test run after the Mac's disk-pressure cache cleanup.

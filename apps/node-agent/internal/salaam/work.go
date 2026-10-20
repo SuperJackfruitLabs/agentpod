@@ -62,7 +62,7 @@ func (c *Client) WorkAdmit(ctx context.Context, payload WorkPayload, owner Statu
 	return out, nil
 }
 
-// WorkControl forwards only the two closed private decision verbs. The daemon
+// WorkControl forwards only the closed private decision and completion verbs. The daemon
 // owns operation validation; no ACP permission or model metadata enters here.
 func (c *Client) WorkControl(ctx context.Context, action string, binding Binding, answer json.RawMessage, owner Status) (json.RawMessage, error) {
 	if err := c.validate(binding); err != nil {
@@ -73,7 +73,7 @@ func (c *Client) WorkControl(ctx context.Context, action string, binding Binding
 	}
 	body := map[string]any{"binding": binding}
 	switch action {
-	case "work-decisions":
+	case "work-decisions", "work-completion":
 		if len(answer) != 0 {
 			return nil, fmt.Errorf("salaam: discovery cannot carry an answer")
 		}

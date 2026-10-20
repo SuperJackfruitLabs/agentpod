@@ -743,6 +743,13 @@
       "when": 1792500600000,
       "tag": "0105_salaam_work_decisions",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1792503600000,
+      "tag": "0106_salaam_work_reports",
+      "breakpoints": true
     }
   ]
 }

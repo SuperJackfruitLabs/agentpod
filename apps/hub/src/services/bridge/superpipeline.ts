@@ -176,6 +176,9 @@ export interface RunContext {
     outcome: string | null;
     startedAt: string;
     endedAt: string | null;
+    /** Original run output/verdict, never the current card handoff. */
+    handoff?: unknown;
+    completion?: unknown;
   };
   card: ClaimedCard;
   stage: RunStage | null;
@@ -501,6 +504,11 @@ export class SuperpipelineClient {
   /** Note the action is `activities`; superpipeline's RPC method is `postActivity`. */
   activity(lease: RunLease, activity: BoardActivity): Promise<unknown> {
     return this.verb(lease, "activities", { ...activity });
+  }
+
+  /** Strict completion is explicit pass; recovery checks the original stored verdict. */
+  completeVerified(lease: RunLease, handoff: unknown): Promise<unknown> {
+    return this.verb(lease,"complete",{outcome:"pass",handoff});
   }
 
   complete(lease: RunLease, handoff?: unknown): Promise<unknown> {
