@@ -97,10 +97,11 @@ func (c *Client) WorkCapability(ctx context.Context, node, workspace, key string
 	if node != c.NodeID || workspace != c.Workspace || key != StationKey(c.Workspace) || node == "" {
 		return nil, fmt.Errorf("salaam: capability probe names another station")
 	}
-	if c.Runtime != nil {
-		if err := c.Runtime.Ensure(ctx); err != nil {
-			return nil, err
-		}
+	if c.Runtime == nil {
+		return nil, fmt.Errorf("salaam: reviewed strict work host required")
+	}
+	if err := c.Runtime.ensureStrict(ctx); err != nil {
+		return nil, err
 	}
 	var result struct {
 		Version int  `json:"version"`

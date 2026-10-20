@@ -276,3 +276,11 @@ preserve original ownership for recovery; authoritative lease loss, terminal
 failure and exhausted bounds attempt explicit revocation. Unknown outcomes cannot
 open replacement work. Daemon progression remains an explicit service opt-in;
 component fixtures do not establish a deployed capability or milestone acceptance.
+
+Strict work requires the reviewed schema6 host manifest opt-in. Native startup
+continues to delegate the complete manifest/pin/health comparison to the reviewed
+absolute host CLI, then requires its startup receipt to include exact
+`strict_work: {version: 1}` before probing capability. Missing/null remains valid
+for ordinary disabled hosts but cannot enable strict bridge work. Unknown versions
+and fields fail startup receipt validation. A private endpoint without reviewed
+host startup configuration is insufficient to advertise strict work.
