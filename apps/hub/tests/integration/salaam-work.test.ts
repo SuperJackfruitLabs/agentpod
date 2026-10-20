@@ -1251,6 +1251,19 @@ test("original released run reconciles only without a session or work owner", as
     false,
   );
   released = true;
+  const missingStage = {
+    ...deps,
+    client: {
+      ...deps.client,
+      context: async () => ({
+        ...(await deps.client.context(runId)),
+        stage: null,
+      }),
+    },
+  } as unknown as DispatchDeps;
+  expect(
+    await reconcileUnopenedSalaamRelease(missingStage, runId, "build"),
+  ).toBe(false);
   expect(await reconcileUnopenedSalaamRelease(deps, runId, "other")).toBe(
     false,
   );

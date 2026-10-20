@@ -127,7 +127,7 @@ export async function reconcileUnopenedSalaamRelease(
   const original = await deps.client.context(runId);
   if (
     original.run.stageKey !== stageKey ||
-    original.stage.key !== stageKey ||
+    original.stage?.key !== stageKey ||
     original.run.runId !== runId ||
     original.run.cardId !== saved.externalCardId ||
     original.run.leaseEpoch !== saved.leaseEpoch ||
