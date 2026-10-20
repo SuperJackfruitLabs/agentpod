@@ -15,7 +15,7 @@ import {
   SalaamWorkPlan,
 } from "../../../../../packages/contract/src/salaam-work-payload";
 import * as broker from "../broker";
-import { openDispatch } from "./ledger";
+import { openDispatch, markReleased } from "./ledger";
 import { reserveSalaamWork, deliverSalaamWork } from "./salaam-work";
 import {
   discoverSalaamDecisions,
@@ -75,6 +75,80 @@ function planFrom(context: RunContext) {
 }
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Reconcile only a producer-confirmed original release with no execution owner.
+ * Operator recovery requires the roster paused and controller quiesced.
+ * Historical recovery does not dispatch, reclaim, or infer release from a timeout. */
+export async function reconcileUnopenedSalaamRelease(
+  deps: DispatchDeps,
+  runId: string,
+  stageKey: string,
+): Promise<boolean> {
+  const filter = and(
+    eq(bridgeDispatches.tenantId, deps.tenantId),
+    eq(bridgeDispatches.externalSource, deps.source),
+    eq(bridgeDispatches.externalRunId, runId),
+    eq(bridgeDispatches.stationId, deps.agent.stationId),
+    eq(bridgeDispatches.agentKey, deps.agent.key),
+    eq(bridgeDispatches.boardId, deps.agent.boardId),
+  );
+  const [saved] = await db.select().from(bridgeDispatches).where(filter);
+  if (!saved || saved.outcome !== "working") return false;
+  const original = await deps.client.context(runId);
+  if (
+    original.run.stageKey !== stageKey ||
+    original.stage.key !== stageKey ||
+    original.run.runId !== runId ||
+    original.run.cardId !== saved.externalCardId ||
+    original.run.leaseEpoch !== saved.leaseEpoch ||
+    original.run.status !== "ended" ||
+    original.run.outcome !== "released"
+  )
+    return false;
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(bridgeDispatches)
+      .where(filter)
+      .for("update");
+    if (
+      !current ||
+      current.outcome !== "working" ||
+      current.leaseEpoch !== saved.leaseEpoch
+    )
+      return false;
+    const owners = await tx
+      .select({ id: salaamWorkOwners.requestId })
+      .from(salaamWorkOwners)
+      .where(
+        and(
+          eq(salaamWorkOwners.externalSource, deps.source),
+          eq(salaamWorkOwners.externalRunId, runId),
+        ),
+      );
+    const sessions = await tx
+      .select({ id: acpSessions.id })
+      .from(acpSessions)
+      .where(
+        and(
+          eq(acpSessions.tenantId, deps.tenantId),
+          sql`${acpSessions.executionAuthority}->'binding'->'run'->>'source' = ${deps.source}`,
+          sql`${acpSessions.executionAuthority}->'binding'->'run'->>'id' = ${runId}`,
+        ),
+      );
+    if (owners.length || sessions.length) return false;
+    await tx
+      .update(bridgeDispatches)
+      .set({
+        outcome: "released",
+        reason:
+          "Original producer run confirms release before execution ownership",
+        updatedAt: new Date(),
+      })
+      .where(filter);
+    return true;
+  });
+}
 
 /** Recover original owned sessions BEFORE asking the board for any new claim. */
 export async function resumeSalaamWork(
@@ -137,12 +211,25 @@ export async function startSalaamWork(
       leaseEpoch: claim.leaseEpoch,
     });
     await client.heartbeat(claim);
+    const [station] = await db
+      .select({ mcpProxy: stations.mcpProxy })
+      .from(stations)
+      .where(
+        and(
+          eq(stations.id, agent.stationId),
+          eq(stations.userId, agent.hubUserId),
+          eq(stations.tenantId, deps.tenantId),
+        ),
+      );
+    if (!station) throw Error("Strict work station ownership unavailable");
     session = (
       await acp.createSession({
         stationId: agent.stationId,
         userId: agent.hubUserId,
         mode: "ask",
-        mcpProxy: true,
+        // Only the operator's explicit station declaration requests managed tools.
+        // Native-only tasks must not implicitly acquire proxy capabilities.
+        mcpProxy: station.mcpProxy === true,
         executionRun: {
           source: "superpipeline",
           id: claim.runId,
@@ -162,6 +249,16 @@ export async function startSalaamWork(
   } catch (error) {
     if (!session) {
       await client.release(claim);
+      await markReleased(
+        {
+          tenantId: deps.tenantId,
+          externalSource: deps.source,
+          externalRunId: claim.runId,
+          externalCardId: claim.card.id,
+          boardId: agent.boardId,
+        },
+        String(error),
+      );
       return {
         status: "released",
         externalRunId: claim.runId,

@@ -1127,3 +1127,153 @@ test("report rechecks authority after asynchronous credential acquisition", asyn
     await fakePlane.unsuspend(principal);
   }
 });
+
+import { startSalaamWork } from "../../src/services/bridge/salaam-dispatch";
+for (const declared of [null, false, true]) {
+  test(`strict session startup uses explicit MCP declaration ${declared} and settles confirmed release`, async () => {
+    const runId = "run_" + hex();
+    await db
+      .update(stations)
+      .set({ mcpProxy: declared })
+      .where(eq(stations.id, station));
+    let requested: boolean | undefined;
+    let released = 0;
+    const deps = {
+      tenantId,
+      source: "superpipeline",
+      agent: {
+        key: "proof",
+        boardId: board,
+        stationId: station,
+        hubUserId: user,
+      },
+      client: {
+        context: async () => ({
+          ...context,
+          card: { ...context.card, spec: { salaam: { version: 1, plan } } },
+        }),
+        heartbeat: async () => {},
+        release: async () => {
+          released++;
+        },
+      },
+      acp: {
+        createSession: async (input: { mcpProxy: boolean }) => {
+          requested = input.mcpProxy;
+          throw Error("reviewed startup refused");
+        },
+      },
+    } as unknown as DispatchDeps;
+    expect(await startSalaamWork(deps, { ...claim, runId })).toMatchObject({
+      status: "released",
+      externalRunId: runId,
+    });
+    expect(requested).toBe(declared === true);
+    expect(released).toBe(1);
+    const [row] = await db
+      .select()
+      .from(bridgeDispatches)
+      .where(eq(bridgeDispatches.externalRunId, runId));
+    expect(row?.outcome).toBe("released");
+    expect(row?.reason).toContain("reviewed startup refused");
+    await db
+      .delete(bridgeDispatches)
+      .where(eq(bridgeDispatches.externalRunId, runId));
+  });
+}
+test("unconfirmed strict release never records a released ledger outcome", async () => {
+  const runId = "run_" + hex();
+  const deps = {
+    tenantId,
+    source: "superpipeline",
+    agent: {
+      key: "proof",
+      boardId: board,
+      stationId: station,
+      hubUserId: user,
+    },
+    client: {
+      context: async () => ({
+        ...context,
+        card: { ...context.card, spec: { salaam: { version: 1, plan } } },
+      }),
+      heartbeat: async () => {},
+      release: async () => {
+        throw Error("release response lost");
+      },
+    },
+    acp: {
+      createSession: async () => {
+        throw Error("startup refused");
+      },
+    },
+  } as unknown as DispatchDeps;
+  await expect(startSalaamWork(deps, { ...claim, runId })).rejects.toThrow(
+    "release response lost",
+  );
+  const [row] = await db
+    .select()
+    .from(bridgeDispatches)
+    .where(eq(bridgeDispatches.externalRunId, runId));
+  expect(row?.outcome).toBe("working");
+  await db
+    .delete(bridgeDispatches)
+    .where(eq(bridgeDispatches.externalRunId, runId));
+});
+
+import { reconcileUnopenedSalaamRelease } from "../../src/services/bridge/salaam-dispatch";
+test("original released run reconciles only without a session or work owner", async () => {
+  const runId = "run_" + hex();
+  await openDispatch({ ...dispatch, externalRunId: runId });
+  let released = false;
+  const deps = {
+    tenantId,
+    source: "superpipeline",
+    agent: {
+      key: "proof",
+      boardId: board,
+      stationId: station,
+      hubUserId: user,
+    },
+    client: {
+      context: async () => ({
+        ...context,
+        run: {
+          ...context.run,
+          runId,
+          status: released ? "ended" : "working",
+          outcome: released ? "released" : null,
+        },
+      }),
+    },
+  } as unknown as DispatchDeps;
+  expect(await reconcileUnopenedSalaamRelease(deps, runId, "build")).toBe(
+    false,
+  );
+  released = true;
+  expect(await reconcileUnopenedSalaamRelease(deps, runId, "other")).toBe(
+    false,
+  );
+  expect(await reconcileUnopenedSalaamRelease(deps, runId, "build")).toBe(true);
+  expect(await reconcileUnopenedSalaamRelease(deps, runId, "build")).toBe(
+    false,
+  );
+  await db
+    .delete(bridgeDispatches)
+    .where(eq(bridgeDispatches.externalRunId, runId));
+  await reportFixture();
+  await db
+    .update(bridgeDispatches)
+    .set({ outcome: "working" })
+    .where(eq(bridgeDispatches.externalRunId, run));
+  const owned = {
+    ...deps,
+    client: {
+      context: async () => ({
+        ...context,
+        run: { ...context.run, status: "ended", outcome: "released" },
+      }),
+    },
+  } as unknown as DispatchDeps;
+  expect(await reconcileUnopenedSalaamRelease(owned, run, "build")).toBe(false);
+});
