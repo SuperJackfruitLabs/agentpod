@@ -284,3 +284,12 @@ absolute host CLI, then requires its startup receipt to include exact
 for ordinary disabled hosts but cannot enable strict bridge work. Unknown versions
 and fields fail startup receipt validation. A private endpoint without reviewed
 host startup configuration is insufficient to advertise strict work.
+
+Fresh status/completion scans use bounded 120-second native transport (125 seconds
+at the Hub). These timeouts do not change the 90-second execution lease. During an
+awaited scan the strict controller independently heartbeats the original board run
+and then renews its execution lease, serially every 15 seconds. It waits for any
+in-flight renewal before accepting a result; renewal failure wins over a late
+successful observation. Timers end before reporting to the board, so an ended run
+is not accidentally renewed. Historical original-run report reconciliation still
+requires no new execution grant.

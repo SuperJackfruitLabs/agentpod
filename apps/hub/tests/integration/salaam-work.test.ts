@@ -1068,32 +1068,62 @@ test("durable work rows cannot cross the owning session tenant", async () => {
     ).rejects.toThrow();
     await expect(
       Promise.resolve(
-        db
-          .insert(salaamWorkDecisions)
-          .values({
-            tenantId: foreign,
-            requestId: crypto.randomUUID(),
-            workRequestId: work.requestId,
-            decision: {},
-          }),
+        db.insert(salaamWorkDecisions).values({
+          tenantId: foreign,
+          requestId: crypto.randomUUID(),
+          workRequestId: work.requestId,
+          decision: {},
+        }),
       ),
     ).rejects.toThrow();
     await expect(
       Promise.resolve(
-        db
-          .insert(salaamWorkReports)
-          .values({
-            tenantId: foreign,
-            requestId: crypto.randomUUID(),
-            workRequestId: work.requestId,
-            completion: {},
-            handoff: {},
-            handoffDigest: "a".repeat(64),
-            state: "prepared",
-          }),
+        db.insert(salaamWorkReports).values({
+          tenantId: foreign,
+          requestId: crypto.randomUUID(),
+          workRequestId: work.requestId,
+          completion: {},
+          handoff: {},
+          handoffDigest: "a".repeat(64),
+          state: "prepared",
+        }),
       ),
     ).rejects.toThrow();
   } finally {
     await db.delete(tenants).where(eq(tenants.id, foreign));
+  }
+});
+
+test("report rechecks authority after asynchronous credential acquisition", async () => {
+  const { completion } = await reportFixture();
+  let writes = 0;
+  const mock = spyOn(broker, "request").mockResolvedValue({
+    ok: true,
+    data: completion,
+  } as never);
+  try {
+    await expect(
+      reportSalaamCompletion(session, user, {
+        context: async () => ({
+          ...context,
+          run: { ...context.run, handoff: null, completion: null },
+        }),
+        completeVerified: async (
+          _lease: unknown,
+          _handoff: unknown,
+          beforeSend?: () => Promise<void>,
+        ) => {
+          await fakePlane.suspend(principal);
+          expect(beforeSend).toBeDefined();
+          await beforeSend!();
+          writes++;
+          return {};
+        },
+      }),
+    ).rejects.toThrow(/suspended/);
+    expect(writes).toBe(0);
+  } finally {
+    mock.mockRestore();
+    await fakePlane.unsuspend(principal);
   }
 });

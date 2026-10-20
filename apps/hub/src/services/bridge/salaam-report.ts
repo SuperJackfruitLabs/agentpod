@@ -170,7 +170,15 @@ export async function reportSalaamCompletion(
   sessionId: string,
   userId: string,
   client: Pick<SuperpipelineClient, "context" | "completeVerified">,
+  observation?: {
+    observe<T>(action: () => Promise<T>): Promise<T>;
+    beforeReport(): Promise<void>;
+  },
 ) {
+  const fresh = () =>
+    observation
+      ? observation.observe(() => freshCompletion(sessionId, userId))
+      : freshCompletion(sessionId, userId);
   const o = await owner(sessionId, userId);
   let [intent] = await db
     .select()
@@ -185,7 +193,7 @@ export async function reportSalaamCompletion(
   if (intent?.state === "reported")
     throw Error("Reported original run changed unexpectedly");
   if (!intent) {
-    const completion = await freshCompletion(sessionId, userId);
+    const completion = await fresh();
     const requestId = crypto.randomUUID(),
       handoff = {
         version: 1,
@@ -226,17 +234,37 @@ export async function reportSalaamCompletion(
   run = checkRun(o, context);
   if (run.status === "ended") return acknowledge(o, intent, context);
   if (run.status !== "working") throw Error("Original run is not live");
-  const completion = await freshCompletion(sessionId, userId);
+  const completion = await fresh();
   if (!same(completion, intent.completion))
     throw Error("Protected completion changed; old intent cannot be reported");
   // Any lost response leaves the immutable intent prepared. Recovery reads this
   // same run, even if its lease has subsequently expired or its card has moved.
+  await observation?.beforeReport();
   await client.completeVerified(
     {
       runId: o.execution.binding.run.id,
       leaseEpoch: o.execution.binding.run.epoch,
     },
     intent.handoff,
+    async () => {
+      // Credential acquisition is asynchronous: recheck the original owner after
+      // it completes, immediately before the producer mutation is sent.
+      const checked = await fresh();
+      if (!same(checked, intent.completion))
+        throw Error(
+          "Protected completion changed during credential acquisition",
+        );
+      const current = await owner(sessionId, userId);
+      if (
+        current.execution.state !== "active" ||
+        current.session.status === "ended" ||
+        !same(current.execution.binding, o.execution.binding)
+      )
+        throw Error(
+          "Strict report authority changed during credential acquisition",
+        );
+      await validateSalaamAuthority(current.execution.binding, userId);
+    },
   );
   return acknowledge(
     o,

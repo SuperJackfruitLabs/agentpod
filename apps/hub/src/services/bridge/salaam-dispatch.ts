@@ -1,3 +1,4 @@
+import { observeWithLease } from "./salaam-observation";
 /** Strict Salaam controller selected only by a fresh private runtime probe. */
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -211,6 +212,27 @@ async function driveSalaamWork(
     const execution = session?.executionAuthority;
     if (!execution || execution.binding.run.id !== runId)
       throw Error("Strict session owner changed");
+    const renew = async () => {
+      try {
+        await heartbeat({ runId, leaseEpoch: execution.binding.run.epoch });
+        if (!acp.renewExecution) throw Error("Strict work renewal unavailable");
+        await acp.renewExecution(
+          agent.hubUserId,
+          sessionId,
+          execution.binding.run,
+        );
+      } catch (error) {
+        mustStop = true;
+        throw error;
+      }
+    };
+    const observation = {
+      observe: async <T>(action: () => Promise<T>) => {
+        await renew();
+        return observeWithLease(action, renew);
+      },
+      beforeReport: renew,
+    };
     let [work] = await db
       .select()
       .from(salaamWorkOwners)
@@ -221,7 +243,12 @@ async function driveSalaamWork(
         .from(salaamWorkReports)
         .where(eq(salaamWorkReports.workRequestId, work.requestId));
       if (report) {
-        await reportSalaamCompletion(sessionId, agent.hubUserId, client);
+        await reportSalaamCompletion(
+          sessionId,
+          agent.hubUserId,
+          client,
+          observation,
+        );
         await acp.endSession(
           agent.hubUserId,
           sessionId,
@@ -296,11 +323,13 @@ async function driveSalaamWork(
         sessionId,
         execution.binding.run,
       );
-      const result = await broker.request(
-        execution.binding.node_id,
-        "salaam.work-status",
-        { binding: execution.binding },
-        { timeoutMs: 125_000 },
+      const result = await observation.observe(() =>
+        broker.request(
+          execution.binding.node_id,
+          "salaam.work-status",
+          { binding: execution.binding },
+          { timeoutMs: 125_000 },
+        ),
       );
       const status = z
         .object({
@@ -334,7 +363,12 @@ async function driveSalaamWork(
       )
         throw Error("Strict task status changed owner or plan");
       if (status.state === "succeeded") {
-        await reportSalaamCompletion(sessionId, agent.hubUserId, client);
+        await reportSalaamCompletion(
+          sessionId,
+          agent.hubUserId,
+          client,
+          observation,
+        );
         await acp.endSession(
           agent.hubUserId,
           sessionId,
