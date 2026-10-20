@@ -111,3 +111,32 @@ func TestWorkDecisionControlIsClosed(t *testing.T) {
 		t.Fatal("invalid controls reached daemon")
 	}
 }
+
+func TestBoundedProgressionNeverForwardsChangedOwnerOrGrant(t *testing.T) {
+	b := Binding{Version: 1, OrganizationID: "org_00000000000000000000", PrincipalID: "prn_00000000000000000000", NodeID: "node", StationID: "station", StationKey: StationKey("/work"), Workspace: "/work", OccupancyEpoch: 1, HubSessionID: "hub", Run: Run{Source: "superpipeline", ID: "run_fixture", Epoch: 1}}
+	owner := Status{Binding: b, SessionID: "session"}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/v1/agentpod/work-progress" {
+			t.Error(r.URL.Path)
+		}
+		w.Write([]byte(`{"version":1}`))
+	}))
+	defer server.Close()
+	client := Client{NodeID: "node", Workspace: "/work", HTTP: &http.Client{Transport: roundTripWork{server.URL}}}
+	original := WorkProgress{Binding: b, RequestID: "11111111-1111-4111-8111-111111111111", WorkRequestID: "11111111-1111-4111-8111-111111111111", MaxSteps: 1}
+	if _, err := client.ProgressWork(context.Background(), original, owner); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []func(*WorkProgress){func(p *WorkProgress) { p.MaxSteps = 0 }, func(p *WorkProgress) { p.MaxSteps = 33 }, func(p *WorkProgress) { p.Compact = true }, func(p *WorkProgress) { p.RequestID = "22222222-2222-4222-8222-222222222222" }, func(p *WorkProgress) { p.Binding.Run.Epoch++ }} {
+		p := original
+		change(&p)
+		if _, err := client.ProgressWork(context.Background(), p, owner); err == nil {
+			t.Fatal("invalid progression reached transport")
+		}
+	}
+	if calls != 1 {
+		t.Fatal("invalid grant was forwarded")
+	}
+}
