@@ -831,3 +831,224 @@ test("strict resumed task drives private bounded progression and verified report
     mock.mockRestore();
   }
 });
+
+for (const lostVerb of ["salaam.work-progress", "salaam.work-status"]) {
+  test(`strict controller recovers lost ${lostVerb} reply under original request`, async () => {
+    const { work, completion } = await reportFixture();
+    const requests: unknown[] = [];
+    let lose = true,
+      ended = 0,
+      claims = 0,
+      reported = 0;
+    let live: RunContext = {
+      ...context,
+      run: { ...context.run, handoff: null, completion: null },
+    };
+    const mock = spyOn(broker, "request").mockImplementation(
+      async (_node, verb, body: any) => {
+        if (verb === "salaam.work-progress") requests.push(body);
+        if (verb === lostVerb && lose) {
+          lose = false;
+          throw Error("accepted remotely; reply lost");
+        }
+        if (verb === "salaam.work-progress")
+          return {
+            ok: true,
+            data: {
+              version: 1,
+              request_id: work.requestId,
+              work_request_id: work.requestId,
+              task_id: completion.task_id,
+              plan_revision: 1,
+              binding_digest: completion.binding_digest,
+            },
+          } as never;
+        if (verb === "salaam.work-status")
+          return {
+            ok: true,
+            data: { ...completion, state: "succeeded", auto_enabled: false },
+          } as never;
+        if (verb === "salaam.work-completion")
+          return { ok: true, data: completion } as never;
+        throw Error("unexpected verb");
+      },
+    );
+    const deps = {
+      tenantId,
+      source: "superpipeline",
+      agent: {
+        key: "proof",
+        boardId: board,
+        stationId: station,
+        hubUserId: user,
+      },
+      client: {
+        context: async () => live,
+        heartbeat: async () => {},
+        claim: async () => {
+          claims++;
+          throw Error("new claim forbidden");
+        },
+        completeVerified: async (_lease: unknown, handoff: unknown) => {
+          reported++;
+          live = {
+            ...live,
+            run: {
+              ...live.run,
+              status: "ended",
+              outcome: "completed",
+              handoff,
+              completion: { met: true, outcome: "pass" },
+            },
+          };
+          return {};
+        },
+      },
+      acp: {
+        strictWork: async () => ({ required: true, version: 1 }),
+        renewExecution: async () => {},
+        endSession: async () => {
+          ended++;
+        },
+        promptSession: async () => {
+          throw Error("generic prompt forbidden");
+        },
+      },
+    } as unknown as DispatchDeps;
+    try {
+      expect(await runOnce(deps)).toMatchObject({
+        status: "failed",
+        reason: expect.stringContaining("reply lost"),
+      });
+      expect(ended).toBe(0);
+      expect(reported).toBe(0);
+      expect(await runOnce(deps)).toMatchObject({ status: "reported" });
+      expect(claims).toBe(0);
+      expect(reported).toBe(1);
+      expect(ended).toBe(1);
+      expect(requests).toHaveLength(2);
+      expect(requests[0]).toEqual(requests[1]);
+    } finally {
+      mock.mockRestore();
+    }
+  });
+}
+for (const code of ["STALE_LEASE", "NOT_RUN_OWNER"]) {
+  test(`strict controller ${code} stops before renewal or progression`, async () => {
+    await reportFixture();
+    let renewals = 0,
+      ends = 0,
+      requests = 0;
+    const mock = spyOn(broker, "request").mockImplementation(async () => {
+      requests++;
+      throw Error("must not dispatch");
+    });
+    const deps = {
+      tenantId,
+      source: "superpipeline",
+      agent: {
+        key: "proof",
+        boardId: board,
+        stationId: station,
+        hubUserId: user,
+      },
+      client: {
+        context: async () => context,
+        heartbeat: async () => {
+          throw Object.assign(Error(code), { code });
+        },
+        claim: async () => {
+          throw Error("new claim forbidden");
+        },
+      },
+      acp: {
+        strictWork: async () => ({ required: true, version: 1 }),
+        renewExecution: async () => {
+          renewals++;
+        },
+        endSession: async () => {
+          ends++;
+        },
+      },
+    } as unknown as DispatchDeps;
+    try {
+      expect(await runOnce(deps)).toMatchObject({
+        status: "failed",
+        reason: expect.stringContaining(code),
+      });
+      expect(renewals).toBe(0);
+      expect(requests).toBe(0);
+      expect(ends).toBe(1);
+    } finally {
+      mock.mockRestore();
+    }
+  });
+}
+
+test("strict lease loss after progression prevents status, completion and another renewal", async () => {
+  const { work, completion } = await reportFixture();
+  let beats = 0,
+    renewals = 0,
+    ends = 0;
+  const verbs: string[] = [];
+  const mock = spyOn(broker, "request").mockImplementation(
+    async (_node, verb) => {
+      verbs.push(verb);
+      if (verb !== "salaam.work-progress")
+        throw Error("post-loss dispatch forbidden");
+      return {
+        ok: true,
+        data: {
+          version: 1,
+          request_id: work.requestId,
+          work_request_id: work.requestId,
+          task_id: completion.task_id,
+          plan_revision: 1,
+          binding_digest: completion.binding_digest,
+        },
+      } as never;
+    },
+  );
+  const deps = {
+    tenantId,
+    source: "superpipeline",
+    agent: {
+      key: "proof",
+      boardId: board,
+      stationId: station,
+      hubUserId: user,
+    },
+    client: {
+      context: async () => context,
+      heartbeat: async () => {
+        if (++beats === 2)
+          throw Object.assign(Error("lease reclaimed"), {
+            code: "STALE_LEASE",
+          });
+      },
+      claim: async () => {
+        throw Error("new claim forbidden");
+      },
+    },
+    acp: {
+      strictWork: async () => ({ required: true, version: 1 }),
+      renewExecution: async () => {
+        renewals++;
+      },
+      endSession: async () => {
+        ends++;
+      },
+    },
+  } as unknown as DispatchDeps;
+  try {
+    expect(await runOnce(deps)).toMatchObject({
+      status: "failed",
+      reason: expect.stringContaining("lease reclaimed"),
+    });
+    expect(renewals).toBe(1);
+    expect(ends).toBe(1);
+    expect(verbs).toEqual(["salaam.work-progress"]);
+  } finally {
+    mock.mockRestore();
+  }
+});
