@@ -729,6 +729,48 @@
       "when": 1792440363983,
       "tag": "0103_salaam_mcp_reconnect",
       "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1792499400000,
+      "tag": "0104_salaam_work_owners",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1792500600000,
+      "tag": "0105_salaam_work_decisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1792503600000,
+      "tag": "0106_salaam_work_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1792507200000,
+      "tag": "0107_salaam_work_tenant_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1792510800000,
+      "tag": "0108_bridge_plane_credential",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1792510800001,
+      "tag": "0109_salaam_work_settlement",
+      "breakpoints": true
     }
   ]
 }

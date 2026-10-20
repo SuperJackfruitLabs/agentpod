@@ -1,0 +1,2877 @@
+{
+  "version": 1,
+  "admissions": [
+    {
+      "name": "valid explicit admission",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": true
+    },
+    {
+      "name": "invalid version 2",
+      "value": {
+        "version": 2,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid extra True",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "extra": true
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid work.extra True",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "extra": true
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid binding.extra True",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          },
+          "extra": true
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid binding.run.extra True",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7,
+            "extra": true
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid binding.run.source agentpod",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "agentpod",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid binding.run.epoch -1",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": -1
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid binding.run.id attempt_abc123",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "attempt_abc123",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid request_id request_any",
+      "value": {
+        "version": 1,
+        "request_id": "request_any",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid work.board_id wrong",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "wrong",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid work.card_id wrong",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "wrong",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid work.input_digest AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid work.plan_digest abc",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "abc"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid work.stage_key ",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid work.stage_key implement\n",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement\n",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "missing request_id",
+      "value": {
+        "version": 1,
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "missing binding",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "missing work",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "missing work.input_digest",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "missing work.plan_digest",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "missing binding.principal_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "missing binding.run.epoch",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1"
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid run epoch bound",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 9007199254740992
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "invalid run id bound",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1\n",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "reject old fixture card prefix",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "crd_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "producer stage labels are not slug constrained",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "Research \u2014 review",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "accept": true
+    }
+  ],
+  "bindings": [
+    {
+      "name": "independent identical expectation",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "accepted"
+    },
+    {
+      "name": "changed binding.principal_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_11111111111111111111",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_authority_mismatch"
+    },
+    {
+      "name": "changed binding.organization_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_11111111111111111111",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_authority_mismatch"
+    },
+    {
+      "name": "changed binding.occupancy_epoch",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 9,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_authority_mismatch"
+    },
+    {
+      "name": "changed binding.run.id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Bb1Cc2",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_authority_mismatch"
+    },
+    {
+      "name": "changed binding.run.epoch",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 8
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_authority_mismatch"
+    },
+    {
+      "name": "changed binding.hub_session_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_other",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_authority_mismatch"
+    },
+    {
+      "name": "changed binding.workspace",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace/other",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_authority_mismatch"
+    },
+    {
+      "name": "changed work.board_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Bb1Cc2",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_input_mismatch"
+    },
+    {
+      "name": "changed work.card_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Bb1Cc2",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_input_mismatch"
+    },
+    {
+      "name": "changed work.stage_key",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "verify",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_input_mismatch"
+    },
+    {
+      "name": "changed work.input_digest",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_input_mismatch"
+    },
+    {
+      "name": "changed work.plan_digest",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_input_mismatch"
+    },
+    {
+      "name": "invalid expectation",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 0
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "invalid_work_binding"
+    },
+    {
+      "name": "changed binding.node_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_other",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_authority_mismatch"
+    },
+    {
+      "name": "changed binding.station_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_other",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_authority_mismatch"
+    },
+    {
+      "name": "changed binding.station_key",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:2222222222222222",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expected": {
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_authority_mismatch"
+    }
+  ],
+  "replays": [
+    {
+      "name": "identical request",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "replay"
+    },
+    {
+      "name": "same request changed binding.principal_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_11111111111111111111",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "same request changed binding.organization_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_11111111111111111111",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "same request changed binding.occupancy_epoch",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 9,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "same request changed binding.run.id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Bb1Cc2",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "same request changed binding.run.epoch",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 8
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "same request changed binding.hub_session_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_other",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "same request changed binding.workspace",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace/other",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "same request changed work.board_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Bb1Cc2",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "same request changed work.card_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Bb1Cc2",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "same request changed work.stage_key",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "verify",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "same request changed work.input_digest",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "same request changed work.plan_digest",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "different request",
+      "value": {
+        "version": 1,
+        "request_id": "510a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "corrupt saved record",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 2,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "invalid_work_record"
+    },
+    {
+      "name": "malformed input",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "extra": true
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "invalid_work_admission"
+    },
+    {
+      "name": "same request changed binding.node_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_other",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "same request changed binding.station_id",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_other",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    },
+    {
+      "name": "same request changed binding.station_key",
+      "value": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:2222222222222222",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "saved": {
+        "version": 1,
+        "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+        "binding": {
+          "version": 1,
+          "organization_id": "org_00000000000000000001",
+          "principal_id": "prn_00000000000000000002",
+          "node_id": "node_fixture",
+          "station_id": "station_fixture",
+          "station_key": "salaam:c52ddf65534b7b46",
+          "occupancy_epoch": 3,
+          "hub_session_id": "acps_fixture",
+          "workspace": "/workspace",
+          "run": {
+            "source": "superpipeline",
+            "id": "run_Aa0Bb1",
+            "epoch": 7
+          }
+        },
+        "work": {
+          "board_id": "brd_Aa0Bb1",
+          "card_id": "card_Aa0Bb1",
+          "stage_key": "implement",
+          "input_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "result": "work_request_conflict"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+CREATE UNIQUE INDEX "salaam_work_owner_request_tenant_idx" ON "salaam_work_owners" ("request_id", "tenant_id");
+ALTER TABLE "salaam_work_owners" ADD CONSTRAINT "salaam_work_owner_session_tenant_fk" FOREIGN KEY ("session_id", "tenant_id") REFERENCES "acp_sessions"("id", "tenant_id") ON DELETE RESTRICT;
+ALTER TABLE "salaam_work_decisions" ADD COLUMN "tenant_id" text;
+ALTER TABLE "salaam_work_reports" ADD COLUMN "tenant_id" text;
+UPDATE "salaam_work_decisions" AS d SET "tenant_id" = o."tenant_id" FROM "salaam_work_owners" AS o WHERE d."work_request_id" = o."request_id";
+UPDATE "salaam_work_reports" AS r SET "tenant_id" = o."tenant_id" FROM "salaam_work_owners" AS o WHERE r."work_request_id" = o."request_id";
+ALTER TABLE "salaam_work_decisions" ALTER COLUMN "tenant_id" SET NOT NULL;
+ALTER TABLE "salaam_work_reports" ALTER COLUMN "tenant_id" SET NOT NULL;
+ALTER TABLE "salaam_work_decisions" ADD CONSTRAINT "salaam_work_decision_tenant_fk" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT;
+ALTER TABLE "salaam_work_reports" ADD CONSTRAINT "salaam_work_report_tenant_fk" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT;
+ALTER TABLE "salaam_work_decisions" ADD CONSTRAINT "salaam_work_decision_owner_tenant_fk" FOREIGN KEY ("work_request_id", "tenant_id") REFERENCES "salaam_work_owners"("request_id", "tenant_id") ON DELETE RESTRICT;
+ALTER TABLE "salaam_work_reports" ADD CONSTRAINT "salaam_work_report_owner_tenant_fk" FOREIGN KEY ("work_request_id", "tenant_id") REFERENCES "salaam_work_owners"("request_id", "tenant_id") ON DELETE RESTRICT;

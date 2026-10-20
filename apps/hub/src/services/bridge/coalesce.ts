@@ -34,6 +34,8 @@ import { isAutoAnswered, permissionQuestion, toBoardOptions } from "./permission
  * an error — so structured options ride in `parameter`, which is stored.
  */
 export interface BoardActivity {
+  /** Only private strict work uses this producer correlation; model activities do not. */
+  strictDecision?: {version:1;request_id:string;decision_digest:string;expires_at:number};
   type: "thought" | "action" | "response" | "elicitation" | "error";
   body?: string;
   action?: string;
