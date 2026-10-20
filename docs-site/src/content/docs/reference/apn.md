@@ -28,6 +28,7 @@ Each command's text below is what `apn help <command>` prints, from the same tab
 
 | Command | What it does |
 |---|---|
+| [`apn salaam-station-files-v1`](#apn-salaam-station-files-v1) | Private Salaam station file protocol (not an interactive command). |
 | [`apn node`](#apn-node) | Explicit spelling for the machine-scoped verbs (apn node status, …). |
 | [`apn enroll`](#apn-enroll) | Enroll this machine with a hub (`--hub`, `--token`, `--force`, `--otlp-endpoint`). |
 | [`apn run`](#apn-run) | Run the agent in the foreground. |
@@ -369,6 +370,30 @@ apn telemetry disable
 
 ```sh
 apn telemetry disable
+```
+
+## apn salaam-station-files-v1
+
+Private Salaam station file protocol (not an interactive command).
+
+```text
+apn salaam-station-files-v1
+```
+
+`apn help salaam-station-files-v1` prints:
+
+```text
+Private versioned stdin/stdout protocol for the reviewed Salaam station controller.
+Linux only. It does not load node enrollment credentials or grant execution authority.
+Use the Salaam tools and their operation-bound approval surface, not this entry directly.
+```
+
+**Needs:** Private local stdin owned by the reviewed Salaam controller; no enrollment credentials are read. Linux openat2 boundary required.
+
+**Exit status:** 0 for a validated content/metadata receipt; 1 for a bounded protocol or filesystem refusal; 2 for extra arguments. A missing result never verifies an effect.
+
+```sh
+# Invoked by Salaam's protected station controller, not as an interactive shell command.
 ```
 
 ## apn node

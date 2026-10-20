@@ -1,0 +1,525 @@
+{
+  "version": 1,
+  "scope": "private-station-files-v1",
+  "requests": [
+    {
+      "name": "inspect",
+      "accept": true,
+      "request": {
+        "version": 1,
+        "action": "inspect",
+        "root": "$ROOT",
+        "root_identity": "$ROOT_IDENTITY"
+      }
+    },
+    {
+      "name": "read",
+      "accept": true,
+      "request": {
+        "version": 1,
+        "action": "read",
+        "root": "$ROOT",
+        "path": "file.txt",
+        "root_identity": "$ROOT_IDENTITY"
+      }
+    },
+    {
+      "name": "list",
+      "accept": true,
+      "request": {
+        "version": 1,
+        "action": "list",
+        "root": "$ROOT",
+        "root_identity": "$ROOT_IDENTITY"
+      }
+    },
+    {
+      "name": "create",
+      "accept": true,
+      "request": {
+        "version": 1,
+        "action": "patch",
+        "root": "$ROOT",
+        "path": "new.txt",
+        "content": "hello\n",
+        "expected_hash": null,
+        "expected_tree": "$TREE",
+        "request_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "deadline_ms": "$DEADLINE",
+        "root_identity": "$ROOT_IDENTITY"
+      }
+    },
+    {
+      "name": "snapshot",
+      "accept": true,
+      "request": {
+        "version": 1,
+        "action": "snapshot",
+        "root": "$ROOT",
+        "expected_tree": "$TREE",
+        "snapshot": "$SNAPSHOT",
+        "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "root_identity": "$ROOT_IDENTITY"
+      }
+    },
+    {
+      "name": "future",
+      "accept": false,
+      "setup": null,
+      "request": {
+        "version": 2,
+        "action": "inspect",
+        "root": "$ROOT",
+        "root_identity": "$ROOT_IDENTITY"
+      }
+    },
+    {
+      "name": "command-field",
+      "accept": false,
+      "setup": null,
+      "request": {
+        "version": 1,
+        "action": "inspect",
+        "root": "$ROOT",
+        "command": "false",
+        "root_identity": "$ROOT_IDENTITY"
+      }
+    },
+    {
+      "name": "unknown-action",
+      "accept": false,
+      "setup": null,
+      "request": {
+        "version": 1,
+        "action": "execute",
+        "root": "$ROOT",
+        "root_identity": "$ROOT_IDENTITY"
+      }
+    },
+    {
+      "name": "traversal",
+      "accept": false,
+      "setup": null,
+      "request": {
+        "version": 1,
+        "action": "read",
+        "root": "$ROOT",
+        "path": "../outside",
+        "root_identity": "$ROOT_IDENTITY"
+      }
+    },
+    {
+      "name": "excluded-credential",
+      "accept": false,
+      "setup": null,
+      "request": {
+        "version": 1,
+        "action": "read",
+        "root": "$ROOT",
+        "path": ".env",
+        "root_identity": "$ROOT_IDENTITY"
+      }
+    },
+    {
+      "name": "wrong-tree",
+      "accept": false,
+      "setup": null,
+      "request": {
+        "version": 1,
+        "action": "inspect",
+        "root": "$ROOT",
+        "expected_tree": "0000000000000000000000000000000000000000000000000000000000000000",
+        "root_identity": "$ROOT_IDENTITY"
+      }
+    },
+    {
+      "name": "symlink",
+      "accept": false,
+      "setup": "symlink",
+      "request": {
+        "version": 1,
+        "action": "read",
+        "root": "$ROOT",
+        "path": "escape",
+        "root_identity": "$ROOT_IDENTITY"
+      }
+    },
+    {
+      "name": "literal-path-search",
+      "accept": true,
+      "request": {
+        "version": 1,
+        "action": "search",
+        "root": "$ROOT",
+        "query": "file",
+        "root_identity": "$ROOT_IDENTITY"
+      }
+    },
+    {
+      "name": "wrong-root-identity",
+      "accept": false,
+      "request": {
+        "version": 1,
+        "action": "inspect",
+        "root": "$ROOT",
+        "root_identity": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  ],
+  "receipts": [
+    {
+      "name": "inspect",
+      "accept": true,
+      "request": {
+        "action": "inspect",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "files": 1,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "read",
+      "accept": true,
+      "request": {
+        "action": "read",
+        "path": "file.txt",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "files": 1,
+        "path": "file.txt",
+        "content": "hello\n",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "list",
+      "accept": true,
+      "request": {
+        "action": "list",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "files": 1,
+        "entries": [
+          {
+            "path": "file.txt",
+            "dev": 1,
+            "inode": 2,
+            "bytes": 6,
+            "mode": 384,
+            "mtime": {
+              "Sec": 1,
+              "Nsec": 0
+            },
+            "ctime": {
+              "Sec": 1,
+              "Nsec": 0
+            }
+          }
+        ],
+        "next_offset": null,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "create",
+      "accept": true,
+      "request": {
+        "action": "patch",
+        "path": "new.txt",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": "hello\n",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "new.txt",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "delete",
+      "accept": true,
+      "request": {
+        "action": "patch",
+        "path": "file.txt",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": null,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "file.txt",
+        "sha256": null,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "snapshot",
+      "accept": true,
+      "request": {
+        "action": "snapshot",
+        "snapshot": "/private/snapshot",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "files": 1,
+        "snapshot": "/private/snapshot",
+        "bytes": 6,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "future",
+      "accept": false,
+      "request": {
+        "action": "inspect",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 2,
+        "ok": true,
+        "tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "files": 1,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "unknown-field",
+      "accept": false,
+      "request": {
+        "action": "inspect",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "files": 1,
+        "verified": true,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "missing-digest",
+      "accept": false,
+      "request": {
+        "action": "inspect",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": null,
+        "files": 1,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "wrong-read-hash",
+      "accept": false,
+      "request": {
+        "action": "read",
+        "path": "file.txt",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "files": 1,
+        "path": "file.txt",
+        "content": "hello\n",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "wrong-read-target",
+      "accept": false,
+      "request": {
+        "action": "read",
+        "path": "file.txt",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "files": 1,
+        "path": "foreign.txt",
+        "content": "hello\n",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "wrong-patch-before",
+      "accept": false,
+      "request": {
+        "action": "patch",
+        "path": "new.txt",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": "hello\n",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "path": "new.txt",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "wrong-patch-content",
+      "accept": false,
+      "request": {
+        "action": "patch",
+        "path": "new.txt",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": "hello\n",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "new.txt",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "wrong-snapshot",
+      "accept": false,
+      "request": {
+        "action": "snapshot",
+        "snapshot": "/private/snapshot",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "files": 1,
+        "snapshot": "/foreign",
+        "bytes": 6,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "unbounded-files",
+      "accept": false,
+      "request": {
+        "action": "inspect",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "files": 100001,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "invalid-entries",
+      "accept": false,
+      "request": {
+        "action": "list",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "files": 1,
+        "entries": null,
+        "next_offset": null,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "literal-path-search",
+      "accept": true,
+      "request": {
+        "action": "search",
+        "query": "file",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "files": 1,
+        "entries": [
+          {
+            "path": "file.txt",
+            "dev": 1,
+            "inode": 2,
+            "bytes": 6,
+            "mode": 384,
+            "mtime": {
+              "Sec": 1,
+              "Nsec": 0
+            },
+            "ctime": {
+              "Sec": 1,
+              "Nsec": 0
+            }
+          }
+        ],
+        "next_offset": null,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    },
+    {
+      "name": "wrong-root-identity",
+      "accept": false,
+      "request": {
+        "action": "inspect",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "files": 1,
+        "root_identity": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  ]
+}

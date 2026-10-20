@@ -11,6 +11,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/selfupdate"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/service"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/stationfs"
 	"os"
 	"runtime"
 )
@@ -48,6 +49,11 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "salaam-station-files-v1":
+		if len(os.Args) != 2 {
+			os.Exit(2)
+		}
+		os.Exit(stationfs.Entry(os.Stdin, os.Stdout, os.Stderr))
 	case "help", "-h", "--help":
 		if os.Args[1] == "help" && len(os.Args) > 2 {
 			name := os.Args[2]

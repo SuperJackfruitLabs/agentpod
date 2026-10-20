@@ -19,7 +19,17 @@ import { join, resolve } from "node:path";
 import { generateKeyPair, exportJWK } from "jose";
 import { SALAAM_MCP_FIXTURE_TOOLS } from "../fixtures/salaam-mcp-tools";
 
-const mcpMode = process.env.SALAAM_MCP_REHEARSAL === "1";
+const stationMode = process.env.SALAAM_STATION_REHEARSAL === "1";
+const mcpMode = process.env.SALAAM_MCP_REHEARSAL === "1" || stationMode;
+if (stationMode) process.umask(0o077);
+if (stationMode)
+  assert(
+    process.platform === "linux" &&
+      process.getuid?.() === 0 &&
+      process.env.SALAAM_STATION_RUNTIME_ROOT &&
+      process.env.SALAAM_STATION_RUNTIME_IMAGE,
+    "Station rehearsal needs an isolated Linux systemd host, root controller and verified prepared runtime image root",
+  );
 
 const repo = resolve(process.env.SALAAM_REPO ?? "");
 assert(
@@ -38,6 +48,18 @@ const dir = realpathSync(mkdtempSync("/tmp/sal-m191-")),
   state = join(dir, "state"),
   home = join(dir, "home");
 for (const path of [workspace, state, home]) mkdirSync(path, { mode: 0o700 });
+if (stationMode) {
+  mkdirSync(join(workspace, "src"));
+  for (let i = 0; i < 50000; i++)
+    writeFileSync(
+      join(workspace, "src", `file-${String(i).padStart(5, "0")}.txt`),
+      "source\n",
+    );
+  writeFileSync(join(workspace, "counter.txt"), "before\n");
+  writeFileSync(join(workspace, ".env"), "synthetic-private-canary-only", {
+    mode: 0o600,
+  });
+}
 const hex = () => randomUUID().replaceAll("-", "").slice(0, 20);
 const cfg = {
   mcpRehearsal: mcpMode,
@@ -86,12 +108,49 @@ const nodeDirectory = resolve(import.meta.dir, "../../../node-agent"),
 const binary = join(dir, "agentpod-node");
 
 function sourceEvidence(cwd: string) {
+  if (!existsSync(join(cwd, ".git"))) {
+    const receipt = JSON.parse(
+      readFileSync(join(cwd, ".salaam-source-evidence.json"), "utf8"),
+    );
+    assert.equal(receipt.version, 1);
+    assert(/^[a-f0-9]{40}$/.test(receipt.base_commit));
+    for (const [file, expected] of Object.entries(receipt.files)) {
+      assert(
+        typeof file === "string" &&
+          !file.startsWith("/") &&
+          !file.split("/").includes(".."),
+      );
+      assert.equal(
+        createHash("sha256")
+          .update(readFileSync(join(cwd, file)))
+          .digest("hex"),
+        expected,
+        "Packaged source changed: " + file,
+      );
+    }
+    return {
+      base_commit: receipt.base_commit,
+      changes_sha256: receipt.changes_sha256,
+      packaged_files_verified: Object.keys(receipt.files).length,
+    };
+  }
   const sha = createHash("sha256").update(
-    execFileSync("git", ["diff", "HEAD", "--binary"], { cwd }),
+    execFileSync(
+      "git",
+      ["-c", "safe.directory=" + cwd, "diff", "HEAD", "--binary"],
+      { cwd },
+    ),
   );
   for (const file of execFileSync(
     "git",
-    ["ls-files", "--others", "--exclude-standard", "-z"],
+    [
+      "-c",
+      "safe.directory=" + cwd,
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+      "-z",
+    ],
     { cwd, encoding: "utf8" },
   )
     .split("\0")
@@ -99,10 +158,14 @@ function sourceEvidence(cwd: string) {
     .sort())
     sha.update(file + "\0").update(readFileSync(join(cwd, file)));
   return {
-    base_commit: execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd,
-      encoding: "utf8",
-    }).trim(),
+    base_commit: execFileSync(
+      "git",
+      ["-c", "safe.directory=" + cwd, "rev-parse", "HEAD"],
+      {
+        cwd,
+        encoding: "utf8",
+      },
+    ).trim(),
     changes_sha256: sha.digest("hex"),
   };
 }
@@ -158,6 +221,7 @@ const record = (name: string) => {
   console.log("PASS " + name);
 };
 const logs: string[] = [];
+let acceptancePassed = false;
 async function until<T>(
   read: () => Promise<T> | T,
   accept: (value: T) => boolean,
@@ -469,6 +533,354 @@ function canonicalFixture(value: unknown): string {
 }
 const mcpFingerprint = (value: unknown) =>
   createHash("sha256").update(canonicalFixture(value)).digest("hex");
+function prepareStationConfig(): string {
+  const file = join(dir, "station-config.json");
+  const script = `import{readFileSync,writeFileSync,realpathSync}from'node:fs';import{createHash}from'node:crypto';import{stationRuntimeFingerprint,stationWorkspaceIdentity}from${JSON.stringify(join(repo, "dist/src/station-config.js"))};const [file,workspace,binary,runtime,image]=process.argv.slice(1);const pin=p=>({path:realpathSync(p),sha256:createHash('sha256').update(readFileSync(realpathSync(p))).digest('hex')});writeFileSync(file,JSON.stringify({version:1,kind:'linux-systemd-station-v1',workspace,workspace_identity:stationWorkspaceIdentity(workspace),files:pin(binary),systemd_run:pin('/usr/bin/systemd-run'),systemctl:pin('/usr/bin/systemctl'),runtime_root:runtime,runtime_fingerprint:stationRuntimeFingerprint(runtime),runtime_image_digest:image}),{mode:0o600});`;
+  execFileSync(
+    node,
+    [
+      "--input-type=module",
+      "-e",
+      script,
+      file,
+      workspace,
+      binary,
+      realpathSync(process.env.SALAAM_STATION_RUNTIME_ROOT!),
+      process.env.SALAAM_STATION_RUNTIME_IMAGE!,
+    ],
+    { env: cleanEnv, timeout: 30000 },
+  );
+  return file;
+}
+function stationRows(sql: string, params: unknown[] = []): any[] {
+  const script = `import{DatabaseSync}from'node:sqlite';const db=new DatabaseSync(process.argv[1],{readOnly:true});try{console.log(JSON.stringify(db.prepare(process.argv[2]).all(...JSON.parse(process.argv[3]))))}finally{db.close()}`;
+  return JSON.parse(
+    execFileSync(
+      node,
+      [
+        "--input-type=module",
+        "-e",
+        script,
+        join(state, "journal.sqlite"),
+        sql,
+        JSON.stringify(params),
+      ],
+      { env: cleanEnv, encoding: "utf8", timeout: 10000 },
+    ),
+  );
+}
+function stationOperator(path: string, body?: unknown): any {
+  const script = `import{call}from${JSON.stringify(join(repo, "dist/src/transport.js"))};console.log(JSON.stringify(await call(process.argv[1],process.argv[2],JSON.parse(process.argv[3])??undefined)));`;
+  return JSON.parse(
+    execFileSync(
+      node,
+      [
+        "--input-type=module",
+        "-e",
+        script,
+        join(state, "operator.sock"),
+        path,
+        JSON.stringify(body ?? null),
+      ],
+      { env: cleanEnv, encoding: "utf8", timeout: 10000 },
+    ),
+  );
+}
+async function stationCases() {
+  assert.equal(stationMode, true);
+  const first = await hub!.request("create"),
+    saved = await hub!.request("record", { id: first.id }),
+    session = saved.executionAuthority.sessionId;
+  assert(
+    (await snapshot(session)).capabilities.includes("protected-station-v1"),
+  );
+  const send = async (args: unknown, requestId = randomUUID()) => {
+    await hub!.request("prompt", {
+      id: first.id,
+      text: "[station] " + JSON.stringify(args),
+      requestId,
+    });
+    return until(
+      () => hub!.request("receipt", { id: first.id, requestId }),
+      (r) => r.state === "completed",
+    );
+  };
+  await send({ action: "search", query: "counter.txt" });
+  const read = stationRows(
+    "SELECT response FROM requests WHERE actor LIKE ? ORDER BY rowid DESC LIMIT 1",
+    ["station-read:" + session + ":%"],
+  )[0];
+  const index = JSON.parse(read.response);
+  assert(index.files >= 50000);
+  assert.equal(index.entries.length, 1);
+  assert.equal(index.entries[0].path, "counter.txt");
+  const logical = randomUUID(),
+    text =
+      "[station] " +
+      JSON.stringify({
+        action: "patch",
+        path: "counter.txt",
+        expected_tree: index.tree_digest,
+        expected_hash: createHash("sha256").update("before\n").digest("hex"),
+        content: "after\n",
+      });
+  const pending = hub!.request("prompt", {
+    id: first.id,
+    text,
+    requestId: logical,
+  });
+  void pending.catch(() => {});
+  const events = await until(
+    () => hub!.request("events", { id: first.id }),
+    (e) => e.some((v: any) => v.type === "permission-request"),
+  );
+  const permission = events
+      .filter((v: any) => v.type === "permission-request")
+      .at(-1),
+    option = permission.payload.options.find(
+      (v: any) => v.kind === "allow_once",
+    );
+  assert(option);
+  assert.equal(
+    readFileSync(join(workspace, "counter.txt"), "utf8"),
+    "before\n",
+  );
+  await hub!.request("permission", {
+    id: first.id,
+    seq: permission.seq,
+    optionId: option.optionId,
+  });
+  await pending;
+  const receipt = await until(
+    () => hub!.request("receipt", { id: first.id, requestId: logical }),
+    (r) => r.state === "completed",
+  );
+  const patch = stationRows(
+    "SELECT * FROM station_calls WHERE attempt_id=? AND kind='patch'",
+    [receipt.attemptId],
+  )[0];
+  assert.equal(patch.state, "returned");
+  assert.equal(patch.helper_state, "stopped");
+  assert(patch.helper_pid > 0 && patch.helper_identity);
+  assert.equal(readFileSync(join(workspace, "counter.txt"), "utf8"), "after\n");
+  const applied = JSON.parse(patch.result_json);
+  assert.equal(
+    applied.sha256,
+    createHash("sha256").update("after\n").digest("hex"),
+  );
+  const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'";
+  const check = await send({
+    action: "check",
+    expected_tree: applied.tree_digest,
+    command:
+      "node -e " +
+      quote(
+        "const fs=require('fs'),assert=require('assert/strict');assert.equal(fs.readFileSync('/workspace/counter.txt','utf8'),'after\\n');assert.throws(()=>fs.readFileSync('/workspace/.env'));assert.throws(()=>fs.writeFileSync('/workspace/counter.txt','bad'));assert.notEqual(process.getuid(),0);assert.equal(process.env.NO_PROXY,undefined);assert.deepEqual(fs.readdirSync('/sys/class/net'),['lo']);console.log('actual-root-check-ok');",
+      ),
+  });
+  const checked = stationRows(
+      "SELECT * FROM station_calls WHERE attempt_id=? AND kind='check'",
+      [check.attemptId],
+    )[0],
+    result = JSON.parse(checked.result_json);
+  assert.equal(checked.state, "returned");
+  assert.equal(result.verified_check, true);
+  assert.equal(result.cleanup.observed_empty, true);
+  record(
+    "real Go node schema5 cold start exposes protected station tools; >=50000-file metadata, human-bound actual-root patch and isolated revision-bound check pass",
+  );
+  await kill(hub!.p);
+  hub = bootHub();
+  assert.equal(await hub.started, cfg.port);
+  await until(() => hub!.request("online"), Boolean);
+  await kill(nodeProcess);
+  bootNode();
+  await until(() => hub!.request("online"), Boolean);
+  await until(
+    () => hub!.request("record", { id: first.id }),
+    (r) => r.status === "idle",
+  );
+  const restored = await hub.request("record", { id: first.id });
+  assert.equal(restored.executionAuthority.sessionId, session);
+  assert.equal(
+    (await hub.request("prompt", { id: first.id, text, requestId: logical }))
+      .attemptId,
+    receipt.attemptId,
+  );
+  assert.equal(
+    stationRows("SELECT count(*) AS n FROM station_calls WHERE attempt_id=?", [
+      receipt.attemptId,
+    ])[0].n,
+    1,
+  );
+  assert.equal(readFileSync(join(workspace, "counter.txt"), "utf8"), "after\n");
+  record(
+    "Hub and node reconnect retain the station session and original reviewed patch attempt without a second filesystem dispatch",
+  );
+  const longId = randomUUID(),
+    long = hub.request("prompt", {
+      id: first.id,
+      requestId: longId,
+      text:
+        "[station] " +
+        JSON.stringify({
+          action: "check",
+          expected_tree: applied.tree_digest,
+          command:
+            "node -e " +
+            quote(
+              "require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});setInterval(()=>{},1000)",
+            ),
+        }),
+    });
+  void long.catch(() => {});
+  const unit = await until<any>(
+    () =>
+      stationRows(
+        "SELECT u.* FROM station_units u JOIN station_calls c ON c.id=u.call_id WHERE c.session_id=? AND u.state='running' ORDER BY u.rowid DESC LIMIT 1",
+        [session],
+      )[0],
+    Boolean,
+  );
+  const old = JSON.parse(readFileSync(join(state, "host/status.json"), "utf8"));
+  process.kill(old.daemon_pid, "SIGKILL");
+  await until(
+    () => JSON.parse(readFileSync(join(state, "host/status.json"), "utf8")),
+    (s) => s.daemon_pid !== old.daemon_pid && s.healthy,
+    30000,
+  );
+  const recovered = stationRows("SELECT * FROM station_units WHERE id=?", [
+    unit.id,
+  ])[0];
+  assert.equal(recovered.state, "stopped");
+  assert.equal(JSON.parse(recovered.stop_json).observed_empty, true);
+  assert.equal(
+    stationRows("SELECT count(*) AS n FROM station_units WHERE call_id=?", [
+      unit.call_id,
+    ])[0].n,
+    1,
+  );
+  assert.notEqual(
+    stationRows("SELECT state FROM station_calls WHERE id=?", [unit.call_id])[0]
+      .state,
+    "returned",
+  );
+  await long.catch(() => {});
+  await hub.request("end", { id: first.id });
+  await until(
+    () => hub!.request("status", { id: first.id }),
+    (r) => r.revoked && r.owned_execution_stopped,
+  );
+  record(
+    "daemon SIGKILL stops the exact inherited systemd invocation/cgroup and preserves a failed check rather than replaying or verifying it",
+  );
+  for (const mode of ["revoke", "lease-expiry"]) {
+    const root: any = await hub.request("create");
+    const rootRecord: any = await hub.request("record", { id: root.id });
+    const sid: string = rootRecord.executionAuthority.sessionId;
+    const requestId = randomUUID(),
+      text =
+        "[station] " +
+        JSON.stringify({
+          action: "check",
+          expected_tree: applied.tree_digest,
+          command:
+            "node -e " +
+            quote(
+              "require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});setInterval(()=>{},1000)",
+            ),
+        });
+    let deadline = 0,
+      running: Promise<unknown> = Promise.resolve();
+    if (mode === "lease-expiry") {
+      await kill(hub.p);
+      await kill(nodeProcess);
+      deadline = stationRows(
+        "SELECT expires_at FROM agentpod_admissions WHERE session_id=?",
+        [sid],
+      )[0].expires_at;
+      // Use the real ninety-second lease. Start the command in its final fifteen
+      // seconds via the existing private operator surface, without a Hub renewal.
+      // This distinguishes authority expiry from the thirty-second runtime cap.
+      await until(
+        () => deadline - Date.now(),
+        (n) => n <= 15000,
+        95000,
+      );
+      const view = stationOperator("/v1/sessions/" + sid + "/snapshot"),
+        client = "station-lease-proof",
+        control = stationOperator("/v1/sessions/" + sid + "/control", {
+          request_id: randomUUID(),
+          client_id: client,
+          action: "takeover",
+          expected_epoch: view.control.epoch,
+        });
+      const ready = stationOperator("/v1/sessions/" + sid);
+      stationOperator("/v1/sessions/" + sid + "/submissions", {
+        request_id: requestId,
+        expected_revision: ready.revision,
+        client_id: client,
+        token: control.token,
+        text,
+      });
+    } else {
+      running = hub.request("prompt", { id: root.id, requestId, text });
+      void running.catch(() => {});
+    }
+    const active = await until<any>(
+      () =>
+        stationRows(
+          "SELECT u.* FROM station_units u JOIN station_calls c ON c.id=u.call_id WHERE c.session_id=? AND u.state='running' ORDER BY u.rowid DESC LIMIT 1",
+          [sid],
+        )[0],
+      Boolean,
+    );
+    if (mode === "revoke") await hub.request("end", { id: root.id });
+    await until(
+      () =>
+        stationRows("SELECT * FROM station_units WHERE id=?", [active.id])[0],
+      (u) => u.state === "stopped",
+      25000,
+    );
+    const ended: any = stationRows("SELECT * FROM station_units WHERE id=?", [
+      active.id,
+    ])[0];
+    assert.equal(JSON.parse(ended.stop_json).observed_empty, true);
+    assert.notEqual(
+      stationRows("SELECT state FROM station_calls WHERE id=?", [
+        active.call_id,
+      ])[0].state,
+      "returned",
+    );
+    if (mode === "lease-expiry") {
+      assert(
+        Date.now() >= deadline,
+        "The actual admission deadline must have elapsed",
+      );
+      hub = bootHub();
+      await hub.started;
+      bootNode();
+      await until(() => hub!.request("online"), Boolean);
+      await hub.request("end", { id: root.id });
+    }
+    await until(
+      () => hub!.request("status", { id: root.id }),
+      (r) => r.revoked && r.owned_execution_stopped,
+    );
+    await running.catch(() => {});
+    assert.equal(
+      stationRows("SELECT count(*) AS n FROM station_units WHERE call_id=?", [
+        active.call_id,
+      ])[0].n,
+      1,
+    );
+    record(
+      "active station command and descendant stop with exact cgroup receipt on " +
+        mode +
+        "; no verified check or replay",
+    );
+  }
+}
 async function prepareMcpHost() {
   const configDirs = [
     join(home, "Library/Application Support/agentpod-node"),
@@ -515,6 +927,7 @@ async function prepareMcpHost() {
       state,
       agentpod_config: pins,
       mcp_config: profileFile,
+      ...(stationMode ? { station_config: prepareStationConfig() } : {}),
     }),
     { mode: 0o600 },
   );
@@ -523,7 +936,7 @@ async function prepareMcpHost() {
     [join(repo, "bin/salaam.mjs"), "host", "plan", "--config", input],
     { env: cleanEnv, encoding: "utf8" },
   );
-  assert.equal(JSON.parse(planned).schema, 3);
+  assert.equal(JSON.parse(planned).schema, stationMode ? 5 : 3);
   writeFileSync(manifestPath, planned, { mode: 0o600 });
   // A wrong key cannot reach either upstream; do not read or print the real proxy key.
   const refused = await fetch(
@@ -805,6 +1218,7 @@ try {
   if (mcpMode) {
     await prepareMcpHost();
     await mcpCases();
+    if (stationMode) await stationCases();
   } else if (runtimeMode) await runtimeCases();
   else {
     const first = await hub.request("create"),
@@ -1229,6 +1643,14 @@ try {
     },
     cases,
     provider: "pinned Pi offline proof provider",
+    station_mode: stationMode,
+    station_runtime: stationMode
+      ? {
+          image_digest: process.env.SALAAM_STATION_RUNTIME_IMAGE,
+          profile: "linux-systemd-station-v1",
+          files: 50001,
+        }
+      : undefined,
     scope: mcpMode
       ? "real authenticated local gateway, Go node, persisted proxy, daemon and pinned Pi; synthetic signed Accounts and MCP product data/effects; no live Library/provider acceptance"
       : "real authenticated local gateway, real Go node and daemon; synthetic Accounts and board ownership",
@@ -1244,8 +1666,11 @@ try {
       { mode: 0o600 },
     );
   console.log(JSON.stringify(evidence, null, 2));
+  acceptancePassed = true;
 } catch (error) {
   console.error("Salaam end-to-end proof failed:", (error as Error).message);
+  if (existsSync(join(state, "host.log")))
+    logs.push(readFileSync(join(state, "host.log"), "utf8").slice(-24000));
   console.error(logs.slice(-20).join("\n"));
   throw error;
 } finally {
@@ -1273,5 +1698,7 @@ try {
       15000,
     ).catch(() => {});
   }
-  rmSync(dir, { recursive: true, force: true });
+  if (!acceptancePassed && process.env.SALAAM_KEEP_FAILED === "1")
+    console.error("Retained failed isolated fixture: " + dir);
+  else rmSync(dir, { recursive: true, force: true });
 }

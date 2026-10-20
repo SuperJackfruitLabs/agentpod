@@ -25,6 +25,7 @@ const (
 // apnRef holds, per path, what the reference adds to the help table. Top-level paths must be
 // commands in help.go; deeper paths are subverbs.
 var apnRef = []clidoc.Command{
+	{Path: "salaam-station-files-v1", Synopsis: "apn salaam-station-files-v1", Auth: "Private local stdin owned by the reviewed Salaam controller; no enrollment credentials are read. Linux openat2 boundary required.", Exit: "0 for a validated content/metadata receipt; 1 for a bounded protocol or filesystem refusal; 2 for extra arguments. A missing result never verifies an effect.", Example: "# Invoked by Salaam's protected station controller, not as an interactive shell command."},
 	{Path: "", Dispatch: []clidoc.Dispatch{{Func: "main", Tag: "os.Args[1]"}}},
 
 	// ---- Service ----------------------------------------------------------------------
