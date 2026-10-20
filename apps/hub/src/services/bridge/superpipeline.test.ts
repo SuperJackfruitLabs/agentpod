@@ -318,3 +318,14 @@ test('trusted credentials are refreshed per request and completion guard runs af
   await expect(client.completeVerified({runId:'run_x',leaseEpoch:1},{},async()=>{order.push('guard');throw Error('revoked');})).rejects.toThrow('revoked');
   expect(order).toEqual(['credential','guard']);
 });
+
+test("strict activity unwraps actual REST receipt and never substitutes a bare response", async () => {
+  const strictDecision = {version:1 as const, request_id:crypto.randomUUID(), decision_digest:"a".repeat(64), expires_at:Date.now()+60000};
+  const receipt = {accepted:true,cardState:"input-required",elicitationId:"elc_123456",strictDecision};
+  const activity = {type:"elicitation" as const,signal:"select",strictDecision};
+  const wrapped = fakeBoard(()=>({status:200,body:{activity:receipt}}));
+  expect(await wrapped.client.activity(work,activity)).toEqual(receipt);
+  const bare = fakeBoard(()=>({status:200,body:receipt}));
+  expect(await bare.client.activity(work,activity)).toBeUndefined();
+  expect(await bare.client.activity(work,{type:"thought",body:"legacy"})).toEqual(receipt);
+});

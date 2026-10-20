@@ -508,8 +508,12 @@ export class SuperpipelineClient {
   }
 
   /** Note the action is `activities`; superpipeline's RPC method is `postActivity`. */
-  activity(lease: RunLease, activity: BoardActivity): Promise<unknown> {
-    return this.verb(lease, "activities", { ...activity });
+  async activity(lease: RunLease, activity: BoardActivity): Promise<unknown> {
+    const response = await this.verb(lease, "activities", { ...activity });
+    // REST wraps the native postActivity result. Strict consumers validate the
+    // inner receipt; absence must fail closed rather than accept another shape.
+    if (activity.strictDecision) return (response as { activity?: unknown } | null)?.activity;
+    return response;
   }
 
   /** Strict completion is explicit pass; recovery checks the original stored verdict. */
