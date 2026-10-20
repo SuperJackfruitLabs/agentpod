@@ -652,7 +652,7 @@ Subcommands: [`status`](#apn-mcp-proxy-status), [`rotate`](#apn-mcp-proxy-rotate
 
 ```text
 apn mcp-proxy <status|rotate [STATION_ID...]> — the node's loopback MCP proxy
-gives a station's harness sessions the hub's and Superlibrary's MCP tools.
+gives a station's harness sessions the hub's and SuperLibrary's MCP tools.
 
 Each station's secret persists in mcp-proxy.json (0600) beside the node config,
 so a session kept open across a node restart keeps working. `rotate` replaces

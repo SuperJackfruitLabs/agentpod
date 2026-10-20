@@ -17,7 +17,7 @@ const mcpProxyUsage = `usage:
   fleet mcp-proxy rotate STATION_ID... | --node ID            new secrets; sessions holding old ones are refused
 
 The node's loopback MCP proxy gives a station's harness sessions the hub's and
-Superlibrary's MCP tools, as the station's own agent. Only Hermes, Claude Code,
+SuperLibrary's MCP tools, as the station's own agent. Only Hermes, Claude Code,
 Codex, opencode, Muse and Kilo stations can use it: OpenClaw's and Pi's ACP adapters take
 no HTTP MCP servers in session/new, and enabling one is refused.
 

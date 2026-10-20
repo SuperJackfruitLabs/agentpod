@@ -730,7 +730,7 @@ var reference = clidoc.Binary{
 			Summary:  "Which stations each node's loopback MCP proxy serves, and their secrets.",
 			Synopsis: "fleet mcp-proxy <list|enable|disable|rotate> ...",
 			Help:     mcpProxyUsage,
-			Detail: "The proxy gives a station's harness sessions the hub's and Superlibrary's MCP tools as " +
+			Detail: "The proxy gives a station's harness sessions the hub's and SuperLibrary's MCP tools as " +
 				"the station's own agent, through a loopback URL and a per-station secret that never leave " +
 				"the node. A change is written to the node's config (`mcpProxy.stations`) and applied " +
 				"without a restart; every change and rotation leaves an audit row per station. The hub " +
@@ -1133,11 +1133,11 @@ var reference = clidoc.Binary{
 		{
 			Path: "bridge related-work", Summary: "Switch a board's Related prior work section on or off.",
 			Synopsis: "fleet bridge related-work BOARD on|off",
-			Detail: "The earlier work Superlibrary finds for a claimed card, put into the card's prompt as " +
+			Detail: "The earlier work SuperLibrary finds for a claimed card, put into the card's prompt as " +
 				"reference material. On for every board until switched off; the next claim on the board " +
 				"reads the new value. Anything but `on` or `off` exits 2 without calling the hub.",
 			Args: []clidoc.Arg{
-				{Name: "BOARD", Meaning: "a superpipeline `brd_` id"},
+				{Name: "BOARD", Meaning: "a SuperPipeline `brd_` id"},
 				{Name: "STATE", Meaning: "`on` or `off`"},
 			},
 			Handlers: []string{"fleetBridge"},
