@@ -189,27 +189,34 @@ const nodes = [
       section.band p, ul.limits { color: var(--muted); }
       code { font-family: var(--mono); font-size: 0.92em; }
 
-      .hero .wrap {
-        display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center;
-        padding-top: 48px; padding-bottom: 84px;
+      /* One hero for all six landing pages (operator decision 2026-10-21). */
+      .hero-in { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+      .hero-grid {
+        display: grid; grid-template-columns: minmax(0, 1fr) 500px; gap: 56px;
+        align-items: center; min-height: calc(100svh - 108px); padding: 56px 0 72px;
       }
       h1 {
         font-family: var(--display); font-weight: 800;
-        font-size: clamp(2.3rem, 4.8vw, 3.7rem); line-height: 1.05;
-        letter-spacing: -0.035em; margin: 0 0 20px; text-wrap: balance;
+        font-size: clamp(40px, 4.6vw, 60px); line-height: 1.04;
+        letter-spacing: -0.02em; margin: 0; max-width: 12ch;
       }
       h1 em { font-style: normal; color: var(--cyan); }
-      .lede { font-size: 1.14rem; color: var(--muted); margin: 0 0 30px; max-width: 31em; }
+      .lede {
+        font-family: var(--body); font-size: 18px; line-height: 1.55; max-width: 34em;
+        margin: 20px 0 28px; color: var(--muted);
+      }
       .actions { display: flex; gap: 12px; flex-wrap: wrap; }
       .btn {
-        display: inline-block; padding: 13px 22px; border-radius: 9px;
-        font-weight: 600; font-size: 15px; text-decoration: none;
-        border: 1px solid transparent;
+        display: inline-flex; align-items: center; height: 46px; padding: 0 20px;
+        border-radius: 10px; font: 600 15px var(--body); text-decoration: none;
+        border: 1px solid transparent; box-sizing: border-box;
       }
       .btn-primary { background: var(--cyan); color: var(--ink); }
       .btn-primary:hover { filter: brightness(1.1); }
-      .btn-ghost { border-color: var(--line); color: var(--text); }
+      .btn-ghost { background: transparent; border-color: var(--line); color: var(--text); }
       .btn-ghost:hover { border-color: var(--cyan); }
+      .demo { width: 500px; max-width: 100%; }
+      .demo-cap { margin-top: 10px; font: 12px var(--mono); color: var(--muted); }
 
       /* ── the fleet panel: this page's signature ─────────────────── */
       .fleet {
@@ -279,8 +286,11 @@ const nodes = [
       .fnav { display: flex; gap: 20px; flex-wrap: wrap; }
 
       @media (max-width: 860px) {
-        .hero .wrap { grid-template-columns: 1fr; gap: 40px; padding-bottom: 56px; }
         .grid { grid-template-columns: 1fr; gap: 28px; }
+      }
+      @media (max-width: 899px) {
+        .hero-grid { grid-template-columns: 1fr; gap: 40px; min-height: auto; padding: 40px 0 56px; }
+        .demo { width: 100%; }
       }
       @media (prefers-reduced-motion: reduce) {
         * { transition: none !important; animation: none !important; }
@@ -308,14 +318,14 @@ const nodes = [
       </div>
     </header>
 
-    <div class="hero">
-      <div class="wrap">
+    <section class="hero">
+      <div class="hero-in hero-grid">
         <div>
           <h1>The console for the machines your agents <em>live on</em>.</h1>
           <p class="lede">
             AgentPod puts a small Go agent on each machine where your agents run. It dials out to
-            a hub, and from the console you read each runtime's files, tail its logs, open a
-            terminal and check its health. It attaches to the agents you already run.
+            a hub, and from one console you read each runtime's files, tail its logs, open a
+            terminal and check its health.
           </p>
           <div class="actions">
             <a class="btn btn-primary" href={`${DOCS}/use/scan/`}>Get started</a>
@@ -323,11 +333,12 @@ const nodes = [
           </div>
         </div>
 
+        <div class="demo">
         <!-- Signature element: invented data, labelled as an example. -->
         <div class="fleet" role="img"
           aria-label="Example fleet with invented names: three nodes — a VPS, a laptop behind CGNAT, and a provisioned Docker container — each listing the harness stations on it. All are reachable because every node dials out to the hub.">
           <div class="fleet-head">
-            <b>Fleet</b><span>3 nodes · 4 stations</span><span class="example-tag">Example</span>
+            <b>Fleet</b><span>3 nodes · 4 stations</span>
           </div>
           <div class="fleet-body">
             {nodes.map((n) => (
@@ -353,8 +364,10 @@ const nodes = [
             in the fleet on the same terms as the VPS.
           </div>
         </div>
+        <p class="demo-cap">Example fleet. Names and machines are invented.</p>
+        </div>
       </div>
-    </div>
+    </section>
 
     <section class="band">
       <div class="wrap">
