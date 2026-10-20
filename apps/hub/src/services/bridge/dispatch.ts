@@ -751,6 +751,22 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
       return { status: "unanswered", externalRunId: work.runId, attemptId: attemptId ?? undefined, reason };
     }
 
+    // Persist the terminal failure BEFORE any remote report. A lost fail response
+    // must never leave `produced` output for the next claimant to replay as success.
+    // Partial agent prose is evidence of a failed attempt, not a completion receipt.
+    if (end.kind === "timeout" || end.kind === "session-ended") {
+      const reason = end.kind === "timeout" ? "the turn exceeded its time limit" : end.reason;
+      await markAbandoned(key, reason);
+      if (attemptId) await endAttempt(attemptId, "failed", lastSeq);
+      await acp.endSession(agent.hubUserId, session.id, reason).catch(() => {});
+      try {
+        await client.fail(work, reason);
+        return { status: "failed", externalRunId: work.runId, attemptId: attemptId ?? undefined, reason };
+      } catch (err) {
+        return await abort(deps, key, work, attemptId, err);
+      }
+    }
+
     const contextPeak = coalescer.contextPeak();
     const handoff = {
       summary: said.join("").slice(0, SUMMARY_LIMIT) || null,
@@ -764,19 +780,8 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
     // Written BEFORE the board is told. A bridge that dies between these two
     // leaves a recoverable fact instead of a card that will be worked twice.
     await recordProduced(key, handoff);
-    if (attemptId) await endAttempt(attemptId, end.kind === "yielded" ? "completed" : "failed", lastSeq);
+    if (attemptId) await endAttempt(attemptId, "completed", lastSeq);
     await acp.endSession(agent.hubUserId, session.id, "The board's card is complete.").catch(() => {});
-
-    if (end.kind === "timeout" || end.kind === "session-ended") {
-      const reason = end.kind === "timeout" ? "the turn exceeded its time limit" : end.reason;
-      try {
-        await client.fail(work, reason);
-        await markAbandoned(key, reason);
-        return { status: "failed", externalRunId: work.runId, attemptId: attemptId ?? undefined, reason };
-      } catch (err) {
-        return await abort(deps, key, work, attemptId, err);
-      }
-    }
 
     try {
       await client.complete(work, handoff);
