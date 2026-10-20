@@ -2,38 +2,42 @@
 /**
  * agentpod.dev.
  *
- * Rewritten on 2026-09-12. The previous page was audited against the code and
- * could not be published: its waitlist form discarded the address and told the
- * visitor "we'll be in touch"; it offered .msi, .deb, .rpm and .AppImage
- * installers that are not built (releases are raw Go binaries for linux and
- * darwin, and there is no Windows target at all); it listed iOS and Android apps
- * as "coming soon" when no mobile app exists; and its features table sold
- * "container flavors", a concept dropped from the schema in migration 0023.
+ * Rewritten 2026-10-21 against the claims ledger (sjl-marketing foundation/products.md,
+ * AgentPod section, pinned to v0.1.98) and docs.agentpod.dev. Previous rewrite: 2026-09-12.
  *
- * Everything here is checked against the code. The harness list is
- * `registerDescriptors` in cmd/agentpod-node/registry.go; the capabilities are the
- * hub's `gateCapability` calls plus the console's station panels; the provisioning
- * substrates are the driver files in services/provisioner/; the install command is
- * what install.sh actually accepts; the standalone `apn scan` download names an asset
- * .github/workflows/release-node-agent.yml uploads. If those move, this page is wrong.
+ * What changed and why:
+ * - "No account here to sign up for — clone it, run it" is gone. Since v0.1.92 the hub
+ *   refuses to boot without ORG_PLANE_* settings and a credential from an external account
+ *   service that is not public source (ledger AP-03, AP-13). The page now says so.
+ * - The harness list is the v0.1.98 registry (`buildRegistry` in
+ *   apps/node-agent/cmd/agentpod-node/registry.go): eight, with Muse Code and Kilo. Salaam is
+ *   on main only and must not appear until a release carries it. The list is rendered from
+ *   `harnesses` below and nowhere else. A descriptor means detection, not parity (AP-02).
+ * - "Every action is written to the audit trail before it is dispatched" was dropped: the docs
+ *   say it, but the ledger does not carry it, and only ledger claims go on this page.
+ * - Provisioning, scan/posture and macOS signing carry their ledger caveats (AP-05, AP-04,
+ *   AP-01/#228).
  *
- * The hero is a fleet panel rather than a headline over a gradient, because the
- * product's thesis is that machines you cannot reach are still reachable: every
- * node dials OUT, so a laptop behind CGNAT is in the fleet on the same terms as a
- * VPS. Showing that is the argument.
+ * The suite frame adds the claims list, "works on its own", the version and the footer, so
+ * this page does not.
  */
 import Mark from '../components/Mark.astro';
 
-const harnesses = ['Hermes', 'OpenClaw', 'Claude Code', 'Codex', 'OpenCode', 'Pi'];
-const substrates = ['Docker', 'Cloudflare', 'Modal', 'Fly'];
+// The release this page describes. Change it, the harness list and the caveats together,
+// against the ledger. The install commands use releases/latest, so they do not go stale.
+const RELEASE = 'v0.1.98';
+
+// buildRegistry at the RELEASE tag. One list; the page renders it once.
+const harnesses = ['Hermes', 'OpenClaw', 'Claude Code', 'Codex', 'OpenCode', 'Pi', 'Muse Code', 'Kilo'];
 
 const SITE = 'https://agentpod.dev';
+const DOCS = 'https://docs.agentpod.dev';
 const TITLE = 'AgentPod — the console for the machines your agents live on';
 const DESCRIPTION =
-  'A fleet and facilities console for agent runtimes. Attach to the agents you already run, ' +
-  'reach machines behind NAT, and manage files, logs, terminals, health and cleanup from one ' +
-  'place. Self-hostable.';
+  'A console for the machines your agents run on. A small Go agent on each machine dials out ' +
+  'to your hub, and you work with each agent runtime’s files, logs, terminal and health from one place.';
 
+// Invented data for the hero example. Labelled as an example on the page.
 const nodes = [
   {
     name: 'workhorse',
@@ -108,7 +112,7 @@ const nodes = [
          reader's preference, so a dark-only page here would mean a dark landing
          page and light docs — the mismatch worth avoiding. */
       @media (prefers-color-scheme: light) {
-        :root {
+        :root:not([data-theme="dark"]) {
           --ink: #fbfcfe;
           --raised: #eef3f8;
           --raised-2: #e0e9f2;
@@ -118,6 +122,18 @@ const nodes = [
           --cyan: #1d6c8c;
           --green: #1c7a5b;
         }
+      }
+
+      /* The same light set, chosen explicitly with the header toggle. */
+      :root[data-theme="light"] {
+        --ink: #fbfcfe;
+        --raised: #eef3f8;
+        --raised-2: #e0e9f2;
+        --line: #ccdae7;
+        --text: #101c29;
+        --muted: #4b6076;
+        --cyan: #1d6c8c;
+        --green: #1c7a5b;
       }
 
       * { box-sizing: border-box; }
@@ -149,6 +165,29 @@ const nodes = [
       nav { display: flex; gap: 22px; font-size: 15px; }
       nav a { color: var(--muted); text-decoration: none; }
       nav a:hover, nav a:focus-visible { color: var(--text); }
+      nav { align-items: center; }
+      #theme {
+        font: inherit; font-size: 14px; color: var(--muted); background: none;
+        border: 1px solid var(--line); border-radius: 7px; padding: 4px 10px; cursor: pointer;
+      }
+      #theme:hover, #theme:focus-visible { color: var(--text); border-color: var(--cyan); }
+      .example-tag {
+        margin-left: auto; font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase;
+        border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; color: var(--muted);
+      }
+      ol.steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+      ol.steps .cell { counter-increment: step; }
+      ol.steps .cell h3::before {
+        content: counter(step) ". "; color: var(--cyan); font-family: var(--mono); font-weight: 500;
+      }
+      .cell .chips { margin-top: 12px; }
+      .cell .chips li { font-size: 12px; padding: 4px 9px; }
+      h3.run { font-family: var(--display); font-size: 1.1rem; font-weight: 600; margin: 34px 0 8px; }
+      ul.limits { margin: 0; padding-left: 1.2em; max-width: 70ch; }
+      ul.limits li { margin: 0 0 12px; }
+      ul.limits strong { color: var(--text); }
+      section.band p, ul.limits { color: var(--muted); }
+      code { font-family: var(--mono); font-size: 0.92em; }
 
       .hero .wrap {
         display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center;
@@ -247,6 +286,13 @@ const nodes = [
         * { transition: none !important; animation: none !important; }
       }
     </style>
+    <script is:inline>
+      // Before paint: honour a remembered choice, otherwise follow the system.
+      try {
+        const t = localStorage.getItem('theme');
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
   </head>
 
   <body>
@@ -254,9 +300,10 @@ const nodes = [
       <div class="wrap">
         <a class="brand" href="/"><Mark />AgentPod</a>
         <nav>
-          <a href="https://docs.agentpod.dev">Docs</a>
-          <a href="/blog">Blog</a>
+          <a href={DOCS}>Docs</a>
           <a href="https://github.com/SuperJackfruitLabs/agentpod">Source</a>
+          <a href="https://superjackfruit.com">SuperJackfruit Labs</a>
+          <button id="theme" type="button" aria-label="Switch light and dark theme">Theme</button>
         </nav>
       </div>
     </header>
@@ -266,21 +313,21 @@ const nodes = [
         <div>
           <h1>The console for the machines your agents <em>live on</em>.</h1>
           <p class="lede">
-            Your agents run somewhere — a server, a laptop, a container you spun up last week.
-            AgentPod is where you see those places and reach into them: files, logs, a terminal,
-            health, cleanup. Point it at what you already run.
+            AgentPod puts a small Go agent on each machine where your agents run. It dials out to
+            a hub, and from the console you read each runtime's files, tail its logs, open a
+            terminal and check its health. It attaches to the agents you already run.
           </p>
           <div class="actions">
-            <a class="btn btn-primary" href="https://docs.agentpod.dev/start/first-node/">Enroll a node</a>
-            <a class="btn btn-ghost" href="https://docs.agentpod.dev">Read the docs</a>
+            <a class="btn btn-primary" href={`${DOCS}/use/scan/`}>Get started</a>
+            <a class="btn btn-ghost" href={DOCS}>Docs</a>
           </div>
         </div>
 
-        <!-- Signature element. See the note at the top of this file. -->
+        <!-- Signature element: invented data, labelled as an example. -->
         <div class="fleet" role="img"
-          aria-label="A fleet: three nodes — a VPS, a laptop behind CGNAT, and a provisioned Docker container — each listing the harness stations running on it. All are reachable because every node dials out to the hub.">
+          aria-label="Example fleet with invented names: three nodes — a VPS, a laptop behind CGNAT, and a provisioned Docker container — each listing the harness stations on it. All are reachable because every node dials out to the hub.">
           <div class="fleet-head">
-            <b>Fleet</b><span>3 nodes · 4 stations</span>
+            <b>Fleet</b><span>3 nodes · 4 stations</span><span class="example-tag">Example</span>
           </div>
           <div class="fleet-body">
             {nodes.map((n) => (
@@ -302,7 +349,7 @@ const nodes = [
             ))}
           </div>
           <div class="fleet-foot">
-            Every node dials <strong>out</strong>. No inbound ports — which is why the laptop is
+            Every node dials <strong>out</strong>. No inbound ports, which is why the laptop is
             in the fleet on the same terms as the VPS.
           </div>
         </div>
@@ -311,118 +358,150 @@ const nodes = [
 
     <section class="band">
       <div class="wrap">
-        <h2>Attach to what you already run</h2>
-        <p class="sub">
-          AgentPod does not run your agents and does not ask you to move them. It ships a
-          descriptor per harness that knows how to ask that harness what it is running, where its
-          config and logs live, and how to start and stop it — wrapping each one's native
-          interface rather than reinventing it.
-        </p>
-        <ul class="chips">{harnesses.map((h) => <li>{h}</li>)}</ul>
-      </div>
-    </section>
-
-    <section class="band">
-      <div class="wrap">
-        <h2>What you can do to a runtime</h2>
-        <p class="sub">
-          Each operation is gated on a capability the station declares. A request for one it has
-          not declared is refused at the hub, before anything reaches the machine.
-        </p>
-        <div class="grid">
-          <div class="cell">
-            <h3>Files, logs, terminal</h3>
-            <p>Browse and edit the workspace, tail logs live, open a real shell — brokered through
-              the hub, executed by the local agent.</p>
-          </div>
-          <div class="cell">
-            <h3>Health and lifecycle</h3>
-            <p>What a station reports about itself, and start, stop or restart. Every action is
-              written to the audit trail before it is dispatched, not after.</p>
-          </div>
-          <div class="cell">
-            <h3>Cleanup and changesets</h3>
-            <p>Plan a disk reclaim and inspect the plan before applying it. See what an agent has
-              actually changed in its working tree.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="band">
-      <div class="wrap">
-        <h2>Enrolling a machine</h2>
-        <p class="sub">
-          One command on the target host. It downloads the right binary, installs a service, and
-          enrolls with your hub.
-        </p>
-        <pre><code><span class="c"># linux and macOS, amd64 and arm64</span>
-curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/install.sh \
-  | sudo bash -s -- https://hub.example.com &lt;TOKEN&gt;</code></pre>
-        <p class="note">
-          Without root, pass <code>--user</code> to install under your login session instead.
-          Binaries are published for linux and darwin on amd64 and arm64.
+        <h2>How it works</h2>
+        <ol class="grid steps">
+          <li class="cell">
+            <h3>Install <code>apn</code> on a machine</h3>
+            <p>One install script on a server, a laptop or a container. The node agent dials out
+              to your hub over a WebSocket, so it needs no inbound port and works from behind
+              NAT.</p>
+          </li>
+          <li class="cell">
+            <h3>It finds the agents there</h3>
+            <p>A descriptor per harness detects what is running and where its config and logs
+              live. {RELEASE} has descriptors for:</p>
+            <ul class="chips">{harnesses.map((h) => <li>{h}</li>)}</ul>
+          </li>
+          <li class="cell">
+            <h3>You work from the console</h3>
+            <p>Adopt a station, then use its panels: files, logs, terminal, health, start and
+              stop, cleanup, changesets. A request for a capability the station has not declared
+              is refused at the hub.</p>
+          </li>
+        </ol>
+        <p class="note" style="margin-top: 28px;">
+          A descriptor means AgentPod can detect that harness. What it can do with each one
+          depends on the harness and how the host is set up, so the panels are not the same for
+          every harness. AgentPod detects Muse Code and Kilo; their capabilities beyond detection have not been checked.
         </p>
       </div>
     </section>
 
     <section class="band">
       <div class="wrap">
-        <h2>Check a machine before you trust it</h2>
+        <h2>What it's like to use</h2>
         <p class="sub">
+          Say you have a Hermes agent on a VPS and Codex on a laptop that sits behind your
+          home router. Both machines have dialled out to your hub, so both show up in one fleet.
+          The laptop's agent stopped answering: you open its station, tail the log, and open a
+          terminal to look around, without forwarding a port. Before you restart it you check
+          the changeset to see what it actually changed in its working tree. Then the VPS is
+          low on disk: you plan a cleanup, read the plan, and only then apply it.
+        </p>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="wrap">
+        <h2>Run it yourself</h2>
+        <p class="sub">
+          The latest release is {RELEASE}. Its downloads are the node agent (<code>apn</code>)
+          and the <code>fleet</code> CLI, for Linux and macOS on amd64 and arm64, with a
+          <code>SHA256SUMS</code> file.
+        </p>
+
+        <h3 class="run">First: check a machine, no hub needed</h3>
+        <p class="sub" style="margin-bottom: 18px;">
           <code>apn scan</code> checks the agent runtimes on a host for the two ways they get
           taken over: a listener bound to every interface, and credential files other users can
-          read. It needs no hub, no account and no network, and exits 0, 1 or 2 so it works in
+          read. It needs no hub, no account and no network, and exits 0, 1 or 2, so it works in
           cron.
         </p>
-        <pre><code><span class="c"># no install and no enrolment: the released binary, run where it lands</span>
-curl -fsSLo apn https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/agentpod-node-linux-amd64
-chmod +x apn && ./apn scan</code></pre>
+        <pre><code><span class="c"># the released binary, run where it lands; nothing else is installed</span>
+curl -fsSLO https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/agentpod-node-linux-amd64
+curl -fsSLO https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS
+chmod +x agentpod-node-linux-amd64
+./agentpod-node-linux-amd64 scan</code></pre>
         <p class="note">
           Swap the suffix for <code>linux-arm64</code>, <code>darwin-amd64</code> or
-          <code>darwin-arm64</code>; each release carries a <code>SHA256SUMS</code>. A check that
-          cannot determine an answer says so. It is never reported as a pass.
+          <code>darwin-arm64</code>; on macOS check with
+          <code>shasum -a 256 --ignore-missing -c SHA256SUMS</code>. A check that cannot
+          determine an answer reports unknown and says why. It is never reported as a pass.
+        </p>
+
+        <h3 class="run">Then: enroll a machine with a hub</h3>
+        <p class="sub" style="margin-bottom: 18px;">
+          Create an enrollment token in the console (single use, valid for an hour), then run
+          one command on the host. It downloads the right binary, installs a service and enrolls.
+        </p>
+        <pre><code>curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/install.sh \
+  | sudo bash -s -- https://hub.example.com &lt;TOKEN&gt;</code></pre>
+        <p class="note">
+          Without root, add <code>--user</code> after <code>-s --</code> to install under your
+          login session (a systemd user unit on Linux, a LaunchAgent on macOS).
+          <code>apn status</code> exits 0 once the service runs and the hub accepts it.
+        </p>
+
+        <h3 class="run">The hub</h3>
+        <p class="sub" style="margin-bottom: 0;">
+          The hub is a Bun service over Postgres and the console is a static site. Neither has a
+          release download; they run from source. Since v0.1.92 the hub does not sign anyone in
+          itself: it will not start without five <code>ORG_PLANE_*</code> settings and a
+          credential from an external account service, and that service is not public source.
+          So enrolling needs a hub you already have access to. Standing up your own from the
+          README is not a working path for current releases.
         </p>
       </div>
     </section>
 
     <section class="band">
       <div class="wrap">
-        <h2>Or let it provision the machine</h2>
-        <p class="sub">
-          When there is nothing to attach to yet, AgentPod can create the runtime and enroll it for
-          you, on any of these.
-        </p>
-        <ul class="chips">{substrates.map((s) => <li>{s}</li>)}</ul>
-      </div>
-    </section>
-
-    <section class="band">
-      <div class="wrap">
-        <h2>You host all of it</h2>
-        <p class="sub">
-          The hub is a Bun service over Postgres. The console is a static site. The node agent is a
-          single Go binary. There is no account here to sign up for — clone it, run it, and the
-          fleet is yours.
-        </p>
-        <div class="actions">
-          <a class="btn btn-primary" href="https://docs.agentpod.dev">Read the docs</a>
-          <a class="btn btn-ghost" href="https://github.com/SuperJackfruitLabs/agentpod">View the source</a>
-        </div>
+        <h2>Where it runs today</h2>
+        <ul class="limits">
+          <li><strong>One operator per hub.</strong> The hub reads identity from the external
+            account service above. It is not a team or multi-tenant product.</li>
+          <li><strong>Unsigned macOS nodes.</strong> The macOS node binaries are not signed yet
+            (<a href="https://github.com/SuperJackfruitLabs/agentpod/issues/228">#228</a>), so a
+            macOS node asks for permissions again after it updates.</li>
+          <li><strong>POSIX only for scan and posture.</strong> <code>apn scan</code>, the
+            posture banner and changesets are observation: they show you what is wrong and do
+            not fix it. There is no Windows build.</li>
+          <li><strong>Provisioning is off by default.</strong> The hub can create runtimes on
+            Docker, Cloudflare, Modal or Fly, each behind its own flag. Docker is the documented
+            path. Cloudflare has not been verified live, Fly only runs the OpenCode and Pi
+            images, and Modal destroys sandboxes after 24 hours.</li>
+          <li><strong>Harness support varies.</strong> Detection is not parity: see the note
+            under How it works.</li>
+        </ul>
       </div>
     </section>
 
     <footer>
       <div class="wrap">
-        <span>AgentPod · self-hosted · MIT</span>
+        <span>AgentPod · MIT</span>
         <span class="fnav">
-          <a href="https://docs.agentpod.dev">Documentation</a>
-          <a href="/blog">Blog</a>
-          <a href="https://github.com/SuperJackfruitLabs/agentpod">GitHub</a>
-          <a href="https://docs.superpipeline.dev">SuperPipeline</a>
-          <a href="https://docs.supermessage.dev">SuperMessage</a>
+          <a href={DOCS}>Docs</a>
+          <a href="https://github.com/SuperJackfruitLabs/agentpod">Source</a>
+          <a href="https://superjackfruit.com">SuperJackfruit Labs</a>
         </span>
       </div>
     </footer>
+
+    <script is:inline>
+      (() => {
+        const btn = document.getElementById('theme');
+        if (!btn) return;
+        const root = document.documentElement;
+        const current = () =>
+          root.dataset.theme ||
+          (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+        btn.addEventListener('click', () => {
+          const next = current() === 'light' ? 'dark' : 'light';
+          root.dataset.theme = next;
+          try { localStorage.setItem('theme', next); } catch (e) {}
+        });
+      })();
+    </script>
   </body>
 </html>
