@@ -1,4 +1,5 @@
 import {
+  SalaamWorkFailureReceipt,
   SalaamWorkExpiryReceipt,
   SalaamWorkSettlementReceipt as terminalSettlementReceipt,
 } from "../../../../../packages/contract/src/salaam-work-settlement";
@@ -87,6 +88,7 @@ function stoppedUnownedSession(
   row: typeof acpSessions.$inferSelect,
   runId: string,
   epoch: number,
+  knownEffectsFailure = false,
 ): boolean {
   const a = row.executionAuthority;
   const receipt = SalaamAuthorityStatus.safeParse(a?.receipt);
@@ -103,7 +105,7 @@ function stoppedUnownedSession(
     receipt.data.owned_execution_stopped &&
     receipt.data.unresolved_operations.length === 0 &&
     receipt.data.active_attempts.length === 0 &&
-    receipt.data.interrupted_attempts.length === 0 &&
+    (knownEffectsFailure || receipt.data.interrupted_attempts.length === 0) &&
     receipt.data.session_id === a.sessionId &&
     receipt.data.admission_id === a.admissionId &&
     receipt.data.binding_digest === workDigest(a.binding) &&
@@ -200,9 +202,14 @@ const settlementRecord = z
     version: z.literal(1),
     request_id: z.string().uuid(),
     decision_request_id: z.string().uuid().optional(),
+    known_effects_failure: z.literal(true).optional(),
     terminal: z.unknown().nullable(),
     receipt: z
-      .union([terminalSettlementReceipt, SalaamWorkExpiryReceipt])
+      .union([
+        terminalSettlementReceipt,
+        SalaamWorkExpiryReceipt,
+        SalaamWorkFailureReceipt,
+      ])
       .nullable(),
   })
   .strict();
@@ -219,8 +226,11 @@ export async function settleNeverDispatchedSalaamWork(
   runId: string,
   requestId: string,
   expiredDecisionRequestId?: string,
+  knownEffectsFailure = false,
 ) {
   z.string().uuid().parse(requestId);
+  if (knownEffectsFailure && expiredDecisionRequestId)
+    throw Error("Conflicting terminal recovery modes");
   const read = async () => {
     const [w] = await db
       .select()
@@ -248,7 +258,12 @@ export async function settleNeverDispatchedSalaamWork(
       !w ||
       !s ||
       !s.executionAuthority ||
-      !stoppedUnownedSession(s, runId, s.executionAuthority.binding.run.epoch)
+      !stoppedUnownedSession(
+        s,
+        runId,
+        s.executionAuthority.binding.run.epoch,
+        knownEffectsFailure,
+      )
     )
       throw Error("Exact stopped work owner required");
     const payload = SalaamWorkPayload.parse(w.payload);
@@ -307,6 +322,7 @@ export async function settleNeverDispatchedSalaamWork(
           session,
           runId,
           state.payload.admission.binding.run.epoch,
+          knownEffectsFailure,
         )
       )
         throw Error("Settlement stop proof changed");
@@ -319,9 +335,11 @@ export async function settleNeverDispatchedSalaamWork(
           .update(bridgeDispatches)
           .set({
             outcome: "abandoned",
-            reason: expiredDecisionRequestId
-              ? "Expired unanswered approval cancellation verified"
-              : "Explicit never-dispatched work cancellation verified",
+            reason: knownEffectsFailure
+              ? "Stopped failed work retired with known effects preserved"
+              : expiredDecisionRequestId
+                ? "Expired unanswered approval cancellation verified"
+                : "Explicit never-dispatched work cancellation verified",
             updatedAt: new Date(),
           })
           .where(
@@ -344,6 +362,9 @@ export async function settleNeverDispatchedSalaamWork(
         ...(expiredDecisionRequestId
           ? { decision_request_id: expiredDecisionRequestId }
           : {}),
+        ...(knownEffectsFailure
+          ? { known_effects_failure: true as const }
+          : {}),
         terminal: null,
         receipt: null,
       },
@@ -354,7 +375,8 @@ export async function settleNeverDispatchedSalaamWork(
   let saved = settlementRecord.parse(state.w.settlement);
   if (
     saved.request_id !== requestId ||
-    saved.decision_request_id !== expiredDecisionRequestId
+    saved.decision_request_id !== expiredDecisionRequestId ||
+    Boolean(saved.known_effects_failure) !== knownEffectsFailure
   )
     throw Error("Original settlement request and mode required");
   const verifyRun = (value: RunContext) => {
@@ -415,7 +437,11 @@ export async function settleNeverDispatchedSalaamWork(
   state = await read();
   const result = await broker.request(
     state.payload.admission.binding.node_id,
-    expiredDecisionRequestId ? "salaam.work-expire" : "salaam.work-settle",
+    knownEffectsFailure
+      ? "salaam.work-fail"
+      : expiredDecisionRequestId
+        ? "salaam.work-expire"
+        : "salaam.work-settle",
     {
       binding: state.payload.admission.binding,
       request_id: requestId,
@@ -429,9 +455,11 @@ export async function settleNeverDispatchedSalaamWork(
   if (!result.ok)
     throw Error("Daemon terminal settlement unresolved; retain original owner");
   const receipt = (
-      expiredDecisionRequestId
-        ? SalaamWorkExpiryReceipt
-        : terminalSettlementReceipt
+      knownEffectsFailure
+        ? SalaamWorkFailureReceipt
+        : expiredDecisionRequestId
+          ? SalaamWorkExpiryReceipt
+          : terminalSettlementReceipt
     ).parse(result.data),
     admitted = state.w.receipt as { task_id: string; plan_revision: number };
   if (
@@ -540,29 +568,47 @@ export async function resumeSalaamWork(
   // a failed startup row. A generic ended status is never sufficient.
   const pending = [];
   for (const row of rows) {
+    const [owner] = await db
+      .select({
+        id: salaamWorkOwners.requestId,
+        settlement: salaamWorkOwners.settlement,
+        admissionReceipt: salaamWorkOwners.receipt,
+      })
+      .from(salaamWorkOwners)
+      .where(
+        and(
+          eq(salaamWorkOwners.externalSource, deps.source),
+          eq(salaamWorkOwners.externalRunId, row.dispatch.externalRunId),
+        ),
+      );
+    const knownFailure = owner
+      ? settlementRecord.safeParse(owner.settlement)
+      : null;
+    const preservesEffects = Boolean(
+      knownFailure?.success &&
+      knownFailure.data.known_effects_failure &&
+      knownFailure.data.receipt?.effects === "known_effects_preserved",
+    );
+
     if (
       row.dispatch.outcome === "abandoned" &&
       stoppedUnownedSession(
         row.session,
         row.dispatch.externalRunId,
         row.dispatch.leaseEpoch,
+        preservesEffects,
       )
     ) {
-      const [owner] = await db
-        .select({
-          id: salaamWorkOwners.requestId,
-          settlement: salaamWorkOwners.settlement,
-          admissionReceipt: salaamWorkOwners.receipt,
-        })
-        .from(salaamWorkOwners)
-        .where(
-          and(
-            eq(salaamWorkOwners.externalSource, deps.source),
-            eq(salaamWorkOwners.externalRunId, row.dispatch.externalRunId),
-          ),
-        );
       if (!owner) continue;
       const retired = settlementRecord.safeParse(owner.settlement);
+      if (
+        retired.success &&
+        Boolean(retired.data.known_effects_failure) !==
+          (retired.data.receipt?.effects === "known_effects_preserved")
+      ) {
+        pending.push(row);
+        continue;
+      }
       if (
         retired.success &&
         retired.data.receipt?.effects === "expired_approval_unapplied"

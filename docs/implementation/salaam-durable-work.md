@@ -336,3 +336,13 @@ cancelling the task. The durable owner records `expired_approval_unapplied`, not
 `never_dispatched`; request mode, decision, task, run epoch and terminal projection
 remain immutable across retries. Only that receipt retires the old owner for a
 normal subsequent claim. Unknown resources and mismatched receipts keep the fence.
+
+An operator can separately request `mode: "known-effects-failure"` on the same
+quiesced settlement endpoint. This invokes `work-fail`; it never reuses an expiry
+or never-dispatched receipt. The daemon must attest the exact supported budget
+failure with its known successful operation evidence and stopped resources. The
+original interrupted attempt and successful patch remain in history; the task is
+cancelled as non-success. The receipt records `known_effects_preserved` and an
+evidence digest. Only this explicit mode may retain interrupted history while
+retiring the failed owner. Every other settlement keeps rejecting interruptions,
+and an unknown operation or resource blocks all retirement.

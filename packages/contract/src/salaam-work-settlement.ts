@@ -33,3 +33,9 @@ export const SalaamWorkExpiryReceipt = SalaamWorkSettlementReceipt.extend({
   approval_id: z.string().uuid(),
   operation_digest: hash,
 }).strict();
+
+export const SalaamWorkFailure = SalaamWorkSettlement;
+export const SalaamWorkFailureReceipt = SalaamWorkSettlementReceipt.extend({
+  effects: z.literal("known_effects_preserved"),
+  evidence_digest: hash,
+}).strict();

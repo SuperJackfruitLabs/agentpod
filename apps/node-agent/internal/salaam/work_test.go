@@ -194,3 +194,30 @@ func TestExpiredApprovalRequiresExactStoppedOwner(t *testing.T) {
 		t.Fatal("refused request reached daemon")
 	}
 }
+
+func TestKnownEffectFailureRequiresStoppedOwnerAndPreservesInterruptedHistory(t *testing.T) {
+	b := Binding{Version: 1, OrganizationID: "org_00000000000000000000", PrincipalID: "prn_00000000000000000000", NodeID: "node", StationID: "station", StationKey: StationKey("/work"), Workspace: "/work", OccupancyEpoch: 1, HubSessionID: "hub", Run: Run{Source: "superpipeline", ID: "run_abcdef", Epoch: 1}}
+	p := WorkSettlement{Binding: b, RequestID: "11111111-1111-4111-8111-111111111111", WorkRequestID: "22222222-2222-4222-8222-222222222222", ProducerTerminalDigest: strings.Repeat("a", 64)}
+	owner := Status{Binding: b, BindingDigest: canonicalDigest(b), SessionID: "session", Revoked: true, OwnedExecutionStopped: true, InterruptedAttempts: []string{"historical-interrupted"}}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/v1/agentpod/work-fail" {
+			t.Error(r.URL.Path)
+		}
+		w.Write([]byte(`{"state":"cancelled"}`))
+	}))
+	defer server.Close()
+	c := Client{NodeID: "node", Workspace: "/work", HTTP: &http.Client{Transport: roundTripWork{server.URL}}}
+	if _, err := c.FailWork(context.Background(), p, owner); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []Status{{Binding: b, SessionID: "session"}, {Binding: b, SessionID: "session", Revoked: true, OwnedExecutionStopped: true, Authorized: true}, {Binding: b, SessionID: "session", Revoked: true, OwnedExecutionStopped: true, UnresolvedOperations: []string{"uncertain"}}} {
+		if _, err := c.FailWork(context.Background(), p, bad); err == nil {
+			t.Fatal("accepted unstopped owner")
+		}
+	}
+	if calls != 1 {
+		t.Fatal("refused request reached daemon")
+	}
+}

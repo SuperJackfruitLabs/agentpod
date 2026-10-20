@@ -48,3 +48,17 @@ test("expired approval settlement is distinct from never-dispatched settlement",
     }).success,
   ).toBe(false);
 });
+
+import { SalaamWorkFailureReceipt } from "../../../../packages/contract/src/salaam-work-settlement";
+import failure from "../../../../packages/contract/src/fixtures/salaam-work-failure-v1.json";
+test("known effects failure retains evidence and cannot report success or no effects", () => {
+  expect(JSON.stringify(SalaamWorkFailureReceipt.parse(failure.receipt))).toBe(
+    JSON.stringify(failure.receipt),
+  );
+  for (const receipt of [
+    { ...failure.receipt, state: "succeeded" },
+    { ...failure.receipt, effects: "never_dispatched" },
+    { ...failure.receipt, evidence_digest: "unknown" },
+  ])
+    expect(SalaamWorkFailureReceipt.safeParse(receipt).success).toBe(false);
+});

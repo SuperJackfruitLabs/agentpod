@@ -87,6 +87,9 @@ export const adminBridgeAgentsRouter = new Hono()
         .object({
           runId: z.string().regex(/^run_[A-Za-z0-9]{6,}$/),
           requestId: z.string().uuid(),
+          mode: z
+            .enum(["never-dispatched", "known-effects-failure"])
+            .default("never-dispatched"),
         })
         .strict(),
     ),
@@ -125,7 +128,7 @@ export const adminBridgeAgentsRouter = new Hono()
           : {}),
         fetch: fetchAdapter,
       });
-      const { runId, requestId } = c.req.valid("json");
+      const { runId, requestId, mode } = c.req.valid("json");
       try {
         return c.json(
           await settleNeverDispatchedSalaamWork(
@@ -137,6 +140,8 @@ export const adminBridgeAgentsRouter = new Hono()
             },
             runId,
             requestId,
+            undefined,
+            mode === "known-effects-failure",
           ),
         );
       } catch {

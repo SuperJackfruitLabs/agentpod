@@ -181,3 +181,18 @@ func (c *Client) ExpireWork(ctx context.Context, p WorkExpiry, owner Status) (js
 	}
 	return out, nil
 }
+
+// FailWork preserves interrupted history; only the daemon may attest known effects.
+func (c *Client) FailWork(ctx context.Context, p WorkSettlement, owner Status) (json.RawMessage, error) {
+	if err := c.validate(p.Binding); err != nil {
+		return nil, err
+	}
+	if owner.Binding != p.Binding || owner.BindingDigest != canonicalDigest(p.Binding) || owner.SessionID == "" || p.Binding.Run.Source != "superpipeline" || owner.Authorized || !owner.Revoked || !owner.OwnedExecutionStopped || len(owner.UnresolvedOperations) > 0 || len(owner.ActiveAttempts) > 0 || !regexp.MustCompile(`^[a-f0-9-]{36}$`).MatchString(p.RequestID) || !regexp.MustCompile(`^[a-f0-9-]{36}$`).MatchString(p.WorkRequestID) || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(p.ProducerTerminalDigest) {
+		return nil, fmt.Errorf("salaam: known-effect failure owner or stop proof refused")
+	}
+	var out json.RawMessage
+	if err := c.call(ctx, "work-fail", p, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

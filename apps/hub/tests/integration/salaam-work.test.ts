@@ -1409,8 +1409,8 @@ import {
   resumeSalaamWork,
   recoverExpiredSalaamDecision,
 } from "../../src/services/bridge/salaam-dispatch";
-test.each(["crashed", "reclaimed"])(
-  "explicit never-dispatched settlement retains original %s owner across lost replies and later leases",
+test.each(["crashed", "reclaimed", "known-effects"])(
+  "explicit terminal settlement retains original %s owner across lost replies and later leases",
   async (terminalOutcome) => {
     const { work, completion } = await reportFixture();
     const [originalSession] = await db
@@ -1434,7 +1434,8 @@ test.each(["crashed", "reclaimed"])(
       owned_execution_stopped: true,
       unresolved_operations: [],
       active_attempts: [],
-      interrupted_attempts: [],
+      interrupted_attempts:
+        terminalOutcome === "known-effects" ? ["historical-interrupted"] : [],
     };
     await db
       .update(acpSessions)
@@ -1481,7 +1482,10 @@ test.each(["crashed", "reclaimed"])(
             run: {
               ...live.run,
               status: "ended",
-              outcome: terminalOutcome,
+              outcome:
+                terminalOutcome === "known-effects"
+                  ? "crashed"
+                  : terminalOutcome,
               endedAt: "2026-10-20T18:00:00.000Z",
             },
           };
@@ -1491,7 +1495,11 @@ test.each(["crashed", "reclaimed"])(
     } as unknown as DispatchDeps;
     const mock = spyOn(broker, "request").mockImplementation(
       async (_node, verb, body: any) => {
-        expect(verb).toBe("salaam.work-settle");
+        expect(verb).toBe(
+          terminalOutcome === "known-effects"
+            ? "salaam.work-fail"
+            : "salaam.work-settle",
+        );
         daemonCalls++;
         if (daemonCalls === 1)
           return { ok: false, error: "lost daemon reply" } as never;
@@ -1500,7 +1508,13 @@ test.each(["crashed", "reclaimed"])(
           data: {
             version: 1,
             state: "cancelled",
-            effects: "never_dispatched",
+            effects:
+              terminalOutcome === "known-effects"
+                ? "known_effects_preserved"
+                : "never_dispatched",
+            ...(terminalOutcome === "known-effects"
+              ? { evidence_digest: "a".repeat(64) }
+              : {}),
             request_id: request,
             work_request_id: work.requestId,
             session_id: authority.sessionId,
@@ -1512,19 +1526,27 @@ test.each(["crashed", "reclaimed"])(
         } as never;
       },
     );
-    try {
-      await expect(
-        settleNeverDispatchedSalaamWork(deps, run, request),
-      ).rejects.toThrow("unresolved");
-      expect(fails).toBe(expectedFails);
-      await expect(
-        settleNeverDispatchedSalaamWork(deps, run, crypto.randomUUID()),
-      ).rejects.toThrow("Original settlement");
-      const result = await settleNeverDispatchedSalaamWork(deps, run, request);
-      expect(result.state).toBe("cancelled");
-      expect(await settleNeverDispatchedSalaamWork(deps, run, request)).toEqual(
-        result,
+    const settle = (id: string) =>
+      settleNeverDispatchedSalaamWork(
+        deps,
+        run,
+        id,
+        undefined,
+        terminalOutcome === "known-effects",
       );
+    try {
+      if (terminalOutcome === "known-effects")
+        await expect(
+          settleNeverDispatchedSalaamWork(deps, run, request),
+        ).rejects.toThrow("stopped work owner");
+      await expect(settle(request)).rejects.toThrow("unresolved");
+      expect(fails).toBe(expectedFails);
+      await expect(settle(crypto.randomUUID())).rejects.toThrow(
+        "Original settlement",
+      );
+      const result = await settle(request);
+      expect(result.state).toBe("cancelled");
+      expect(await settle(request)).toEqual(result);
       expect(fails).toBe(expectedFails);
       expect(await resumeSalaamWork(deps)).toBe(null);
       expect(
@@ -1542,17 +1564,13 @@ test.each(["crashed", "reclaimed"])(
         )[0]?.outcome,
       ).toBe("abandoned");
       live = { ...live, run: { ...live.run, leaseEpoch: 2 } };
-      await expect(
-        settleNeverDispatchedSalaamWork(deps, run, request),
-      ).rejects.toThrow("run changed");
+      await expect(settle(request)).rejects.toThrow("run changed");
       authority.receipt.owned_execution_stopped = false;
       await db
         .update(acpSessions)
         .set({ executionAuthority: authority })
         .where(eq(acpSessions.id, session));
-      await expect(
-        settleNeverDispatchedSalaamWork(deps, run, request),
-      ).rejects.toThrow("stopped work owner");
+      await expect(settle(request)).rejects.toThrow("stopped work owner");
     } finally {
       mock.mockRestore();
       await db
