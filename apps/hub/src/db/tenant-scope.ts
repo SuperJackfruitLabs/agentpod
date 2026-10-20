@@ -33,6 +33,7 @@ import { and, eq, getTableName, type SQL, type Table } from "drizzle-orm";
 import { TenantId } from "@agentpod/contract";
 
 import { db } from "./drizzle";
+import { salaamWorkOwners, salaamWorkDecisions, salaamWorkReports } from "./schema/salaam-work";
 import { acpEvents, acpRuns, acpSessions, acpPromptRequests } from "./schema/acp";
 import { matrixBoardRooms } from "./schema/board-rooms";
 import { bridgeAgents, bridgeBoardSettings, bridgeDispatches } from "./schema/bridge";
@@ -117,6 +118,9 @@ export type TenantScopedTable = Table & { tenantId: Parameters<typeof eq>[0] };
  * composite FK rather than by the rule.
  */
 export const TENANT_SCOPED_TABLES = {
+  salaamWorkOwners,
+  salaamWorkDecisions,
+  salaamWorkReports,
   nodes,
   provisionedRuntimes,
   enrollmentTokens,

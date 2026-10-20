@@ -1,0 +1,9 @@
+# Salaam station credentials for the durable bridge
+
+The accepted `2026-08-30-an-agent-is-a-principal` decision requires an agent to exchange as its own plane principal. A human bearer or a stored expiring JWT is not an agent credential strategy.
+
+The legacy roster still accepts encrypted `spa_` credentials. The additive `credentialSource` contract selects version 1 `station-plane` with exact principal, organization and the registered Superpipeline audience. Admission requires that principal to occupy the named Salaam station in the roster tenant, whose Organization plane mapping must match. Source mode cannot store a bearer or MCP token. Migration 0108 adds nullable source metadata and enforces that exclusion. Old rows remain unchanged; removing source mode requires an explicit legacy credential.
+
+For each outbound board request the Hub reads the current roster, station owner, occupant and tenant mapping, exchanges through the existing Organization plane service client, verifies the signed agent claims with the configured issuer/JWKS and exact audience, then rechecks the binding. Revisions, ownership changes, disabling, revocation, expiry or mismatched grants fail closed. No bearer is cached or persisted. A stale occupant cannot prevent the operator from disabling a row. Completion additionally invokes its caller's exact execution/lease guard after credential acquisition and before HTTP delivery.
+
+Producer/consumer coverage includes the strict contract grammar, fresh exchange and claims rejection corpus, real PostgreSQL roster storage/admission/rotation, existing legacy client/routes/reconciler regressions, and credential-before-final-guard HTTP ordering. This is component evidence; the isolated deployed Hub/Worker canary remains the integration gate. No existing production station is changed by this source change.

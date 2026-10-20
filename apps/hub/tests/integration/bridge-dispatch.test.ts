@@ -30,7 +30,7 @@ import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import type { BridgeAgentConfig } from "../../src/services/bridge/config";
 import { runOnce, type AcpPort, type DispatchDeps } from "../../src/services/bridge/dispatch";
 import { SuperpipelineClient } from "../../src/services/bridge/superpipeline";
-import { dispatchOutcome, openDispatch, recordProduced } from "../../src/services/bridge/ledger";
+import { dispatchOutcome, findUnreportedOutput, openDispatch, recordProduced } from "../../src/services/bridge/ledger";
 import { makeFingerprint } from "../../src/services/evidence/fingerprint";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
@@ -844,6 +844,26 @@ describe("403 NOT_RUN_OWNER — a different fact, and never a retry", () => {
     expect(board.verbs()).not.toContain("fail");
     expect(board.verbs()).not.toContain("release");
   });
+});
+
+describe("failed turns never become replayable completion", () => {
+  for (const terminal of ["timeout", "session-ended"] as const) {
+    test(`${terminal} remains abandoned when the failure report is lost`, async () => {
+      const board = fakeBoard((path) => {
+        if (path.endsWith("/fail")) return { status: 502, body: "lost failure response" };
+        return happyBoard(path, undefined);
+      });
+      const acp = fakeAcp(() => terminal === "timeout"
+        ? [chunk("partial work; not verified")]
+        : [chunk("partial work; not verified"), ev("state", { status: "ended" })]);
+      const result = await runOnce(deps(board.client, acp.port, undefined, { turnTimeoutMs: 20 }));
+      expect(result.status).toBe("failed");
+      expect(board.verbs()).not.toContain("complete");
+      expect(await dispatchOutcome(key())).toMatchObject({ outcome: "abandoned" });
+      expect(await findUnreportedOutput(key("run_reclaimed_failure"))).toBeNull();
+      expect(acp.state.ended.some((reason) => reason.includes("complete"))).toBe(false);
+    });
+  }
 });
 
 describe("at-least-once — a finished-but-unreported run comes back", () => {

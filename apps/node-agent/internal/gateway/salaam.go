@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/salaam"
+	"io"
 	"strings"
 )
 
@@ -25,6 +26,153 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 	}
 	if h.client == nil {
 		return nil, false, fmt.Errorf("salaam: node authority control is not configured")
+	}
+	if verb == "salaam.work-capability" {
+		var p struct {
+			NodeID    string `json:"node_id"`
+			Workspace string `json:"workspace"`
+			Key       string `json:"station_key"`
+		}
+		d := json.NewDecoder(strings.NewReader(string(params)))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&p); err != nil {
+			return nil, false, fmt.Errorf("salaam: invalid capability probe")
+		}
+		var extra any
+		if d.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing capability probe")
+		}
+		result, err := h.client.WorkCapability(ctx, p.NodeID, p.Workspace, p.Key)
+		return result, false, err
+	}
+	if verb == "salaam.work-expire" {
+		var p salaam.WorkExpiry
+		d := json.NewDecoder(strings.NewReader(string(params)))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&p); err != nil {
+			return nil, false, fmt.Errorf("salaam: invalid settlement")
+		}
+		var extra any
+		if d.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing settlement")
+		}
+		owner, err := h.client.Request(ctx, "status", p.Binding, "work-expirement-owner", 0, "")
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := h.client.ExpireWork(ctx, p, owner)
+		return result, false, err
+	}
+	if verb == "salaam.work-fail" {
+		var p salaam.WorkSettlement
+		d := json.NewDecoder(strings.NewReader(string(params)))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&p); err != nil {
+			return nil, false, fmt.Errorf("salaam: invalid settlement")
+		}
+		var extra any
+		if d.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing settlement")
+		}
+		owner, err := h.client.Request(ctx, "status", p.Binding, "work-settlement-owner", 0, "")
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := h.client.FailWork(ctx, p, owner)
+		return result, false, err
+	}
+	if verb == "salaam.work-settle" {
+		var p salaam.WorkSettlement
+		d := json.NewDecoder(strings.NewReader(string(params)))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&p); err != nil {
+			return nil, false, fmt.Errorf("salaam: invalid settlement")
+		}
+		var extra any
+		if d.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing settlement")
+		}
+		owner, err := h.client.Request(ctx, "status", p.Binding, "work-settlement-owner", 0, "")
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := h.client.SettleWork(ctx, p, owner)
+		return result, false, err
+	}
+	if verb == "salaam.work-abandon" {
+		var p salaam.WorkSettlement
+		d := json.NewDecoder(strings.NewReader(string(params)))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&p); err != nil {
+			return nil, false, fmt.Errorf("salaam: invalid settlement")
+		}
+		var extra any
+		if d.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing settlement")
+		}
+		owner, err := h.client.Request(ctx, "status", p.Binding, "work-settlement-owner", 0, "")
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := h.client.AbandonWork(ctx, p, owner)
+		return result, false, err
+	}
+	if verb == "salaam.work-progress" {
+		var p salaam.WorkProgress
+		d := json.NewDecoder(strings.NewReader(string(params)))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&p); err != nil {
+			return nil, false, fmt.Errorf("salaam: invalid progression")
+		}
+		var extra any
+		if d.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing progression")
+		}
+		owner, err := h.client.Request(ctx, "status", p.Binding, "work-progression-owner", 0, "")
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := h.client.ProgressWork(ctx, p, owner)
+		return result, false, err
+	}
+	if verb == "salaam.work-admit" {
+		var work salaam.WorkPayload
+		decoder := json.NewDecoder(strings.NewReader(string(params)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&work); err != nil {
+			return nil, false, fmt.Errorf("salaam: malformed private work payload")
+		}
+		var extra any
+		if decoder.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing private work payload")
+		}
+		owner, err := h.client.Request(ctx, "status", work.Admission.Binding, "work-owner:"+work.Admission.RequestID, 0, "")
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := h.client.WorkAdmit(ctx, work, owner)
+		return result, false, err
+	}
+	if verb == "salaam.work-decisions" || verb == "salaam.work-decision" || verb == "salaam.work-completion" || verb == "salaam.work-status" {
+		var work struct {
+			Binding salaam.Binding  `json:"binding"`
+			Answer  json.RawMessage `json:"answer"`
+		}
+		decoder := json.NewDecoder(strings.NewReader(string(params)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&work); err != nil {
+			return nil, false, fmt.Errorf("salaam: malformed decision control")
+		}
+		var extra any
+		if decoder.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing decision control")
+		}
+		owner, err := h.client.Request(ctx, "status", work.Binding, "work-decision-owner", 0, "")
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := h.client.WorkControl(ctx, strings.TrimPrefix(verb, "salaam."), work.Binding, work.Answer, owner)
+		return result, false, err
 	}
 	var p struct {
 		Binding       salaam.Binding `json:"binding"`

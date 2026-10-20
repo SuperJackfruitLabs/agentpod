@@ -13,11 +13,20 @@
  */
 
 process.env.DATABASE_URL =
-  process.env.DATABASE_URL || "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
+  process.env.DATABASE_URL ||
+  "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
 process.env.NODE_ENV = "test";
-process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "bridge-routes-test-key-0123456789";
+process.env.ENCRYPTION_KEY =
+  process.env.ENCRYPTION_KEY || "bridge-routes-test-key-0123456789";
 
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 
@@ -63,7 +72,12 @@ const patch = (key: string, body: unknown) =>
     body: JSON.stringify(body),
   });
 
-const valid = () => ({ key: "coder-kai", boardId: BOARD_ID, stationId: STATION_ID, token: TOKEN });
+const valid = () => ({
+  key: "coder-kai",
+  boardId: BOARD_ID,
+  stationId: STATION_ID,
+  token: TOKEN,
+});
 
 beforeAll(async () => {
   await ensurePgMigrations();
@@ -100,11 +114,15 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.delete(bridgeAgents).where(eq(bridgeAgents.tenantId, BOOTSTRAP_TENANT_ID));
+  await db
+    .delete(bridgeAgents)
+    .where(eq(bridgeAgents.tenantId, BOOTSTRAP_TENANT_ID));
 });
 
 afterAll(async () => {
-  await db.delete(bridgeAgents).where(eq(bridgeAgents.tenantId, BOOTSTRAP_TENANT_ID));
+  await db
+    .delete(bridgeAgents)
+    .where(eq(bridgeAgents.tenantId, BOOTSTRAP_TENANT_ID));
   await db.delete(stations).where(eq(stations.id, STATION_ID));
   await db.delete(nodes).where(eq(nodes.id, NODE_ID));
 });
@@ -117,7 +135,10 @@ describe("no response carries a credential", () => {
     const text = await res.text();
     expect(text).not.toContain(TOKEN);
     expect(text).not.toContain(MCP_TOKEN);
-    expect(JSON.parse(text).agent).toMatchObject({ hasToken: true, hasMcpToken: true });
+    expect(JSON.parse(text).agent).toMatchObject({
+      hasToken: true,
+      hasMcpToken: true,
+    });
   });
 
   test("not the list", async () => {
@@ -133,7 +154,9 @@ describe("no response carries a credential", () => {
     const text = await (await patch("coder-kai", { token: rotated })).text();
     expect(text).not.toContain(rotated);
     // It really did rotate — the bridge's own read surface sees the new one.
-    expect((await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]!.token).toBe(rotated);
+    expect((await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]!.token).toBe(
+      rotated,
+    );
   });
 });
 
@@ -155,7 +178,11 @@ describe("what a create refuses, in words an operator can act on", () => {
     // Drizzle's error message includes the bound parameters, and for this table one of them is the
     // ENCRYPTED credential. Returning the raw text — which the first version of `refusal()` did as
     // its fallback — published ciphertext to anyone who could provoke an insert error.
-    const res = await post({ ...valid(), stationId: "station_does_not_exist", mcpToken: MCP_TOKEN });
+    const res = await post({
+      ...valid(),
+      stationId: "station_does_not_exist",
+      mcpToken: MCP_TOKEN,
+    });
     const text = await res.text();
     expect(text).not.toContain("token_encrypted");
     expect(text).not.toContain("Failed query");
@@ -188,7 +215,11 @@ describe("editing one", () => {
     const res = await patch("coder-kai", { enabled: false });
 
     expect(res.status).toBe(200);
-    expect((await res.json()).agent).toMatchObject({ enabled: false, hasToken: true, hasMcpToken: true });
+    expect((await res.json()).agent).toMatchObject({
+      enabled: false,
+      hasToken: true,
+      hasMcpToken: true,
+    });
     expect(await readBridgeRoster(BOOTSTRAP_TENANT_ID)).toHaveLength(0);
   });
 
@@ -196,20 +227,72 @@ describe("editing one", () => {
     await post({ ...valid(), mcpToken: MCP_TOKEN });
     const res = await patch("coder-kai", { mcpToken: null });
 
-    expect((await res.json()).agent).toMatchObject({ hasToken: true, hasMcpToken: false });
-    expect((await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]!.mcpToken).toBeNull();
+    expect((await res.json()).agent).toMatchObject({
+      hasToken: true,
+      hasMcpToken: false,
+    });
+    expect(
+      (await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]!.mcpToken,
+    ).toBeNull();
   });
 });
 
 describe("removing one", () => {
   test("it goes, and says so", async () => {
     await post(valid());
-    const res = await app().request("/bridge/agents/coder-kai", { method: "DELETE" });
+    const res = await app().request("/bridge/agents/coder-kai", {
+      method: "DELETE",
+    });
     expect(res.status).toBe(200);
     expect(await readBridgeRoster(BOOTSTRAP_TENANT_ID)).toHaveLength(0);
   });
 
   test("removing one that is not there is a 404", async () => {
-    expect((await app().request("/bridge/agents/nobody", { method: "DELETE" })).status).toBe(404);
+    expect(
+      (await app().request("/bridge/agents/nobody", { method: "DELETE" }))
+        .status,
+    ).toBe(404);
   });
+});
+
+test("terminal Salaam operator settlement requires explicit process quiescence and a closed request", async () => {
+  const saved = process.env.ENABLE_SUPERPIPELINE_BRIDGE;
+  try {
+    process.env.ENABLE_SUPERPIPELINE_BRIDGE = "true";
+    const request = (body: unknown) =>
+      app().request("/bridge/agents/coder-kai/salaam-settle", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    expect(
+      (await request({ runId: "run_abcdef", requestId: crypto.randomUUID() }))
+        .status,
+    ).toBe(409);
+    process.env.ENABLE_SUPERPIPELINE_BRIDGE = "false";
+    expect(
+      (
+        await request({
+          runId: "run_abcdef",
+          requestId: crypto.randomUUID(),
+          approve: true,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await app().request("/bridge/agents/missing/salaam-settle", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            runId: "run_abcdef",
+            requestId: crypto.randomUUID(),
+          }),
+        })
+      ).status,
+    ).toBe(404);
+  } finally {
+    if (saved === undefined) delete process.env.ENABLE_SUPERPIPELINE_BRIDGE;
+    else process.env.ENABLE_SUPERPIPELINE_BRIDGE = saved;
+  }
 });

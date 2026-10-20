@@ -1,3 +1,4 @@
+import { probeSalaamWork } from "./salaam-dispatch";
 /**
  * The bridge process: one hub process multiplexing many agent identities, each
  * with its own claim-and-lease loop.
@@ -16,7 +17,7 @@ import { resolveTenantForUser } from "../../auth/tenant";
 import * as acpSessions from "../acp-sessions";
 import { BRIDGE_SOURCE, isBridgeEnabled, type BridgeAgentConfig } from "./config";
 import { reconcileRoster, type LoopRegistry, type ReconcileState } from "./reconcile";
-import { readBridgeRoster, type BridgeAgentSecrets } from "./roster";
+import { bridgePlaneCredential, readBridgeRoster, type BridgeAgentSecrets } from "./roster";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { runOnce, type AcpPort, type DispatchResult } from "./dispatch";
 import { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./superpipeline";
@@ -160,6 +161,7 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
 
 /** The hub's real ACP machinery, behind the port a dispatch talks to. */
 const hubAcpPort: AcpPort = {
+  strictWork: probeSalaamWork,
   stationReady: ({ stationId, userId }) => acpSessions.stationReadiness(userId, stationId),
   createSession: async (input) => {
     const row = await acpSessions.createSession(input);
@@ -251,6 +253,7 @@ export async function startSuperpipelineBridge(
         baseUrl,
         boardId: agent.boardId,
         token: agent.token,
+        ...(agent.credentialSource ? {credential: bridgePlaneCredential(agent)} : {}),
         fetch: fetchAdapter,
       });
       const handle = startAgentLoop({

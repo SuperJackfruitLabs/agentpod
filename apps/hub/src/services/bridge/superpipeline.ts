@@ -90,6 +90,8 @@ export interface SuperpipelineClientOptions {
   boardId: string;
   /** The agent's own credential. Decision 3: an agent's authority is its own. */
   token: string;
+  /** Trusted station-plane resolver, never an arbitrary configured JWT. */
+  credential?: () => Promise<string>;
   fetch: Fetcher;
 }
 
@@ -147,6 +149,8 @@ export interface RunReference {
  * agent — stop waiting, nobody is going to answer this.
  */
 export interface RunElicitation {
+  runId?: string; cardId?: string; stageKey?: string;
+  strictDecision?: {version:1;request_id:string;decision_digest:string;expires_at:number};
   id: string;
   question: string;
   signal?: string | null;
@@ -174,6 +178,9 @@ export interface RunContext {
     outcome: string | null;
     startedAt: string;
     endedAt: string | null;
+    /** Original run output/verdict, never the current card handoff. */
+    handoff?: unknown;
+    completion?: unknown;
   };
   card: ClaimedCard;
   stage: RunStage | null;
@@ -277,25 +284,28 @@ export class SuperpipelineClient {
   private readonly baseUrl: string;
   private readonly boardId: string;
   private readonly token: string;
+  private readonly credential?: () => Promise<string>;
   private readonly fetch: Fetcher;
 
   constructor(opts: SuperpipelineClientOptions) {
-    if (!opts.token.startsWith("spa_")) {
+    if (!opts.credential && !opts.token.startsWith("spa_")) {
       throw new Error(
         'SuperpipelineClient: token must be a superpipeline agent token ("spa_…"), minted via "Connect an agent"',
       );
     }
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.boardId = opts.boardId;
+    if (opts.credential && opts.token !== "") throw new Error("Ambiguous bridge credential source");
     this.token = opts.token;
+    this.credential = opts.credential;
     this.fetch = opts.fetch;
   }
 
-  private headers(): Record<string, string> {
+  private async headers(): Promise<Record<string, string>> {
     // Bearer only. The spike sent `X-Tenant-Id: tnt_dev` because no
     // agent-readable read existed; a deployed superpipeline rejects dev headers, so
     // sending one is a bug that surfaces only against production.
-    return { "Content-Type": "application/json", Authorization: `Bearer ${this.token}` };
+    return { "Content-Type": "application/json", Authorization: `Bearer ${this.credential ? await this.credential() : this.token}` };
   }
 
   /**
@@ -303,8 +313,8 @@ export class SuperpipelineClient {
    * otherwise. The bridge polls `claims` every five seconds per agent, and a root span per poll
    * would fill the trace store with nothing.
    */
-  private async send(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
-    if (!trace.getSpan(context.active())) return this.request(method, path, body, this.headers());
+  private async send(method: "GET" | "POST", path: string, body?: unknown, beforeSend?: () => Promise<void>): Promise<unknown> {
+    if (!trace.getSpan(context.active())) { const headers = await this.headers(); await beforeSend?.(); return this.request(method, path, body, headers); }
     const template = pathTemplate(path);
     const runId = /\/runs\/(run_[^/?]+)/.exec(path)?.[1];
     return tracer().startActiveSpan(
@@ -320,7 +330,8 @@ export class SuperpipelineClient {
       },
       async (span) => {
         try {
-          const headers = this.headers();
+          const headers = await this.headers();
+          await beforeSend?.();
           injectTraceHeaders(headers);
           return await this.request(method, path, body, headers, (status) => {
             span.setAttribute("http.response.status_code", status);
@@ -497,8 +508,17 @@ export class SuperpipelineClient {
   }
 
   /** Note the action is `activities`; superpipeline's RPC method is `postActivity`. */
-  activity(lease: RunLease, activity: BoardActivity): Promise<unknown> {
-    return this.verb(lease, "activities", { ...activity });
+  async activity(lease: RunLease, activity: BoardActivity): Promise<unknown> {
+    const response = await this.verb(lease, "activities", { ...activity });
+    // REST wraps the native postActivity result. Strict consumers validate the
+    // inner receipt; absence must fail closed rather than accept another shape.
+    if (activity.strictDecision) return (response as { activity?: unknown } | null)?.activity;
+    return response;
+  }
+
+  /** Strict completion is explicit pass; recovery checks the original stored verdict. */
+  completeVerified(lease: RunLease, handoff: unknown, beforeSend?: () => Promise<void>): Promise<unknown> {
+    return this.send("POST", `/v1/boards/${this.boardId}/runs/${lease.runId}/complete`, {leaseEpoch:lease.leaseEpoch,outcome:"pass",handoff}, beforeSend);
   }
 
   complete(lease: RunLease, handoff?: unknown): Promise<unknown> {
@@ -514,8 +534,8 @@ export class SuperpipelineClient {
     return this.verb(lease, "block", { reason });
   }
 
-  fail(lease: RunLease, reason: string): Promise<unknown> {
-    return this.verb(lease, "fail", { reason });
+  fail(lease: RunLease, reason: string, beforeSend?: () => Promise<void>): Promise<unknown> {
+    return this.send("POST", `/v1/boards/${this.boardId}/runs/${lease.runId}/fail`, {leaseEpoch:lease.leaseEpoch,reason}, beforeSend);
   }
 
   release(lease: RunLease): Promise<unknown> {

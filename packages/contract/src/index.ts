@@ -33,3 +33,9 @@ export * from "./forge-api";
 export * from "./salaam-authority";
 export * from "./salaam-acp";
 export * from "./salaam-mcp";
+
+export * from "./salaam-work";
+export * from "./salaam-work-payload";
+export * from "./salaam-work-decision";
+export * from "./salaam-work-completion";
+export * from './bridge-credential';

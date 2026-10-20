@@ -32,11 +32,21 @@ import { createLogger } from "../../utils/logger";
 import { superlibraryClient } from "../superlibrary/client";
 import { decrypt, encrypt } from "../../utils/encryption";
 import type { AcpSessionMode } from "@agentpod/contract";
+import { BridgeCredentialSource } from "../../../../../packages/contract/src/bridge-credential";
+import { tenants } from "../../db/schema/tenants";
+import { orgPlane } from "../../auth/org-plane/config";
+import { createPlaneVerifier } from "../../auth/org-plane/verify";
+import { orgPlaneClient } from "../org-plane/client";
+import {
+  createBridgePlaneCredential,
+  type BridgeCredentialSnapshot,
+} from "./plane-credential";
 
 const log = createLogger("bridge-roster");
 
 /** One roster entry as a human sees it. Deliberately carries no credential. */
 export interface BridgeAgentView {
+  credentialSource?: BridgeCredentialSource | null;
   key: string;
   boardId: string;
   stationId: string;
@@ -57,6 +67,8 @@ export interface BridgeAgentView {
 
 /** One roster entry as the bridge spends it. The only shape carrying plaintext. */
 export interface BridgeAgentSecrets {
+  tenantId?: string;
+  credentialSource?: BridgeCredentialSource | null;
   key: string;
   boardId: string;
   stationId: string;
@@ -84,11 +96,12 @@ export interface BridgeAgentSecrets {
 }
 
 export interface CreateBridgeAgentInput {
+  credentialSource?: BridgeCredentialSource | null;
   tenantId: string;
   key: string;
   boardId: string;
   stationId: string;
-  token: string;
+  token?: string;
   mcpToken?: string | null;
   mode?: string;
   permissionWaitMs?: number | null;
@@ -99,6 +112,7 @@ export interface CreateBridgeAgentInput {
 }
 
 export interface UpdateBridgeAgentInput {
+  credentialSource?: BridgeCredentialSource | null;
   boardId?: string;
   stationId?: string;
   token?: string;
@@ -121,18 +135,27 @@ export interface UpdateBridgeAgentInput {
  */
 function rowsFor(tenantId: string) {
   return db
-    .select({ agent: bridgeAgents, stationUserId: stations.userId, stationName: stations.displayName })
+    .select({
+      agent: bridgeAgents,
+      stationUserId: stations.userId,
+      stationName: stations.displayName,
+    })
     .from(bridgeAgents)
     .innerJoin(
       stations,
-      and(eq(bridgeAgents.stationId, stations.id), eq(bridgeAgents.tenantId, stations.tenantId)),
+      and(
+        eq(bridgeAgents.stationId, stations.id),
+        eq(bridgeAgents.tenantId, stations.tenantId),
+      ),
     )
     .where(eq(bridgeAgents.tenantId, tenantId))
     .orderBy(asc(bridgeAgents.key));
 }
 
 /** Every entry a human may see, enabled or not. No credentials. */
-export async function listBridgeAgents(tenantId: string): Promise<BridgeAgentView[]> {
+export async function listBridgeAgents(
+  tenantId: string,
+): Promise<BridgeAgentView[]> {
   const rows = await rowsFor(tenantId);
   return rows.map(({ agent, stationUserId, stationName }) => ({
     key: agent.key,
@@ -145,8 +168,11 @@ export async function listBridgeAgents(tenantId: string): Promise<BridgeAgentVie
     maxConcurrency: agent.maxConcurrency,
     profileKey: agent.profileKey,
     enabled: agent.enabled,
+    credentialSource: agent.credentialSource,
     hasToken: agent.tokenEncrypted.length > 0,
-    hasMcpToken: Boolean(agent.mcpTokenEncrypted && agent.mcpTokenEncrypted.length > 0),
+    hasMcpToken: Boolean(
+      agent.mcpTokenEncrypted && agent.mcpTokenEncrypted.length > 0,
+    ),
     createdAt: agent.createdAt,
     updatedAt: agent.updatedAt,
   }));
@@ -178,13 +204,24 @@ export async function readBridgeRoster(
         permissionWaitMs: agent.permissionWaitMs,
         maxConcurrency: agent.maxConcurrency,
         profileKey: agent.profileKey,
-        token: await decrypt(agent.tokenEncrypted),
-        mcpToken: agent.mcpTokenEncrypted ? await decrypt(agent.mcpTokenEncrypted) : null,
+        tenantId: agent.tenantId,
+        credentialSource: agent.credentialSource
+          ? BridgeCredentialSource.parse(agent.credentialSource)
+          : null,
+        token: agent.credentialSource
+          ? ""
+          : await decrypt(agent.tokenEncrypted),
+        mcpToken: agent.mcpTokenEncrypted
+          ? await decrypt(agent.mcpTokenEncrypted)
+          : null,
         revision: revisionOf(agent),
         updatedAt: agent.updatedAt,
       });
     } catch (err) {
-      onUnreadable?.(agent.key, err instanceof Error ? err.message : String(err));
+      onUnreadable?.(
+        agent.key,
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 
@@ -210,19 +247,30 @@ function revisionOf(agent: BridgeAgentRow): string {
         agent.enabled,
         agent.tokenEncrypted,
         agent.mcpTokenEncrypted,
+        agent.credentialSource,
       ]),
     )
     .digest("hex")
     .slice(0, 16);
 }
 
-export async function createBridgeAgent(input: CreateBridgeAgentInput): Promise<void> {
+export async function createBridgeAgent(
+  input: CreateBridgeAgentInput,
+): Promise<void> {
+  await validateCredentialInput(
+    input.tenantId,
+    input.stationId,
+    input.credentialSource,
+    input.token,
+    input.mcpToken,
+  );
   await db.insert(bridgeAgents).values({
     tenantId: input.tenantId,
     key: input.key,
     boardId: input.boardId,
     stationId: input.stationId,
-    tokenEncrypted: await encrypt(input.token),
+    credentialSource: input.credentialSource ?? null,
+    tokenEncrypted: input.credentialSource ? "" : await encrypt(input.token!),
     mcpTokenEncrypted: input.mcpToken ? await encrypt(input.mcpToken) : null,
     ...(input.mode !== undefined ? { mode: input.mode } : {}),
     permissionWaitMs: input.permissionWaitMs ?? null,
@@ -235,7 +283,10 @@ export async function createBridgeAgent(input: CreateBridgeAgentInput): Promise<
 }
 
 /** Superlibrary caches a roster for five minutes; a change clears it now. Never throws. */
-export async function notifyRosterChanged(tenantId: string, stationId: string): Promise<void> {
+export async function notifyRosterChanged(
+  tenantId: string,
+  stationId: string,
+): Promise<void> {
   try {
     const lib = superlibraryClient();
     if (!lib) return;
@@ -246,11 +297,17 @@ export async function notifyRosterChanged(tenantId: string, stationId: string): 
       .limit(1);
     if (s?.principalId) await lib.invalidateRoster(s.principalId);
   } catch (err) {
-    log.warn("roster change not sent to Superlibrary", { stationId, error: String(err) });
+    log.warn("roster change not sent to Superlibrary", {
+      stationId,
+      error: String(err),
+    });
   }
 }
 
-async function stationOf(tenantId: string, key: string): Promise<string | null> {
+async function stationOf(
+  tenantId: string,
+  key: string,
+): Promise<string | null> {
   const [r] = await db
     .select({ stationId: bridgeAgents.stationId })
     .from(bridgeAgents)
@@ -271,17 +328,52 @@ export async function updateBridgeAgent(
 ): Promise<boolean> {
   const set: Record<string, unknown> = { updatedAt: new Date() };
   const before = await stationOf(tenantId, key);
+  const [current] = await db
+    .select()
+    .from(bridgeAgents)
+    .where(and(eq(bridgeAgents.tenantId, tenantId), eq(bridgeAgents.key, key)))
+    .limit(1);
+  if (!current) return false;
+  const source =
+    patch.credentialSource !== undefined
+      ? patch.credentialSource
+      : current.credentialSource;
+  if (source) {
+    if (patch.token !== undefined || patch.mcpToken)
+      throw new Error("Station-plane credentials cannot store tokens");
+    if (!(patch.enabled === false && Object.keys(patch).length === 1)) {
+      await validateCredentialInput(
+        tenantId,
+        patch.stationId ?? current.stationId,
+        source,
+        undefined,
+        undefined,
+      );
+    }
+    set.tokenEncrypted = "";
+    set.mcpTokenEncrypted = null;
+  } else if (current.credentialSource && !patch.token?.startsWith("spa_"))
+    throw new Error(
+      "A legacy credential is required when removing exchange source",
+    );
+  if (patch.credentialSource !== undefined)
+    set.credentialSource = patch.credentialSource;
 
   if (patch.boardId !== undefined) set.boardId = patch.boardId;
   if (patch.stationId !== undefined) set.stationId = patch.stationId;
   if (patch.mode !== undefined) set.mode = patch.mode;
-  if (patch.permissionWaitMs !== undefined) set.permissionWaitMs = patch.permissionWaitMs;
-  if (patch.maxConcurrency !== undefined) set.maxConcurrency = patch.maxConcurrency;
+  if (patch.permissionWaitMs !== undefined)
+    set.permissionWaitMs = patch.permissionWaitMs;
+  if (patch.maxConcurrency !== undefined)
+    set.maxConcurrency = patch.maxConcurrency;
   if (patch.profileKey !== undefined) set.profileKey = patch.profileKey;
   if (patch.enabled !== undefined) set.enabled = patch.enabled;
-  if (patch.token !== undefined) set.tokenEncrypted = await encrypt(patch.token);
+  if (patch.token !== undefined)
+    set.tokenEncrypted = await encrypt(patch.token);
   if (patch.mcpToken !== undefined) {
-    set.mcpTokenEncrypted = patch.mcpToken ? await encrypt(patch.mcpToken) : null;
+    set.mcpTokenEncrypted = patch.mcpToken
+      ? await encrypt(patch.mcpToken)
+      : null;
   }
 
   const done = await db
@@ -299,7 +391,10 @@ export async function updateBridgeAgent(
   return done.length > 0;
 }
 
-export async function deleteBridgeAgent(tenantId: string, key: string): Promise<boolean> {
+export async function deleteBridgeAgent(
+  tenantId: string,
+  key: string,
+): Promise<boolean> {
   const before = await stationOf(tenantId, key);
   const done = await db
     .delete(bridgeAgents)
@@ -308,4 +403,107 @@ export async function deleteBridgeAgent(tenantId: string, key: string): Promise<
 
   if (done.length > 0 && before) void notifyRosterChanged(tenantId, before);
   return done.length > 0;
+}
+
+async function validateCredentialInput(
+  tenantId: string,
+  stationId: string,
+  raw: BridgeCredentialSource | null | undefined,
+  token?: string,
+  mcpToken?: string | null,
+) {
+  if (!raw) {
+    if (!token?.startsWith("spa_"))
+      throw new Error("A legacy agent credential is required");
+    return;
+  }
+  const source = BridgeCredentialSource.parse(raw);
+  if (token !== undefined || mcpToken)
+    throw new Error("Station-plane credentials cannot store tokens");
+  const [station] = await db
+    .select()
+    .from(stations)
+    .where(and(eq(stations.id, stationId), eq(stations.tenantId, tenantId)))
+    .limit(1);
+  const [tenant] = await db
+    .select()
+    .from(tenants)
+    .where(eq(tenants.id, tenantId))
+    .limit(1);
+  if (
+    !station ||
+    station.harness !== "salaam" ||
+    station.principalId !== source.principalId ||
+    tenant?.externalSource !== "org-plane" ||
+    tenant.externalId !== source.organizationId
+  )
+    throw new Error(
+      "Station-plane source requires the exact Salaam occupant and mapped organization",
+    );
+}
+
+/** No exchanged bearer is persisted. A new signed grant is acquired for each board request. */
+export function bridgePlaneCredential(
+  agent: BridgeAgentSecrets,
+): () => Promise<string> {
+  const source = BridgeCredentialSource.parse(agent.credentialSource);
+  if (!agent.tenantId) throw new Error("Station credential has no tenant");
+  const tenantId = agent.tenantId;
+  const cfg = orgPlane();
+  const verifier = createPlaneVerifier({
+    issuer: cfg.issuer,
+    jwksUrl: cfg.jwksUrl,
+    audience: source.audience,
+  });
+  async function snapshot(): Promise<BridgeCredentialSnapshot | null> {
+    const [row] = await db
+      .select({ agent: bridgeAgents, station: stations, tenant: tenants })
+      .from(bridgeAgents)
+      .innerJoin(
+        stations,
+        and(
+          eq(bridgeAgents.stationId, stations.id),
+          eq(bridgeAgents.tenantId, stations.tenantId),
+        ),
+      )
+      .innerJoin(tenants, eq(tenants.id, bridgeAgents.tenantId))
+      .where(
+        and(
+          eq(bridgeAgents.tenantId, tenantId),
+          eq(bridgeAgents.key, agent.key),
+        ),
+      )
+      .limit(1);
+    if (
+      !row ||
+      row.station.harness !== "salaam" ||
+      row.tenant.externalSource !== "org-plane"
+    )
+      return null;
+    return {
+      revision: revisionOf(row.agent),
+      principalId: row.station.principalId,
+      org: row.tenant.externalId,
+      owner: row.station.userId,
+      enabled: row.agent.enabled,
+    };
+  }
+  // Capture the organization from the exact initial row, and refuse any drift before/after exchange.
+  return async () => {
+    const initial = await snapshot();
+    if (
+      !initial ||
+      initial.revision !== agent.revision ||
+      initial.owner !== agent.hubUserId ||
+      initial.principalId !== source.principalId ||
+      initial.org !== source.organizationId
+    )
+      throw new Error("Bridge station binding changed");
+    return createBridgePlaneCredential(source, initial, {
+      snapshot,
+      exchange: (principal, audience) =>
+        orgPlaneClient().agentToken(principal, audience),
+      verify: (token) => verifier.verify(token),
+    })();
+  };
 }

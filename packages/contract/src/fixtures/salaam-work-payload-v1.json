@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "fully expanded checked plan",
+      "payload": {
+        "admission": {
+          "version": 1,
+          "request_id": "410a1f6a-870a-4b3f-a0c1-b33cc4e2561c",
+          "binding": {
+            "version": 1,
+            "organization_id": "org_00000000000000000001",
+            "principal_id": "prn_00000000000000000002",
+            "node_id": "node_fixture",
+            "station_id": "station_fixture",
+            "station_key": "salaam:c52ddf65534b7b46",
+            "occupancy_epoch": 3,
+            "hub_session_id": "acps_fixture",
+            "workspace": "/workspace",
+            "run": {
+              "source": "superpipeline",
+              "id": "run_Aa0Bb1",
+              "epoch": 7
+            }
+          },
+          "work": {
+            "board_id": "brd_Aa0Bb1",
+            "card_id": "card_Aa0Bb1",
+            "stage_key": "implement",
+            "input_digest": "ddb156eabf5d6a40eb049dcf57fe4c806b610a140836214337c289c0948df7a8",
+            "plan_digest": "67ecee848aba46c139ae72a04195e24c8a3bab7ccd8de9e0e7a3d79ca38412e4"
+          }
+        },
+        "input": {
+          "instructions": "Inspect source",
+          "references": ["library:card"],
+          "incoming_handoff": null
+        },
+        "plan": {
+          "objective": "Inspect",
+          "constraints": [],
+          "steps": [
+            {
+              "key": "inspect",
+              "title": "Inspect",
+              "instruction": "Read source",
+              "depends_on": [],
+              "checks": ["verify"]
+            }
+          ],
+          "acceptance": [
+            {
+              "key": "verify",
+              "command": "test -f src/a.ts",
+              "cwd": "."
+            }
+          ],
+          "deliverables": ["src/a.ts"],
+          "limits": {
+            "requests": 2,
+            "runtime_ms": 10000,
+            "concurrency": 1,
+            "token_units": 10000,
+            "input_token_bound": 1024,
+            "output_token_bound": 1024,
+            "verification_runs": 2
+          }
+        }
+      }
+    }
+  ]
+}

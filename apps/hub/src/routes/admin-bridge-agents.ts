@@ -21,26 +21,43 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 
 import { AcpSessionMode } from "@agentpod/contract";
+import { BridgeCredentialSource } from "../../../../packages/contract/src/bridge-credential";
 import { resolveTenantForUser } from "../auth/tenant";
 import { createLogger } from "../utils/logger";
 import {
+  readBridgeRoster,
+  bridgePlaneCredential,
   createBridgeAgent,
   deleteBridgeAgent,
   listBridgeAgents,
   updateBridgeAgent,
 } from "../services/bridge/roster";
 
+import { settleNeverDispatchedSalaamWork } from "../services/bridge/salaam-dispatch";
+import {
+  SuperpipelineClient,
+  fetchAdapter,
+} from "../services/bridge/superpipeline";
+
 const log = createLogger("admin-bridge-agents");
 
 /** superpipeline's own id grammar, matched here so a typo is a 400 rather than a silent no-op. */
-const BOARD_ID = z.string().regex(/^brd_[0-9a-f]{16}$/, "a superpipeline board id looks like brd_<16 hex>");
-const AGENT_TOKEN = z.string().startsWith("spa_", 'a superpipeline agent token starts with "spa_"');
+const BOARD_ID = z
+  .string()
+  .regex(
+    /^brd_[0-9a-f]{16}$/,
+    "a superpipeline board id looks like brd_<16 hex>",
+  );
+const AGENT_TOKEN = z
+  .string()
+  .startsWith("spa_", 'a superpipeline agent token starts with "spa_"');
 
 const createSchema = z.object({
   key: z.string().min(1).max(64),
   boardId: BOARD_ID,
   stationId: z.string().min(1),
-  token: AGENT_TOKEN,
+  token: AGENT_TOKEN.optional(),
+  credentialSource: BridgeCredentialSource.nullish(),
   /**
    * The second, `run`-scoped credential — the one the HARNESS spends over MCP so a dispatched
    * agent can complete or block its own card. Never the same as `token`, which can also claim.
@@ -54,12 +71,95 @@ const createSchema = z.object({
 });
 
 /** Every field optional, but at least one present — an empty PATCH is a mistake, not a no-op. */
-const updateSchema = createSchema.omit({ key: true }).partial().refine(
-  (patch) => Object.keys(patch).length > 0,
-  { message: "nothing to change" },
-);
+const updateSchema = createSchema
+  .omit({ key: true })
+  .partial()
+  .refine((patch) => Object.keys(patch).length > 0, {
+    message: "nothing to change",
+  });
 
 export const adminBridgeAgentsRouter = new Hono()
+  .post(
+    "/:key/salaam-settle",
+    zValidator(
+      "json",
+      z
+        .object({
+          runId: z.string().regex(/^run_[A-Za-z0-9]{6,}$/),
+          requestId: z.string().uuid(),
+          mode: z
+            .enum([
+              "never-dispatched",
+              "known-effects-failure",
+              "unreported-local-success",
+            ])
+            .default("never-dispatched"),
+        })
+        .strict(),
+    ),
+    async (c) => {
+      // Process startup must disable controllers; toggling a roster alone does not
+      // prove an already-running dispatch has returned.
+      if (process.env.ENABLE_SUPERPIPELINE_BRIDGE !== "false")
+        return c.json(
+          {
+            error:
+              "Restart Hub with bridge controllers explicitly disabled before operator settlement",
+          },
+          409,
+        );
+      const userId = c.get("user")!.id,
+        tenantId = await resolveTenantForUser(userId);
+      const agent = (await readBridgeRoster(tenantId)).find(
+        (a) => a.key === c.req.param("key") && a.hubUserId === userId,
+      );
+      if (!agent)
+        return c.json(
+          { error: "Exact enabled operator-owned roster required" },
+          404,
+        );
+      const baseUrl = (process.env.SUPERPIPELINE_BASE_URL ?? "")
+        .trim()
+        .replace(/\/+$/, "");
+      if (!baseUrl)
+        return c.json({ error: "Producer origin unavailable" }, 409);
+      const client = new SuperpipelineClient({
+        baseUrl,
+        boardId: agent.boardId,
+        token: agent.token,
+        ...(agent.credentialSource
+          ? { credential: bridgePlaneCredential(agent) }
+          : {}),
+        fetch: fetchAdapter,
+      });
+      const { runId, requestId, mode } = c.req.valid("json");
+      try {
+        return c.json(
+          await settleNeverDispatchedSalaamWork(
+            {
+              tenantId,
+              source: "superpipeline",
+              agent,
+              client,
+            },
+            runId,
+            requestId,
+            undefined,
+            mode === "known-effects-failure",
+            mode === "unreported-local-success",
+          ),
+        );
+      } catch {
+        return c.json(
+          {
+            error:
+              "Terminal settlement refused or unresolved; retain original owner and retry the same request",
+          },
+          409,
+        );
+      }
+    },
+  )
   .get("/", async (c) => {
     const userId = c.get("user")!.id;
     const tenantId = await resolveTenantForUser(userId);
@@ -122,7 +222,8 @@ export const adminBridgeAgentsRouter = new Hono()
  * gets a flat sentence, and the real one goes to the log.
  */
 function refusal(err: unknown): string {
-  const cause = (err as { cause?: { constraint_name?: string; code?: string } })?.cause;
+  const cause = (err as { cause?: { constraint_name?: string; code?: string } })
+    ?.cause;
   switch (cause?.constraint_name) {
     case "bridge_agents_station_tenant_fk":
       return "no such station in this workspace";
