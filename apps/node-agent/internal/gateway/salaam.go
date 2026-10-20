@@ -27,6 +27,42 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 	if h.client == nil {
 		return nil, false, fmt.Errorf("salaam: node authority control is not configured")
 	}
+	if verb == "salaam.work-capability" {
+		var p struct {
+			NodeID    string `json:"node_id"`
+			Workspace string `json:"workspace"`
+			Key       string `json:"station_key"`
+		}
+		d := json.NewDecoder(strings.NewReader(string(params)))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&p); err != nil {
+			return nil, false, fmt.Errorf("salaam: invalid capability probe")
+		}
+		var extra any
+		if d.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing capability probe")
+		}
+		result, err := h.client.WorkCapability(ctx, p.NodeID, p.Workspace, p.Key)
+		return result, false, err
+	}
+	if verb == "salaam.work-progress" {
+		var p salaam.WorkProgress
+		d := json.NewDecoder(strings.NewReader(string(params)))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&p); err != nil {
+			return nil, false, fmt.Errorf("salaam: invalid progression")
+		}
+		var extra any
+		if d.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing progression")
+		}
+		owner, err := h.client.Request(ctx, "status", p.Binding, "work-progression-owner", 0, "")
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := h.client.ProgressWork(ctx, p, owner)
+		return result, false, err
+	}
 	if verb == "salaam.work-admit" {
 		var work salaam.WorkPayload
 		decoder := json.NewDecoder(strings.NewReader(string(params)))
@@ -45,7 +81,7 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 		result, err := h.client.WorkAdmit(ctx, work, owner)
 		return result, false, err
 	}
-	if verb == "salaam.work-decisions" || verb == "salaam.work-decision" || verb == "salaam.work-completion" {
+	if verb == "salaam.work-decisions" || verb == "salaam.work-decision" || verb == "salaam.work-completion" || verb == "salaam.work-status" {
 		var work struct {
 			Binding salaam.Binding  `json:"binding"`
 			Answer  json.RawMessage `json:"answer"`

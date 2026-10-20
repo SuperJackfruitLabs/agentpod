@@ -73,7 +73,7 @@ func (c *Client) WorkControl(ctx context.Context, action string, binding Binding
 	}
 	body := map[string]any{"binding": binding}
 	switch action {
-	case "work-decisions", "work-completion":
+	case "work-decisions", "work-completion", "work-status":
 		if len(answer) != 0 {
 			return nil, fmt.Errorf("salaam: discovery cannot carry an answer")
 		}
@@ -87,6 +87,53 @@ func (c *Client) WorkControl(ctx context.Context, action string, binding Binding
 	}
 	var out json.RawMessage
 	if err := c.call(ctx, action, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// WorkCapability is a fresh private observation, never cached inventory/model metadata.
+func (c *Client) WorkCapability(ctx context.Context, node, workspace, key string) (any, error) {
+	if node != c.NodeID || workspace != c.Workspace || key != StationKey(c.Workspace) || node == "" {
+		return nil, fmt.Errorf("salaam: capability probe names another station")
+	}
+	if c.Runtime != nil {
+		if err := c.Runtime.Ensure(ctx); err != nil {
+			return nil, err
+		}
+	}
+	var result struct {
+		Version int  `json:"version"`
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.call(ctx, "work-capability", map[string]any{}, &result); err != nil {
+		return nil, err
+	}
+	if result.Version != 1 || !result.Enabled {
+		return nil, fmt.Errorf("salaam: strict work capability unavailable")
+	}
+	return result, nil
+}
+
+// WorkProgress forwards one bounded, original-run progression request.
+type WorkProgress struct {
+	Binding       Binding `json:"binding"`
+	RequestID     string  `json:"request_id"`
+	WorkRequestID string  `json:"work_request_id"`
+	MaxSteps      int     `json:"max_steps"`
+	Compact       bool    `json:"compact"`
+}
+
+func (c *Client) ProgressWork(ctx context.Context, p WorkProgress, owner Status) (json.RawMessage, error) {
+	if err := c.validate(p.Binding); err != nil {
+		return nil, err
+	}
+	uuid := regexp.MustCompile(`^[a-f0-9-]{36}$`)
+	if owner.Binding != p.Binding || owner.SessionID == "" || p.Binding.Run.Source != "superpipeline" || !uuid.MatchString(p.RequestID) || p.RequestID != p.WorkRequestID || p.MaxSteps < 1 || p.MaxSteps > 32 || p.Compact {
+		return nil, fmt.Errorf("salaam: invalid bounded work progression")
+	}
+	var out json.RawMessage
+	if err := c.call(ctx, "work-progress", p, &out); err != nil {
 		return nil, err
 	}
 	return out, nil

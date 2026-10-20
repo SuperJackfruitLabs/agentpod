@@ -256,3 +256,23 @@ scope behavior, not actual native verifier execution or deployed acceptance.
 Automatic bridge selection remains disabled until the full milestone chain is
 proven. The new native completion forwarding branch still needs the consolidated
 native test run after the Mac's disk-pressure cache cleanup.
+
+### Strict bridge selection and bounded progression
+
+The production bridge probes the private node `work-capability` route before a
+Salaam claim. Only version 1 with the explicitly enabled protected daemon backend
+selects strict work; unsupported Salaam stations fail closed. Other harnesses keep
+the existing ACP dispatch behavior. A strict card must carry `spec.salaam` with
+`version: 1` and a fully expanded `plan` matching the work contract. The bridge
+never turns model prose or an ordinary ACP turn into that plan or completion.
+
+Before claiming another run the bridge reconciles its durable original session.
+It heartbeats the original board lease before renewing execution, grants exactly
+the original plan's bounded steps using its saved request identity, and polls
+private task status and exact human decisions. Progression uses the daemon's
+existing task driver. Successful status still requires independently fresh
+protected completion and original-run report verification. Lost transport replies
+preserve original ownership for recovery; authoritative lease loss, terminal
+failure and exhausted bounds attempt explicit revocation. Unknown outcomes cannot
+open replacement work. Daemon progression remains an explicit service opt-in;
+component fixtures do not establish a deployed capability or milestone acceptance.

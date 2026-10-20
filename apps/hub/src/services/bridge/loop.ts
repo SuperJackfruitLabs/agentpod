@@ -1,3 +1,4 @@
+import { probeSalaamWork } from "./salaam-dispatch";
 /**
  * The bridge process: one hub process multiplexing many agent identities, each
  * with its own claim-and-lease loop.
@@ -160,6 +161,7 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
 
 /** The hub's real ACP machinery, behind the port a dispatch talks to. */
 const hubAcpPort: AcpPort = {
+  strictWork: probeSalaamWork,
   stationReady: ({ stationId, userId }) => acpSessions.stationReadiness(userId, stationId),
   createSession: async (input) => {
     const row = await acpSessions.createSession(input);

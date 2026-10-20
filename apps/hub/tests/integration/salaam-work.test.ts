@@ -719,3 +719,115 @@ test("unverified or failed daemon work never creates report intent", async () =>
     mock.mockRestore();
   }
 });
+
+import { runOnce, type DispatchDeps } from "../../src/services/bridge/dispatch";
+import { probeSalaamWork } from "../../src/services/bridge/salaam-dispatch";
+test("strict runtime capability missing or wrong version prevents claiming", async () => {
+  let claims = 0;
+  const mocked = spyOn(broker, "request").mockResolvedValue({
+    ok: true,
+    data: { version: 2, enabled: true },
+  } as never);
+  try {
+    const deps = {
+      agent: { stationId: station, hubUserId: user },
+      acp: { strictWork: probeSalaamWork },
+      client: {
+        claim: async () => {
+          claims++;
+          throw Error("must not claim");
+        },
+      },
+    } as unknown as DispatchDeps;
+    expect((await runOnce(deps)).status).toBe("not-ready");
+    expect(claims).toBe(0);
+  } finally {
+    mocked.mockRestore();
+  }
+});
+test("strict resumed task drives private bounded progression and verified reporting without new claim or ACP prompt", async () => {
+  const { work, completion } = await reportFixture();
+  const events: string[] = [];
+  let live: RunContext = {
+    ...context,
+    run: { ...context.run, handoff: null, completion: null },
+  };
+  const mock = spyOn(broker, "request").mockImplementation(
+    async (_node, verb, body: any) => {
+      events.push(verb);
+      if (verb === "salaam.work-progress")
+        return {
+          ok: true,
+          data: {
+            version: 1,
+            request_id: work.requestId,
+            work_request_id: work.requestId,
+            task_id: completion.task_id,
+            plan_revision: 1,
+            binding_digest: completion.binding_digest,
+          },
+        } as never;
+      if (verb === "salaam.work-status")
+        return {
+          ok: true,
+          data: { ...completion, state: "succeeded", auto_enabled: false },
+        } as never;
+      if (verb === "salaam.work-completion")
+        return { ok: true, data: completion } as never;
+      throw Error("Unexpected private verb: " + verb);
+    },
+  );
+  try {
+    const deps = {
+      tenantId,
+      source: "superpipeline",
+      agent: {
+        key: "proof",
+        boardId: board,
+        stationId: station,
+        hubUserId: user,
+      },
+      client: {
+        context: async () => live,
+        heartbeat: async () => {
+          events.push("heartbeat");
+        },
+        completeVerified: async (_lease: unknown, handoff: unknown) => {
+          live = {
+            ...live,
+            run: {
+              ...live.run,
+              status: "ended",
+              outcome: "completed",
+              handoff,
+              completion: { met: true, outcome: "pass" },
+            },
+          };
+          events.push("verified-report");
+          return { ok: true };
+        },
+        claim: async () => {
+          throw Error("new claim forbidden");
+        },
+      },
+      acp: {
+        strictWork: async () => ({ required: true, version: 1 }),
+        renewExecution: async () => {
+          events.push("renew");
+        },
+        endSession: async () => {
+          events.push("end");
+        },
+        promptSession: async () => {
+          throw Error("generic prompt forbidden");
+        },
+      },
+    } as unknown as DispatchDeps;
+    expect(await runOnce(deps)).toMatchObject({ status: "reported" });
+    expect(events.indexOf("heartbeat")).toBeLessThan(events.indexOf("renew"));
+    expect(events.filter((x) => x === "salaam.work-progress")).toHaveLength(1);
+    expect(events.filter((x) => x === "verified-report")).toHaveLength(1);
+  } finally {
+    mock.mockRestore();
+  }
+});

@@ -1,3 +1,4 @@
+import { resumeSalaamWork, startSalaamWork } from "./salaam-dispatch";
 /**
  * One claim, worked start to finish.
  *
@@ -107,6 +108,9 @@ import {
  * a station — the same seam `acp-agent.ts` already uses for Doors.
  */
 export interface AcpPort {
+  /** Fresh private probe; unsupported Salaam never falls back to generic ACP. */
+  strictWork?(input: { stationId: string; userId: string }): Promise<import("./salaam-dispatch").StrictWorkSelection>;
+
   /**
    * Could a session be opened on this station right now? Asked BEFORE a claim,
    * because a claim the bridge cannot execute strands a card on the board.
@@ -348,6 +352,20 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   const { client, acp, agent } = deps;
   const log = deps.log ?? (() => {});
 
+  const strict = await acp.strictWork?.({
+    stationId: agent.stationId,
+    userId: agent.hubUserId,
+  });
+  if (strict?.required) {
+    if (strict.version !== 1)
+      return {
+        status: "not-ready",
+        reason: strict.reason ?? "Strict work protocol unavailable",
+      };
+    const resumed = await resumeSalaamWork(deps);
+    if (resumed) return resumed;
+  }
+
   // ─── requirement 4a: do not claim work there is nowhere to run ─────────────
   // The board hands out a card on a claim; the hub cannot un-hand it for 15
   // minutes except by asking. Checking first is what removes the race entirely,
@@ -365,6 +383,7 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   // A bare "not claimed" covers an empty queue, an over-budget board and an
   // agent at its concurrency cap alike. superpipeline does not say which.
   if (!work) return { status: "idle" };
+  if (strict?.required) return startSalaamWork(deps, work);
 
   return inDispatchSpan(
     { runId: work.runId, boardId: agent.boardId, cardId: work.card.id, source: deps.source, stationId: agent.stationId, startTime: claimedAt },
