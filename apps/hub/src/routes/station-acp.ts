@@ -36,7 +36,7 @@ import { z } from "zod";
 import { and, asc, eq, gt } from "drizzle-orm";
 import {
   AcpClientMsg,
-  AcpSessionMode,
+  CreateAcpSessionBody,
   type AcpEvent,
   type AcpEventType,
   type AcpServerMsg,
@@ -70,7 +70,7 @@ function createErrorStatus(message: string): 403 | 404 | 409 | 502 {
 
 // ─── Route schemas ────────────────────────────────────────────────────────────
 
-const CreateBody = z.object({ mode: AcpSessionMode });
+const CreateBody = CreateAcpSessionBody;
 
 /** Treat `?limit=` / `?before=` with an empty value as absent, not as junk. */
 const blankToUndefined = (v: unknown) => (v === "" ? undefined : v);
@@ -120,10 +120,10 @@ export const stationAcpRoutes = new Hono()
       }
 
       const stationId = c.req.param("id");
-      const { mode } = c.req.valid("json");
+      const { mode, mcpProxy } = c.req.valid("json");
 
       try {
-        const row = await acp.createSession({ stationId, userId: user.id, mode, authority: user.authority });
+        const row = await acp.createSession({ stationId, userId: user.id, mode, mcpProxy, authority: user.authority });
         return c.json(row, 201);
       } catch (err) {
         // The plane was needed (a caller with no token authority, under ORG_PLANE_*) and is down.

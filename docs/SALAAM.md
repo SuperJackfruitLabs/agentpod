@@ -193,7 +193,7 @@ compatible backup and reviewed runtime; old binaries refuse the newer schema.
 The baseline profile above remains available. New private host references add
 separate capabilities; upgrading binaries alone enables none of them. Install a
 matching reviewed Salaam build and node before the Hub and apply migration
-`0103_salaam_managed_mcp.sql`. Back up daemon state before schema 26; older
+`0103_salaam_mcp_reconnect.sql`. Back up daemon state before schema 26; older
 binaries require their compatible backup for rollback.
 
 `mcp_config` admits a closed HTTP MCP catalog through the node-owned loopback
@@ -241,3 +241,10 @@ For the closed profile schemas, limits and recovery details, consult the matchin
 Salaam build's `docs/contributor/managed-mcp.md` and
 `docs/contributor/station-execution.md`. Runtime, credentials, private manifests
 and journal state must stay outside the admitted source root.
+
+Interactive clients explicitly request configured tools when creating the session:
+`POST /api/stations/:id/acp/sessions` with `{"mode":"ask","mcpProxy":true}`.
+The console offers “Use configured station tools” before a new session. Omitted
+or false preserves the previous request behavior; this switch does not assign
+a server, grant new tools, or bypass the private host profile and fresh authority.
+A host requiring managed MCP refuses a session opened without its assignment.

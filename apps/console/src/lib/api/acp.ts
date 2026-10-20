@@ -16,7 +16,7 @@
  */
 
 import { AcpServerMsg as AcpServerMsgSchema } from "@agentpod/contract";
-import type { AcpSessionMode } from "@agentpod/contract";
+import type { AcpSessionMode, CreateAcpSessionBody } from "@agentpod/contract";
 import { http, withToken } from "./client";
 
 export type AcpSessionRow = import("@agentpod/contract").AcpSessionRow;
@@ -32,11 +32,11 @@ function hubUrl(): string {
 
 // ─── REST helpers ─────────────────────────────────────────────────────────────
 
-export const createAcpSession = (stationId: string, mode: AcpSessionMode) =>
+export const createAcpSession = (stationId: string, mode: AcpSessionMode, tools?: Pick<CreateAcpSessionBody, "mcpProxy">) =>
   http<AcpSessionRow>(`/api/stations/${stationId}/acp/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode }),
+    body: JSON.stringify({ mode, ...tools }),
   });
 
 /**

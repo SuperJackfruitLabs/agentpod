@@ -186,6 +186,9 @@ export class AcpChat {
    */
   #creating = $state(false);
 
+  /** Explicit intent for the next session, never a grant of new station tools. */
+  managedTools = $state(false);
+
   /**
    * Called with the text of a prompt whose echo will never arrive (the hub
    * rejected the turn, or the socket died before it landed). The panel hands it
@@ -488,7 +491,9 @@ export class AcpChat {
     if (this.destroyed || this.#creating) return null;
     this.#creating = true;
     try {
-      const row = await createAcpSession(this.stationId, this.mode);
+      const row = this.managedTools
+        ? await createAcpSession(this.stationId, this.mode, {mcpProxy:true})
+        : await createAcpSession(this.stationId, this.mode);
       return this.destroyed ? null : row;
     } catch (err) {
       // The ApiError message already carries the right "Couldn't …" grammar.

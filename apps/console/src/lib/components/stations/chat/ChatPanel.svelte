@@ -262,6 +262,13 @@
     />
   </div>
 
+  {#if chat.session === null || chat.status === "ended"}
+    <label class="flex items-center gap-2 border-b px-3 py-2 text-sm text-muted-foreground">
+      <input type="checkbox" bind:checked={chat.managedTools} disabled={chat.creating} />
+      Use configured station tools
+    </label>
+  {/if}
+
   <div class="min-h-0 flex-1">
     <!-- `chat.conversation`, not the raw transcript: whatever the agent said
          before the first prompt is session metadata and belongs to the header
