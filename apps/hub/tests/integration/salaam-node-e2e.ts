@@ -600,10 +600,21 @@ async function stationCases() {
       text: "[station] " + JSON.stringify(args),
       requestId,
     });
-    return until(
+    const receipt = await until(
       () => hub!.request("receipt", { id: first.id, requestId }),
-      (r) => r.state === "completed",
+      (r) =>
+        ["completed", "interrupted", "cancelled", "failed"].includes(r.state),
     );
+    await until(
+      () => hub!.request("record", { id: first.id }),
+      (r) => r.status === "idle",
+    );
+    assert.equal(
+      receipt.state,
+      "completed",
+      "Station prompt must finish successfully",
+    );
+    return receipt;
   };
   await send({ action: "search", query: "counter.txt" });
   const read = stationRows(
@@ -655,6 +666,10 @@ async function stationCases() {
     () => hub!.request("receipt", { id: first.id, requestId: logical }),
     (r) => r.state === "completed",
   );
+  await until(
+    () => hub!.request("record", { id: first.id }),
+    (r) => r.status === "idle",
+  );
   const patch = stationRows(
     "SELECT * FROM station_calls WHERE attempt_id=? AND kind='patch'",
     [receipt.attemptId],
@@ -675,7 +690,7 @@ async function stationCases() {
     command:
       "node -e " +
       quote(
-        "const fs=require('fs'),assert=require('assert/strict');assert.equal(fs.readFileSync('/workspace/counter.txt','utf8'),'after\\n');assert.throws(()=>fs.readFileSync('/workspace/.env'));assert.throws(()=>fs.writeFileSync('/workspace/counter.txt','bad'));assert.notEqual(process.getuid(),0);assert.equal(process.env.NO_PROXY,undefined);assert.deepEqual(fs.readdirSync('/sys/class/net'),['lo']);console.log('actual-root-check-ok');",
+        "const fs=require('fs'),assert=require('assert/strict');assert.equal(fs.readFileSync('/workspace/counter.txt').toString('hex'),'61667465720a');assert.throws(()=>fs.readFileSync('/workspace/.env'));assert.throws(()=>fs.writeFileSync('/workspace/counter.txt','bad'));assert.notEqual(process.getuid(),0);assert.equal(process.env.NO_PROXY,undefined);assert.deepEqual(fs.readdirSync('/sys/class/net'),['lo']);console.log('actual-root-check-ok');",
       ),
   });
   const checked = stationRows(
@@ -693,6 +708,10 @@ async function stationCases() {
   hub = bootHub();
   assert.equal(await hub.started, cfg.port);
   await until(() => hub!.request("online"), Boolean);
+  await until(
+    () => hub!.request("record", { id: first.id }),
+    (r) => r.status === "idle",
+  );
   await kill(nodeProcess);
   bootNode();
   await until(() => hub!.request("online"), Boolean);
@@ -715,7 +734,7 @@ async function stationCases() {
   );
   assert.equal(readFileSync(join(workspace, "counter.txt"), "utf8"), "after\n");
   record(
-    "Hub and node reconnect retain the station session and original reviewed patch attempt without a second filesystem dispatch",
+    "Separate Hub and node reconnects retain the station session and original reviewed patch attempt without a second filesystem dispatch",
   );
   const longId = randomUUID(),
     long = hub.request("prompt", {
@@ -1217,8 +1236,10 @@ try {
   await until(() => hub!.request("online"), Boolean);
   if (mcpMode) {
     await prepareMcpHost();
-    await mcpCases();
+    // The HTTP crash proof intentionally leaves an unresolved remote mutation.
+    // Keep it last: a new execution root must not bypass that durable fence.
     if (stationMode) await stationCases();
+    await mcpCases();
   } else if (runtimeMode) await runtimeCases();
   else {
     const first = await hub.request("create"),

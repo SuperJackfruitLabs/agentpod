@@ -1,6 +1,6 @@
 {
   "schema": 1,
   "repository": "SuperJackfruitLabs/salaam",
-  "revision": "fae28c62a5a3341753d933e0ace517ef657ba2bd",
-  "scope": "managed-http-mcp"
+  "revision": "364b88c5fd9ec7863eb9323d28a8de71c92e01b3",
+  "scope": "managed-station-mcp"
 }
