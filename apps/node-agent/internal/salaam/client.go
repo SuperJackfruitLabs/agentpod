@@ -130,6 +130,11 @@ func (c *Client) call(ctx context.Context, action string, body any, out any) err
 	if action == "mcp-assign" && c.HTTP == nil {
 		client.Timeout = 70 * time.Second
 	}
+	// Fresh protected tree/deliverable verification may scan large workspaces.
+	// This transport budget does not extend the authority lease.
+	if (action == "work-status" || action == "work-completion") && c.HTTP == nil {
+		client.Timeout = 120 * time.Second
+	}
 	res, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("salaam: authority control unavailable")

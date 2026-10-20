@@ -79,6 +79,7 @@ async function freshCompletion(sessionId: string, userId: string) {
     o.execution.binding.node_id,
     "salaam.work-completion",
     { binding: o.execution.binding },
+    { timeoutMs: 125_000 },
   );
   if (!response.ok) throw Error("Fresh protected completion unavailable");
   const current = await owner(sessionId, userId);

@@ -300,6 +300,7 @@ async function driveSalaamWork(
         execution.binding.node_id,
         "salaam.work-status",
         { binding: execution.binding },
+        { timeoutMs: 125_000 },
       );
       const status = z
         .object({
