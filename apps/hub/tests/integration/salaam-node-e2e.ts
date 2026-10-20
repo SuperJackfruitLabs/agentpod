@@ -788,7 +788,10 @@ async function stationCases() {
   await hub.request("end", { id: first.id });
   await until(
     () => hub!.request("status", { id: first.id }),
-    (r) => r.revoked && r.owned_execution_stopped,
+    (r) =>
+      r.revoked &&
+      r.owned_execution_stopped &&
+      r.unresolved_operations.length === 0,
   );
   record(
     "daemon SIGKILL stops the exact inherited systemd invocation/cgroup and preserves a failed check rather than replaying or verifying it",
@@ -884,7 +887,12 @@ async function stationCases() {
     }
     await until(
       () => hub!.request("status", { id: root.id }),
-      (r) => r.revoked && r.owned_execution_stopped,
+      // A stopped process alone is not the barrier for admitting the next root.
+      // The in-flight operation must also have a durable terminal settlement.
+      (r) =>
+        r.revoked &&
+        r.owned_execution_stopped &&
+        r.unresolved_operations.length === 0,
     );
     await running.catch(() => {});
     assert.equal(
@@ -1690,6 +1698,19 @@ try {
   acceptancePassed = true;
 } catch (error) {
   console.error("Salaam end-to-end proof failed:", (error as Error).message);
+  if (stationMode && existsSync(join(state, "journal.sqlite"))) {
+    for (const query of [
+      "SELECT id,state,error FROM sessions",
+      "SELECT session_id,state,kind,helper_state FROM station_calls",
+      "SELECT call_id,state FROM station_units",
+    ]) {
+      try {
+        console.error("Station failure metadata:", JSON.stringify(stationRows(query)));
+      } catch {
+        // Preserve the original failure if the diagnostic journal is unavailable.
+      }
+    }
+  }
   if (existsSync(join(state, "host.log")))
     logs.push(readFileSync(join(state, "host.log"), "utf8").slice(-24000));
   console.error(logs.slice(-20).join("\n"));
