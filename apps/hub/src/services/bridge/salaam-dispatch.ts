@@ -346,7 +346,7 @@ export async function settleNeverDispatchedSalaamWork(
   }
   if (
     r.status !== "ended" ||
-    !["crashed", "released"].includes(r.outcome ?? "") ||
+    !["crashed", "released", "reclaimed"].includes(r.outcome ?? "") ||
     !r.endedAt
   )
     throw Error("Original producer non-success terminal receipt required");

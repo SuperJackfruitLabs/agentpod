@@ -1401,144 +1401,159 @@ import {
   settleNeverDispatchedSalaamWork,
   resumeSalaamWork,
 } from "../../src/services/bridge/salaam-dispatch";
-test("explicit never-dispatched settlement retains owner and recovers lost producer and daemon replies", async () => {
-  const { work, completion } = await reportFixture();
-  const [originalSession] = await db
-    .select()
-    .from(acpSessions)
-    .where(eq(acpSessions.id, session));
-  if (!originalSession?.executionAuthority) throw Error("missing authority");
-  const authority = structuredClone(originalSession.executionAuthority);
-  authority.state = "revoked";
-  authority.sessionId = crypto.randomUUID();
-  authority.admissionId = crypto.randomUUID();
-  authority.receipt = {
-    admission_id: authority.admissionId,
-    session_id: authority.sessionId,
-    binding: authority.binding,
-    binding_digest: workDigest(authority.binding),
-    lease_sequence: 1,
-    expires_at: 1,
-    authorized: false,
-    revoked: true,
-    owned_execution_stopped: true,
-    unresolved_operations: [],
-    active_attempts: [],
-    interrupted_attempts: [],
-  };
-  await db
-    .update(acpSessions)
-    .set({ status: "ended", executionAuthority: authority })
-    .where(eq(acpSessions.id, session));
-  await db
-    .update(salaamWorkOwners)
-    .set({
-      settlement: null,
-      receipt: { task_id: completion.task_id, plan_revision: 1 },
-    })
-    .where(eq(salaamWorkOwners.requestId, work.requestId));
-  let live = { ...context, run: { ...context.run } },
-    fails = 0,
-    daemonCalls = 0;
-  const request = crypto.randomUUID();
-  const deps = {
-    tenantId,
-    source: "superpipeline",
-    agent: {
-      key: "proof",
-      boardId: board,
-      stationId: station,
-      hubUserId: user,
-    },
-    client: {
-      context: async () => live,
-      fail: async () => {
-        fails++;
-        live = {
-          ...live,
-          run: {
-            ...live.run,
-            status: "ended",
-            outcome: "crashed",
-            endedAt: "2026-10-20T18:00:00.000Z",
-          },
-        };
-        throw Error("lost producer reply");
-      },
-    },
-  } as unknown as DispatchDeps;
-  const mock = spyOn(broker, "request").mockImplementation(
-    async (_node, verb, body: any) => {
-      expect(verb).toBe("salaam.work-settle");
-      daemonCalls++;
-      if (daemonCalls === 1)
-        return { ok: false, error: "lost daemon reply" } as never;
-      return {
-        ok: true,
-        data: {
-          version: 1,
-          state: "cancelled",
-          effects: "never_dispatched",
-          request_id: request,
-          work_request_id: work.requestId,
-          session_id: authority.sessionId,
-          task_id: completion.task_id,
-          plan_revision: 1,
-          binding_digest: workDigest(authority.binding),
-          producer_terminal_digest: body.producer_terminal_digest,
+test.each(["crashed", "reclaimed"])(
+  "explicit never-dispatched settlement retains original %s owner across lost replies and later leases",
+  async (terminalOutcome) => {
+    const { work, completion } = await reportFixture();
+    const [originalSession] = await db
+      .select()
+      .from(acpSessions)
+      .where(eq(acpSessions.id, session));
+    if (!originalSession?.executionAuthority) throw Error("missing authority");
+    const authority = structuredClone(originalSession.executionAuthority);
+    authority.state = "revoked";
+    authority.sessionId = crypto.randomUUID();
+    authority.admissionId = crypto.randomUUID();
+    authority.receipt = {
+      admission_id: authority.admissionId,
+      session_id: authority.sessionId,
+      binding: authority.binding,
+      binding_digest: workDigest(authority.binding),
+      lease_sequence: 1,
+      expires_at: 1,
+      authorized: false,
+      revoked: true,
+      owned_execution_stopped: true,
+      unresolved_operations: [],
+      active_attempts: [],
+      interrupted_attempts: [],
+    };
+    await db
+      .update(acpSessions)
+      .set({ status: "ended", executionAuthority: authority })
+      .where(eq(acpSessions.id, session));
+    await db
+      .update(salaamWorkOwners)
+      .set({
+        settlement: null,
+        receipt: { task_id: completion.task_id, plan_revision: 1 },
+      })
+      .where(eq(salaamWorkOwners.requestId, work.requestId));
+    let live = { ...context, run: { ...context.run } },
+      fails = 0,
+      daemonCalls = 0;
+    if (terminalOutcome === "reclaimed")
+      live = {
+        ...live,
+        card: { ...live.card, currentRunId: "run_successor" },
+        run: {
+          ...live.run,
+          status: "ended",
+          outcome: "reclaimed",
+          endedAt: "2026-10-20T18:00:00.000Z",
         },
-      } as never;
-    },
-  );
-  try {
-    await expect(
-      settleNeverDispatchedSalaamWork(deps, run, request),
-    ).rejects.toThrow("unresolved");
-    expect(fails).toBe(1);
-    await expect(
-      settleNeverDispatchedSalaamWork(deps, run, crypto.randomUUID()),
-    ).rejects.toThrow("Original settlement");
-    const result = await settleNeverDispatchedSalaamWork(deps, run, request);
-    expect(result.state).toBe("cancelled");
-    expect(await settleNeverDispatchedSalaamWork(deps, run, request)).toEqual(
-      result,
+      } as typeof live;
+    const expectedFails = terminalOutcome === "reclaimed" ? 0 : 1;
+    const request = crypto.randomUUID();
+    const deps = {
+      tenantId,
+      source: "superpipeline",
+      agent: {
+        key: "proof",
+        boardId: board,
+        stationId: station,
+        hubUserId: user,
+      },
+      client: {
+        context: async () => live,
+        fail: async () => {
+          fails++;
+          live = {
+            ...live,
+            run: {
+              ...live.run,
+              status: "ended",
+              outcome: terminalOutcome,
+              endedAt: "2026-10-20T18:00:00.000Z",
+            },
+          };
+          throw Error("lost producer reply");
+        },
+      },
+    } as unknown as DispatchDeps;
+    const mock = spyOn(broker, "request").mockImplementation(
+      async (_node, verb, body: any) => {
+        expect(verb).toBe("salaam.work-settle");
+        daemonCalls++;
+        if (daemonCalls === 1)
+          return { ok: false, error: "lost daemon reply" } as never;
+        return {
+          ok: true,
+          data: {
+            version: 1,
+            state: "cancelled",
+            effects: "never_dispatched",
+            request_id: request,
+            work_request_id: work.requestId,
+            session_id: authority.sessionId,
+            task_id: completion.task_id,
+            plan_revision: 1,
+            binding_digest: workDigest(authority.binding),
+            producer_terminal_digest: body.producer_terminal_digest,
+          },
+        } as never;
+      },
     );
-    expect(fails).toBe(1);
-    expect(await resumeSalaamWork(deps)).toBe(null);
-    expect(
-      await db
-        .select()
-        .from(salaamWorkOwners)
-        .where(eq(salaamWorkOwners.requestId, work.requestId)),
-    ).toHaveLength(1);
-    expect(
-      (
+    try {
+      await expect(
+        settleNeverDispatchedSalaamWork(deps, run, request),
+      ).rejects.toThrow("unresolved");
+      expect(fails).toBe(expectedFails);
+      await expect(
+        settleNeverDispatchedSalaamWork(deps, run, crypto.randomUUID()),
+      ).rejects.toThrow("Original settlement");
+      const result = await settleNeverDispatchedSalaamWork(deps, run, request);
+      expect(result.state).toBe("cancelled");
+      expect(await settleNeverDispatchedSalaamWork(deps, run, request)).toEqual(
+        result,
+      );
+      expect(fails).toBe(expectedFails);
+      expect(await resumeSalaamWork(deps)).toBe(null);
+      expect(
         await db
           .select()
-          .from(bridgeDispatches)
-          .where(eq(bridgeDispatches.externalRunId, run))
-      )[0]?.outcome,
-    ).toBe("abandoned");
-    live = { ...live, run: { ...live.run, leaseEpoch: 2 } };
-    await expect(
-      settleNeverDispatchedSalaamWork(deps, run, request),
-    ).rejects.toThrow("run changed");
-    authority.receipt.owned_execution_stopped = false;
-    await db
-      .update(acpSessions)
-      .set({ executionAuthority: authority })
-      .where(eq(acpSessions.id, session));
-    await expect(
-      settleNeverDispatchedSalaamWork(deps, run, request),
-    ).rejects.toThrow("stopped work owner");
-  } finally {
-    mock.mockRestore();
-    await db
-      .update(acpSessions)
-      .set({
-        status: originalSession.status,
-        executionAuthority: originalSession.executionAuthority,
-      })
-      .where(eq(acpSessions.id, session));
-  }
-});
+          .from(salaamWorkOwners)
+          .where(eq(salaamWorkOwners.requestId, work.requestId)),
+      ).toHaveLength(1);
+      expect(
+        (
+          await db
+            .select()
+            .from(bridgeDispatches)
+            .where(eq(bridgeDispatches.externalRunId, run))
+        )[0]?.outcome,
+      ).toBe("abandoned");
+      live = { ...live, run: { ...live.run, leaseEpoch: 2 } };
+      await expect(
+        settleNeverDispatchedSalaamWork(deps, run, request),
+      ).rejects.toThrow("run changed");
+      authority.receipt.owned_execution_stopped = false;
+      await db
+        .update(acpSessions)
+        .set({ executionAuthority: authority })
+        .where(eq(acpSessions.id, session));
+      await expect(
+        settleNeverDispatchedSalaamWork(deps, run, request),
+      ).rejects.toThrow("stopped work owner");
+    } finally {
+      mock.mockRestore();
+      await db
+        .update(acpSessions)
+        .set({
+          status: originalSession.status,
+          executionAuthority: originalSession.executionAuthority,
+        })
+        .where(eq(acpSessions.id, session));
+    }
+  },
+);

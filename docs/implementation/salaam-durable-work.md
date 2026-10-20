@@ -301,8 +301,10 @@ operator may quiesce its controller and invoke `settleNeverDispatchedSalaamWork`
 with the original run and one durable recovery request ID. The Hub verifies the
 exact stopped authority and original producer run/card/stage/lease. A still-working
 original run is failed through its normal authenticated producer API; a lost reply
-is reconciled by reading that original run. The producer's immutable ended/crashed
-or ended/released projection proves non-success, not who caused it.
+is reconciled by reading that original run. The producer's immutable ended/crashed,
+ended/released, or ended/reclaimed projection proves non-success, not who caused it.
+A reclaimed original run can have a successor; settlement only retires the stopped
+original owner and never authorizes actions on the successor.
 
 Migration0109 stores recovery intent, immutable producer terminal projection and
 exact daemon cancellation receipt on the original owner. The private native
