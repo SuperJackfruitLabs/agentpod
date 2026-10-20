@@ -530,8 +530,8 @@ export class SuperpipelineClient {
     return this.verb(lease, "block", { reason });
   }
 
-  fail(lease: RunLease, reason: string): Promise<unknown> {
-    return this.verb(lease, "fail", { reason });
+  fail(lease: RunLease, reason: string, beforeSend?: () => Promise<void>): Promise<unknown> {
+    return this.send("POST", `/v1/boards/${this.boardId}/runs/${lease.runId}/fail`, {leaseEpoch:lease.leaseEpoch,reason}, beforeSend);
   }
 
   release(lease: RunLease): Promise<unknown> {

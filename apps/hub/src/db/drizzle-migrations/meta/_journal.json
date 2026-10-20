@@ -764,6 +764,13 @@
       "when": 1792510800000,
       "tag": "0108_bridge_plane_credential",
       "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1792510800001,
+      "tag": "0109_salaam_work_settlement",
+      "breakpoints": true
     }
   ]
 }

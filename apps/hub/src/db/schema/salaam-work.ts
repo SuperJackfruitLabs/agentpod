@@ -24,6 +24,7 @@ export const salaamWorkOwners = pgTable(
     requestId: text("request_id").notNull().unique(),
     payload: jsonb("payload").notNull(),
     receipt: jsonb("receipt"),
+    settlement: jsonb("settlement"),
   },
   (t) => [
     primaryKey({ columns: [t.externalSource, t.externalRunId] }),

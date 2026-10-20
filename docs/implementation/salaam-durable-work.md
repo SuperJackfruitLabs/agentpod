@@ -293,3 +293,33 @@ in-flight renewal before accepting a result; renewal failure wins over a late
 successful observation. Timers end before reporting to the board, so an ended run
 is not accidentally renewed. Historical original-run report reconciliation still
 requires no new execution grant.
+
+### Explicit terminal settlement of never-dispatched work
+
+An admitted task whose original run expired before progression is retained. An
+operator may quiesce its controller and invoke `settleNeverDispatchedSalaamWork`
+with the original run and one durable recovery request ID. The Hub verifies the
+exact stopped authority and original producer run/card/stage/lease. A still-working
+original run is failed through its normal authenticated producer API; a lost reply
+is reconciled by reading that original run. The producer's immutable ended/crashed
+or ended/released projection proves non-success, not who caused it.
+
+Migration0109 stores recovery intent, immutable producer terminal projection and
+exact daemon cancellation receipt on the original owner. The private native
+`work-settle` route checks the exact revoked/stopped owner, and the daemon refuses
+any task with attempts, operations, checks, grants, children or unresolved resources.
+Only a confirmed `cancelled` / `never_dispatched` receipt retires the dispatch as
+abandoned. The owner and task remain present. Unknown responses preserve the fence;
+retry uses the original request and terminal digest. This action is not automatic
+polling, model permission, a new lease, or successful completion.
+
+Candidate upgrades apply migration0109 only to the isolated candidate database
+through the ordinary migration helper after a private backup. Updated Hub, native
+node and reviewed Salaam daemon must be deployed together before invoking recovery.
+
+The concrete operator entry is the existing guarded admin surface:
+`POST /api/admin/bridge/agents/:key/salaam-settle` with only `runId` and `requestId`.
+Restart Hub with `ENABLE_SUPERPIPELINE_BRIDGE=false` first; roster pause alone does
+not quiesce an in-flight controller. The exact operator-owned roster must be enabled
+for normal short-lived credential resolution while global loops remain disabled.
+No credentials are returned. Keep the same request ID after an uncertain response.

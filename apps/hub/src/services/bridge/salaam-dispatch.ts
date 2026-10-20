@@ -1,3 +1,4 @@
+import { SalaamWorkSettlementReceipt as terminalSettlementReceipt } from "../../../../../packages/contract/src/salaam-work-settlement";
 import { observeWithLease } from "./salaam-observation";
 /** Strict Salaam controller selected only by a fresh private runtime probe. */
 import { and, eq, sql } from "drizzle-orm";
@@ -190,6 +191,215 @@ export async function reconcileUnopenedSalaamRelease(
   });
 }
 
+const settlementRecord = z
+  .object({
+    version: z.literal(1),
+    request_id: z.string().uuid(),
+    terminal: z.unknown().nullable(),
+    receipt: terminalSettlementReceipt.nullable(),
+  })
+  .strict();
+/** Explicit operator recovery only: caller quiesces the controller/roster first.
+ * Never called by polling, claim, model tools, or generic ACP completion. */
+export async function settleNeverDispatchedSalaamWork(
+  deps: Pick<DispatchDeps, "tenantId" | "source" | "client"> & {
+    agent: Pick<
+      DispatchDeps["agent"],
+      "key" | "boardId" | "stationId" | "hubUserId"
+    >;
+  },
+  runId: string,
+  requestId: string,
+) {
+  z.string().uuid().parse(requestId);
+  const read = async () => {
+    const [w] = await db
+      .select()
+      .from(salaamWorkOwners)
+      .where(
+        and(
+          eq(salaamWorkOwners.tenantId, deps.tenantId),
+          eq(salaamWorkOwners.externalSource, deps.source),
+          eq(salaamWorkOwners.externalRunId, runId),
+        ),
+      );
+    const [s] = w
+      ? await db
+          .select()
+          .from(acpSessions)
+          .where(
+            and(
+              eq(acpSessions.id, w.sessionId),
+              eq(acpSessions.userId, deps.agent.hubUserId),
+              eq(acpSessions.stationId, deps.agent.stationId),
+            ),
+          )
+      : [];
+    if (
+      !w ||
+      !s ||
+      !s.executionAuthority ||
+      !stoppedUnownedSession(s, runId, s.executionAuthority.binding.run.epoch)
+    )
+      throw Error("Exact stopped work owner required");
+    const payload = SalaamWorkPayload.parse(w.payload);
+    if (
+      payload.admission.work.board_id !== deps.agent.boardId ||
+      workDigest(payload.admission.binding) !==
+        workDigest(s.executionAuthority.binding) ||
+      !w.receipt
+    )
+      throw Error("Settlement owner mismatch");
+    return { w, s, payload };
+  };
+  let state = await read();
+  const persist = async (next: unknown, expected: unknown, retire = false) =>
+    db.transaction(async (tx) => {
+      const [current] = await tx
+        .select()
+        .from(salaamWorkOwners)
+        .where(eq(salaamWorkOwners.requestId, state.w.requestId))
+        .for("update");
+      if (
+        !current ||
+        workDigest(current.payload) !== workDigest(state.w.payload) ||
+        workDigest(current.settlement) !== workDigest(expected)
+      )
+        throw Error("Settlement changed concurrently");
+      const [session] = await tx
+        .select()
+        .from(acpSessions)
+        .where(eq(acpSessions.id, current.sessionId))
+        .for("update");
+      if (
+        !session ||
+        !stoppedUnownedSession(
+          session,
+          runId,
+          state.payload.admission.binding.run.epoch,
+        )
+      )
+        throw Error("Settlement stop proof changed");
+      await tx
+        .update(salaamWorkOwners)
+        .set({ settlement: next })
+        .where(eq(salaamWorkOwners.requestId, current.requestId));
+      if (retire)
+        await tx
+          .update(bridgeDispatches)
+          .set({
+            outcome: "abandoned",
+            reason: "Explicit never-dispatched work cancellation verified",
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(bridgeDispatches.tenantId, deps.tenantId),
+              eq(bridgeDispatches.externalSource, deps.source),
+              eq(bridgeDispatches.externalRunId, runId),
+              eq(
+                bridgeDispatches.leaseEpoch,
+                state.payload.admission.binding.run.epoch,
+              ),
+            ),
+          );
+    });
+  if (!state.w.settlement) {
+    await persist(
+      { version: 1, request_id: requestId, terminal: null, receipt: null },
+      null,
+    );
+    state = await read();
+  }
+  let saved = settlementRecord.parse(state.w.settlement);
+  if (saved.request_id !== requestId)
+    throw Error("Original settlement request required");
+  const verifyRun = (value: RunContext) => {
+    const r = value.run,
+      a = state.payload.admission;
+    if (
+      r.runId !== runId ||
+      r.cardId !== a.work.card_id ||
+      r.stageKey !== a.work.stage_key ||
+      r.leaseEpoch !== a.binding.run.epoch
+    )
+      throw Error("Original producer run changed");
+    return r;
+  };
+  let original = await deps.client.context(runId);
+  let r = verifyRun(original);
+  if (r.status === "working") {
+    if (saved.terminal) throw Error("Terminal producer run revived");
+    try {
+      await deps.client.fail(
+        { runId, leaseEpoch: r.leaseEpoch },
+        "Operator cancelled never-dispatched stopped work",
+        async () => {
+          await read();
+        },
+      );
+    } catch {
+      /* Lost reply must be reconciled from the original run below. */
+    }
+    original = await deps.client.context(runId);
+    r = verifyRun(original);
+  }
+  if (
+    r.status !== "ended" ||
+    !["crashed", "released"].includes(r.outcome ?? "") ||
+    !r.endedAt
+  )
+    throw Error("Original producer non-success terminal receipt required");
+  const terminal = {
+    version: 1,
+    board_id: deps.agent.boardId,
+    run_id: r.runId,
+    card_id: r.cardId,
+    stage_key: r.stageKey,
+    lease_epoch: r.leaseEpoch,
+    status: r.status,
+    outcome: r.outcome,
+    ended_at: r.endedAt,
+  };
+  if (saved.terminal && workDigest(saved.terminal) !== workDigest(terminal))
+    throw Error("Producer terminal receipt changed");
+  if (!saved.terminal) {
+    const next = { ...saved, terminal };
+    await persist(next, saved);
+    saved = next;
+  }
+  // Both read and replay remain scoped to the immutable stopped root.
+  state = await read();
+  const result = await broker.request(
+    state.payload.admission.binding.node_id,
+    "salaam.work-settle",
+    {
+      binding: state.payload.admission.binding,
+      request_id: requestId,
+      work_request_id: state.w.requestId,
+      producer_terminal_digest: workDigest(terminal),
+    },
+  );
+  if (!result.ok)
+    throw Error("Daemon terminal settlement unresolved; retain original owner");
+  const receipt = terminalSettlementReceipt.parse(result.data),
+    admitted = state.w.receipt as { task_id: string; plan_revision: number };
+  if (
+    receipt.request_id !== requestId ||
+    receipt.work_request_id !== state.w.requestId ||
+    receipt.session_id !== state.s.executionAuthority!.sessionId ||
+    receipt.task_id !== admitted.task_id ||
+    receipt.plan_revision !== admitted.plan_revision ||
+    receipt.binding_digest !== workDigest(state.payload.admission.binding) ||
+    receipt.producer_terminal_digest !== workDigest(terminal)
+  )
+    throw Error("Daemon settlement receipt mismatch");
+  if (saved.receipt && workDigest(saved.receipt) !== workDigest(receipt))
+    throw Error("Saved settlement changed");
+  await persist({ ...saved, receipt }, saved, true);
+  return receipt;
+}
+
 /** Recover original owned sessions BEFORE asking the board for any new claim. */
 export async function resumeSalaamWork(
   deps: DispatchDeps,
@@ -228,7 +438,11 @@ export async function resumeSalaamWork(
       )
     ) {
       const [owner] = await db
-        .select({ id: salaamWorkOwners.requestId })
+        .select({
+          id: salaamWorkOwners.requestId,
+          settlement: salaamWorkOwners.settlement,
+          admissionReceipt: salaamWorkOwners.receipt,
+        })
         .from(salaamWorkOwners)
         .where(
           and(
@@ -237,6 +451,26 @@ export async function resumeSalaamWork(
           ),
         );
       if (!owner) continue;
+      const retired = settlementRecord.safeParse(owner.settlement);
+      if (
+        retired.success &&
+        retired.data.receipt &&
+        retired.data.receipt.binding_digest ===
+          workDigest(row.session.executionAuthority!.binding) &&
+        retired.data.receipt.work_request_id === owner.id &&
+        retired.data.receipt.request_id === retired.data.request_id &&
+        retired.data.receipt.session_id ===
+          row.session.executionAuthority!.sessionId &&
+        retired.data.terminal !== null &&
+        retired.data.receipt.producer_terminal_digest ===
+          workDigest(retired.data.terminal) &&
+        retired.data.receipt.task_id ===
+          (owner.admissionReceipt as { task_id?: string } | null)?.task_id &&
+        retired.data.receipt.plan_revision ===
+          (owner.admissionReceipt as { plan_revision?: number } | null)
+            ?.plan_revision
+      )
+        continue;
     }
     pending.push(row);
   }

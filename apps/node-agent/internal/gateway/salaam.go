@@ -45,6 +45,24 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 		result, err := h.client.WorkCapability(ctx, p.NodeID, p.Workspace, p.Key)
 		return result, false, err
 	}
+	if verb == "salaam.work-settle" {
+		var p salaam.WorkSettlement
+		d := json.NewDecoder(strings.NewReader(string(params)))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&p); err != nil {
+			return nil, false, fmt.Errorf("salaam: invalid settlement")
+		}
+		var extra any
+		if d.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing settlement")
+		}
+		owner, err := h.client.Request(ctx, "status", p.Binding, "work-settlement-owner", 0, "")
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := h.client.SettleWork(ctx, p, owner)
+		return result, false, err
+	}
 	if verb == "salaam.work-progress" {
 		var p salaam.WorkProgress
 		d := json.NewDecoder(strings.NewReader(string(params)))
