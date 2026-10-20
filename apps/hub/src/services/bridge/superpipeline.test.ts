@@ -308,3 +308,13 @@ describe("SuperpipelineClient: tracing", () => {
     expect(span.status.code).toBe(2);
   });
 });
+
+test('trusted credentials are refreshed per request and completion guard runs after exchange', async () => {
+  const order:string[]=[];
+  const client=new SuperpipelineClient({baseUrl:'https://board.test',boardId:BOARD,token:'',credential:async()=>{order.push('credential');return 'signed-agent-token';},fetch:async()=>{order.push('send');return{status:200,ok:true,json:async()=>({card:{id:'x'}})}}});
+  await client.completeVerified({runId:'run_x',leaseEpoch:1},{},async()=>{order.push('guard');});
+  expect(order).toEqual(['credential','guard','send']);
+  order.length=0;
+  await expect(client.completeVerified({runId:'run_x',leaseEpoch:1},{},async()=>{order.push('guard');throw Error('revoked');})).rejects.toThrow('revoked');
+  expect(order).toEqual(['credential','guard']);
+});
