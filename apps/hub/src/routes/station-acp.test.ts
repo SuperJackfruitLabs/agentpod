@@ -972,3 +972,17 @@ test(
   },
   20_000
 );
+
+
+test("public session creation forwards explicit managed proxy intent to the assigned node", async () => {
+  const {server,nodeId,fake,station,baseUrl}=await setupRig("acproute-managed-tools", {mcpProxyEcho:["agentpod","superlibrary"]});
+  let id:string|undefined;
+  try {
+    await rawSql`UPDATE nodes SET capabilities='["mcp.proxy"]'::jsonb WHERE id=${nodeId}`;
+    const res=await createSessionReq(baseUrl,station.id,{mode:"ask",mcpProxy:true});
+    expect(res.status).toBe(201);id=((await res.json()) as AcpSessionRow).id;
+    const open=fake.nodeMsgs.map((s:string)=>JSON.parse(s) as {type?:string;verb?:string;params?:{mcpProxy?:unknown}}).find(m=>m.type==="req"&&m.verb==="acp.open");
+    expect(open?.params?.mcpProxy).toEqual({stationId:station.id});
+    expect((await createSessionReq(baseUrl,station.id,{mode:"ask",mcpProxy:"true"})).status).toBe(400);
+  } finally {if(id)await endSession(TEST_USER,id,"test done");fake.close();server.stop(true)}
+},30000);

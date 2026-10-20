@@ -20,6 +20,7 @@ import {
   uniqueIndex,
   foreignKey,
   check,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import type { SalaamAuthority, SalaamAuthorityStatus } from "@agentpod/contract";
@@ -65,6 +66,8 @@ export const acpSessions = pgTable("acp_sessions", {
   endedReason: text("ended_reason"),
   nodeSessionId: text("node_session_id"),                             // the node-side acp_* id, for reconciliation acp.close
   executionAuthority: jsonb("execution_authority").$type<StoredSalaamExecution>(),
+  // Public reconnect intent, never a credential or an execution grant.
+  mcpProxyRequested: boolean("mcp_proxy_requested").notNull().default(false),
   title: text("title"),                                               // first prompt, truncated; null until the first prompt
   lastSeq: integer("last_seq").notNull().default(0),                  // highest event seq persisted for this session
   createdAt: timestamp("created_at").notNull(),

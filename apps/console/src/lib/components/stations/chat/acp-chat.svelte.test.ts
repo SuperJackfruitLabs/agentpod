@@ -1301,3 +1301,10 @@ test("an advertising Salaam Hub receives a durable UUID and its receipt clears r
     expect(sessionStorage.getItem("agentpod.salaam.pending:s1")).toBeNull();
   } finally { chat.destroy(); sessionStorage.clear(); }
 });
+
+
+test("managed station tools are explicitly selected for a new session", async()=>{
+  const create=vi.spyOn(api,"createAcpSession").mockResolvedValue(row());
+  const chat=new AcpChat("st1");chat.managedTools=true;await chat.newSession();
+  expect(create).toHaveBeenCalledWith("st1","ask",{mcpProxy:true});chat.destroy();
+});

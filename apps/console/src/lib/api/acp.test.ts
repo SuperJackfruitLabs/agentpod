@@ -333,3 +333,10 @@ test("endAcpSession DELETEs /api/acp/sessions/:sessionId and resolves on 204", a
   expect(url).toBe("http://hub.test:3001/api/acp/sessions/s9");
   expect(init.method).toBe("DELETE");
 });
+
+
+test("createAcpSession sends an explicit managed station tools request", async()=>{
+  const fetchSpy=vi.fn().mockResolvedValue(jsonResponse(sessionRow,201));vi.stubGlobal("fetch",fetchSpy);
+  await createAcpSession("st1","ask",{mcpProxy:true});
+  expect(JSON.parse(fetchSpy.mock.calls[0][1].body)).toEqual({mode:"ask",mcpProxy:true});
+});

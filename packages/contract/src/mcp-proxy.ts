@@ -16,7 +16,8 @@ import { z } from "zod";
  * false`; enabling the proxy for them would serve a station whose sessions never get the servers.
  * The node keeps the same list (mcpproxy.SupportsHTTP) and injects nothing for any other harness.
  */
-export const MCP_PROXY_HARNESSES = ["hermes", "claude-code", "codex", "opencode"] as const;
+// Salaam additionally requires a reviewed managed-MCP host profile and private node assignment.
+export const MCP_PROXY_HARNESSES = ["hermes", "claude-code", "codex", "opencode", "salaam"] as const;
 
 export function mcpProxyEligible(harness: string): boolean {
   return (MCP_PROXY_HARNESSES as readonly string[]).includes(harness);

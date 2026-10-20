@@ -294,6 +294,9 @@ func runCmd() {
 	var salaamClient *salaam.Client
 	if cfg.SalaamStateDir != "" && cfg.SalaamWorkspace != "" {
 		salaamClient = &salaam.Client{State: cfg.SalaamStateDir, NodeID: cfg.NodeID, Workspace: cfg.SalaamWorkspace}
+		if proxy != nil {
+			salaamClient.BindMCP = proxy.BindIdentity
+		}
 		if cfg.SalaamManifest != "" || cfg.SalaamNodeBinary != "" {
 			salaamClient.Runtime = &salaam.Runtime{Node: cfg.SalaamNodeBinary, CLI: cfg.SalaamBinary, Manifest: cfg.SalaamManifest, State: cfg.SalaamStateDir, Workspace: cfg.SalaamWorkspace, NodeID: cfg.NodeID}
 		}

@@ -17,6 +17,15 @@ import { z } from "zod";
 export const AcpSessionMode = z.enum(["ask", "accept-edits", "full-auto"]);
 export type AcpSessionMode = z.infer<typeof AcpSessionMode>;
 
+/** Session intent only: the node's explicit station assignment and private
+ * daemon profile remain the authority for every offered managed tool. */
+export const CreateAcpSessionBody = z.object({
+  mode: AcpSessionMode,
+  mcpProxy: z.boolean().optional(),
+});
+export type CreateAcpSessionBody = z.infer<typeof CreateAcpSessionBody>;
+
+
 export const AcpSessionStatus = z.enum(["starting", "idle", "working", "waiting", "ended"]);
 export type AcpSessionStatus = z.infer<typeof AcpSessionStatus>;
 

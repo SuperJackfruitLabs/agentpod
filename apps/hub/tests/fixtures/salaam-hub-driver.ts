@@ -12,7 +12,14 @@ import { tenants, BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { acpEvents, acpSessions } from "../../src/db/schema/acp";
 import { bridgeDispatches } from "../../src/db/schema/bridge";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { fakePlane, installFakePlane, TEST_ORG } from "../helpers/fake-plane";
+import {
+  fakePlane,
+  installFakePlane,
+  TEST_ORG,
+  setFakePlaneSigningKeyForRecovery,
+} from "../helpers/fake-plane";
+import { createStationTokenRoutes } from "../../src/routes/station-token";
+import { salaamMcpFixture } from "./salaam-mcp-server";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { connectionManager } from "../../src/services/connection-manager";
 import { gatewayRoutes } from "../../src/routes/gateway";
@@ -29,6 +36,8 @@ if (
   database.pathname !== "/agentpod"
 )
   throw Error("Use only the isolated pgvector database on loopback:5434");
+if (cfg.fixtureSigningKey)
+  setFakePlaneSigningKeyForRecovery(cfg.fixtureSigningKey);
 installFakePlane();
 fakePlane.addHuman({
   id: cfg.userId,
@@ -78,6 +87,14 @@ await db
   .onConflictDoNothing();
 await sessions.reconcileOnBoot();
 const app = new Hono().route("/public/nodes", gatewayRoutes);
+const managedMcp = cfg.mcpRehearsal
+  ? salaamMcpFixture(cfg.principalId)
+  : undefined;
+if (managedMcp) {
+  app.route("/api", createStationTokenRoutes());
+  app.all("/mcp", (c) => managedMcp.handle(c.req.raw, "agentpod"));
+  app.all("/mcp-library", (c) => managedMcp.handle(c.req.raw, "superlibrary"));
+}
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: cfg.port ?? 0,
@@ -149,7 +166,21 @@ input.on("line", (line) => {
             stationId: cfg.stationId,
             userId: cfg.userId,
             mode: "ask",
+            ...(cfg.mcpRehearsal ? { mcpProxy: true } : {}),
           });
+          break;
+        case "mcp-observed":
+          result = managedMcp?.observed;
+          break;
+        case "permission":
+          await sessions.answerPermission(cfg.userId, p.id, p.seq, p.optionId);
+          result = true;
+          break;
+        case "mcp-mode":
+          if (!managedMcp) throw Error("Managed MCP fixture is not enabled");
+          if (typeof p.hold === "boolean") managedMcp.mode.hold = p.hold;
+          if (typeof p.drift === "boolean") managedMcp.mode.drift = p.drift;
+          result = true;
           break;
         case "prompt":
           result = await sessions.promptSession(
@@ -205,6 +236,7 @@ input.on("line", (line) => {
             .update(stations)
             .set({ principalId: p.principalId })
             .where(eq(stations.id, cfg.stationId));
+          if (managedMcp) managedMcp.mode.principal = p.principalId;
           result = true;
           break;
         case "suspend":

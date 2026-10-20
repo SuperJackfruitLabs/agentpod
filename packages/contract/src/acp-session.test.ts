@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   AcpSessionMode,
+  CreateAcpSessionBody,
   AcpMcpServer,
   AcpSessionStatus,
   AcpSessionRow,
@@ -165,4 +166,12 @@ it("AcpMcpServer is HTTP only, and a stdio entry is refused", () => {
   // stdio would be a second way to run code on the station; the board cannot vouch for one.
   expect(() => AcpMcpServer.parse({ type: "stdio", name: "local", command: "/bin/sh" })).toThrow();
   expect(() => AcpMcpServer.parse({ type: "http", name: "superpipeline", url: "not-a-url" })).toThrow();
+});
+
+
+it("session creation preserves explicit managed tools intent without enabling it for old clients", () => {
+  expect(CreateAcpSessionBody.parse({mode:"ask"})).toEqual({mode:"ask"});
+  expect(CreateAcpSessionBody.parse({mode:"ask",mcpProxy:true})).toEqual({mode:"ask",mcpProxy:true});
+  expect(CreateAcpSessionBody.parse({mode:"ask",mcpProxy:false})).toEqual({mode:"ask",mcpProxy:false});
+  expect(CreateAcpSessionBody.safeParse({mode:"ask",mcpProxy:"true"}).success).toBe(false);
 });

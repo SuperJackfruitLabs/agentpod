@@ -1,6 +1,7 @@
 package mcpproxy
 
 import (
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // startAt runs a proxy for stations over a fake hub upstream, persisting its state at path.
@@ -36,7 +38,40 @@ func startAt(t *testing.T, path string, stations ...string) (*Proxy, *logSink) {
 
 func statusOf(t *testing.T, s Server) int {
 	t.Helper()
-	return post(t, s.URL, secretOf(s), nil).StatusCode
+	// These probes test persisted credentials across proxy incarnations, not an old
+	// HTTP pool. A POST on a socket closed by the previous server may receive EOF;
+	// retrying it would be wrong for a real mutation. Use one fresh connection instead.
+	transport := &http.Transport{DisableKeepAlives: true}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
+	req, err := http.NewRequest(http.MethodPost, s.URL, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(SecretHeader, secretOf(s))
+	response, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if _, err := io.Copy(io.Discard, response.Body); err != nil {
+		t.Fatal(err)
+	}
+	return response.StatusCode
+}
+
+func TestPersistenceProbeUsesAFreshConnectionForEachProxyIncarnation(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !r.Close {
+			t.Error("persistence probe reused the global keep-alive transport")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer up.Close()
+	if statusOf(t, Server{URL: up.URL, Headers: []Header{{Name: SecretHeader, Value: "fixture"}}}) != 200 {
+		t.Fatal("probe failed")
+	}
 }
 
 // The point of persisting: a session opened before a node restart holds a URL and a secret, and
@@ -75,12 +110,12 @@ func TestTheStateFileIsOwnerOnlyAndHoldsNoTemporaries(t *testing.T) {
 		t.Fatalf("state file mode %v; want 0600", fi.Mode().Perm())
 	}
 	entries, _ := os.ReadDir(dir)
-	if len(entries) != 1 {
+	if len(entries) != 2 || entries[0].Name() != "mcp-proxy.json" || entries[1].Name() != "mcp-proxy.json.lock" {
 		var names []string
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		t.Fatalf("state dir holds %v; want only the state file (writes are atomic renames)", names)
+		t.Fatalf("state dir holds %v; want the state and stable writer lock only", names)
 	}
 }
 

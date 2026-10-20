@@ -98,10 +98,11 @@ type Header struct {
 
 // Server is an ACP `session/new` MCP server entry (the `http` form).
 type Server struct {
-	Type    string   `json:"type"`
-	Name    string   `json:"name"`
-	URL     string   `json:"url"`
-	Headers []Header `json:"headers"`
+	Type                 string   `json:"type"`
+	Name                 string   `json:"name"`
+	URL                  string   `json:"url"`
+	Headers              []Header `json:"headers"`
+	CredentialGeneration int64    `json:"-"`
 }
 
 // Proxy is a running loopback MCP proxy.
@@ -299,20 +300,31 @@ func (p *Proxy) secretFor(stationID string) (string, bool) {
 
 // Servers are the ACP MCP entries for a station's session — nil for a station not served.
 func (p *Proxy) Servers(stationID string) []Server {
-	secret, ok := p.secretFor(stationID)
+	if !p.Serves(stationID) {
+		return nil
+	}
+	secret, generation, ok, err := p.store.SecretVersion(stationID)
+	if err != nil {
+		p.logf("mcp proxy: reading its state file: %v", err)
+		return nil
+	}
 	if !ok {
 		return nil
 	}
+	return p.servers(stationID, secret, generation)
+}
+func (p *Proxy) servers(stationID, secret string, generation int64) []Server {
 	var out []Server
 	for _, u := range upstreamOrder {
 		if p.upstreams[u.segment] == nil {
 			continue
 		}
 		out = append(out, Server{
-			Type:    "http",
-			Name:    u.name,
-			URL:     "http://" + p.Addr() + "/stations/" + url.PathEscape(stationID) + "/mcp/" + u.segment,
-			Headers: []Header{{Name: SecretHeader, Value: secret}},
+			Type:                 "http",
+			Name:                 u.name,
+			URL:                  "http://" + p.Addr() + "/stations/" + url.PathEscape(stationID) + "/mcp/" + u.segment,
+			Headers:              []Header{{Name: SecretHeader, Value: secret}},
+			CredentialGeneration: generation,
 		})
 	}
 	return out
@@ -331,17 +343,26 @@ func (p *Proxy) ServersForHarness(stationID, harness string) []Server {
 // ServeHTTP authenticates, mints and forwards.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
-	if len(parts) != 4 || parts[0] != "stations" || parts[2] != "mcp" {
+	managed := len(parts) == 5 && parts[0] == "stations" && parts[2] == "mcp-managed-v1"
+	if !managed && (len(parts) != 4 || parts[0] != "stations" || parts[2] != "mcp") {
 		http.NotFound(w, r)
 		return
 	}
 	stationID, segment := parts[1], parts[3]
+	if managed {
+		segment = parts[4]
+	}
 	up := p.upstreams[segment]
 	if up == nil {
 		http.NotFound(w, r)
 		return
 	}
-	want, served := p.secretFor(stationID)
+	want, generation, identity, served, stateError := p.store.Snapshot(stationID)
+	served = served && stateError == nil && p.Serves(stationID)
+	if (managed && (identity == nil || parts[3] != identity.BindingDigest || r.URL.RawQuery != "" || r.URL.ForceQuery)) || (!managed && identity != nil) {
+		writeRPCError(w, http.StatusUnauthorized, "managed MCP requires its exact versioned root route")
+		return
+	}
 	got := r.Header.Get(SecretHeader)
 	// Constant time, and the same answer for an unknown station as for a wrong secret, so a
 	// caller cannot probe which stations this node serves.
@@ -359,8 +380,25 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := p.tokens.Token(r.Context(), stationID)
 	if err != nil {
-		p.logf("mcp proxy: no station token for %s: %v", stationID, err)
+		if managed {
+			p.logf("mcp proxy: station token unavailable for managed station %s", stationID)
+		} else {
+			p.logf("mcp proxy: no station token for %s: %v", stationID, err)
+		}
 		writeRPCError(w, http.StatusBadGateway, "the node could not get this station's token")
+		return
+	}
+	current, currentGeneration, currentIdentity, served, stateError := p.store.Snapshot(stationID)
+	if stateError != nil || !served || !p.Serves(stationID) || currentGeneration != generation || !sameCredential(want, current) || !sameIdentity(identity, currentIdentity) {
+		writeRPCError(w, http.StatusUnauthorized, "managed proxy assignment changed during token admission")
+		return
+	}
+	if !tokenMatchesIdentity(token, identity) {
+		p.invalidateToken(stationID)
+		writeRPCError(w, http.StatusForbidden, "station token differs from the admitted managed principal")
+		return
+	}
+	if r.Context().Err() != nil {
 		return
 	}
 	rp := &httputil.ReverseProxy{
@@ -374,13 +412,26 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			pr.Out.Header.Del(SecretHeader)
 			pr.Out.Header.Del("Cookie")
 			pr.Out.Header.Set("Authorization", "Bearer "+token)
+			if managed {
+				pr.Out.Header.Set("Accept-Encoding", "identity")
+			}
 		},
 		// Negative: flush every write, so an SSE event reaches the harness when the upstream sends it.
 		FlushInterval: -1,
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-			p.logf("mcp proxy: upstream %s failed for station %s: %v", segment, stationID, err)
+			if managed {
+				p.logf("mcp proxy: managed upstream %s failed for station %s", segment, stationID)
+			} else {
+				p.logf("mcp proxy: upstream %s failed for station %s: %v", segment, stationID, err)
+			}
 			writeRPCError(w, http.StatusBadGateway, "the upstream MCP server could not be reached")
 		},
+	}
+	if managed {
+		rp.ErrorLog = log.New(managedProxyDiagnostic(func() { p.logf("mcp proxy: managed upstream response incomplete for station %s", stationID) }), "", 0)
+		rp.ModifyResponse = func(response *http.Response) error {
+			return sanitizeManagedResponse(response, credentialPatterns(token, want))
+		}
 	}
 	rp.ServeHTTP(w, r)
 }
@@ -408,7 +459,9 @@ func writeRPCError(w http.ResponseWriter, status int, msg string) {
 //	                               (acp_adapter/server.py new_session → _register_session_mcp_servers)
 //
 // A harness not listed gets no servers, and its prompt names none of their tools.
-var httpMCPHarnesses = map[string]bool{"hermes": true, "claude-code": true, "codex": true, "opencode": true, "muse": true, "kilo": true}
+// Salaam's gateway installs credentials directly into the daemon and verifies its readiness
+// receipt before injecting credential-free declarations. Its reviewed host profile is mandatory.
+var httpMCPHarnesses = map[string]bool{"hermes": true, "claude-code": true, "codex": true, "opencode": true, "muse": true, "kilo": true, "salaam": true}
 
 // SupportsHTTP reports whether a harness takes HTTP MCP servers in session/new.
 func SupportsHTTP(harness string) bool { return httpMCPHarnesses[harness] }

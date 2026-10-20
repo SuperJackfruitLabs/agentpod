@@ -10,8 +10,9 @@ import { NodeCapability } from "./posture";
 import { VERB_PARAMS, VERB_RESULTS } from "./protocol";
 
 test("only harnesses whose ACP adapter takes HTTP MCP servers in session/new are eligible", () => {
-  expect([...MCP_PROXY_HARNESSES].sort()).toEqual(["claude-code", "codex", "hermes", "opencode"]);
+  expect([...MCP_PROXY_HARNESSES].sort()).toEqual(["claude-code", "codex", "hermes", "opencode", "salaam"]);
   expect(mcpProxyEligible("hermes")).toBe(true);
+  expect(mcpProxyEligible("salaam")).toBe(true);
   expect(mcpProxyEligible("openclaw")).toBe(false);
   expect(mcpProxyEligible("pi")).toBe(false);
   expect(mcpProxyEligible("something-new")).toBe(false);

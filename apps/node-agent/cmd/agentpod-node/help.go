@@ -15,6 +15,14 @@ import (
 var commands = []struct {
 	name, group, oneline, detail string
 }{
+
+	{
+		name: "salaam-station-files-v1", group: "Node",
+		oneline: "Private Salaam station file protocol (not an interactive command)",
+		detail: "Private versioned stdin/stdout protocol for the reviewed Salaam station controller.\n" +
+			"Linux only. It does not load node enrollment credentials or grant execution authority.\n" +
+			"Use the Salaam tools and their operation-bound approval surface, not this entry directly.",
+	},
 	{
 		name: "node", group: "Node",
 		oneline: "Explicit spelling for the machine-scoped verbs (apn node status, …)",

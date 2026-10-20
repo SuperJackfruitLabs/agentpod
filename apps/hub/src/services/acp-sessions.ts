@@ -40,6 +40,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { acpTraceMeta } from "../telemetry/propagation";
+import { assertSalaamManagedMcp } from "./salaam-mcp";
 import {
   SalaamAcpFeatures,
   SalaamPromptReceipt,
@@ -377,6 +378,7 @@ interface LiveSession {
   mcpProxyRequested: boolean;
   /** What the node said it injected on the latest acp.open. */
   mcpProxied: string[];
+  managedMcpVerified?: boolean;
   /** A re-attach is running; a second would race it for the same wire. */
   reattaching: boolean;
 }
@@ -708,6 +710,7 @@ async function connectAndHandshake(
   wire: AcpWire,
 ): Promise<void> {
   if (live.executionAuthority) {
+    live.managedMcpVerified = false;
     const cancellation = await readSalaamCancellation(live.id);
     live.pendingCancellation =
       cancellation && cancellation.state !== "confirmed"
@@ -771,6 +774,8 @@ async function connectAndHandshake(
       throw Error(
         "Upgrade the Salaam adapter: typed failures and confirmed cancellation receipts are required",
       );
+    assertSalaamManagedMcp(initialized, wire.mcpProxy);
+    live.managedMcpVerified = wire.mcpProxy.length > 0;
   }
   live.acceptsImages =
     (
@@ -1465,7 +1470,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     harness,
     mode,
     workspacePath: workspacePath ?? null,
-    mcpProxyRequested: harness !== "salaam" && mcpProxyRequested,
+    mcpProxyRequested,
     mcpServers: input.mcpServers,
   });
   live.executionAuthority = execution;
@@ -1490,6 +1495,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
         endedReason: null,
         nodeSessionId: null,
         executionAuthority: execution,
+        mcpProxyRequested,
         createdAt: now,
         lastEventAt: now,
       }),
@@ -1940,7 +1946,7 @@ async function restoreSalaamRow(
     harness: "salaam",
     mode: row.mode as AcpSessionMode,
     workspacePath: b.workspace,
-    mcpProxyRequested: false,
+    mcpProxyRequested: row.mcpProxyRequested,
   });
   live.seq = row.lastSeq;
   live.executionAuthority = saved;
@@ -1994,6 +2000,7 @@ export function sessionHasLibraryTools(sessionId: string): boolean {
   const live = liveById.get(sessionId);
   return (
     !!live &&
+    (live.harness !== 'salaam' || live.managedMcpVerified === true) &&
     live.mcpProxied.includes(PROXIED_HUB) &&
     live.mcpProxied.includes(PROXIED_SUPERLIBRARY)
   );

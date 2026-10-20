@@ -32,3 +32,4 @@ export * from "./mcp-proxy";
 export * from "./forge-api";
 export * from "./salaam-authority";
 export * from "./salaam-acp";
+export * from "./salaam-mcp";
