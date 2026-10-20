@@ -1277,3 +1277,109 @@ test("original released run reconciles only without a session or work owner", as
   } as unknown as DispatchDeps;
   expect(await reconcileUnopenedSalaamRelease(owned, run, "build")).toBe(false);
 });
+
+test("failed create with a hidden terminal session needs exact stop receipt before abandonment", async () => {
+  const runId = "run_" + hex(),
+    sid = "acps_" + hex();
+  const [template] = await db
+    .select()
+    .from(acpSessions)
+    .where(eq(acpSessions.id, session));
+  if (!template?.executionAuthority) throw Error("missing test authority");
+  const authority = structuredClone(template.executionAuthority);
+  authority.binding = {
+    ...authority.binding,
+    hub_session_id: sid,
+    run: { source: "superpipeline", id: runId, epoch: 1 },
+  };
+  authority.state = "revoked";
+  authority.sessionId = crypto.randomUUID();
+  authority.admissionId = crypto.randomUUID();
+  authority.receipt = {
+    admission_id: authority.admissionId,
+    session_id: authority.sessionId,
+    binding: authority.binding,
+    binding_digest: workDigest(authority.binding),
+    lease_sequence: 1,
+    expires_at: 1,
+    authorized: false,
+    revoked: true,
+    owned_execution_stopped: false,
+    unresolved_operations: [],
+    active_attempts: [],
+    interrupted_attempts: [],
+  };
+  let released = false;
+  const deps = {
+    tenantId,
+    source: "superpipeline",
+    agent: {
+      key: "proof",
+      boardId: board,
+      stationId: station,
+      hubUserId: user,
+    },
+    client: {
+      context: async () => ({
+        ...context,
+        card: { ...context.card, spec: { salaam: { version: 1, plan } } },
+        run: {
+          ...context.run,
+          runId,
+          status: released ? "ended" : "working",
+          outcome: released ? "released" : null,
+        },
+      }),
+      heartbeat: async () => {},
+      release: async () => {
+        released = true;
+      },
+    },
+    acp: {
+      createSession: async () => {
+        await db.insert(acpSessions).values({
+          ...template,
+          id: sid,
+          status: "ended",
+          executionAuthority: authority,
+        });
+        throw Error("startup refused after row persisted");
+      },
+    },
+  } as unknown as DispatchDeps;
+  try {
+    expect(await startSalaamWork(deps, { ...claim, runId })).toMatchObject({
+      status: "failed",
+    });
+    expect(await reconcileUnopenedSalaamRelease(deps, runId, "build")).toBe(
+      false,
+    );
+    authority.receipt.owned_execution_stopped = true;
+    authority.receipt.binding_digest = "bad";
+    await db
+      .update(acpSessions)
+      .set({ executionAuthority: authority })
+      .where(eq(acpSessions.id, sid));
+    expect(await reconcileUnopenedSalaamRelease(deps, runId, "build")).toBe(
+      false,
+    );
+    authority.receipt.binding_digest = workDigest(authority.binding);
+    await db
+      .update(acpSessions)
+      .set({ executionAuthority: authority })
+      .where(eq(acpSessions.id, sid));
+    expect(await reconcileUnopenedSalaamRelease(deps, runId, "build")).toBe(
+      true,
+    );
+    const [saved] = await db
+      .select()
+      .from(bridgeDispatches)
+      .where(eq(bridgeDispatches.externalRunId, runId));
+    expect(saved?.outcome).toBe("abandoned");
+  } finally {
+    await db.delete(acpSessions).where(eq(acpSessions.id, sid));
+    await db
+      .delete(bridgeDispatches)
+      .where(eq(bridgeDispatches.externalRunId, runId));
+  }
+});

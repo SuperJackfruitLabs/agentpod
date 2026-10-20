@@ -5,6 +5,8 @@ import { z } from "zod";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { acpSessions } from "../../db/schema/acp";
+import { SalaamAuthorityStatus } from "@agentpod/contract";
+import { workDigest } from "../salaam-work";
 import { bridgeDispatches } from "../../db/schema/bridge";
 import {
   salaamWorkOwners,
@@ -76,6 +78,34 @@ function planFrom(context: RunContext) {
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+function stoppedUnownedSession(
+  row: typeof acpSessions.$inferSelect,
+  runId: string,
+  epoch: number,
+): boolean {
+  const a = row.executionAuthority;
+  const receipt = SalaamAuthorityStatus.safeParse(a?.receipt);
+  return (
+    row.status === "ended" &&
+    a?.state === "revoked" &&
+    a.binding.run.id === runId &&
+    a.binding.run.source === "superpipeline" &&
+    a.binding.run.epoch === epoch &&
+    a.binding.hub_session_id === row.id &&
+    receipt.success &&
+    receipt.data.revoked &&
+    !receipt.data.authorized &&
+    receipt.data.owned_execution_stopped &&
+    receipt.data.unresolved_operations.length === 0 &&
+    receipt.data.active_attempts.length === 0 &&
+    receipt.data.interrupted_attempts.length === 0 &&
+    receipt.data.session_id === a.sessionId &&
+    receipt.data.admission_id === a.admissionId &&
+    receipt.data.binding_digest === workDigest(a.binding) &&
+    workDigest(receipt.data.binding) === workDigest(a.binding)
+  );
+}
+
 /** Reconcile only a producer-confirmed original release with no execution owner.
  * Operator recovery requires the roster paused and controller quiesced.
  * Historical recovery does not dispatch, reclaim, or infer release from a timeout. */
@@ -127,7 +157,7 @@ export async function reconcileUnopenedSalaamRelease(
         ),
       );
     const sessions = await tx
-      .select({ id: acpSessions.id })
+      .select()
       .from(acpSessions)
       .where(
         and(
@@ -136,13 +166,23 @@ export async function reconcileUnopenedSalaamRelease(
           sql`${acpSessions.executionAuthority}->'binding'->'run'->>'id' = ${runId}`,
         ),
       );
-    if (owners.length || sessions.length) return false;
+    if (
+      owners.length ||
+      sessions.some(
+        (row) =>
+          row.stationId !== deps.agent.stationId ||
+          row.userId !== deps.agent.hubUserId ||
+          !stoppedUnownedSession(row, runId, current.leaseEpoch),
+      )
+    )
+      return false;
     await tx
       .update(bridgeDispatches)
       .set({
-        outcome: "released",
-        reason:
-          "Original producer run confirms release before execution ownership",
+        outcome: sessions.length ? "abandoned" : "released",
+        reason: sessions.length
+          ? "Original producer released; failed session has exact terminal stop receipt and no work owner"
+          : "Original producer run confirms release before execution ownership",
         updatedAt: new Date(),
       })
       .where(filter);
@@ -175,13 +215,38 @@ export async function resumeSalaamWork(
         sql`(${acpSessions.executionAuthority}->>'state' != 'revoked' OR ${bridgeDispatches.outcome} != 'reported')`,
       ),
     );
-  if (!rows.length) return null;
-  if (rows.length !== 1)
+  // Only explicit operator settlement plus its exact terminal receipt can retire
+  // a failed startup row. A generic ended status is never sufficient.
+  const pending = [];
+  for (const row of rows) {
+    if (
+      row.dispatch.outcome === "abandoned" &&
+      stoppedUnownedSession(
+        row.session,
+        row.dispatch.externalRunId,
+        row.dispatch.leaseEpoch,
+      )
+    ) {
+      const [owner] = await db
+        .select({ id: salaamWorkOwners.requestId })
+        .from(salaamWorkOwners)
+        .where(
+          and(
+            eq(salaamWorkOwners.externalSource, deps.source),
+            eq(salaamWorkOwners.externalRunId, row.dispatch.externalRunId),
+          ),
+        );
+      if (!owner) continue;
+    }
+    pending.push(row);
+  }
+  if (!pending.length) return null;
+  if (pending.length !== 1)
     return {
       status: "failed",
       reason: "Multiple strict run owners require reconciliation",
     };
-  const { session, dispatch } = rows[0]!;
+  const { session, dispatch } = pending[0]!;
   if (
     !session.executionAuthority ||
     session.executionAuthority.binding.run.source !== "superpipeline"
@@ -249,6 +314,23 @@ export async function startSalaamWork(
   } catch (error) {
     if (!session) {
       await client.release(claim);
+      const [created] = await db
+        .select({ id: acpSessions.id })
+        .from(acpSessions)
+        .where(
+          and(
+            eq(acpSessions.tenantId, deps.tenantId),
+            sql`${acpSessions.executionAuthority}->'binding'->'run'->>'source' = ${deps.source}`,
+            sql`${acpSessions.executionAuthority}->'binding'->'run'->>'id' = ${claim.runId}`,
+          ),
+        );
+      if (created)
+        return {
+          status: "failed",
+          externalRunId: claim.runId,
+          reason:
+            "Producer released; failed session startup requires stop-receipt reconciliation",
+        };
       await markReleased(
         {
           tenantId: deps.tenantId,
