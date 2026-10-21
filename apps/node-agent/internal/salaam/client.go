@@ -88,26 +88,60 @@ func (c *Client) Healthy(ctx context.Context) bool {
 	if c.Runtime != nil && c.Runtime.Ensure(ctx) != nil {
 		return false
 	}
+	healthy, _ := c.PassiveHealth(ctx)
+	return healthy
+}
+
+// PassiveHealth observes the private daemon without startup or lifecycle effects.
+// An unknown PID stays unknown; it is never fabricated from supervisor records.
+type DaemonHealth struct {
+	Running             bool
+	PID                 *int
+	ConfigurationDigest string
+}
+
+func (c *Client) PassiveHealth(ctx context.Context) (bool, *int) {
+	health := c.ObserveHealth(ctx)
+	return health.Running, health.PID
+}
+func (c *Client) ObserveHealth(ctx context.Context) DaemonHealth {
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://salaam/v1/health", nil)
 	if err != nil {
-		return false
+		return DaemonHealth{}
 	}
 	res, err := c.httpClient().Do(req)
 	if err != nil {
-		return false
+		return DaemonHealth{}
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		return false
+		return DaemonHealth{}
 	}
 	var out struct {
-		Service        string  `json:"service"`
-		AgentPodConfig *string `json:"agentpod_config"`
+		Service             string  `json:"service"`
+		AgentPodConfig      *string `json:"agentpod_config"`
+		PID                 *int    `json:"pid"`
+		ManifestDigest      string  `json:"host_manifest_digest"`
+		SupervisorConnected bool    `json:"host_supervisor_connected"`
+		RuntimeNode         string  `json:"runtime_node"`
+		JobExecution        struct {
+			ControlError         any `json:"control_error"`
+			ScheduleControlError any `json:"schedule_control_error"`
+			InboxControlError    any `json:"inbox_control_error"`
+		} `json:"job_execution"`
 	}
 	if json.NewDecoder(io.LimitReader(res.Body, 1024*1024)).Decode(&out) != nil {
-		return false
+		return DaemonHealth{}
 	}
-	return out.Service == "healthy" && out.AgentPodConfig != nil && *out.AgentPodConfig != ""
+	healthy := out.Service == "healthy" && out.AgentPodConfig != nil && *out.AgentPodConfig != ""
+	health := DaemonHealth{Running: healthy}
+	if healthy && out.PID != nil && *out.PID > 0 {
+		health.PID = out.PID
+	}
+	if health.PID != nil && out.SupervisorConnected && regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(out.ManifestDigest) && (c.Runtime == nil || c.Runtime.Node == out.RuntimeNode) && out.JobExecution.ControlError == nil && out.JobExecution.ScheduleControlError == nil && out.JobExecution.InboxControlError == nil {
+		health.ConfigurationDigest = out.ManifestDigest
+	}
+	return health
 }
 func (c *Client) call(ctx context.Context, action string, body any, out any) error {
 	if c.Runtime != nil && (action == "admit" || action == "renew") {

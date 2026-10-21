@@ -11,15 +11,18 @@ import (
 )
 
 type SalaamConfig struct{ Binary, StateDir, Workspace, NodeBinary, Manifest, NodeID string }
-type salaamDescriptor struct{ config SalaamConfig }
+type salaamDescriptor struct {
+	config    SalaamConfig
+	configure func(context.Context, string, any) ([]byte, error)
+}
 
-func NewSalaamFrom(c SalaamConfig) Descriptor { return &salaamDescriptor{c} }
+func NewSalaamFrom(c SalaamConfig) Descriptor { return &salaamDescriptor{config: c} }
 func (s *salaamDescriptor) Harness() string   { return "salaam" }
 func (s *salaamDescriptor) configured() bool {
 	return filepath.IsAbs(s.config.Binary) && filepath.IsAbs(s.config.StateDir) && filepath.IsAbs(s.config.Workspace)
 }
 func (s *salaamDescriptor) client() *salaam.Client {
-	c := &salaam.Client{State: s.config.StateDir}
+	c := &salaam.Client{State: s.config.StateDir, Workspace: s.config.Workspace, NodeID: s.config.NodeID}
 	if s.config.Manifest != "" || s.config.NodeBinary != "" {
 		c.Runtime = &salaam.Runtime{Node: s.config.NodeBinary, CLI: s.config.Binary, Manifest: s.config.Manifest, State: s.config.StateDir, Workspace: s.config.Workspace, NodeID: s.config.NodeID}
 	}
@@ -43,10 +46,17 @@ func (s *salaamDescriptor) Detect() ([]Station, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
-	if !s.client().Healthy(ctx) {
-		return nil, nil
+	if s.config.Manifest != "" {
+		if err := s.client().Runtime.Validate(); err != nil {
+			return nil, err
+		}
+	} else {
+		healthy, _ := s.client().PassiveHealth(ctx)
+		if !healthy {
+			return nil, nil
+		}
 	}
-	return []Station{{Key: salaam.StationKey(workspace), Harness: "salaam", Kind: "leaf", DisplayName: "Salaam", WorkspacePath: &workspace, Capabilities: []string{"inventory", "health", "acp"}}}, nil
+	return []Station{{Key: salaam.StationKey(workspace), Harness: "salaam", Kind: "leaf", DisplayName: "Salaam", WorkspacePath: &workspace, Capabilities: []string{"inventory", "health", "acp", "skills.inventory"}}}, nil
 }
 func (s *salaamDescriptor) Health(key string) (Health, error) {
 	if key != salaam.StationKey(s.config.Workspace) || !s.configured() {
@@ -55,7 +65,8 @@ func (s *salaamDescriptor) Health(key string) (Health, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	note := "Daemon health observed; execution still requires a fresh bound authority lease"
-	return Health{Running: s.client().Healthy(ctx), Note: &note}, nil
+	health := s.client().ObserveHealth(ctx)
+	return Health{Running: health.Running, PID: health.PID, ConfigurationDigest: health.ConfigurationDigest, Note: &note}, nil
 }
 func (s *salaamDescriptor) ACPCommand(key string) ([]string, string, []string, error) {
 	if key != salaam.StationKey(s.config.Workspace) || !s.configured() {

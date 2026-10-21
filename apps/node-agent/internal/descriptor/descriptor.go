@@ -26,19 +26,20 @@ type Station struct {
 	// MatrixId is the agent's Matrix user ID (mxid), e.g. "@name:id.agentpod.dev".
 	// It is nil when the agent has no Matrix identity or the config cannot be read.
 	// SECURITY: the access_token is NEVER read or stored here.
-	MatrixId      *string  `json:"matrixId"`
+	MatrixId *string `json:"matrixId"`
 }
 
 // Health is a point-in-time resource/liveness snapshot for a station.
 type Health struct {
-	Running      bool     `json:"running"`
-	PID          *int     `json:"pid"`
-	CpuPct       *float64 `json:"cpuPct"`
-	MemBytes     *int64   `json:"memBytes"`
-	DiskBytes    *int64   `json:"diskBytes"`
-	UptimeSec    *int64   `json:"uptimeSec"`
-	LastActivity *string  `json:"lastActivity"`
-	Note         *string  `json:"note"`
+	ConfigurationDigest string   `json:"configurationDigest,omitempty"`
+	Running             bool     `json:"running"`
+	PID                 *int     `json:"pid"`
+	CpuPct              *float64 `json:"cpuPct"`
+	MemBytes            *int64   `json:"memBytes"`
+	DiskBytes           *int64   `json:"diskBytes"`
+	UptimeSec           *int64   `json:"uptimeSec"`
+	LastActivity        *string  `json:"lastActivity"`
+	Note                *string  `json:"note"`
 }
 
 // FsEntry is a single directory entry returned by ListDir.

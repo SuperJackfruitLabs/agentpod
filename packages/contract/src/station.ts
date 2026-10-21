@@ -53,6 +53,8 @@ export type Station = z.infer<typeof Station>;
 export const DetectedStation = Station.extend({ adopted: z.boolean() });
 export type DetectedStation = z.infer<typeof DetectedStation>;
 export const StationHealth = z.object({
+  /** Salaam only: canonical SHA-256 of the manifest confirmed live by its healthy supervised daemon. Never a disk digest. Older nodes omit it. */
+  configurationDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   running: z.boolean(), pid: z.number().nullable(), cpuPct: z.number().nullable(),
   memBytes: z.number().nullable(), diskBytes: z.number().nullable(),
   uptimeSec: z.number().nullable(), lastActivity: z.string().nullable(), note: z.string().nullable(),

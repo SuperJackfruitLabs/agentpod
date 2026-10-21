@@ -47,21 +47,8 @@ func (r *Runtime) Ensure(ctx context.Context) error { return r.ensure(ctx, false
 // agree on opt-in. The pinned host CLI owns full manifest validation.
 func (r *Runtime) ensureStrict(ctx context.Context) error { return r.ensure(ctx, true) }
 func (r *Runtime) ensure(ctx context.Context, requireStrict bool) error {
-	for _, path := range []string{r.Node, r.CLI, r.Manifest} {
-		if !filepath.IsAbs(path) {
-			return fmt.Errorf("salaam: runtime, CLI and manifest paths must be absolute")
-		}
-		actual, err := filepath.EvalSymlinks(path)
-		if err != nil || actual != path {
-			return fmt.Errorf("salaam: runtime paths must be canonical")
-		}
-		st, err := os.Stat(path)
-		if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0022 != 0 {
-			return fmt.Errorf("salaam: runtime files must not be writable by other users")
-		}
-	}
-	if !filepath.IsAbs(r.State) || !filepath.IsAbs(r.Workspace) || r.NodeID == "" {
-		return fmt.Errorf("salaam: private state, workspace and enrolled node are required")
+	if err := r.validatePaths(); err != nil {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
@@ -98,3 +85,26 @@ func (r *Runtime) ensure(ctx context.Context, requireStrict bool) error {
 	}
 	return nil
 }
+
+func (r *Runtime) validatePaths() error {
+	for _, path := range []string{r.Node, r.CLI, r.Manifest} {
+		if !filepath.IsAbs(path) {
+			return fmt.Errorf("salaam: runtime, CLI and manifest paths must be absolute")
+		}
+		actual, err := filepath.EvalSymlinks(path)
+		if err != nil || actual != path {
+			return fmt.Errorf("salaam: runtime paths must be canonical")
+		}
+		st, err := os.Stat(path)
+		if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0022 != 0 {
+			return fmt.Errorf("salaam: runtime files must not be writable by other users")
+		}
+	}
+	if !filepath.IsAbs(r.State) || !filepath.IsAbs(r.Workspace) || r.NodeID == "" {
+		return fmt.Errorf("salaam: private state, workspace and enrolled node are required")
+	}
+	return nil
+}
+
+// Validate checks configured installation paths without starting a process.
+func (r *Runtime) Validate() error { return r.validatePaths() }

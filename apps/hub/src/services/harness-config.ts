@@ -10,6 +10,8 @@
  * Every hub query is tenant-scoped, and an optional tenant on a write is a
  * cross-tenant write — the most expensive defect class in this repo.
  */
+import { createHash } from "node:crypto";
+import { canonicalSalaamWork } from "@agentpod/contract";
 import { eq, isNull, or, SQL } from "drizzle-orm";
 import type { ConfigObservation, ConfigSetting, ConfigValue } from "@agentpod/contract";
 import { db } from "../db/drizzle";
@@ -222,6 +224,8 @@ export function compare(args: {
    * produces false agreement, the worse of the two.
    */
   currentGatewayPid?: number | null;
+  /** Salaam live supervised manifest evidence, passed only from current health. */
+  currentConfigurationDigest?: string | null;
   /** `settingId`s an operator explicitly opted out of reconciliation for
    * this station (`harness_config_opt_out`, keyed by station key). */
   optedOut?: Set<string>;
@@ -294,8 +298,17 @@ export function compare(args: {
     // every profile, so that pid IS the process that re-reads config — a pid
     // change is the only evidence a restart actually happened.
     if (setting?.restartToTakeEffect) {
+      const salaamManifest = setting.harness === "salaam" && v.settingId === "salaam.host.manifest";
+      if (salaamManifest) {
+        let intendedDigest: string | null = null;
+        try { intendedDigest = createHash("sha256").update(canonicalSalaamWork(declared)).digest("hex"); } catch { /* invalid desired JSON cannot establish activation */ }
+        if (!intendedDigest || args.currentConfigurationDigest !== intendedDigest) {
+          out.push({ ...row, state: "awaiting-restart", reason: "the healthy supervised Salaam daemon has not confirmed the reviewed manifest digest" });
+          continue;
+        }
+      }
       const applied = appliedWrites[v.settingId];
-      if (applied) {
+      if (applied && !salaamManifest) {
         // Unconfirmable on EITHER side. A null `currentGatewayPid` is health
         // failing now; a null `applied.gatewayPid` is health having failed at
         // write time (`applyFor` records null whenever the post-write `health`
@@ -325,7 +338,9 @@ export function compare(args: {
       continue;
     }
 
-    if (sameValue(declared, v.observed)) {
+    if (setting?.harness === "salaam" && v.settingId === "salaam.host.manifest"
+      ? canonicalSalaamWork(declared) === canonicalSalaamWork(v.observed)
+      : sameValue(declared, v.observed)) {
       out.push({ ...row, state: "matches" });
       continue;
     }

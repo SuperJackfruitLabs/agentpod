@@ -426,3 +426,23 @@ describe("level: the resolution level travels on every observation", () => {
     expect(o.level).toBe("node");
   });
 });
+
+describe("Salaam restart evidence binds the live supervised manifest", () => {
+  const id = "salaam.host.manifest";
+  const manifest = { schema: 2, mode: "agentpod", source_digest: "reviewed", provider: { provider: "salaam-proof" } };
+  const settings = [{ id, harness: "salaam", scope: "profile" as const, policy: "reconcilable" as const, restartToTakeEffect: true }];
+  const args = { stationId: "salaam_station", settings, declared: { [id]: at(manifest, "station") }, values: [{settingId:id,readable:true,observed:manifest}], appliedWrites:{[id]:{gatewayPid:null}},currentGatewayPid:null };
+  const canonical = (v: any): string => v && typeof v === "object" ? "{"+Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+canonical(v[k])).join(",")+"}" : JSON.stringify(v);
+  const expected = new Bun.CryptoHasher("sha256").update(canonical(manifest)).digest("hex");
+  test("an exact live ready supervised manifest proves activation even when apply observed a stopped host", () => {
+    expect(compare({...args,currentConfigurationDigest:expected})[0]!.state).toBe("matches");
+  });
+  test("missing or different digest never clears restart even when PID changed", () => {
+    for(const currentConfigurationDigest of [undefined,null,"f".repeat(64)]) {
+      expect(compare({...args,currentGatewayPid:123,currentConfigurationDigest})[0]!.state).toBe("awaiting-restart");
+    }
+  });
+  test("digest activation evidence does not hide document drift", () => {
+    expect(compare({...args,currentConfigurationDigest:expected,values:[{settingId:id,readable:true,observed:{...manifest,source_digest:"changed"}}]})[0]!.state).toBe("drifted");
+  });
+});

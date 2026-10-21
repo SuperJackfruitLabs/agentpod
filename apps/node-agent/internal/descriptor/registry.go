@@ -51,7 +51,10 @@ func (r *Registry) DetectAll() []Station {
 		if err == nil {
 			_, managed := d.(SkillManagementProvider)
 			_, native := d.(NativeSkillReadinessProvider)
-			_, configurable := d.(ConfigManager)
+			cm, configurable := d.(ConfigManager)
+			if configurable && len(cm.ConfigSettings()) == 0 {
+				configurable = false
+			}
 			for _, station := range stations {
 				if r.skillManagement && managed && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
 					station.Capabilities = append(append([]string(nil), station.Capabilities...), "skills.manage")

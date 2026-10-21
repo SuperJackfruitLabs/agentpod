@@ -284,3 +284,12 @@ it("acp.open result names the proxied servers the node injected; an old node's r
   });
   expect(VERB_RESULTS["acp.open"].parse({ sessionId: "acp_1" }).mcpProxy).toBeUndefined();
 });
+
+it("health carries optional live Salaam configuration evidence without requiring it from old nodes", () => {
+  const health={running:true,pid:42,cpuPct:null,memBytes:null,diskBytes:null,uptimeSec:null,lastActivity:null,note:null};
+  expect(VERB_RESULTS.health.parse(health).configurationDigest).toBeUndefined();
+  expect(VERB_RESULTS.health.parse({...health,configurationDigest:"a".repeat(64)}).configurationDigest).toBe("a".repeat(64));
+  for(const configurationDigest of ["short","G".repeat(64),null]) {
+    expect(VERB_RESULTS.health.safeParse({...health,configurationDigest}).success).toBe(false);
+  }
+});

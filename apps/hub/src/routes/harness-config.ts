@@ -80,7 +80,7 @@ import {
   clearOptOut,
   listOptOuts,
 } from "../services/harness-config";
-import { planFor, applyFor, ConfigApplyError, getAppliedWrites, readGatewayPid } from "../services/harness-config-apply";
+import { planFor, applyFor, ConfigApplyError, getAppliedWrites, readConfigurationHealth } from "../services/harness-config-apply";
 import { callerPrincipal } from "../auth/caller-authority";
 import type { AuthUser } from "../auth/middleware";
 
@@ -280,14 +280,14 @@ async function observeStation(
     return { observations: [], unreachable: false };
   }
 
-  const [registry, result, appliedWrites, currentGatewayPid, optedOut] = await Promise.all([
+  const [registry, result, appliedWrites, currentHealth, optedOut] = await Promise.all([
     fetchRegistry(station.nodeId, station.stationKey),
     broker.request(station.nodeId, "config.observe", {
       stationKey: station.stationKey,
       settings: settingIds,
     }),
     getAppliedWrites(tenantId, station.id),
-    readGatewayPid(station.nodeId, station.stationKey),
+    readConfigurationHealth(station.nodeId, station.stationKey),
     resolveOptOuts(tenantId, station.stationKey, station.nodeId),
   ]);
 
@@ -311,7 +311,8 @@ async function observeStation(
       values,
       settings,
       appliedWrites,
-      currentGatewayPid,
+      currentGatewayPid: currentHealth.pid,
+      currentConfigurationDigest: currentHealth.configurationDigest,
       optedOut,
     }),
     unreachable: !result.ok,
