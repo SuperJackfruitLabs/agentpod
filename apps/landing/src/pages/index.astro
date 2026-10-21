@@ -38,6 +38,21 @@ const DESCRIPTION =
   'A console for the machines your agents run on. A small Go agent on each machine dials out ' +
   'to your hub, and you work with each agent runtime’s files, logs, terminal and health from one place.';
 
+// Only what the page itself states: the operating systems are the node-agent builds listed
+// under Install, and the version is the release shown there. No offers, no ratings.
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'AgentPod',
+  description: DESCRIPTION,
+  url: `${SITE}/`,
+  applicationCategory: 'DeveloperApplication',
+  operatingSystem: 'Linux, macOS',
+  softwareVersion: RELEASE,
+  sameAs: ['https://github.com/SuperJackfruitLabs/agentpod'],
+  publisher: { '@type': 'Organization', name: 'Super Jackfruit Labs', url: 'https://superjackfruit.com' },
+};
+
 // Invented data for the hero example. Labelled as an example on the page.
 const nodes = [
   {
@@ -73,6 +88,8 @@ const nodes = [
     <meta name="description" content={DESCRIPTION} />
     <link rel="canonical" href={`${SITE}/`} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate" type="text/plain" title="llms.txt" href="/llms.txt" />
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
 
     <!-- What a pasted link unfurls as. Without these, Slack and X showed a bare URL. -->
     <meta property="og:type" content="website" />

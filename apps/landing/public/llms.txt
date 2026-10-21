@@ -1,0 +1,22 @@
+# AgentPod
+
+> A console for the machines your agents run on: files, logs, terminals, configuration, health and cleanup for each agent runtime, from one place.
+
+AgentPod puts a small Go agent on each machine where your agents run. The agent dials out to a hub, so machines behind NAT need no inbound ports. From the console you work with each runtime's files, logs, terminal and health. It detects Hermes, OpenClaw, Claude Code, Codex, OpenCode, Pi, Muse Code and Kilo; what you can do depends on the harness. Node agents are published for Linux and macOS on amd64 and arm64.
+
+## Docs
+
+- [Documentation](https://docs.agentpod.dev): guides for using and running AgentPod
+- [Get started](https://docs.agentpod.dev/use/scan/): the first steps from the home page
+
+## Links
+
+- [Home](https://agentpod.dev)
+- [Docs site](https://docs.agentpod.dev)
+- [Source repository](https://github.com/SuperJackfruitLabs/agentpod)
+- [Node-agent downloads and install script](https://github.com/SuperJackfruitLabs/agentpod/releases/latest)
+
+## Optional
+
+- [Super Jackfruit Labs](https://superjackfruit.com): the company behind AgentPod
+- [Super Jackfruit Labs llms.txt](https://superjackfruit.com/llms.txt)
