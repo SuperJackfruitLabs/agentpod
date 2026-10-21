@@ -37,7 +37,7 @@
     "@hono/zod-validator": "^0.9.1",
     "@iarna/toml": "^2.2.5",
     "@matrix-org/matrix-sdk-crypto-nodejs": "^0.6.6",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@opencode-ai/sdk": "^1.18.31",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/api-logs": "^0.222.0",

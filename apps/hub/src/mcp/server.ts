@@ -85,6 +85,7 @@ export function newTransport(): WebStandardStreamableHTTPServerTransport {
   return new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless
     keepAliveMs: MCP_SSE_KEEPALIVE_MS,
+    maxRequestBodySize: 1024 * 1024, // Bound parsing before any tool dispatch.
   });
 }
 
@@ -92,6 +93,7 @@ export function newTransport(): WebStandardStreamableHTTPServerTransport {
 export async function handleMcpRequest(request: Request, caller: McpCaller, opts: { link?: ToolDeps["link"] } = {}): Promise<Response> {
   const link = opts.link ?? ownStationLink();
   const server = new McpServer(SERVER_INFO, {
+    maxToolInputElements: 10_000, // Bound structural validation, including unknown fields.
     instructions: caller.kind === "agent" ? agentInstructions(link !== undefined) : HUMAN_INSTRUCTIONS,
   });
   registerHubTools(server, { caller, link });

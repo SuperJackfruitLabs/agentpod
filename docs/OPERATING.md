@@ -2305,3 +2305,11 @@ checks the file at start and before each deliver, policy and status.
   body cannot be enforced.
 - **Forgejo's token listing and repository confinement are to be verified live** against the real
   forge before relying on them for orphan cleanup and repository restriction.
+
+
+## MCP request limits
+
+HTTP MCP requests are limited to 1 MiB. Tool arguments may contain at most
+10,000 array elements and object keys in total, including unknown fields. An
+oversized body returns HTTP 413; excessive argument structure returns a tool
+error before the tool runs. Send references or smaller batches for larger work.
