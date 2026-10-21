@@ -16,7 +16,7 @@
     "@astrojs/check": "^0.9.10",
     "@astrojs/mdx": "^4.3.14",
     "@astrojs/sitemap": "^3.7.4",
-    "@superjackfruit/frontdoor": "file:vendor/superjackfruit-frontdoor-0.0.3.tgz",
+    "@superjackfruit/frontdoor": "file:vendor/superjackfruit-frontdoor-0.0.6.tgz",
     "@superjackfruit/vibekit": "file:vendor/superjackfruit-vibekit-0.0.14.tgz",
     "astro": "^5.18.2"
   },
