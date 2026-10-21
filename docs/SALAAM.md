@@ -187,7 +187,6 @@ ledgers above; cancellation intent and receipts use the durable session event
 ledger. Back up daemon state before upgrading to schema 20. Downgrading requires a
 compatible backup and reviewed runtime; old binaries refuse the newer schema.
 
-
 ## Opt-in managed tools and protected station work
 
 The baseline profile above remains available. New private host references add
@@ -307,3 +306,24 @@ force loaded/eligible false. Aggregated reasons identify sessions. Presence,
 admission and payload loading never establish skill exercise. TUI command inventory is available separately through the private
 `GET /v1/command-inventory` endpoint. It describes the TUI registry and does not
 establish ACP command announcements or skill loading.
+
+### Operator recovery of an expired approval
+
+With Hub restarted using literal `ENABLE_SUPERPIPELINE_BRIDGE=false`, an authenticated
+human administrator can POST `/api/admin/bridge/agents/:key/salaam-settle` for an
+exact enabled roster they own. The closed request is `{ "runId": "run_…",
+"requestId": "<fresh settlement UUID>", "mode": "expired-approval",
+"decisionRequestId": "<original expired decision UUID>" }`. Retain the same
+settlement request UUID when retrying an unresolved response. `decisionRequestId`
+is required only for this mode; existing modes reject it and an omitted mode still
+means `never-dispatched`.
+
+The route delegates to the existing terminal settlement service, which requires
+exact stopped work ownership and an expired, unanswered decision with its producer
+receipt and no daemon receipt. Recovery retains the original run and requests fresh
+approval through the existing producer expiry path, without reusing an answer or
+reviving revoked execution authority. Unresolved evidence refuses settlement.
+The expiry receipt remains version 1. See
+`packages/contract/src/salaam-operator-settlement.ts`,
+`apps/hub/src/routes/admin-bridge-agents.ts`, and
+`apps/hub/src/services/bridge/salaam-dispatch.ts`.

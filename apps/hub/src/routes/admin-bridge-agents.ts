@@ -20,7 +20,10 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 
-import { AcpSessionMode } from "@agentpod/contract";
+import {
+  AcpSessionMode,
+  SalaamOperatorSettlementRequest,
+} from "@agentpod/contract";
 import { BridgeCredentialSource } from "../../../../packages/contract/src/bridge-credential";
 import { resolveTenantForUser } from "../auth/tenant";
 import { createLogger } from "../utils/logger";
@@ -81,22 +84,7 @@ const updateSchema = createSchema
 export const adminBridgeAgentsRouter = new Hono()
   .post(
     "/:key/salaam-settle",
-    zValidator(
-      "json",
-      z
-        .object({
-          runId: z.string().regex(/^run_[A-Za-z0-9]{6,}$/),
-          requestId: z.string().uuid(),
-          mode: z
-            .enum([
-              "never-dispatched",
-              "known-effects-failure",
-              "unreported-local-success",
-            ])
-            .default("never-dispatched"),
-        })
-        .strict(),
-    ),
+    zValidator("json", SalaamOperatorSettlementRequest),
     async (c) => {
       // Process startup must disable controllers; toggling a roster alone does not
       // prove an already-running dispatch has returned.
@@ -132,7 +120,7 @@ export const adminBridgeAgentsRouter = new Hono()
           : {}),
         fetch: fetchAdapter,
       });
-      const { runId, requestId, mode } = c.req.valid("json");
+      const { runId, requestId, mode, decisionRequestId } = c.req.valid("json");
       try {
         return c.json(
           await settleNeverDispatchedSalaamWork(
@@ -144,7 +132,7 @@ export const adminBridgeAgentsRouter = new Hono()
             },
             runId,
             requestId,
-            undefined,
+            decisionRequestId,
             mode === "known-effects-failure",
             mode === "unreported-local-success",
           ),

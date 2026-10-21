@@ -329,3 +329,46 @@ test("strict activity unwraps actual REST receipt and never substitutes a bare r
   expect(await bare.client.activity(work,activity)).toBeUndefined();
   expect(await bare.client.activity(work,{type:"thought",body:"legacy"})).toEqual(receipt);
 });
+
+test("evidence reference uses original run and existing principal credential with unverified metadata", async () => {
+  const seen: { url: string; body: any; authorization: string }[] = [];
+  const client = new SuperpipelineClient({
+    baseUrl: "https://board.test",
+    boardId: BOARD,
+    token: "",
+    credential: async () => "existing-original-principal",
+    fetch: async (url, init) => {
+      seen.push({
+        url,
+        body: JSON.parse(init.body!),
+        authorization: init.headers.Authorization!,
+      });
+      return {
+        status: 200,
+        ok: true,
+        json: async () => ({
+          reference_id: "ref_abcdef",
+          verification: "unverified",
+        }),
+      };
+    },
+  });
+  const input = {
+    leaseEpoch: 7,
+    cardId: "card_abcdef",
+    stageKey: "build",
+    export_id: "11111111-1111-4111-8111-111111111111",
+    manifest_sha256: "a".repeat(64),
+  };
+  expect(await client.addEvidenceReference("run_original", input)).toEqual({
+    reference_id: "ref_abcdef",
+    verification: "unverified",
+  });
+  expect(seen).toEqual([
+    {
+      url: `https://board.test/v1/boards/${BOARD}/runs/run_original/evidence-reference`,
+      body: input,
+      authorization: "Bearer existing-original-principal",
+    },
+  ]);
+});

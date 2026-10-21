@@ -771,6 +771,27 @@
       "when": 1792510800001,
       "tag": "0109_salaam_work_settlement",
       "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1792580400000,
+      "tag": "0110_execution_exports",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1792580400001,
+      "tag": "0111_salaam_work_telemetry_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1792580400002,
+      "tag": "0112_execution_artifact_bundle",
+      "breakpoints": true
     }
   ]
 }

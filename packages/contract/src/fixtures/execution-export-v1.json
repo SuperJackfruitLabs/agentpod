@@ -1,0 +1,203 @@
+{
+  "version": 1,
+  "success": [
+    {
+      "name": "committed-manifest",
+      "value": {
+        "schema_version": "agentpod-execution-export/v1",
+        "export_id": "22222222-2222-4222-8222-222222222222",
+        "external_source": "superpipeline",
+        "external_run_id": "run_abcdef",
+        "board_id": "brd_abcdef",
+        "card_id": "card_abcdef",
+        "stage_key": "build",
+        "principal_id": "prn_aaaaaaaaaaaaaaaaaaaa",
+        "run_epoch": 1,
+        "manifest_sha256": "c5c6a2f3119798e0e273c6d4e8f74094b70d307f28075defd0adcd8c71afa2c0",
+        "manifest_bytes": 1371,
+        "artifact_kind": "execution-metadata-manifest",
+        "library": {
+          "item_id": "itm_fixture",
+          "version": 1,
+          "sha256": "c5c6a2f3119798e0e273c6d4e8f74094b70d307f28075defd0adcd8c71afa2c0",
+          "bytes": 1371,
+          "entry": "execution-evidence.json"
+        },
+        "artifact_files": [],
+        "verification": "download-sha256-verified"
+      }
+    },
+    {
+      "name": "committed-artifact-bundle",
+      "value": {
+        "schema_version": "agentpod-execution-export/v1",
+        "export_id": "44444444-4444-4444-8444-444444444444",
+        "external_source": "superpipeline",
+        "external_run_id": "run_abcdef",
+        "board_id": "brd_abcdef",
+        "card_id": "card_abcdef",
+        "stage_key": "build",
+        "principal_id": "prn_aaaaaaaaaaaaaaaaaaaa",
+        "run_epoch": 1,
+        "manifest_sha256": "38bfa0105691557544427a9d27a4760bbd8ffd02c4a7480fcdcf3cf7967b989b",
+        "manifest_bytes": 1942,
+        "artifact_kind": "execution-artifact-bundle",
+        "library": {
+          "item_id": "itm_fixture",
+          "version": 1,
+          "sha256": "c8b0d8fd8f9c2fcc50a5a9e3343030dfcddb01679ab4c4ba395bfd6c25df57ec",
+          "bytes": 1975,
+          "entry": "execution-manifest.json"
+        },
+        "artifact_files": [
+          {
+            "artifact_id": "33333333-3333-4333-8333-333333333333",
+            "file_id": {
+              "item_id": "itm_fixture",
+              "version": 1,
+              "path": "artifacts/33333333-3333-4333-8333-333333333333.json"
+            },
+            "path": "artifacts/33333333-3333-4333-8333-333333333333.json",
+            "sha256": "2de657a2eacded6e94ac4c32bf02ec0393eb89612392534c4faa7d6c06356688",
+            "bytes": 33,
+            "disposition": "produced"
+          }
+        ],
+        "verification": "download-sha256-verified"
+      }
+    }
+  ],
+  "rejection": [
+    {
+      "name": "unknown-version",
+      "value": {
+        "schema_version": "v2",
+        "export_id": "22222222-2222-4222-8222-222222222222",
+        "external_source": "superpipeline",
+        "external_run_id": "run_abcdef",
+        "board_id": "brd_abcdef",
+        "card_id": "card_abcdef",
+        "stage_key": "build",
+        "principal_id": "prn_aaaaaaaaaaaaaaaaaaaa",
+        "run_epoch": 1,
+        "manifest_sha256": "c5c6a2f3119798e0e273c6d4e8f74094b70d307f28075defd0adcd8c71afa2c0",
+        "manifest_bytes": 1371,
+        "artifact_kind": "execution-metadata-manifest",
+        "library": {
+          "item_id": "itm_abcdef",
+          "version": 1,
+          "sha256": "c5c6a2f3119798e0e273c6d4e8f74094b70d307f28075defd0adcd8c71afa2c0",
+          "bytes": 1371,
+          "entry": "execution-evidence.json"
+        },
+        "verification": "download-sha256-verified",
+        "artifact_files": []
+      }
+    },
+    {
+      "name": "unknown-field",
+      "value": {
+        "schema_version": "agentpod-execution-export/v1",
+        "export_id": "22222222-2222-4222-8222-222222222222",
+        "external_source": "superpipeline",
+        "external_run_id": "run_abcdef",
+        "board_id": "brd_abcdef",
+        "card_id": "card_abcdef",
+        "stage_key": "build",
+        "principal_id": "prn_aaaaaaaaaaaaaaaaaaaa",
+        "run_epoch": 1,
+        "manifest_sha256": "c5c6a2f3119798e0e273c6d4e8f74094b70d307f28075defd0adcd8c71afa2c0",
+        "manifest_bytes": 1371,
+        "artifact_kind": "execution-metadata-manifest",
+        "library": {
+          "item_id": "itm_abcdef",
+          "version": 1,
+          "sha256": "c5c6a2f3119798e0e273c6d4e8f74094b70d307f28075defd0adcd8c71afa2c0",
+          "bytes": 1371,
+          "entry": "execution-evidence.json"
+        },
+        "verification": "download-sha256-verified",
+        "url": "https://untrusted.test",
+        "artifact_files": []
+      }
+    },
+    {
+      "name": "unverified-receipt",
+      "value": {
+        "schema_version": "agentpod-execution-export/v1",
+        "export_id": "22222222-2222-4222-8222-222222222222",
+        "external_source": "superpipeline",
+        "external_run_id": "run_abcdef",
+        "board_id": "brd_abcdef",
+        "card_id": "card_abcdef",
+        "stage_key": "build",
+        "principal_id": "prn_aaaaaaaaaaaaaaaaaaaa",
+        "run_epoch": 1,
+        "manifest_sha256": "c5c6a2f3119798e0e273c6d4e8f74094b70d307f28075defd0adcd8c71afa2c0",
+        "manifest_bytes": 1371,
+        "artifact_kind": "execution-metadata-manifest",
+        "library": {
+          "item_id": "itm_abcdef",
+          "version": 1,
+          "sha256": "c5c6a2f3119798e0e273c6d4e8f74094b70d307f28075defd0adcd8c71afa2c0",
+          "bytes": 1371,
+          "entry": "execution-evidence.json"
+        },
+        "verification": "unverified",
+        "artifact_files": []
+      }
+    },
+    {
+      "name": "foreign-run-namespace",
+      "value": {
+        "schema_version": "agentpod-execution-export/v1",
+        "export_id": "22222222-2222-4222-8222-222222222222",
+        "external_source": "salaam",
+        "external_run_id": "run_abcdef",
+        "board_id": "brd_abcdef",
+        "card_id": "card_abcdef",
+        "stage_key": "build",
+        "principal_id": "prn_aaaaaaaaaaaaaaaaaaaa",
+        "run_epoch": 1,
+        "manifest_sha256": "c5c6a2f3119798e0e273c6d4e8f74094b70d307f28075defd0adcd8c71afa2c0",
+        "manifest_bytes": 1371,
+        "artifact_kind": "execution-metadata-manifest",
+        "library": {
+          "item_id": "itm_abcdef",
+          "version": 1,
+          "sha256": "c5c6a2f3119798e0e273c6d4e8f74094b70d307f28075defd0adcd8c71afa2c0",
+          "bytes": 1371,
+          "entry": "execution-evidence.json"
+        },
+        "verification": "download-sha256-verified",
+        "artifact_files": []
+      }
+    },
+    {
+      "name": "zero-library-version",
+      "value": {
+        "schema_version": "agentpod-execution-export/v1",
+        "export_id": "22222222-2222-4222-8222-222222222222",
+        "external_source": "superpipeline",
+        "external_run_id": "run_abcdef",
+        "board_id": "brd_abcdef",
+        "card_id": "card_abcdef",
+        "stage_key": "build",
+        "principal_id": "prn_aaaaaaaaaaaaaaaaaaaa",
+        "run_epoch": 1,
+        "manifest_sha256": "c5c6a2f3119798e0e273c6d4e8f74094b70d307f28075defd0adcd8c71afa2c0",
+        "manifest_bytes": 1371,
+        "artifact_kind": "execution-metadata-manifest",
+        "library": {
+          "item_id": "itm_abcdef",
+          "version": 0,
+          "sha256": "c5c6a2f3119798e0e273c6d4e8f74094b70d307f28075defd0adcd8c71afa2c0",
+          "bytes": 1371,
+          "entry": "execution-evidence.json"
+        },
+        "verification": "download-sha256-verified",
+        "artifact_files": []
+      }
+    }
+  ]
+}

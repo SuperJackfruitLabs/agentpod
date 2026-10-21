@@ -24,6 +24,7 @@ export const salaamWorkOwners = pgTable(
     requestId: text("request_id").notNull().unique(),
     payload: jsonb("payload").notNull(),
     receipt: jsonb("receipt"),
+    telemetryStatus: text("telemetry_status"),
     settlement: jsonb("settlement"),
   },
   (t) => [

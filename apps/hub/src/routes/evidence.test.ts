@@ -87,7 +87,7 @@ beforeAll(async () => {
   // A row as migration 0085 found it: no fingerprint at all.
   legacyAttempt = `attempt_${crypto.randomUUID()}`;
   await rawSql`INSERT INTO acp_runs (id, tenant_id, session_id, station_id, external_run_id, external_source, state, start_seq, started_at)
-               VALUES (${legacyAttempt}, ${BOOTSTRAP_TENANT_ID}, ${SESSION}, ${STATION}, ${RUN_ID}, 'superpipeline', 'working', 10, now())`;
+               VALUES (${legacyAttempt}, ${BOOTSTRAP_TENANT_ID}, ${SESSION}, ${STATION}, ${RUN_ID}, 'superpipeline', 'working', 10, (SELECT started_at + interval '1 second' FROM acp_runs WHERE id=${firstAttempt}))`;
   // An attempt whose ledger row is gone.
   await rawSql`INSERT INTO acp_runs (id, tenant_id, session_id, station_id, external_run_id, external_source, state, start_seq, started_at)
                VALUES (${`attempt_${crypto.randomUUID()}`}, ${BOOTSTRAP_TENANT_ID}, ${SESSION}, ${STATION}, ${BARE_RUN}, 'superpipeline', 'working', 20, now())`;
@@ -478,5 +478,45 @@ describe("GET /api/evidence/principals/:id under the plane (superwitness's run j
     } finally {
       restore();
     }
+  });
+});
+
+describe("explicit execution evidence opt-in leaves C5 strict", () => {
+  const endpoint = () => `/api/evidence/runs/superpipeline/${RUN_ID}/execution`;
+  test("requires exact explicit schema and rejects unknown query fields", async () => {
+    const token = await serviceToken(reader);
+    for (const query of [
+      "",
+      "?schema_version=v2",
+      "?schema_version=salaam-execution-evidence%2Fv1&extra=1",
+    ])
+      expect((await get(endpoint() + query, token)).status).toBe(400);
+  });
+  test("legacy run without Salaam work remains execution-unavailable with empty array", async () => {
+    const response = await get(
+      endpoint() + "?schema_version=salaam-execution-evidence%2Fv1",
+      await serviceToken(reader),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      schema_version: "agentpod-execution-evidence/v1",
+      external_source: "superpipeline",
+      external_run_id: RUN_ID,
+      executions: [],
+    });
+  });
+  test("execution exports require owning agent and cannot be requested by Witness service", async () => {
+    const response = await app.request(endpoint() + "/export", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${await serviceToken(reader)}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        schema_version: "salaam-execution-evidence/v1",
+        request_id: crypto.randomUUID(),
+      }),
+    });
+    expect(response.status).toBe(403);
   });
 });

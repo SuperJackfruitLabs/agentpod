@@ -1602,6 +1602,12 @@ When Superlibrary is configured (`SUPERLIBRARY_URL`), each claimed card's prompt
 station's own agent token, so it shows only what that agent's roster may see. It is **on for every
 board by default**. Switch it per board:
 
+For an isolated transport, set `SUPERLIBRARY_AUDIENCE` to the exact registered HTTPS
+Library resource identifier. Tokens use that audience while requests use
+`SUPERLIBRARY_URL`. An unset audience preserves the existing URL-based default;
+an invalid explicit audience is rejected. Token refusals never fall back to the
+transport audience. Keep this trusted operator setting outside model inputs.
+
 ```bash
 fleet bridge related-work brd_0000000000000001 off   # or: on
 # PUT /api/admin/bridge/boards/:boardId {"relatedWork": false}

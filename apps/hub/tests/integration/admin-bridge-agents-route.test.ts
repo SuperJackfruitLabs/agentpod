@@ -26,6 +26,7 @@ import {
   describe,
   expect,
   test,
+  spyOn,
 } from "bun:test";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
@@ -36,6 +37,7 @@ import { stations } from "../../src/db/schema/stations";
 import { nodes } from "../../src/db/schema/nodes";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { adminBridgeAgentsRouter } from "../../src/routes/admin-bridge-agents";
+import * as salaamDispatch from "../../src/services/bridge/salaam-dispatch";
 import { readBridgeRoster } from "../../src/services/bridge/roster";
 import { createTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
@@ -294,5 +296,65 @@ test("terminal Salaam operator settlement requires explicit process quiescence a
   } finally {
     if (saved === undefined) delete process.env.ENABLE_SUPERPIPELINE_BRIDGE;
     else process.env.ENABLE_SUPERPIPELINE_BRIDGE = saved;
+  }
+});
+
+test("expired approval settlement forwards the exact decision behind existing operator gates", async () => {
+  const savedBridge = process.env.ENABLE_SUPERPIPELINE_BRIDGE;
+  const savedOrigin = process.env.SUPERPIPELINE_BASE_URL;
+  const settle = spyOn(
+    salaamDispatch,
+    "settleNeverDispatchedSalaamWork",
+  ).mockResolvedValue({ ok: true } as never);
+  const decisionRequestId = crypto.randomUUID();
+  const body = {
+    runId: "run_abcdef",
+    requestId: crypto.randomUUID(),
+    mode: "expired-approval",
+    decisionRequestId,
+  };
+  const request = (value: unknown) =>
+    app().request("/bridge/agents/coder-kai/salaam-settle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(value),
+    });
+  try {
+    await post(valid());
+    process.env.SUPERPIPELINE_BASE_URL = "http://127.0.0.1:1";
+    for (const enabled of [undefined, "true", "0"]) {
+      if (enabled === undefined) delete process.env.ENABLE_SUPERPIPELINE_BRIDGE;
+      else process.env.ENABLE_SUPERPIPELINE_BRIDGE = enabled;
+      expect((await request(body)).status).toBe(409);
+    }
+    expect(settle).not.toHaveBeenCalled();
+    process.env.ENABLE_SUPERPIPELINE_BRIDGE = "false";
+    expect(
+      (await request({ ...body, decisionRequestId: undefined })).status,
+    ).toBe(400);
+    expect((await request({ ...body, mode: "never-dispatched" })).status).toBe(
+      400,
+    );
+    expect((await request({ ...body, approve: true })).status).toBe(400);
+    expect(settle).not.toHaveBeenCalled();
+    expect((await request(body)).status).toBe(200);
+    expect(settle).toHaveBeenCalledTimes(1);
+    expect(settle.mock.calls[0]!.slice(1)).toEqual([
+      body.runId,
+      body.requestId,
+      decisionRequestId,
+      false,
+      false,
+    ]);
+    await patch("coder-kai", { enabled: false });
+    expect((await request(body)).status).toBe(404);
+    expect(settle).toHaveBeenCalledTimes(1);
+  } finally {
+    settle.mockRestore();
+    if (savedBridge === undefined)
+      delete process.env.ENABLE_SUPERPIPELINE_BRIDGE;
+    else process.env.ENABLE_SUPERPIPELINE_BRIDGE = savedBridge;
+    if (savedOrigin === undefined) delete process.env.SUPERPIPELINE_BASE_URL;
+    else process.env.SUPERPIPELINE_BASE_URL = savedOrigin;
   }
 });

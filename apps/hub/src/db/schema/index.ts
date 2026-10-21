@@ -78,3 +78,5 @@ export * from "./operators";
 // A station's repository-restricted forge API access; no token is stored (forge-api-access design, 2026-10-17).
 export * from "./forge-api-grants";
 export * from "./salaam-work";
+
+export * from "./execution-evidence";

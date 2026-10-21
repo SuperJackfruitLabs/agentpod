@@ -75,14 +75,20 @@ func TestWorkDecisionControlIsClosed(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		if r.URL.Path != "/v1/agentpod/work-decisions" && r.URL.Path != "/v1/agentpod/work-decision" && r.URL.Path != "/v1/agentpod/work-completion" {
+		if r.URL.Path != "/v1/agentpod/work-evidence" && r.URL.Path != "/v1/agentpod/work-decisions" && r.URL.Path != "/v1/agentpod/work-decision" && r.URL.Path != "/v1/agentpod/work-completion" {
 			t.Fatal(r.URL.Path)
+		}
+		if r.URL.Path == "/v1/agentpod/work-evidence" {
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["schema_version"] != "salaam-execution-evidence/v1" {
+				t.Fatal("missing explicit evidence version")
+			}
 		}
 		w.Write([]byte(`{"version":1}`))
 	}))
 	defer server.Close()
 	client := Client{NodeID: "node", Workspace: "/work", HTTP: &http.Client{Transport: roundTripWork{server.URL}}}
-	for _, action := range []string{"work-decisions", "work-decision", "work-completion"} {
+	for _, action := range []string{"work-evidence", "work-decisions", "work-decision", "work-completion"} {
 		var answer json.RawMessage
 		if action == "work-decision" {
 			answer = json.RawMessage(`{"version":1}`)
@@ -91,7 +97,7 @@ func TestWorkDecisionControlIsClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if calls != 3 {
+	if calls != 4 {
 		t.Fatal(calls)
 	}
 	for _, action := range []string{"renew", "work-admit", "approve-all"} {
@@ -107,7 +113,7 @@ func TestWorkDecisionControlIsClosed(t *testing.T) {
 	if _, err := client.WorkControl(context.Background(), "work-decisions", b, nil, changed); err == nil {
 		t.Fatal("accepted stale owner")
 	}
-	if calls != 3 {
+	if calls != 4 {
 		t.Fatal("invalid controls reached daemon")
 	}
 }
@@ -248,5 +254,65 @@ func TestAbandonLocalSuccessRequiresStoppedOwnerAndNoInterruptedAttempts(t *test
 	}
 	if calls != 1 {
 		t.Fatal("refused request reached daemon")
+	}
+}
+
+func TestWorkTraceIsClosedCorrelationOnly(t *testing.T) {
+	b := Binding{Version: 1, OrganizationID: "org_00000000000000000000", PrincipalID: "prn_00000000000000000000", NodeID: "node", StationID: "station", StationKey: StationKey("/work"), Workspace: "/work", OccupancyEpoch: 1, HubSessionID: "hub", Run: Run{Source: "superpipeline", ID: "run_abcdef", Epoch: 1}}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/v1/agentpod/work-trace" {
+			t.Fatal(r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body) != 3 || body["schema_version"] != "salaam-work-trace/v1" {
+			t.Fatal("trace envelope changed authority")
+		}
+		w.Write([]byte(`{"version":1,"authority":false,"traceparent":"00-11111111111111111111111111111111-2222222222222222-01"}`))
+	}))
+	defer server.Close()
+	client := Client{NodeID: "node", Workspace: "/work", HTTP: &http.Client{Transport: roundTripWork{server.URL}}}
+	if _, err := client.WorkTrace(context.Background(), b, "00-11111111111111111111111111111111-2222222222222222-01"); err != nil {
+		t.Fatal(err)
+	}
+	for _, parent := range []string{"", "00-00000000000000000000000000000000-2222222222222222-01", "00-11111111111111111111111111111111-0000000000000000-01", "bad"} {
+		if _, err := client.WorkTrace(context.Background(), b, parent); err == nil {
+			t.Fatal("invalid trace accepted")
+		}
+	}
+	if calls != 1 {
+		t.Fatal("invalid trace reached daemon")
+	}
+}
+
+func TestEvidenceArtifactTransportBoundIsExplicitAndControlRemainsSmall(t *testing.T) {
+	b := Binding{Version: 1, OrganizationID: "org_00000000000000000000", PrincipalID: "prn_00000000000000000000", NodeID: "node", StationID: "station", StationKey: StationKey("/work"), Workspace: "/work", OccupancyEpoch: 1, HubSessionID: "hub", Run: Run{Source: "superpipeline", ID: "run_abcdef", Epoch: 1}}
+	id := "33333333-3333-4333-8333-333333333333"
+	calls := 0
+	size := 2 << 20
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		json.NewEncoder(w).Encode(map[string]string{"content_base64": strings.Repeat("a", size)})
+	}))
+	defer server.Close()
+	client := Client{NodeID: "node", Workspace: "/work", HTTP: &http.Client{Transport: roundTripWork{server.URL}}}
+	if _, err := client.WorkEvidenceArtifacts(context.Background(), b, []string{id}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ids := range [][]string{nil, {id, id}, {"artifact_foreign"}} {
+		if _, err := client.WorkEvidenceArtifacts(context.Background(), b, ids); err == nil {
+			t.Fatal("bad selection accepted")
+		}
+	}
+	if calls != 1 {
+		t.Fatal("invalid selections reached source")
+	}
+	if _, err := client.WorkTrace(context.Background(), b, "00-11111111111111111111111111111111-2222222222222222-01"); err == nil {
+		t.Fatal("legacy control limit widened")
+	}
+	size = 9 << 20
+	if _, err := client.WorkEvidenceArtifacts(context.Background(), b, []string{id}); err == nil {
+		t.Fatal("oversized evidence accepted")
 	}
 }

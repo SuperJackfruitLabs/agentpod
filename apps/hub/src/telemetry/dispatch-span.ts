@@ -17,6 +17,12 @@ export interface DispatchSpanInput {
   source: string;
   stationId: string;
   startTime: Date;
+  /** Strict recovery is an observation of the saved run, never a new claim. */
+  observation?: "strict-start" | "strict-resume";
+  runEpoch?: number;
+  hubSessionId?: string;
+  nativeSessionId?: string;
+  countClaim?: boolean;
 }
 
 type Status = DispatchResult["status"] | "threw";
@@ -37,6 +43,10 @@ function startDispatch(input: DispatchSpanInput): { span: Span; ctx: Context; sp
         "card.id": input.cardId,
         "external.source": input.source,
         "station.id": input.stationId,
+        ...(input.observation ? { "dispatch.observation": input.observation } : {}),
+        ...(input.runEpoch !== undefined ? { "run.epoch": input.runEpoch } : {}),
+        ...(input.hubSessionId ? { "hub.session.id": input.hubSessionId } : {}),
+        ...(input.nativeSessionId ? { "salaam.session.id": input.nativeSessionId } : {}),
       },
     },
     ROOT_CONTEXT,
@@ -87,7 +97,8 @@ export async function inDispatchSpan(
       // as above
     }
     try {
-      instruments().dispatches.add(1, { "dispatch.status": status });
+      if (input.countClaim !== false)
+        instruments().dispatches.add(1, { "dispatch.status": status });
     } catch {
       // as above
     }
