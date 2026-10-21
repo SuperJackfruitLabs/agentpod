@@ -383,7 +383,20 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   // A bare "not claimed" covers an empty queue, an over-budget board and an
   // agent at its concurrency cap alike. superpipeline does not say which.
   if (!work) return { status: "idle" };
-  if (strict?.required) return startSalaamWork(deps, work);
+  if (strict?.required)
+    return inDispatchSpan(
+      {
+        runId: work.runId,
+        boardId: agent.boardId,
+        cardId: work.card.id,
+        source: deps.source,
+        stationId: agent.stationId,
+        startTime: claimedAt,
+        observation: "strict-start",
+        runEpoch: work.leaseEpoch,
+      },
+      () => startSalaamWork(deps, work),
+    );
 
   return inDispatchSpan(
     { runId: work.runId, boardId: agent.boardId, cardId: work.card.id, source: deps.source, stationId: agent.stationId, startTime: claimedAt },

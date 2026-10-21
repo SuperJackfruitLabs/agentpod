@@ -73,6 +73,13 @@ No replacement occupant or legacy credential is a fallback. Pipeline marks the h
 Stale run, missing configuration or reference failure leaves the artifact committed and
 reports `reference_status:unavailable`.
 
+Strict start enters the same real dispatch-span boundary as other claimed work. Strict
+recovery enters a `strict-resume` observation span only after the original saved-owner
+fences; it does not claim work or mint an ACP attempt. Observation attributes use exact
+saved run epoch, Hub/native session and admitted task IDs. A recovery observation may
+have a different Hub trace ID; the source keeps its original saved traceparent for native
+invocations. Recovery observations do not increment the new-claim metric.
+
 Optional work-trace correlation uses only active W3C context. The private versioned trace
 call carries no new authority; source preserves the first root trace on retries. No context
 is a no-op, failure is recorded independently as telemetry unavailable, and neither case

@@ -1,3 +1,5 @@
+import { context as otelContext, trace } from "@opentelemetry/api";
+import { inDispatchSpan } from "../../telemetry/dispatch-span";
 import { forwardSalaamWorkTrace } from "./salaam-trace";
 import {
   SalaamWorkFailureReceipt,
@@ -772,7 +774,22 @@ export async function resumeSalaamWork(
     }
   }
   // Do not claim or recreate a session when a report reply may have been lost.
-  return driveSalaamWork(deps, dispatch.externalRunId, session.id);
+  return inDispatchSpan(
+    {
+      runId: dispatch.externalRunId,
+      boardId: dispatch.boardId,
+      cardId: dispatch.externalCardId,
+      source: dispatch.externalSource,
+      stationId: session.stationId,
+      startTime: new Date(),
+      observation: "strict-resume",
+      runEpoch: session.executionAuthority.binding.run.epoch,
+      hubSessionId: session.id,
+      nativeSessionId: session.executionAuthority.sessionId ?? undefined,
+      countClaim: false,
+    },
+    () => driveSalaamWork(deps, dispatch.externalRunId, session.id),
+  );
 }
 
 export async function startSalaamWork(
@@ -982,6 +999,17 @@ async function driveSalaamWork(
       );
     const payload = SalaamWorkPayload.parse(work.payload);
     const admitted = await deliverSalaamWork(sessionId, agent.hubUserId);
+    // These are saved/admitted identities, not new telemetry-owned attempts.
+    try {
+      trace.getSpan(otelContext.active())?.setAttributes({
+        "hub.session.id": sessionId,
+        "salaam.session.id": admitted.session_id,
+        "task.id": admitted.task_id,
+        "run.epoch": execution.binding.run.epoch,
+      });
+    } catch {
+      /* telemetry cannot change execution authority */
+    }
     await heartbeat(claim);
     if (!acp.renewExecution) throw Error("Strict work renewal is unavailable");
     await acp.renewExecution(agent.hubUserId, sessionId, execution.binding.run);
