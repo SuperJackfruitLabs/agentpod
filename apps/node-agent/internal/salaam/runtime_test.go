@@ -63,3 +63,13 @@ func TestReviewedRuntimeRejectsUnpinnedPathsAndForeignStartupReceipt(t *testing.
 		t.Fatal("foreign startup receipt accepted")
 	}
 }
+
+func TestPassiveHealthNeverStartsConfiguredRuntime(t *testing.T) {
+	calls := 0
+	r := &Runtime{run: func(context.Context, string, []string) ([]byte, error) { calls++; return nil, nil }}
+	c := &Client{Runtime: r, State: t.TempDir()}
+	healthy, pid := c.PassiveHealth(context.Background())
+	if healthy || pid != nil || calls != 0 {
+		t.Fatalf("passive health started runtime: healthy=%v pid=%v calls=%d", healthy, pid, calls)
+	}
+}

@@ -83,3 +83,28 @@ func TestRuntimeFailureCannotBlockStopOrInspection(t *testing.T) {
 		t.Fatalf("stop/inspection were blocked or dispatch escaped: %d", calls)
 	}
 }
+
+func TestPassiveConfigurationActivationRequiresLiveReadySupervisedManifest(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	base := map[string]any{"service": "healthy", "agentpod_config": "/private/pins.json", "pid": 42, "host_manifest_digest": digest, "host_supervisor_connected": true, "runtime_node": "/private/node", "job_execution": map[string]any{}}
+	payload := base
+	c := &Client{Runtime: &Runtime{Node: "/private/node"}, HTTP: &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
+		data, _ := json.Marshal(payload)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
+	})}}
+	if got := c.ObserveHealth(context.Background()); got.ConfigurationDigest != digest || got.PID == nil || *got.PID != 42 {
+		t.Fatalf("live evidence missing: %+v", got)
+	}
+	for _, mutation := range []map[string]any{{"host_supervisor_connected": false}, {"pid": nil}, {"pid": 0}, {"host_manifest_digest": "bad"}, {"runtime_node": "foreign"}, {"job_execution": map[string]any{"control_error": "uncertain stop"}}, {"service": "degraded"}} {
+		payload = map[string]any{}
+		for k, v := range base {
+			payload[k] = v
+		}
+		for k, v := range mutation {
+			payload[k] = v
+		}
+		if got := c.ObserveHealth(context.Background()); got.ConfigurationDigest != "" {
+			t.Fatalf("unconfirmed activation accepted for %+v: %+v", mutation, got)
+		}
+	}
+}

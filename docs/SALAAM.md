@@ -248,3 +248,62 @@ The console offers “Use configured station tools” before a new session. Omit
 or false preserves the previous request behavior; this switch does not assign
 a server, grant new tools, or bypass the private host profile and fresh authority.
 A host requiring managed MCP refuses a session opened without its assignment.
+
+## Reviewed host configuration
+
+With the node operator's `configManagement` opt-in, a Salaam descriptor configured
+with absolute private Node, CLI and manifest paths exposes the existing
+`config.manage` interface. Its one registry entry, `salaam.host.manifest`, is the
+complete output of `salaam host plan --config FILE`. It uses profile scope,
+reconcilable policy and `restartToTakeEffect: true`. No bundle or provider secret
+is carried by this declaration.
+
+The existing Hub `config.observe`, `config.plan`, `config.apply` and
+`config.inspect` verbs delegate to native CLI commands of the same suffix:
+`salaam host config-observe|config-plan|config-apply|config-inspect --manifest FILE`.
+Requests are bounded JSON on stdin using the existing config.manage v1 fields
+(`stationKey`, `settings`, `operationId`, `want`, `planDigest`, as applicable).
+Planning validates the intended manifest against fresh native `host plan`
+results. Host identity (Node/repo, state, authority-pins path, workspace) cannot
+be rebound through a setting. Package/source/runtime pins or referenced config
+changes invalidate an unapplied review. The plan digest binds the prior manifest
+bytes, target, station and displayed diff.
+
+The native private journal lives beside the manifest under
+`.agentpod/<manifest-name>.configuration/`. It retains request identity and
+planned/applying/applied/conflict receipts. A request ID cannot be reused for a
+different intent. Successful retries replay the saved receipt before fresh
+runtime checks. Apply records `applying` before atomic replacement and fsync;
+a retry can finish a write whose final receipt was interrupted. Unexpected
+current bytes are preserved as a conflict. A rollback is another reviewed plan
+validated against the currently installed package; it is never an automatic
+restoration of old bytes.
+
+Observation, polling and apply never start or restart a process. A configured
+stopped installation remains detectable, with health reporting stopped. Explicit
+ACP/session use retains the reviewed native host startup boundary; observing a
+station does not activate its configuration. Apply obtains the existing startup,
+supervisor and daemon OS ownership locks; a running owner or uncertain stop
+refuses replacement. The caller must stop the supervised host before applying
+and explicitly start or use the reviewed manifest afterwards. Health reads are passive.
+An unchanged or missing PID cannot prove activation. Salaam instead forwards the
+existing private daemon `host_manifest_digest` as optional station health
+`configurationDigest`, only with healthy controls, a real positive PID, the
+configured Node and a connected supervisor. The Hub requires that live digest to
+match the canonical SHA-256 of the declared manifest before clearing
+`awaiting-restart`; a file digest or saved apply receipt cannot do so. Other
+harnesses retain their existing PID-based restart evidence. Older nodes omit the
+optional field and remain conservatively awaiting restart.
+
+The descriptor also implements the existing read-only `skills.inventory` path.
+It reads the private session list and each session's explicit context admission,
+never starts a process or scans unpublished files. Inventory is limited to 64
+sessions, the station's exact configured workspace, an eight-second total probe
+and bounded response bodies. Partial reads and excluded sessions make coverage
+incomplete. Bundle digest, bundle manifest pin, entrypoint hash and skill identity
+are validated separately. Loading is unknown until the current ready worker has
+verified matching admitted bytes in an actual provider payload; stale resources
+force loaded/eligible false. Aggregated reasons identify sessions. Presence,
+admission and payload loading never establish skill exercise. TUI command inventory is available separately through the private
+`GET /v1/command-inventory` endpoint. It describes the TUI registry and does not
+establish ACP command announcements or skill loading.

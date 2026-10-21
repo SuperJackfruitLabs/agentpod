@@ -66,7 +66,7 @@ func TestSalaamRequiresObservedBoundDaemonAndAdvertisesOnlyProvedCapabilities(t 
 	if err != nil || len(found) != 1 {
 		t.Fatalf("bound daemon missing: %v %v", found, err)
 	}
-	if found[0].Key != key || !reflect.DeepEqual(found[0].Capabilities, []string{"inventory", "health", "acp"}) {
+	if found[0].Key != key || !reflect.DeepEqual(found[0].Capabilities, []string{"inventory", "health", "acp", "skills.inventory"}) {
 		t.Fatalf("unsupported authority advertised: %+v", found[0])
 	}
 	if _, ok := d.(Lifecycle); ok {

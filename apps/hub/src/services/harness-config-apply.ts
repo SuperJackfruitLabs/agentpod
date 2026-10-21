@@ -454,10 +454,22 @@ export async function getAppliedWrites(
  * never resolve it to `matches`.
  */
 export async function readGatewayPid(nodeId: string, stationKey: string): Promise<number | null> {
+  return (await readConfigurationHealth(nodeId, stationKey)).pid;
+}
+
+/** Live health only: configurationDigest is never recovered from a manifest file or apply receipt. */
+export async function readConfigurationHealth(nodeId: string, stationKey: string): Promise<{ pid: number | null; configurationDigest: string | null }> {
   const health = await broker.request(nodeId, "health", { key: stationKey });
-  if (!health.ok) return null;
-  const parsed = VERB_RESULTS.health.safeParse(health.data);
-  return parsed.success ? parsed.data.pid : null;
+  const empty = { pid: null, configurationDigest: null };
+  if (!health.ok) return empty;
+  return configurationHealthFrom(health.data);
+}
+
+export function configurationHealthFrom(value: unknown): { pid: number | null; configurationDigest: string | null } {
+  const parsed = VERB_RESULTS.health.safeParse(value);
+  if (!parsed.success) return { pid: null, configurationDigest: null };
+  const live = parsed.data.running && parsed.data.pid !== null && parsed.data.pid > 0;
+  return { pid: parsed.data.pid, configurationDigest: live ? (parsed.data.configurationDigest ?? null) : null };
 }
 
 // ─── reconcileOnAdopt ──────────────────────────────────────────────────────────
@@ -692,13 +704,13 @@ async function reconcileStation(tenantId: string, station: ConfigStation): Promi
     // with the `applied_harness_config` read, a DB query) rather than after,
     // so adding Task 9b's restart evidence does not add a serial round trip
     // to every reconcile.
-    const [observeResult, appliedWrites, currentGatewayPid] = await Promise.all([
+    const [observeResult, appliedWrites, currentHealth] = await Promise.all([
       broker.request(station.nodeId, "config.observe", {
         stationKey: station.stationKey,
         settings: candidateIds,
       }),
       getAppliedWrites(tenantId, station.id),
-      readGatewayPid(station.nodeId, station.stationKey),
+      readConfigurationHealth(station.nodeId, station.stationKey),
     ]);
     const rawValues = observeResult.ok
       ? ((observeResult.data as { values?: ConfigValue[] } | undefined)?.values ?? [])
@@ -723,7 +735,8 @@ async function reconcileStation(tenantId: string, station: ConfigStation): Promi
       values,
       settings: settingsForCompare,
       appliedWrites,
-      currentGatewayPid,
+      currentGatewayPid: currentHealth.pid,
+      currentConfigurationDigest: currentHealth.configurationDigest,
       optedOut,
     });
 
