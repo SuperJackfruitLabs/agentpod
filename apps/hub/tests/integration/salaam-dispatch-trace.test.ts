@@ -343,7 +343,13 @@ for (const outage of [false, true])
       );
       expect(savedSourceParent).toBe(original);
       expect(nativeInvocationParents).toEqual([original, original]);
-      expect(claimMetric).toHaveBeenCalledTimes(1);
+      // The no-op API shares one counter across instruments, including the SDK
+      // span metrics. Only dispatch outcomes count claims; recovery adds none.
+      expect(
+        claimMetric.mock.calls.filter(([, attributes]) =>
+          attributes?.["dispatch.status"] !== undefined,
+        ),
+      ).toEqual([[1, { "dispatch.status": "failed" }]]);
       expect(claims).toBe(1);
       expect(sessions).toBe(1);
       expect(reports).toBe(1);
