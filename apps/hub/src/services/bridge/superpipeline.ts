@@ -425,6 +425,30 @@ export class SuperpipelineClient {
     return (await this.send("GET", `/v1/boards/${this.boardId}/runs/${runId}`)) as RunContext;
   }
 
+  /** Original live run reference only; the Pipeline hint remains unverified. */
+  async addEvidenceReference(
+    runId: string,
+    input: {
+      leaseEpoch: number;
+      cardId: string;
+      stageKey: string;
+      export_id: string;
+      manifest_sha256: string;
+    },
+  ): Promise<{ reference_id: string; verification: "unverified" }> {
+    const result = (await this.send(
+      "POST",
+      `/v1/boards/${this.boardId}/runs/${encodeURIComponent(runId)}/evidence-reference`,
+      input,
+    )) as { reference_id?: unknown; verification?: unknown };
+    if (
+      typeof result.reference_id !== "string" ||
+      result.verification !== "unverified"
+    )
+      throw Error("Invalid evidence reference receipt");
+    return { reference_id: result.reference_id, verification: "unverified" };
+  }
+
   /**
    * Every gate on this board still waiting on a human.
    *

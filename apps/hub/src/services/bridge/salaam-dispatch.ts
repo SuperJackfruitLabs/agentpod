@@ -1,3 +1,4 @@
+import { forwardSalaamWorkTrace } from "./salaam-trace";
 import {
   SalaamWorkFailureReceipt,
   SalaamWorkAbandonReceipt,
@@ -984,6 +985,23 @@ async function driveSalaamWork(
     await heartbeat(claim);
     if (!acp.renewExecution) throw Error("Strict work renewal is unavailable");
     await acp.renewExecution(agent.hubUserId, sessionId, execution.binding.run);
+    const telemetryStatus = await forwardSalaamWorkTrace(execution.binding);
+    if (telemetryStatus !== "unreported") {
+      // This optional ledger write cannot turn a telemetry outage into task failure.
+      try {
+        await db
+          .update(salaamWorkOwners)
+          .set({ telemetryStatus })
+          .where(
+            and(
+              eq(salaamWorkOwners.requestId, work.requestId),
+              eq(salaamWorkOwners.tenantId, work.tenantId),
+            ),
+          );
+      } catch {
+        /* execution remains independent */
+      }
+    }
     const progress = await broker.request(
       execution.binding.node_id,
       "salaam.work-progress",

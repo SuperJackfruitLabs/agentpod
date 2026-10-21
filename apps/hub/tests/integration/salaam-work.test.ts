@@ -1809,3 +1809,134 @@ test("expired lost question receipt is recovered by exact original GET without p
       .where(eq(acpSessions.id, session));
   }
 });
+
+test("execution evidence keeps original task and binding after lease expiry without renew or new grants", async () => {
+  const { readExecutionEvidence } =
+    await import("../../src/services/evidence/execution");
+  const { ExecutionEvidenceBinding } =
+    await import("../../../../packages/contract/src/execution-evidence");
+  const fixture =
+    await import("../../../../packages/contract/src/fixtures/execution-evidence-v1.json");
+  const [owner] = await db
+    .select()
+    .from(salaamWorkOwners)
+    .where(eq(salaamWorkOwners.externalRunId, run));
+  const [savedSession] = await db
+    .select()
+    .from(acpSessions)
+    .where(eq(acpSessions.id, session));
+  const payload = owner!.payload as (typeof corpus.cases)[0]["payload"];
+  const receipt = owner!.receipt as { task_id: string; session_id: string };
+  const authority = structuredClone(savedSession!.executionAuthority!);
+  authority.state = "revoked";
+  authority.sessionId = crypto.randomUUID();
+  const evidence = structuredClone(fixture.default.success[0]!.value);
+  const { workspace: _workspace, ...binding } = payload.admission.binding;
+  evidence.binding = ExecutionEvidenceBinding.parse(binding);
+  Object.assign(evidence.task, payload.admission.work, {
+    task_id: receipt.task_id,
+    request_id: owner!.requestId,
+    session_id: authority.sessionId,
+  });
+  evidence.usage.session_id = authority.sessionId;
+  await db
+    .update(acpSessions)
+    .set({ executionAuthority: authority, status: "ended" })
+    .where(eq(acpSessions.id, session));
+  await db
+    .update(salaamWorkOwners)
+    .set({ receipt: { ...receipt, session_id: authority.sessionId } })
+    .where(eq(salaamWorkOwners.requestId, owner!.requestId));
+  let calls = 0;
+  const mock = spyOn(broker, "request").mockImplementation(
+    async (target, verb, params) => {
+      calls++;
+      expect(target).toBe(node);
+      expect(verb).toBe("salaam.work-evidence");
+      expect(params).toEqual({ binding: payload.admission.binding });
+      return { ok: true, data: evidence };
+    },
+  );
+  try {
+    expect(
+      (
+        await readExecutionEvidence(tenantId, "superpipeline", run, board, card)
+      )[0]!.task.task_id,
+    ).toBe(receipt.task_id);
+    evidence.binding.run.epoch++;
+    await expect(
+      readExecutionEvidence(tenantId, "superpipeline", run, board, card),
+    ).rejects.toThrow("execution_binding_mismatch");
+    evidence.binding.run.epoch--;
+    evidence.task.task_id = crypto.randomUUID();
+    await expect(
+      readExecutionEvidence(tenantId, "superpipeline", run, board, card),
+    ).rejects.toThrow("execution_task_mismatch");
+    expect(
+      await readExecutionEvidence(
+        "fleet_foreign",
+        "superpipeline",
+        run,
+        board,
+        card,
+      ),
+    ).toEqual([]);
+    expect(calls).toBe(3);
+    evidence.task.task_id = receipt.task_id;
+    const { readExecutionArtifactBundle } =
+      await import("../../src/services/evidence/execution");
+    const { evidenceHash } =
+      await import("../../src/services/superlibrary/execution-export");
+    const content = Buffer.from("actual immutable selected patch");
+    const artifact = {
+      id: crypto.randomUUID(),
+      session_id: authority.sessionId,
+      digest: evidenceHash(content),
+      bytes: content.length,
+      disposition: "produced" as const,
+    };
+    evidence.artifacts = [artifact];
+    const bundle = {
+      schema_version: "salaam-execution-artifacts/v1",
+      evidence,
+      artifacts: [{ ...artifact, content_base64: content.toString("base64") }],
+    };
+    mock.mockImplementation(async (_node, verb, params: any) => {
+      expect(verb).toBe("salaam.work-evidence-artifacts");
+      expect(params.artifact_ids).toEqual([artifact.id]);
+      return { ok: true, data: bundle };
+    });
+    expect(
+      (
+        await readExecutionArtifactBundle(
+          tenantId,
+          "superpipeline",
+          run,
+          board,
+          card,
+          [artifact.id],
+        )
+      ).artifacts[0]!.digest,
+    ).toBe(artifact.digest);
+    bundle.artifacts[0]!.content_base64 =
+      Buffer.from("tampered").toString("base64");
+    await expect(
+      readExecutionArtifactBundle(tenantId, "superpipeline", run, board, card, [
+        artifact.id,
+      ]),
+    ).rejects.toThrow("source_artifact_integrity_failed");
+  } finally {
+    mock.mockRestore();
+    await db
+      .update(acpSessions)
+      .set({
+        executionAuthority: savedSession!.executionAuthority,
+        status: savedSession!.status,
+      })
+      .where(eq(acpSessions.id, session));
+    await db
+      .update(salaamWorkOwners)
+      .set({ receipt: owner!.receipt })
+      .where(eq(salaamWorkOwners.requestId, owner!.requestId));
+  }
+});

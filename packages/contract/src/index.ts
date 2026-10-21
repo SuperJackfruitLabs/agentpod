@@ -39,3 +39,5 @@ export * from "./salaam-work-payload";
 export * from "./salaam-work-decision";
 export * from "./salaam-work-completion";
 export * from './bridge-credential';
+
+export * from "./execution-evidence";

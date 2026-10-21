@@ -9,6 +9,22 @@
  * Self-authenticating (a plane token, aud = this hub), so mounted ahead of `authMiddleware`
  * beside `dispatchableRoutes` in `index.ts`.
  */
+import { traceDeliveryEvidence } from "../services/bridge/salaam-trace";
+import { salaamWorkOwners } from "../db/schema/salaam-work";
+import { attachExecutionReference } from "../services/bridge/execution-reference";
+import { z } from "zod";
+import { executionExportStore } from "../services/superlibrary/execution-export-store";
+import {
+  reserveExecutionExport,
+  runExecutionExport,
+  exportReceipt,
+} from "../services/superlibrary/execution-export";
+import { superlibraryClient } from "../services/superlibrary/client";
+import {
+  readExecutionEvidence,
+  readExecutionArtifactBundle,
+} from "../services/evidence/execution";
+import { executionExports } from "../db/schema/execution-evidence";
 import { Hono } from "hono";
 import { asc, eq } from "drizzle-orm";
 import { PrincipalId, UNKNOWN_FINGERPRINT_VIEW, itemFirstSeq, type EvidenceFingerprint } from "@agentpod/contract";
@@ -49,7 +65,7 @@ export interface EvidenceDeps {
 }
 
 type Authorized =
-  | { ok: true; tenant: string; principalId: string }
+  | { ok: true; tenant: string; principalId: string; principalKind: "agent" | "service" }
   | { ok: false; status: 401 | 403; body?: { error: "product_not_enabled"; org: string } };
 
 /** Each route names the ONE scope it needs; holding another never stands in for it. */
@@ -68,7 +84,7 @@ async function authorize(
   if (r.caller.principalKind === "human") return { ok: false, status: 403 };
   const scopes = (r.caller.claims.scope ?? "").split(" ").filter(Boolean);
   if (!scopes.includes(scope)) return { ok: false, status: 403 };
-  return { ok: true, tenant: r.caller.tenantId, principalId: r.caller.sub };
+  return { ok: true, tenant: r.caller.tenantId, principalId: r.caller.sub, principalKind: r.caller.principalKind };
 }
 
 const refusal = (status: 401 | 403, body?: { error: "product_not_enabled"; org: string }) =>
@@ -164,6 +180,302 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
   const now = deps.now ?? (() => new Date());
 
   return new Hono()
+    .get("/api/evidence/exports/:exportId", async (c) => {
+      const auth = await authorize(
+        c.req.header("authorization"),
+        EVIDENCE_READ,
+        verifyPlane,
+      );
+      if (!auth.ok)
+        return c.json(refusal(auth.status, auth.body), auth.status);
+      if (
+        c.req.queries("schema_version")?.length !== 1 ||
+        c.req.query("schema_version") !== "agentpod-execution-export/v1" ||
+        Object.keys(c.req.query()).some((k) => k !== "schema_version")
+      )
+        return c.json({ error: "unsupported_evidence_version" }, 400);
+      const [record] = await db
+        .select()
+        .from(executionExports)
+        .where(
+          tenantScope(
+            executionExports,
+            auth.tenant,
+            eq(executionExports.requestId, c.req.param("exportId")),
+          ),
+        );
+      if (!record) return c.json({ error: "not_found" }, 404);
+      try {
+        return c.json(
+          exportReceipt(record as Parameters<typeof exportReceipt>[0]),
+        );
+      } catch {
+        return c.json({ error: "artifact_export_unconfirmed" }, 409);
+      }
+    })
+    .post(
+      "/api/evidence/runs/:source/:externalRunId/execution/export",
+      async (c) => {
+        const auth = await authorize(
+          c.req.header("authorization"),
+          EVIDENCE_READ,
+          verifyPlane,
+        );
+        if (!auth.ok)
+          return c.json(refusal(auth.status, auth.body), auth.status);
+        if (auth.principalKind !== "agent")
+          return c.json({ error: "agent_only" }, 403);
+        const input = z
+          .object({
+            schema_version: z.literal("salaam-execution-evidence/v1"),
+            request_id: z.string().uuid(),
+            artifact_ids: z.array(z.string().uuid()).max(16).optional(),
+          })
+          .strict()
+          .safeParse(await c.req.json().catch(() => null));
+        if (!input.success)
+          return c.json({ error: "invalid_export_request" }, 400);
+        const client = superlibraryClient();
+        if (!client) return c.json({ error: "library_unavailable" }, 503);
+        const scope = {
+          requestId: input.data.request_id,
+          tenantId: auth.tenant,
+          principalId: auth.principalId,
+        };
+        const source = c.req.param("source"),
+          runId = c.req.param("externalRunId");
+        const [dispatch] = await db
+          .select()
+          .from(bridgeDispatches)
+          .where(
+            tenantScope(
+              bridgeDispatches,
+              auth.tenant,
+              eq(bridgeDispatches.externalSource, source),
+              eq(bridgeDispatches.externalRunId, runId),
+            ),
+          );
+        if (!dispatch) return c.json({ error: "not_found" }, 404);
+        let traceContextStatus: unknown = "unavailable";
+        try {
+          const [workTelemetry] = await db
+            .select({ status: salaamWorkOwners.telemetryStatus })
+            .from(salaamWorkOwners)
+            .where(
+              tenantScope(
+                salaamWorkOwners,
+                auth.tenant,
+                eq(salaamWorkOwners.externalSource, source),
+                eq(salaamWorkOwners.externalRunId, runId),
+              ),
+            );
+          traceContextStatus = workTelemetry?.status ?? "unreported";
+        } catch {
+          /* independent correlation read */
+        }
+        const traceEvidence = traceDeliveryEvidence(traceContextStatus);
+        try {
+          const selected = input.data.artifact_ids ?? [];
+          if (new Set(selected).size !== selected.length)
+            return c.json({ error: "invalid_artifact_selection" }, 400);
+          const saved = await executionExportStore.get(
+            scope.requestId,
+            scope.tenantId,
+            scope.principalId,
+          );
+          if (saved) {
+            const savedIds = (
+              (saved.bundle as { artifacts: { id: string }[] } | null)
+                ?.artifacts ?? []
+            )
+              .map((a) => a.id)
+              .sort();
+            if (
+              JSON.stringify([...selected].sort()) !==
+              JSON.stringify(savedIds)
+            )
+              return c.json({ error: "export_request_conflict" }, 409);
+            const frozen = saved.manifest as {
+              binding: { run: { source: string; id: string } };
+            };
+            if (
+              frozen.binding.run.source !== source ||
+              frozen.binding.run.id !== runId
+            )
+              return c.json({ error: "export_request_conflict" }, 409);
+          } else {
+            const bundle = selected.length
+              ? await readExecutionArtifactBundle(
+                  auth.tenant,
+                  source,
+                  runId,
+                  dispatch.boardId,
+                  dispatch.externalCardId,
+                  selected,
+                )
+              : undefined;
+            const executions = bundle
+              ? [bundle.evidence]
+              : await readExecutionEvidence(
+                  auth.tenant,
+                  source,
+                  runId,
+                  dispatch.boardId,
+                  dispatch.externalCardId,
+                );
+            if (
+              executions.length !== 1 ||
+              executions[0]!.binding.principal_id !== auth.principalId
+            )
+              return c.json({ error: "export_owner_mismatch" }, 403);
+            await reserveExecutionExport(executionExportStore, {
+              ...scope,
+              manifest: executions[0],
+              bundle,
+            });
+          }
+          const result = await runExecutionExport(
+            executionExportStore,
+            scope,
+            client.asService({ principal: auth.principalId, kind: "agent" }),
+            async (url) => {
+              const parsed = new URL(url);
+              if (
+                parsed.protocol !== "https:" ||
+                parsed.username ||
+                parsed.password
+              )
+                throw Error("invalid_content_url");
+              const response = await fetch(parsed, {
+                redirect: "error",
+                signal: AbortSignal.timeout(30000),
+              });
+              if (!response.ok)
+                throw Error("artifact_verification_unavailable");
+              const reader = response.body!.getReader();
+              const parts: Uint8Array[] = [];
+              let size = 0;
+              for (;;) {
+                const part = await reader.read();
+                if (part.done) break;
+                size += part.value.length;
+                if (size > 8 * 1024 * 1024) {
+                  await reader.cancel();
+                  throw Error("artifact_too_large");
+                }
+                parts.push(part.value);
+              }
+              return Buffer.concat(parts);
+            },
+          );
+          const reference_status = await attachExecutionReference(
+            executionExportStore,
+            result,
+            dispatch.agentKey,
+          );
+          return c.json({
+            request_id: result.requestId,
+            status: result.status,
+            manifest_digest: result.digest,
+            artifact: exportReceipt(result),
+            reference_status,
+            ...traceEvidence,
+          });
+        } catch (error) {
+          const code = error instanceof Error ? error.message : "";
+          if (
+            code === "export_request_conflict" ||
+            code === "upload_declaration_unconfirmed"
+          )
+            return c.json({ error: code, request_id: scope.requestId }, 409);
+          if (code === "artifact_scan_rejected")
+            return c.json(
+              {
+                error: "artifact_scan_rejected",
+                request_id: scope.requestId,
+              },
+              422,
+            );
+          if (
+            [
+              "source_artifact_integrity_failed",
+              "readiness_fingerprint_integrity_failed",
+              "artifact_source_mismatch",
+              "artifact_selection_mismatch",
+              "bundle_evidence_mismatch",
+              "source_integrity_failed",
+            ].includes(code)
+          )
+            return c.json(
+              {
+                error: "source_integrity_failed",
+                request_id: scope.requestId,
+              },
+              422,
+            );
+          return c.json(
+            {
+              error:
+                code === "library_integrity_failed"
+                  ? "artifact_library_integrity_failed"
+                  : "artifact_export_unconfirmed",
+              request_id: scope.requestId,
+              ...traceEvidence,
+            },
+            502,
+          );
+        }
+      },
+    )
+    .get("/api/evidence/runs/:source/:externalRunId/execution", async (c) => {
+      const auth = await authorize(
+        c.req.header("authorization"),
+        EVIDENCE_READ,
+        verifyPlane,
+      );
+      if (!auth.ok)
+        return c.json(refusal(auth.status, auth.body), auth.status);
+      if (
+        c.req.queries("schema_version")?.length !== 1 ||
+        c.req.query("schema_version") !== "salaam-execution-evidence/v1" ||
+        Object.keys(c.req.query()).some((k) => k !== "schema_version")
+      )
+        return c.json({ error: "unsupported_evidence_version" }, 400);
+      const source = c.req.param("source"),
+        runId = c.req.param("externalRunId");
+      const [dispatch] = await db
+        .select()
+        .from(bridgeDispatches)
+        .where(
+          tenantScope(
+            bridgeDispatches,
+            auth.tenant,
+            eq(bridgeDispatches.externalSource, source),
+            eq(bridgeDispatches.externalRunId, runId),
+          ),
+        );
+      if (!dispatch) return c.json({ error: "not_found" }, 404);
+      try {
+        const executions = await readExecutionEvidence(
+          auth.tenant,
+          source,
+          runId,
+          dispatch.boardId,
+          dispatch.externalCardId,
+        );
+        return c.json({
+          schema_version: "agentpod-execution-evidence/v1",
+          external_source: source,
+          external_run_id: runId,
+          board_id: dispatch.boardId,
+          card_id: dispatch.externalCardId,
+          executions,
+          as_of: now().toISOString(),
+        });
+      } catch {
+        return c.json({ error: "execution_evidence_unavailable" }, 502);
+      }
+    })
     .get("/api/evidence/runs/:source/:externalRunId", async (c) => {
       const auth = await authorize(c.req.header("authorization"), EVIDENCE_READ, verifyPlane);
       if (!auth.ok) return c.json(refusal(auth.status, auth.body), auth.status);

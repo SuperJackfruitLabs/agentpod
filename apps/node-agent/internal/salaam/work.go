@@ -73,7 +73,7 @@ func (c *Client) WorkControl(ctx context.Context, action string, binding Binding
 	}
 	body := map[string]any{"binding": binding}
 	switch action {
-	case "work-decisions", "work-completion", "work-status":
+	case "work-evidence", "work-decisions", "work-completion", "work-status":
 		if len(answer) != 0 {
 			return nil, fmt.Errorf("salaam: discovery cannot carry an answer")
 		}
@@ -84,6 +84,9 @@ func (c *Client) WorkControl(ctx context.Context, action string, binding Binding
 		body["answer"] = answer
 	default:
 		return nil, fmt.Errorf("salaam: unsupported work decision action")
+	}
+	if action == "work-evidence" {
+		body["schema_version"] = "salaam-execution-evidence/v1"
 	}
 	var out json.RawMessage
 	if err := c.call(ctx, action, body, &out); err != nil {
@@ -210,4 +213,40 @@ func (c *Client) AbandonWork(ctx context.Context, p WorkSettlement, owner Status
 		return nil, err
 	}
 	return out, nil
+}
+
+// WorkTrace stores optional correlation against an already admitted work root.
+// This call never admits, renews, or grants execution authority.
+func (c *Client) WorkTrace(ctx context.Context, binding Binding, traceparent string) (json.RawMessage, error) {
+	if err := c.validate(binding); err != nil {
+		return nil, err
+	}
+	valid := regexp.MustCompile(`^00-[a-f0-9]{32}-[a-f0-9]{16}-[a-f0-9]{2}$`)
+	if !valid.MatchString(traceparent) || traceparent[3:35] == "00000000000000000000000000000000" || traceparent[36:52] == "0000000000000000" || binding.Run.Source != "superpipeline" {
+		return nil, fmt.Errorf("salaam: invalid work trace")
+	}
+	var out json.RawMessage
+	err := c.call(ctx, "work-trace", map[string]any{"schema_version": "salaam-work-trace/v1", "binding": binding, "traceparent": traceparent}, &out)
+	return out, err
+}
+
+// WorkEvidenceArtifacts reads only explicitly selected immutable historical artifacts.
+func (c *Client) WorkEvidenceArtifacts(ctx context.Context, binding Binding, ids []string) (json.RawMessage, error) {
+	if err := c.validate(binding); err != nil {
+		return nil, err
+	}
+	if len(ids) < 1 || len(ids) > 16 || binding.Run.Source != "superpipeline" {
+		return nil, fmt.Errorf("salaam: invalid artifact selection")
+	}
+	seen := map[string]bool{}
+	valid := regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`)
+	for _, id := range ids {
+		if !valid.MatchString(id) || seen[id] {
+			return nil, fmt.Errorf("salaam: invalid artifact identity")
+		}
+		seen[id] = true
+	}
+	var out json.RawMessage
+	err := c.call(ctx, "work-evidence-artifacts", map[string]any{"schema_version": "salaam-execution-artifacts/v1", "binding": binding, "artifact_ids": ids}, &out)
+	return out, err
 }

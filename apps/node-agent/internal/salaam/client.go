@@ -166,7 +166,7 @@ func (c *Client) call(ctx context.Context, action string, body any, out any) err
 	}
 	// Fresh protected tree/deliverable verification may scan large workspaces.
 	// This transport budget does not extend the authority lease.
-	if (action == "work-status" || action == "work-completion") && c.HTTP == nil {
+	if (action == "work-evidence-artifacts" || action == "work-evidence" || action == "work-status" || action == "work-completion") && c.HTTP == nil {
 		client.Timeout = 120 * time.Second
 	}
 	res, err := client.Do(req)
@@ -176,6 +176,23 @@ func (c *Client) call(ctx context.Context, action string, body any, out any) err
 	defer res.Body.Close()
 	if res.StatusCode >= 400 {
 		return fmt.Errorf("salaam: authority request refused (%d)", res.StatusCode)
+	}
+	// Only explicitly versioned evidence reads admit a larger response. Existing
+	// authority/control receipts retain their original 1 MiB cap.
+	if action == "work-evidence-artifacts" || action == "work-evidence" {
+		raw, err := io.ReadAll(io.LimitReader(res.Body, (8<<20)+1))
+		if err != nil || len(raw) > 8<<20 {
+			return fmt.Errorf("salaam: evidence receipt exceeds 8 MiB")
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		if decoder.Decode(out) != nil {
+			return fmt.Errorf("salaam: malformed evidence receipt")
+		}
+		var trailing any
+		if decoder.Decode(&trailing) != io.EOF {
+			return fmt.Errorf("salaam: trailing evidence receipt")
+		}
+		return nil
 	}
 	if err := json.NewDecoder(io.LimitReader(res.Body, 1024*1024)).Decode(out); err != nil {
 		return fmt.Errorf("salaam: malformed authority receipt")
