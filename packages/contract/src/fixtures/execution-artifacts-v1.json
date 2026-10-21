@@ -73,9 +73,7 @@
           },
           "coverage": {
             "truncated": [],
-            "unavailable": [
-              "fingerprints"
-            ]
+            "unavailable": ["fingerprints"]
           },
           "fingerprints": []
         },
@@ -164,9 +162,7 @@
           },
           "coverage": {
             "truncated": [],
-            "unavailable": [
-              "fingerprints"
-            ]
+            "unavailable": ["fingerprints"]
           },
           "fingerprints": []
         },
@@ -254,9 +250,7 @@
           },
           "coverage": {
             "truncated": [],
-            "unavailable": [
-              "fingerprints"
-            ]
+            "unavailable": ["fingerprints"]
           },
           "fingerprints": []
         },
@@ -344,9 +338,7 @@
           },
           "coverage": {
             "truncated": [],
-            "unavailable": [
-              "fingerprints"
-            ]
+            "unavailable": ["fingerprints"]
           },
           "fingerprints": []
         },
@@ -434,9 +426,7 @@
           },
           "coverage": {
             "truncated": [],
-            "unavailable": [
-              "fingerprints"
-            ]
+            "unavailable": ["fingerprints"]
           },
           "fingerprints": []
         },
@@ -515,9 +505,7 @@
           },
           "coverage": {
             "truncated": [],
-            "unavailable": [
-              "fingerprints"
-            ]
+            "unavailable": ["fingerprints"]
           },
           "fingerprints": []
         },

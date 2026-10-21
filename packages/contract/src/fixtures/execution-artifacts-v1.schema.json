@@ -69,10 +69,7 @@
               "properties": {
                 "source": {
                   "type": "string",
-                  "enum": [
-                    "agentpod",
-                    "superpipeline"
-                  ]
+                  "enum": ["agentpod", "superpipeline"]
                 },
                 "id": {
                   "type": "string",
@@ -86,11 +83,7 @@
                   "maximum": 9007199254740991
                 }
               },
-              "required": [
-                "source",
-                "id",
-                "epoch"
-              ],
+              "required": ["source", "id", "epoch"],
               "additionalProperties": false
             }
           },
@@ -307,12 +300,7 @@
                 "pattern": "^[A-Za-z0-9_.:-]+$"
               }
             },
-            "required": [
-              "id",
-              "session_id",
-              "worker_epoch",
-              "state"
-            ],
+            "required": ["id", "session_id", "worker_epoch", "state"],
             "additionalProperties": false
           }
         },
@@ -874,10 +862,7 @@
                           },
                           "outcome": {
                             "type": "string",
-                            "enum": [
-                              "succeeded",
-                              "failed_definite"
-                            ]
+                            "enum": ["succeeded", "failed_definite"]
                           },
                           "evidence_digest": {
                             "type": "string",
@@ -885,12 +870,7 @@
                           },
                           "native_state": {
                             "type": "string",
-                            "enum": [
-                              "outcome_acknowledged",
-                              "returned",
-                              "denied",
-                              "cancelled"
-                            ]
+                            "enum": ["outcome_acknowledged", "returned", "denied", "cancelled"]
                           },
                           "native_receipt_digest": {
                             "type": "string",
@@ -1279,21 +1259,10 @@
               },
               "disposition": {
                 "type": "string",
-                "enum": [
-                  "observed",
-                  "proposed",
-                  "produced",
-                  "integrated"
-                ]
+                "enum": ["observed", "proposed", "produced", "integrated"]
               }
             },
-            "required": [
-              "id",
-              "session_id",
-              "digest",
-              "bytes",
-              "disposition"
-            ],
+            "required": ["id", "session_id", "digest", "bytes", "disposition"],
             "additionalProperties": false
           }
         },
@@ -1319,13 +1288,7 @@
             },
             "status": {
               "type": "string",
-              "enum": [
-                "known",
-                "estimated",
-                "unknown",
-                "unreported",
-                "partial"
-              ]
+              "enum": ["known", "estimated", "unknown", "unreported", "partial"]
             },
             "coverage": {
               "type": "object",
@@ -1351,12 +1314,7 @@
                   "maximum": 9007199254740991
                 }
               },
-              "required": [
-                "observations",
-                "recorded",
-                "unknown",
-                "estimated"
-              ],
+              "required": ["observations", "recorded", "unknown", "estimated"],
               "additionalProperties": false
             },
             "recorded_subtotal": {
@@ -1401,10 +1359,7 @@
             },
             "cost_provenance": {
               "type": "string",
-              "enum": [
-                "ledger-recorded-not-provider-bill",
-                "unknown"
-              ]
+              "enum": ["ledger-recorded-not-provider-bill", "unknown"]
             },
             "truncated": {
               "type": "boolean"
@@ -1449,11 +1404,7 @@
                   },
                   "status": {
                     "type": "string",
-                    "enum": [
-                      "known",
-                      "estimated",
-                      "unknown"
-                    ]
+                    "enum": ["known", "estimated", "unknown"]
                   },
                   "recorded_values": {
                     "anyOf": [
@@ -1519,17 +1470,11 @@
                   },
                   "token_provenance": {
                     "type": "string",
-                    "enum": [
-                      "ledger-recorded",
-                      "unknown"
-                    ]
+                    "enum": ["ledger-recorded", "unknown"]
                   },
                   "cost_provenance": {
                     "type": "string",
-                    "enum": [
-                      "ledger-recorded-not-provider-bill",
-                      "unknown"
-                    ]
+                    "enum": ["ledger-recorded-not-provider-bill", "unknown"]
                   }
                 },
                 "required": [
@@ -1578,17 +1523,10 @@
             },
             "closure": {
               "type": "string",
-              "enum": [
-                "complete",
-                "incomplete",
-                "unknown"
-              ]
+              "enum": ["complete", "incomplete", "unknown"]
             }
           },
-          "required": [
-            "principal_ids",
-            "closure"
-          ],
+          "required": ["principal_ids", "closure"],
           "additionalProperties": false
         },
         "coverage": {
@@ -1629,10 +1567,7 @@
               }
             }
           },
-          "required": [
-            "truncated",
-            "unavailable"
-          ],
+          "required": ["truncated", "unavailable"],
           "additionalProperties": false
         }
       },
@@ -1683,11 +1618,7 @@
           },
           "disposition": {
             "type": "string",
-            "enum": [
-              "proposed",
-              "produced",
-              "integrated"
-            ]
+            "enum": ["proposed", "produced", "integrated"]
           },
           "content_base64": {
             "type": "string",
@@ -1695,22 +1626,11 @@
             "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
           }
         },
-        "required": [
-          "id",
-          "session_id",
-          "digest",
-          "bytes",
-          "disposition",
-          "content_base64"
-        ],
+        "required": ["id", "session_id", "digest", "bytes", "disposition", "content_base64"],
         "additionalProperties": false
       }
     }
   },
-  "required": [
-    "schema_version",
-    "evidence",
-    "artifacts"
-  ],
+  "required": ["schema_version", "evidence", "artifacts"],
   "additionalProperties": false
 }

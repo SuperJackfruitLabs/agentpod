@@ -1,6 +1,6 @@
 import { expect, test, spyOn } from "bun:test";
 import { context, trace, ROOT_CONTEXT, TraceFlags } from "@opentelemetry/api";
-import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import { ensureContextManager } from "../../telemetry/otel";
 import { forwardSalaamWorkTrace, traceDeliveryEvidence } from "./salaam-trace";
 import * as broker from "../broker";
 import corpus from "../../../../../packages/contract/src/fixtures/execution-evidence-v1.json";
@@ -9,8 +9,9 @@ const binding = {
   workspace: "/workspace",
 } as Parameters<typeof forwardSalaamWorkTrace>[0];
 test("missing trace is no-op; trace transport failure is unavailable, never an execution error", async () => {
-  const manager = new AsyncLocalStorageContextManager().enable();
-  context.setGlobalContextManager(manager);
+  // The Hub suite shares one process. Use its context lifecycle so this file
+  // cannot unregister the manager used by later logger/trace tests.
+  ensureContextManager();
   let calls = 0;
   const mock = spyOn(broker, "request").mockImplementation(
     async (_node, verb, body: any) => {
@@ -37,8 +38,6 @@ test("missing trace is no-op; trace transport failure is unavailable, never an e
     expect(calls).toBe(1);
   } finally {
     mock.mockRestore();
-    context.disable();
-    manager.disable();
   }
 });
 

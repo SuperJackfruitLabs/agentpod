@@ -63,9 +63,7 @@
         },
         "coverage": {
           "truncated": [],
-          "unavailable": [
-            "fingerprints"
-          ]
+          "unavailable": ["fingerprints"]
         },
         "fingerprints": []
       }
@@ -216,16 +214,12 @@
           "observations": []
         },
         "contributors": {
-          "principal_ids": [
-            "prn_aaaaaaaaaaaaaaaaaaaa"
-          ],
+          "principal_ids": ["prn_aaaaaaaaaaaaaaaaaaaa"],
           "closure": "incomplete"
         },
         "coverage": {
           "truncated": [],
-          "unavailable": [
-            "fingerprints"
-          ]
+          "unavailable": ["fingerprints"]
         },
         "fingerprints": []
       }
@@ -387,16 +381,12 @@
           "observations": []
         },
         "contributors": {
-          "principal_ids": [
-            "prn_aaaaaaaaaaaaaaaaaaaa"
-          ],
+          "principal_ids": ["prn_aaaaaaaaaaaaaaaaaaaa"],
           "closure": "incomplete"
         },
         "coverage": {
           "truncated": [],
-          "unavailable": [
-            "fingerprints"
-          ]
+          "unavailable": ["fingerprints"]
         },
         "fingerprints": []
       }
@@ -465,9 +455,7 @@
         },
         "coverage": {
           "truncated": [],
-          "unavailable": [
-            "fingerprints"
-          ]
+          "unavailable": ["fingerprints"]
         },
         "fingerprints": []
       }
@@ -535,9 +523,7 @@
         },
         "coverage": {
           "truncated": [],
-          "unavailable": [
-            "fingerprints"
-          ]
+          "unavailable": ["fingerprints"]
         },
         "fingerprints": []
       }
@@ -604,9 +590,7 @@
         },
         "coverage": {
           "truncated": [],
-          "unavailable": [
-            "fingerprints"
-          ]
+          "unavailable": ["fingerprints"]
         },
         "credentials": "secret",
         "fingerprints": []
@@ -681,9 +665,7 @@
         },
         "coverage": {
           "truncated": [],
-          "unavailable": [
-            "fingerprints"
-          ]
+          "unavailable": ["fingerprints"]
         },
         "fingerprints": []
       }
@@ -749,9 +731,7 @@
         },
         "coverage": {
           "truncated": [],
-          "unavailable": [
-            "fingerprints"
-          ]
+          "unavailable": ["fingerprints"]
         },
         "fingerprints": []
       }
@@ -913,16 +893,12 @@
           "observations": []
         },
         "contributors": {
-          "principal_ids": [
-            "prn_aaaaaaaaaaaaaaaaaaaa"
-          ],
+          "principal_ids": ["prn_aaaaaaaaaaaaaaaaaaaa"],
           "closure": "incomplete"
         },
         "coverage": {
           "truncated": [],
-          "unavailable": [
-            "fingerprints"
-          ]
+          "unavailable": ["fingerprints"]
         },
         "fingerprints": []
       }
@@ -1084,16 +1060,12 @@
           "observations": []
         },
         "contributors": {
-          "principal_ids": [
-            "prn_aaaaaaaaaaaaaaaaaaaa"
-          ],
+          "principal_ids": ["prn_aaaaaaaaaaaaaaaaaaaa"],
           "closure": "incomplete"
         },
         "coverage": {
           "truncated": [],
-          "unavailable": [
-            "fingerprints"
-          ]
+          "unavailable": ["fingerprints"]
         },
         "fingerprints": []
       }
