@@ -224,20 +224,32 @@ export async function runExecutionExport(
     receipt.bytes !== files.reduce((n, f) => n + f.bytes.length, 0)
   )
     return fail();
-  const embed = await lib.request(
-    "POST",
-    `/api/v1/items/${receipt.itemId}/embed`,
-    { json: { version: receipt.version } },
-  );
-  if (!embed.ok) throw Error("artifact_verification_unavailable");
-  const grant = (await embed.json()) as {
+  const verification = await lib.request("POST", path + "/verification", {
+    json: { schemaVersion: "superlibrary-upload-verification/v1" },
+  });
+  if (!verification.ok) throw Error("artifact_verification_unavailable");
+  const grant = (await verification.json()) as {
+    schemaVersion?: string;
+    uploadId?: string;
+    itemId?: string;
+    sha256?: string;
+    bytes?: number;
     url?: string;
     downloadUrl?: string;
     version?: number;
     entry?: string;
     files?: { path: string }[];
   };
-  if (grant.version !== receipt.version || grant.entry !== entry) return fail();
+  if (
+    grant.schemaVersion !== "superlibrary-upload-verification/v1" ||
+    grant.uploadId !== record.uploadId ||
+    grant.itemId !== receipt.itemId ||
+    grant.sha256 !== receipt.sha256 ||
+    grant.bytes !== receipt.bytes ||
+    grant.version !== receipt.version ||
+    grant.entry !== entry
+  )
+    return fail();
   if (
     files.length > 1 &&
     (!Array.isArray(grant.files) ||

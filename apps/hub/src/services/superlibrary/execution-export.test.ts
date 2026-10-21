@@ -58,8 +58,13 @@ function harness() {
           bytes: bytes.length,
         });
       }
-      if (path.endsWith("/embed"))
+      if (path.endsWith("/verification"))
         return Response.json({
+          schemaVersion: "superlibrary-upload-verification/v1",
+          uploadId: "upl_abc",
+          itemId: "itm_abcdef",
+          sha256: evidenceHash(bytes),
+          bytes: bytes.length,
           version: 1,
           downloadUrl: "https://content.test/frozen",
           entry: "execution-evidence.json",
@@ -246,6 +251,11 @@ test("source selected artifact bundle freezes verified bytes and rejects corrupt
           bytes: files.reduce((n, f) => n + f.bytes.length, 0),
         });
       return Response.json({
+        schemaVersion: "superlibrary-upload-verification/v1",
+        uploadId: "upl_bundle",
+        itemId: "itm_bundle",
+        sha256: libraryDigest(files),
+        bytes: files.reduce((n, f) => n + f.bytes.length, 0),
         version: 1,
         url: "https://content.test/_view?sig=signature",
         entry: "execution-manifest.json",
@@ -335,4 +345,68 @@ test("Library raw scan rejection remains an artifact failure and keeps the same 
   expect(declarations).toBe(1);
   expect(commits).toBe(2);
   expect(h.rows.get(h.scope.requestId)!.status).toBe("commit_unconfirmed");
+});
+
+test("owned upload verification retries the saved upload and never falls back to person-only embed", async () => {
+  const h = harness();
+  await reserveExecutionExport(h.store, {
+    ...h.scope,
+    manifest: corpus.success[0]!.value,
+  });
+  let unavailable = true;
+  const remote = {
+    async request(method: string, path: string, init?: { json?: unknown }) {
+      if (path.endsWith("/verification")) {
+        expect(path).toBe("/api/v1/uploads/upl_abc/verification");
+        expect(init?.json).toEqual({
+          schemaVersion: "superlibrary-upload-verification/v1",
+        });
+        if (unavailable) return new Response(null, { status: 503 });
+      }
+      expect(path.includes("/items/")).toBe(false);
+      return h.lib.request(method, path);
+    },
+  };
+  await expect(
+    runExecutionExport(h.store, h.scope, remote, async () => h.bytes),
+  ).rejects.toThrow("artifact_verification_unavailable");
+  expect(h.rows.get(h.scope.requestId)?.status).toBe("commit_unconfirmed");
+  unavailable = false;
+  expect(
+    (await runExecutionExport(h.store, h.scope, remote, async () => h.bytes))
+      .status,
+  ).toBe("committed");
+  expect(h.calls.filter((c) => c === "POST /api/v1/uploads")).toHaveLength(1);
+});
+
+test("verification grant cannot substitute another upload or committed result", async () => {
+  for (const changed of [
+    { uploadId: "foreign" },
+    { itemId: "foreign" },
+    { version: 2 },
+    { schemaVersion: "unknown" },
+    { sha256: "0".repeat(64) },
+    { bytes: -1 },
+  ]) {
+    const h = harness();
+    await reserveExecutionExport(h.store, {
+      ...h.scope,
+      manifest: corpus.success[0]!.value,
+    });
+    const remote = {
+      async request(method: string, path: string) {
+        const response = await h.lib.request(method, path);
+        return path.endsWith("/verification")
+          ? Response.json({
+              ...((await response.json()) as object),
+              ...changed,
+            })
+          : response;
+      },
+    };
+    await expect(
+      runExecutionExport(h.store, h.scope, remote, async () => h.bytes),
+    ).rejects.toThrow("library_integrity_failed");
+    expect(h.rows.get(h.scope.requestId)?.status).toBe("integrity_failed");
+  }
 });

@@ -49,8 +49,13 @@ test("Postgres preserves original scoped upload and immutable bytes across expor
           bytes: bytes.length,
         });
       }
-      if (path.endsWith("/embed"))
+      if (path.endsWith("/verification"))
         return Response.json({
+          schemaVersion: "superlibrary-upload-verification/v1",
+          uploadId: "upl_restart",
+          itemId: "itm_restarted",
+          sha256: evidenceHash(bytes),
+          bytes: bytes.length,
           version: 1,
           downloadUrl: "https://content.test/saved",
           entry: "execution-evidence.json",
