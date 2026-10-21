@@ -105,3 +105,33 @@ test("initialize carries the instructions that match the registered tools", asyn
   expect(off).not.toContain("agentpod_link_artifact (your own workspace only)");
   expect(off).toContain("Never publish through gists");
 });
+
+
+describe("MCP request resource bounds", () => {
+  const caller = { principalId: "prn_000000000000000000a7", kind: "agent" as const };
+  const request = (args: unknown) => new Request("http://hub.test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "agentpod_link_artifact", arguments: args } }),
+  });
+  test("rejects oversized requests before calling a tool", async () => {
+    let called = false;
+    const res = await handleMcpRequest(request({ path: "x".repeat(1024 * 1024) }), caller, {
+      link: async () => { called = true; throw new Error("tool must not run"); },
+    });
+    expect(res.status).toBe(413);
+    expect(called).toBe(false);
+  });
+  test("counts even unknown argument fields before schema parsing or dispatch", async () => {
+    let called = false;
+    const res = await handleMcpRequest(request({ path: "a.md", extra: Array(10_001).fill(0) }), caller, {
+      link: async () => { called = true; throw new Error("tool must not run"); },
+    });
+    const raw = await res.text();
+    const data = raw.split("\n").find((line) => line.startsWith("data:"))?.slice(5) ?? raw;
+    const body = JSON.parse(data);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain("maximum of 10000 elements");
+    expect(called).toBe(false);
+  });
+});
