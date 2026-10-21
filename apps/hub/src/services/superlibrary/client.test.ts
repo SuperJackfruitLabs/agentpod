@@ -15,6 +15,24 @@ const A1 = "prn_000000000000000000a1";
 const A2 = "prn_000000000000000000a2";
 const base = { url: "https://lib.test", audience: "https://lib.test" };
 
+test("an isolated transport uses only the registered resource for both tokens", async () => {
+  const { plane, calls } = fakePlane();
+  const seen: Request[] = [];
+  const client = createSuperlibraryClient({
+    url: "http://127.0.0.1:8794",
+    audience: "https://library.superjackfruit.com/",
+    plane,
+    fetch: async (r) => { seen.push(r); return new Response("{}", { status: 403 }); },
+  });
+  const response = await client.asService({ principal: A1, kind: "agent" }).request("POST", "/api/v1/uploads", { json: {} });
+  expect(response.status).toBe(403);
+  expect(seen.map((r) => r.url)).toEqual(["http://127.0.0.1:8794/api/v1/uploads"]);
+  expect(calls).toEqual([
+    "service https://library.superjackfruit.com/",
+    `agent ${A1} https://library.superjackfruit.com/`,
+  ]);
+});
+
 test("a service call carries the hub's token, names the agent it acts for, and proves it with the agent's own token", async () => {
   const seen: Request[] = [];
   const { plane, calls } = fakePlane();
