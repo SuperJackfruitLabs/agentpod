@@ -124,6 +124,43 @@ function legacyRoleFlags(role: string | null) {
 }
 
 // =============================================================================
+// Readiness
+// =============================================================================
+
+/**
+ * Under the plane the token lives in memory, so a full page load starts signed out and the session
+ * has to be re-established before a hub request can carry one. Requests made in that window (a
+ * page's onMount) used to go out bare, draw a 401 and leave the page on an error (staging,
+ * 2026-10-22). `authReady` is what they wait on: it settles when `initAuth` has finished.
+ */
+let releaseReady: (() => void) | null = null;
+let ready: Promise<void> = newReadiness();
+
+function newReadiness(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    releaseReady = resolve;
+  });
+}
+
+function settleReadiness(): void {
+  releaseReady?.();
+  releaseReady = null;
+}
+
+function unsettleReadiness(): void {
+  if (!releaseReady) ready = newReadiness();
+}
+
+/**
+ * Resolves once auth has settled: at once in legacy mode (the cookie needs no restoring) or when
+ * `initAuth` has already run; otherwise when it finishes.
+ */
+export function authReady(): Promise<void> {
+  if (!plane || isInitialized) return Promise.resolve();
+  return ready;
+}
+
+// =============================================================================
 // Derived State
 // =============================================================================
 
@@ -238,6 +275,7 @@ export async function initAuth(): Promise<void> {
     } finally {
       isLoading = false;
       isInitialized = true;
+      settleReadiness();
     }
     return;
   }
@@ -483,6 +521,7 @@ export async function checkAuth(): Promise<boolean> {
  */
 export function resetAuthInit(): void {
   isInitialized = false;
+  unsettleReadiness();
 }
 
 /**
@@ -525,6 +564,7 @@ export function clearAuthSession(): void {
   currentAuthClient = null;
   currentApiUrl = null;
   isInitialized = false;
+  unsettleReadiness();
   error = null;
 }
 

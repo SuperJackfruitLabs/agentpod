@@ -9,16 +9,18 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import { createRawSnippet } from "svelte";
 
-const mockAuth = vi.hoisted(() => ({ isAuthenticated: true, isWorkspaceAdmin: true, isHubOperator: false }));
 const mockPage = vi.hoisted(() => ({ url: new URL("http://localhost/admin/users") }));
 
 vi.mock("$app/navigation", () => ({ goto: vi.fn() }));
 vi.mock("$app/state", () => ({ page: mockPage }));
 vi.mock("$lib/stores/connection.svelte", () => ({ connection: { isConnected: true } }));
-vi.mock("$lib/stores/auth.svelte", () => ({ auth: mockAuth }));
+vi.mock("$lib/stores/auth.svelte", async () => ({ auth: (await import("$lib/test-utils/mock-auth.svelte")).mockAuth }));
 vi.mock("$lib/api/admin", () => ({ getAdminStats: vi.fn() }));
 
 import * as adminApi from "$lib/api/admin";
+import { mockAuth } from "$lib/test-utils/mock-auth.svelte";
+import { goto } from "$app/navigation";
+import { flushSync } from "svelte";
 import { ApiError } from "$lib/api/http-error";
 import AdminLayout from "./+layout.svelte";
 
@@ -26,8 +28,11 @@ const children = createRawSnippet(() => ({ render: () => "<p>Admin content</p>" 
 
 beforeEach(() => {
   vi.mocked(adminApi.getAdminStats).mockReset();
+  mockAuth.isInitialized = true;
+  mockAuth.isAuthenticated = true;
   mockAuth.isWorkspaceAdmin = true;
   mockAuth.isHubOperator = false;
+  vi.mocked(goto).mockReset();
   mockPage.url = new URL("http://localhost/admin/users");
 });
 afterEach(() => cleanup());
@@ -88,4 +93,35 @@ test.each([
   await fireEvent.click(await findByRole("button", { name: "Retry" }));
   expect(await findByText("Admin content")).toBeTruthy();
   await waitFor(() => expect(adminApi.getAdminStats).toHaveBeenCalledTimes(2));
+});
+
+// A full load of /admin/bridge or /admin/transcription (staging, 2026-10-22) ended on /login: the
+// guard decided before the session was re-established. It now waits, then decides.
+test.each([
+  ["a member on /admin/bridge", "/admin/bridge", { isWorkspaceAdmin: false, isHubOperator: false }, "not-for"],
+  ["a member on /admin/transcription", "/admin/transcription", { isWorkspaceAdmin: false, isHubOperator: false }, "not-for"],
+  ["a workspace admin on /admin/bridge", "/admin/bridge", { isWorkspaceAdmin: true, isHubOperator: false }, "content"],
+  ["the hub operator on /admin/transcription", "/admin/transcription", { isWorkspaceAdmin: false, isHubOperator: true }, "content"],
+] as const)("%s: no /login while auth is pending, then the right page", async (_n, path, flags, expected) => {
+  vi.mocked(adminApi.getAdminStats).mockResolvedValue({} as never);
+  mockPage.url = new URL(`http://localhost${path}`);
+  mockAuth.isInitialized = false;
+  mockAuth.isAuthenticated = false;
+  mockAuth.isWorkspaceAdmin = false;
+  mockAuth.isHubOperator = false;
+  const { findByText, findByTestId, queryByText, queryByTestId } = render(AdminLayout, { props: { children } });
+  await new Promise((r) => setTimeout(r, 10));
+  expect(goto).not.toHaveBeenCalled();
+  expect(queryByTestId("admin-not-for-you")).toBeNull();
+  expect(queryByText("Admin content")).toBeNull();
+
+  mockAuth.isWorkspaceAdmin = flags.isWorkspaceAdmin;
+  mockAuth.isHubOperator = flags.isHubOperator;
+  mockAuth.isAuthenticated = true;
+  mockAuth.isInitialized = true;
+  flushSync();
+
+  if (expected === "content") expect(await findByText("Admin content")).toBeTruthy();
+  else expect(await findByTestId("admin-not-for-you")).toBeTruthy();
+  expect(goto).not.toHaveBeenCalledWith("/login");
 });
