@@ -73,3 +73,15 @@ test("stationFailure: transport failures are 503 station_unavailable, the rest 4
   });
   expect(stationFailure(undefined, "fs.list failed").body.error).toBe("fs.list failed");
 });
+
+test("stationFailure: a refused path is 403 path_refused and a missing one 404, never a node failure", () => {
+  expect(stationFailure("path escapes workspace", "x")).toEqual({
+    status: 403,
+    body: { error: "path escapes workspace", code: "path_refused" },
+  });
+  expect(stationFailure("path denied: .env (.env*)", "x").status).toBe(403);
+  expect(stationFailure("src/nope.ts: not found", "x")).toEqual({
+    status: 404,
+    body: { error: "src/nope.ts: not found", code: "not_found" },
+  });
+});

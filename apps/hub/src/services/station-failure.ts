@@ -8,11 +8,14 @@
  *
  * - The node is not there to ask (offline, disconnected, timed out): 503 `station_unavailable`.
  * - The node answered and the station failed: 424 `node_failed`.
+ * - The node refused a path (outside the workspace, or denied): 403 `path_refused`. A refusal,
+ *   not a failure (spec 2026-10-23, C6), in the node's wording (fsops.ErrEscape, ErrDenied).
+ * - The node reported the path absent (`<path>: not found`): 404 `not_found`.
  */
-export type StationFailureCode = "station_unavailable" | "node_failed";
+export type StationFailureCode = "station_unavailable" | "node_failed" | "path_refused" | "not_found";
 
 export interface StationFailure {
-  status: 424 | 503;
+  status: 403 | 404 | 424 | 503;
   body: { error: string; code: StationFailureCode };
 }
 
@@ -23,6 +26,12 @@ export function stationFailure(error: string | undefined, fallback: string): Sta
   const message = error?.trim() || fallback;
   if (error && TRANSPORT.has(error)) {
     return { status: 503, body: { error: message, code: "station_unavailable" } };
+  }
+  if (error && (error.includes("path escapes workspace") || error.startsWith("path denied"))) {
+    return { status: 403, body: { error: message, code: "path_refused" } };
+  }
+  if (error && error.endsWith(": not found")) {
+    return { status: 404, body: { error: message, code: "not_found" } };
   }
   return { status: 424, body: { error: message, code: "node_failed" } };
 }
