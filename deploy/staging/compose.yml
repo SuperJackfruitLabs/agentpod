@@ -1,0 +1,63 @@
+# The hub on the staging plane (workbench), checked out at /opt/suite-staging/agentpod.
+# It signs in against staging-accounts and reaches nothing real: every provisioner and bridge is
+# off, the database starts empty, and no production secret is reused. The shared edge
+# (cloudflared on the external `suite-staging` network) routes staging-hub.agentpod.dev here.
+name: staging-agentpod
+
+services:
+  hub-postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hub
+      POSTGRES_DB: hub
+    env_file: ../../../env/hub/postgres.env
+    volumes:
+      - hubdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hub -d hub"]
+      interval: 5s
+      retries: 20
+
+  hub:
+    image: oven/bun:1.4.2
+    restart: unless-stopped
+    working_dir: /app
+    command:
+      - sh
+      - -c
+      - bunx pnpm@10.18.2 install --frozen-lockfile --filter '@agentpod/hub...' && cd apps/hub && exec bun run src/index.ts
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      MANAGEMENT_API_PUBLIC_URL: https://staging-hub.agentpod.dev
+      ALLOWED_ORIGINS: https://staging-console.agentpod.dev,https://staging-app.superpipeline.dev,https://staging-app.superlibrary.dev
+      ORG_PLANE_ISSUER: https://staging-accounts.superjackfruit.com
+      ORG_PLANE_URL: https://staging-accounts.superjackfruit.com
+      ORG_PLANE_JWKS_URL: https://staging-accounts.superjackfruit.com/api/auth/jwks
+      ORG_PLANE_AUDIENCE: https://staging-hub.agentpod.dev
+      ORG_PLANE_SERVICE_CREDENTIAL_FILE: /run/secrets/org-plane-credential
+      # Nothing real: no provisioning, no Matrix, no Superpipeline claims.
+      ENABLE_DOCKER_PROVISIONING: "false"
+      ENABLE_MODAL_PROVISIONING: "false"
+      ENABLE_FLY_PROVISIONING: "false"
+      ENABLE_CLOUDFLARE_SANDBOXES: "false"
+      ENABLE_MATRIX_BRIDGE: "false"
+      ENABLE_SUPERPIPELINE_BRIDGE: "false"
+    env_file: ../../../env/hub/hub.env
+    volumes:
+      - ../..:/app
+      - ../../../env/hub/org-plane-credential:/run/secrets/org-plane-credential:ro
+    ports:
+      - "127.0.0.1:3101:3001"
+    networks: [default, suite-staging]
+    depends_on:
+      hub-postgres:
+        condition: service_healthy
+
+networks:
+  suite-staging:
+    external: true
+
+volumes:
+  hubdata:
