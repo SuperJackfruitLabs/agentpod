@@ -9,6 +9,7 @@ import { connectionString, initDatabase } from './db/drizzle.ts';
 import { holdHubRunningLock } from './db/hub-running-lock.ts';
 import { resetOrphanedOnlineNodes } from './services/node-registry.ts';
 import { reconcileHubOperators } from './services/hub-operators.ts';
+import { learnHubHomeOrg } from './services/hub-home-org.ts';
 import { authMiddleware } from './auth/middleware.ts';
 import { orgPlaneOutageBody } from './auth/caller-authority.ts';
 // A human at a terminal exchanging a device credential for a short-lived token
@@ -137,6 +138,11 @@ if (operatorSeats) {
         : ""),
   );
 }
+
+// Owners/admins of the workspace that owns the hub's service credential operate the hub. Learned
+// from the plane; unknown (plane down) means no derived operators until a background retry learns
+// it. A HUB_HOME_ORG pin that disagrees with the credential refuses the boot.
+await learnHubHomeOrg();
 
 const orphans = await resetOrphanedOnlineNodes();
 if (orphans > 0) console.log(`Reset ${orphans} orphaned online node(s) to offline`);

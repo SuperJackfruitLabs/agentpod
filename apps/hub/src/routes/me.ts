@@ -7,7 +7,8 @@
  * - `org` is the workspace the token names (null for the static API_TOKEN, which names none);
  *   `workspaceRole` is the caller's role in it, `member` when the token carries no `orgRole`.
  * - `isWorkspaceAdmin`: owner or admin of that workspace — the fleet's admin actions.
- * - `isHubOperator`: the hub's own seat (`hub_operators`, set from `HUB_OPERATORS`) — the hub-wide
+ * - `isHubOperator`: owner/admin of the hub's home workspace (its service credential's org), or a
+ *   seat in `hub_operators` (`HUB_OPERATORS`, optional extras) — the hub-wide
  *   settings.
  * - `isAdmin` = `isWorkspaceAdmin || isHubOperator`, kept for a console that reads only it
  *   (`apps/console/src/lib/stores/auth.svelte.ts`, `initAuth`).

@@ -66,6 +66,15 @@ at boot and reconciled into `hub_operators` (added; removing a principal from th
 its row). A self-hosted hub names its operator in its env file; nobody opens psql. The manual
 `INSERT` leaves `docs/OPERATING.md`.
 
+> **W2/W3 superseded 2026-10-22 (operator approved).** Owners and admins of the hub's *home
+> workspace* — the org that owns the hub's service credential, learned at boot from the `org`
+> claim of a service token the plane mints for it — are hub operators. `hub_operators` /
+> `HUB_OPERATORS` stay as an optional, additive list for people outside that workspace (unchanged
+> reconcile semantics). Home workspace unknown (plane down) = nobody derived, fail closed;
+> `HUB_HOME_ORG` may pin it and a mismatch with the credential refuses the boot. A self-hosted hub
+> needs zero bootstrap; on the hosted hub the service principal is in SJL's org, so a customer's
+> owner never operates it, and W2's "not an admin of every workspace" still holds.
+
 **W4. Resources belong to the workspace.** A node, station, runtime or enrollment token is the
 tenant's. `user_id` stays, renamed in meaning to *who enrolled or created it* (audit), and stops
 being a read filter. Two things stay per person, because they are a person's own: ACP sessions

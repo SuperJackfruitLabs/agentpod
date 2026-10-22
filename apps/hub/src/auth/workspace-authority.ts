@@ -7,10 +7,12 @@
  *   It gates everything a workspace owns — enrolling, removing and updating its nodes, its agents,
  *   its bridge roster, its audit log. It is read from the token on every request; the hub keeps no
  *   copy, and a token without `orgRole` is a member (fails closed).
- * - **Hub operator** (W2): a seat in `hub_operators`, set from `HUB_OPERATORS` at boot (W3). It
- *   gates only what no single workspace owns: the hub-wide provider settings, and reads that span
- *   tenants. A hub operator is NOT an admin of any workspace by holding the seat; in a workspace
- *   they are whatever their token's role says.
+ * - **Hub operator** (W2, superseded 2026-10-22): an owner or admin of the hub's home workspace —
+ *   the org its service credential belongs to — or a seat in `hub_operators` (`HUB_OPERATORS`, an
+ *   optional extra list for staff outside that workspace). It gates only what no single workspace
+ *   owns: the hub-wide provider settings, and reads that span tenants. Being an admin of any OTHER
+ *   workspace never makes anyone a hub operator; a seat holder is, in a workspace, whatever their
+ *   token's role says.
  *
  * The static API_TOKEN is both: it is the hub's own key, held by whoever runs the hub, and it acts
  * in the bootstrap tenant (auth/middleware.ts sets `workspaceRole: "admin"`).
@@ -20,6 +22,7 @@ import { createMiddleware } from "hono/factory";
 import type { WorkspaceRole } from "@agentpod/contract";
 
 import { isUserAdmin } from "../models/admin-users";
+import { hubHomeOrg } from "../services/hub-home-org";
 import { createLogger } from "../utils/logger";
 import type { AuthUser } from "./middleware";
 
@@ -64,12 +67,24 @@ export function requireWorkspaceAdmin(c: Context): Response | null {
   return c.json(WORKSPACE_ADMIN_REQUIRED, 403);
 }
 
-/** Does the caller hold this hub's operator seat? The static API_TOKEN always does. */
+/**
+ * Is the caller a hub operator? The static API_TOKEN always is. A person is when they are an owner
+ * or admin of the hub's home workspace (the org of its service credential, services/hub-home-org.ts;
+ * nobody while that is unknown), or hold a seat in `hub_operators` (the optional extra list).
+ */
 export async function isHubOperator(c: Context): Promise<boolean> {
   const user = callerOf(c);
   if (!user) return false;
   if (user.authType === "api_key") return true;
+  if (isHomeWorkspaceAdmin(user)) return true;
   return isUserAdmin(user.id);
+}
+
+/** Owner or admin of the hub's home workspace, by the token's `org` and role. Only plane tokens (people) qualify. */
+export function isHomeWorkspaceAdmin(user: Pick<AuthUser, "authType" | "org" | "workspaceRole">): boolean {
+  if (user.authType !== "org_plane") return false;
+  const home = hubHomeOrg();
+  return user.org !== undefined && user.org === home && isWorkspaceAdminUser(user);
 }
 
 /** `requireWorkspaceAdmin` as middleware. */

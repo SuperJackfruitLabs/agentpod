@@ -630,16 +630,30 @@ loopback host), or a credential file that is unreadable, empty or not `svc_<20 h
 
 ### Hub operators
 
+**A self-hosted hub needs nothing here.** The owners and admins of the workspace that owns the
+hub's service credential (`ORG_PLANE_SERVICE_CREDENTIAL_FILE`) are its hub operators: the hub-wide
+provider settings (transcription, speech) and every workspace's audit log. At boot the hub asks the
+plane for a service token with that credential and reads the workspace from its `org` claim; the
+log says `hub home workspace learned`. If the plane is unreachable at boot, nobody is a derived
+operator until a background retry learns it (fails closed; the log says so).
+
 ```bash
-HUB_OPERATORS=prn_0123456789abcdef0123,prn_fedcba9876543210fedc
+HUB_HOME_ORG=org_0123456789abcdef0123   # optional pin
 ```
 
-Who holds the hub operator seat: the hub-wide provider settings (transcription, speech) and
-every workspace's audit log. Read at every boot and reconciled into `hub_operators`: listed
-principals are added, unlisted ones removed, so the env file is the record. **Unset (or blank)
-leaves the table as it is** — set it to today's seats before deploying a release that reads it
-(`SELECT principal_id FROM hub_operators;`), then manage the seat only here. An entry that is not
-`prn_` + 20 hex stops the boot, naming it.
+Optional. Pins the home workspace, so operators work while the plane is down at boot. When the
+credential's workspace is known and differs, the hub **refuses to boot**; a value that is not
+`org_` + 20 hex stops the boot too.
+
+```bash
+HUB_OPERATORS=prn_0123456789abcdef0123,prn_fedcba9876543210fedc   # optional extras
+```
+
+Optional, and purely additive: people outside the home workspace (staff on a hosted hub) who
+should also operate it. Read at every boot and reconciled into `hub_operators`: listed principals
+are added, unlisted ones removed, so the env file is the record. **Unset (or blank) leaves the
+table as it is.** An entry that is not `prn_` + 20 hex stops the boot, naming it. Removing someone
+from this list does not remove an owner/admin of the home workspace; demote them at the plane.
 
 The seat is not workspace administration. Enrolling and removing nodes, agents, the bridge
 roster and station forge access belong to a workspace's **owners and admins**, read from the
