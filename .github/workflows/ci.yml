@@ -186,6 +186,8 @@ jobs:
       # warning is pure shell and runs here against fake binaries.
       - name: Test the node installer
         run: bash apps/node-agent/scripts/install.test.sh
+      - name: Test the hub release script's env parsing
+        run: bash deploy/release.test.sh
 
       # The Fly images bake in a RELEASED node-agent binary rather than
       # compiling one, so they carry a version pin — and a pin nobody is forced

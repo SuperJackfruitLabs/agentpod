@@ -7,6 +7,19 @@
 # checkout, back up the database, switch the drop-in, restart, wait for /health, run the smoke.
 # If the hub does not come back, or the smoke fails, the previous drop-in is restored.
 set -euo pipefail
+
+# hub.env is a systemd EnvironmentFile, not shell: values may hold spaces unquoted (HUB_OAUTH_CLIENTS
+# does), so sourcing it runs words as commands. Read only the keys this script needs, as systemd
+# would: the first `KEY=` line, the rest of the line verbatim, one pair of surrounding quotes removed.
+env_get() {
+  local v
+  v=$(grep -m1 "^$1=" "${HUB_ENV_FILE:-/etc/agentpod/hub.env}" | cut -d= -f2-) || true
+  v=${v%\"}; v=${v#\"}; v=${v%\'}; v=${v#\'}
+  printf '%s' "$v"
+}
+# Sourced by deploy/release.test.sh for env_get alone.
+if [ "${AGENTPOD_RELEASE_LIB:-}" = 1 ]; then return 0; fi
+
 tag=${1:?usage: release.sh v<x.y.z>}
 repo=/opt/agentpod
 releases=/opt/agentpod-releases
@@ -27,7 +40,9 @@ if [ ! -f "$dir/.release-ok" ]; then
   touch "$dir/.release-ok"
 fi
 
-set -a; . /etc/agentpod/hub.env; set +a
+DATABASE_URL=$(env_get DATABASE_URL)
+ORG_PLANE_ISSUER=$(env_get ORG_PLANE_ISSUER)
+[ -n "$DATABASE_URL" ] && [ -n "$ORG_PLANE_ISSUER" ] || { echo "release: DATABASE_URL or ORG_PLANE_ISSUER missing from hub.env" >&2; exit 1; }
 pg_dump "$DATABASE_URL" | gzip > "$releases/db-$stamp-before-$tag.sql.gz"
 
 previous=$(mktemp)
