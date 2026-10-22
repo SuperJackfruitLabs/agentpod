@@ -780,9 +780,11 @@ overhead depending on syscall frequency.
 
 ## 6. Console — build + deploy to Cloudflare Pages
 
-> **agentpod.dev itself deploys from CI.** The `deploy-console` job in `.github/workflows/ci.yml`
-> builds with `PUBLIC_HUB_URL=https://hub.agentpod.dev` and uploads to the `agentpod-console`
-> project on every push to `main`. The steps below are for a deployment on your own domain.
+> **agentpod.dev itself deploys from CI, on a release tag.** The `deploy-console` job in
+> `.github/workflows/release-hub.yml` runs after the hub's deploy for the same `v*` tag, builds with
+> `PUBLIC_HUB_URL=https://hub.agentpod.dev` and uploads to the `agentpod-console` project. A push
+> to `main` builds and tests the console and deploys it to staging (`staging-console.agentpod.dev`),
+> never to production. The steps below are for a deployment on your own domain.
 
 Build the static SPA (build locally — the VPS does not need to run this step). The build needs
 **Node 22 or newer**: the console's design system, vibekit, is vendored as a tarball in
