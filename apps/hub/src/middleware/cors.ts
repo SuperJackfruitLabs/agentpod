@@ -1,5 +1,5 @@
 import { cors } from 'hono/cors';
-import { allowedOrigins, isAllowedOrigin } from '../config.ts';
+import { isAllowedOrigin } from '../config.ts';
 
 /**
  * Response headers the console (a different origin) must be able to read.
@@ -17,11 +17,12 @@ export const exposedHeaders = [
 // Origin list lives in config.ts (allowedOrigins) so station-terminal.ts can re-use it
 // for CSWSH defence without duplicating it here.
 export const corsMiddleware = cors({
-  origin: (origin) => {
-    if (!origin) return allowedOrigins[0]!;
-    if (isAllowedOrigin(origin)) return origin;
-    return allowedOrigins[0]!;
-  },
+  // Echo an allowed origin; otherwise send no Access-Control-Allow-Origin at all. This used to
+  // fall back to allowedOrigins[0], which is the Vite dev server: every request without an
+  // Origin (curl, a server, the conformance script) or from an unknown one was told
+  // "http://localhost:5173", which read on staging as a misconfigured allowlist (spec
+  // 2026-10-23, open question 5). A browser on a disallowed origin is refused either way.
+  origin: (origin) => (origin && isAllowedOrigin(origin) ? origin : null),
   credentials: true,
   allowHeaders: ['Content-Type', 'Authorization'],
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

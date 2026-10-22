@@ -27,3 +27,32 @@ describe('CORS exposed headers', () => {
     expect(exposed).toContain('x-ratelimit-limit');
   });
 });
+
+describe('CORS allowed origin', () => {
+  const app = new Hono().use('*', corsMiddleware).get('/probe', (c) => c.text('x'));
+
+  test('an allowed origin is echoed', async () => {
+    const res = await app.request('/probe', { headers: { Origin: CONSOLE_ORIGIN } });
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe(CONSOLE_ORIGIN);
+  });
+
+  // Spec 2026-10-23 Q5: staging answered "http://localhost:5173" to every request without an
+  // Origin, because the middleware fell back to the first default origin (the Vite dev server).
+  test('no Origin gets no Access-Control-Allow-Origin, never the dev server', async () => {
+    const res = await app.request('/probe');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
+  });
+
+  test('a disallowed origin gets no Access-Control-Allow-Origin', async () => {
+    const res = await app.request('/probe', { headers: { Origin: 'https://evil.example' } });
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
+  });
+
+  test('the staging hub allows the staging console', async () => {
+    const compose = await Bun.file(new URL('../../../../deploy/staging/compose.yml', import.meta.url)).text();
+    const line = compose.split('\n').find((l) => l.trim().startsWith('ALLOWED_ORIGINS:'));
+    expect(line?.split(':').slice(1).join(':').split(',').map((o) => o.trim())).toContain(
+      'https://staging-console.agentpod.dev',
+    );
+  });
+});
