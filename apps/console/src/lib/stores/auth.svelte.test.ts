@@ -458,6 +458,35 @@ describe("under the org plane", () => {
     expect(mockAuthClient.getSession).not.toHaveBeenCalled();
   });
 
+  test.each([
+    [
+      "a workspace member",
+      { workspaceRole: "member", isWorkspaceAdmin: false, isHubOperator: false, isAdmin: false },
+      { workspaceRole: "member", isWorkspaceAdmin: false, isHubOperator: false },
+    ],
+    [
+      "a workspace owner",
+      { workspaceRole: "owner", isWorkspaceAdmin: true, isHubOperator: false, isAdmin: true },
+      { workspaceRole: "owner", isWorkspaceAdmin: true, isHubOperator: false },
+    ],
+    [
+      "a hub operator who is a member of the workspace",
+      { workspaceRole: "member", isWorkspaceAdmin: false, isHubOperator: true, isAdmin: true },
+      { workspaceRole: "member", isWorkspaceAdmin: false, isHubOperator: true },
+    ],
+    // A hub from before workspace authority sends isAdmin only: it meant the seat, so both flags.
+    ["a legacy hub's admin (isAdmin only)", { isAdmin: true }, { workspaceRole: null, isWorkspaceAdmin: true, isHubOperator: true }],
+    ["a legacy hub's non-admin (isAdmin only)", { isAdmin: false }, { workspaceRole: null, isWorkspaceAdmin: false, isHubOperator: false }],
+  ])("/api/me for %s sets the two flags", async (_name, body, expected) => {
+    setPlane(P);
+    vi.spyOn(plane, "planeAccessToken").mockResolvedValue("at1");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ id: "prn_x", email: "a@example.com", org: "org_x", issuer: "org-plane", ...body }), { status: 200 }),
+    );
+    await initAuth();
+    expect({ workspaceRole: auth.workspaceRole, isWorkspaceAdmin: auth.isWorkspaceAdmin, isHubOperator: auth.isHubOperator }).toEqual(expected);
+  });
+
   test("no token in memory (a reload) leaves the user signed out and asks nobody", async () => {
     setPlane(P);
     vi.spyOn(plane, "planeAccessToken").mockResolvedValue(null);

@@ -47,9 +47,38 @@ vi.mock("$app/navigation", () => ({
   replaceState: vi.fn(),
 }));
 
+const mockAuth = vi.hoisted(() => ({ isWorkspaceAdmin: true }));
+vi.mock("$lib/stores/auth.svelte", () => ({ auth: mockAuth }));
+
 beforeEach(() => {
   vi.restoreAllMocks();
   resetReactivePageState();
+  mockAuth.isWorkspaceAdmin = true;
+});
+
+// ── a workspace member ────────────────────────────────────────────────────────
+
+test("a member's empty fleet says who can enrol, and offers no enrolment token", async () => {
+  mockAuth.isWorkspaceAdmin = false;
+  vi.spyOn(api, "listNodes").mockResolvedValue([]);
+  const { findByTestId, queryByRole } = render(NodesOverview);
+  expect((await findByTestId("enrol-member")).textContent).toContain(
+    "Workspace admins can enrol nodes. Ask an owner or admin of your workspace.",
+  );
+  expect(queryByRole("button", { name: /create enrollment token/i })).toBeNull();
+});
+
+test("a member sees a node's drift but no Update, Update-all, New runtime or enrolment control", async () => {
+  mockAuth.isWorkspaceAdmin = false;
+  vi.spyOn(api, "listNodes").mockResolvedValue([
+    { ...mockNodes[0], agentVersion: "v0.1.2", latestVersion: "v0.1.3", updateAvailable: true },
+  ]);
+  const { findByText, queryByRole, queryByText } = render(NodesOverview);
+  expect(await findByText(/v0\.1\.2.*v0\.1\.3/)).toBeTruthy();
+  expect(queryByRole("button", { name: /^update$/i })).toBeNull();
+  expect(queryByRole("button", { name: /create enrollment token/i })).toBeNull();
+  expect(queryByText(/Update 1 node/)).toBeNull();
+  expect(queryByText("New runtime")).toBeNull();
 });
 afterEach(cleanup);
 

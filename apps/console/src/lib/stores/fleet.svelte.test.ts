@@ -4,7 +4,7 @@ import { test, expect, vi, beforeEach, afterEach } from "vitest";
 // touches the admin-only principal directory, so the role has to be settable
 // per test.
 const { mockAuth } = vi.hoisted(() => ({
-  mockAuth: { user: null as { role?: string | null } | null },
+  mockAuth: { user: null as { role?: string | null } | null, isWorkspaceAdmin: false },
 }));
 vi.mock("$lib/stores/auth.svelte", () => ({ auth: mockAuth }));
 
@@ -178,6 +178,7 @@ test("startFleetPoll is idempotent: calling stop twice is harmless", async () =>
 
 test("a non-admin never calls listPrincipals, and gets an empty directory", async () => {
   mockAuth.user = { role: "user" };
+  mockAuth.isWorkspaceAdmin = false;
   vi.spyOn(api, "getFleet").mockResolvedValue({ agents: [agent], stats });
   vi.spyOn(api, "listNodes").mockResolvedValue([node]);
   vi.spyOn(api, "listRuntimes").mockResolvedValue([runtime]);
@@ -192,6 +193,7 @@ test("a non-admin never calls listPrincipals, and gets an empty directory", asyn
 
 test("an admin loads the principal directory", async () => {
   mockAuth.user = { role: "admin" };
+  mockAuth.isWorkspaceAdmin = true;
   vi.spyOn(api, "getFleet").mockResolvedValue({ agents: [agent], stats });
   vi.spyOn(api, "listNodes").mockResolvedValue([node]);
   vi.spyOn(api, "listRuntimes").mockResolvedValue([runtime]);

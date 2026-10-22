@@ -158,6 +158,8 @@ beforeEach(() => {
   setContextRail(null);
   window.matchMedia = realMatchMedia;
   vi.spyOn(api, "stationHealth").mockResolvedValue(health);
+  // Changing an agent is a workspace admin's; the member test overrides this.
+  vi.spyOn(auth, "isWorkspaceAdmin", "get").mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -398,6 +400,30 @@ test("Restart and a destructive Stop ride in the header, for a station that has 
   expect(call).not.toHaveBeenCalled();
   await fireEvent.click(confirm);
   await waitFor(() => expect(call).toHaveBeenCalledWith("station_1", "stop"));
+});
+
+test("a workspace member can chat but is offered no lifecycle, terminal, cleanup or configuration change", async () => {
+  vi.spyOn(auth, "isWorkspaceAdmin", "get").mockReturnValue(false);
+  vi.spyOn(api, "listStations").mockResolvedValue([
+    station(["health", "acp", "lifecycle", "terminal", "cleanup", "config.manage", "fs.write"]),
+  ]);
+
+  const { getAllByRole, queryByRole, findByTestId } = render(StationPage);
+
+  await waitFor(() => expect(tabNames(getAllByRole("tab"))).toContain("Chat"));
+  const names = tabNames(getAllByRole("tab"));
+  expect(names).toContain("Terminal");
+  expect(names).not.toContain("Cleanup");
+  expect(queryByRole("button", { name: "Restart" })).toBeNull();
+  expect(queryByRole("button", { name: "Stop" })).toBeNull();
+  const terminal = getAllByRole("tab").find((t) => t.getAttribute("aria-label") === "Terminal")!;
+  expect(terminal.getAttribute("aria-disabled")).toBe("true");
+  expect(terminal.getAttribute("title")).toBe("Workspace admins can open a terminal. Ask an owner or admin of your workspace.");
+
+  setUrl("?tab=config");
+  expect((await findByTestId("config-member")).textContent).toContain(
+    "Workspace admins can change this agent's configuration. Ask an owner or admin of your workspace.",
+  );
 });
 
 test("a station without the lifecycle capability gets no Restart or Stop", async () => {
@@ -836,6 +862,7 @@ test("the About sheet says Couldn't read the grants. when the grants call fails"
 });
 
 test("the About sheet keeps the rail's other dispatch states", async () => {
+  vi.spyOn(auth, "isWorkspaceAdmin", "get").mockReturnValue(false);
   atWidth(390);
   vi.spyOn(api, "listStations").mockResolvedValue([occupied(["health"])]);
 

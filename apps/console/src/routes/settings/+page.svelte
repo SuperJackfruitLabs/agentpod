@@ -73,9 +73,10 @@
         {/if}
         <dt>Email</dt>
         <dd>{auth.user.email}</dd>
-        {#if auth.user.role}
+        <!-- The workspace role when the hub says it ("owner", "admin", "member"); a legacy hub's role otherwise. -->
+        {#if auth.workspaceRole ?? auth.user.role}
           <dt>Role</dt>
-          <dd><Badge variant="secondary">{auth.user.role}</Badge></dd>
+          <dd><Badge variant="secondary">{auth.workspaceRole ?? auth.user.role}</Badge></dd>
         {/if}
       </dl>
     {:else}

@@ -38,6 +38,11 @@
   import PlusIcon from "@lucide/svelte/icons/plus";
   import ContainerIcon from "@lucide/svelte/icons/container";
   import { toast } from "svelte-sonner";
+  import { auth } from "$lib/stores/auth.svelte";
+  import { workspaceAdminsCan } from "$lib/workspace-authority";
+
+  /** Creating, starting, stopping and destroying runtimes are a workspace admin's. */
+  const wsAdmin = $derived(auth.isWorkspaceAdmin);
 
   // ── State ───────────────────────────────────────────────────────────────────
   let runtimes = $state<ProvisionedRuntime[]>([]);
@@ -188,10 +193,12 @@
 <!-- ── Page header with "New runtime" CTA ─────────────────────────────────── -->
 <PageHeader title="Runtimes" subtitle="Provisioned containers">
   {#snippet actions()}
-    <Button onclick={() => (showNewRuntimeDialog = true)} data-testid="new-runtime-btn">
-      <PlusIcon class="h-4 w-4 mr-2" />
-      New runtime
-    </Button>
+    {#if wsAdmin}
+      <Button onclick={() => (showNewRuntimeDialog = true)} data-testid="new-runtime-btn">
+        <PlusIcon class="h-4 w-4 mr-2" />
+        New runtime
+      </Button>
+    {/if}
   {/snippet}
 </PageHeader>
 
@@ -215,16 +222,20 @@
   {:else if runtimes.length === 0}
     <!-- Empty state -->
     <div data-testid="empty-state" class="ap-card">
-      <Empty
-        title="No runtimes yet"
-        description="Provision your first runtime to get started"
-        icon={ContainerIcon}
-      >
-        <Button onclick={() => (showNewRuntimeDialog = true)} data-testid="empty-new-runtime-btn">
-          <PlusIcon class="h-4 w-4 mr-2" />
-          New runtime
-        </Button>
-      </Empty>
+      {#if wsAdmin}
+        <Empty
+          title="No runtimes yet"
+          description="Provision your first runtime to get started"
+          icon={ContainerIcon}
+        >
+          <Button onclick={() => (showNewRuntimeDialog = true)} data-testid="empty-new-runtime-btn">
+            <PlusIcon class="h-4 w-4 mr-2" />
+            New runtime
+          </Button>
+        </Empty>
+      {:else}
+        <Empty title="No runtimes yet" description={workspaceAdminsCan("provision runtimes")} icon={ContainerIcon} />
+      {/if}
     </div>
 
   {:else}
@@ -323,6 +334,7 @@
 
               <td data-card="actions" class="px-3 py-3">
                 <div class="flex items-center justify-end gap-1.5">
+                  {#if wsAdmin}
                   <!-- Start: a runtime an operator stopped, or one that failed -->
                   {#if rt.status === "stopped" || rt.status === "error"}
                     <Button
@@ -369,6 +381,7 @@
                     >
                       Destroy
                     </Button>
+                  {/if}
                   {/if}
                 </div>
               </td>

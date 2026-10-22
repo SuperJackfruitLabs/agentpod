@@ -22,6 +22,11 @@
   import UserXIcon from "@lucide/svelte/icons/user-x";
   import UserCheckIcon from "@lucide/svelte/icons/user-check";
   import BanIcon from "@lucide/svelte/icons/ban";
+  import { auth } from "$lib/stores/auth.svelte";
+  import { workspaceAdminsCan } from "$lib/workspace-authority";
+
+  /** Creating, assigning and unassigning agents are a workspace admin's. */
+  const wsAdmin = $derived(auth.isWorkspaceAdmin);
 
   interface ExternalFilter {
     stationId?: string;
@@ -193,6 +198,8 @@
   }
 
   async function loadPrincipals() {
+    // The directory is a workspace admin's; a member asking would 403 on every poll.
+    if (!wsAdmin) return;
     try {
       principalsById = new Map((await listPrincipals()).map((p) => [p.id, p]));
       principalsError = null;
@@ -258,7 +265,7 @@
     }
     if (action === handledAction) return;
     handledAction = action;
-    if (action === "create") openCreateGeneric();
+    if (action === "create" && wsAdmin) openCreateGeneric();
     try {
       replaceState("/agents", {});
     } catch {
@@ -338,10 +345,12 @@
     {/if}
   {/snippet}
   {#snippet actions()}
-    <Button variant="outline" onclick={openCreateGeneric}>
-      <UserPlusIcon class="h-4 w-4" />
-      Create agent
-    </Button>
+    {#if wsAdmin}
+      <Button variant="outline" onclick={openCreateGeneric}>
+        <UserPlusIcon class="h-4 w-4" />
+        Create agent
+      </Button>
+    {/if}
   {/snippet}
 </PageHeader>
 
@@ -360,7 +369,11 @@
     </div>
 
   {:else}
-    {#if assignmentsError || principalsError}
+    {#if !wsAdmin}
+      <p class="ap-card text-sm text-muted-foreground" data-testid="agents-member">
+        {workspaceAdminsCan("create agents and assign them to stations")}
+      </p>
+    {:else if assignmentsError || principalsError}
       <WarnBox
         class="flex items-start justify-between gap-3"
         role="alert"

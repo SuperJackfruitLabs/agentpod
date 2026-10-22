@@ -265,6 +265,24 @@ test("a harness station that has not reported yet is not called a bridge station
   expect(getByTestId("rail-credential-mode").textContent).toContain("Held by the agent itself");
 });
 
+// ─── a member's rail ────────────────────────────────────────────────────────
+
+test("a member sees who to ask in place of the voice, Matrix and setup controls", async () => {
+  const loadTranscription = vi.fn();
+  const loadSpeech = vi.fn();
+  const { getByTestId, queryByRole } = render(ContextRail, {
+    props: { station: station({ matrixId: "@hermes:example.org", matrixIdentityMode: "harness" }), node, isAdmin: false, loadTranscription, loadSpeech },
+  });
+  expect(getByTestId("rail-voice-notes-member").textContent).toBe(
+    "Workspace admins can change how this agent hears voice notes. Ask an owner or admin of your workspace.",
+  );
+  expect(getByTestId("rail-voice-replies-member").textContent).toContain("Ask an owner or admin of your workspace.");
+  expect(queryByRole("button", { name: "Apply to harness" })).toBeNull();
+  expect(queryByRole("button", { name: /remove/i })).toBeNull();
+  expect(loadTranscription).not.toHaveBeenCalled();
+  expect(loadSpeech).not.toHaveBeenCalled();
+});
+
 // ─── voice notes ────────────────────────────────────────────────────────────
 
 test("the rail carries the station's voice-note setting, and a harness station's apply control", async () => {
@@ -279,6 +297,7 @@ test("the rail carries the station's voice-note setting, and a harness station's
     props: {
       station: station({ matrixId: "@hermes:example.org", matrixIdentityMode: "harness" }),
       node,
+      isAdmin: true,
       loadTranscription,
     },
   });
@@ -316,6 +335,7 @@ test("the rail carries the station's voice replies, with the harness note and ap
     props: {
       station: station({ matrixId: "@hermes:example.org", matrixIdentityMode: "harness" }),
       node,
+      isAdmin: true,
       loadSpeech,
       loadVoices,
     },

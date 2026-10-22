@@ -13,6 +13,8 @@
    */
   import { cn } from "$lib/utils";
   import { scrollStrip } from "$lib/actions/scroll-strip";
+  import { auth } from "$lib/stores/auth.svelte";
+  import { adminSections } from "$lib/components/shell/nav";
 
   interface Props {
     /** The section this page is. */
@@ -21,13 +23,9 @@
 
   let { active }: Props = $props();
 
-  const sections = [
-    { id: "users", label: "Users", href: "/admin/users" },
-    { id: "grants", label: "Grants", href: "/admin/grants" },
-    { id: "bridge", label: "Bridge", href: "/admin/bridge" },
-    { id: "transcription", label: "Transcription", href: "/admin/transcription" },
-    { id: "speech", label: "Speech", href: "/admin/speech" },
-  ] as const;
+  // Workspace pages for workspace admins, hub settings for the hub's operator: a tab that only
+  // leads to "ask someone else" is not offered.
+  const sections = $derived(adminSections({ isWorkspaceAdmin: auth.isWorkspaceAdmin, isHubOperator: auth.isHubOperator }));
 </script>
 
 <!-- A scroll strip, and min-w-0 so it can be narrower than its tabs: five

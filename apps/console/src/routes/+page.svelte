@@ -21,6 +21,8 @@
   import { deriveAttention } from "$lib/fleet/attention";
   import { nodeState, stationState, type StateId } from "$lib/fleet/state";
   import { fleet } from "$lib/stores/fleet.svelte";
+  import { auth } from "$lib/stores/auth.svelte";
+  import { workspaceAdminsCan } from "$lib/workspace-authority";
   import ActivityFeed from "$lib/components/fleet/ActivityFeed.svelte";
   import ConnectBanner from "$lib/components/fleet/connect-banner.svelte";
   import StateBar from "$lib/components/shell/StateBar.svelte";
@@ -119,6 +121,9 @@
 
   let lastToken = $state<string | null>(null);
 
+  /** Enrolling and updating nodes are a workspace admin's; a member is told who to ask. */
+  const wsAdmin = $derived(auth.isWorkspaceAdmin);
+
   async function handleCreateToken() {
     try {
       const result = await createEnrollmentToken();
@@ -181,8 +186,13 @@
           </code>
           <p class="text-xs text-muted-foreground">The node joins the fleet as soon as it connects.</p>
         </div>
-      {:else}
+      {:else if wsAdmin}
         <ConnectBanner onCreateToken={handleCreateToken} />
+      {:else}
+        <div class="ap-card space-y-2" data-testid="enrol-member">
+          <h2 class="t-section text-base">No nodes yet</h2>
+          <p class="text-sm text-muted-foreground">{workspaceAdminsCan("enrol nodes")}</p>
+        </div>
       {/if}
     </div>
 
@@ -253,7 +263,7 @@
                   {/if}
                 </dd>
               </dl>
-              {#if node.updateAvailable}
+              {#if node.updateAvailable && wsAdmin}
                 <Button
                   data-testid="node-update-{node.id}"
                   variant="outline"
@@ -349,7 +359,7 @@
                 </td>
 
                 <td class="px-3 py-2 text-right">
-                  {#if node.updateAvailable}
+                  {#if node.updateAvailable && wsAdmin}
                     <Button
                       data-testid="node-update-{node.id}"
                       variant="outline"

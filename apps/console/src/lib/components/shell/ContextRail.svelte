@@ -23,6 +23,7 @@
     type PrincipalSummary,
   } from "$lib/api/grants";
   import { auth } from "$lib/stores/auth.svelte";
+  import { ASK_AN_ADMIN, workspaceAdminsCan } from "$lib/workspace-authority";
   import RemoveStation from "$lib/components/stations/RemoveStation.svelte";
   import { goto } from "$app/navigation";
   import { refreshFleet } from "$lib/stores/fleet.svelte";
@@ -67,7 +68,8 @@
     loadVoices,
   }: Props = $props();
 
-  const admin = $derived(isAdmin ?? auth.user?.role === "admin");
+  /** A workspace admin: onboarding, removal, Matrix credentials, voice and grants are theirs. */
+  const admin = $derived(isAdmin ?? auth.isWorkspaceAdmin);
 
   /**
    * The address this station actually answers on.
@@ -214,9 +216,11 @@
       {#if admin}
         <div class="mt-3"><RemoveStation stationId={station.id} displayName={station.displayName} onRemoved={()=>{void refreshFleet();void goto(`/nodes/${station!.nodeId}`);}} /></div>
       {/if}
-      <div class="mt-3 empty:hidden">
-        <MatrixIdentityPanel station={{ id: station.id, matrixId: station.matrixId }} />
-      </div>
+      {#if admin}
+        <div class="mt-3 empty:hidden">
+          <MatrixIdentityPanel station={{ id: station.id, matrixId: station.matrixId }} />
+        </div>
+      {/if}
     </section>
 
     <!-- ── Placement ────────────────────────────────────────────────────── -->
@@ -274,14 +278,18 @@
       <h2 class="ap-rail__h mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
         Voice notes
       </h2>
-      {#key station.id}
-        <!-- An undefined `load` falls back to the hub call. -->
-        <VoiceNotesField
-          stationId={station.id}
-          harnessMode={station.matrixIdentityMode === "harness"}
-          load={loadTranscription}
-        />
-      {/key}
+      {#if admin}
+        {#key station.id}
+          <!-- An undefined `load` falls back to the hub call. -->
+          <VoiceNotesField
+            stationId={station.id}
+            harnessMode={station.matrixIdentityMode === "harness"}
+            load={loadTranscription}
+          />
+        {/key}
+      {:else}
+        <p class="text-muted-foreground" data-testid="rail-voice-notes-member">{workspaceAdminsCan("change how this agent hears voice notes")}</p>
+      {/if}
     </section>
 
     <!-- ── Voice replies ────────────────────────────────────────────────── -->
@@ -289,14 +297,18 @@
       <h2 class="ap-rail__h mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
         Voice replies
       </h2>
-      {#key station.id}
-        <VoiceRepliesField
-          stationId={station.id}
-          harnessMode={station.matrixIdentityMode === "harness"}
-          load={loadSpeech}
-          {loadVoices}
-        />
-      {/key}
+      {#if admin}
+        {#key station.id}
+          <VoiceRepliesField
+            stationId={station.id}
+            harnessMode={station.matrixIdentityMode === "harness"}
+            load={loadSpeech}
+            {loadVoices}
+          />
+        {/key}
+      {:else}
+        <p class="text-muted-foreground" data-testid="rail-voice-replies-member">{workspaceAdminsCan("change how this agent speaks")}</p>
+      {/if}
     </section>
 
     <!-- ── Who may dispatch it ──────────────────────────────────────────── -->
@@ -307,7 +319,7 @@
       {#if !admin}
         <p class="text-muted-foreground" data-testid="rail-grant-not-visible">
           Who may dispatch this agent is not visible to you — grants are readable
-          by administrators.
+          by workspace admins. {ASK_AN_ADMIN}
         </p>
       {:else if station.principalId === null}
         <p class="text-muted-foreground">

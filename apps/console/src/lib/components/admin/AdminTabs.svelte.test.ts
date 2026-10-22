@@ -9,6 +9,16 @@ import { test, expect, vi } from "vitest";
 import { render } from "@testing-library/svelte";
 import AdminTabs from "./AdminTabs.svelte";
 
+const mockAuth = vi.hoisted(() => ({ isWorkspaceAdmin: true, isHubOperator: true }));
+vi.mock("$lib/stores/auth.svelte", () => ({ auth: mockAuth }));
+
+test("a workspace admin who is not the hub operator is offered the workspace pages only", () => {
+  mockAuth.isHubOperator = false;
+  const { getAllByRole } = render(AdminTabs, { active: "users" });
+  expect(getAllByRole("link").map((a) => a.textContent?.trim())).toEqual(["Users", "Grants", "Bridge"]);
+  mockAuth.isHubOperator = true;
+});
+
 test("the strip scrolls in its own box, never the page", () => {
   const { getByRole } = render(AdminTabs, { active: "grants" });
   const nav = getByRole("navigation", { name: "Admin sections" });

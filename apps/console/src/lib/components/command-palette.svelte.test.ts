@@ -19,7 +19,7 @@ const { mockFleet, mockAuth, goto, updateAllNodes, nodePosture, toast } = vi.hoi
     stations: [] as unknown[],
     principals: [] as unknown[],
   },
-  mockAuth: { user: null as { role?: string | null } | null },
+  mockAuth: { isWorkspaceAdmin: false },
   goto: vi.fn(),
   updateAllNodes: vi.fn(),
   nodePosture: vi.fn(),
@@ -86,7 +86,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockFleet.agents = AGENTS;
   mockFleet.nodes = NODES;
-  mockAuth.user = { role: "user" };
+  // Most tests are about the verbs, which are a workspace admin's; the member test says otherwise.
+  mockAuth.isWorkspaceAdmin = true;
   commandPalette.close();
 });
 
@@ -218,8 +219,18 @@ test("an offline node is not offered a scan", async () => {
 
 // --- Authority --------------------------------------------------------------
 
+test("a member is offered no fleet change the hub would refuse, but can still reach agents", async () => {
+  mockAuth.isWorkspaceAdmin = false;
+  mockFleet.nodes = [node({ id: "n_orion", name: "orion", updateAvailable: true })];
+  const { queryByTestId, getAllByTestId } = await open();
+  for (const id of ["palette-update-all", "palette-enrollment-token", "palette-create-agent", "palette-assign-agent", "palette-new-runtime"]) {
+    expect(queryByTestId(id), id).toBeNull();
+  }
+  expect(getAllByTestId("palette-agent").length).toBeGreaterThan(0);
+});
+
 test("a non-admin is offered no Authority verbs", async () => {
-  mockAuth.user = { role: "user" };
+  mockAuth.isWorkspaceAdmin = false;
   const { queryByTestId, queryByText } = await open();
 
   expect(queryByTestId("palette-grants")).toBeNull();
@@ -228,7 +239,7 @@ test("a non-admin is offered no Authority verbs", async () => {
 });
 
 test("an admin is offered them, tailed destructive", async () => {
-  mockAuth.user = { role: "admin" };
+  mockAuth.isWorkspaceAdmin = true;
   const { getByTestId, getByText } = await open();
 
   expect(getByText("Authority")).toBeTruthy();
@@ -243,7 +254,7 @@ test("an admin is offered them, tailed destructive", async () => {
 });
 
 test("the Authority verbs go to the page that holds them", async () => {
-  mockAuth.user = { role: "admin" };
+  mockAuth.isWorkspaceAdmin = true;
   const { getByTestId } = await open();
 
   await fireEvent.click(getByTestId("palette-suspend"));
@@ -265,7 +276,7 @@ test("the palette is how you reach agent creation and assignment", async () => {
 // --- Groups and keyboard (pinned through the restyle) --------------------
 
 test("the groups are Go to and Fleet, and Authority for admins, in that order", async () => {
-  mockAuth.user = { role: "admin" };
+  mockAuth.isWorkspaceAdmin = true;
   const { container } = await open();
   const headings = [...container.ownerDocument.querySelectorAll("[data-command-group-heading]")].map(
     (h) => h.textContent?.trim(),

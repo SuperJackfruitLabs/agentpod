@@ -30,8 +30,8 @@
   import ShieldCheckIcon from "@lucide/svelte/icons/shield-check";
   import BanIcon from "@lucide/svelte/icons/ban";
 
-  /** Authority is admin-only: never offer an action the hub would refuse. */
-  const isAdmin = $derived(auth.user?.role === "admin");
+  /** Fleet changes and Authority are a workspace admin's: never offer an action the hub would refuse. */
+  const isAdmin = $derived(auth.isWorkspaceAdmin);
 
   const nodesBehind = $derived(fleet.nodes.filter((n: NodeSummary) => n.updateAvailable));
 
@@ -150,6 +150,7 @@
     <Command.Separator />
 
     <Command.Group heading="Fleet">
+      {#if isAdmin}
       {#if nodesBehind.length > 0}
         <!-- Only when there is something to update: an entry that does
              nothing is an entry that teaches you to ignore the palette. -->
@@ -200,6 +201,7 @@
         <PlusCircleIcon class="mr-2 size-4" />
         New runtime
       </Command.Item>
+      {/if}
       {#each scannableNodes as node (node.id)}
         <Command.Item
           data-testid="palette-posture"

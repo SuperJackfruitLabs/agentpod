@@ -36,6 +36,8 @@ export class ApiError extends Error {
   }
 }
 
+import { WORKSPACE_ADMIN_REQUIRED, WORKSPACE_ADMIN_REQUIRED_MESSAGE } from "$lib/workspace-authority";
+
 /** The hub's refusal for anything the organization plane now owns. */
 export const MANAGED_BY_ORG_PLANE = "managed_by_org_plane";
 
@@ -91,6 +93,11 @@ export async function apiError(res: Response, requestLine: string): Promise<ApiE
         const candidate = parsed.message ?? parsed.error;
         if (typeof candidate === "string" && candidate.trim()) hubMessage = candidate;
         if (typeof parsed.code === "string" && parsed.code.trim()) code = parsed.code;
+        if (parsed.error === WORKSPACE_ADMIN_REQUIRED) {
+          // A member called a workspace-admin route: say who can, never the raw code.
+          code = WORKSPACE_ADMIN_REQUIRED;
+          hubMessage = WORKSPACE_ADMIN_REQUIRED_MESSAGE;
+        }
         if (parsed.error === MANAGED_BY_ORG_PLANE) {
           code = MANAGED_BY_ORG_PLANE;
           hubMessage = "This is managed in your Super Jackfruit account";

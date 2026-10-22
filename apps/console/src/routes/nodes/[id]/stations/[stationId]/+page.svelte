@@ -36,6 +36,8 @@
   import ActivityPanel from "$lib/components/stations/ActivityPanel.svelte";
   import { lifecycle, listStations, setStationPurpose } from "$lib/api/client";
   import { myReach } from "$lib/api/my-grant";
+  import { auth } from "$lib/stores/auth.svelte";
+  import { workspaceAdminsCan } from "$lib/workspace-authority";
   import type { StationRow } from "$lib/api/client";
   import ContextRail from "$lib/components/shell/ContextRail.svelte";
   import StateDot from "$lib/components/shell/StateDot.svelte";
@@ -177,14 +179,22 @@
    */
   let mayGrantReach = $state(true);
 
+  /**
+   * A workspace member uses an agent (chat, logs, files to read) but does not change it: the
+   * hub refuses a member's lifecycle, terminal, file writes, configuration, skills, cleanup,
+   * avatar and purpose, so none of those is offered.
+   */
+  const wsAdmin = $derived(auth.isWorkspaceAdmin);
+  const mayChange = $derived(mayGrantReach && wsAdmin);
+
   const canWrite = $derived(
     Array.isArray(station?.capabilities) &&
       station!.capabilities.includes("fs.write") &&
-      mayGrantReach
+      mayChange
   );
 
   const canLifecycle = $derived(
-    Array.isArray(station?.capabilities) && station!.capabilities.includes("lifecycle")
+    wsAdmin && Array.isArray(station?.capabilities) && station!.capabilities.includes("lifecycle")
   );
 
   const hasSkillInventory = $derived(station?.capabilities?.includes("skills.inventory") ?? false);
@@ -198,8 +208,9 @@
   // A Matrix identity the hub can put a face on: the appservice's own user for
   // a bridge-mode agent, or a harness login the node can use (`matrix.avatar`).
   const canSetAvatar = $derived(
-    station?.matrixIdentityMode === "bridge" ||
-      (station?.capabilities?.includes("matrix.avatar") ?? false)
+    wsAdmin &&
+      (station?.matrixIdentityMode === "bridge" ||
+        (station?.capabilities?.includes("matrix.avatar") ?? false))
   );
   const hasSkills = $derived(hasSkillInventory || hasSkillManagement || hasNativeSkillManagement || hasPluginManagement);
   /**
@@ -243,8 +254,9 @@
     Array.isArray(station?.capabilities) && station!.capabilities.includes("changeset")
   );
 
+  // Cleanup only deletes, and deleting is a workspace admin's: a member has no use for the tab.
   const hasCleanup = $derived(
-    Array.isArray(station?.capabilities) && station!.capabilities.includes("cleanup")
+    wsAdmin && Array.isArray(station?.capabilities) && station!.capabilities.includes("cleanup")
   );
 
   /** Which station the loaded row describes, so a reload of the SAME agent
@@ -421,8 +433,8 @@
             // A shell changes what an agent is, so it sits behind mayGrantReach.
             // Shown-and-locked rather than hidden: a missing tab reads as "this
             // agent has no terminal", which is a different and wrong answer.
-            disabled: !mayGrantReach,
-            disabledReason: "You may dispatch this agent but not change it",
+            disabled: !mayChange,
+            disabledReason: wsAdmin ? "You may dispatch this agent but not change it" : workspaceAdminsCan("open a terminal"),
           },
         ]
       : []),
@@ -516,7 +528,7 @@
     {station}
     {node}
     agentVersion={fleetAgent?.agentVersion ?? null}
-    onSavePurpose={savePurpose}
+    onSavePurpose={wsAdmin ? savePurpose : undefined}
     onSetupComplete={() => { void loadStation(); void refreshFleet(); }}
   />
 {/snippet}
@@ -807,7 +819,12 @@
              switch must not be able to tear it down mid-review. -->
         <div data-config-section="settings" class={configSection === "settings" ? "contents" : "hidden"}>
           <McpProxyStatus {stationId} />
-          {#if hasConfigManagement}
+          {#if hasConfigManagement && !wsAdmin}
+            <div class="ap-cfg-placeholder space-y-2 p-4" data-testid="config-member">
+              <h2 class="font-semibold">Declared configuration</h2>
+              <p class="text-sm text-muted-foreground">{workspaceAdminsCan("change this agent's configuration")}</p>
+            </div>
+          {:else if hasConfigManagement}
             <HarnessConfigPanel
               {stationId}
               {nodeId}
@@ -832,7 +849,7 @@
           <div data-config-section="plugins" class={configSection === "plugins" ? "contents" : "hidden"}>
             <PluginManagementPanel
               {stationId}
-              canManage={mayGrantReach}
+              canManage={mayChange}
               onRestart={canLifecycle ? () => askFor("restart") : undefined}
             />
           </div>
@@ -845,8 +862,8 @@
               <SkillManagementPanel
                 {stationId}
                 harness={station?.harness ?? ""}
-                canManage={hasSkillManagement && mayGrantReach}
-                canNative={hasNativeSkillManagement && mayGrantReach}
+                canManage={hasSkillManagement && mayChange}
+                canNative={hasNativeSkillManagement && mayChange}
               />
             {/if}
           </div>

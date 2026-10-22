@@ -11,6 +11,8 @@ const { mockPage, mockAuth, mockLogout, mockGoto } = vi.hoisted(() => ({
     initials: "RG",
     email: "rakesh@example.com" as string | null,
     user: { role: "admin" as string | null },
+    isWorkspaceAdmin: true,
+    isHubOperator: false,
   },
   mockLogout: vi.fn(async () => {}),
   mockGoto: vi.fn(async () => {}),
@@ -30,6 +32,8 @@ import { appearance } from "$lib/appearance.svelte";
 beforeEach(() => {
   mockPage.url = new URL("https://console.test/");
   mockAuth.user = { role: "admin" };
+  mockAuth.isWorkspaceAdmin = true;
+  mockAuth.isHubOperator = false;
   mockAuth.email = "rakesh@example.com";
   mockLogout.mockClear();
   mockGoto.mockClear();
@@ -49,8 +53,17 @@ describe("Navigation", () => {
 
   test("hides Admin from someone who is not an admin", () => {
     mockAuth.user = { role: null };
+    mockAuth.isWorkspaceAdmin = false;
     const { getByRole } = render(Navigation);
     expect(labels(getByRole("navigation", { name: "Console" }))).not.toContain("Admin");
+  });
+
+  test("a hub operator who is a workspace member gets Admin, leading to the hub settings", () => {
+    mockAuth.isWorkspaceAdmin = false;
+    mockAuth.isHubOperator = true;
+    const { getByRole } = render(Navigation);
+    const nav = getByRole("navigation", { name: "Console" });
+    expect(within(nav).getByRole("link", { name: "Admin" }).getAttribute("href")).toBe("/admin/transcription");
   });
 
   test("marks the current section with aria-current, from the route", () => {
@@ -180,6 +193,7 @@ describe("MoreSheet", () => {
 
   test("no Admin for someone who is not an admin", () => {
     mockAuth.user = { role: null };
+    mockAuth.isWorkspaceAdmin = false;
     render(MoreSheet, { props: { open: true } });
     const sheet = document.querySelector<HTMLElement>('[data-testid="more-sheet"]')!;
     expect(labels(within(sheet).getByRole("navigation", { name: "More pages" }))).toEqual([
