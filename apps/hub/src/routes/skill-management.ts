@@ -56,6 +56,7 @@ import {
 } from "../services/skill-operations";
 import * as broker from "../services/broker";
 import { canaryOperationIdentity } from "./canary-operation";
+import { isWorkspaceAdminUser, WORKSPACE_ADMIN_REQUIRED } from "../auth/workspace-authority";
 
 /** The console caller with its org-plane token authority, for the reach checks (design §5.7). */
 function callerOf(c: Context): AuthUser {
@@ -70,9 +71,21 @@ function owner(c: Context): SkillOwner {
   return { userId: user.id, tenantId: user.tenantId };
 }
 
+/**
+ * The workspace's skill catalog and the skills installed on its stations change what those
+ * stations do for everyone in it: a workspace admin's (workspace authority spec, W1). Reads and
+ * inspections stay any member's (W4).
+ */
+function adminOwner(c: Context): SkillOwner {
+  const o = owner(c);
+  if (!isWorkspaceAdminUser(c.get("user") as AuthUser))
+    throw new SkillRequestError(403, WORKSPACE_ADMIN_REQUIRED.error);
+  return o;
+}
+
 async function stationContext(c: Context, mutate = false, capability = "skills.manage") {
-  const caller = owner(c),
-    station = await getStation(caller.userId, c.req.param("id")!);
+  const caller = mutate ? adminOwner(c) : owner(c),
+    station = await getStation(caller, c.req.param("id")!);
   if (!station || station.tenantId !== caller.tenantId)
     throw new SkillRequestError(404, "Station not found");
   if (!gateCapability(station, capability))
@@ -197,25 +210,26 @@ export function createSkillManagementRoutes(
       c.json(await listTrustedSkillReleases(owner(c))),
     )
     .post("/skills/catalog/releases", async (c) => {
+      const admin = adminOwner(c);
       const request = await body(c, TrustedSkillReleaseImportRequest);
       return c.json(
-        await importTrustedSkillRelease(owner(c), request.record, request.artifacts),
+        await importTrustedSkillRelease(admin, request.record, request.artifacts),
         201,
       );
     })
     .get("/skills/catalog/cohorts", async (c) => c.json(await listSkillReleaseCohorts(owner(c))))
     .post("/skills/catalog/cohorts", async (c) =>
-      c.json(await createSkillReleaseCohort(owner(c), await body(c, SkillReleaseCohortCreateRequest), callerOf(c)), 201),
+      c.json(await createSkillReleaseCohort(adminOwner(c), await body(c, SkillReleaseCohortCreateRequest), callerOf(c)), 201),
     )
     .post("/skills/catalog/cohorts/:cohortId/canary/plan", async (c) => {
-      const caller = owner(c);
+      const caller = adminOwner(c);
       const binding = await createSkillReleaseCanaryOperation(
         caller,
         c.req.param("cohortId"),
         await body(c, SkillReleaseCanaryPlanRequest),
         callerOf(c),
       );
-      const station = await getStation(caller.userId, binding.stationId);
+      const station = await getStation(caller, binding.stationId);
       if (!station || station.tenantId !== caller.tenantId)
         throw new SkillRequestError(409, "Canary station is no longer available to this owner");
       const result = await executeSkillOperation(caller, station, binding.operationId, "plan", undefined, timeoutMs);
@@ -228,7 +242,7 @@ export function createSkillManagementRoutes(
       return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
     })
     .post("/skills/catalog/cohorts/:cohortId/canary/operations/apply", async (c) => {
-      const caller = owner(c);
+      const caller = adminOwner(c);
       const request = await body(c, SkillReleaseCanaryApplyRequest);
       const { station, operation } = await getSkillReleaseCanaryOperation(
         caller,
@@ -242,6 +256,7 @@ export function createSkillManagementRoutes(
       return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
     })
     .post("/skills/artifacts", async (c) => {
+      const admin = adminOwner(c);
       const query = new URL(c.req.url).searchParams;
       if ([...query.keys()].some((key) => query.getAll(key).length !== 1))
         throw new SkillRequestError(400, "Duplicate artifact metadata");
@@ -258,13 +273,13 @@ export function createSkillManagementRoutes(
         throw new SkillRequestError(400, "Binary artifact body required");
       const bytes = await readSkillBody(c.req.raw, MAX_SKILL_ARTIFACT_BYTES);
       return c.json(
-        await storeSkillArtifact(owner(c), parsed.data, bytes),
+        await storeSkillArtifact(admin, parsed.data, bytes),
         201,
       );
     })
     .delete("/skills/artifacts/:artifactId", async (c) => {
       const deleted = await deleteSkillArtifact(
-        owner(c),
+        adminOwner(c),
         c.req.param("artifactId"),
       );
       return deleted
@@ -549,7 +564,6 @@ export const skillArtifactDownloadRoutes = routesBase().post(
         stations,
         and(
           eq(stations.id, skillOperations.stationId),
-          eq(stations.userId, skillOperations.userId),
           eq(stations.tenantId, skillOperations.tenantId),
         ),
       )

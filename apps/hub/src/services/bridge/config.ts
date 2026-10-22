@@ -74,7 +74,7 @@ export const BridgeAgentConfig = z.object({
   stationId: z.string().min(1),
   /**
    * The hub user the ACP session belongs to. The session machinery authorizes
-   * every call by user id (`getStation(userId, …)`, `requireLive`), so a
+   * every session call by user id (`requireLive`), so a
    * background worker needs a real owning principal — it cannot invent one.
    */
   hubUserId: z.string().min(1),

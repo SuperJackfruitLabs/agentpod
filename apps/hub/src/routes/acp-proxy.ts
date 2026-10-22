@@ -42,12 +42,13 @@ export const acpProxyRouter = new Hono().get("/acp/proxy", async (c, next) => {
   return upgradeWebSocket(() => {
     // Captured at upgrade time — `c` is not available inside the callbacks.
     const userId = user.id;
+    const tenantId = user.tenantId;
     let bridge: ReturnType<typeof webSocketStream> | undefined;
 
     return {
       onOpen(_evt: unknown, ws: { send(data: string): void }) {
         bridge = webSocketStream({ send: (d) => ws.send(d) });
-        buildAcpAgent({ userId, stationId }).connect(bridge.stream);
+        buildAcpAgent({ userId, tenantId, stationId }).connect(bridge.stream);
         log.debug("acp proxy attached", { userId, stationId });
       },
 

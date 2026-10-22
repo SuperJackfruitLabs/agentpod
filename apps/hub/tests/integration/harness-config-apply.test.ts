@@ -87,6 +87,7 @@ const testApp = new Hono()
         id: userId,
         authType: "api_key",
         tenantId: BOOTSTRAP_TENANT_ID,
+        workspaceRole: "admin",
       } satisfies AuthUser);
     } else {
       c.set("user", {

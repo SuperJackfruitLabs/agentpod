@@ -117,7 +117,7 @@ function app() {
 
   return new Hono()
     .use("*", async (c, next) => {
-      c.set("user", { id: OWNER, role: "user" });
+      c.set("user", { id: OWNER, tenantId: "fleet_00000000000000000000", workspaceRole: "admin" } as never);
       await next();
     })
     .route("/api", routes);

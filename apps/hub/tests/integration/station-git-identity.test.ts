@@ -107,7 +107,9 @@ function appFor(deps: { forge: ForgeConfig | null; fetchImpl?: typeof fetch }) {
       c.set("user", {
         id: userId,
         authType: "api_key",
-        tenantId: "fleet_00000000000000000000",
+        // OTHER_USER acts in another workspace: a station is the workspace's (W4).
+        tenantId: userId === OTHER_USER ? "fleet_11111111111111111111" : "fleet_00000000000000000000",
+        workspaceRole: "admin",
       } satisfies AuthUser);
       return next();
     })
@@ -526,7 +528,7 @@ describe("refusals", () => {
     }
   });
 
-  test("anonymous is 401 and another user's station is 404", async () => {
+  test("anonymous is 401 and another workspace's station is 404", async () => {
     const forge = forgeStub();
     const ctx = await withStation({ fetchImpl: forge.fetchImpl as unknown as typeof fetch });
     try {

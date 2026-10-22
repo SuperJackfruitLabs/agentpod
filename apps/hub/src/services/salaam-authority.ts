@@ -25,9 +25,11 @@ export async function validateSalaamAuthority(
     .select()
     .from(tenants)
     .where(eq(tenants.id, station?.tenantId ?? ""));
+  // Not `station.userId`: the station is the workspace's, not its adopter's (workspace authority
+  // spec, W4). Who may run here is the person's membership of the binding's organization and their
+  // dispatch grant over the occupant, both checked below against fresh reads.
   if (
     !station ||
-    station.userId !== userId ||
     station.harness !== "salaam" ||
     station.nodeId !== binding.node_id ||
     station.stationKey !== binding.station_key ||

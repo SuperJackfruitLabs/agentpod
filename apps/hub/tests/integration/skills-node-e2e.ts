@@ -123,6 +123,8 @@ try {
         id: userId,
         tenantId: BOOTSTRAP_TENANT_ID,
         authType: "api_key",
+        // As the real middleware sets it for the static API key: skill operations are workspace-admin.
+        workspaceRole: "admin",
       });
       await next();
     })

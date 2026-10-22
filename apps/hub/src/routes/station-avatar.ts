@@ -19,7 +19,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { VERB_RESULTS } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
@@ -28,6 +28,8 @@ import { principalHandle } from "../services/principals";
 import { stationSpeaker } from "../services/matrix-as/names";
 import { createLogger } from "../utils/logger";
 import { sniffImage } from "../utils/sniff-image";
+import { tenantScope } from "../db/tenant-scope";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
 export { sniffImage };
 
@@ -60,7 +62,8 @@ export interface AvatarBridge {
 }
 
 export interface StationAvatarDeps {
-  target?: (userId: string, stationId: string) => Promise<AvatarTarget | null>;
+  /** The station, if it is in the caller's workspace (W4). */
+  target?: (tenantId: string, stationId: string) => Promise<AvatarTarget | null>;
   brokerRequest?: BrokerRequest;
   bridge?: AvatarBridge;
 }
@@ -76,7 +79,7 @@ const HARNESSES_WITH_MATRIX_LOGIN: ReadonlySet<string> = new Set(["hermes"]);
 
 const Body = z.object({ path: z.string().min(1).max(4096) });
 
-async function targetInDb(userId: string, stationId: string): Promise<AvatarTarget | null> {
+async function targetInDb(tenantId: string, stationId: string): Promise<AvatarTarget | null> {
   const [row] = await db
     .select({
       id: stations.id,
@@ -88,7 +91,7 @@ async function targetInDb(userId: string, stationId: string): Promise<AvatarTarg
       principalId: stations.principalId,
     })
     .from(stations)
-    .where(and(eq(stations.id, stationId), eq(stations.userId, userId)))
+    .where(tenantScope(stations, tenantId, eq(stations.id, stationId)))
     .limit(1);
   return row ?? null;
 }
@@ -119,8 +122,10 @@ export function stationAvatarRoutes(deps: StationAvatarDeps = {}) {
   const request: BrokerRequest = deps.brokerRequest ?? broker.request;
 
   return new Hono().post("/stations/:stationId/matrix-avatar", zValidator("json", Body), async (c) => {
-    const userId = c.get("user").id;
-    const station = await target(userId, c.req.param("stationId"));
+    // The picture is the station's for everyone in the workspace: a workspace admin's (W1).
+    const notAdmin = requireWorkspaceAdmin(c);
+    if (notAdmin) return notAdmin;
+    const station = await target(c.get("user").tenantId, c.req.param("stationId"));
     if (!station) return c.json({ error: "Not Found" }, 404);
     const { path } = c.req.valid("json");
 

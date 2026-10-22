@@ -72,8 +72,8 @@ export const stationChangesetRoutes = new Hono()
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    // ── 2. Ownership check ───────────────────────────────────────────────────
-    const station = await getStation(user.id, c.req.param("id"));
+    // ── 2. Station in the caller's workspace ─────────────────────────────────
+    const station = await getStation(user, c.req.param("id"));
     if (!station) {
       return c.json({ error: "Not Found" }, 404);
     }
@@ -118,8 +118,8 @@ export const stationChangesetRoutes = new Hono()
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    // ── 2. Ownership check ───────────────────────────────────────────────────
-    const station = await getStation(user.id, c.req.param("id"));
+    // ── 2. Station in the caller's workspace ─────────────────────────────────
+    const station = await getStation(user, c.req.param("id"));
     if (!station) {
       return c.json({ error: "Not Found" }, 404);
     }

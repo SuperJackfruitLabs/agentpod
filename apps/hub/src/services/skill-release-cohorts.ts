@@ -26,7 +26,7 @@ export async function createSkillReleaseCohort(owner: SkillOwner, raw: unknown, 
   const release = await getTrustedSkillRelease(owner, request.releaseId);
   if (!release || release.recordDigest !== request.recordDigest)
     throw new SkillRequestError(409, "Trusted release identity changed or is unavailable");
-  const rows = await db.select().from(stations).where(tenantScope(stations, owner.tenantId, eq(stations.userId, owner.userId), inArray(stations.id, request.stationIds)));
+  const rows = await db.select().from(stations).where(tenantScope(stations, owner.tenantId, inArray(stations.id, request.stationIds)));
   if (rows.length !== request.stationIds.length)
     throw new SkillRequestError(409, "Every requested station must belong to this owner and tenant");
   const record = release.record as { artifacts: { harness: string }[] };
@@ -40,13 +40,13 @@ export async function createSkillReleaseCohort(owner: SkillOwner, raw: unknown, 
 }
 
 export async function listSkillReleaseCohorts(owner: SkillOwner) {
-  const rows = await db.select().from(skillReleaseCohorts).where(tenantScope(skillReleaseCohorts, owner.tenantId, eq(skillReleaseCohorts.userId, owner.userId))).orderBy(skillReleaseCohorts.createdAt).limit(128);
+  const rows = await db.select().from(skillReleaseCohorts).where(tenantScope(skillReleaseCohorts, owner.tenantId)).orderBy(skillReleaseCohorts.createdAt).limit(128);
   return rows.map(metadata);
 }
 
 export async function getSkillReleaseCohort(owner: SkillOwner, id: string) {
   const [row] = await db.select().from(skillReleaseCohorts).where(
-    tenantScope(skillReleaseCohorts, owner.tenantId, eq(skillReleaseCohorts.userId, owner.userId), eq(skillReleaseCohorts.id, id)),
+    tenantScope(skillReleaseCohorts, owner.tenantId, eq(skillReleaseCohorts.id, id)),
   );
   return row ?? null;
 }

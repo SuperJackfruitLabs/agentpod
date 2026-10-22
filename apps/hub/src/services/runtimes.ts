@@ -269,57 +269,55 @@ export async function createRuntime(
 }
 
 /**
- * List a user's live provisioned runtimes.
+ * Whose runtimes a call may reach: the workspace's (workspace authority spec, W4). A runtime
+ * belongs to its tenant; `user_id` records who provisioned it. An object, so a caller still passing
+ * a user id is a type error rather than a silent "not found".
+ */
+export interface RuntimeScope {
+  tenantId: string;
+}
+
+/**
+ * List the workspace's live provisioned runtimes.
  *
  * Destroyed rows stay in the DB for history but are excluded here: no action
  * can be taken on a destroyed runtime, so surfacing it gives the console a
  * permanent dead row.
  */
-export async function listRuntimes(userId: string, tenantId: string): Promise<ProvisionedRuntime[]> {
+export async function listRuntimes(scope: RuntimeScope): Promise<ProvisionedRuntime[]> {
   const rows = await db
     .select()
     .from(provisionedRuntimes)
-    .where(
-      tenantScope(
-        provisionedRuntimes,
-        tenantId,
-        eq(provisionedRuntimes.userId, userId),
-        ne(provisionedRuntimes.status, "destroyed"),
-      )
-    );
+    .where(tenantScope(provisionedRuntimes, scope.tenantId, ne(provisionedRuntimes.status, "destroyed")));
 
   return rows.map(toContract);
 }
 
 /**
- * Get a single runtime, owner-scoped. Returns null if not found or wrong user.
+ * Get a single runtime in the workspace. Returns null if not found or in another workspace.
  */
 export async function getRuntime(
-  userId: string,
+  scope: RuntimeScope,
   id: string
 ): Promise<ProvisionedRuntime | null> {
   const [row] = await db
     .select()
     .from(provisionedRuntimes)
-    .where(
-      and(eq(provisionedRuntimes.id, id), eq(provisionedRuntimes.userId, userId))
-    );
+    .where(tenantScope(provisionedRuntimes, scope.tenantId, eq(provisionedRuntimes.id, id)));
 
   return row ? toContract(row) : null;
 }
 
 /**
  * Permanently destroy a runtime and mark it destroyed in the DB.
- * Throws 404 if not found or owned by another user.
+ * Throws 404 if not found or in another workspace.
  * Throws 502 if the driver destroy() fails.
  */
-export async function destroyRuntime(userId: string, id: string): Promise<void> {
+export async function destroyRuntime(scope: RuntimeScope, id: string): Promise<void> {
   const [row] = await db
     .select()
     .from(provisionedRuntimes)
-    .where(
-      and(eq(provisionedRuntimes.id, id), eq(provisionedRuntimes.userId, userId))
-    );
+    .where(tenantScope(provisionedRuntimes, scope.tenantId, eq(provisionedRuntimes.id, id)));
 
   if (!row) {
     throw Object.assign(new Error("runtime not found"), { status: 404 });
@@ -507,13 +505,11 @@ export async function reprovisionRuntime(
  * A wake takes the same path, so an asleep runtime goes asleep → starting →
  * online (or → error, if the substrate says yes and nothing comes back).
  */
-export async function startRuntime(userId: string, id: string): Promise<void> {
+export async function startRuntime(scope: RuntimeScope, id: string): Promise<void> {
   const [row] = await db
     .select()
     .from(provisionedRuntimes)
-    .where(
-      and(eq(provisionedRuntimes.id, id), eq(provisionedRuntimes.userId, userId))
-    );
+    .where(tenantScope(provisionedRuntimes, scope.tenantId, eq(provisionedRuntimes.id, id)));
 
   if (!row) {
     throw Object.assign(new Error("runtime not found"), { status: 404 });
@@ -790,13 +786,11 @@ async function probeState(
  *   - substrate will not say     → stays `stopping`; the sweeper keeps asking
  *   - driver has no status()     → `stopped`, with the caveat recorded (below)
  */
-export async function stopRuntime(userId: string, id: string): Promise<void> {
+export async function stopRuntime(scope: RuntimeScope, id: string): Promise<void> {
   const [row] = await db
     .select()
     .from(provisionedRuntimes)
-    .where(
-      and(eq(provisionedRuntimes.id, id), eq(provisionedRuntimes.userId, userId))
-    );
+    .where(tenantScope(provisionedRuntimes, scope.tenantId, eq(provisionedRuntimes.id, id)));
 
   if (!row) {
     throw Object.assign(new Error("runtime not found"), { status: 404 });
@@ -1303,19 +1297,14 @@ export async function sweepUnobservedRuntimes(
  * want to decide before sending anything, and the fleet one would otherwise ask
  * once per node.
  */
-export async function nodesWithFixedImage(userId: string): Promise<Set<string>> {
+export async function nodesWithFixedImage(tenantId: string): Promise<Set<string>> {
   const rows = await db
     .select({
       nodeId: provisionedRuntimes.nodeId,
       provider: provisionedRuntimes.provider,
     })
     .from(provisionedRuntimes)
-    .where(
-      and(
-        eq(provisionedRuntimes.userId, userId),
-        isNotNull(provisionedRuntimes.nodeId)
-      )
-    );
+    .where(tenantScope(provisionedRuntimes, tenantId, isNotNull(provisionedRuntimes.nodeId)));
 
   const fixed = new Set<string>();
   for (const row of rows) {

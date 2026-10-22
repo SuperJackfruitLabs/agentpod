@@ -48,7 +48,7 @@ const testApp = new Hono()
   .use("/api/*", async (c, next) => {
     const userId = c.req.header("X-Test-User-Id");
     if (userId && userId !== "anonymous") {
-      c.set("user", { id: userId, authType: "api_key" , tenantId: "fleet_00000000000000000000"} satisfies AuthUser);
+      c.set("user", { id: userId, authType: "api_key" , tenantId: c.req.header("X-Test-Tenant") ?? "fleet_00000000000000000000", workspaceRole: "admin" } satisfies AuthUser);
     } else {
       c.set("user", { id: "anonymous", authType: "api_key" , tenantId: "fleet_00000000000000000000"} satisfies AuthUser);
     }
@@ -253,15 +253,15 @@ test(
 );
 
 test(
-  "GET /activity returns 404 for a different user's station",
+  "GET /activity returns 404 for a station in another workspace",
   async () => {
     const { server, baseUrl, fakeNode } = await setupServer();
 
     try {
       const res = await fetch(`${baseUrl}/api/stations/${stationId}/activity`, {
-        headers: { "X-Test-User-Id": OTHER_USER },
+        headers: { "X-Test-User-Id": OTHER_USER, "X-Test-Tenant": "fleet_11111111111111111111" },
       });
-      // OTHER_USER does not own this station → 404
+      // A station is the workspace's (W4): another workspace does not see it → 404
       expect(res.status).toBe(404);
     } finally {
       fakeNode.close();

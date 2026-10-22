@@ -56,31 +56,32 @@ export type RemoveNodeOutcome =
     }
   | { kind: "removed"; result: RemoveNodeResponse };
 
-/** Does `userId` own `nodeId` — in `tenantId`, when given (the route always gives it)? */
-export async function ownsNode(userId: string, nodeId: string, tenantId?: string): Promise<boolean> {
+/**
+ * Is `nodeId` in the workspace `tenantId`? A node belongs to its workspace, not to whoever
+ * enrolled it (workspace authority spec, W4); `nodes.user_id` is that audit fact only.
+ */
+export async function nodeInTenant(tenantId: string, nodeId: string): Promise<boolean> {
   const [row] = await db
     .select({ id: nodes.id })
     .from(nodes)
-    .where(and(eq(nodes.id, nodeId), eq(nodes.userId, userId), tenantId ? eq(nodes.tenantId, tenantId) : undefined));
+    .where(and(eq(nodes.id, nodeId), eq(nodes.tenantId, tenantId)));
   return row !== undefined;
 }
 
 /**
- * Remove `nodeId` if `userId` owns it. A node someone else owns is answered
- * exactly like one that does not exist, so its id is not confirmed to anyone.
+ * Remove `nodeId` if it is in the workspace the request acts in. A node in another workspace is
+ * answered exactly like one that does not exist, so its id is not confirmed to anyone. Who may
+ * remove (a workspace admin) is the route's question; `actor` is recorded on the grant revokes.
  */
 export async function removeNode(
-  userId: string,
+  actor: string,
   nodeId: string,
-  // `tenantId`: the workspace the request acts in. The same person is a member of several
-  // workspaces, so owning a node is not enough: it must be in this one (workspace authority spec,
-  // W2). Optional only for fixtures; the route always passes it.
-  opts: { force: boolean; tenantId?: string }
+  opts: { force: boolean; tenantId: string }
 ): Promise<RemoveNodeOutcome> {
   const [node] = await db
     .select({ id: nodes.id, name: nodes.name, status: nodes.status })
     .from(nodes)
-    .where(and(eq(nodes.id, nodeId), eq(nodes.userId, userId), opts.tenantId ? eq(nodes.tenantId, opts.tenantId) : undefined));
+    .where(and(eq(nodes.id, nodeId), eq(nodes.tenantId, opts.tenantId)));
   if (!node) return { kind: "not_found" };
 
   const [runtime] = await db
@@ -135,7 +136,7 @@ export async function removeNode(
     };
   }
 
-  for (const s of owned) await unadopt(s.userId, s.id, "node-removed");
+  for (const s of owned) await unadopt({ tenantId: opts.tenantId }, s.id, "node-removed", actor);
 
   await db.delete(declaredHarnessConfig).where(eq(declaredHarnessConfig.nodeId, nodeId));
   await db.delete(harnessConfigOptOut).where(eq(harnessConfigOptOut.nodeId, nodeId));

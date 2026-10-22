@@ -7,7 +7,7 @@
  *      → adopts selected stations, resolves parentStationId
  *   3. GET /api/nodes/:nodeId/stations  → returns adopted rows (flat)
  *   4. DELETE /api/stations/:stationId  → unadopts a station
- *   5. Ownership enforcement: user B cannot access user A's node
+ *   5. Workspace enforcement: user B, in another workspace, cannot access A's node (W4)
  *
  * Uses a minimal Hono test server (avoids importing index.ts side-effects).
  * The "fake node" WebSocket replies to every detect req with 3 stations
@@ -95,7 +95,7 @@ const fakeDetected = [
 const testApp = new Hono()
   .use("/api/*", async (c, next) => {
     const userId = c.req.header("X-Test-User-Id") ?? "anonymous";
-    c.set("user", { id: userId, authType: "api_key" , tenantId: "fleet_00000000000000000000"} satisfies AuthUser);
+    c.set("user", { id: userId, authType: "api_key" , tenantId: userId === TEST_USER_B ? "fleet_11111111111111111111" : "fleet_00000000000000000000", workspaceRole: "admin" } satisfies AuthUser);
     return next();
   })
   .route("/public/nodes", gatewayRoutes)
@@ -286,7 +286,7 @@ test(
 );
 
 test(
-  "user B cannot access or adopt user A's node",
+  "an admin of another workspace (user B) cannot access or adopt this workspace's node",
   async () => {
     const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
     const baseUrl = `http://localhost:${server.port}`;
@@ -341,7 +341,7 @@ test(
 );
 
 test(
-  "DELETE /api/stations/:stationId is ownership-checked",
+  "DELETE /api/stations/:stationId is checked against the caller's workspace",
   async () => {
     const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
     const baseUrl = `http://localhost:${server.port}`;

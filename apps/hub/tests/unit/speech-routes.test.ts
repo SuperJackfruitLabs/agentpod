@@ -87,14 +87,18 @@ function setup(opts: { env?: Record<string, string>; fetch?: typeof fetch; now?:
     .use("*", async (c, next) => {
       const who = c.req.header("x-user");
       if (who === "nobody") return c.json({ error: "Unauthorized" }, 401);
-      c.set("user", { id: who ?? OWNER, role: "user" } as never);
+            // Each person stands in their own workspace here (tenant "t_<id>"), so "another user" is
+      // another workspace: a station is the workspace's (W4). An admin, since these are
+      // per-station configuration (W1); tests/integration/workspace-reads.test.ts holds the member's 403.
+      const id = who ?? OWNER;
+      c.set("user", { id, tenantId: "t_" + id, workspaceRole: "admin" } as never);
       await next();
     })
     .route(
       "/api",
       stationSpeechRoutes({
         settings,
-        ownsStation: async (userId, stationId) => userId === OWNER && stationId === "st_1",
+        stationInTenant: async (tenantId, stationId) => tenantId === "t_" + OWNER && stationId === "st_1",
       })
     )
     .route("/api", speechVoicesRoutes({ settings, fetch: opts.fetch, now: opts.now }));

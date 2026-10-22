@@ -122,14 +122,14 @@ test("a node that connects to the gateway shows online via listNodes", async () 
     // Wait for onOpen's setNodeStatus rather than guessing how long the
     // argon2id credential verify plus two DB round trips will take.
     const node = await pollUntil(async () =>
-      (await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID)).find((n) => n.id === nodeId && n.status === "online")
+      (await listNodes(BOOTSTRAP_TENANT_ID)).find((n) => n.id === nodeId && n.status === "online")
     );
     expect(node?.status).toBe("online");
 
     // Close the connection — node should go offline
     ws.close();
     const nodeAfterClose = await pollUntil(async () =>
-      (await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID)).find((n) => n.id === nodeId && n.status === "offline")
+      (await listNodes(BOOTSTRAP_TENANT_ID)).find((n) => n.id === nodeId && n.status === "offline")
     );
     expect(nodeAfterClose?.status).toBe("offline");
   } finally {
@@ -198,7 +198,7 @@ test("a node with invalid credentials is rejected", async () => {
     // close, not raced against it.
     expect(connectionManager.isOnline(nodeId)).toBe(false);
     expect(
-      (await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID)).find(
+      (await listNodes(BOOTSTRAP_TENANT_ID)).find(
         (n) => n.id === nodeId && n.status === "online"
       )
     ).toBeUndefined();
@@ -277,7 +277,7 @@ test("a late close from a replaced socket does not mark the reconnected node off
     await new Promise((r) => setTimeout(r, 200));
 
     // Node must still be online, and the NEW socket must still be routable.
-    const list = await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
+    const list = await listNodes(BOOTSTRAP_TENANT_ID);
     expect(list.find((n) => n.id === nodeId)?.status).toBe("online");
     const ackPromise = new Promise<unknown>((res) => { wsNew.onmessage = (e) => res(JSON.parse(String(e.data))); });
     wsNew.send(JSON.stringify({ type: "heartbeat", ts: Date.now() }));
@@ -351,7 +351,7 @@ test("hello frame version is persisted to agentVersion on the node row", async (
     // Verify agentVersion was persisted — poll rather than guess how long the
     // auth-then-hello path takes; a hello that is never ingested still fails.
     const node = await pollUntil(async () =>
-      (await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID)).find(
+      (await listNodes(BOOTSTRAP_TENANT_ID)).find(
         (n) => n.id === nodeId && n.agentVersion === "v0.1.1"
       )
     );

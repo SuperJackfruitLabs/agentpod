@@ -283,7 +283,7 @@ describe("station deletion and node removal", () => {
     const h = harness();
     const { st, grant } = await grantedStation(h);
 
-    await unadopt(OWNER, st.id);
+    await unadopt({ tenantId: f.tenant }, st.id);
 
     expect((await rawSql`SELECT id FROM stations WHERE id = ${st.id}`).length).toBe(0);
     const row = await loadGrant(grant.id);
@@ -309,7 +309,7 @@ describe("station deletion and node removal", () => {
     const { st, grant } = await grantedStation(h);
     const restore = await failWritesTo(st.id, "DELETE");
     try {
-      await expect(unadopt(OWNER, st.id)).rejects.toThrow();
+      await expect(unadopt({ tenantId: f.tenant }, st.id)).rejects.toThrow();
     } finally {
       await restore();
     }
@@ -326,7 +326,7 @@ describe("station deletion and node removal", () => {
     const a = await grantedStation(h, node);
     const b = await grantedStation(h, node);
 
-    const out = await removeNode(OWNER, node, { force: true });
+    const out = await removeNode(OWNER, node, { force: true, tenantId: f.tenant });
     expect(out.kind).toBe("removed");
     for (const { grant } of [a, b]) {
       const row = await loadGrant(grant.id);
@@ -358,7 +358,7 @@ describe("cascades: child stations and runtime destroy", () => {
     const child = await grantedStation(h, NODE, parent.st.id);
     const grandchild = await grantedStation(h, NODE, child.st.id);
 
-    await unadopt(OWNER, parent.st.id);
+    await unadopt({ tenantId: f.tenant }, parent.st.id);
 
     for (const x of [parent, child, grandchild]) await expectDeleted(x.grant.id, x.st.id, "station-deleted");
     expect((await auditFor(child.grant.id)).length).toBe(1);
@@ -371,7 +371,7 @@ describe("cascades: child stations and runtime destroy", () => {
     const child = await grantedStation(h, NODE, parent.st.id);
     const restore = await failWritesTo(parent.st.id, "DELETE");
     try {
-      await expect(unadopt(OWNER, parent.st.id)).rejects.toThrow();
+      await expect(unadopt({ tenantId: f.tenant }, parent.st.id)).rejects.toThrow();
     } finally {
       await restore();
     }
@@ -394,9 +394,9 @@ describe("cascades: child stations and runtime destroy", () => {
         child = await grantedStation(h, node, tmp.id);
         parent = await grantedStation(h, node);
         await rawSql`UPDATE stations SET parent_station_id = ${parent.st.id} WHERE id = ${child.st.id}`;
-        await unadopt(OWNER, tmp.id);
+        await unadopt({ tenantId: f.tenant }, tmp.id);
       }
-      expect((await removeNode(OWNER, node, { force: true })).kind).toBe("removed");
+      expect((await removeNode(OWNER, node, { force: true, tenantId: f.tenant })).kind).toBe("removed");
       await expectDeleted(parent.grant.id, parent.st.id, "node-removed");
       await expectDeleted(child.grant.id, child.st.id, "node-removed");
     });
@@ -412,7 +412,7 @@ describe("cascades: child stations and runtime destroy", () => {
       VALUES (${f.tenant}, ${rt}, ${OWNER}, 'docker', NULL, 'online', ${rt}, 'small', 'none', ${node}, now(), now())`;
     const x = await grantedStation(h, node);
 
-    await destroyRuntime(OWNER, rt);
+    await destroyRuntime({ tenantId: f.tenant }, rt);
 
     expect((await rawSql`SELECT id FROM nodes WHERE id = ${node}`).length).toBe(0);
     await expectDeleted(x.grant.id, x.st.id, "node-removed");

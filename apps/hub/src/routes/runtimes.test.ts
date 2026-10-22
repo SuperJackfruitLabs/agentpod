@@ -6,10 +6,10 @@
  *      fake provision() called with runtimeId+hubUrl+enrollToken; externalId persisted;
  *      linked enrollment_token row created with provisionedRuntimeId.
  *   2. POST /api/runtimes with disabled provider → 400.
- *   3. GET  /api/runtimes → only the caller's runtimes (isolation by user).
+ *   3. GET  /api/runtimes → the workspace's runtimes, whoever provisioned them (W4).
  *   4. GET  /api/runtimes/providers → lists enabled providers.
  *   5. DELETE /api/runtimes/:id → fake destroy() called; row status "destroyed".
- *   6. DELETE /api/runtimes/:otherId (other user's) → 404.
+ *   6. DELETE /api/runtimes/:id from another workspace → 404.
  *   7. POST /api/runtimes/:id/stop on a driver with no stop → 400.
  *   8. Unauthenticated request → 401 (anonymous user in X-Test-User-Id middleware).
  *
@@ -209,7 +209,9 @@ const testApp = new Hono()
   .use("/api/*", async (c, next) => {
     const userId = c.req.header("X-Test-User-Id");
     if (userId && userId !== "anonymous") {
-      c.set("user", { id: userId, authType: "api_key" , tenantId: "fleet_00000000000000000000"} satisfies AuthUser);
+      // X-Test-Tenant stands the caller in another workspace (a runtime is the workspace's, W4).
+      const tenantId = c.req.header("X-Test-Tenant") ?? "fleet_00000000000000000000";
+      c.set("user", { id: userId, authType: "api_key", tenantId, workspaceRole: "admin" } satisfies AuthUser);
       return next();
     }
     return c.json({ error: "Unauthorized", message: "Valid session or API key required" }, 401);
@@ -384,8 +386,8 @@ test("POST /api/runtimes with a provider no driver registered → 400, and nothi
   expect(rows).toHaveLength(0);
 });
 
-test("GET /api/runtimes → only the caller's runtimes", async () => {
-  // Create one runtime for TEST_USER and one for OTHER_USER
+test("GET /api/runtimes → the workspace's runtimes, whoever provisioned them; none of another workspace's", async () => {
+  // Two people in one workspace: each sees both runtimes (workspace authority, W4).
   await createRuntime(TEST_USER, "user1-box");
   await createRuntime(OTHER_USER, "user2-box");
 
@@ -393,16 +395,17 @@ test("GET /api/runtimes → only the caller's runtimes", async () => {
     headers: { "X-Test-User-Id": TEST_USER },
   });
   expect(res.status).toBe(200);
+  const list = (await res.json()) as Array<{ ownerId: string; name: string }>;
+  const names = list.map((r) => r.name);
+  expect(names).toContain("user1-box");
+  expect(names).toContain("user2-box");
 
-  const list = (await res.json()) as Array<{ ownerId: string }>;
-  expect(Array.isArray(list)).toBe(true);
-  // Every returned runtime must belong to TEST_USER
-  for (const rt of list) {
-    expect(rt.ownerId).toBe(TEST_USER);
-  }
-  // OTHER_USER's runtimes must NOT appear
-  const otherUserRts = list.filter((r) => r.ownerId === OTHER_USER);
-  expect(otherUserRts).toHaveLength(0);
+  // The same person, acting in another workspace, sees none of them.
+  const elsewhere = await testApp.request("/api/runtimes", {
+    headers: { "X-Test-User-Id": TEST_USER, "X-Test-Tenant": "fleet_11111111111111111111" },
+  });
+  expect(elsewhere.status).toBe(200);
+  expect(((await elsewhere.json()) as unknown[]).length).toBe(0);
 }, 30_000);
 
 test("GET /api/runtimes → destroyed runtimes are excluded (no immortal ghost rows)", async () => {
@@ -607,16 +610,15 @@ test("DELETE /api/runtimes/:id removes the provisioned node + its stations (no g
   expect(rt!.nodeId).toBeNull();
 }, 30_000);
 
-test("DELETE /api/runtimes/:id with another user's id → 404", async () => {
-  // Create a runtime for OTHER_USER
+test("DELETE /api/runtimes/:id from another workspace → 404", async () => {
   const createRes = await createRuntime(OTHER_USER, "other-box");
   expect(createRes.status).toBe(201);
   const created = (await createRes.json()) as { id: string };
 
-  // TEST_USER tries to delete OTHER_USER's runtime
+  // An admin of another workspace cannot reach this workspace's runtime.
   const delRes = await testApp.request(`/api/runtimes/${created.id}`, {
     method: "DELETE",
-    headers: { "X-Test-User-Id": TEST_USER },
+    headers: { "X-Test-User-Id": TEST_USER, "X-Test-Tenant": "fleet_11111111111111111111" },
   });
   expect(delRes.status).toBe(404);
 }, 30_000);

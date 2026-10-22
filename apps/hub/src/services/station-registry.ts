@@ -4,8 +4,9 @@
  * "Adopting" a station is the act of saving a detected remote station to the
  * local DB so the fleet console can track it across reconnects.
  *
- * All functions are scoped to (userId, ...) so callers can never access another
- * user's data by providing a different nodeId or stationId.
+ * Reads are scoped to the workspace (tenant), never to the person: a station belongs to its
+ * workspace, and `user_id` records who adopted it (workspace authority spec, W4). A caller can
+ * never reach another workspace's station by providing a different nodeId or stationId.
  */
 
 import { and, eq, sql } from "drizzle-orm";
@@ -81,7 +82,7 @@ export function reportUnknownCapabilities(
  *    The ON CONFLICT target is the unique (nodeId, stationKey) index, so this
  *    is idempotent — re-adopting a station refreshes its metadata.
  * 3. Second pass: resolve each parentKey → parentStationId by looking up
- *    all rows already persisted for this (userId, nodeId).  This covers the
+ *    all rows already persisted for this node.  This covers the
  *    case where a parent was adopted in a previous call.
  * 4. Return the final rows for the requested keys.
  */
@@ -118,7 +119,7 @@ export async function adoptStations(
   const known = await db
     .select({ id: stations.id, stationKey: stations.stationKey })
     .from(stations)
-    .where(and(eq(stations.userId, userId), eq(stations.nodeId, nodeId)));
+    .where(tenantScope(stations, tenantId, eq(stations.nodeId, nodeId)));
   const knownIdFor = new Map(known.map((r) => [r.stationKey, r.id]));
   for (const station of toAdopt) {
     const id = knownIdFor.get(station.key);
@@ -171,10 +172,12 @@ export async function adoptStations(
   // ── Second pass: resolve parent links ─────────────────────────────────────
   // Load ALL adopted rows for this node (including those from prior calls)
   // so that a parent adopted in an earlier request is also resolved.
+  // By node, not by who adopted (W4): a station another admin adopted earlier is
+  // the same station, and the upsert above kept its row and its `user_id`.
   const allRows = await db
     .select({ id: stations.id, stationKey: stations.stationKey })
     .from(stations)
-    .where(and(eq(stations.userId, userId), eq(stations.nodeId, nodeId)));
+    .where(tenantScope(stations, tenantId, eq(stations.nodeId, nodeId)));
 
   const keyToId = new Map(allRows.map((r) => [r.stationKey, r.id]));
 
@@ -194,7 +197,7 @@ export async function adoptStations(
   const allAdopted = await db
     .select()
     .from(stations)
-    .where(and(eq(stations.userId, userId), eq(stations.nodeId, nodeId)));
+    .where(tenantScope(stations, tenantId, eq(stations.nodeId, nodeId)));
 
   const adopted = allAdopted.filter((r) => keys.includes(r.stationKey));
 
@@ -229,31 +232,34 @@ export async function adoptStations(
 
 // ─── listAdopted ─────────────────────────────────────────────────────────────
 
-/** All adopted stations for a specific (user, node) pair. */
-export async function listAdopted(
-  userId: string,
-  nodeId: string,
-  tenantId: string,
-): Promise<StationRow[]> {
+/**
+ * Whose stations a read may see: the workspace's (workspace authority W4). A station belongs to
+ * its tenant; `stations.user_id` records who adopted it and is not a read filter. An object, not a
+ * bare string, so a caller still passing a user id is a type error rather than an empty answer.
+ */
+export interface StationScope {
+  tenantId: string;
+}
+
+/** All adopted stations on a node, in the workspace. */
+export async function listAdopted(scope: StationScope, nodeId: string): Promise<StationRow[]> {
   return db
     .select()
     .from(stations)
-    .where(
-      tenantScope(stations, tenantId, eq(stations.userId, userId), eq(stations.nodeId, nodeId)),
-    );
+    .where(tenantScope(stations, scope.tenantId, eq(stations.nodeId, nodeId)));
 }
 
 // ─── getStation ───────────────────────────────────────────────────────────────
 
-/** Single station by id, scoped to the user. Returns null if not found or not owned. */
+/** Single station by id, in the workspace. Null if not found or in another workspace. */
 export async function getStation(
-  userId: string,
+  scope: StationScope,
   stationId: string
 ): Promise<StationRow | null> {
   const rows = await db
     .select()
     .from(stations)
-    .where(and(eq(stations.id, stationId), eq(stations.userId, userId)));
+    .where(tenantScope(stations, scope.tenantId, eq(stations.id, stationId)));
   return rows[0] ?? null;
 }
 
@@ -298,21 +304,23 @@ export async function markStationTreeRevoking(
 }
 
 export async function unadopt(
-  userId: string,
+  scope: StationScope,
   stationId: string,
-  cause: RevokeCause = "station-deleted"
+  cause: RevokeCause = "station-deleted",
+  /** Who asked, for the grant revoke's audit. */
+  actor?: string
 ): Promise<void> {
   await db.transaction(async (tx) => {
     const [st] = await tx
       .select({ tenantId: stations.tenantId })
       .from(stations)
-      .where(and(eq(stations.id, stationId), eq(stations.userId, userId)))
+      .where(tenantScope(stations, scope.tenantId, eq(stations.id, stationId)))
       .for("update");
     if (!st) return;
-    await markStationTreeRevoking(tx, stationId, cause, userId);
+    await markStationTreeRevoking(tx, stationId, cause, actor);
     await tx
       .delete(stations)
-      .where(and(eq(stations.id, stationId), eq(stations.userId, userId)));
+      .where(tenantScope(stations, scope.tenantId, eq(stations.id, stationId)));
   });
 }
 

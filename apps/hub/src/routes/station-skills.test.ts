@@ -23,6 +23,7 @@ const app = new Hono()
       id: c.req.header("X-Test-User") ?? userId,
       tenantId: c.req.header("X-Test-Tenant") ?? BOOTSTRAP_TENANT_ID,
       authType: "api_key",
+      workspaceRole: "admin",
     } satisfies AuthUser);
     await next();
   })
@@ -114,7 +115,7 @@ test("owned capable station returns independently unknown observations", async (
 test("anonymous, other owner and other tenant never reach the node", async () => {
   const c = await setup();
   expect((await c.post({}, { "X-Test-User": "anonymous" })).status).toBe(401);
-  expect((await c.post({}, { "X-Test-User": "other-user" })).status).toBe(404);
+  expect((await c.post({}, { "X-Test-User": "other-user", "X-Test-Tenant": "fleet_11111111111111111111" })).status).toBe(404);
   expect(
     (await c.post({}, { "X-Test-Tenant": "fleet_11111111111111111111" }))
       .status,

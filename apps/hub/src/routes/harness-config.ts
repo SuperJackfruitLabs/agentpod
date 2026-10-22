@@ -15,8 +15,8 @@
  * Shape follows `apps/hub/src/routes/station-acp.ts`: a chained `Hono()`
  * export mounted at `/api` (so routes here read as `/api/fleet/...` and
  * `/api/stations/:id/config`), `AuthUser` read off `c.get("user")` (set by
- * `authMiddleware`, which already ran in `index.ts`), `getStation(userId, id)`
- * plus a `tenantId` check for per-station ownership, and `broker.request` for
+ * `authMiddleware`, which already ran in `index.ts`), `getStation(user, id)`
+ * (the station in the caller's workspace, W4), and `broker.request` for
  * the node round trip — the same four ingredients `station-skills.ts` and
  * `station-cleanup.ts` use.
  *
@@ -83,6 +83,7 @@ import {
 import { planFor, applyFor, ConfigApplyError, getAppliedWrites, readConfigurationHealth } from "../services/harness-config-apply";
 import { callerPrincipal } from "../auth/caller-authority";
 import type { AuthUser } from "../auth/middleware";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
 /** The capability a station must advertise to be a candidate for this feature. */
 const CONFIG_MANAGE = "config.manage";
@@ -675,7 +676,7 @@ export const harnessConfigRoutes = new Hono()
    *
    * `resolveFor` + broker `config.observe` + `compare` for one station,
    * scoped to the caller the same way `station-skills.ts` and
-   * `station-cleanup.ts` are: `getStation(userId, id)` plus a tenant check.
+   * `station-cleanup.ts` are: `getStation(user, id)`, the caller's workspace.
    * Always 200 when the station is found — a broker failure still answers
    * with honest `unreadable` rows rather than a 502, because the caller
    * asked "what does this station have", and "we could not find out" is an
@@ -688,7 +689,7 @@ export const harnessConfigRoutes = new Hono()
     if (refusal) return c.json(refusal, 403);
 
     const stationId = c.req.param("stationId");
-    const station = await getStation(user.id, stationId);
+    const station = await getStation(user, stationId);
     if (!station || station.tenantId !== user.tenantId) {
       return c.json({ error: "Not Found" }, 404);
     }
@@ -719,7 +720,10 @@ export const harnessConfigRoutes = new Hono()
     if (refusal) return c.json(refusal, 403);
 
     const stationId = c.req.param("stationId");
-    const station = await getStation(user.id, stationId);
+    // Changes the station for everyone in the workspace: a workspace admin's (W1).
+    const notAdmin = requireWorkspaceAdmin(c);
+    if (notAdmin) return notAdmin;
+    const station = await getStation(user, stationId);
     if (!station || station.tenantId !== user.tenantId) {
       return c.json({ error: "Not Found" }, 404);
     }
@@ -756,7 +760,7 @@ export const harnessConfigRoutes = new Hono()
     if (refusal) return c.json(refusal, 403);
 
     const stationId = c.req.param("stationId");
-    const station = await getStation(user.id, stationId);
+    const station = await getStation(user, stationId);
     if (!station || station.tenantId !== user.tenantId) {
       return c.json({ error: "Not Found" }, 404);
     }
@@ -795,7 +799,10 @@ export const harnessConfigRoutes = new Hono()
     if (refusal) return c.json(refusal, 403);
 
     const stationId = c.req.param("stationId");
-    const station = await getStation(user.id, stationId);
+    // Changes the station for everyone in the workspace: a workspace admin's (W1).
+    const notAdmin = requireWorkspaceAdmin(c);
+    if (notAdmin) return notAdmin;
+    const station = await getStation(user, stationId);
     if (!station || station.tenantId !== user.tenantId) {
       return c.json({ error: "Not Found" }, 404);
     }

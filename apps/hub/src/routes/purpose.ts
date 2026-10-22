@@ -18,17 +18,22 @@
  * nobody has answered for. It is what makes an existing fleet adoptable without
  * clicking through it station by station — and it is reported in the response
  * rather than done quietly.
+ *
+ * Purpose re-files a station for everyone in the workspace, so setting it is a workspace admin's
+ * (workspace authority spec, W1), on any station or node in the workspace, whoever adopted it (W4).
  */
 
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, eq, isNull } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { notifyStationsAdopted } from "../services/matrix-as/hooks";
 import { createLogger } from "../utils/logger";
+import { tenantScope } from "../db/tenant-scope";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
 const log = createLogger("purpose");
 
@@ -61,14 +66,15 @@ export const purposeRoutes = new Hono()
     "/stations/:stationId/purpose",
     zValidator("json", PurposeBody),
     async (c) => {
-      const userId = c.get("user").id;
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
       const stationId = c.req.param("stationId");
       const { purpose } = c.req.valid("json");
 
       const updated = await db
         .update(stations)
         .set({ purpose })
-        .where(and(eq(stations.id, stationId), eq(stations.userId, userId)))
+        .where(tenantScope(stations, c.get("user").tenantId, eq(stations.id, stationId)))
         .returning({ id: stations.id, purpose: stations.purpose });
 
       const row = updated[0];
@@ -92,14 +98,16 @@ export const purposeRoutes = new Hono()
    * stations already on it that have none.
    */
   .put("/nodes/:nodeId/purpose", zValidator("json", PurposeBody), async (c) => {
-    const userId = c.get("user").id;
+    const notAdmin = requireWorkspaceAdmin(c);
+    if (notAdmin) return notAdmin;
+    const tenantId = c.get("user").tenantId;
     const nodeId = c.req.param("nodeId");
     const { purpose } = c.req.valid("json");
 
     const updatedNode = await db
       .update(nodes)
       .set({ purpose })
-      .where(and(eq(nodes.id, nodeId), eq(nodes.userId, userId)))
+      .where(tenantScope(nodes, tenantId, eq(nodes.id, nodeId)))
       .returning({ id: nodes.id, purpose: nodes.purpose });
 
     if (!updatedNode[0]) return c.json({ error: "Not Found" }, 404);
@@ -114,7 +122,7 @@ export const purposeRoutes = new Hono()
         : await db
             .update(stations)
             .set({ purpose })
-            .where(and(eq(stations.nodeId, nodeId), isNull(stations.purpose)))
+            .where(tenantScope(stations, tenantId, eq(stations.nodeId, nodeId), isNull(stations.purpose)))
             .returning({ id: stations.id });
 
     log.info("node purpose set", {

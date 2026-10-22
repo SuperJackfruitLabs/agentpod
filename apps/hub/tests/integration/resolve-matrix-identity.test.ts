@@ -76,7 +76,7 @@ beforeAll(async () => {
     },
   ]);
 
-  stationId = (await listAdopted(USER, nodeId, BOOTSTRAP_TENANT_ID)).find((s) => s.stationKey === "hermes:olivia")!.id;
+  stationId = (await listAdopted({ tenantId: BOOTSTRAP_TENANT_ID }, nodeId)).find((s) => s.stationKey === "hermes:olivia")!.id;
 });
 
 afterAll(async () => {

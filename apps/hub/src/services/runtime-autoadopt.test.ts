@@ -163,14 +163,14 @@ test(
   "harness 'opencode' + detect returns opencode station at /workspace → station adopted",
   async () => {
     // Precondition: no stations adopted yet for this node
-    const before = await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID);
+    const before = await listAdopted({ tenantId: BOOTSTRAP_TENANT_ID }, testNodeId);
     expect(before).toHaveLength(0);
 
     await autoAdoptProvisionedHarness(testNodeId, {
       brokerRequest: fakeDetectOk,
     });
 
-    const after = await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID);
+    const after = await listAdopted({ tenantId: BOOTSTRAP_TENANT_ID }, testNodeId);
     expect(after).toHaveLength(1);
 
     const adopted = after[0]!;
@@ -186,7 +186,7 @@ test(
   "idempotent: calling again when station already adopted → broker not called, no new row",
   async () => {
     // At this point testNodeId already has the opencode station adopted (from test above).
-    const before = await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID);
+    const before = await listAdopted({ tenantId: BOOTSTRAP_TENANT_ID }, testNodeId);
     expect(before.length).toBeGreaterThan(0);
 
     let brokerCallCount = 0;
@@ -206,7 +206,7 @@ test(
     expect(brokerCallCount).toBe(0);
 
     // No extra rows created
-    const after = await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID);
+    const after = await listAdopted({ tenantId: BOOTSTRAP_TENANT_ID }, testNodeId);
     expect(after).toHaveLength(before.length);
   },
   15_000
@@ -230,7 +230,7 @@ test(
     await autoAdoptProvisionedHarness(noneNodeId, { brokerRequest: spyBroker });
 
     expect(brokerCallCount).toBe(0);
-    const adopted = await listAdopted(TEST_USER, noneNodeId, BOOTSTRAP_TENANT_ID);
+    const adopted = await listAdopted({ tenantId: BOOTSTRAP_TENANT_ID }, noneNodeId);
     expect(adopted).toHaveLength(0);
   },
   15_000
@@ -291,7 +291,7 @@ test(
       autoAdoptProvisionedHarness(failNodeId, { brokerRequest: fakeDetectFail })
     ).resolves.toBeUndefined();
 
-    const adopted = await listAdopted(TEST_USER, failNodeId, BOOTSTRAP_TENANT_ID);
+    const adopted = await listAdopted({ tenantId: BOOTSTRAP_TENANT_ID }, failNodeId);
     expect(adopted).toHaveLength(0);
   },
   15_000

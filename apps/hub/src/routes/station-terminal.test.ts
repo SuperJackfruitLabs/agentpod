@@ -66,7 +66,9 @@ const testApp = new Hono()
   .use("/api/*", async (c, next) => {
     const userId = c.req.header("X-Test-User-Id");
     if (userId && userId !== "anonymous") {
-      c.set("user", { id: userId, authType: "api_key" , tenantId: "fleet_00000000000000000000"} satisfies AuthUser);
+      // A workspace admin unless the test says otherwise: a terminal is a workspace admin's (W1).
+      const role = c.req.header("X-Test-Role") === "member" ? "member" : "admin";
+      c.set("user", { id: userId, authType: "api_key", tenantId: "fleet_00000000000000000000", workspaceRole: role } satisfies AuthUser);
     } else {
       // No header → anonymous; the terminal route rejects this with 1008.
       c.set("user", { id: "anonymous", authType: "api_key" , tenantId: "fleet_00000000000000000000"} satisfies AuthUser);
@@ -605,6 +607,55 @@ test(
       await new Promise((r) => setTimeout(r, 200));
 
       // No term.open req should have been sent to the node.
+      const termOpenSent = nodeReceivedMsgs.some((raw) => {
+        try {
+          const m = JSON.parse(raw);
+          return m?.type === "req" && m?.verb === "term.open";
+        } catch {
+          return false;
+        }
+      });
+      expect(termOpenSent).toBe(false);
+
+      fakeNode.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "a workspace member is refused a shell — WS closes workspace_admin_required, no term.open sent",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+
+    try {
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
+      const { nodeId, nodeSecret } = await enrollNode(token, {
+        hostname: "sterm-member-host",
+        os: "linux",
+        arch: "amd64",
+        cpuCount: 2,
+      });
+      const nodeReceivedMsgs: string[] = [];
+      const fakeNode = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        capturedNodeMsgs: nodeReceivedMsgs,
+      });
+      const station = await adoptStation(baseUrl, nodeId);
+
+      const closed = await new Promise<{ code: number; reason: string }>((resolve) => {
+        const clientWs = new WebSocket(`ws://localhost:${server.port}/api/stations/${station.id}/terminal`, {
+          headers: { "X-Test-User-Id": TEST_USER, "X-Test-Role": "member" },
+        } as RequestInit & { headers: Record<string, string> });
+        clientWs.onclose = (e) => resolve({ code: e.code, reason: e.reason });
+      });
+      expect(closed.code).toBe(1008);
+      expect(closed.reason).toBe("workspace_admin_required");
+
+      await new Promise((r) => setTimeout(r, 200));
       const termOpenSent = nodeReceivedMsgs.some((raw) => {
         try {
           const m = JSON.parse(raw);
