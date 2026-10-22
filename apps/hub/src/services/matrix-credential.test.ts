@@ -31,6 +31,7 @@ import {
   redeemCredentialAuthorization,
   UnknownStationError,
 } from "./matrix-credential";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 
 const TEST_USER = "test-user-matrix-cred-svc-001";
 
@@ -50,7 +51,7 @@ beforeAll(async () => {
     name: "Matrix Credential Service Test User",
   });
 
-  const { token } = await mintEnrollmentToken(TEST_USER);
+  const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   const { nodeId } = await enrollNode(token, {
     hostname: "matrix-cred-test-host",
     os: "linux",

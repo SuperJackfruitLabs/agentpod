@@ -9,7 +9,9 @@ const log = createLogger("enrollment-tokens");
 
 /**
  * POST /api/enrollment-tokens
- * Authenticated route — mints a one-time enrollment token for the current user.
+ * Authenticated route — mints a one-time enrollment token for the current user,
+ * in the tenant of the workspace the request acts in (`user.tenantId`, from the
+ * token's `org`), so the node it enrols joins that workspace's fleet (W5).
  * Returns { token, expiresAt } where `token` is the plaintext token (shown once).
  *
  * Behind the reach half of the control pair (#345). A machine joining the fleet
@@ -59,6 +61,6 @@ export const enrollmentTokenRoutes = new Hono().post("/", async (c) => {
     return c.json({ error: "You do not have permission to add machines to this fleet." }, 403);
   }
 
-  const { token, expiresAt } = await mintEnrollmentToken(user.id);
+  const { token, expiresAt } = await mintEnrollmentToken(user.id, user.tenantId);
   return c.json({ token, expiresAt: expiresAt.toISOString() });
 });

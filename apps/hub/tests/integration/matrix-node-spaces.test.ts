@@ -2,9 +2,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { createPrincipal, forgetPrincipals, linkMatrixId } from "../helpers/principals";
 import { provisionStation } from "../../src/services/matrix-as/provision";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Filing an agent's room under the machine it runs on.
@@ -90,7 +90,7 @@ beforeAll(async () => {
     [A]: await createPrincipal({ kind: "agent", handle: "ps-agent-a" }),
     [B]: await createPrincipal({ kind: "agent", handle: "ps-agent-b" }),
   };
-  const tenant = await resolveTenantForUser(OWNER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${A}, ${B})`;
   await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
@@ -116,7 +116,7 @@ beforeEach(async () => {
   invited = [];
   nextSpace = 0;
   addFails = false;
-  const tenant = await resolveTenantForUser(OWNER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${A}, ${B})`;
   await rawSql`DELETE FROM matrix_spaces WHERE tenant_id = ${tenant}`;
   await setPurpose(A, null);
@@ -125,7 +125,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   try {
-    const tenant = await resolveTenantForUser(OWNER);
+    const tenant = BOOTSTRAP_TENANT_ID;
     await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${A}, ${B})`;
     await rawSql`DELETE FROM matrix_spaces WHERE tenant_id = ${tenant}`;
     await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;

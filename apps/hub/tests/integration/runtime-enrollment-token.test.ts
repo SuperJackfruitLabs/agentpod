@@ -32,6 +32,7 @@ import {
 } from "../../src/services/provisioner/registry";
 import type { RuntimeProvisioner } from "../../src/services/provisioner/types";
 import { createRuntime } from "../../src/services/runtimes";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const TEST_USER = "test-user-runtime-token-001";
 
@@ -67,6 +68,7 @@ afterAll(async () => {
 test("createRuntime mints an enrollment token that outlives the container", async () => {
   const runtime = await createRuntime(
     TEST_USER,
+    BOOTSTRAP_TENANT_ID,
     { provider: "docker", name: "ttl-box", resourceTier: "small" },
     "https://hub.example.test"
   );

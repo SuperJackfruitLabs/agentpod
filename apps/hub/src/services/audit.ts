@@ -2,7 +2,7 @@
  * Audit service — records terminal and write-op events to station_audit.
  *
  * Usage:
- *   const handle = await recordAudit(db, { userId, nodeId, stationKey, verb, params });
+ *   const handle = await recordAudit(db, { tenantId, userId, nodeId, stationKey, verb, params });
  *   // ... perform the operation ...
  *   await handle.done("ok");          // success
  *   await handle.done("error", msg);  // failure
@@ -16,12 +16,16 @@
 
 import { eq } from "drizzle-orm";
 import type { DbExecutor } from "../db/drizzle";
-import { resolveTenantForUser } from "../auth/tenant";
 import { stationAudit } from "../db/schema/audit";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface AuditArgs {
+  /**
+   * The tenant of the row the action is on (the station's or node's), or the
+   * request's when there is none. Never derived from `userId` (W5).
+   */
+  tenantId: string;
   userId: string;
   nodeId: string;
   stationKey: string;
@@ -116,7 +120,7 @@ export async function recordAudit(
 
   await db.insert(stationAudit).values({
     id,
-    tenantId: await resolveTenantForUser(args.userId),
+    tenantId: args.tenantId,
     userId: args.userId,
     nodeId: args.nodeId,
     stationKey: args.stationKey,

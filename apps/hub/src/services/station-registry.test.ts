@@ -31,6 +31,7 @@ import {
   reportUnknownCapabilities,
 } from "./station-registry";
 import type { DetectedStation } from "@agentpod/contract";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 
 // ─── Test Constants ────────────────────────────────────────────────────────────
 
@@ -50,7 +51,7 @@ beforeAll(async () => {
   });
 
   // Enroll a test node so we have a valid nodeId to adopt stations under.
-  const { token } = await mintEnrollmentToken(TEST_USER);
+  const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   const { nodeId } = await enrollNode(token, {
     hostname: "matrix-test-host",
     os: "linux",
@@ -177,7 +178,7 @@ test("listAdopted returns matrixId in adopted rows", async () => {
     detected
   );
 
-  const allRows = await listAdopted(TEST_USER, testNodeId);
+  const allRows = await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID);
   const target = allRows.find((r) => r.stationKey === "station-list-matrix");
   expect(target).toBeDefined();
   expect(target!.matrixId).toBe(MATRIX_ID);
@@ -293,7 +294,7 @@ test("refresh updates capabilities on an already-adopted station", async () => {
   });
   expect(updated).toBeGreaterThanOrEqual(1);
 
-  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId))
+  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID))
     .find((r) => r.stationKey === "refresh-caps")!.id);
   expect(row!.capabilities).toEqual(["health", "changeset"]);
   expect(row!.displayName).toBe("new name");
@@ -312,7 +313,7 @@ test("refresh never adopts a station on its own", async () => {
     ]),
   });
 
-  const rows = await listAdopted(TEST_USER, testNodeId);
+  const rows = await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID);
   expect(rows.find((r) => r.stationKey === "never-adopted-by-refresh")).toBeUndefined();
 });
 
@@ -371,7 +372,7 @@ test("refresh writes a matrixId onto a station adopted without one", async () =>
     ]),
   });
 
-  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId))
+  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID))
     .find((r) => r.stationKey === "refresh-mxid")!.id);
   expect(row!.matrixId).toBe("@onboarding-olivia:id.agentpod.dev");
 });
@@ -396,7 +397,7 @@ test("refresh clears a matrixId the node no longer reports", async () => {
     ]),
   });
 
-  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId))
+  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID))
     .find((r) => r.stationKey === "refresh-mxid-gone")!.id);
   expect(row!.matrixId).toBeNull();
 });
@@ -422,7 +423,7 @@ test("refresh leaves matrixId alone for a harness that reports none", async () =
   });
 
   expect(updated).toBeGreaterThanOrEqual(1);
-  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId))
+  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID))
     .find((r) => r.stationKey === "refresh-mxid-absent")!.id);
   expect(row!.matrixId).toBeNull();
 });
@@ -522,7 +523,7 @@ test("refresh surfaces a capability the hub does not know, and still stores the 
   // And the tolerance the filter exists for is intact: the row was not
   // rejected, and every capability the hub DOES know was written.
   expect(updated).toBeGreaterThanOrEqual(1);
-  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId))
+  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID))
     .find((r) => r.stationKey === "caps-ahead-of-hub")!.id);
   expect(row!.capabilities).toEqual(["health", "config.manage"]);
 });

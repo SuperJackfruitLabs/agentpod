@@ -73,6 +73,7 @@ export const nodePostureRoutes = new Hono().post(
     // stationKey is "" because this is not about a station. Station keys are
     // `.min(1)` in the contract, so an empty string can never collide with one.
     const audit = await recordAudit(db, {
+      tenantId: node.tenantId,
       userId: user.id,
       nodeId: node.id,
       stationKey: "",

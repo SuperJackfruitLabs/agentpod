@@ -36,6 +36,7 @@ import { stationRoutes } from "./stations";
 import { websocket } from "../ws";
 import type { AuthUser } from "../auth/middleware";
 import type { StationRow } from "../services/station-registry";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -246,7 +247,7 @@ test(
       const STATION_KEY = "write-capable-001";
       const capturedMsgs: string[] = [];
 
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "write-capable-host",
         os: "linux",
@@ -361,7 +362,7 @@ test(
       const STATION_KEY = "write-incapable-001";
       const capturedMsgs: string[] = [];
 
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "write-incapable-host",
         os: "linux",
@@ -463,7 +464,7 @@ test(
     try {
       const STATION_KEY = "write-offline-001";
 
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "write-offline-host",
         os: "linux",

@@ -10,6 +10,7 @@ import { fakePlane } from "../helpers/fake-plane";
 const linkIdentity = (id: string, system: string, externalId: string) => fakePlane.linkIdentity(id, system, externalId);
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { resolveMatrixId } from "../../src/services/matrix-identity";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Given a Matrix id, who is that?
@@ -52,7 +53,7 @@ beforeAll(async () => {
   // INSERTs. A fixture that writes its own rows has to guess the schema, and a
   // guess that is wrong fails as a column error five tests deep — which is
   // exactly what the first version of this file did.
-  const { token } = await mintEnrollmentToken(USER);
+  const { token } = await mintEnrollmentToken(USER, BOOTSTRAP_TENANT_ID);
   const enrolled = await enrollNode(token, {
     hostname: "mxresolve-host",
     os: "linux",
@@ -75,7 +76,7 @@ beforeAll(async () => {
     },
   ]);
 
-  stationId = (await listAdopted(USER, nodeId)).find((s) => s.stationKey === "hermes:olivia")!.id;
+  stationId = (await listAdopted(USER, nodeId, BOOTSTRAP_TENANT_ID)).find((s) => s.stationKey === "hermes:olivia")!.id;
 });
 
 afterAll(async () => {

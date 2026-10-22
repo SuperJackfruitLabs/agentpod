@@ -43,11 +43,11 @@ import { fileURLToPath } from "node:url";
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../../../tests/helpers/database";
 import { rawSql } from "../drizzle";
-import { resolveTenantForUser } from "../../auth/tenant";
 import { createPrincipal } from "../../../tests/helpers/principals";
 import { roomAgentUser } from "../../services/matrix-as/gates";
 import { bridgeUserId } from "../../services/matrix-as/names";
 import { forgetPrincipals } from "../../../tests/helpers/principals";
+import { BOOTSTRAP_TENANT_ID } from "../schema/tenants";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -260,7 +260,7 @@ describe("migration 0062 re-runs the backfill 0061's dedupe left half-done", () 
     // The state 0061 leaves behind, reproduced directly: a station with its
     // rightful occupant and a room of its own that nothing ever bound.
     await createTestUser({ id: USER, email: `rebackfill-${RUN}@example.com`, name: "RB" });
-    const tenant = await resolveTenantForUser(USER);
+    const tenant = BOOTSTRAP_TENANT_ID;
     PRINCIPAL = await createPrincipal({ kind: "agent", handle: HANDLE });
     await rawSql`
       INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)

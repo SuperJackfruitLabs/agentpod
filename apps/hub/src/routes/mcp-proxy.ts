@@ -34,7 +34,7 @@ export function createMcpProxyRoutes() {
     .get("/fleet/mcp-proxy", async (c) => {
       const user = caller(c);
       if (!user) return c.json({ error: "Unauthorized" }, 401);
-      return c.json(await fleetView(user.id, c.req.query("nodeId") || undefined));
+      return c.json(await fleetView(user.id, user.tenantId, c.req.query("nodeId") || undefined));
     })
     .post("/fleet/mcp-proxy", async (c) => {
       const user = caller(c);
@@ -43,7 +43,7 @@ export function createMcpProxyRoutes() {
       if (!parsed.success) {
         return c.json({ error: parsed.error.issues.map((i) => i.message).join("; ") }, 400);
       }
-      const out = await changeProxy(user.id, parsed.data);
+      const out = await changeProxy(user.id, user.tenantId, parsed.data);
       return c.json(out.body as Record<string, unknown>, out.status);
     })
     .post("/fleet/mcp-proxy/rotate", async (c) => {
@@ -53,7 +53,7 @@ export function createMcpProxyRoutes() {
       if (!parsed.success) {
         return c.json({ error: parsed.error.issues.map((i) => i.message).join("; ") }, 400);
       }
-      const out = await rotateProxy(user.id, parsed.data);
+      const out = await rotateProxy(user.id, user.tenantId, parsed.data);
       return c.json(out.body as Record<string, unknown>, out.status);
     })
     .get("/stations/:id/mcp-proxy", async (c) => {

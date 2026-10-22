@@ -3,7 +3,6 @@ import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { adminMiddleware } from "../../src/auth/admin-middleware";
 import { authMiddleware } from "../../src/auth/middleware";
 import { getAllSettings } from "../../src/models/system-settings";
@@ -17,6 +16,7 @@ import {
 import { stationForRoom } from "../../src/services/matrix-as/stations";
 import { TENANT_SCOPED_TABLES } from "../../src/db/tenant-scope";
 import { encrypt, decrypt } from "../../src/utils/encryption";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Speech settings against Postgres: the hub default in one `system_settings`
@@ -71,7 +71,7 @@ beforeAll(async () => {
   await createTestUser({ id: ADMIN, email: "speech-admin@example.com", name: "SA", role: "admin" });
   await createTestUser({ id: OWNER, email: "speech-owner@example.com", name: "SO" });
   await createTestUser({ id: OTHER, email: "speech-other@example.com", name: "SX" });
-  const tenant = await resolveTenantForUser(OWNER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM matrix_rooms WHERE room_id IN (${ROOM}, ${HARNESS_ROOM})`;
   await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
@@ -149,7 +149,7 @@ describe("station routes", () => {
     expect(res.status).toBe(200);
     const [row] = (await rawSql`SELECT mode, voice, speak_mode, tenant_id FROM station_speech WHERE station_id = ${STATION}`) as any[];
     expect(row).toMatchObject({ mode: "inherit", voice: "bm_george", speak_mode: "always" });
-    expect(row.tenant_id).toBe(await resolveTenantForUser(OWNER));
+    expect(row.tenant_id).toBe(BOOTSTRAP_TENANT_ID);
     expect(await settings.resolveFor(STATION)).toEqual({
       url: HUB.url,
       apiKey: KEY,
@@ -198,7 +198,7 @@ describe("station routes", () => {
 
   test("removing the station removes its setting; the table is tenant-scoped", async () => {
     expect(Object.values(TENANT_SCOPED_TABLES)).toContain((await import("../../src/db/schema/speech")).stationSpeech);
-    const tenant = await resolveTenantForUser(OWNER);
+    const tenant = BOOTSTRAP_TENANT_ID;
     const doomed = "station_speech_doomed";
     await rawSql`
       INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, adopted_at, created_at)

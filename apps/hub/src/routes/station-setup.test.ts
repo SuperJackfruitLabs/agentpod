@@ -94,7 +94,7 @@ beforeAll(async () => {
   // The operator IS the caller: an account id is the human's principal (contract §2).
   operatorId = actor;
   await setGrant(operatorId, { mayDispatch: ["prn_00000000000000000099"], mayGrantReach: true, scopes: [] });
-  const { token } = await mintEnrollmentToken(actor);
+  const { token } = await mintEnrollmentToken(actor, BOOTSTRAP_TENANT_ID);
   ({ nodeId } = await enrollNode(token, {
     hostname: "setup-test",
     os: "linux",

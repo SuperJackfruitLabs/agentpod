@@ -25,7 +25,7 @@ import {
   SalaamOperatorSettlementRequest,
 } from "@agentpod/contract";
 import { BridgeCredentialSource } from "../../../../packages/contract/src/bridge-credential";
-import { resolveTenantForUser } from "../auth/tenant";
+import { resolveTenantId } from "../auth/tenant";
 import { createLogger } from "../utils/logger";
 import {
   readBridgeRoster,
@@ -97,7 +97,7 @@ export const adminBridgeAgentsRouter = new Hono()
           409,
         );
       const userId = c.get("user")!.id,
-        tenantId = await resolveTenantForUser(userId);
+        tenantId = resolveTenantId(c);
       const agent = (await readBridgeRoster(tenantId)).find(
         (a) => a.key === c.req.param("key") && a.hubUserId === userId,
       );
@@ -150,13 +150,13 @@ export const adminBridgeAgentsRouter = new Hono()
   )
   .get("/", async (c) => {
     const userId = c.get("user")!.id;
-    const tenantId = await resolveTenantForUser(userId);
+    const tenantId = resolveTenantId(c);
     return c.json({ agents: await listBridgeAgents(tenantId) });
   })
 
   .post("/", zValidator("json", createSchema), async (c) => {
     const userId = c.get("user")!.id;
-    const tenantId = await resolveTenantForUser(userId);
+    const tenantId = resolveTenantId(c);
     const body = c.req.valid("json");
 
     try {
@@ -174,7 +174,7 @@ export const adminBridgeAgentsRouter = new Hono()
 
   .patch("/:key", zValidator("json", updateSchema), async (c) => {
     const userId = c.get("user")!.id;
-    const tenantId = await resolveTenantForUser(userId);
+    const tenantId = resolveTenantId(c);
     const key = c.req.param("key");
 
     let changed: boolean;
@@ -191,7 +191,7 @@ export const adminBridgeAgentsRouter = new Hono()
 
   .delete("/:key", async (c) => {
     const userId = c.get("user")!.id;
-    const tenantId = await resolveTenantForUser(userId);
+    const tenantId = resolveTenantId(c);
     const removed = await deleteBridgeAgent(tenantId, c.req.param("key"));
     if (!removed) return c.json({ error: "no such agent" }, 404);
     return c.json({ removed: true });

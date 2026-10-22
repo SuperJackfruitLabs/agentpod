@@ -18,7 +18,6 @@ import { rawSql } from "../../src/db/drizzle";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { pollUntil, waitForNodeOnline } from "../helpers/wait";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { createPrincipal, forgetPrincipals, linkMatrixId } from "../helpers/principals";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { gatewayRoutes } from "../../src/routes/gateway";
@@ -26,6 +25,7 @@ import { websocket } from "../../src/ws";
 import { reportingAgentFor } from "../../src/services/push/fleet/agent-identity";
 import { setFleetSink, type FleetSink } from "../../src/services/push/fleet/sink";
 import type { FleetEvent } from "../../src/services/push/fleet/state";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const RUN = Math.random().toString(36).slice(2, 8);
 const OWNER = `test-user-fleet-reports-${RUN}`;
@@ -51,14 +51,14 @@ beforeAll(async () => {
   await linkMatrixId(owner, READER);
   principals.push(await createPrincipal({ kind: "human", handle: `fleet-reports-other-${RUN}`, userId: OTHER_OWNER }));
 
-  const { token } = await mintEnrollmentToken(OWNER);
+  const { token } = await mintEnrollmentToken(OWNER, BOOTSTRAP_TENANT_ID);
   ({ nodeId: NODE, nodeSecret: NODE_SECRET } = await enrollNode(token, {
     hostname: `guild-${RUN}`,
     os: "linux",
     arch: "amd64",
     cpuCount: 2,
   }));
-  const other = await enrollNode((await mintEnrollmentToken(OTHER_OWNER)).token, {
+  const other = await enrollNode((await mintEnrollmentToken(OTHER_OWNER, BOOTSTRAP_TENANT_ID)).token, {
     hostname: `other-${RUN}`,
     os: "linux",
     arch: "amd64",
@@ -66,8 +66,8 @@ beforeAll(async () => {
   });
   OTHER_NODE = other.nodeId;
 
-  const tenant = await resolveTenantForUser(OWNER);
-  const otherTenant = await resolveTenantForUser(OTHER_OWNER);
+  const tenant = BOOTSTRAP_TENANT_ID;
+  const otherTenant = BOOTSTRAP_TENANT_ID;
   await rawSql`
     INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name,
                           matrix_id, matrix_identity_mode, created_at)

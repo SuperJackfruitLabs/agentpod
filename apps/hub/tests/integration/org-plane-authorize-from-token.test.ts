@@ -4,7 +4,6 @@ import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { setOrgPlaneForTests, TEST_PLANE } from "../../src/auth/org-plane/config";
 import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../../src/services/org-plane/directory";
@@ -22,6 +21,7 @@ import { stationWriteRoutes } from "../../src/routes/station-writes";
 import { createStationMatrixRoutes } from "../../src/routes/station-matrix";
 import { stationCleanupRoutes } from "../../src/routes/station-cleanup";
 import { createSkillManagementRoutes } from "../../src/routes/skill-management";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Design §5.7: "No authorization path calls the plane. The one named exception is resolving an
@@ -99,7 +99,7 @@ beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: ME, email: "plane-authz@example.com", name: "Plane AuthZ" });
   AGENT = await createPrincipal({ kind: "agent", handle: "plane-authz-agent" });
-  TENANT = await resolveTenantForUser(ME);
+  TENANT = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
   await rawSql`

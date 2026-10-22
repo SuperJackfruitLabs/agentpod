@@ -3,6 +3,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * A node name identifies one machine.
@@ -39,7 +40,7 @@ afterAll(async () => {
 });
 
 async function enroll(hostname: string) {
-  const { token } = await mintEnrollmentToken(USER);
+  const { token } = await mintEnrollmentToken(USER, BOOTSTRAP_TENANT_ID);
   return enrollNode(token, { hostname, os: "linux", arch: "amd64", cpuCount: 2 });
 }
 

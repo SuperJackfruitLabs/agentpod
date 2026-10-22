@@ -76,7 +76,6 @@ import type {
   TurnResolution,
 } from "@agentpod/contract";
 import { db } from "../db/drizzle";
-import { resolveTenantForUser } from "../auth/tenant";
 import { ControlPairDenied, isControlPairEnforced } from "./control-pair";
 import { grantAllowsPrincipal } from "./grants";
 import {
@@ -1456,8 +1455,9 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
   const now = new Date();
   // Resolved once, here, and carried on the live session: every event this
   // session ever writes inherits it, so a transcript cannot end up split across
-  // tenants by a later re-resolution.
-  const tenantId = await resolveTenantForUser(userId);
+  // tenants by a later re-resolution. It is the station's tenant: a session is
+  // a child of the station it runs on (W5), never of the user opening it.
+  const tenantId = station.tenantId;
   const execution =
     harness === "salaam"
       ? await makeSalaamExecution(stationId, userId, id, input.executionRun)
@@ -2131,6 +2131,7 @@ async function dispatchPrompt(
   let audit: Awaited<ReturnType<typeof recordAudit>>;
   try {
     audit = await recordAudit(db, {
+      tenantId: live.tenantId,
       userId,
       nodeId: live.nodeId,
       stationKey: live.stationKey,

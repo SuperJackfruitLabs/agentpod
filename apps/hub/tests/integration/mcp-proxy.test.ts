@@ -32,6 +32,7 @@ import { connectionManager } from "../../src/services/connection-manager";
 import type { AuthUser } from "../../src/auth/middleware";
 import type { StationRow } from "../../src/services/station-registry";
 import { McpProxyFleetView } from "@agentpod/contract";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const TEST_USER = `usr_mcpproxy_${RUN}`;
@@ -114,7 +115,7 @@ async function withNode(opts: { harnesses: Harness[]; capable?: boolean; served?
   const baseUrl = `http://localhost:${server.port}`;
   const tag = crypto.randomUUID().slice(0, 8);
   const stationDefs = opts.harnesses.map((harness, i) => ({ key: `${harness}:mcp-${tag}-${i}`, harness }));
-  const { token } = await mintEnrollmentToken(TEST_USER);
+  const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   const { nodeId, nodeSecret } = await enrollNode(token, { hostname: `mcp-host-${tag}`, os: "linux", arch: "amd64", cpuCount: 2 });
   const captured: string[] = [];
   const served = new Set<string>();

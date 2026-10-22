@@ -136,6 +136,7 @@ export const stationChangesetRoutes = new Hono()
 
     // ── 4. Audit — this is the call that moves source off the machine ────────
     const audit = await recordAudit(db, {
+      tenantId: station.tenantId,
       userId: user.id,
       nodeId: station.nodeId,
       stationKey: station.stationKey,

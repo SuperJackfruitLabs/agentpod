@@ -45,7 +45,7 @@ let cardSeq = 0;
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: ACTOR, email: `${ACTOR}@example.com`, name: "Actor", role: "admin" });
-  const { token } = await mintEnrollmentToken(ACTOR);
+  const { token } = await mintEnrollmentToken(ACTOR, BOOTSTRAP_TENANT_ID);
   const { nodeId } = await enrollNode(token, {
     hostname: `gates-embedded-${RUN}`,
     os: "linux",

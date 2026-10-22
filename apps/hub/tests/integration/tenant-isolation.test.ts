@@ -136,7 +136,7 @@ describe("a scoped read is scoped by tenant, not only by owner", () => {
     // predicate matches both; only the tenant predicate separates them. Delete
     // the tenantScope() call from listNodes and this test fails — which is the
     // whole claim that the scoping does something.
-    const ids = (await listNodes(SHARED_USER)).map((n) => n.id).sort();
+    const ids = (await listNodes(SHARED_USER, BOOTSTRAP_TENANT_ID)).map((n) => n.id).sort();
     expect(ids).toEqual([OWN_NODE]);
   });
 

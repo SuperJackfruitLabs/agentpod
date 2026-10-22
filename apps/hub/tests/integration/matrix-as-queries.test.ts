@@ -3,7 +3,6 @@ import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { createMatrixAsRoutes } from "../../src/routes/matrix-as";
 import {
   bridgeUserId,
@@ -12,6 +11,7 @@ import {
 } from "../../src/services/matrix-as/names";
 import { provisionStationForAlias } from "../../src/services/matrix-as/provision";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * What the homeserver asks before it will let anyone talk to one of our users
@@ -57,7 +57,7 @@ function get(path: string, token = HS_TOKEN) {
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: USER, email: "matrix-queries@example.com", name: "MQ" });
-  const tenant = await resolveTenantForUser(USER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
   await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;

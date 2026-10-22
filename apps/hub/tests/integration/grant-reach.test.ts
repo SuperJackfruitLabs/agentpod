@@ -5,7 +5,6 @@ import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { setGrant } from "../../src/services/grants";
 import { createPrincipal, forgetPrincipals, clearGrant } from "../helpers/principals";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import {
   REACH_BEARING,
   isReachBearing,
@@ -13,6 +12,7 @@ import {
   requireFleetGrantReach,
 } from "../../src/services/grant-reach";
 import { isGrantReachDenied } from "../../src/services/control-pair";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * The second half of the control pair.
@@ -50,7 +50,7 @@ beforeAll(async () => {
   });
   AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "grant-reach-it-agent" });
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-  const tenant = await resolveTenantForUser(USER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
     VALUES (${NODE}, ${tenant}, ${USER},

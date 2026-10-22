@@ -103,7 +103,7 @@ beforeAll(async () => {
   });
 
   // ── Node 1: harness "opencode" ────────────────────────────────────────────
-  const tokenA = await mintEnrollmentToken(TEST_USER);
+  const tokenA = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   const enrolledA = await enrollNode(tokenA.token, {
     hostname: "autoadopt-host-opencode",
     os: "linux",
@@ -124,7 +124,7 @@ beforeAll(async () => {
   });
 
   // ── Node 2: harness "none" ────────────────────────────────────────────────
-  const tokenB = await mintEnrollmentToken(TEST_USER);
+  const tokenB = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   const enrolledB = await enrollNode(tokenB.token, {
     hostname: "autoadopt-host-none",
     os: "linux",
@@ -163,14 +163,14 @@ test(
   "harness 'opencode' + detect returns opencode station at /workspace → station adopted",
   async () => {
     // Precondition: no stations adopted yet for this node
-    const before = await listAdopted(TEST_USER, testNodeId);
+    const before = await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID);
     expect(before).toHaveLength(0);
 
     await autoAdoptProvisionedHarness(testNodeId, {
       brokerRequest: fakeDetectOk,
     });
 
-    const after = await listAdopted(TEST_USER, testNodeId);
+    const after = await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID);
     expect(after).toHaveLength(1);
 
     const adopted = after[0]!;
@@ -186,7 +186,7 @@ test(
   "idempotent: calling again when station already adopted → broker not called, no new row",
   async () => {
     // At this point testNodeId already has the opencode station adopted (from test above).
-    const before = await listAdopted(TEST_USER, testNodeId);
+    const before = await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID);
     expect(before.length).toBeGreaterThan(0);
 
     let brokerCallCount = 0;
@@ -206,7 +206,7 @@ test(
     expect(brokerCallCount).toBe(0);
 
     // No extra rows created
-    const after = await listAdopted(TEST_USER, testNodeId);
+    const after = await listAdopted(TEST_USER, testNodeId, BOOTSTRAP_TENANT_ID);
     expect(after).toHaveLength(before.length);
   },
   15_000
@@ -230,7 +230,7 @@ test(
     await autoAdoptProvisionedHarness(noneNodeId, { brokerRequest: spyBroker });
 
     expect(brokerCallCount).toBe(0);
-    const adopted = await listAdopted(TEST_USER, noneNodeId);
+    const adopted = await listAdopted(TEST_USER, noneNodeId, BOOTSTRAP_TENANT_ID);
     expect(adopted).toHaveLength(0);
   },
   15_000
@@ -266,7 +266,7 @@ test(
   "broker.request {ok:false} → no adopt, no throw",
   async () => {
     // Use a fresh node so there are no stations adopted yet
-    const tokenC = await mintEnrollmentToken(TEST_USER);
+    const tokenC = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
     const enrolledC = await enrollNode(tokenC.token, {
       hostname: "autoadopt-host-fail",
       os: "linux",
@@ -291,7 +291,7 @@ test(
       autoAdoptProvisionedHarness(failNodeId, { brokerRequest: fakeDetectFail })
     ).resolves.toBeUndefined();
 
-    const adopted = await listAdopted(TEST_USER, failNodeId);
+    const adopted = await listAdopted(TEST_USER, failNodeId, BOOTSTRAP_TENANT_ID);
     expect(adopted).toHaveLength(0);
   },
   15_000

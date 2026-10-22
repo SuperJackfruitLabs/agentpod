@@ -583,6 +583,7 @@ export async function createForgeApiGrant(deps: ForgeApiDeps, input: CreateForge
   }
 
   const audit = await recordAudit(deps.db, {
+    tenantId: station.tenantId,
     userId: input.actor,
     nodeId: station.nodeId,
     stationKey: station.stationKey,
@@ -1994,6 +1995,7 @@ export async function markGrantsRevoking(
     });
     // Through the transaction: the audit row rolls back with the change it records.
     const audit = await recordAudit(tx, {
+      tenantId: input.tenantId,
       userId: input.actor ?? "system",
       nodeId: st?.nodeId ?? "",
       stationKey: st?.stationKey ?? row.stationIdSnapshot,

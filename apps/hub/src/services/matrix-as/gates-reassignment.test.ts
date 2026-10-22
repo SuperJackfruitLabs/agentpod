@@ -104,7 +104,7 @@ beforeAll(async () => {
     role: "admin",
   });
 
-  const { token } = await mintEnrollmentToken(ADMIN_ACTOR);
+  const { token } = await mintEnrollmentToken(ADMIN_ACTOR, BOOTSTRAP_TENANT_ID);
   const { nodeId } = await enrollNode(token, {
     hostname: `gates-reassign-host-${RUN}`,
     os: "linux",

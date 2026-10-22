@@ -14,7 +14,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 
-import { resolveTenantForUser } from "../auth/tenant";
+import { resolveTenantId } from "../auth/tenant";
 import { db } from "../db/drizzle";
 import { bridgeBoardSettings } from "../db/schema/bridge";
 
@@ -27,7 +27,7 @@ export const adminBridgeBoardsRouter = new Hono().put(
   async (c) => {
     const boardId = c.req.param("boardId");
     if (!BOARD_ID.test(boardId)) return c.json({ error: "a superpipeline board id looks like brd_<16 hex>" }, 400);
-    const tenantId = await resolveTenantForUser(c.get("user")!.id);
+    const tenantId = resolveTenantId(c);
     const { relatedWork } = c.req.valid("json");
     await db
       .insert(bridgeBoardSettings)

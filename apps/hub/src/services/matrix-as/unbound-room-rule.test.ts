@@ -155,7 +155,7 @@ beforeAll(async () => {
     name: "Actor",
     role: "admin",
   });
-  const { token } = await mintEnrollmentToken(ACTOR);
+  const { token } = await mintEnrollmentToken(ACTOR, BOOTSTRAP_TENANT_ID);
   const enrolled = await enrollNode(token, {
     hostname: `unbound-rule-host-${RUN}`,
     os: "linux",

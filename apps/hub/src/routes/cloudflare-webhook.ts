@@ -3,7 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { createLogger } from "../utils/logger";
 import { db } from "../db/drizzle";
-import { resolveTenantForUser } from "../auth/tenant";
+import { resolveTenantId } from "../auth/tenant";
 import { cloudflareSandboxes } from "../db/schema/cloudflare";
 import { eq } from "drizzle-orm";
 
@@ -55,7 +55,7 @@ export const cloudflareWebhookRoutes = new Hono()
       try {
         switch (body.event) {
           case "sandbox.created":
-            if (body.data.sandboxId) await handleSandboxCreated({ sandboxId: body.data.sandboxId, userId: body.data.userId });
+            if (body.data.sandboxId) await handleSandboxCreated({ sandboxId: body.data.sandboxId, userId: body.data.userId, tenantId: resolveTenantId(c) });
             break;
 
           case "sandbox.hibernated":
@@ -110,7 +110,9 @@ export const cloudflareWebhookRoutes = new Hono()
     }
   );
 
-async function handleSandboxCreated(data: { sandboxId: string; userId?: string }) {
+// The webhook is called under the /api/* auth middleware, so its tenant is the calling request's
+// (W5), not one derived from the sandbox's userId.
+async function handleSandboxCreated(data: { sandboxId: string; userId?: string; tenantId: string }) {
   if (!data.userId) {
     log.warn("sandbox.created missing userId", { sandboxId: data.sandboxId });
     return;
@@ -124,7 +126,7 @@ async function handleSandboxCreated(data: { sandboxId: string; userId?: string }
 
   if (existing.length === 0) {
     await db.insert(cloudflareSandboxes).values({
-      tenantId: await resolveTenantForUser(data.userId),
+      tenantId: data.tenantId,
       id: data.sandboxId,
       userId: data.userId,
       status: "running",

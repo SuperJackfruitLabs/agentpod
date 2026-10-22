@@ -3,9 +3,9 @@ import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { purposeRoutes } from "../../src/routes/purpose";
 import { onStationsAdopted } from "../../src/services/matrix-as/hooks";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Setting what a station is for.
@@ -51,7 +51,7 @@ beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: OWNER, email: "purpose-routes@example.com", name: "PR" });
   await createTestUser({ id: OTHER, email: "purpose-other@example.com", name: "PO" });
-  const tenant = await resolveTenantForUser(OWNER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
   await rawSql`

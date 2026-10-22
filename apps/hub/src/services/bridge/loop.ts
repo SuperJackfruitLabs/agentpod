@@ -13,7 +13,6 @@ import { probeSalaamWork } from "./salaam-dispatch";
  * constructs nothing here and behaves exactly as it does today.
  */
 
-import { resolveTenantForUser } from "../../auth/tenant";
 import * as acpSessions from "../acp-sessions";
 import { BRIDGE_SOURCE, isBridgeEnabled, type BridgeAgentConfig } from "./config";
 import { reconcileRoster, type LoopRegistry, type ReconcileState } from "./reconcile";
@@ -262,9 +261,10 @@ export async function startSuperpipelineBridge(
             client,
             acp,
             agent: config,
-            // Read per cycle rather than captured at start: a station that moves tenant would
-            // otherwise keep writing ledger rows under the old one.
-            tenantId: await resolveTenantForUser(agent.hubUserId),
+            // The roster row's own tenant (W5): the composite FK pins it to its station's, so the
+            // ledger rows land where the station lives. A test-seam roster without one is the
+            // tenant the roster below is read from.
+            tenantId: agent.tenantId ?? BOOTSTRAP_TENANT_ID,
             source: BRIDGE_SOURCE,
             log,
             mcpUrl,

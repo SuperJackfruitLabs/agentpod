@@ -31,6 +31,7 @@ import {
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
 import * as broker from "../../src/services/broker";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 // ─── Minimal test server ──────────────────────────────────────────────────────
 
@@ -68,7 +69,7 @@ test(
 
     try {
       // Enroll a real node
-      const { token } = await mintEnrollmentToken(TEST_USER_ID);
+      const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "broker-int-host",
         os: "linux",
@@ -145,7 +146,7 @@ test(
     const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER_ID);
+      const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "broker-stream-host",
         os: "linux",

@@ -2,8 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { adoptStations } from "../../src/services/station-registry";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * What a station is FOR, and where that fact comes from.
@@ -38,7 +38,7 @@ const purposeOf = async (nodeId: string, key: string): Promise<string | null> =>
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: USER, email: "purpose@example.com", name: "P" });
-  const tenant = await resolveTenantForUser(USER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   for (const node of [NODE, BARE_NODE]) {
     await rawSql`DELETE FROM stations WHERE node_id = ${node}`;
     await rawSql`DELETE FROM nodes WHERE id = ${node}`;

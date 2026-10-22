@@ -36,6 +36,7 @@ import { stationRoutes } from "../../src/routes/stations";
 import { websocket } from "../../src/ws";
 import type { AuthUser } from "../../src/auth/middleware";
 import type { StationRow } from "../../src/services/station-registry";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -233,7 +234,7 @@ test(
     const baseUrl = `http://localhost:${server.port}`;
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "observe-health-host",
         os: "linux",
@@ -274,7 +275,7 @@ test(
     const baseUrl = `http://localhost:${server.port}`;
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "observe-files-host",
         os: "linux",
@@ -313,7 +314,7 @@ test(
     const baseUrl = `http://localhost:${server.port}`;
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "observe-file-host",
         os: "linux",
@@ -352,7 +353,7 @@ test(
     const baseUrl = `http://localhost:${server.port}`;
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "observe-logs-host",
         os: "linux",
@@ -408,7 +409,7 @@ test(
     const baseUrl = `http://localhost:${server.port}`;
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "observe-file-b64-host",
         os: "linux",
@@ -455,7 +456,7 @@ test(
 
     try {
       // Enroll + connect a node, adopt a station, then disconnect the node.
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "observe-logs-offline-host",
         os: "linux",

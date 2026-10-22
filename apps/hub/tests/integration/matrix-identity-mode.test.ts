@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { refreshAdoptedCapabilities } from "../../src/services/station-registry";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Two facts about one station, and who answers.
@@ -55,7 +55,7 @@ async function nodeReports(reported: Array<{ key: string; matrixId: string | nul
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: USER, email: "matrix-mode@example.com", name: "MM" });
-  const tenant = await resolveTenantForUser(USER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM stations WHERE id IN (${BRIDGED}, ${HARNESS})`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
   await rawSql`

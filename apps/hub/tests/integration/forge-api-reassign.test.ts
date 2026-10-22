@@ -17,7 +17,6 @@ import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 
 import { db, rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { stationForgeApiGrants as g } from "../../src/db/schema/forge-api-grants";
 import { agentsAdminRouter } from "../../src/routes/agents-admin";
 import { unadopt } from "../../src/services/station-registry";
@@ -54,6 +53,7 @@ import {
   type Fixture,
   type Harness,
 } from "../helpers/forge-api-harness";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const RUN = `far${crypto.randomUUID().slice(0, 8)}`;
 const OWNER = `test-user-${RUN}`;
@@ -119,7 +119,7 @@ afterEach(() => {
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: OWNER, email: `${OWNER}@example.com`, name: "FAR" });
-  f.tenant = await resolveTenantForUser(OWNER);
+  f.tenant = BOOTSTRAP_TENANT_ID;
   await insertNode(f, NODE);
 });
 

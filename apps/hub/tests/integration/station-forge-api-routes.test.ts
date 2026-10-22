@@ -19,7 +19,6 @@ import { and, eq, inArray, like } from "drizzle-orm";
 import handoverFixture from "../../../../packages/contract/fixtures/handover-v1.json";
 
 import { db, rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { createAuthMiddleware, type AuthUser } from "../../src/auth/middleware";
 import { hubOperators } from "../../src/db/schema/operators";
 import { stationAudit } from "../../src/db/schema/audit";
@@ -30,6 +29,7 @@ import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { getProvider, type ForgeProvider } from "../../src/services/forge-api/providers";
 import type { ForgeApiDeps } from "../../src/services/station-forge-api";
 import { createStationForgeApiRoutes } from "../../src/routes/station-forge-api";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const hex20 = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
@@ -175,7 +175,7 @@ beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: OWNER, email: `${OWNER}@example.com`, name: "SFR owner" });
   await createTestUser({ id: ADMIN, email: `${ADMIN}@example.com`, name: "SFR admin" });
-  tenant = await resolveTenantForUser(OWNER);
+  tenant = BOOTSTRAP_TENANT_ID;
   await db.insert(hubOperators).values({ principalId: ADMIN });
   await rawSql`
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)

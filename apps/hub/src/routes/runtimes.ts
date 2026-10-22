@@ -53,7 +53,7 @@ export const runtimeRoutes = new Hono()
       process.env.PROVISIONING_HUB_URL ?? new URL(c.req.url).origin;
 
     try {
-      const runtime = await createRuntime(user.id, body, hubUrl);
+      const runtime = await createRuntime(user.id, user.tenantId, body, hubUrl);
       return c.json(runtime, 201);
     } catch (err) {
       const e = err as Error & { status?: number };
@@ -82,7 +82,7 @@ export const runtimeRoutes = new Hono()
   // ── GET /api/runtimes ─────────────────────────────────────────────────────
   .get("/", async (c) => {
     const user = c.get("user");
-    const runtimes = await listRuntimes(user.id);
+    const runtimes = await listRuntimes(user.id, user.tenantId);
     return c.json(runtimes);
   })
 

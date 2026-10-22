@@ -19,6 +19,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { nodes } from "../db/schema/nodes";
+import { resolveTenantId } from "../auth/tenant";
 import * as broker from "../services/broker";
 import { connectionManager } from "../services/connection-manager";
 import { VERB_RESULTS } from "@agentpod/contract";
@@ -37,11 +38,13 @@ const FILE_READ_MAX_BYTES = 8 * 1024 * 1024;
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
 /** Returns the node row if it belongs to userId, otherwise null. */
-async function requireNodeOwnership(userId: string, nodeId: string) {
+async function requireNodeOwnership(userId: string, nodeId: string, tenantId: string) {
+  // The request's tenant as well as the owner (W5): the same person in another
+  // workspace does not reach this node.
   const rows = await db
     .select({ id: nodes.id })
     .from(nodes)
-    .where(and(eq(nodes.id, nodeId), eq(nodes.userId, userId)));
+    .where(and(eq(nodes.id, nodeId), eq(nodes.tenantId, tenantId), eq(nodes.userId, userId)));
   return rows[0] ?? null;
 }
 
@@ -62,7 +65,7 @@ export const stationRoutes = new Hono()
     const userId = c.get("user").id;
     const nodeId = c.req.param("nodeId");
 
-    if (!(await requireNodeOwnership(userId, nodeId))) {
+    if (!(await requireNodeOwnership(userId, nodeId, resolveTenantId(c)))) {
       return c.json({ error: "Not Found" }, 404);
     }
 
@@ -81,7 +84,7 @@ export const stationRoutes = new Hono()
     // reportUnknownCapabilities — but it must not be silent.
     reportUnknownCapabilities(nodeId, result.data);
 
-    const adoptedRows = await listAdopted(userId, nodeId);
+    const adoptedRows = await listAdopted(userId, nodeId, resolveTenantId(c));
     const adoptedKeys = new Set(adoptedRows.map((s) => s.stationKey));
 
     return c.json(
@@ -103,7 +106,7 @@ export const stationRoutes = new Hono()
       const nodeId = c.req.param("nodeId");
       const { keys } = c.req.valid("json");
 
-      if (!(await requireNodeOwnership(userId, nodeId))) {
+      if (!(await requireNodeOwnership(userId, nodeId, resolveTenantId(c)))) {
         return c.json({ error: "Not Found" }, 404);
       }
 
@@ -135,11 +138,11 @@ export const stationRoutes = new Hono()
     const userId = c.get("user").id;
     const nodeId = c.req.param("nodeId");
 
-    if (!(await requireNodeOwnership(userId, nodeId))) {
+    if (!(await requireNodeOwnership(userId, nodeId, resolveTenantId(c)))) {
       return c.json({ error: "Not Found" }, 404);
     }
 
-    return c.json(await listAdopted(userId, nodeId));
+    return c.json(await listAdopted(userId, nodeId, resolveTenantId(c)));
   })
   /**
    * DELETE /api/stations/:stationId
