@@ -5,7 +5,7 @@
  *   POST /stations/:id/acp/sessions {mode} → 201 AcpSessionRow
  *        (400 invalid mode, 401 anonymous, 403 no acp capability,
  *         404 unknown station, 409 the node can't host a second session,
- *         502 node offline / agent open failure)
+ *         503 node offline, 424 agent open failure — never 502, see station-failure.ts)
  *   GET  /stations/:id/acp/sessions → AcpSessionRow[] (newest activity first)
  *   DELETE /acp/sessions/:sessionId → 204 (ends the session; WS clients get
  *        {t:"bye"}); 401 anonymous, 404 absent/foreign
@@ -48,6 +48,8 @@ import { isAllowedOrigin } from "../config";
 import { getStation } from "../services/station-registry";
 import * as acp from "../services/acp-sessions";
 import { isControlPairDenied } from "../services/control-pair";
+import { isSalaamAuthorityDenied } from "../services/salaam-authority";
+import { stationFailure } from "../services/station-failure";
 import type { AuthUser } from "../auth/middleware";
 import { isOrgPlaneUnavailable, ORG_PLANE_UNAVAILABLE_BODY } from "../auth/caller-authority";
 
@@ -57,15 +59,40 @@ import { isOrgPlaneUnavailable, ORG_PLANE_UNAVAILABLE_BODY } from "../auth/calle
  * Maps createSession error messages to HTTP statuses. The service throws
  * plain Errors with stable, user-facing messages (see acp-sessions.ts);
  * anything unrecognised is an upstream failure (node offline, acp.open
- * failed, agent handshake broke) → 502.
+ * failed, agent handshake broke) → "node", answered by stationFailure (424/503, never 502).
  */
-function createErrorStatus(message: string): 403 | 404 | 409 | 502 {
+function createErrorStatus(message: string): 403 | 404 | 409 | "node" {
   if (message === "Station not found.") return 404;
   if (message === "This station does not support agent sessions.") return 403;
   // Raised only when the node can't key processes per session (no instance
   // echo) and one is already live — the exact string the service throws.
   if (message === "An active session already exists for this agent.") return 409;
-  return 502;
+  return "node";
+}
+
+/**
+ * The answer to a failed session open. Exported so the mapping itself is under test: an
+ * authorization refusal must never surface as a node failure, and a node failure must never be a
+ * 502 (an edge replaces it with CORS-less HTML; spec 2026-10-23, C16).
+ */
+export function createSessionFailure(err: unknown): {
+  status: 403 | 404 | 409 | 424 | 503;
+  body: { error: string; code?: string } | typeof ORG_PLANE_UNAVAILABLE_BODY;
+} {
+  // The plane was needed (a caller with no token authority, under ORG_PLANE_*) and is down.
+  if (isOrgPlaneUnavailable(err)) return { status: 503, body: ORG_PLANE_UNAVAILABLE_BODY };
+  // A refusal by the control pair is 403. A node-failure status would invite a retry that can
+  // never succeed, and hide an authorization decision behind an infrastructure one.
+  if (isControlPairDenied(err)) return { status: 403, body: { error: err.message } };
+  // Salaam's own authority check (no dispatch grant, a suspended agent) is the same kind of
+  // answer: an authorization decision, so 403 with a code the console can word.
+  if (isSalaamAuthorityDenied(err)) {
+    return { status: 403, body: { error: err.message, code: "salaam_authority_denied" } };
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  const status = createErrorStatus(message);
+  if (status === "node") return stationFailure(message, "the agent could not be started");
+  return { status, body: { error: message } };
 }
 
 // ─── Route schemas ────────────────────────────────────────────────────────────
@@ -126,17 +153,8 @@ export const stationAcpRoutes = new Hono()
         const row = await acp.createSession({ stationId, tenantId: user.tenantId, userId: user.id, mode, mcpProxy, authority: user.authority });
         return c.json(row, 201);
       } catch (err) {
-        // The plane was needed (a caller with no token authority, under ORG_PLANE_*) and is down.
-        if (isOrgPlaneUnavailable(err)) return c.json(ORG_PLANE_UNAVAILABLE_BODY, 503);
-        // A refusal by the control pair is 403, not the 502 the generic mapper
-        // gives it. 502 says the node failed, which is a different thing to a
-        // caller: it invites a retry that can never succeed, and it hides an
-        // authorization decision behind an infrastructure one.
-        if (isControlPairDenied(err)) {
-          return c.json({ error: err.message }, 403);
-        }
-        const message = err instanceof Error ? err.message : String(err);
-        return c.json({ error: message }, createErrorStatus(message));
+        const { status, body } = createSessionFailure(err);
+        return c.json(body, status);
       }
     }
   )

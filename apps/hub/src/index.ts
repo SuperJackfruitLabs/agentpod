@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { corsMiddleware } from './middleware/cors.ts';
+import { edgeSafeStatus } from './middleware/edge-safe-status.ts';
 import { logger } from 'hono/logger';
 import { redactUrlSecrets } from './utils/redact-url-secrets.ts';
 import { config, allowedOrigins, isAllowedOrigin } from './config.ts';
@@ -184,6 +185,9 @@ const app = new Hono()
   // Matrix event wrote a live credential into journald in clear. Redacting here closes the
   // recurrence; rotating the token alone would not (estate BACKLOG, 2026-09-01).
   .use('*', logger((message, ...rest) => console.log(redactUrlSecrets(message), ...rest)))
+  // Outside CORS, so it sees the final response: the hub never sends 502/504, which an edge
+  // would replace with a CORS-less HTML page (spec 2026-10-23, C16).
+  .use('*', edgeSafeStatus)
   // CORS configuration
   .use('*', corsMiddleware)
   .use('*', securityHeadersMiddleware)

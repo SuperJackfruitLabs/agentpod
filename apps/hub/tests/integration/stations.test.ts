@@ -398,7 +398,7 @@ test(
 );
 
 test(
-  "GET /api/nodes/:nodeId/detected returns 502 when node is offline",
+  "GET /api/nodes/:nodeId/detected returns 503 station_unavailable when node is offline",
   async () => {
     const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
     const baseUrl = `http://localhost:${server.port}`;
@@ -416,8 +416,10 @@ test(
       const res = await fetch(`${baseUrl}/api/nodes/${nodeId}/detected`, {
         headers: { "X-Test-User-Id": TEST_USER_A },
       });
-      // broker resolves {ok:false, error:"node offline"} → route returns 502
-      expect(res.status).toBe(502);
+      // broker resolves {ok:false, error:"node offline"} → 503 station_unavailable, never a 502
+      // an edge would replace with a CORS-less HTML page (spec 2026-10-23, C16).
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ error: "node offline", code: "station_unavailable" });
     } finally {
       server.stop(true);
     }

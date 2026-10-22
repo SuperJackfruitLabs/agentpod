@@ -13,6 +13,18 @@ import { bridgeDispatches } from "../db/schema/bridge";
 import { orgPlaneClient } from "./org-plane/client";
 import * as broker from "./broker";
 
+/**
+ * An authorization refusal: the caller, or the agent, may not run here. A caller answers it with
+ * 403 (spec 2026-10-23, C16). It is not a node failure, and retrying cannot fix it.
+ */
+export class SalaamAuthorityDenied extends Error {
+  override name = "SalaamAuthorityDenied";
+}
+
+export function isSalaamAuthorityDenied(e: unknown): e is SalaamAuthorityDenied {
+  return e instanceof SalaamAuthorityDenied || (e as { name?: string })?.name === "SalaamAuthorityDenied";
+}
+
 export async function validateSalaamAuthority(
   binding: SalaamAuthority,
   userId: string,
@@ -58,7 +70,7 @@ export async function validateSalaamAuthority(
     owner.organizationId !== binding.organization_id ||
     !owner.grant?.mayDispatch.includes(binding.principal_id)
   )
-    throw Error(
+    throw new SalaamAuthorityDenied(
       "Salaam execution authority was suspended or its dispatch grant was withdrawn",
     );
   if (binding.run.source === "superpipeline") {

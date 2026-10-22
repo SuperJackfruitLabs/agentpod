@@ -14,6 +14,7 @@ import {
   makeSalaamExecution,
   validateSalaamAuthority,
   salaamStationStopped,
+  SalaamAuthorityDenied,
 } from "../../src/services/salaam-authority";
 import { fakePlane } from "../helpers/fake-plane";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
@@ -166,6 +167,10 @@ test("admission uses the owner grant and current station facts; suspension and w
   await expect(
     validateSalaamAuthority(execution.binding, owner),
   ).rejects.toThrow(/withdrawn/i);
+  // Typed, so the session route answers 403 rather than a node failure (spec 2026-10-23, C16).
+  await expect(
+    validateSalaamAuthority(execution.binding, owner),
+  ).rejects.toBeInstanceOf(SalaamAuthorityDenied);
 });
 
 test("MCP reconnect intent is durable session configuration and defaults off for old rows", async () => {

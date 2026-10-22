@@ -944,3 +944,46 @@ test("a station missing five capabilities shows only its real tabs, in the conso
   expect(strip.className).toContain("scroll-strip");
   expect(strip.className).toContain("min-w-0");
 });
+
+// ─── Logs and Files follow the capabilities ─────────────────────────────────
+// A Salaam station advertised neither, and the console showed the tabs' panels anyway: Logs sat
+// on "Reconnecting…" forever and Files failed (spec 2026-10-23, C5/C6). The tabs stay, and say so.
+
+test("a station without logs gets a plain note on the Logs tab, not a log tail", async () => {
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "acp"])]);
+  setUrl("?tab=logs");
+  const { findByTestId, getAllByRole } = render(StationPage);
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Logs"));
+  const note = await findByTestId("logs-unavailable");
+  expect(note.textContent).toBe("This agent doesn't share its logs with AgentPod.");
+});
+
+test("a station with logs gets the log tail, not the note", async () => {
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "logs"])]);
+  setUrl("?tab=logs");
+  const { queryByTestId, getAllByRole } = render(StationPage);
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Logs"));
+  await waitFor(() => expect(document.getElementById("page-tabs-panel-logs")?.childElementCount).toBeGreaterThan(0));
+  expect(queryByTestId("logs-unavailable")).toBeNull();
+});
+
+test("a station without fs.read gets a plain note on the Files tab, and never lists files", async () => {
+  const list = vi.spyOn(api, "listFiles");
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "acp"])]);
+  setUrl("?tab=files");
+  const { findByTestId, getAllByRole } = render(StationPage);
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Files"));
+  const note = await findByTestId("files-unavailable");
+  expect(note.textContent).toBe("This agent doesn't share its files with AgentPod.");
+  expect(list).not.toHaveBeenCalled();
+});
+
+test("a station with fs.read gets the file browser, not the note", async () => {
+  vi.spyOn(api, "listFiles").mockResolvedValue([]);
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "fs.read"])]);
+  setUrl("?tab=files");
+  const { queryByTestId, getAllByRole } = render(StationPage);
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Files"));
+  await waitFor(() => expect(api.listFiles).toHaveBeenCalled());
+  expect(queryByTestId("files-unavailable")).toBeNull();
+});

@@ -6,7 +6,7 @@
  *     1. POST /api/stations/:id/acp/sessions {mode} → 201 AcpSessionRow;
  *        error statuses: 400 invalid mode, 401 anonymous, 403 no acp
  *        capability, 404 unknown station, 409 the node can't host a second
- *        session, 502 node offline / acp.open failure.
+ *        session, 503 node offline, 424 acp.open failure (never 502).
  *     2. GET /api/stations/:id/acp/sessions → rows newest ACTIVITY first,
  *        straight from the service's SQL ordering (the route never re-sorts),
  *        with ?limit= / ?before= paging (slice 4c) — out-of-range numbers are
@@ -520,7 +520,7 @@ test(
 );
 
 test(
-  "POST create → 502 when the node is offline and 502 when acp.open fails",
+  "POST create → 503 when the node is offline and 424 when acp.open fails (never 502)",
   async () => {
     // Offline node: enrolled but never connected to the gateway.
     const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
@@ -536,7 +536,8 @@ test(
       if (!station) throw new Error("station adoption failed");
 
       const offline = await createSessionReq(baseUrl, station.id, { mode: "ask" });
-      expect(offline.status).toBe(502);
+      expect(offline.status).toBe(503);
+      expect(((await offline.json()) as { code?: string }).code).toBe("station_unavailable");
 
       // Online node whose acp.open fails.
       const { nodeId: failNodeId, nodeSecret } = await enrollTestNode(
@@ -557,7 +558,8 @@ test(
       const openFail = await createSessionReq(baseUrl, failStation.id, {
         mode: "ask",
       });
-      expect(openFail.status).toBe(502);
+      expect(openFail.status).toBe(424);
+      expect(((await openFail.json()) as { code?: string }).code).toBe("node_failed");
 
       fake.close();
       await new Promise((r) => setTimeout(r, 100));
