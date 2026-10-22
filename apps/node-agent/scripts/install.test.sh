@@ -72,6 +72,48 @@ hasnt "no warning for link to new binary" "WARNING" "$OUT"
 echo "== user files are never deleted"
 if [ -x "$H1/.local/bin/apn" ]; then pass "stale apn still present"; else fail "stale apn deleted"; fi
 
+echo "== install mode decision (Linux, root via sudo)"
+# decide_install_mode <explicit> <system_unit_exists> <sudo_user> <root_detect_json> <user_detect_json>
+J0='[]'
+J2='[{"key":"claude-code"},{"key":"codex"}]'
+J1='[{"key":"hermes"}]'
+mode_of() { decide_install_mode "$@" | cut -f1; }
+check_mode() { # name want args...
+  local name="$1" want="$2" got; shift 2
+  got="$(mode_of "$@")"
+  if [ "$got" = "$want" ]; then pass "$name"; else fail "$name (want $want, got '$got')"; fi
+}
+check_mode "user has harnesses, root none -> user" user "" 0 alice "$J0" "$J2"
+check_mode "root has harnesses -> system" system "" 0 alice "$J1" "$J2"
+check_mode "neither has harnesses -> system" system "" 0 alice "$J0" "$J0"
+check_mode "--system forces system" system system 0 alice "$J0" "$J2"
+check_mode "existing system unit -> system" system "" 1 alice "$J0" "$J2"
+check_mode "--user forces user" user user 1 alice "$J1" "$J0"
+check_mode "plain root (no SUDO_USER) -> system" system "" 0 "" "$J0" "$J2"
+check_mode "detect null counts as zero" user "" 0 alice "null" "$J2"
+REASON="$(decide_install_mode "" 0 alice "$J0" "$J2" | cut -f2)"
+case "$REASON" in *alice*"2 "*--system*) pass "reason names user, count, override" ;; *) fail "reason: $REASON" ;; esac
+show() { echo "    $(install_mode_line "$(decide_install_mode "$@")")"; }
+show "" 0 alice "$J0" "$J2"
+show "" 0 alice "$J1" "$J2"
+show "" 0 alice "$J0" "$J0"
+show system 0 alice "$J0" "$J2"
+show "" 1 alice "$J0" "$J2"
+show user 1 alice "$J1" "$J0"
+
+echo "== fallback harness count from well-known paths"
+H5="$WORK/home5"; mkdir -p "$H5/.claude" "$H5/.codex" "$H5/.local/bin"
+fake_bin "$H5/.local/bin/claude" v1
+if [ "$(count_harness_paths "$H5")" = 2 ]; then pass "counts harnesses by home dir"; else fail "fallback count: $(count_harness_paths "$H5")"; fi
+if [ "$(count_harness_paths "$WORK/home3")" = 0 ]; then pass "empty home -> 0"; else fail "empty home -> 0"; fi
+H6="$WORK/home6"; mkdir -p "$H6/.npm-global/bin"; fake_bin "$H6/.npm-global/bin/codex" v1
+if [ "$(count_harness_paths "$H6")" = 1 ]; then pass "harness binary alone counts"; else fail "binary-only count: $(count_harness_paths "$H6")"; fi
+
+echo "== detect finds 0 but harness paths exist (fresh install, no projects)"
+# args 6/7: root / user harness-path counts
+check_mode "user with only an empty ~/.claude -> user" user "" 0 alice "$J0" "$J0" 0 1
+check_mode "root with ~/.codex -> system" system "" 0 alice "$J0" "$J2" 1 0
+
 echo ""
 echo "install.test.sh: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ]
