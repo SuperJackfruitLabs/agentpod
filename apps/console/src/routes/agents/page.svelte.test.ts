@@ -18,6 +18,7 @@ import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, cleanup, fireEvent } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
 import * as grantsApi from "$lib/api/grants";
+import { auth } from "$lib/stores/auth.svelte";
 import * as agentsApi from "$lib/api/agents";
 import { setSearchParam, resetReactivePageState } from "../../mocks/reactive-page-state.svelte";
 
@@ -89,8 +90,23 @@ beforeEach(() => {
   // assignment never make a real network call for it.
   vi.spyOn(api, "listStations").mockResolvedValue([]);
   vi.spyOn(grantsApi, "listPrincipals").mockResolvedValue([]);
+  // Assignment is a workspace admin's; the member test overrides this.
+  vi.spyOn(auth, "isWorkspaceAdmin", "get").mockReturnValue(true);
 });
 afterEach(cleanup);
+
+test("a member sees the agents, with who to ask in place of create and assign, and never asks for the directory", async () => {
+  vi.spyOn(auth, "isWorkspaceAdmin", "get").mockReturnValue(false);
+  const principals = vi.spyOn(grantsApi, "listPrincipals");
+  vi.spyOn(api, "getFleet").mockResolvedValue({ stats: mockStats, agents: mockAgents });
+  const { findByTestId, queryByRole } = render(AgentsPage);
+  expect((await findByTestId("agents-member")).textContent?.trim()).toBe(
+    "Workspace admins can create agents and assign them to stations. Ask an owner or admin of your workspace.",
+  );
+  expect(queryByRole("button", { name: /create agent/i })).toBeNull();
+  expect(queryByRole("button", { name: /assign/i })).toBeNull();
+  expect(principals).not.toHaveBeenCalled();
+});
 
 function stationRow(overrides: Partial<api.StationRow>): api.StationRow {
   return {

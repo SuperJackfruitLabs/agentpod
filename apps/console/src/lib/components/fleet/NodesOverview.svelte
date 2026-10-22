@@ -36,6 +36,11 @@
 
   import { enrollmentCommand, enrollmentHubUrl } from "$lib/utils/enrollment-command";
   import { relativeTime } from "$lib/utils/relative-time";
+  import { auth } from "$lib/stores/auth.svelte";
+  import { workspaceAdminsCan } from "$lib/workspace-authority";
+
+  /** Enrolling, updating and provisioning are a workspace admin's; a member is told who to ask. */
+  const wsAdmin = $derived(auth.isWorkspaceAdmin);
 
   let nodes = $state<NodeSummary[]>([]);
   let isLoading = $state(true);
@@ -153,6 +158,8 @@
     }
     if (action === handledAction) return;
     handledAction = action;
+    // A member's palette offers neither; a typed URL must not open a dialog the hub would refuse.
+    if (!wsAdmin) return;
     if (action === "new-runtime") {
       showNewRuntimeDialog = true;
     } else if (action === "create-token") {
@@ -286,7 +293,7 @@
     });
   }
 
-  const headerActions = $derived<SecondaryAction[]>([
+  const headerActions = $derived<SecondaryAction[]>(!wsAdmin ? [] : [
     ...(nodesBehind.length > 0
       ? [{
           label: isRollingOut
@@ -322,7 +329,7 @@
       (or while loading). When nodes=0 the ConnectBanner below supplies the same CTA
       to avoid duplicate accessible buttons.
     -->
-    {#if isLoading || nodes.length > 0 || provisioningRuntimes.length > 0}
+    {#if wsAdmin && (isLoading || nodes.length > 0 || provisioningRuntimes.length > 0)}
       <Button
         onclick={handleCreateToken}
         disabled={isMinting}
@@ -379,8 +386,13 @@
             <EnrollmentCommand token={lastToken} hubUrl={enrollmentHubUrl()} {copied} onCopy={handleCopyEnrollCmd} />
             <p class="text-xs text-muted-foreground/60">The node will appear below once it connects</p>
           </div>
-        {:else}
+        {:else if wsAdmin}
           <ConnectBanner onCreateToken={handleCreateToken} />
+        {:else}
+          <div class="ap-card space-y-2" data-testid="enrol-member">
+            <h2 class="t-section text-base">No nodes yet</h2>
+            <p class="text-sm text-muted-foreground">{workspaceAdminsCan("enrol nodes")}</p>
+          </div>
         {/if}
       </div>
     </div>
@@ -464,9 +476,9 @@
                 </dd>
               </dl>
 
-              {#if node.updateAvailable || node.capabilities?.includes("posture")}
+              {#if (node.updateAvailable && wsAdmin) || node.capabilities?.includes("posture")}
                 <div class="flex flex-wrap items-center gap-2">
-                  {#if node.updateAvailable}
+                  {#if node.updateAvailable && wsAdmin}
                     <Button
                       data-testid="node-update-{node.id}"
                       variant="outline"
@@ -591,7 +603,7 @@
                 </td>
 
                 <td class="px-3 py-2 text-right">
-                  {#if node.updateAvailable}
+                  {#if node.updateAvailable && wsAdmin}
                     <Button
                       data-testid="node-update-{node.id}"
                       variant="outline"

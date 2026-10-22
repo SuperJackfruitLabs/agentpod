@@ -11,8 +11,8 @@
   import { currentSection, navItems } from "./nav";
   import NavIcon from "./NavIcon.svelte";
 
-  const isAdmin = $derived(auth.user?.role === "admin");
-  const items = $derived(navItems(isAdmin));
+  // Admin is shown to workspace admins (its workspace pages) and hub operators (its settings).
+  const items = $derived(navItems({ isWorkspaceAdmin: auth.isWorkspaceAdmin, isHubOperator: auth.isHubOperator }));
   const current = $derived(currentSection(page.url.pathname));
 </script>
 

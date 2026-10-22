@@ -27,6 +27,8 @@ const { mockFleet, goto, updateNode, listActivity, createEnrollmentToken } = vi.
   createEnrollmentToken: vi.fn(),
 }));
 
+const mockAuth = vi.hoisted(() => ({ isWorkspaceAdmin: true }));
+vi.mock("$lib/stores/auth.svelte", () => ({ auth: mockAuth }));
 vi.mock("$lib/stores/fleet.svelte", () => ({ fleet: mockFleet, refreshFleet: vi.fn() }));
 vi.mock("$app/navigation", () => ({ goto }));
 vi.mock("$app/state", () => ({ page: { url: { pathname: "/", searchParams: null } } }));
@@ -97,6 +99,7 @@ beforeEach(() => {
   mockFleet.isLoading = false;
   mockFleet.error = null;
   mockFleet.loadedAt = 1;
+  mockAuth.isWorkspaceAdmin = true;
   goto.mockClear();
   updateNode.mockReset().mockResolvedValue({ ok: true, updating: true });
   listActivity.mockReset().mockResolvedValue([]);
@@ -288,6 +291,27 @@ test("with no nodes at all the muster offers the way to connect one", () => {
 
   expect(getByTestId("connect-banner")).toBeTruthy();
   expect(queryByTestId("muster-state-bar")).toBeNull();
+});
+
+test("a member's empty fleet says who can enrol, instead of the button the hub would refuse", () => {
+  mockAuth.isWorkspaceAdmin = false;
+  mockFleet.agents = [];
+  mockFleet.nodes = [];
+
+  const { getByTestId, queryByTestId, queryByRole } = render(Muster);
+
+  expect(queryByTestId("connect-banner")).toBeNull();
+  expect(queryByRole("button", { name: "Create enrollment token" })).toBeNull();
+  expect(getByTestId("enrol-member").textContent).toContain(
+    "Workspace admins can enrol nodes. Ask an owner or admin of your workspace.",
+  );
+});
+
+test("a member sees a node's drift but no Update button", () => {
+  mockAuth.isWorkspaceAdmin = false;
+  const { getByTestId, queryByTestId } = render(Muster);
+  expect(getByTestId("node-drift-n_orion")).toBeTruthy();
+  expect(queryByTestId("node-update-n_orion")).toBeNull();
 });
 
 // --- failure ----------------------------------------------------------------

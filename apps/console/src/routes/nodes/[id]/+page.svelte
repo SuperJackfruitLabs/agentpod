@@ -2,6 +2,7 @@
   import { refreshFleet } from "$lib/stores/fleet.svelte";
   import StationSetup from "$lib/components/stations/StationSetup.svelte";
   import { auth } from "$lib/stores/auth.svelte";
+  import { workspaceAdminsCan } from "$lib/workspace-authority";
   import * as Dialog from "$lib/components/ui/dialog";
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -93,9 +94,10 @@
   let setupOpen = $state(false);
   let setupTarget = $state<{nodeId:string;stationKey:string;displayName:string}|null>(null);
   let bulkOpen = $state(false);
-  const admin = $derived(auth.user?.role === "admin");
+  /** Adopting, updating, removing and labelling a node are a workspace admin's. */
+  const admin = $derived(auth.isWorkspaceAdmin);
   async function handleAdopt(key: string) {
-    if (!admin) { await adopt(id,[key]); return; }
+    if (!admin) return;
     const detected = stations.detected.find(s=>s.key===key);
     if (!detected) return;
     setupTarget = {nodeId:id,stationKey:key,displayName:detected.displayName};
@@ -177,15 +179,17 @@
           <span class="ap-drift font-mono text-xs whitespace-nowrap">
             {node.agentVersion} → {node.latestVersion}
           </span>
-          <Button disabled={updating} onclick={handleUpdate}>
-            {updating ? "Updating…" : "Update"}
-          </Button>
+          {#if admin}
+            <Button disabled={updating} onclick={handleUpdate}>
+              {updating ? "Updating…" : "Update"}
+            </Button>
+          {/if}
         {:else}
           <span class="font-mono text-xs text-muted-foreground">{node.agentVersion ?? "—"}</span>
         {/if}
         <!-- A provisioned runtime's node leaves with its runtime (Destroy,
              below); this is for a machine somebody enrolled. -->
-        {#if !node.provisioned}
+        {#if !node.provisioned && admin}
           <RemoveNode {node} />
         {/if}
       </div>
@@ -195,7 +199,7 @@
 
 <div class="ap-page">
   <!-- Provisioned runtime controls (destroy / stop / start) -->
-  {#if node?.provisioned}
+  {#if node?.provisioned && admin}
     <ProvisionedNodeControls {node} onRefresh={loadNode} />
   {/if}
 
@@ -213,6 +217,9 @@
   {#if node}
     <section class="ap-card" aria-labelledby="node-purpose-h">
       <h2 id="node-purpose-h" class="ap-h2 mb-3">Purpose</h2>
+      {#if !admin}
+        <p data-testid="node-purpose-readonly">{node.purpose ?? "—"}</p>
+      {:else}
       <div>
         <PurposeField
           id="node-purpose"
@@ -227,6 +234,7 @@
           }}
         />
       </div>
+      {/if}
     </section>
   {/if}
 
@@ -243,8 +251,11 @@
       <div>
         <h2 class="ap-h2">Detected agents</h2>
         <p class="ap-lede">Found on this node, not yet added</p>
+        {#if !admin}
+          <p class="mt-1 text-sm text-muted-foreground" data-testid="adopt-member">{workspaceAdminsCan("add agents")}</p>
+        {/if}
       </div>
-      {#if stations.detected.filter((s) => !isAlreadyAdopted(s.key)).length > 0}
+      {#if admin && stations.detected.filter((s) => !isAlreadyAdopted(s.key)).length > 0}
         <Button
           variant="outline"
           onclick={() => bulkOpen = true}
@@ -330,13 +341,17 @@
                 </td>
                 <td data-card="actions" class="px-3 py-2 text-right">
                   {#if !isAlreadyAdopted(s.key)}
-                    <Button
-                      variant="outline"
-                      onclick={() => handleAdopt(s.key)}
-                      disabled={stations.isLoading}
-                    >
-                      {admin ? "Add agent" : "Register workspace"}
-                    </Button>
+                    {#if admin}
+                      <Button
+                        variant="outline"
+                        onclick={() => handleAdopt(s.key)}
+                        disabled={stations.isLoading}
+                      >
+                        Add agent
+                      </Button>
+                    {:else}
+                      <span class="text-xs text-muted-foreground">Not added</span>
+                    {/if}
                   {:else}
                     <span class="text-xs text-muted-foreground">Added</span>
                   {/if}

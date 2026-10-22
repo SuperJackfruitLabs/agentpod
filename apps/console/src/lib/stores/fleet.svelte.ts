@@ -124,7 +124,7 @@ async function refreshStations(): Promise<void> {
  * but cannot tell that a named principal is suspended.
  */
 async function refreshPrincipals(): Promise<void> {
-  if (auth.user?.role !== "admin") {
+  if (!auth.isWorkspaceAdmin) {
     principals = [];
     return;
   }

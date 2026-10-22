@@ -17,7 +17,7 @@
   let { open = $bindable(false) }: { open?: boolean } = $props();
   let appearanceOpen = $state(false);
 
-  const items = $derived(moreItems(auth.user?.role === "admin"));
+  const items = $derived(moreItems(auth));
 </script>
 
 <Sheet.Root bind:open onOpenChange={(o) => { if (!o) appearanceOpen = false; }}>

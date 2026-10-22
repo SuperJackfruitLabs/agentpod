@@ -21,8 +21,47 @@ const ALL: NavItem[] = [
   { id: "admin", label: "Admin", href: "/admin" },
 ];
 
-export function navItems(isAdmin: boolean): NavItem[] {
-  return ALL.filter((i) => i.id !== "admin" || isAdmin);
+/** What this session may change: the two flags from `/api/me`. */
+export interface Access {
+  /** Owner or admin of the workspace. */
+  isWorkspaceAdmin: boolean;
+  /** Holds the hub's operator seat. */
+  isHubOperator: boolean;
+}
+
+export type AdminSectionId = "users" | "grants" | "bridge" | "transcription" | "speech";
+
+export interface AdminSection {
+  id: AdminSectionId;
+  label: string;
+  href: string;
+  /** Who it is for: the workspace's admins, or the hub's operator (hub-wide settings). */
+  audience: "workspace" | "hub";
+}
+
+const ADMIN_SECTIONS: AdminSection[] = [
+  { id: "users", label: "Users", href: "/admin/users", audience: "workspace" },
+  { id: "grants", label: "Grants", href: "/admin/grants", audience: "workspace" },
+  { id: "bridge", label: "Bridge", href: "/admin/bridge", audience: "workspace" },
+  { id: "transcription", label: "Transcription", href: "/admin/transcription", audience: "hub" },
+  { id: "speech", label: "Speech", href: "/admin/speech", audience: "hub" },
+];
+
+/** The Admin pages this session may open: workspace pages for workspace admins, settings for hub operators. */
+export function adminSections(access: Access): AdminSection[] {
+  return ADMIN_SECTIONS.filter((s) => (s.audience === "hub" ? access.isHubOperator : access.isWorkspaceAdmin));
+}
+
+/** Who the admin page at `path` is for, or null outside the Admin area. */
+export function adminAudience(path: string): "workspace" | "hub" | null {
+  if (!under(path, "/admin")) return null;
+  return ADMIN_SECTIONS.find((s) => under(path, s.href))?.audience ?? "workspace";
+}
+
+/** Admin appears when any of its pages may be opened, and leads to the first of them. */
+export function navItems(access: Access): NavItem[] {
+  const first = adminSections(access)[0];
+  return ALL.flatMap((i) => (i.id !== "admin" ? [i] : first ? [{ ...i, href: first.href }] : []));
 }
 
 const under = (path: string, base: string) => path === base || path.startsWith(`${base}/`);
@@ -49,8 +88,8 @@ export function phoneCurrent(path: string): PhoneId | null {
 }
 
 /** What the More sheet lists: every section the bar does not. */
-export function moreItems(isAdmin: boolean): NavItem[] {
-  return navItems(isAdmin).filter((i) => !PHONE_SECTIONS.includes(i.id));
+export function moreItems(access: Access): NavItem[] {
+  return navItems(access).filter((i) => !PHONE_SECTIONS.includes(i.id));
 }
 
 export function phoneItems(): NavItem[] {

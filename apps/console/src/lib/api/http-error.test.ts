@@ -86,3 +86,12 @@ test("managedByPlaneUrl: only an http(s) url from a managed refusal; anything el
   expect(managedByPlaneUrl(await apiError(managed({ error: "gone" }), "GET /x"))).toBeNull();
   expect(managedByPlaneUrl(new Error("boom"))).toBeNull();
 });
+
+test("apiError: a member's 403 workspace_admin_required reads as who can do it, not the raw code", async () => {
+  const res = new Response(JSON.stringify({ error: "workspace_admin_required" }), { status: 403 });
+  const err = await apiError(res, "POST /api/enrollment-tokens");
+  expect(err.status).toBe(403);
+  expect(err.code).toBe("workspace_admin_required");
+  expect(err.message).toBe("Only workspace admins can do that. Ask an owner or admin of your workspace.");
+  expect(err.detail).toBe("POST /api/enrollment-tokens → 403");
+});

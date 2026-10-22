@@ -16,6 +16,7 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, cleanup } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
+import { auth } from "$lib/stores/auth.svelte";
 import type { DetectedStation } from "@agentpod/contract";
 import type { StationRow } from "$lib/api/client";
 
@@ -103,7 +104,11 @@ const adoptedStation: StationRow = {
   createdAt: "2026-06-22T00:00:00Z",
 };
 
-beforeEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  vi.restoreAllMocks();
+  // Adopting is a workspace admin's; the member test overrides this.
+  vi.spyOn(auth, "isWorkspaceAdmin", "get").mockReturnValue(true);
+});
 afterEach(cleanup);
 
 test("renders the node's name and says whether it is online", async () => {
@@ -165,23 +170,25 @@ test("an already-added agent says so instead of offering to add it twice", async
   expect(queryByText("Register workspace")).toBeNull();
 });
 
-test("detected station card's Adopt button calls adopt(id, [key])", async () => {
-  vi.spyOn(api, "listNodes").mockResolvedValue([mockNode]);
-  vi.spyOn(api, "listDetected").mockResolvedValue([detectedStation]);
+test("a member is told who adds agents, and offered no adopt, update, remove or purpose control", async () => {
+  vi.spyOn(auth, "isWorkspaceAdmin", "get").mockReturnValue(false);
+  vi.spyOn(api, "listNodes").mockResolvedValue([{ ...mockNode, agentVersion: "v0.1.2", latestVersion: "v0.1.3", updateAvailable: true }]);
+  vi.spyOn(api, "listDetected").mockResolvedValue([detectedStation, secondDetectedStation]);
   vi.spyOn(api, "listStations").mockResolvedValue([]);
-  const adoptSpy = vi.spyOn(api, "adoptStations").mockResolvedValue([adoptedStation]);
+  const adoptSpy = vi.spyOn(api, "adoptStations");
 
-  const { getByText } = render(NodeDetailPage);
+  const { findByTestId, queryByRole, queryByText, getAllByText } = render(NodeDetailPage);
 
-  await waitFor(() => {
-    expect(getByText("Workspace")).toBeTruthy();
-    expect((getByText("Register workspace") as HTMLButtonElement).disabled).toBe(false);
-  });
-  getByText("Register workspace").click();
-
-  await waitFor(() => {
-    expect(adoptSpy).toHaveBeenCalledWith("node_1", ["claude://workspace"]);
-  });
+  expect((await findByTestId("adopt-member")).textContent).toBe(
+    "Workspace admins can add agents. Ask an owner or admin of your workspace.",
+  );
+  await waitFor(() => expect(getAllByText("Not added").length).toBe(2));
+  expect(queryByRole("button", { name: "Add agent" })).toBeNull();
+  expect(queryByText("Register all workspaces")).toBeNull();
+  expect(queryByRole("button", { name: /^update$/i })).toBeNull();
+  expect(queryByRole("button", { name: /remove/i })).toBeNull();
+  expect(queryByRole("textbox", { name: /purpose/i })).toBeNull();
+  expect(adoptSpy).not.toHaveBeenCalled();
 });
 
 test("Adopt all calls adopt(id, allUnadoptedKeys)", async () => {

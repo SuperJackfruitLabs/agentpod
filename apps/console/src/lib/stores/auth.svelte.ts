@@ -78,8 +78,50 @@ let sessionData = $state<{
     image?: string | null;
     /** Server-assigned role, e.g. "admin". Populated when the hub includes it in the session. */
     role?: string | null;
+    /** The caller's role in their workspace ("owner" | "admin" | "member"), from `/api/me`. */
+    workspaceRole?: string | null;
+    /** Owner or admin of the workspace: enrol, remove and update nodes, agents, bridge, grants. */
+    isWorkspaceAdmin?: boolean;
+    /** Holds the hub's operator seat: hub-wide settings (transcription, speech). */
+    isHubOperator?: boolean;
   };
 } | null>(null);
+
+/** `GET /api/me`. A hub before workspace authority sends only `isAdmin`. */
+export interface MeResponse {
+  id: string;
+  email: string | null;
+  org?: string | null;
+  workspaceRole?: string | null;
+  isWorkspaceAdmin?: boolean;
+  isHubOperator?: boolean;
+  isAdmin?: boolean;
+}
+
+/**
+ * The two flags, read from `/api/me`. An older hub answers with `isAdmin` alone, which meant the
+ * operator seat (and so everything); that reads as both flags, so an old hub hides nothing it allows.
+ */
+export function userFromMe(me: MeResponse) {
+  const legacy = me.isWorkspaceAdmin === undefined && me.isHubOperator === undefined;
+  const isWorkspaceAdmin = legacy ? !!me.isAdmin : !!me.isWorkspaceAdmin;
+  const isHubOperator = legacy ? !!me.isAdmin : !!me.isHubOperator;
+  return {
+    id: me.id,
+    email: me.email ?? "",
+    name: null,
+    image: null,
+    role: isWorkspaceAdmin || isHubOperator ? "admin" : null,
+    workspaceRole: me.workspaceRole ?? (legacy ? null : "member"),
+    isWorkspaceAdmin,
+    isHubOperator,
+  };
+}
+
+/** Better Auth's session (legacy hubs) carries only `role`; "admin" there held everything. */
+function legacyRoleFlags(role: string | null) {
+  return { role, isWorkspaceAdmin: role === "admin", isHubOperator: role === "admin", workspaceRole: null };
+}
 
 // =============================================================================
 // Derived State
@@ -133,6 +175,21 @@ export const auth = {
   get email() {
     return sessionData?.user?.email ?? null;
   },
+
+  /** Owner or admin of the workspace. Gates fleet changes, agents, bridge, grants. */
+  get isWorkspaceAdmin() {
+    return sessionData?.user?.isWorkspaceAdmin ?? false;
+  },
+
+  /** The hub's operator seat. Gates hub-wide settings only. */
+  get isHubOperator() {
+    return sessionData?.user?.isHubOperator ?? false;
+  },
+
+  /** "owner" | "admin" | "member", or null when the hub does not say (a legacy hub). */
+  get workspaceRole() {
+    return sessionData?.user?.workspaceRole ?? null;
+  },
 };
 
 // =============================================================================
@@ -165,10 +222,7 @@ export async function initAuth(): Promise<void> {
       if (token) {
         const res = await fetch(`${currentApiUrl}/api/me`, { headers: { Authorization: `Bearer ${token}` } });
         if (res.ok) {
-          const me = (await res.json()) as { id: string; email: string | null; isAdmin: boolean };
-          sessionData = {
-            user: { id: me.id, email: me.email ?? "", name: null, image: null, role: me.isAdmin ? "admin" : null },
-          };
+          sessionData = { user: userFromMe((await res.json()) as MeResponse) };
         } else {
           // The hub will not have this token (e.g. 403 product_not_enabled). Forget it, and stop
           // automatic sign-in for this page load, so the layout sends the user to /login with this
@@ -209,7 +263,7 @@ export async function initAuth(): Promise<void> {
           email: data.user.email,
           name: data.user.name ?? null,
           image: data.user.image ?? null,
-          role: (data.user as { role?: string | null }).role ?? null,
+          ...legacyRoleFlags((data.user as { role?: string | null }).role ?? null),
         },
       };
     }
@@ -288,7 +342,7 @@ export async function loginWithEmail(emailInput: string, password: string): Prom
           email: result.data.user.email,
           name: result.data.user.name,
           image: result.data.user.image,
-          role: (result.data.user as { role?: string | null }).role ?? null,
+          ...legacyRoleFlags((result.data.user as { role?: string | null }).role ?? null),
         },
       };
     }
@@ -334,7 +388,7 @@ export async function signUp(emailInput: string, password: string, name: string)
           email: result.data.user.email,
           name: result.data.user.name,
           image: result.data.user.image,
-          role: (result.data.user as { role?: string | null }).role ?? null,
+          ...legacyRoleFlags((result.data.user as { role?: string | null }).role ?? null),
         },
       };
     }

@@ -14,6 +14,7 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, fireEvent, cleanup, screen, within } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
+import { auth } from "$lib/stores/auth.svelte";
 
 // ---------------------------------------------------------------------------
 // SvelteKit stubs
@@ -48,8 +49,25 @@ import RuntimesPage from "./+page.svelte";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-beforeEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  vi.restoreAllMocks();
+  // Runtime actions are a workspace admin's; the member test overrides this.
+  vi.spyOn(auth, "isWorkspaceAdmin", "get").mockReturnValue(true);
+});
 afterEach(cleanup);
+
+test("a member sees runtimes with no New runtime, Start, Stop, Wake or Destroy", async () => {
+  vi.spyOn(auth, "isWorkspaceAdmin", "get").mockReturnValue(false);
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([]);
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: [], manifests: [] } as never);
+  const { findByTestId, queryByTestId } = render(RuntimesPage);
+  expect((await findByTestId("empty-state")).textContent).toContain(
+    "Workspace admins can provision runtimes. Ask an owner or admin of your workspace.",
+  );
+  for (const id of ["new-runtime-btn", "empty-new-runtime-btn", "start-btn", "stop-btn", "wake-btn", "destroy-btn"]) {
+    expect(queryByTestId(id), id).toBeNull();
+  }
+});
 
 const createdAt = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // 5 min ago
 
