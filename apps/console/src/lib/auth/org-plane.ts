@@ -230,6 +230,13 @@ export async function completeSignIn(
   } catch {
     // storage unavailable
   }
+  try {
+    // A sign-in that worked is not part of a failing loop: only consecutive unsuccessful
+    // automatic attempts count towards the breaker.
+    s.removeItem(AUTO_ATTEMPTS);
+  } catch {
+    // storage unavailable
+  }
   return { returnTo: pending.returnTo || "/" };
 }
 

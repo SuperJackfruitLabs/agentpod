@@ -46,7 +46,7 @@
   }
 
   function loadStations() {
-    loadDetected(id);
+    loadDetected(id, !!node && node.status !== "online");
     loadAdopted(id);
   }
 
@@ -238,7 +238,13 @@
     </section>
   {/if}
 
-  {#if stations.error}
+  {#if stations.nodeUnreachable}
+    <!-- A node problem: the hub answered, the node did not. Never blame the hub connection. -->
+    <div class="ap-alert" role="status" data-testid="node-offline">
+      <p class="text-sm text-muted-foreground">{node?.hostname ?? "This node"} is offline. Detected agents show here when it reconnects.</p>
+      <Button variant="outline" size="sm" onclick={retryAll}>Retry</Button>
+    </div>
+  {:else if stations.error}
     <div class="ap-alert" role="alert">
       <p class="text-sm text-destructive">{stations.error}</p>
       <Button variant="outline" size="sm" onclick={retryAll}>Retry</Button>

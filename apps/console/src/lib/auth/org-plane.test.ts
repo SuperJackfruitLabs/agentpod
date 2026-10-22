@@ -305,6 +305,49 @@ describe("autoSignIn (the layout's guard, for a visitor with no token)", () => {
   });
 });
 
+describe("the loop breaker counts only unsuccessful automatic sign-ins", () => {
+  /** One page load: an automatic attempt, then the callback (a new page load) with `params`. */
+  async function attempt(now: () => number, params: (state: string) => Record<string, string>) {
+    resetPageLoadState();
+    let went = "";
+    const started = autoSignIn(PLANE, "/", { origin: ORIGIN, navigate: (u) => (went = u), now });
+    if (!started) return { started, out: null as unknown };
+    await vi.waitFor(() => expect(went).toBeTruthy());
+    const state = new URL(went).searchParams.get("state")!;
+    resetPageLoadState();
+    const out = await completeSignIn(new URLSearchParams(params(state)), PLANE, {
+      origin: ORIGIN, now: () => 0,
+      fetchFn: (async () => json(200, { access_token: "at1", expires_in: 300, refresh_token: "rt1" })) as never,
+    }).catch((e: unknown) => e);
+    return { started, out };
+  }
+
+  test("five successful silent sign-ins ~12 s apart (full reloads) never trip it", async () => {
+    let t = 1_000_000;
+    const now = () => t;
+    for (let i = 0; i < 5; i++) {
+      signOutLocal(); // a full load starts with no tokens in memory
+      const { started, out } = await attempt(now, (state) => ({ code: "c", state }));
+      expect(started).toBe(true);
+      expect(out).toEqual({ returnTo: "/" });
+      t += 12_000;
+    }
+  });
+
+  test("three failing callbacks inside a minute still stop the fourth", async () => {
+    let t = 1_000_000;
+    const now = () => t;
+    for (let i = 0; i < 3; i++) {
+      const { started, out } = await attempt(now, (state) => ({ error: "access_denied", state }));
+      expect(started).toBe(true);
+      expect(out).toBeInstanceOf(Error);
+      t += 5_000;
+    }
+    resetPageLoadState();
+    expect(autoSignIn(PLANE, "/", { origin: ORIGIN, navigate: () => {}, now })).toBe(false);
+  });
+});
+
 describe("a silent authorize the plane cannot answer silently", () => {
   for (const error of ["login_required", "interaction_required", "consent_required"]) {
     test(`${error} asks for an interactive authorize instead of failing`, async () => {
