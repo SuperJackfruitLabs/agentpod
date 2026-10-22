@@ -36,6 +36,7 @@ import { stationRoutes } from "./stations";
 import { websocket } from "../ws";
 import type { AuthUser } from "../auth/middleware";
 import type { StationRow } from "../services/station-registry";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 
 const TEST_USER = "test-user-changeset-001";
 
@@ -247,7 +248,7 @@ async function withCapableStation(
   const stationKey = `changeset-${crypto.randomUUID().slice(0, 8)}`;
   const capturedMsgs: string[] = [];
 
-  const { token } = await mintEnrollmentToken(TEST_USER);
+  const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   const { nodeId, nodeSecret } = await enrollNode(token, {
     hostname: `changeset-host-${stationKey}`,
     os: "linux",

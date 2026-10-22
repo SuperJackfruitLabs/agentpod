@@ -35,6 +35,7 @@ import {
   waitForNodeOnline,
   waitForNodeUnregistered,
 } from "../helpers/wait";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Barrier for "this socket's onOpen finished registering it".
@@ -97,7 +98,7 @@ test("a node that connects to the gateway shows online via listNodes", async () 
 
   try {
     // Enroll a node so we have valid credentials
-    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
     const { nodeId, nodeSecret } = await enrollNode(token, {
       hostname: "ws-host",
       os: "linux",
@@ -121,14 +122,14 @@ test("a node that connects to the gateway shows online via listNodes", async () 
     // Wait for onOpen's setNodeStatus rather than guessing how long the
     // argon2id credential verify plus two DB round trips will take.
     const node = await pollUntil(async () =>
-      (await listNodes(TEST_USER_ID)).find((n) => n.id === nodeId && n.status === "online")
+      (await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID)).find((n) => n.id === nodeId && n.status === "online")
     );
     expect(node?.status).toBe("online");
 
     // Close the connection — node should go offline
     ws.close();
     const nodeAfterClose = await pollUntil(async () =>
-      (await listNodes(TEST_USER_ID)).find((n) => n.id === nodeId && n.status === "offline")
+      (await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID)).find((n) => n.id === nodeId && n.status === "offline")
     );
     expect(nodeAfterClose?.status).toBe("offline");
   } finally {
@@ -143,7 +144,7 @@ test("a node with invalid credentials is rejected", async () => {
   const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
 
   try {
-    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
     const { nodeId } = await enrollNode(token, {
       hostname: "bad-creds-host",
       os: "linux",
@@ -197,7 +198,7 @@ test("a node with invalid credentials is rejected", async () => {
     // close, not raced against it.
     expect(connectionManager.isOnline(nodeId)).toBe(false);
     expect(
-      (await listNodes(TEST_USER_ID)).find(
+      (await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID)).find(
         (n) => n.id === nodeId && n.status === "online"
       )
     ).toBeUndefined();
@@ -210,7 +211,7 @@ test("heartbeat keeps node online and receives ack", async () => {
   const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
 
   try {
-    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
     const { nodeId, nodeSecret } = await enrollNode(token, {
       hostname: "hb-host",
       os: "linux",
@@ -249,7 +250,7 @@ test("heartbeat keeps node online and receives ack", async () => {
 test("a late close from a replaced socket does not mark the reconnected node offline", async () => {
   const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
   try {
-    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
     const { nodeId, nodeSecret } = await enrollNode(token, {
       hostname: "race-host", os: "linux", arch: "amd64", cpuCount: 1,
     });
@@ -276,7 +277,7 @@ test("a late close from a replaced socket does not mark the reconnected node off
     await new Promise((r) => setTimeout(r, 200));
 
     // Node must still be online, and the NEW socket must still be routable.
-    const list = await listNodes(TEST_USER_ID);
+    const list = await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
     expect(list.find((n) => n.id === nodeId)?.status).toBe("online");
     const ackPromise = new Promise<unknown>((res) => { wsNew.onmessage = (e) => res(JSON.parse(String(e.data))); });
     wsNew.send(JSON.stringify({ type: "heartbeat", ts: Date.now() }));
@@ -291,7 +292,7 @@ test("a late close from a replaced socket does not mark the reconnected node off
 test("a heartbeat from a socket with no registry entry re-registers it", async () => {
   const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
   try {
-    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
     const { nodeId, nodeSecret } = await enrollNode(token, {
       hostname: "rereg-host", os: "linux", arch: "amd64", cpuCount: 1,
     });
@@ -321,7 +322,7 @@ test("hello frame version is persisted to agentVersion on the node row", async (
   const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
 
   try {
-    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
     const { nodeId, nodeSecret } = await enrollNode(token, {
       hostname: "version-host",
       os: "linux",
@@ -350,7 +351,7 @@ test("hello frame version is persisted to agentVersion on the node row", async (
     // Verify agentVersion was persisted — poll rather than guess how long the
     // auth-then-hello path takes; a hello that is never ingested still fails.
     const node = await pollUntil(async () =>
-      (await listNodes(TEST_USER_ID)).find(
+      (await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID)).find(
         (n) => n.id === nodeId && n.agentVersion === "v0.1.1"
       )
     );
@@ -387,7 +388,7 @@ const DEFERRED_WINDOW_MS = 3_000;
  * below would observe anything.
  */
 async function enrollProvisionedNode(hostname: string) {
-  const { token } = await mintEnrollmentToken(TEST_USER_ID);
+  const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
   const creds = await enrollNode(token, {
     hostname, os: "linux", arch: "amd64", cpuCount: 1,
   });

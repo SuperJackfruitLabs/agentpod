@@ -3,10 +3,10 @@ import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
 import { createPrincipal, forgetPrincipals, linkMatrixId } from "../helpers/principals";
 import { createMissionRoutes } from "../../src/routes/missions";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Rooms where several agents work together.
@@ -74,7 +74,7 @@ beforeAll(async () => {
   OWNER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "mission-it-owner", userId: OWNER });
   AGENT_A = await createPrincipal({ kind: "agent", handle: "mission-it-agent-a" });
   AGENT_B = await createPrincipal({ kind: "agent", handle: "mission-it-agent-b" });
-  const tenant = await resolveTenantForUser(OWNER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM matrix_mission_members`;
   await rawSql`DELETE FROM matrix_missions`;
   await rawSql`DELETE FROM stations WHERE id IN (${A}, ${B})`;

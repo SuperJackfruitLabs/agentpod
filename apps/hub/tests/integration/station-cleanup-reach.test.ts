@@ -3,12 +3,12 @@ import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { stationCleanupRoutes } from "../../src/routes/station-cleanup";
 import { stationChangesetRoutes } from "../../src/routes/station-changeset";
 import { stationLifecycleRoutes } from "../../src/routes/station-lifecycle";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Where the line falls inside a single capability, and where it does not fall
@@ -44,7 +44,7 @@ beforeAll(async () => {
   await createTestUser({ id: USER, email: "cleanup-reach@example.com", name: "CR" });
   USER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "cleanup-reach-it-user", userId: USER });
   AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "cleanup-reach-it-agent" });
-  const tenant = await resolveTenantForUser(USER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
   await rawSql`

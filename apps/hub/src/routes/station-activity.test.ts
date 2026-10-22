@@ -81,7 +81,7 @@ beforeAll(async () => {
   });
 
   // Enroll a node under TEST_USER
-  const { token } = await mintEnrollmentToken(TEST_USER);
+  const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   const enrolled = await enrollNode(token, {
     hostname: "station-act-host",
     os: "linux",

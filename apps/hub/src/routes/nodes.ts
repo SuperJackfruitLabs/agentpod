@@ -18,6 +18,7 @@ import { removeNode, ownsNode } from "../services/node-removal";
 import { requireFleetGrantReach } from "../services/grant-reach";
 import { isControlPairEnforced, isGrantReachDenied, GrantReachDenied } from "../services/control-pair";
 import { callerPrincipal } from "../auth/caller-authority";
+import { resolveTenantId } from "../auth/tenant";
 
 const log = createLogger("nodes-routes");
 
@@ -200,7 +201,7 @@ async function readForce(c: {
 export function createNodeRoutes(deps?: {
   request?: RequestFn;
   /** Replaces the database-backed node list so the rollout is unit-testable. */
-  listNodesFn?: (userId: string) => Promise<RolloutNode[]>;
+  listNodesFn?: (userId: string, tenantId: string) => Promise<RolloutNode[]>;
   /** Replaces the runtime lookup that answers which nodes boot from an image. */
   fixedImageNodesFn?: (userId: string) => Promise<Set<string>>;
   /** Replaces the database-backed admin check (telemetry routes are admin-only). */
@@ -209,7 +210,7 @@ export function createNodeRoutes(deps?: {
   auditFn?: (entry: LogAdminActionInput) => Promise<unknown>;
 }) {
   const _request: RequestFn = deps?.request ?? brokerRequest;
-  const _listNodes = deps?.listNodesFn ?? (listNodes as (u: string) => Promise<RolloutNode[]>);
+  const _listNodes = deps?.listNodesFn ?? (listNodes as (u: string, t: string) => Promise<RolloutNode[]>);
   const _fixedImageNodes = deps?.fixedImageNodesFn ?? nodesWithFixedImage;
   const _isAdmin = deps?.isAdminFn ?? isUserAdmin;
   const _audit = deps?.auditFn ?? logAdminAction;
@@ -219,7 +220,7 @@ export function createNodeRoutes(deps?: {
       /**
        * GET /api/nodes → list nodes belonging to the current user.
        */
-      .get("/", async (c) => c.json(await listNodes(c.get("user").id)))
+      .get("/", async (c) => c.json(await listNodes(c.get("user").id, resolveTenantId(c))))
       /**
        * GET /api/nodes/telemetry  (admin only)
        *
@@ -232,7 +233,7 @@ export function createNodeRoutes(deps?: {
         if (!(await _isAdmin(userId))) {
           return c.json({ ok: false as const, error: "Forbidden: Admin access required" }, 403);
         }
-        const nodes = (await _listNodes(userId)).slice().sort((a, b) => a.name.localeCompare(b.name));
+        const nodes = (await _listNodes(userId, resolveTenantId(c))).slice().sort((a, b) => a.name.localeCompare(b.name));
         const fixed = await _fixedImageNodes(userId);
         const results: TelemetryRow[] = [];
         for (const n of nodes) {
@@ -283,7 +284,7 @@ export function createNodeRoutes(deps?: {
           only = body.only as string[];
         }
 
-        const all = await _listNodes(user.id);
+        const all = await _listNodes(user.id, resolveTenantId(c));
         let targets = all;
         if (only) {
           const unknown = only.filter((o) => !all.some((n) => n.id === o || n.name === o));
@@ -355,7 +356,7 @@ export function createNodeRoutes(deps?: {
           : undefined;
 
         const userId = c.get("user").id;
-        const nodes = await _listNodes(userId);
+        const nodes = await _listNodes(userId, resolveTenantId(c));
 
         // A node whose binary comes from an image is not updatable by RPC, and
         // asking stops it. A rollout that did that to every container station

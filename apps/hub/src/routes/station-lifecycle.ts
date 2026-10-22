@@ -78,6 +78,7 @@ export const stationLifecycleRoutes = new Hono()
 
       // ── 4. Audit (only the action, never any secrets) ───────────────────────
       const audit = await recordAudit(db, {
+        tenantId: station.tenantId,
         userId: user.id,
         nodeId: station.nodeId,
         stationKey: station.stationKey,

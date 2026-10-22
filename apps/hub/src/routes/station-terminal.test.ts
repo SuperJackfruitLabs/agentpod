@@ -35,6 +35,7 @@ import { websocket } from "../ws";
 import type { AuthUser } from "../auth/middleware";
 import type { StationRow } from "../services/station-registry";
 import { clearGrant, forgetPrincipals } from "../../tests/helpers/principals";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -283,7 +284,7 @@ test(
     const baseUrl = `http://localhost:${server.port}`;
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "sterm-open-host",
         os: "linux",
@@ -336,7 +337,7 @@ test(
     const baseUrl = `http://localhost:${server.port}`;
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "sterm-input-host",
         os: "linux",
@@ -412,7 +413,7 @@ test(
     const baseUrl = `http://localhost:${server.port}`;
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "sterm-resize-host",
         os: "linux",
@@ -485,7 +486,7 @@ test(
     const baseUrl = `http://localhost:${server.port}`;
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "sterm-disconnect-host",
         os: "linux",
@@ -568,7 +569,7 @@ test(
     const baseUrl = `http://localhost:${server.port}`;
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "sterm-unauth-host",
         os: "linux",
@@ -641,7 +642,7 @@ test(
     process.env.ENFORCE_CONTROL_PAIR = "true";
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "sterm-reach-host",
         os: "linux",
@@ -709,7 +710,7 @@ test(
     process.env.ENFORCE_CONTROL_PAIR = "true";
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "sterm-reach-ok-host",
         os: "linux",

@@ -48,7 +48,6 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { fakePlane } from "../helpers/fake-plane";
 
@@ -72,6 +71,7 @@ import {
   mintCredentialAuthorization,
   redeemCredentialAuthorization,
 } from "../../src/services/matrix-credential";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const RUN = Math.random().toString(36).slice(2, 8);
 const OWNER = `test-user-identity-move-${RUN}`;
@@ -271,7 +271,7 @@ beforeAll(async () => {
     userId: OWNER,
   });
   AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: HANDLE });
-  TENANT = await resolveTenantForUser(OWNER);
+  TENANT = BOOTSTRAP_TENANT_ID;
 
   await rawSql`
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)

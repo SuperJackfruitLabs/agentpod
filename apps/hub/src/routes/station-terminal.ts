@@ -116,6 +116,7 @@ export const stationTerminalRoutes = new Hono().get(
           }
           if (!isGrantReachDenied(e)) throw e;
           const denied = await recordAudit(db, {
+            tenantId: station.tenantId,
             userId: user.id,
             nodeId: station.nodeId,
             stationKey: station.stationKey,
@@ -138,6 +139,7 @@ export const stationTerminalRoutes = new Hono().get(
 
         // ── 4. Audit (P2 Task 6) ──────────────────────────────────────────
         const audit = await recordAudit(db, {
+          tenantId: station.tenantId,
           userId: user.id,
           nodeId: station.nodeId,
           stationKey: station.stationKey,

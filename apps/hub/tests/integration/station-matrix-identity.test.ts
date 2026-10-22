@@ -3,7 +3,6 @@ import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { createStationMatrixRoutes } from "../../src/routes/station-matrix";
@@ -16,6 +15,7 @@ import { connectionManager } from "../../src/services/connection-manager";
 import { handleNodeMessage } from "../../src/services/broker";
 import type { GatewayServerMessage } from "@agentpod/contract";
 import { fakePlane } from "../helpers/fake-plane";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Registering an agent's Matrix identity, without an admin credential on a node.
@@ -130,7 +130,7 @@ beforeAll(async () => {
   await createTestUser({ id: OWNER, email: "station-matrix@example.com", name: "Owner" });
   OWNER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "station-matrix-it-owner", userId: OWNER });
   AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "station-matrix-it-agent" });
-  const tenant = await resolveTenantForUser(OWNER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
   await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
@@ -215,7 +215,7 @@ describe("POST /api/stations/:id/matrix/identity", () => {
     // live rooms were created before a room's alias followed its occupant.
     // Re-deriving would misreport every one of them; the stored alias is the
     // only thing that is true about where the room actually is.
-    const tenant = await resolveTenantForUser(OWNER);
+    const tenant = BOOTSTRAP_TENANT_ID;
     const storedAlias = "#agentpod_sm-box_hermes-analyst-echo-legacy:id.agentpod.dev";
     await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
     await rawSql`

@@ -72,14 +72,14 @@ beforeAll(async () => {
     email: `station-transcription-node-${RUN}@example.com`,
     name: "Station Transcription Node Test User",
   });
-  const { token } = await mintEnrollmentToken(TEST_USER);
+  const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   ({ nodeId, nodeSecret } = await enrollNode(token, {
     hostname: `station-transcription-node-host-${RUN}`,
     os: "linux",
     arch: "amd64",
     cpuCount: 2,
   }));
-  const { token: otherToken } = await mintEnrollmentToken(TEST_USER);
+  const { token: otherToken } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   ({ nodeId: otherNodeId, nodeSecret: otherNodeSecret } = await enrollNode(otherToken, {
     hostname: `station-transcription-node-other-${RUN}`,
     os: "linux",

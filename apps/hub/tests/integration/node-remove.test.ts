@@ -49,7 +49,7 @@ async function del(userId: string, nodeId: string, force = false) {
 }
 
 async function enrol(userId: string) {
-  const { token } = await mintEnrollmentToken(userId);
+  const { token } = await mintEnrollmentToken(userId, BOOTSTRAP_TENANT_ID);
   const creds = await enrollNode(token, HOST);
   return { token, ...creds };
 }
@@ -195,7 +195,7 @@ describe("removing an offline node", () => {
     expect(body.disconnected).toBe(false);
     expect(body.stationsRemoved.map((s) => s.stationKey).sort()).toEqual(["hermes:one", "pi:two"]);
 
-    expect((await listNodes(OWNER)).some((n) => n.id === nodeId)).toBe(false);
+    expect((await listNodes(OWNER, BOOTSTRAP_TENANT_ID)).some((n) => n.id === nodeId)).toBe(false);
     expect(await rawSql`SELECT 1 FROM stations WHERE node_id = ${nodeId}`).toHaveLength(0);
     expect(await rawSql`SELECT 1 FROM declared_harness_config WHERE node_id = ${nodeId}`).toHaveLength(0);
 
@@ -248,7 +248,7 @@ describe("removing a connected node", () => {
       expect(second.reason).toBe("unauthorized");
       expect(connectionManager.isOnline(nodeId)).toBe(false);
       expect(await nodeExists(nodeId)).toBe(false);
-      await pollUntil(async () => !(await listNodes(OWNER)).some((n) => n.id === nodeId));
+      await pollUntil(async () => !(await listNodes(OWNER, BOOTSTRAP_TENANT_ID)).some((n) => n.id === nodeId));
     } finally {
       server.stop(true);
     }

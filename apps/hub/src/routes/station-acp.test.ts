@@ -55,6 +55,7 @@ import { gatewayRoutes } from "./gateway";
 import { stationAcpRoutes } from "./station-acp";
 import { websocket } from "../ws";
 import type { AuthUser } from "../auth/middleware";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -109,7 +110,7 @@ afterAll(async () => {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async function enrollTestNode(hostname: string) {
-  const { token } = await mintEnrollmentToken(TEST_USER);
+  const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   return enrollNode(token, {
     hostname,
     os: "linux",

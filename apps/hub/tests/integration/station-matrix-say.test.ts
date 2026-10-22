@@ -3,10 +3,10 @@ import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { createStationSayRoutes } from "../../src/routes/station-say";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * An agent speaking without being spoken to.
@@ -64,7 +64,7 @@ beforeAll(async () => {
   await createTestUser({ id: OWNER, email: "say@example.com", name: "Owner" });
   OWNER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "station-say-it-owner", userId: OWNER });
   AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "station-say-it-agent" });
-  const tenant = await resolveTenantForUser(OWNER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${ROOM}`;
   await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
@@ -149,7 +149,7 @@ describe("POST /api/stations/:id/matrix/say", () => {
     expect(res.status).toBe(409);
     expect(sent).toHaveLength(0);
 
-    const tenant = await resolveTenantForUser(OWNER);
+    const tenant = BOOTSTRAP_TENANT_ID;
     await rawSql`
       INSERT INTO matrix_rooms (room_id, tenant_id, station_id, alias, principal_id, created_at)
       VALUES (${ROOM}, ${tenant}, ${STATION}, '#agentpod_say-box_hermes-cron-carl:id.agentpod.dev', ${AGENT_PRINCIPAL}, now())`;

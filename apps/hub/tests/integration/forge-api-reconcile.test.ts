@@ -17,7 +17,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 
 import { db, rawSql } from "../../src/db/drizzle";
 import { viewOf } from "../../src/routes/station-forge-api";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { connectionManager } from "../../src/services/connection-manager";
 import {
   createForgeApiGrant,
@@ -55,6 +54,7 @@ import {
   type Fixture,
   type Harness,
 } from "../helpers/forge-api-harness";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const RUN = `frc${crypto.randomUUID().slice(0, 8)}`;
 const OWNER = `test-user-${RUN}`;
@@ -92,7 +92,7 @@ afterEach(() => {
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: OWNER, email: `${OWNER}@example.com`, name: "FRC" });
-  f.tenant = await resolveTenantForUser(OWNER);
+  f.tenant = BOOTSTRAP_TENANT_ID;
 });
 
 afterAll(async () => {

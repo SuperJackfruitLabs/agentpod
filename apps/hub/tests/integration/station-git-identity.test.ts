@@ -36,6 +36,7 @@ import { websocket } from "../../src/ws";
 import type { ForgeConfig } from "../../src/services/forge";
 import type { AuthUser } from "../../src/auth/middleware";
 import type { StationRow } from "../../src/services/station-registry";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const cfg: ForgeConfig = { baseUrl: "https://forge.test", adminToken: "admin" };
@@ -242,7 +243,7 @@ async function withStation(opts: {
   const stationKey = `gitid-${crypto.randomUUID().slice(0, 8)}`;
   const captured: string[] = [];
 
-  const { token } = await mintEnrollmentToken(TEST_USER);
+  const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   const { nodeId, nodeSecret } = await enrollNode(token, {
     hostname: `gitid-host-${stationKey}`,
     os: "linux",

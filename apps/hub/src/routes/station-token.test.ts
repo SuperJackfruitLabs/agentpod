@@ -64,7 +64,7 @@ beforeAll(async () => {
     name: "Station Token Test User",
   });
 
-  const { token } = await mintEnrollmentToken(TEST_USER);
+  const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   ({ nodeId, nodeSecret } = await enrollNode(token, {
     hostname: `station-token-host-${RUN}`,
     os: "linux",
@@ -72,7 +72,7 @@ beforeAll(async () => {
     cpuCount: 2,
   }));
 
-  const { token: otherToken } = await mintEnrollmentToken(TEST_USER);
+  const { token: otherToken } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   const other = await enrollNode(otherToken, {
     hostname: `station-token-other-host-${RUN}`,
     os: "linux",

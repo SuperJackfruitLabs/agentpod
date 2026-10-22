@@ -1,7 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { tenantScope } from "../db/tenant-scope";
-import { resolveTenantForUser } from "../auth/tenant";
 import { nodes, provisionedRuntimes } from "../db/schema/nodes";
 import type { NodeSummary } from "@agentpod/contract";
 import { getLatestAgentVersion, isNewerVersion, isReleaseVersion } from "./agent-version";
@@ -37,12 +36,12 @@ export function annotateWithVersion<
   }));
 }
 
-export async function listNodes(userId: string): Promise<NodeWithProvisioning[]> {
+export async function listNodes(userId: string, tenantId: string): Promise<NodeWithProvisioning[]> {
   // Tenant first, owner second. `user_id` answers "whose is this"; it has never
   // been able to answer "which fleet is this inside", and with one tenant the
   // two happen to select the same rows — which is exactly why this has to be
   // structural now rather than when a second tenant makes the gap visible.
-  const tenantId = await resolveTenantForUser(userId);
+  // The tenant is the request's (W5).
 
   // Left-join provisioned_runtimes on node_id so each node carries its
   // provisioned-runtime info (null if the node was attached manually).

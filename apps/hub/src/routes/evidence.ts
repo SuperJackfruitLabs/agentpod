@@ -139,6 +139,8 @@ function onBehalfOf(header: string | undefined): string | null {
  * A session outlives its station, so a deleted station's row names the session's station id.
  */
 async function auditTranscriptRead(args: {
+  /** The caller's tenant, which `findSession` already scoped the session to. */
+  tenantId: string;
   principalId: string;
   onBehalfOf: string | null;
   session: SessionRef;
@@ -157,6 +159,7 @@ async function auditTranscriptRead(args: {
     .where(eq(stations.id, args.session.stationId))
     .limit(1);
   const audit = await recordAudit(db, {
+    tenantId: args.tenantId,
     userId: args.principalId,
     nodeId: station?.nodeId ?? "unknown",
     stationKey: station?.stationKey ?? args.session.stationId,
@@ -598,6 +601,7 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
       });
 
       await auditTranscriptRead({
+        tenantId: auth.tenant,
         principalId: auth.principalId,
         onBehalfOf: onBehalfOf(c.req.header("x-on-behalf-of")),
         session,
@@ -644,6 +648,7 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
       const redacted = redactItem(found, contentRedactor());
       const item = full ? redacted : truncateItem(redacted).item;
       const audit = {
+        tenantId: auth.tenant,
         principalId: auth.principalId,
         onBehalfOf: onBehalfOf(c.req.header("x-on-behalf-of")),
         session,

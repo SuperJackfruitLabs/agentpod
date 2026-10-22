@@ -2,9 +2,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { createPrincipal, forgetPrincipals, linkMatrixId, unlinkMatrixId } from "../helpers/principals";
 import { provisionStation, provisionAll } from "../../src/services/matrix-as/provision";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Giving every station a Matrix identity and somewhere to be talked to.
@@ -147,7 +147,7 @@ beforeAll(async () => {
   });
   KRISHNA_PRINCIPAL = await createPrincipal({ kind: "agent", handle: KRISHNA_HANDLE });
   ECHO_PRINCIPAL = await createPrincipal({ kind: "agent", handle: ECHO_HANDLE });
-  const tenant = await resolveTenantForUser(OWNER);
+  const tenant = BOOTSTRAP_TENANT_ID;
 
   await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${OPENCLAW}, ${HERMES})`;
   await rawSql`DELETE FROM stations WHERE id IN (${OPENCLAW}, ${HERMES})`;

@@ -36,7 +36,6 @@ import { db } from "../db/drizzle";
 import { nodes } from "../db/schema/nodes";
 import { stations } from "../db/schema/stations";
 import { tenantScope } from "../db/tenant-scope";
-import { resolveTenantForUser } from "../auth/tenant";
 import { recordAudit } from "./audit";
 import * as broker from "./broker";
 import { connectionManager } from "./connection-manager";
@@ -107,8 +106,7 @@ function stationView(s: StationRow, served: Set<string> | null): McpProxyStation
   };
 }
 
-async function ownedStations(userId: string, nodeId?: string): Promise<StationRow[]> {
-  const tenantId = await resolveTenantForUser(userId);
+async function ownedStations(userId: string, tenantId: string, nodeId?: string): Promise<StationRow[]> {
   return db
     .select()
     .from(stations)
@@ -119,8 +117,7 @@ async function ownedStations(userId: string, nodeId?: string): Promise<StationRo
     );
 }
 
-export async function fleetView(userId: string, nodeId?: string): Promise<McpProxyFleetView> {
-  const tenantId = await resolveTenantForUser(userId);
+export async function fleetView(userId: string, tenantId: string, nodeId?: string): Promise<McpProxyFleetView> {
   const nodeRows = await db
     .select({ id: nodes.id, name: nodes.name })
     .from(nodes)
@@ -129,7 +126,7 @@ export async function fleetView(userId: string, nodeId?: string): Promise<McpPro
         ? tenantScope(nodes, tenantId, eq(nodes.userId, userId), eq(nodes.id, nodeId))
         : tenantScope(nodes, tenantId, eq(nodes.userId, userId)),
     );
-  const all = await ownedStations(userId, nodeId);
+  const all = await ownedStations(userId, tenantId, nodeId);
 
   const views: McpProxyNodeView[] = await Promise.all(
     nodeRows.map(async (n) => {
@@ -201,7 +198,7 @@ function statusFor(results: McpProxyChangeOutcome[], hardFailures: number): 200 
   return hardFailures > 0 ? 502 : 409;
 }
 
-export async function changeProxy(userId: string, req: McpProxyChangeRequest): Promise<ServiceResult> {
+export async function changeProxy(userId: string, tenantId: string, req: McpProxyChangeRequest): Promise<ServiceResult> {
   let targets: StationRow[];
   let skipped: { stationId: string; harness: string }[] | undefined;
 
@@ -229,7 +226,7 @@ export async function changeProxy(userId: string, req: McpProxyChangeRequest): P
       }
     }
   } else {
-    const all = await ownedStations(userId, req.nodeId);
+    const all = await ownedStations(userId, tenantId, req.nodeId);
     targets = all.filter((s) => mcpProxyEligible(s.harness));
     skipped = all
       .filter((s) => !mcpProxyEligible(s.harness))
@@ -245,7 +242,7 @@ export async function changeProxy(userId: string, req: McpProxyChangeRequest): P
     // record even when it then fails.
     const audits = await Promise.all(
       group.map((s) =>
-        recordAudit(db, { userId, nodeId, stationKey: s.stationKey, verb, params: { action: req.action } }),
+        recordAudit(db, { tenantId: s.tenantId, userId, nodeId, stationKey: s.stationKey, verb, params: { action: req.action } }),
       ),
     );
     const fail = async (error: string, hard: boolean) => {
@@ -306,18 +303,17 @@ export async function changeProxy(userId: string, req: McpProxyChangeRequest): P
   return { status: statusFor(results, hardFailures), body };
 }
 
-export async function rotateProxy(userId: string, req: McpProxyRotateRequest): Promise<ServiceResult> {
+export async function rotateProxy(userId: string, tenantId: string, req: McpProxyRotateRequest): Promise<ServiceResult> {
   const results: McpProxyChangeOutcome[] = [];
   let hardFailures = 0;
 
   if (req.nodeId) {
-    const tenantId = await resolveTenantForUser(userId);
     const [node] = await db
-      .select({ id: nodes.id })
+      .select({ id: nodes.id, tenantId: nodes.tenantId })
       .from(nodes)
       .where(tenantScope(nodes, tenantId, eq(nodes.userId, userId), eq(nodes.id, req.nodeId)));
     if (!node) return { status: 404, body: { error: "no such node" } };
-    const audit = await recordAudit(db, { userId, nodeId: node.id, stationKey: "", verb: "mcp.proxy.rotate", params: {} });
+    const audit = await recordAudit(db, { tenantId: node.tenantId, userId, nodeId: node.id, stationKey: "", verb: "mcp.proxy.rotate", params: {} });
     const why = await unaskable(node.id);
     const res = why ? { ok: false as const, error: why } : await broker.request(node.id, "mcp.proxy.rotate", {}, { timeoutMs: NODE_TIMEOUT_MS });
     const parsed = res.ok ? McpProxyRotateResult.safeParse(res.data) : null;
@@ -339,7 +335,7 @@ export async function rotateProxy(userId: string, req: McpProxyRotateRequest): P
 
   for (const [nodeId, group] of byNode(found)) {
     const audits = await Promise.all(
-      group.map((s) => recordAudit(db, { userId, nodeId, stationKey: s.stationKey, verb: "mcp.proxy.rotate", params: {} })),
+      group.map((s) => recordAudit(db, { tenantId: s.tenantId, userId, nodeId, stationKey: s.stationKey, verb: "mcp.proxy.rotate", params: {} })),
     );
     const why = await unaskable(nodeId);
     const res = why

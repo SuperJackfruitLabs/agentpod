@@ -41,6 +41,7 @@ import { websocket } from "../../src/ws";
 // Import type to activate ContextVariableMap augmentation for c.set("user", ...)
 import type { AuthUser } from "../../src/auth/middleware";
 import type { StationRow } from "../../src/services/station-registry";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -185,7 +186,7 @@ test(
 
     try {
       // ── Enroll node A ──────────────────────────────────────────────────────
-      const { token } = await mintEnrollmentToken(TEST_USER_A);
+      const { token } = await mintEnrollmentToken(TEST_USER_A, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "station-lifecycle-host",
         os: "linux",
@@ -292,7 +293,7 @@ test(
 
     try {
       // Enroll a node for user A
-      const { token } = await mintEnrollmentToken(TEST_USER_A);
+      const { token } = await mintEnrollmentToken(TEST_USER_A, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "station-ownership-host",
         os: "linux",
@@ -347,7 +348,7 @@ test(
 
     try {
       // Enroll node A, adopt a station as user A
-      const { token } = await mintEnrollmentToken(TEST_USER_A);
+      const { token } = await mintEnrollmentToken(TEST_USER_A, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "station-delete-auth-host",
         os: "linux",
@@ -404,7 +405,7 @@ test(
 
     try {
       // Enroll a node but do NOT connect it
-      const { token } = await mintEnrollmentToken(TEST_USER_A);
+      const { token } = await mintEnrollmentToken(TEST_USER_A, BOOTSTRAP_TENANT_ID);
       const { nodeId } = await enrollNode(token, {
         hostname: "station-offline-host",
         os: "linux",
@@ -458,7 +459,7 @@ test(
     const baseUrl = `http://localhost:${server.port}`;
 
     try {
-      const { token } = await mintEnrollmentToken(TEST_USER_A);
+      const { token } = await mintEnrollmentToken(TEST_USER_A, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "station-unknown-capability-host",
         os: "linux",

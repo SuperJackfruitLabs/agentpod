@@ -5,10 +5,10 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { db } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { TENANT_SCOPED_TABLES } from "../../src/db/tenant-scope";
 import { stationForgeApiGrants } from "../../src/db/schema/forge-api-grants";
 import { nextGeneration } from "../../src/services/forge-api/generation";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * station_forge_api_grants against Postgres: live uniqueness keys on the station-id SNAPSHOT, the
@@ -84,7 +84,7 @@ const clean = async () => {
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: OWNER, email: "fga-owner@example.com", name: "FO" });
-  tenant = await resolveTenantForUser(OWNER);
+  tenant = BOOTSTRAP_TENANT_ID;
   await clean();
   await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;

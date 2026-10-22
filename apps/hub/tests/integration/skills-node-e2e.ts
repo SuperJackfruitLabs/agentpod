@@ -81,7 +81,7 @@ let nodeId: string | undefined,
 try {
   await ensurePgMigrations();
   await createTestUser({ id: userId });
-  const { token } = await mintEnrollmentToken(userId);
+  const { token } = await mintEnrollmentToken(userId, BOOTSTRAP_TENANT_ID);
   const enrolled = await enrollNode(token, {
     hostname: "skill-fixture",
     os: "linux",

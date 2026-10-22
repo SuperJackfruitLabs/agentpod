@@ -59,9 +59,9 @@ afterAll(async () => {
 
 // ─── Back-compat path ─────────────────────────────────────────────────────────
 
-test("back-compat: mintEnrollmentToken(userId) — no opts — enrollNode succeeds, no runtime touched", async () => {
+test("back-compat: mintEnrollmentToken(userId, BOOTSTRAP_TENANT_ID) — no opts — enrollNode succeeds, no runtime touched", async () => {
   // Mint with no opts (matches existing caller signature)
-  const { token, expiresAt } = await mintEnrollmentToken(TEST_USER);
+  const { token, expiresAt } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   expect(typeof token).toBe("string");
   expect(token.startsWith("enr_")).toBe(true);
   expect(expiresAt).toBeInstanceOf(Date);
@@ -106,7 +106,7 @@ test("linked path: mintEnrollmentToken({ provisionedRuntimeId }) → enrollNode 
   });
 
   // Mint a token linked to this runtime
-  const { token } = await mintEnrollmentToken(TEST_USER, { provisionedRuntimeId: runtimeId });
+  const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID, { provisionedRuntimeId: runtimeId });
   expect(typeof token).toBe("string");
 
   // Enroll the node
@@ -130,7 +130,7 @@ test("linked path: mintEnrollmentToken({ provisionedRuntimeId }) → enrollNode 
 test("opts.ttlMs overrides the default TTL", async () => {
   const ttlMs = 5 * 60 * 1000; // 5 minutes
   const before = Date.now();
-  const { token, expiresAt } = await mintEnrollmentToken(TEST_USER, { ttlMs });
+  const { token, expiresAt } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID, { ttlMs });
   const after = Date.now();
 
   expect(typeof token).toBe("string");

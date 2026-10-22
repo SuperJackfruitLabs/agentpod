@@ -359,6 +359,7 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
     respond: (out: T) => Response | Promise<Response>,
   ): Promise<Response> {
     const handle = await recordAudit(db, {
+      tenantId: a.station.tenantId,
       userId: a.user.id,
       nodeId: a.station.nodeId,
       stationKey: a.station.stationKey,

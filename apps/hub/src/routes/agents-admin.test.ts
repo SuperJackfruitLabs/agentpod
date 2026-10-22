@@ -99,7 +99,7 @@ beforeAll(async () => {
     name: "Non-actor",
   });
 
-  const { token } = await mintEnrollmentToken(ADMIN_ACTOR);
+  const { token } = await mintEnrollmentToken(ADMIN_ACTOR, BOOTSTRAP_TENANT_ID);
   const { nodeId } = await enrollNode(token, {
     hostname: `agents-admin-host-${RUN}`,
     os: "linux",

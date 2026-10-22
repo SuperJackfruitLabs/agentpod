@@ -26,6 +26,7 @@ import { listNodes } from "../../src/services/node-registry";
 import { adoptStations } from "../../src/services/station-registry";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { nodeEnrollRoutes } from "../../src/routes/nodes";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Minimal test server (mirrors gateway.test.ts's pattern)
@@ -91,7 +92,7 @@ afterAll(async () => {
 describe("Enrollment service", () => {
   test("mint → enroll → verify → list", async () => {
     // 1. Mint an enrollment token
-    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
     expect(typeof token).toBe("string");
     expect(token.length).toBeGreaterThan(10);
 
@@ -110,7 +111,7 @@ describe("Enrollment service", () => {
     expect(await verifyNodeCredential(nodeId, "wrong-secret")).toBe(false);
 
     // 4. Node appears in list
-    const list = await listNodes(TEST_USER_ID);
+    const list = await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
     const registered = list.find((n) => n.id === nodeId);
     expect(registered?.hostname).toBe("vps1");
     expect(registered?.os).toBe("linux");
@@ -119,7 +120,7 @@ describe("Enrollment service", () => {
   });
 
   test("a token cannot be reused", async () => {
-    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
 
     // First enrollment succeeds
     await enrollNode(token, {
@@ -142,7 +143,7 @@ describe("Enrollment service", () => {
 
   test("concurrent enrollments with the same token — exactly one succeeds", async () => {
     // Mint a single-use token
-    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
 
     // Fire two concurrent enrollNode calls with the same token
     const results = await Promise.allSettled([
@@ -169,7 +170,7 @@ describe("Enrollment service", () => {
   });
 
   test("credential-check returns 200 for a valid node credential", async () => {
-    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
     const { nodeId, nodeSecret } = await enrollNode(token, {
       hostname: "credcheck-host", os: "linux", arch: "amd64", cpuCount: 1,
     });
@@ -181,7 +182,7 @@ describe("Enrollment service", () => {
   });
 
   test("credential-check returns 401 for a wrong secret and for a missing header", async () => {
-    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
     const { nodeId } = await enrollNode(token, {
       hostname: "credcheck-bad-host", os: "linux", arch: "amd64", cpuCount: 1,
     });
@@ -201,10 +202,10 @@ describe("Enrollment service", () => {
     // unbound token is pasted into a shell by a human within the hour.
     const runtimeId = await seedRuntime(TEST_USER_ID);
 
-    const bound = await mintEnrollmentToken(TEST_USER_ID, {
+    const bound = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID, {
       provisionedRuntimeId: runtimeId,
     });
-    const unbound = await mintEnrollmentToken(TEST_USER_ID);
+    const unbound = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
 
     const oneDay = 24 * 60 * 60 * 1000;
     expect(bound.expiresAt.getTime() - Date.now()).toBeGreaterThan(oneDay);
@@ -215,7 +216,7 @@ describe("Enrollment service", () => {
     // The durable default must not take away a caller's ability to say
     // otherwise — tests and future callers may want a short-lived bound token.
     const runtimeId = await seedRuntime(TEST_USER_ID);
-    const t = await mintEnrollmentToken(TEST_USER_ID, {
+    const t = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID, {
       provisionedRuntimeId: runtimeId,
       ttlMs: 60_000,
     });
@@ -229,7 +230,7 @@ describe("Enrollment service", () => {
     // re-enrols on every restart; today that mints a new node and orphans the
     // old one, so the runtime loses its stations, capabilities and history.
     const runtimeId = await seedRuntime(TEST_USER_ID);
-    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID, {
       provisionedRuntimeId: runtimeId,
     });
 
@@ -244,7 +245,7 @@ describe("Enrollment service", () => {
     // costs nothing — and a secret that leaked from a previous incarnation
     // stops working.
     const runtimeId = await seedRuntime(TEST_USER_ID);
-    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID, {
       provisionedRuntimeId: runtimeId,
     });
 
@@ -260,7 +261,7 @@ describe("Enrollment service", () => {
     // Guards the orphaning directly: counting rows catches a bug that returning
     // the right id from the wrong code path would hide.
     const runtimeId = await seedRuntime(TEST_USER_ID);
-    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID, {
       provisionedRuntimeId: runtimeId,
     });
 
@@ -283,7 +284,7 @@ describe("Enrollment service", () => {
     // The security property this change must not erode. A reusable token is a
     // durable credential; only runtime-bound ones earn that, because they
     // resolve to exactly one runtime and are revoked by destroying it.
-    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
     await enrollNode(token, HOST_INFO);
     await expect(enrollNode(token, HOST_INFO)).rejects.toThrow(
       /invalid or expired enrollment token/
@@ -295,7 +296,7 @@ describe("Enrollment service", () => {
     // a token pointing at nothing. It must not silently degrade into "mint me
     // anything" — the identity it referred to is gone on purpose.
     const runtimeId = await seedRuntime(TEST_USER_ID);
-    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID, {
       provisionedRuntimeId: runtimeId,
     });
     await enrollNode(token, HOST_INFO);
@@ -308,7 +309,7 @@ describe("Enrollment service", () => {
   test("first boot on a runtime-bound token still mints and links", async () => {
     // The existing provisioning path must be untouched.
     const runtimeId = await seedRuntime(TEST_USER_ID);
-    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID, {
       provisionedRuntimeId: runtimeId,
     });
 
@@ -326,7 +327,7 @@ describe("Enrollment service", () => {
     // consume that protects the unbound path. Two containers starting at once
     // must still not produce two nodes.
     const runtimeId = await seedRuntime(TEST_USER_ID);
-    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID, {
       provisionedRuntimeId: runtimeId,
     });
     const { nodeId } = await enrollNode(token, HOST_INFO);
@@ -351,7 +352,7 @@ describe("Enrollment service", () => {
     // this is the difference between "the runtime came back" and "the runtime
     // came back as itself".
     const runtimeId = await seedRuntime(TEST_USER_ID);
-    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID, {
       provisionedRuntimeId: runtimeId,
     });
     const { nodeId } = await enrollNode(token, HOST_INFO);

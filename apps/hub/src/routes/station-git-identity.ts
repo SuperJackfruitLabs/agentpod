@@ -134,6 +134,7 @@ export function createStationGitIdentityRoutes(deps: StationGitIdentityDeps) {
         // Audited before the call, not after: this grants push access to a repository, which is
         // the kind of thing that must leave a record even when it then fails.
         const audit = await recordAudit(db, {
+          tenantId: station.tenantId,
           userId: user.id,
           nodeId: station.nodeId,
           stationKey: station.stationKey,
@@ -221,6 +222,7 @@ export function createStationGitIdentityRoutes(deps: StationGitIdentityDeps) {
         }
 
         const audit = await recordAudit(db, {
+          tenantId: station.tenantId,
           userId: user.id,
           nodeId: station.nodeId,
           stationKey: station.stationKey,

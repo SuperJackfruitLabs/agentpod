@@ -161,7 +161,7 @@ afterAll(async () => {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async function enrollTestNode(hostname: string) {
-  const { token } = await mintEnrollmentToken(TEST_USER);
+  const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   return enrollNode(token, {
     hostname,
     os: "linux",

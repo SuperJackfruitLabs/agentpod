@@ -1,6 +1,5 @@
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { db } from "../db/drizzle";
-import { resolveTenantForUser } from "../auth/tenant";
 import { nodes, enrollmentTokens, provisionedRuntimes } from "../db/schema/nodes";
 import { prefixedId } from "../utils/ids";
 import type { HostInfo, EnrollResponse } from "@agentpod/contract";
@@ -35,7 +34,9 @@ export const RUNTIME_TOKEN_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000;
  * Mint an enrollment token for a user.
  * The raw token is returned once; only its SHA-256 hash is persisted.
  *
- * @param userId - The user to mint the token for.
+ * @param userId   - The user to mint the token for (recorded as who enrolled).
+ * @param tenantId - The tenant the token, and every node enrolled with it, lives
+ *                   in: the minting request's tenant, or that of the row it acts for.
  * @param opts   - Optional settings:
  *   - ttlMs              — token lifetime in ms. Defaults to 1 hour, or
  *                          RUNTIME_TOKEN_TTL_MS when provisionedRuntimeId is set.
@@ -44,6 +45,7 @@ export const RUNTIME_TOKEN_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000;
  */
 export async function mintEnrollmentToken(
   userId: string,
+  tenantId: string,
   opts?: { ttlMs?: number; provisionedRuntimeId?: string }
 ): Promise<{ token: string; expiresAt: Date }> {
   const ttlMs =
@@ -54,9 +56,10 @@ export async function mintEnrollmentToken(
 
   await db.insert(enrollmentTokens).values({
     id: prefixedId("etk"),
-    // A root row: its tenant comes from the principal minting it. Everything
+    // A root row: its tenant is the one the minting request acts in (W5), never
+    // derived from the user, who can belong to several workspaces. Everything
     // enrolled with this token inherits the tenant from here.
-    tenantId: await resolveTenantForUser(userId),
+    tenantId,
     userId,
     tokenHash: await sha256(token),
     expiresAt,

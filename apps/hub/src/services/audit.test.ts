@@ -22,6 +22,7 @@ import { db, rawSql } from "../db/drizzle";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { recordAudit } from "./audit";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 
 const TEST_USER = "test-user-audit-svc-001";
 
@@ -45,6 +46,7 @@ afterAll(async () => {
 
 test("recordAudit inserts a row with result:'pending'", async () => {
   const handle = await recordAudit(db, {
+    tenantId: BOOTSTRAP_TENANT_ID,
     userId: TEST_USER,
     nodeId: "test-node-audit-1",
     stationKey: "test-station-audit",
@@ -66,6 +68,7 @@ test("recordAudit inserts a row with result:'pending'", async () => {
 
 test("done('ok') updates result to 'ok'", async () => {
   const handle = await recordAudit(db, {
+    tenantId: BOOTSTRAP_TENANT_ID,
     userId: TEST_USER,
     nodeId: "test-node-audit-1",
     stationKey: "test-station-audit",
@@ -86,6 +89,7 @@ test("done('ok') updates result to 'ok'", async () => {
 
 test("done('error','msg') sets result='error' and error='msg'", async () => {
   const handle = await recordAudit(db, {
+    tenantId: BOOTSTRAP_TENANT_ID,
     userId: TEST_USER,
     nodeId: "test-node-audit-1",
     stationKey: "test-station-audit",
@@ -106,6 +110,7 @@ test("done('error','msg') sets result='error' and error='msg'", async () => {
 
 test("sanitizer drops 'content' and 'data' but keeps 'path'", async () => {
   const handle = await recordAudit(db, {
+    tenantId: BOOTSTRAP_TENANT_ID,
     userId: TEST_USER,
     nodeId: "test-node-audit-1",
     stationKey: "test-station-audit",
@@ -151,6 +156,7 @@ test("forge grant audit keys are allow-listed; credential-shaped keys are not", 
 
 test("a sealed blob or token passed as a param is dropped from the row", async () => {
   await recordAudit(db, {
+    tenantId: BOOTSTRAP_TENANT_ID,
     userId: TEST_USER,
     nodeId: "node-audit-forge",
     stationKey: "hermes:audit-forge",

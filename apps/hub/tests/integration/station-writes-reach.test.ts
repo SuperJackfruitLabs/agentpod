@@ -3,10 +3,10 @@ import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { stationWriteRoutes } from "../../src/routes/station-writes";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Writing into an agent's workspace is granting it reach.
@@ -42,7 +42,7 @@ beforeAll(async () => {
   await createTestUser({ id: USER, email: "writes-reach@example.com", name: "WR" });
   USER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "writes-reach-it-user", userId: USER });
   AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "writes-reach-it-agent" });
-  const tenant = await resolveTenantForUser(USER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
   await rawSql`

@@ -106,7 +106,7 @@ beforeAll(async () => {
     role: "admin",
   });
 
-  const { token } = await mintEnrollmentToken(OWNER);
+  const { token } = await mintEnrollmentToken(OWNER, BOOTSTRAP_TENANT_ID);
   const { nodeId } = await enrollNode(token, {
     hostname: `station-say-host-${RUN}`,
     os: "linux",

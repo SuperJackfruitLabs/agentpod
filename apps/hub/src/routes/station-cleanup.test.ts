@@ -35,6 +35,7 @@ import { stationRoutes } from "./stations";
 import { websocket } from "../ws";
 import type { AuthUser } from "../auth/middleware";
 import type { StationRow } from "../services/station-registry";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -217,7 +218,7 @@ test(
       const STATION_KEY = "cleanup-capable-001";
       const capturedMsgs: string[] = [];
 
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "cleanup-capable-host",
         os: "linux",
@@ -302,7 +303,7 @@ test(
       const STATION_KEY = "cleanup-apply-001";
       const capturedMsgs: string[] = [];
 
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "cleanup-apply-host",
         os: "linux",
@@ -392,7 +393,7 @@ test(
       const STATION_KEY = "cleanup-incapable-001";
       const capturedMsgs: string[] = [];
 
-      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
       const { nodeId, nodeSecret } = await enrollNode(token, {
         hostname: "cleanup-incapable-host",
         os: "linux",

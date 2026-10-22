@@ -14,7 +14,6 @@ import { db, type DbExecutor } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
-import { resolveTenantForUser } from "../auth/tenant";
 import { VERB_RESULTS, unknownCapabilitiesByStation } from "@agentpod/contract";
 import type { DetectedStation } from "@agentpod/contract";
 import * as broker from "./broker";
@@ -233,9 +232,9 @@ export async function adoptStations(
 /** All adopted stations for a specific (user, node) pair. */
 export async function listAdopted(
   userId: string,
-  nodeId: string
+  nodeId: string,
+  tenantId: string,
 ): Promise<StationRow[]> {
-  const tenantId = await resolveTenantForUser(userId);
   return db
     .select()
     .from(stations)

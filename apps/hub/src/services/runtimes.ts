@@ -34,7 +34,6 @@
 
 import { and, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import { db } from "../db/drizzle";
-import { resolveTenantForUser } from "../auth/tenant";
 import { tenantScope } from "../db/tenant-scope";
 import { provisionedRuntimes, nodes } from "../db/schema/nodes";
 import { stations } from "../db/schema/stations";
@@ -101,6 +100,8 @@ function toContract(row: RuntimeRow): ProvisionedRuntime {
  */
 export async function createRuntime(
   userId: string,
+  /** The creating request's tenant (W5); the runtime, its token and its node live in it. */
+  tenantId: string,
   req: { provider: string; name: string; resourceTier: string; harness?: string },
   hubUrl: string
 ): Promise<ProvisionedRuntime> {
@@ -161,7 +162,7 @@ export async function createRuntime(
 
   await db.insert(provisionedRuntimes).values({
     id,
-    tenantId: await resolveTenantForUser(userId),
+    tenantId,
     userId,
     provider,
     status: "provisioning",
@@ -185,7 +186,7 @@ export async function createRuntime(
   // destroying the runtime, not by waiting.
   let enrollToken: string;
   try {
-    const result = await mintEnrollmentToken(userId, {
+    const result = await mintEnrollmentToken(userId, tenantId, {
       provisionedRuntimeId: id,
     });
     enrollToken = result.token;
@@ -274,14 +275,14 @@ export async function createRuntime(
  * can be taken on a destroyed runtime, so surfacing it gives the console a
  * permanent dead row.
  */
-export async function listRuntimes(userId: string): Promise<ProvisionedRuntime[]> {
+export async function listRuntimes(userId: string, tenantId: string): Promise<ProvisionedRuntime[]> {
   const rows = await db
     .select()
     .from(provisionedRuntimes)
     .where(
       tenantScope(
         provisionedRuntimes,
-        await resolveTenantForUser(userId),
+        tenantId,
         eq(provisionedRuntimes.userId, userId),
         ne(provisionedRuntimes.status, "destroyed"),
       )
@@ -445,7 +446,8 @@ export async function reprovisionRuntime(
     }
   }
 
-  const { token } = await mintEnrollmentToken(row.userId, {
+  // The runtime's own tenant: a replacement instance re-enrols into the fleet it was created in.
+  const { token } = await mintEnrollmentToken(row.userId, row.tenantId, {
     provisionedRuntimeId: row.id,
   });
 

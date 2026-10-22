@@ -79,6 +79,7 @@ export async function refuseWithoutReach(
     if (!isGrantReachDenied(e)) throw e;
 
     const audit = await recordAudit(db, {
+      tenantId: station.tenantId,
       userId,
       nodeId: station.nodeId,
       stationKey: station.stationKey,
@@ -182,6 +183,7 @@ export const stationWriteRoutes = new Hono()
 
       // ── 4. Audit (safe params only — no content) ────────────────────────────
       const audit = await recordAudit(db, {
+        tenantId: station.tenantId,
         userId: user.id,
         nodeId: station.nodeId,
         stationKey: station.stationKey,
@@ -262,6 +264,7 @@ export const stationWriteRoutes = new Hono()
 
       // ── 4. Audit ────────────────────────────────────────────────────────────
       const audit = await recordAudit(db, {
+        tenantId: station.tenantId,
         userId: user.id,
         nodeId: station.nodeId,
         stationKey: station.stationKey,
@@ -335,6 +338,7 @@ export const stationWriteRoutes = new Hono()
 
       // ── 4. Audit ────────────────────────────────────────────────────────────
       const audit = await recordAudit(db, {
+        tenantId: station.tenantId,
         userId: user.id,
         nodeId: station.nodeId,
         stationKey: station.stationKey,
@@ -410,6 +414,7 @@ export const stationWriteRoutes = new Hono()
 
       // ── 4. Audit ────────────────────────────────────────────────────────────
       const audit = await recordAudit(db, {
+        tenantId: station.tenantId,
         userId: user.id,
         nodeId: station.nodeId,
         stationKey: station.stationKey,

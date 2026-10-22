@@ -40,6 +40,7 @@ import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
 import { pollUntil } from "../helpers/wait";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const testApp = new Hono().route("/public/nodes", gatewayRoutes);
 
@@ -76,7 +77,7 @@ async function enrolledNodeWithRuntime(
   status: string,
   statusReason: string | null = null
 ) {
-  const { token } = await mintEnrollmentToken(TEST_USER_ID);
+  const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
   const creds = await enrollNode(token, {
     hostname,
     os: "linux",

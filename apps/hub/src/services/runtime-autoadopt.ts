@@ -76,7 +76,7 @@ export async function autoAdoptProvisionedHarness(
     }
 
     // ── Step 2: Idempotency check ─────────────────────────────────────────
-    const alreadyAdopted = await listAdopted(row.userId, nodeId);
+    const alreadyAdopted = await listAdopted(row.userId, nodeId, row.tenantId);
     if (alreadyAdopted.length > 0) {
       // A station was already adopted for this node — skip.
       return;

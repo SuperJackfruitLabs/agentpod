@@ -9,6 +9,7 @@ import { createSession } from "../../src/services/acp-sessions";
 import { stationAcpRoutes } from "../../src/routes/station-acp";
 import { setGrant } from "../../src/services/grants";
 import { createPrincipal, forgetPrincipals, clearGrant } from "../helpers/principals";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * The control pair, enforced where dispatch actually happens.
@@ -48,7 +49,7 @@ beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: USER, email: "controlpair@example.com", name: "CP" });
 
-  const { token } = await mintEnrollmentToken(USER);
+  const { token } = await mintEnrollmentToken(USER, BOOTSTRAP_TENANT_ID);
   const enrolled = await enrollNode(token, {
     hostname: "controlpair-host",
     os: "linux",
@@ -70,7 +71,7 @@ beforeAll(async () => {
       adopted: false,
     },
   ]);
-  stationId = (await listAdopted(USER, nodeId)).find((s) => s.stationKey === stationKey)!.id;
+  stationId = (await listAdopted(USER, nodeId, BOOTSTRAP_TENANT_ID)).find((s) => s.stationKey === stationKey)!.id;
 
   USER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "controlpair-it-user", userId: USER });
   AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "controlpair-it-agent" });
@@ -94,7 +95,7 @@ beforeAll(async () => {
       adopted: false,
     },
   ]);
-  otherStationId = (await listAdopted(USER, OTHER_NODE)).find((s) => s.stationKey === stationKey)!.id;
+  otherStationId = (await listAdopted(USER, OTHER_NODE, BOOTSTRAP_TENANT_ID)).find((s) => s.stationKey === stationKey)!.id;
   await rawSql`UPDATE stations SET principal_id = ${OTHER_AGENT_PRINCIPAL} WHERE id = ${otherStationId}`;
 });
 

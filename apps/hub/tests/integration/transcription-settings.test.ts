@@ -3,7 +3,6 @@ import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { adminMiddleware } from "../../src/auth/admin-middleware";
 import { getAllSettings } from "../../src/models/system-settings";
 import {
@@ -16,6 +15,7 @@ import {
   TRANSCRIPTION_SETTING_KEY,
 } from "../../src/services/transcription-settings";
 import { encrypt, decrypt } from "../../src/utils/encryption";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Transcription settings against Postgres: the hub default in one
@@ -70,7 +70,7 @@ beforeAll(async () => {
   await createTestUser({ id: ADMIN, email: "transcription-admin@example.com", name: "TA", role: "admin" });
   await createTestUser({ id: OWNER, email: "transcription-owner@example.com", name: "TO" });
   await createTestUser({ id: OTHER, email: "transcription-other@example.com", name: "TX" });
-  const tenant = await resolveTenantForUser(OWNER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
   await rawSql`
@@ -188,7 +188,7 @@ describe("station routes", () => {
   });
 
   test("removing the station removes its setting", async () => {
-    const tenant = await resolveTenantForUser(OWNER);
+    const tenant = BOOTSTRAP_TENANT_ID;
     const doomed = "station_transcription_doomed";
     await rawSql`
       INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, adopted_at, created_at)
@@ -218,7 +218,7 @@ describe("POST /api/stations/:id/transcription/apply over the stations table", (
   }
 
   beforeAll(async () => {
-    const tenant = await resolveTenantForUser(OWNER);
+    const tenant = BOOTSTRAP_TENANT_ID;
     await rawSql`
       INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, matrix_identity_mode, adopted_at, created_at)
       VALUES (${HERMES}, ${tenant}, ${OWNER}, ${NODE}, 'hermes', 'hermes:analyst-echo', 'composite', 'analyst-echo', '["lifecycle"]'::jsonb, 'harness', now(), now())`;

@@ -175,7 +175,7 @@ async function act(deps: ForgeApiDeps, row: Grant, step: Step): Promise<{ outcom
 
 async function auditSystem(
   deps: Pick<ForgeApiDeps, "db">,
-  where: { nodeId: string; stationKey: string },
+  where: { tenantId: string; nodeId: string; stationKey: string },
   verb: string,
   params: Record<string, unknown>,
   error?: string,
@@ -247,7 +247,7 @@ export async function runForgeApiReconcile(deps: ReconcileDeps): Promise<Reconci
         log.warn("forge grant keeps failing in reconcile", { grantId: row.id, action: step.action, failure, sweeps: count });
         await auditSystem(
           deps,
-          { nodeId: nodeId ?? "", stationKey: row.stationIdSnapshot },
+          { tenantId: row.tenantId, nodeId: nodeId ?? "", stationKey: row.stationIdSnapshot },
           "forge.api.reconcile.failing",
           { grantId: row.id, provider: row.provider, mode: row.mode, action: sig, size: count },
           failure,
@@ -263,13 +263,15 @@ export async function runForgeApiReconcile(deps: ReconcileDeps): Promise<Reconci
 /** Report provider tokens named `agentpod-*` that no grant row knows. Never deletes. */
 async function orphanScan(deps: ForgeApiDeps, report: ReconcileReport): Promise<void> {
   const rows = await deps.db.select().from(g).where(eq(g.mode, "minted"));
-  type Entry = { provider: ForgeApiProvider; instance: string; account: string; names: Set<string>; ids: Set<number> };
+  // `tenantId` is the first grant row's for the account: an orphan has no grant row of its own, so
+  // the audit row goes to a tenant that does mint on that account (W5: never a default tenant).
+  type Entry = { tenantId: string; provider: ForgeApiProvider; instance: string; account: string; names: Set<string>; ids: Set<number> };
   const accounts = new Map<string, Entry>();
   for (const row of rows) {
     const key = JSON.stringify([row.provider, row.instance, row.account]);
     let entry = accounts.get(key);
     if (!entry) {
-      entry = { provider: row.provider, instance: row.instance, account: row.account, names: new Set(), ids: new Set() };
+      entry = { tenantId: row.tenantId, provider: row.provider, instance: row.instance, account: row.account, names: new Set(), ids: new Set() };
       accounts.set(key, entry);
     }
     // A revoked tombstone's token should be gone; if the provider still lists it, that is an orphan.
@@ -308,7 +310,7 @@ async function orphanScan(deps: ForgeApiDeps, report: ReconcileReport): Promise<
       if (reportedOrphans.has(seen)) continue;
       reportedOrphans.add(seen);
       log.warn("forge token with no grant row found (reported, not deleted)", { account: entry.account, tokenName: t.name });
-      await auditSystem(deps, { nodeId: "", stationKey: `forge:${entry.instance}` }, "forge.api.reconcile.orphan", {
+      await auditSystem(deps, { tenantId: entry.tenantId, nodeId: "", stationKey: `forge:${entry.instance}` }, "forge.api.reconcile.orphan", {
         provider: entry.provider,
         username: entry.account,
         key: t.name,

@@ -1,3 +1,4 @@
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
@@ -29,7 +30,7 @@ let USER_PRINCIPAL: string;
 function app(userId: string) {
   const a = new Hono();
   a.use("*", async (c, next) => {
-    c.set("user", { id: userId, role: "user" });
+    c.set("user", { id: userId, role: "user", tenantId: BOOTSTRAP_TENANT_ID });
     await next();
   });
   a.route("/", enrollmentTokenRoutes);

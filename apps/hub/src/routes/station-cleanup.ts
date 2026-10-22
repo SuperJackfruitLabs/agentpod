@@ -74,6 +74,7 @@ export const stationCleanupRoutes = new Hono()
 
     // ── 4. Audit ─────────────────────────────────────────────────────────────
     const audit = await recordAudit(db, {
+      tenantId: station.tenantId,
       userId: user.id,
       nodeId: station.nodeId,
       stationKey: station.stationKey,
@@ -145,6 +146,7 @@ export const stationCleanupRoutes = new Hono()
 
       // ── 4. Audit (path count only — never the full list if large) ──────────
       const audit = await recordAudit(db, {
+        tenantId: station.tenantId,
         userId: user.id,
         nodeId: station.nodeId,
         stationKey: station.stationKey,

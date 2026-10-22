@@ -18,7 +18,6 @@ import { eq, sql } from "drizzle-orm";
 import handoverFixture from "../../../../packages/contract/fixtures/handover-v1.json";
 
 import { db, rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { stationForgeApiGrants as g, type StationForgeApiGrant as Grant, type StationForgeApiGrant } from "../../src/db/schema/forge-api-grants";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { pollUntil } from "../helpers/wait";
@@ -37,6 +36,7 @@ import {
   claimFaults,
   type ForgeApiDeps,
 } from "../../src/services/station-forge-api";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const OWNER = `test-user-sfa-${RUN}`;
@@ -193,7 +193,7 @@ async function assertNoLeak(h: ReturnType<typeof harness>, stationId: string) {
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: OWNER, email: `${OWNER}@example.com`, name: "SFA" });
-  tenant = await resolveTenantForUser(OWNER);
+  tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
     VALUES (${NODE}, ${tenant}, ${OWNER}, ${`sfa-box-${RUN}`}, 'sb', 'linux', 'amd64', 2, 'online', 'x', now())`;

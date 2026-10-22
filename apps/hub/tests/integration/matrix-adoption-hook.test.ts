@@ -2,9 +2,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { adoptStations, announceStationsForNode } from "../../src/services/station-registry";
 import { onStationsAdopted } from "../../src/services/matrix-as/hooks";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * A station adopted at noon should not wait for a restart to get a room.
@@ -22,7 +22,7 @@ let announced: string[][] = [];
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: USER, email: "adopt-hook@example.com", name: "AH" });
-  const tenant = await resolveTenantForUser(USER);
+  const tenant = BOOTSTRAP_TENANT_ID;
   await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
   await rawSql`

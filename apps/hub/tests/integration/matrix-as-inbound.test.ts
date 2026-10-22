@@ -2,7 +2,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
 import { createPrincipal, forgetPrincipals, linkMatrixId, clearGrant } from "../helpers/principals";
 import { handleRoomMessage } from "../../src/services/matrix-as/inbound";
@@ -16,6 +15,7 @@ import {
   notePendingPermission,
   pendingPermissionFor,
 } from "../../src/services/matrix-as/permissions";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**
  * Where a Matrix message becomes work.
@@ -130,7 +130,7 @@ beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: OWNER, email: "mx-inbound@example.com", name: "Owner" });
   await createTestUser({ id: OTHER, email: "mx-inbound-other@example.com", name: "Other" });
-  const tenant = await resolveTenantForUser(OWNER);
+  const tenant = BOOTSTRAP_TENANT_ID;
 
   await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${ROOM}`;
   await rawSql`DELETE FROM stations WHERE id = ${STATION}`;

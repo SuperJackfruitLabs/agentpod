@@ -35,6 +35,7 @@ import { gatewayRoutes } from "./gateway";
 import { nodePostureRoutes } from "./node-posture";
 import { websocket } from "../ws";
 import type { AuthUser } from "../auth/middleware";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 
 const TEST_USER = "test-user-posture-001";
 
@@ -179,7 +180,7 @@ async function withPostureNode(
   const baseUrl = `http://localhost:${server.port}`;
   const capturedMsgs: string[] = [];
 
-  const { token } = await mintEnrollmentToken(TEST_USER);
+  const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
   const { nodeId, nodeSecret } = await enrollNode(token, {
     hostname: `posture-host-${crypto.randomUUID().slice(0, 8)}`,
     os: "linux",

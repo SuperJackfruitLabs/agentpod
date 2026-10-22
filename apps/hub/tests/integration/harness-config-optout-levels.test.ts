@@ -340,7 +340,7 @@ const routeTestApp = new Hono()
   .route("/api", harnessConfigRoutes);
 
 async function enrollRouteNode(hostname: string) {
-  const { token } = await mintEnrollmentToken(ROUTE_USER);
+  const { token } = await mintEnrollmentToken(ROUTE_USER, BOOTSTRAP_TENANT_ID);
   return enrollNode(token, { hostname, os: "linux", arch: "amd64", cpuCount: 2 });
 }
 
