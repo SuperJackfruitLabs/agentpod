@@ -273,6 +273,18 @@
           <Skeleton class="h-16 rounded-lg" />
         {/each}
       </div>
+    {:else if stations.detected.length === 0 && node?.status === "online"}
+      <!--
+        An online node that sees nothing is usually a sudo install on a
+        personal machine: the node runs as root and looks in /root, not in the
+        user's home where the harnesses live.
+      -->
+      <Empty
+        title={`No agent harnesses were found on ${node.hostname}.`}
+        description="If they're installed under your user, the node may be running as root — reinstall without sudo or with the installer's default."
+      >
+        <Button variant="outline" size="sm" onclick={loadStations}>Rescan</Button>
+      </Empty>
     {:else if stations.detected.length === 0}
       <Empty
         title="No agents found on this node"

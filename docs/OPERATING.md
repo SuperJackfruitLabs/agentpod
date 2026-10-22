@@ -12,12 +12,20 @@ A **node** is any host running the AgentPod node-agent — a VPS, a laptop, a pr
 
 ### Option A — curl installer (recommended — no Go / no repo needed)
 
-On the target host (Linux or macOS). **System-wide** (root; installs a systemd service):
+On the target host (Linux or macOS):
 
 ```bash
 curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh \
   | sudo bash -s -- https://hub.<your-domain> <enrollment-token-from-console>
 ```
+
+**How Linux picks the mode under `sudo`.** A system install runs the node as root, and root only sees harnesses in `/root` and root's `PATH` — on a personal machine, where `claude`, `codex`, `hermes` … live under your home, the node would report zero stations. So, with no mode flag, the installer downloads the node binary, runs its `apn detect` as root and as `$SUDO_USER`, and:
+
+- **user mode** if `$SUDO_USER` has harnesses and root has none — it re-execs as `$SUDO_USER` (like macOS), installs into `~/.local/bin`, registers a `systemd --user` service, and runs `loginctl enable-linger $SUDO_USER` so the service survives logout and starts at boot;
+- **system mode** otherwise — root has harnesses, or nobody does (a server), or you ran it as root directly.
+- A host that **already has a system install** (`/etc/systemd/system/agentpod-node.service`) stays in system mode; a running node is never migrated silently.
+
+It prints one line saying which mode it chose and why, e.g. `==> Install mode: user — alice has 2 harness(es) and root has none; pass --system to install as root instead`. Override with **`--system`** (force system-wide: binary in `/usr/local/bin`, root's config, systemd unit) or **`--user`**. Enrollment runs exactly once, in the chosen mode (the token is single-use). A side "has harnesses" if `apn detect` reports a station **or** any harness home dir or binary the node's descriptors use is present (`~/.claude`, `~/.codex`, `~/.hermes`, `~/.openclaw`, `~/.local/share/{opencode,kilo,muse}`, `~/.pi/agent`, or a harness binary in `~/.local/bin`, `~/.npm-global/bin`, `~/bin`), so a fresh Claude Code install with no projects yet still counts. The binary downloaded for this check is the one installed; there is no second download.
 
 **Rootless** — for key-only hosts where the login user has no `sudo` password. Pass `--user`; it installs into `~/.local/bin`, enrolls as you, then runs `apn service install` (systemd `--user` on Linux) — falling back to run instructions (`apn run` / `tmux`) if no user service manager is available:
 
@@ -42,7 +50,7 @@ apn service uninstall   # stop, disable, and remove the service
 
 A LaunchAgent only runs while you're logged in — system sleep suspends it, and the node shows offline until wake (by design).
 
-The installer downloads the prebuilt binary for your platform (linux/darwin × amd64/arm64) from the latest GitHub Release, then — for a **system-wide Linux install (root, no `--user`)**:
+The installer downloads the prebuilt binary for your platform (linux/darwin × amd64/arm64) from the latest GitHub Release, then — for a **system-wide Linux install** (chosen as above, or forced with `--system`):
 1. Installs it to `/usr/local/bin/agentpod-node`.
 2. Runs `agentpod-node enroll --hub <HUB_URL> --token <TOKEN>` — writes config to `/root/.config/agentpod-node/config.json`.
 3. Runs `apn service install`, which installs and enables the systemd unit `agentpod-node.service`.
