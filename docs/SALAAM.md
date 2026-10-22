@@ -250,6 +250,17 @@ A host requiring managed MCP refuses a session opened without its assignment.
 
 ## Reviewed host configuration
 
+With the node operator's `configManagement` opt-in, every Salaam station also
+reports four `report-only` settings, read from the daemon's `/v1/health`:
+`salaam.provider.route` (`{provider, model, endpoint}`), `salaam.mcp.operator`
+(`{digest, servers: [{name, transport, declarationDigest}]}`),
+`salaam.agentpod.pins` (the pins file digest) and `salaam.tools.user` (when the
+daemon reports one). No MCP command line, argument or environment, provider
+connection setting or key is ever included. Declaring one of them
+(`fleet config set`) makes the Console show whether the daemon matches it; the
+node never writes them.
+
+
 With the node operator's `configManagement` opt-in, a Salaam descriptor configured
 with absolute private Node, CLI and manifest paths exposes the existing
 `config.manage` interface. Its one registry entry, `salaam.host.manifest`, is the
@@ -327,3 +338,15 @@ The expiry receipt remains version 1. See
 `packages/contract/src/salaam-operator-settlement.ts`,
 `apps/hub/src/routes/admin-bridge-agents.ts`, and
 `apps/hub/src/services/bridge/salaam-dispatch.ts`.
+
+## Dispatch grant for board work
+
+A card the bridge dispatches runs as the station's adopter. Salaam's authority
+check (and the control pair, when enforced) requires that person's org-plane
+grant to name the station's agent in `mayDispatch`. `fleet bridge add`, and
+`fleet bridge set` on an enabled entry, record that grant when it is missing:
+exactly the station's own agent, for exactly its adopter, never the caller, and
+nothing is ever removed. The response carries `dispatchGrant`
+(`present`, `granted`, `no_agent`, `adopter_not_a_person`, or `unknown` with a
+reason). `GET /api/stations/:id/readiness` reports the same state and refuses
+readiness, with the fix in words, while it is missing.

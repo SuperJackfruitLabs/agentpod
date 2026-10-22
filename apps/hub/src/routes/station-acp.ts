@@ -49,7 +49,8 @@ import { getStation } from "../services/station-registry";
 import { bridgeReadiness } from "../services/bridge/station-readiness";
 import { probeSalaamWork } from "../services/bridge/salaam-dispatch";
 import * as acp from "../services/acp-sessions";
-import { isControlPairDenied } from "../services/control-pair";
+import { isControlPairDenied, isControlPairEnforced } from "../services/control-pair";
+import { checkBridgeDispatchGrant } from "../services/bridge/dispatch-grant";
 import { isSalaamAuthorityDenied } from "../services/salaam-authority";
 import { stationFailure } from "../services/station-failure";
 import type { AuthUser } from "../auth/middleware";
@@ -178,6 +179,8 @@ export const stationAcpRoutes = new Hono()
       await bridgeReadiness(scope, stationId, {
         strictWork: probeSalaamWork,
         stationReady: acp.stationReadiness,
+        dispatchGrant: (sc, id) => checkBridgeDispatchGrant(sc.tenantId, id),
+        pairEnforced: isControlPairEnforced(),
       }),
     );
   })

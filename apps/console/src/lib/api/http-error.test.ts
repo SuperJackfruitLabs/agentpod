@@ -95,3 +95,19 @@ test("apiError: a member's 403 workspace_admin_required reads as who can do it, 
   expect(err.message).toBe("Only workspace admins can do that. Ask an owner or admin of your workspace.");
   expect(err.detail).toBe("POST /api/enrollment-tokens → 403");
 });
+
+test("apiError: a Salaam authority refusal says what to do about a missing dispatch grant", async () => {
+  const res = new Response(
+    JSON.stringify({
+      error: "Salaam execution authority was suspended or its dispatch grant was withdrawn",
+      code: "salaam_authority_denied",
+    }),
+    { status: 403, headers: { "content-type": "application/json" } },
+  );
+  const err = await apiError(res, "POST /api/stations/s/acp/sessions");
+  expect(err.status).toBe(403);
+  expect(err.code).toBe("salaam_authority_denied");
+  expect(err.message).toBe(
+    "You don't have a dispatch grant for this agent, or the agent is suspended. A workspace admin can grant dispatch at the organization plane.",
+  );
+});

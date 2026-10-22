@@ -37,6 +37,7 @@ import {
 } from "../services/bridge/roster";
 
 import { settleNeverDispatchedSalaamWork } from "../services/bridge/salaam-dispatch";
+import { ensureBridgeDispatchGrant } from "../services/bridge/dispatch-grant";
 import {
   SuperpipelineClient,
   fetchAdapter,
@@ -169,7 +170,11 @@ export const adminBridgeAgentsRouter = new Hono()
     }
 
     const agents = await listBridgeAgents(tenantId);
-    return c.json({ agent: agents.find((a) => a.key === body.key) }, 201);
+    const agent = agents.find((a) => a.key === body.key);
+    // An enabled entry is the decision to dispatch this station's agent as its adopter, so the
+    // grant that needs is recorded with it (services/bridge/dispatch-grant.ts).
+    const dispatchGrant = agent?.enabled ? await ensureBridgeDispatchGrant(tenantId, agent.stationId) : undefined;
+    return c.json({ agent, ...(dispatchGrant ? { dispatchGrant } : {}) }, 201);
   })
 
   .patch("/:key", zValidator("json", updateSchema), async (c) => {
@@ -186,7 +191,9 @@ export const adminBridgeAgentsRouter = new Hono()
     if (!changed) return c.json({ error: "no such agent" }, 404);
 
     const agents = await listBridgeAgents(tenantId);
-    return c.json({ agent: agents.find((a) => a.key === key) });
+    const agent = agents.find((a) => a.key === key);
+    const dispatchGrant = agent?.enabled ? await ensureBridgeDispatchGrant(tenantId, agent.stationId) : undefined;
+    return c.json({ agent, ...(dispatchGrant ? { dispatchGrant } : {}) });
   })
 
   .delete("/:key", async (c) => {
