@@ -81,6 +81,25 @@ func NewManagerForRestart(goos string, run Runner) (Manager, error) {
 	return newSystemdManager(run, userUnitActive(probe), home, uid), nil
 }
 
+// SystemScopeManager returns a read-mostly view of the system-wide systemd
+// unit for an unprivileged caller on Linux, or nil when there is no second
+// scope to look at (root already gets the system scope from NewManager;
+// macOS installs are per-user only). Its Status() works without root: the
+// unit file under /etc/systemd/system is world-readable and plain
+// `systemctl is-active/is-enabled/show` need no privileges. It exists so
+// `apn status` run without sudo does not report a running system-wide
+// install as "installed: no".
+func SystemScopeManager(run Runner) Manager {
+	return systemScopeManager(runtime.GOOS, os.Getuid(), run)
+}
+
+func systemScopeManager(goos string, uid int, run Runner) Manager {
+	if goos != "linux" || uid == 0 {
+		return nil
+	}
+	return newSystemdManager(run, false, "", uid)
+}
+
 // newManager is the GOOS/uid-injectable core of NewManager, kept separate so
 // the platform-selection branches are unit-testable without root privileges
 // or a second OS.

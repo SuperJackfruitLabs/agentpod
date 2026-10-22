@@ -182,6 +182,11 @@ jobs:
       - name: Test the fleet client installer
         run: sh apps/node-agent/scripts/install-fleet.test.sh
 
+      # install.sh is the node installer release asset; its shadowed-apn
+      # warning is pure shell and runs here against fake binaries.
+      - name: Test the node installer
+        run: bash apps/node-agent/scripts/install.test.sh
+
       # The Fly images bake in a RELEASED node-agent binary rather than
       # compiling one, so they carry a version pin — and a pin nobody is forced
       # to move goes stale silently (issue #290: both Fly images sat on v0.1.22

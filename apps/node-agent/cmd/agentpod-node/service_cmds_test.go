@@ -567,6 +567,9 @@ func TestPrintServiceSummary(t *testing.T) {
 		var buf bytes.Buffer
 		printServiceSummary("linux", "/etc/systemd/system/agentpod-node.service", &buf)
 		out := buf.String()
+		if !strings.Contains(out, "sudo apn status") {
+			t.Errorf("system scope must say sudo for status, got:\n%s", out)
+		}
 		if !strings.Contains(out, "system-wide") {
 			t.Errorf("missing system-scope label, got:\n%s", out)
 		}
