@@ -1,0 +1,5 @@
+:8080 {
+	root * /srv/current
+	try_files {path} {path}/ /index.html
+	file_server
+}
