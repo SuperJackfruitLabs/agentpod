@@ -1,7 +1,6 @@
 package descriptor
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -14,6 +13,9 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/salaam"
 )
 
+// The surface was closed on purpose and is opened deliberately, one capability per PR, by the
+// operator's decision on spec 2026-10-23: logs (the daemon journal) are advertised; files,
+// terminal, lifecycle and writes are not, until their own PRs prove them.
 func TestSalaamRequiresObservedBoundDaemonAndAdvertisesOnlyProvedCapabilities(t *testing.T) {
 	base, err := os.MkdirTemp("/tmp", "sal-desc-")
 	if err != nil {
@@ -66,7 +68,7 @@ func TestSalaamRequiresObservedBoundDaemonAndAdvertisesOnlyProvedCapabilities(t 
 	if err != nil || len(found) != 1 {
 		t.Fatalf("bound daemon missing: %v %v", found, err)
 	}
-	if found[0].Key != key || !reflect.DeepEqual(found[0].Capabilities, []string{"inventory", "health", "acp", "skills.inventory"}) {
+	if found[0].Key != key || !reflect.DeepEqual(found[0].Capabilities, []string{"inventory", "health", "logs", "acp", "skills.inventory"}) {
 		t.Fatalf("unsupported authority advertised: %+v", found[0])
 	}
 	if _, ok := d.(Lifecycle); ok {
@@ -82,9 +84,8 @@ func TestSalaamRequiresObservedBoundDaemonAndAdvertisesOnlyProvedCapabilities(t 
 	if _, _, _, err := d.ReadFile(key, "secret", 1024); err == nil {
 		t.Fatal("station file read enabled")
 	}
-	if err := d.TailLogs(context.Background(), key, false, func([]byte) error { return nil }); err == nil {
-		t.Fatal("private logs exposed")
-	}
+	// Logs are open since spec 2026-10-23 (decision 2): the daemon's journal, which carries no
+	// session content. salaam_logs_test.go proves it reads that journal and nothing else.
 	health, err := d.Health(key)
 	if err != nil || !health.Running {
 		t.Fatalf("healthy daemon not observed: %v %v", health, err)

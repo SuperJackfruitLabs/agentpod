@@ -84,7 +84,7 @@ func (s *salaamDescriptor) Detect() ([]Station, error) {
 		}
 	}
 	s.miss("")
-	return []Station{{Key: salaam.StationKey(workspace), Harness: "salaam", Kind: "leaf", DisplayName: "Salaam", WorkspacePath: &workspace, Capabilities: []string{"inventory", "health", "acp", "skills.inventory"}}}, nil
+	return []Station{{Key: salaam.StationKey(workspace), Harness: "salaam", Kind: "leaf", DisplayName: "Salaam", WorkspacePath: &workspace, Capabilities: []string{"inventory", "health", "logs", "acp", "skills.inventory"}}}, nil
 }
 func (s *salaamDescriptor) Health(key string) (Health, error) {
 	if key != salaam.StationKey(s.config.Workspace) || !s.configured() {
@@ -123,6 +123,4 @@ func (s *salaamDescriptor) ListDir(string, string) ([]FsEntry, error) {
 func (s *salaamDescriptor) ReadFile(string, string, int64) ([]byte, string, bool, error) {
 	return nil, "", false, fmt.Errorf("salaam: station filesystem access is not enabled")
 }
-func (s *salaamDescriptor) TailLogs(context.Context, string, bool, func([]byte) error) error {
-	return fmt.Errorf("salaam: logs are not exposed as station files")
-}
+
