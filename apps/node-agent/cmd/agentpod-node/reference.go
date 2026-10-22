@@ -42,7 +42,7 @@ var apnRef = []clidoc.Command{
 	{Path: "restart", Synopsis: "apn restart", Auth: apnNeedsService, Example: "apn restart"},
 	{
 		Path: "logs", Synopsis: "apn logs [-f] [-n N]",
-		Handlers: []string{"prepareLogsCmd"},
+		Handlers: []string{"prepareLogsCmdScoped"},
 		Flags:    []clidoc.Flag{{Name: "f"}, {Name: "n", Arg: "N"}},
 		Auth:     apnNeedsService,
 		Example:  "apn logs -n 200\napn logs -f",
