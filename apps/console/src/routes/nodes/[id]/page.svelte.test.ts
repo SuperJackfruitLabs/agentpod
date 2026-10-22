@@ -357,3 +357,52 @@ test("a full load before auth resolves shows no connection error and loads the s
     localStorage.clear();
   }
 });
+
+/** The hub's answer for a node it cannot reach: a 502 with a reason, CORS and all. */
+async function withHub502(status: "online" | "offline", run: (r: ReturnType<typeof render>) => Promise<void>) {
+  const authStore = await import("$lib/stores/auth.svelte");
+  authStore.clearAuthSession();
+  localStorage.setItem("agentpod.apiUrl", "https://hub.test");
+  authStore.setAuthApiUrl("https://hub.test");
+  authStore.setPlane({ issuer: "https://accounts.test", url: "https://accounts.test", audience: "hub" });
+  vi.spyOn(authStore, "getToken").mockResolvedValue("at1");
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/detected")) {
+      return new Response(JSON.stringify({ error: "node offline" }), { status: 502, headers: { "content-type": "application/json" } });
+    }
+    const body = url.endsWith("/stations") ? [] : [{ ...mockNode, status }];
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  });
+  try {
+    await authStore.initAuth();
+    await run(render(NodeDetailPage));
+  } finally {
+    authStore.clearAuthSession();
+    localStorage.clear();
+  }
+}
+
+test("an offline node's page says the node is offline, never that the hub is unreachable", async () => {
+  await withHub502("offline", async ({ findByText, queryByText, getByRole }) => {
+    expect(await findByText("hermes-01 is offline. Detected agents show here when it reconnects.")).toBeTruthy();
+    expect(queryByText(/reach the hub|check your connection/i)).toBeNull();
+    expect(getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+});
+
+test("a 502 from detect blames the node even while the list still says online", async () => {
+  await withHub502("online", async ({ findByText, queryByText }) => {
+    expect(await findByText("hermes-01 is offline. Detected agents show here when it reconnects.")).toBeTruthy();
+    expect(queryByText(/reach the hub|check your connection/i)).toBeNull();
+  });
+});
+
+test("a real network failure keeps the hub-connection copy", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([mockNode]);
+  const { networkError } = await import("$lib/api/http-error");
+  vi.spyOn(api, "listDetected").mockRejectedValue(networkError("GET /api/nodes/node_1/detected", new TypeError("Failed to fetch")));
+  vi.spyOn(api, "listStations").mockResolvedValue([]);
+  const { findByText } = render(NodeDetailPage);
+  expect(await findByText("Couldn't reach the hub — check your connection.")).toBeTruthy();
+});
