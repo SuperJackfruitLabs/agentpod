@@ -12,6 +12,10 @@
 #   HUB_URL   e.g. https://hub.agentpod.dev
 #   TOKEN     enrollment token issued by the hub
 #   --user    rootless install (no sudo): binary in ~/.local/bin, config in ~/.config
+#   --system  force a system-wide install (Linux). Without either flag, a
+#             `sudo` run on Linux installs as $SUDO_USER (user mode + linger)
+#             when only that user has harnesses; else system. An existing
+#             system unit stays system.
 #
 # macOS: always a rootless per-user install, regardless of sudo/--user — binary
 # in ~/.local/bin, service as a per-user LaunchAgent (~/Library/LaunchAgents).
@@ -24,11 +28,12 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: install.sh [--user] <HUB_URL> <TOKEN>" >&2
+  echo "Usage: install.sh [--user|--system] <HUB_URL> <TOKEN>" >&2
   echo "" >&2
   echo "  HUB_URL   hub URL, must start with http:// or https://" >&2
   echo "  TOKEN     enrollment token issued by the hub" >&2
   echo "  --user    rootless install into ~/.local/bin (no sudo; for key-only hosts)" >&2
+  echo "  --system  force a system-wide (root) install on Linux" >&2
   echo "" >&2
   echo "Optional env:  VERSION=v0.2.0   AGENTPOD_USER_INSTALL=1" >&2
   exit 1
@@ -110,6 +115,55 @@ warn_shadowed_apn() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# Install-mode decision (Linux, run as root). A system install runs the node
+# as root, whose descriptors look in /root and root's PATH — so a personal
+# machine's harnesses (~/.claude, ~/.codex, ~/.local/bin/claude …) are
+# invisible and the node reports zero stations. When root got here via sudo
+# and only the invoking user has harnesses, install as that user instead.
+# ---------------------------------------------------------------------------
+
+SYSTEM_UNIT="/etc/systemd/system/agentpod-node.service"
+
+# detect_count <json> — number of stations in `agentpod-node detect` output.
+detect_count() {
+  local n
+  n="$(printf '%s' "$1" | grep -o '"key"[[:space:]]*:' | wc -l | tr -d ' ')"
+  echo "${n:-0}"
+}
+
+# count_harness_paths <home> — fallback when `detect` can't run: how many
+# harnesses have a home dir. The list mirrors the descriptors in
+# internal/descriptor/*.go (claudecode .claude, codex .codex, hermes .hermes,
+# openclaw .openclaw, opencode/kilo/muse .local/share/<name>, pi .pi/agent).
+count_harness_paths() {
+  local home="$1" n=0 d
+  for d in .claude .codex .hermes .openclaw .local/share/opencode .local/share/kilo .local/share/muse .pi/agent; do
+    [ -d "$home/$d" ] && n=$((n + 1))
+  done
+  echo "$n"
+}
+
+# decide_install_mode <explicit user|system|""> <system_unit_exists 0|1>
+#                     <sudo_user> <root_detect_json> <user_detect_json>
+# Prints "<user|system><TAB><reason>". Pure: no side effects.
+decide_install_mode() {
+  local explicit="$1" unit="$2" su="$3" rn un
+  rn="$(detect_count "$4")"; un="$(detect_count "$5")"
+  if [ "$explicit" = "system" ]; then printf 'system\t--system was given\n'; return; fi
+  if [ "$explicit" = "user" ]; then printf 'user\t--user was given\n'; return; fi
+  if [ "$unit" = "1" ]; then printf 'system\tan existing system install was found (%s); pass --user to switch\n' "$SYSTEM_UNIT"; return; fi
+  if [ -z "$su" ] || [ "$su" = "root" ]; then printf 'system\trunning as root, not via sudo\n'; return; fi
+  if [ "$rn" -gt 0 ]; then printf 'system\troot has %s harness(es); pass --user to install as %s instead\n' "$rn" "$su"; return; fi
+  if [ "$un" -gt 0 ]; then printf 'user\t%s has %s harness(es) and root has none; pass --system to install as root instead\n' "$su" "$un"; return; fi
+  printf 'system\tno harnesses found for root or %s (server); pass --user to install as %s instead\n' "$su" "$su"
+}
+
+# install_mode_line <decision> — the one line the installer prints.
+install_mode_line() {
+  printf '==> Install mode: %s — %s\n' "$(printf '%s' "$1" | cut -f1)" "$(printf '%s' "$1" | cut -f2)"
+}
+
 # Tests source this file with AGENTPOD_INSTALL_LIB=1 to get the functions only.
 if [ "${AGENTPOD_INSTALL_LIB:-}" = "1" ]; then return 0 2>/dev/null || exit 0; fi
 
@@ -119,8 +173,19 @@ if [ "${AGENTPOD_INSTALL_LIB:-}" = "1" ]; then return 0 2>/dev/null || exit 0; f
 USER_INSTALL="${AGENTPOD_USER_INSTALL:-}"
 ARGS=()
 for a in "$@"; do
-  if [ "$a" = "--user" ]; then USER_INSTALL=1; else ARGS+=("$a"); fi
+  case "$a" in
+    --user) USER_INSTALL=1 ;;
+    --system) SYSTEM_INSTALL=1 ;;
+    *) ARGS+=("$a") ;;
+  esac
 done
+SYSTEM_INSTALL="${SYSTEM_INSTALL:-}"
+if [ -n "$USER_INSTALL" ] && [ -n "$SYSTEM_INSTALL" ]; then
+  echo "ERROR: pass --user or --system, not both" >&2; usage
+fi
+EXPLICIT_MODE=""
+[ -n "$USER_INSTALL" ] && EXPLICIT_MODE=user
+[ -n "$SYSTEM_INSTALL" ] && EXPLICIT_MODE=system
 HUB_URL="${ARGS[0]:-}"
 TOKEN="${ARGS[1]:-}"
 
@@ -186,7 +251,50 @@ fi
 # ---------------------------------------------------------------------------
 if [ -z "${MODE:-}" ]; then
   if [ "$(id -u)" = "0" ]; then
-    MODE=system
+    # Root on Linux: choose system vs user (see decide_install_mode). The
+    # harness probe runs the release binary's own `detect` as root and as
+    # $SUDO_USER, so detection matches what the node would see.
+    _su="${SUDO_USER:-}"
+    _unit=0; [ -f "$SYSTEM_UNIT" ] && _unit=1
+    _root_json="[]"; _user_json="[]"
+    if [ -z "$EXPLICIT_MODE" ] && [ "$_unit" = "0" ] && [ -n "$_su" ] && [ "$_su" != "root" ]; then
+      _uhome="$(invoking_user_home)"
+      _probe_dir="$(mktemp -d /tmp/agentpod-probe.XXXXXX)"; chmod 0755 "$_probe_dir"
+      case "$(uname -m)" in x86_64) _parch=amd64 ;; aarch64|arm64) _parch=arm64 ;; *) _parch="" ;; esac
+      if [ -n "${VERSION:-}" ]; then _pbase="${BASE_URL}/download/${VERSION}"; else _pbase="${BASE_URL}/latest/download"; fi
+      if [ -n "$_parch" ] && curl -fsSL -o "$_probe_dir/agentpod-node" "${_pbase}/agentpod-node-linux-${_parch}" 2>/dev/null \
+         && chmod 0755 "$_probe_dir/agentpod-node" \
+         && _root_json="$("$_probe_dir/agentpod-node" detect 2>/dev/null)" \
+         && _user_json="$(cd / && sudo -u "$_su" -H "$_probe_dir/agentpod-node" detect 2>/dev/null)"; then
+        :
+      else
+        echo "INFO: couldn't run the node's harness detection; checking well-known paths instead."
+        _root_json="$(for _i in $(seq 1 "$(count_harness_paths "/root")"); do printf '{"key":1}'; done)"
+        _user_json="$(for _i in $(seq 1 "$(count_harness_paths "$_uhome")"); do printf '{"key":1}'; done)"
+      fi
+      rm -rf "$_probe_dir"
+    fi
+    _decision="$(decide_install_mode "$EXPLICIT_MODE" "$_unit" "$_su" "$_root_json" "$_user_json")"
+    install_mode_line "$_decision"
+    MODE="$(printf '%s' "$_decision" | cut -f1)"
+    if [ "$MODE" = "user" ]; then
+      if [ -z "$_su" ] || [ "$_su" = "root" ]; then
+        echo "ERROR: --user as root needs sudo from a regular user (SUDO_USER unset)." >&2; exit 1
+      fi
+      # We are root, so lingering can be enabled here: the user service then
+      # survives logout and starts at boot.
+      if command -v loginctl >/dev/null 2>&1; then
+        loginctl enable-linger "$_su" || echo "WARNING: loginctl enable-linger $_su failed — the service will stop when $_su logs out."
+      fi
+      _uid="$(id -u "$_su")"
+      reexec_script_path
+      # A copy $SUDO_USER can read (mktemp files and /root are root-only).
+      _copy="$(mktemp /tmp/agentpod-install.XXXXXX)"
+      cp "$SCRIPT_PATH" "$_copy" && chmod 0644 "$_copy" && SCRIPT_PATH="$_copy"
+      # Enrollment happens only in the re-exec'd child (single-use token).
+      exec sudo -u "$_su" -H VERSION="${VERSION:-}" AGENTPOD_USER_INSTALL=1 XDG_RUNTIME_DIR="/run/user/${_uid}" \
+        bash "$SCRIPT_PATH" "$HUB_URL" "$TOKEN"
+    fi
   elif [ -n "$USER_INSTALL" ]; then
     MODE=user
   elif command -v sudo >/dev/null 2>&1; then
@@ -194,7 +302,7 @@ if [ -z "${MODE:-}" ]; then
     echo "      No sudo password on this host? Re-run rootless instead:"
     echo "        curl -fsSL .../install.sh | bash -s -- --user $HUB_URL <TOKEN>"
     reexec_script_path
-    exec sudo VERSION="${VERSION:-}" bash "$SCRIPT_PATH" "$HUB_URL" "$TOKEN"
+    exec sudo VERSION="${VERSION:-}" bash "$SCRIPT_PATH" ${SYSTEM_INSTALL:+--system} "$HUB_URL" "$TOKEN"
   else
     echo "INFO: not root and 'sudo' not found — falling back to a rootless --user install."
     MODE=user

@@ -212,8 +212,25 @@ test("Adopt all calls adopt(id, allUnadoptedKeys)", async () => {
   });
 });
 
+test("online node with no harnesses says the node may be running as root", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([{ ...mockNode, hostname: "sun-laptop" }]);
+  vi.spyOn(api, "listDetected").mockResolvedValue([]);
+  vi.spyOn(api, "listStations").mockResolvedValue([]);
+
+  const { getByText } = render(NodeDetailPage);
+
+  await waitFor(() => {
+    expect(getByText("No agent harnesses were found on sun-laptop.")).toBeTruthy();
+  });
+  expect(
+    getByText(
+      "If they're installed under your user, the node may be running as root — reinstall without sudo or with the installer's default.",
+    ),
+  ).toBeTruthy();
+});
+
 test("shows detected-empty state", async () => {
-  vi.spyOn(api, "listNodes").mockResolvedValue([mockNode]);
+  vi.spyOn(api, "listNodes").mockResolvedValue([{ ...mockNode, status: "offline" as const }]);
   vi.spyOn(api, "listDetected").mockResolvedValue([]);
   vi.spyOn(api, "listStations").mockResolvedValue([]);
 
