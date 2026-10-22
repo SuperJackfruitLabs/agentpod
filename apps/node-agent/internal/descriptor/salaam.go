@@ -84,7 +84,7 @@ func (s *salaamDescriptor) Detect() ([]Station, error) {
 		}
 	}
 	s.miss("")
-	return []Station{{Key: salaam.StationKey(workspace), Harness: "salaam", Kind: "leaf", DisplayName: "Salaam", WorkspacePath: &workspace, Capabilities: []string{"inventory", "health", "logs", "acp", "skills.inventory"}}}, nil
+	return []Station{{Key: salaam.StationKey(workspace), Harness: "salaam", Kind: "leaf", DisplayName: "Salaam", WorkspacePath: &workspace, Capabilities: []string{"inventory", "health", "logs", "fs.read", "acp", "skills.inventory"}}}, nil
 }
 func (s *salaamDescriptor) Health(key string) (Health, error) {
 	if key != salaam.StationKey(s.config.Workspace) || !s.configured() {
@@ -117,10 +117,3 @@ func (s *salaamDescriptor) ACPCommand(key string) ([]string, string, []string, e
 	}
 	return command, s.config.Workspace, nil, nil
 }
-func (s *salaamDescriptor) ListDir(string, string) ([]FsEntry, error) {
-	return nil, fmt.Errorf("salaam: station filesystem access is not enabled")
-}
-func (s *salaamDescriptor) ReadFile(string, string, int64) ([]byte, string, bool, error) {
-	return nil, "", false, fmt.Errorf("salaam: station filesystem access is not enabled")
-}
-
