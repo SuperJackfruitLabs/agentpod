@@ -45,6 +45,7 @@ import { VERB_RESULTS } from "@agentpod/contract";
 import type { FetchLike, ForgeConfig } from "../services/forge";
 import { createLogger } from "../utils/logger";
 import type { AuthUser } from "../auth/middleware";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
 const log = createLogger("station-git-identity-route");
 
@@ -77,7 +78,7 @@ export function createStationGitIdentityRoutes(deps: StationGitIdentityDeps) {
         if (!user || user.id === "anonymous") {
           return c.json({ error: "Unauthorized" }, 401);
         }
-        const station = await getStation(user.id, c.req.param("id"));
+        const station = await getStation(user, c.req.param("id"));
         if (!station) {
           return c.json({ error: "Not Found" }, 404);
         }
@@ -113,7 +114,10 @@ export function createStationGitIdentityRoutes(deps: StationGitIdentityDeps) {
           return c.json({ error: "Unauthorized" }, 401);
         }
 
-        const station = await getStation(user.id, c.req.param("id"));
+        // Changes the station for everyone in the workspace: a workspace admin's (W1).
+        const notAdmin = requireWorkspaceAdmin(c);
+        if (notAdmin) return notAdmin;
+        const station = await getStation(user, c.req.param("id"));
         if (!station) {
           return c.json({ error: "Not Found" }, 404);
         }
@@ -213,7 +217,10 @@ export function createStationGitIdentityRoutes(deps: StationGitIdentityDeps) {
           return c.json({ error: "Unauthorized" }, 401);
         }
 
-        const station = await getStation(user.id, c.req.param("id"));
+        // Changes the station for everyone in the workspace: a workspace admin's (W1).
+        const notAdmin = requireWorkspaceAdmin(c);
+        if (notAdmin) return notAdmin;
+        const station = await getStation(user, c.req.param("id"));
         if (!station) {
           return c.json({ error: "Not Found" }, 404);
         }

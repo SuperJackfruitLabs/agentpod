@@ -38,7 +38,9 @@ const settings = createTranscriptionSettings({ store: dbTranscriptionStore, env:
 
 function as(userId: string) {
   return async (c: any, next: () => Promise<void>) => {
-    c.set("user", { id: userId, role: "user" });
+    // OTHER stands in another workspace: a station is the workspace's, not its adopter's (W4).
+    const tenantId = userId === OTHER ? "fleet_11111111111111111111" : "fleet_00000000000000000000";
+    c.set("user", { id: userId, tenantId, workspaceRole: "admin" } as never);
     await next();
   };
 }
@@ -178,7 +180,7 @@ describe("station routes", () => {
     expect(await settings.resolveFor(STATION)).toBeNull();
   });
 
-  test("another user's station is a 404", async () => {
+  test("another workspace's station is a 404", async () => {
     expect((await stationApp(OTHER).request(`/api/stations/${STATION}/transcription`)).status).toBe(404);
     expect(
       (await stationApp(OTHER).request(`/api/stations/${STATION}/transcription`, json("PUT", { mode: "off" }))).status
@@ -237,7 +239,7 @@ describe("POST /api/stations/:id/transcription/apply over the stations table", (
     ]);
   });
 
-  test("another user's station is a 404 and nothing is sent", async () => {
+  test("another workspace's station is a 404 and nothing is sent", async () => {
     const res = await applyApp(OTHER).request(`/api/stations/${HERMES}/transcription/apply`, { method: "POST" });
     expect(res.status).toBe(404);
     expect(sent).toHaveLength(0);

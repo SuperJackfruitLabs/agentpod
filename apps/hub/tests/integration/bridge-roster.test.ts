@@ -187,8 +187,8 @@ describe("hubUserId is derived, so it cannot disagree with the station", () => {
   test("the roster reads the session owner off the station", async () => {
     await createBridgeAgent(base());
     const [agent] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
-    // `getStation(userId, stationId)` filters on `stations.userId`; any other value here would
-    // fail every ACP call as "Station not found", which is why it is not a stored field.
+    // The session is the station adopter's (sessions stay a person's own, W4); a stored value
+    // could disagree with the station, which is why it is not a stored field.
     expect(agent!.hubUserId).toBe(userId);
   });
 

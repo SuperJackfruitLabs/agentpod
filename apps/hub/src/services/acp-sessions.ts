@@ -238,6 +238,13 @@ function withDeadline<T>(
 
 export interface CreateSessionInput {
   stationId: string;
+  /**
+   * The workspace the station must be in (workspace authority spec, W4): any member may open a
+   * session of their own on any of the workspace's stations. Required, so no caller can open a
+   * session without naming the workspace it acts in.
+   */
+  tenantId: string;
+  /** Whose session it is. Sessions stay a person's own (W4). */
   userId: string;
   mode: AcpSessionMode;
   /**
@@ -1340,10 +1347,10 @@ export interface StationReadiness {
  * an outage with no error anywhere — the caller simply never acts.
  */
 export async function stationReadiness(
-  userId: string,
+  scope: { tenantId: string },
   stationId: string,
 ): Promise<StationReadiness> {
-  const station = await getStation(userId, stationId);
+  const station = await getStation(scope, stationId);
   if (!station) return { ready: false, reason: "Station not found." };
   if (!gateCapability(station, "acp")) {
     return {
@@ -1365,7 +1372,7 @@ export async function stationReadiness(
 export async function createSession(
   input: CreateSessionInput,
 ): Promise<AcpSessionRow> {
-  const { stationId, userId } = input;
+  const { stationId, userId, tenantId } = input;
 
   // ── The control pair, first half: may this principal dispatch this agent? ──
   //
@@ -1380,13 +1387,11 @@ export async function createSession(
   // on purpose: whether a caller is ALLOWED to reach a station does not depend
   // on whether that station happens to be online, and answering "node offline"
   // to someone who was never permitted leaks which stations exist.
-  const station = await getStation(userId, stationId);
+  const station = await getStation({ tenantId }, stationId);
   if (station && isControlPairEnforced()) {
-    // The grant is keyed by principal id, not the Better Auth user id
-    // `userId` is here — `getStation` above requires it to equal
-    // `stations.userId`, so this is always a session id, never one obtained
-    // elsewhere. A caller with no principal has no grant to hold. Under the
-    // org plane a caller's token answers both (`auth/caller-authority.ts`).
+    // The grant is keyed by principal id, not the session's `userId`. A caller
+    // with no principal has no grant to hold. Under the org plane a caller's
+    // token answers both (`auth/caller-authority.ts`).
     const caller = { id: userId, authority: input.authority };
     const principal = await callerPrincipal(caller);
     const allowed =
@@ -1409,7 +1414,7 @@ export async function createSession(
 
   // Fail fast on the obvious gates before queueing (openSession re-checks them
   // under the lock, where the answers are current).
-  const readiness = await stationReadiness(userId, stationId);
+  const readiness = await stationReadiness({ tenantId }, stationId);
   if (!readiness.ready) throw new Error(readiness.reason);
 
   return withStationOpenLock(stationId, () => openSession(input));
@@ -1422,7 +1427,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
   // minute after createSession was called, by which time the station may have
   // been re-adopted onto another node, lost the capability, or gone offline.
   // The open must target CURRENT routing, never the snapshot from the queue.
-  const station = await getStation(userId, stationId);
+  const station = await getStation({ tenantId: input.tenantId }, stationId);
   if (!station) throw new Error("Station not found.");
   if (!gateCapability(station, "acp")) {
     throw new Error("This station does not support agent sessions.");

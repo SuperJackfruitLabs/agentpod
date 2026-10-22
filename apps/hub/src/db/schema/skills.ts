@@ -42,7 +42,8 @@ export const skillArtifacts = pgTable(
       t.userId,
       t.archiveSHA256,
     ),
-    uniqueIndex("skill_artifacts_owner_id_idx").on(t.id, t.tenantId, t.userId),
+    // Composite FK target (migration 0114): an artifact is the workspace's; `user_id` is who uploaded it.
+    uniqueIndex("skill_artifacts_id_tenant_idx").on(t.id, t.tenantId),
     check(
       "skill_artifacts_size_check",
       sql`${t.size}>0 AND ${t.size}<=33554432 AND ${t.size}=octet_length(${t.bytes})`,
@@ -70,7 +71,7 @@ export const trustedSkillReleases = pgTable(
   (t) => [
     uniqueIndex("trusted_skill_releases_owner_digest_idx").on(t.tenantId, t.userId, t.recordDigest),
     uniqueIndex("trusted_skill_releases_owner_version_profile_idx").on(t.tenantId, t.userId, t.version, t.profile),
-    uniqueIndex("trusted_skill_releases_owner_id_idx").on(t.id, t.tenantId, t.userId),
+    uniqueIndex("trusted_skill_releases_id_tenant_idx").on(t.id, t.tenantId),
     check("trusted_skill_releases_digest_check", sql`${t.recordDigest} ~ '^[a-f0-9]{64}$'`),
   ],
 );
@@ -89,11 +90,11 @@ export const trustedSkillReleaseArtifacts = pgTable(
   (t) => [
     uniqueIndex("trusted_skill_release_artifacts_release_harness_idx").on(t.releaseId, t.tenantId, t.userId, t.harness),
     uniqueIndex("trusted_skill_release_artifacts_artifact_idx").on(t.artifactId, t.tenantId, t.userId),
-    foreignKey({ name: "trusted_skill_release_artifacts_release_owner_fk", columns: [t.releaseId, t.tenantId, t.userId], foreignColumns: [trustedSkillReleases.id, trustedSkillReleases.tenantId, trustedSkillReleases.userId] }).onDelete("cascade"),
+    foreignKey({ name: "trusted_skill_release_artifacts_release_tenant_fk", columns: [t.releaseId, t.tenantId], foreignColumns: [trustedSkillReleases.id, trustedSkillReleases.tenantId] }).onDelete("cascade"),
     // The public artifact delete path refuses catalog-pinned blobs.  Cascading
     // here is solely for tenant/user teardown, where PostgreSQL otherwise has
     // no safe ordering across two children of the same user.
-    foreignKey({ name: "trusted_skill_release_artifacts_artifact_owner_fk", columns: [t.artifactId, t.tenantId, t.userId], foreignColumns: [skillArtifacts.id, skillArtifacts.tenantId, skillArtifacts.userId] }).onDelete("cascade"),
+    foreignKey({ name: "trusted_skill_release_artifacts_artifact_tenant_fk", columns: [t.artifactId, t.tenantId], foreignColumns: [skillArtifacts.id, skillArtifacts.tenantId] }).onDelete("cascade"),
     check("trusted_skill_release_artifacts_digest_check", sql`${t.bundleDigest} ~ '^[a-f0-9]{64}$'`),
   ],
 );
@@ -108,8 +109,7 @@ export const skillReleaseCohorts = pgTable("skill_release_cohorts", {
   stationIds: jsonb("station_ids").$type<string[]>().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
-  uniqueIndex("skill_release_cohorts_owner_id_idx").on(t.id, t.tenantId, t.userId),
-  foreignKey({ name: "skill_release_cohorts_release_owner_fk", columns: [t.releaseId, t.tenantId, t.userId], foreignColumns: [trustedSkillReleases.id, trustedSkillReleases.tenantId, trustedSkillReleases.userId] }).onDelete("restrict"),
+  foreignKey({ name: "skill_release_cohorts_release_tenant_fk", columns: [t.releaseId, t.tenantId], foreignColumns: [trustedSkillReleases.id, trustedSkillReleases.tenantId] }).onDelete("restrict"),
   check("skill_release_cohorts_digest_check", sql`${t.recordDigest} ~ '^[a-f0-9]{64}$'`),
   check("skill_release_cohorts_station_ids_check", sql`jsonb_typeof(${t.stationIds})='array' AND jsonb_array_length(${t.stationIds}) BETWEEN 1 AND 256`),
 ]);
@@ -163,19 +163,16 @@ export const skillOperations = pgTable(
       t.stationId,
       t.createdAt,
     ),
+    // The workspace's station and artifact, whoever adopted or uploaded them (W4, migration 0114).
     foreignKey({
-      name: "skill_operations_station_owner_fk",
-      columns: [t.stationId, t.tenantId, t.userId],
-      foreignColumns: [stations.id, stations.tenantId, stations.userId],
+      name: "skill_operations_station_tenant_fk",
+      columns: [t.stationId, t.tenantId],
+      foreignColumns: [stations.id, stations.tenantId],
     }).onDelete("cascade"),
     foreignKey({
-      name: "skill_operations_artifact_owner_fk",
-      columns: [t.artifactId, t.tenantId, t.userId],
-      foreignColumns: [
-        skillArtifacts.id,
-        skillArtifacts.tenantId,
-        skillArtifacts.userId,
-      ],
+      name: "skill_operations_artifact_tenant_fk",
+      columns: [t.artifactId, t.tenantId],
+      foreignColumns: [skillArtifacts.id, skillArtifacts.tenantId],
     }),
     check(
       "skill_operations_identity_check",

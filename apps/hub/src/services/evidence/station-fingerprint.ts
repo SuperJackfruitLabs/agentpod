@@ -42,9 +42,9 @@ export async function appliedSkillRelease(tenantId: string, stationId: string): 
            tsr.version AS release_version, tsr.profile AS release_profile, tsr.record_digest
       FROM skill_operations so
       LEFT JOIN trusted_skill_release_artifacts tra
-             ON tra.artifact_id = so.artifact_id AND tra.tenant_id = so.tenant_id AND tra.user_id = so.user_id
+             ON tra.artifact_id = so.artifact_id AND tra.tenant_id = so.tenant_id
       LEFT JOIN trusted_skill_releases tsr
-             ON tsr.id = tra.release_id AND tsr.tenant_id = tra.tenant_id AND tsr.user_id = tra.user_id
+             ON tsr.id = tra.release_id AND tsr.tenant_id = tra.tenant_id
      WHERE so.tenant_id = ${tenantId} AND so.station_id = ${stationId}
        AND so.kind = 'managed' AND so.state = 'applied'
      ORDER BY so.profile, so.updated_at DESC, so.created_at DESC`;

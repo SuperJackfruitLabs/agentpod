@@ -56,19 +56,19 @@ test("resetOrphanedOnlineNodes flips online rows to offline at boot", async () =
   const flipped = await resetOrphanedOnlineNodes();
   expect(flipped).toBeGreaterThanOrEqual(1);
 
-  const node = (await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID)).find((n) => n.id === nodeId);
+  const node = (await listNodes(BOOTSTRAP_TENANT_ID)).find((n) => n.id === nodeId);
   expect(node?.status).toBe("offline");
 });
 
 test("setNodeStatus offline does not bump lastSeenAt", async () => {
   const nodeId = await makeNode("lastseen-host");
   await setNodeStatus(nodeId, "online");
-  const seenOnline = (await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID)).find((n) => n.id === nodeId)!.lastSeenAt;
+  const seenOnline = (await listNodes(BOOTSTRAP_TENANT_ID)).find((n) => n.id === nodeId)!.lastSeenAt;
   expect(seenOnline).not.toBeNull();
 
   await new Promise((r) => setTimeout(r, 50));
   await setNodeStatus(nodeId, "offline");
-  const seenOffline = (await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID)).find((n) => n.id === nodeId)!.lastSeenAt;
+  const seenOffline = (await listNodes(BOOTSTRAP_TENANT_ID)).find((n) => n.id === nodeId)!.lastSeenAt;
   // "last seen" means last actual contact — an offline transition is not contact.
   expect(seenOffline).toBe(seenOnline);
 });
@@ -93,7 +93,7 @@ test("sweeper expires online nodes silent past the threshold — and not before"
   expect(swept).toContain(staleId);
   expect(swept).not.toContain(freshId);
 
-  const list = await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
+  const list = await listNodes(BOOTSTRAP_TENANT_ID);
   expect(list.find((n) => n.id === staleId)?.status).toBe("offline");
   expect(list.find((n) => n.id === freshId)?.status).toBe("online");
 });

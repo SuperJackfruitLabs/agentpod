@@ -40,7 +40,6 @@ export async function listSkillArtifacts(
       tenantScope(
         skillArtifacts,
         owner.tenantId,
-        eq(skillArtifacts.userId, owner.userId),
       ),
     )
     .orderBy(skillArtifacts.createdAt)
@@ -61,7 +60,6 @@ export async function getSkillArtifact(owner: SkillOwner, id: string) {
       tenantScope(
         skillArtifacts,
         owner.tenantId,
-        eq(skillArtifacts.userId, owner.userId),
         eq(skillArtifacts.id, id),
       ),
     );
@@ -78,7 +76,6 @@ export async function getSkillArtifactMetadata(
       tenantScope(
         skillArtifacts,
         owner.tenantId,
-        eq(skillArtifacts.userId, owner.userId),
         eq(skillArtifacts.id, id),
       ),
     );
@@ -103,15 +100,13 @@ export async function storeSkillArtifact(
     throw new SkillRequestError(413, "Artifact must contain 1–33554432 bytes");
   const archiveSHA256 = createHash("sha256").update(bytes).digest("hex");
   return db.transaction(async (tx) => {
-    // Serialize quota accounting for this owner across processes, not just requests.
+    // Serialize quota accounting for this workspace across processes, not just requests. The
+    // artifacts, their dedupe and their quota are the workspace's (workspace authority, W4); the
+    // row's user_id records who uploaded it.
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["skill-artifacts", owner.tenantId, owner.userId])},0))`,
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["skill-artifacts", owner.tenantId])},0))`,
     );
-    const where = tenantScope(
-      skillArtifacts,
-      owner.tenantId,
-      eq(skillArtifacts.userId, owner.userId),
-    );
+    const where = tenantScope(skillArtifacts, owner.tenantId);
     const [existing] = await tx
       .select(metadataColumns)
       .from(skillArtifacts)
@@ -171,10 +166,9 @@ export async function deleteSkillArtifact(
       tenantScope(
         skillArtifacts,
         owner.tenantId,
-        eq(skillArtifacts.userId, owner.userId),
         eq(skillArtifacts.id, id),
         sql`NOT EXISTS (SELECT 1 FROM ${skillOperations} WHERE ${skillOperations.artifactId}=${skillArtifacts.id})`,
-        sql`NOT EXISTS (SELECT 1 FROM ${trustedSkillReleaseArtifacts} WHERE ${trustedSkillReleaseArtifacts.artifactId}=${skillArtifacts.id} AND ${trustedSkillReleaseArtifacts.tenantId}=${skillArtifacts.tenantId} AND ${trustedSkillReleaseArtifacts.userId}=${skillArtifacts.userId})`,
+        sql`NOT EXISTS (SELECT 1 FROM ${trustedSkillReleaseArtifacts} WHERE ${trustedSkillReleaseArtifacts.artifactId}=${skillArtifacts.id} AND ${trustedSkillReleaseArtifacts.tenantId}=${skillArtifacts.tenantId})`,
       ),
     )
     .returning({ id: skillArtifacts.id });

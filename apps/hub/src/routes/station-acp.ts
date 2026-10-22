@@ -123,7 +123,7 @@ export const stationAcpRoutes = new Hono()
       const { mode, mcpProxy } = c.req.valid("json");
 
       try {
-        const row = await acp.createSession({ stationId, userId: user.id, mode, mcpProxy, authority: user.authority });
+        const row = await acp.createSession({ stationId, tenantId: user.tenantId, userId: user.id, mode, mcpProxy, authority: user.authority });
         return c.json(row, 201);
       } catch (err) {
         // The plane was needed (a caller with no token authority, under ORG_PLANE_*) and is down.
@@ -156,7 +156,7 @@ export const stationAcpRoutes = new Hono()
     }
 
     const stationId = c.req.param("id");
-    const station = await getStation(user.id, stationId);
+    const station = await getStation(user, stationId);
     if (!station) {
       return c.json({ error: "Not Found" }, 404);
     }

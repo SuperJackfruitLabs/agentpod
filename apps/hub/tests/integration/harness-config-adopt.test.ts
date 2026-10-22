@@ -739,7 +739,7 @@ test(
       if (!station) throw new Error("station adoption failed");
 
       // The operator unadopts while the (hypothetical) detached pass runs.
-      await unadopt(TEST_USER, station.id);
+      await unadopt({ tenantId: BOOTSTRAP_TENANT_ID }, station.id);
       // The adopt-time pass above wrote a legitimate journal row while the
       // station WAS adopted; it is not what is under test. Cleared so that
       // any row present afterwards can only be the detached pass's own —

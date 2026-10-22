@@ -38,7 +38,7 @@ export async function createSkillReleaseCanaryOperation(
   if (!release || release.recordDigest !== request.recordDigest)
     throw new SkillRequestError(409, "Trusted release identity changed or is unavailable");
   const [station] = await db.select().from(stations).where(
-    tenantScope(stations, owner.tenantId, eq(stations.userId, owner.userId), eq(stations.id, request.stationId)),
+    tenantScope(stations, owner.tenantId, eq(stations.id, request.stationId)),
   );
   if (!station) throw new SkillRequestError(409, "Canary station is no longer available to this owner");
   if (!station.capabilities?.includes("skills.manage"))
@@ -48,7 +48,6 @@ export async function createSkillReleaseCanaryOperation(
     tenantScope(
       trustedSkillReleaseArtifacts,
       owner.tenantId,
-      eq(trustedSkillReleaseArtifacts.userId, owner.userId),
       eq(trustedSkillReleaseArtifacts.releaseId, release.id),
       eq(trustedSkillReleaseArtifacts.harness, station.harness),
     ),
@@ -85,11 +84,11 @@ export async function getSkillReleaseCanaryOperation(
   if (!release || release.recordDigest !== request.recordDigest)
     throw new SkillRequestError(409, "Trusted release identity changed or is unavailable");
   const [station] = await db.select().from(stations).where(
-    tenantScope(stations, owner.tenantId, eq(stations.userId, owner.userId), eq(stations.id, request.stationId)),
+    tenantScope(stations, owner.tenantId, eq(stations.id, request.stationId)),
   );
   if (!station) throw new SkillRequestError(409, "Canary station is no longer available to this owner");
   const [pin] = await db.select().from(trustedSkillReleaseArtifacts).where(
-    tenantScope(trustedSkillReleaseArtifacts, owner.tenantId, eq(trustedSkillReleaseArtifacts.userId, owner.userId), eq(trustedSkillReleaseArtifacts.releaseId, release.id), eq(trustedSkillReleaseArtifacts.harness, station.harness)),
+    tenantScope(trustedSkillReleaseArtifacts, owner.tenantId, eq(trustedSkillReleaseArtifacts.releaseId, release.id), eq(trustedSkillReleaseArtifacts.harness, station.harness)),
   );
   if (!pin) throw new SkillRequestError(409, "Trusted release has no artifact for the canary harness");
   const operation = await getSkillOperation(owner, station, request.operationId);

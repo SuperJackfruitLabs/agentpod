@@ -516,9 +516,10 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     // TRANSCRIBE_* env. None, and a voice note is named to the agent.
     transcriberFor: (stationId: string) => transcriberFor(stationId),
     acp: {
-      createSession: async (input: { stationId: string; userId: string; mode: string }) => {
+      createSession: async (input: { stationId: string; tenantId: string; userId: string; mode: string }) => {
         const session = await createSession({
           stationId: input.stationId,
+          tenantId: input.tenantId,
           userId: input.userId,
           mode: input.mode as never,
         });

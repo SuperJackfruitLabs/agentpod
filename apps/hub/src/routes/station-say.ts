@@ -16,10 +16,14 @@
  * Guarded by the same grant that guards dispatching the agent, because speaking
  * *as* an agent is a strong thing to be able to do: anyone who may not dispatch
  * it must not be able to put words in its mouth.
+ *
+ * Any member of the station's workspace may ask (using a station is a member's, W1/W4); the grant
+ * is what decides whether they may speak as this agent.
  */
 
 import { Hono } from "hono";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import { tenantScope } from "../db/tenant-scope";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
@@ -55,7 +59,7 @@ export function createStationSayRoutes(deps: StationSayDeps) {
       })
       .from(stations)
       .innerJoin(nodes, eq(nodes.id, stations.nodeId))
-      .where(and(eq(stations.id, c.req.param("id")), eq(stations.userId, user.id)));
+      .where(tenantScope(stations, user.tenantId, eq(stations.id, c.req.param("id"))));
 
     if (!station) return c.json({ error: "Not Found" }, 404);
 

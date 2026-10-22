@@ -13,6 +13,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
+import { tenantScope } from "../../db/tenant-scope";
 import { acpSessions } from "../../db/schema/acp";
 import { SalaamAuthorityStatus } from "@agentpod/contract";
 import { workDigest } from "../salaam-work";
@@ -45,14 +46,14 @@ export interface StrictWorkSelection {
 }
 export async function probeSalaamWork(input: {
   stationId: string;
+  /** The bridge agent's workspace; the station is read only there (W4). */
+  tenantId: string;
   userId: string;
 }): Promise<StrictWorkSelection> {
   const [station] = await db
     .select()
     .from(stations)
-    .where(
-      and(eq(stations.id, input.stationId), eq(stations.userId, input.userId)),
-    );
+    .where(tenantScope(stations, input.tenantId, eq(stations.id, input.stationId)));
   if (!station || station.harness !== "salaam")
     return { required: false, version: null };
   const response = await broker.request(
@@ -816,16 +817,13 @@ export async function startSalaamWork(
       .select({ mcpProxy: stations.mcpProxy })
       .from(stations)
       .where(
-        and(
-          eq(stations.id, agent.stationId),
-          eq(stations.userId, agent.hubUserId),
-          eq(stations.tenantId, deps.tenantId),
-        ),
+        tenantScope(stations, deps.tenantId, eq(stations.id, agent.stationId)),
       );
     if (!station) throw Error("Strict work station ownership unavailable");
     session = (
       await acp.createSession({
         stationId: agent.stationId,
+        tenantId: deps.tenantId,
         userId: agent.hubUserId,
         mode: "ask",
         // Only the operator's explicit station declaration requests managed tools.

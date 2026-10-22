@@ -38,7 +38,9 @@ const HOST = { hostname: "noderm-host", os: "linux", arch: "amd64", cpuCount: 2 
 function api(userId: string, workspaceRole: "admin" | "member" = "admin") {
   return new Hono()
     .use("*", async (c, next) => {
-      c.set("user", { id: userId, authType: "org_plane", tenantId: BOOTSTRAP_TENANT_ID, workspaceRole });
+      // OTHER acts in another workspace: a node is the workspace's, whoever enrolled it (W4).
+      const tenantId = userId === OTHER ? "fleet_11111111111111111111" : BOOTSTRAP_TENANT_ID;
+      c.set("user", { id: userId, authType: "org_plane", tenantId, workspaceRole });
       await next();
     })
     .route("/api/nodes", createNodeRoutes())
@@ -111,7 +113,7 @@ describe("who may remove a node", () => {
     expect(res.status).toBe(404);
   });
 
-  test("a node someone else owns is 404 and stays", async () => {
+  test("a node in another workspace is 404 and stays", async () => {
     const { nodeId } = await enrol(OWNER);
     const res = await del(OTHER, nodeId);
     expect(res.status).toBe(404);
@@ -124,7 +126,7 @@ describe("who may remove a node", () => {
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: "workspace_admin_required" });
     expect(await nodeExists(nodeId)).toBe(true);
-    // ...and a stranger member still cannot tell the id exists.
+    // ...and a member of another workspace still cannot tell the id exists.
     expect((await del(OTHER, nodeId, false, "member")).status).toBe(404);
   });
 
@@ -207,7 +209,7 @@ describe("removing an offline node", () => {
     expect(body.disconnected).toBe(false);
     expect(body.stationsRemoved.map((s) => s.stationKey).sort()).toEqual(["hermes:one", "pi:two"]);
 
-    expect((await listNodes(OWNER, BOOTSTRAP_TENANT_ID)).some((n) => n.id === nodeId)).toBe(false);
+    expect((await listNodes(BOOTSTRAP_TENANT_ID)).some((n) => n.id === nodeId)).toBe(false);
     expect(await rawSql`SELECT 1 FROM stations WHERE node_id = ${nodeId}`).toHaveLength(0);
     expect(await rawSql`SELECT 1 FROM declared_harness_config WHERE node_id = ${nodeId}`).toHaveLength(0);
 
@@ -260,7 +262,7 @@ describe("removing a connected node", () => {
       expect(second.reason).toBe("unauthorized");
       expect(connectionManager.isOnline(nodeId)).toBe(false);
       expect(await nodeExists(nodeId)).toBe(false);
-      await pollUntil(async () => !(await listNodes(OWNER, BOOTSTRAP_TENANT_ID)).some((n) => n.id === nodeId));
+      await pollUntil(async () => !(await listNodes(BOOTSTRAP_TENANT_ID)).some((n) => n.id === nodeId));
     } finally {
       server.stop(true);
     }

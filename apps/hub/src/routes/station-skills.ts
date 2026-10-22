@@ -15,7 +15,7 @@ export const stationSkillsRoutes = new Hono().post(
     const user = c.get("user") as AuthUser | undefined;
     if (!user || user.id === "anonymous")
       return c.json({ error: "Unauthorized" }, 401);
-    const station = await getStation(user.id, c.req.param("id"));
+    const station = await getStation(user, c.req.param("id"));
     if (!station || station.tenantId !== user.tenantId)
       return c.json({ error: "Not Found" }, 404);
     if (!gateCapability(station, "skills.inventory")) {

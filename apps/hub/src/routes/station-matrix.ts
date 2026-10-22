@@ -17,7 +17,7 @@
  */
 
 import { Hono } from "hono";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
@@ -34,6 +34,8 @@ import {
   type PreJoinOutcome,
 } from "../services/matrix-as/identity-move";
 import type { AuthUser } from "../auth/middleware";
+import { tenantScope } from "../db/tenant-scope";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
 /**
  * Harnesses whose node-agent can write a Matrix credential into a profile.
@@ -110,8 +112,8 @@ export interface StationMatrixDeps {
 export function createStationMatrixRoutes(deps: StationMatrixDeps) {
   const say = deps.log ?? ((line: string) => console.log(line));
 
-  /** The station, if it belongs to this principal. */
-  async function ownedStation(userId: string, stationId: string) {
+  /** The station, if it is in the caller's workspace (W4). */
+  async function ownedStation(tenantId: string, stationId: string) {
     const [row] = await db
       .select({
         id: stations.id,
@@ -124,7 +126,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
       })
       .from(stations)
       .innerJoin(nodes, eq(nodes.id, stations.nodeId))
-      .where(and(eq(stations.id, stationId), eq(stations.userId, userId)));
+      .where(tenantScope(stations, tenantId, eq(stations.id, stationId)));
     return row ?? null;
   }
 
@@ -151,7 +153,10 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      */
     .post("/stations/:id/matrix/identity", async (c) => {
       const user = c.get("user") as AuthUser;
-      const station = await ownedStation(user.id, c.req.param("id"));
+      // The station's Matrix presence is the workspace's: a workspace admin's (W1).
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+      const station = await ownedStation(user.tenantId, c.req.param("id"));
       if (!station) return c.json({ error: "Not Found" }, 404);
 
       await deps.provisionStation(station.id);
@@ -195,7 +200,10 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      */
     .post("/stations/:id/matrix/credentials", async (c) => {
       const user = c.get("user") as AuthUser;
-      const station = await ownedStation(user.id, c.req.param("id"));
+      // The station's Matrix presence is the workspace's: a workspace admin's (W1).
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+      const station = await ownedStation(user.tenantId, c.req.param("id"));
       if (!station) return c.json({ error: "Not Found" }, 404);
 
       try {
@@ -309,7 +317,10 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      */
     .post("/stations/:id/matrix/authorize-move", async (c) => {
       const user = c.get("user") as AuthUser;
-      const station = await ownedStation(user.id, c.req.param("id"));
+      // The station's Matrix presence is the workspace's: a workspace admin's (W1).
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+      const station = await ownedStation(user.tenantId, c.req.param("id"));
       if (!station) return c.json({ error: "Not Found" }, 404);
 
       try {
@@ -424,7 +435,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      */
     .get("/stations/:id/matrix/move-state", async (c) => {
       const user = c.get("user") as AuthUser;
-      const station = await ownedStation(user.id, c.req.param("id"));
+      const station = await ownedStation(user.tenantId, c.req.param("id"));
       if (!station) return c.json({ error: "Not Found" }, 404);
       return c.json(await deps.moveState(station.id));
     });

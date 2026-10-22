@@ -20,8 +20,8 @@ import type { FleetAgent, FleetStats } from "@agentpod/contract";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type FleetService = {
-  listFleetAgents: (userId: string) => Promise<FleetAgent[]>;
-  getFleetStats: (userId: string) => Promise<FleetStats>;
+  listFleetAgents: (tenantId: string) => Promise<FleetAgent[]>;
+  getFleetStats: (tenantId: string) => Promise<FleetStats>;
 };
 
 // ─── Factory ─────────────────────────────────────────────────────────────────
@@ -46,8 +46,7 @@ export function createFleetRoutes(deps?: FleetDeps) {
        * one response so the Overview home only needs one fetch.
        */
       .get("/agents", async (c) => {
-        const userId = c.get("user").id;
-        const agents = await service.listFleetAgents(userId);
+        const agents = await service.listFleetAgents(c.get("user").tenantId);
         // Compute stats from the same agent list to avoid a second DB query.
         const { computeFleetStats } = await import("../services/fleet");
         const stats = computeFleetStats(agents);
@@ -59,8 +58,7 @@ export function createFleetRoutes(deps?: FleetDeps) {
        * Lightweight stats-only endpoint for polling / stat-band refresh.
        */
       .get("/stats", async (c) => {
-        const userId = c.get("user").id;
-        return c.json(await service.getFleetStats(userId));
+        return c.json(await service.getFleetStats(c.get("user").tenantId));
       })
   );
 }

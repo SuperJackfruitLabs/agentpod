@@ -25,6 +25,7 @@ import {
 } from "../services/org-plane/agent-placement";
 import { humanPrincipalIdForUser, principalHandle } from "../services/principals";
 import { createLogger } from "../utils/logger";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
 const log = createLogger("station-setup");
 
@@ -55,13 +56,9 @@ class SetupError extends Error {
     super(message);
   }
 }
-const owned = (id: string, userId: string, tenantId: string) =>
-  tenantScope(
-    stations,
-    tenantId,
-    eq(stations.id, id),
-    eq(stations.userId, userId),
-  );
+// In the caller's workspace, whoever adopted it (W4).
+const owned = (id: string, tenantId: string) =>
+  tenantScope(stations, tenantId, eq(stations.id, id));
 async function matrixStatus(stationId: string) {
   const occupancy = await roomForStation(stationId);
   const [station] = await db
@@ -154,11 +151,7 @@ export const stationSetupRouter = new Hono()
       .select()
       .from(stations)
       .where(
-        owned(
-          c.req.param("stationId"),
-          c.get("user").id,
-          c.get("user").tenantId,
-        ),
+        owned(c.req.param("stationId"), c.get("user").tenantId),
       );
     if (!station) return c.json({ error: "Station not found" }, 404);
     return c.json({
@@ -170,6 +163,9 @@ export const stationSetupRouter = new Hono()
     "/stations/:stationId/setup",
     zValidator("json", inputSchema),
     async (c) => {
+      // Placing an agent at a station is a workspace admin's (W1), as assigning one is.
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
       const input = c.req.valid("json"),
         userId = c.get("user").id,
         stationId = c.req.param("stationId");
@@ -191,7 +187,7 @@ export const stationSetupRouter = new Hono()
           const [station] = await db
             .select({ principalId: stations.principalId })
             .from(stations)
-            .where(owned(stationId, userId, c.get("user").tenantId));
+            .where(owned(stationId, c.get("user").tenantId));
           if (!station) return c.json({ error: "Station not found" }, 404);
           if (station.principalId)
             return c.json(
@@ -249,7 +245,7 @@ export const stationSetupRouter = new Hono()
           const [station] = await tx
             .select()
             .from(stations)
-            .where(owned(stationId, userId, c.get("user").tenantId))
+            .where(owned(stationId, c.get("user").tenantId))
             .for("update");
           if (!station) throw new SetupError(404, "Station not found");
           const [receipt] = await tx
@@ -373,11 +369,13 @@ export const stationSetupRouter = new Hono()
     "/stations/:stationId/setup/matrix",
     zValidator("json", z.object({ principalId: z.string() })),
     async (c) => {
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
       const stationId = c.req.param("stationId");
       const [station] = await db
         .select()
         .from(stations)
-        .where(owned(stationId, c.get("user").id, c.get("user").tenantId));
+        .where(owned(stationId, c.get("user").tenantId));
       if (!station) return c.json({ error: "Station not found" }, 404);
       if (
         !station.principalId ||

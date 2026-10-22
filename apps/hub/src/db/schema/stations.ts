@@ -83,7 +83,6 @@ export const stations = pgTable("stations", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   uniqueIndex("stations_node_id_station_key_idx").on(t.nodeId, t.stationKey),
-  uniqueIndex("stations_skill_owner_idx").on(t.id, t.tenantId, t.userId),
   // Referencable by a composite FK, exactly as `nodes_id_tenant_idx` is by this
   // table's own `(node_id, tenant_id)` key below. `bridge_agents` uses it so a
   // roster entry in one tenant pointing at a station in another is

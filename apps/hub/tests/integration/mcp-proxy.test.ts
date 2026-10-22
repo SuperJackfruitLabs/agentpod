@@ -42,7 +42,7 @@ function appFor() {
   return new Hono()
     .use("/api/*", async (c, next) => {
       const userId = c.req.header("X-Test-User-Id") ?? "anonymous";
-      c.set("user", { id: userId, authType: "api_key", tenantId: "fleet_00000000000000000000" } satisfies AuthUser);
+      c.set("user", { id: userId, authType: "api_key", tenantId: userId === OTHER_USER ? "fleet_11111111111111111111" : "fleet_00000000000000000000" , workspaceRole: "admin" } satisfies AuthUser);
       return next();
     })
     .route("/public/nodes", gatewayRoutes)
@@ -266,7 +266,7 @@ describe("enable / disable", () => {
     }
   });
 
-  test("an unknown or someone else's station is a 404 and nothing is sent", async () => {
+  test("an unknown or another workspace's station is a 404 and nothing is sent", async () => {
     const ctx = await withNode({ harnesses: ["hermes"] });
     try {
       const st = ctx.byHarness("hermes");

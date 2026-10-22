@@ -3,7 +3,8 @@
  *
  * All four routes follow the same safety model:
  *   1. Authenticate (reject 401 if anonymous).
- *   2. Verify station ownership via getStation(userId, stationId) → 404 if absent.
+ *   2. Workspace admin (403 workspace_admin_required), then the station in the
+ *      caller's workspace via getStation(user, stationId) → 404 if absent.
  *   3. Capability gate: station.capabilities must include "fs.write" → 403 otherwise.
  *   4. Record a station_audit row BEFORE dispatching to the node.
  *   5. Broker.request() to the node.
@@ -37,6 +38,7 @@ import { getStation } from "../services/station-registry";
 import { recordAudit } from "../services/audit";
 import type { AuthUser } from "../auth/middleware";
 import type { StationRow } from "../services/station-registry";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
 // ─── Capability helper ────────────────────────────────────────────────────────
 
@@ -154,9 +156,12 @@ export const stationWriteRoutes = new Hono()
         return c.json({ error: "Unauthorized" }, 401);
       }
 
-      // ── 2. Ownership check ──────────────────────────────────────────────────
+      // ── 2. Station in the caller's workspace ────────────────────────────────
       const stationId = c.req.param("id");
-      const station = await getStation(user.id, stationId);
+      // Changes the station for everyone in the workspace: a workspace admin's (W1).
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+      const station = await getStation(user, stationId);
       if (!station) {
         return c.json({ error: "Not Found" }, 404);
       }
@@ -235,9 +240,12 @@ export const stationWriteRoutes = new Hono()
         return c.json({ error: "Unauthorized" }, 401);
       }
 
-      // ── 2. Ownership check ──────────────────────────────────────────────────
+      // ── 2. Station in the caller's workspace ────────────────────────────────
       const stationId = c.req.param("id");
-      const station = await getStation(user.id, stationId);
+      // Changes the station for everyone in the workspace: a workspace admin's (W1).
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+      const station = await getStation(user, stationId);
       if (!station) {
         return c.json({ error: "Not Found" }, 404);
       }
@@ -309,9 +317,12 @@ export const stationWriteRoutes = new Hono()
         return c.json({ error: "Unauthorized" }, 401);
       }
 
-      // ── 2. Ownership check ──────────────────────────────────────────────────
+      // ── 2. Station in the caller's workspace ────────────────────────────────
       const stationId = c.req.param("id");
-      const station = await getStation(user.id, stationId);
+      // Changes the station for everyone in the workspace: a workspace admin's (W1).
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+      const station = await getStation(user, stationId);
       if (!station) {
         return c.json({ error: "Not Found" }, 404);
       }
@@ -385,9 +396,12 @@ export const stationWriteRoutes = new Hono()
         return c.json({ error: "Unauthorized" }, 401);
       }
 
-      // ── 2. Ownership check ──────────────────────────────────────────────────
+      // ── 2. Station in the caller's workspace ────────────────────────────────
       const stationId = c.req.param("id");
-      const station = await getStation(user.id, stationId);
+      // Changes the station for everyone in the workspace: a workspace admin's (W1).
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+      const station = await getStation(user, stationId);
       if (!station) {
         return c.json({ error: "Not Found" }, 404);
       }

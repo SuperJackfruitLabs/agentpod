@@ -22,10 +22,12 @@ export const stationSetups = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (t) => [
+    // The station's tenant, not its adopter: any admin of the workspace may set a station up (W4,
+    // migration 0114). `user_id` records who did.
     foreignKey({
-      columns: [t.stationId, t.tenantId, t.userId],
-      foreignColumns: [stations.id, stations.tenantId, stations.userId],
-      name: "station_setups_owner_fk",
+      columns: [t.stationId, t.tenantId],
+      foreignColumns: [stations.id, stations.tenantId],
+      name: "station_setups_station_tenant_fk",
     }).onDelete("cascade"),
   ],
 );

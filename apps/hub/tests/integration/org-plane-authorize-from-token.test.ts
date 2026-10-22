@@ -86,7 +86,8 @@ const caller = (authority?: TokenAuthority) => ({
 function mount(authority: TokenAuthority | undefined, routes: Hono, at = "/api") {
   return new Hono()
     .use("*", async (c, next) => {
-      c.set("user", caller(authority));
+      // A workspace admin: these routes are an admin's (W1), and the question here is reach.
+      c.set("user", { ...caller(authority), workspaceRole: "admin" });
       await next();
     })
     .route(at, routes);
@@ -141,19 +142,19 @@ describe("services/acp-sessions createSession — the dispatch control pair", ()
   test("a token whose mayDispatch covers the agent passes the pair without reading the plane", async () => {
     // Past the pair, the next gate is readiness: the node is not connected in this process.
     await expect(
-      createSession({ stationId: STATION, userId: ME, mode: "ask", authority: ALLOWED() }),
+      createSession({ tenantId: TENANT, stationId: STATION, userId: ME, mode: "ask", authority: ALLOWED() }),
     ).rejects.toThrow("Node is offline.");
     expect(callerReads).toEqual([]);
   });
 
   test("a token whose mayDispatch does not cover it is refused by the pair", async () => {
-    const err = await createSession({ stationId: STATION, userId: ME, mode: "ask", authority: NO_DISPATCH() }).catch((e) => e);
+    const err = await createSession({ tenantId: TENANT, stationId: STATION, userId: ME, mode: "ask", authority: NO_DISPATCH() }).catch((e) => e);
     expect(isControlPairDenied(err)).toBe(true);
     expect(callerReads).toEqual([]);
   });
 
   test("with no token to read (bridge, Matrix: the station's owner) it fails closed as OrgPlaneUnavailable", async () => {
-    const err = await createSession({ stationId: STATION, userId: ME, mode: "ask" }).catch((e) => e);
+    const err = await createSession({ tenantId: TENANT, stationId: STATION, userId: ME, mode: "ask" }).catch((e) => e);
     expect(err).toBeInstanceOf(OrgPlaneUnavailable);
   });
 
