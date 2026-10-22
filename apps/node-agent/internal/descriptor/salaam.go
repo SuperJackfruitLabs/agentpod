@@ -94,7 +94,13 @@ func (s *salaamDescriptor) Health(key string) (Health, error) {
 	defer cancel()
 	note := "Daemon health observed; execution still requires a fresh bound authority lease"
 	health := s.client().ObserveHealth(ctx)
-	return Health{Running: health.Running, PID: health.PID, ConfigurationDigest: health.ConfigurationDigest, Note: &note}, nil
+	out := Health{Running: health.Running, PID: health.PID, ConfigurationDigest: health.ConfigurationDigest, Note: &note}
+	if health.PID != nil {
+		out.CpuPct, out.MemBytes, out.UptimeSec = gatherPidMetrics(*health.PID)
+	}
+	out.DiskBytes = salaamWorkspaceDisk(s.config.Workspace)
+	out.LastActivity = salaamLastActivity(health.LastActivityAt, s.config.StateDir)
+	return out, nil
 }
 func (s *salaamDescriptor) ACPCommand(key string) ([]string, string, []string, error) {
 	if key != salaam.StationKey(s.config.Workspace) || !s.configured() {
