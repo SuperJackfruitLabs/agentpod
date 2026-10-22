@@ -106,6 +106,13 @@ H5="$WORK/home5"; mkdir -p "$H5/.claude" "$H5/.codex" "$H5/.local/bin"
 fake_bin "$H5/.local/bin/claude" v1
 if [ "$(count_harness_paths "$H5")" = 2 ]; then pass "counts harnesses by home dir"; else fail "fallback count: $(count_harness_paths "$H5")"; fi
 if [ "$(count_harness_paths "$WORK/home3")" = 0 ]; then pass "empty home -> 0"; else fail "empty home -> 0"; fi
+H6="$WORK/home6"; mkdir -p "$H6/.npm-global/bin"; fake_bin "$H6/.npm-global/bin/codex" v1
+if [ "$(count_harness_paths "$H6")" = 1 ]; then pass "harness binary alone counts"; else fail "binary-only count: $(count_harness_paths "$H6")"; fi
+
+echo "== detect finds 0 but harness paths exist (fresh install, no projects)"
+# args 6/7: root / user harness-path counts
+check_mode "user with only an empty ~/.claude -> user" user "" 0 alice "$J0" "$J0" 0 1
+check_mode "root with ~/.codex -> system" system "" 0 alice "$J0" "$J2" 1 0
 
 echo ""
 echo "install.test.sh: ${PASS} passed, ${FAIL} failed"

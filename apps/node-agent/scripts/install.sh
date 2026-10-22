@@ -132,24 +132,39 @@ detect_count() {
   echo "${n:-0}"
 }
 
-# count_harness_paths <home> — fallback when `detect` can't run: how many
-# harnesses have a home dir. The list mirrors the descriptors in
-# internal/descriptor/*.go (claudecode .claude, codex .codex, hermes .hermes,
-# openclaw .openclaw, opencode/kilo/muse .local/share/<name>, pi .pi/agent).
+# count_harness_paths <home> — how many harnesses are installed under <home>,
+# by home dir or binary. `detect` counts stations (Claude Code: one per
+# project), so a fresh install with no projects yet reads 0 there; this sees
+# it. The list mirrors the descriptors in internal/descriptor/*.go: home dirs
+# (claudecode .claude, codex .codex, hermes .hermes, openclaw .openclaw,
+# opencode/kilo/muse .local/share/<name>, pi .pi/agent) and the binaries the
+# shared locator finds in the user's bin dirs (~/.local/bin, ~/.npm-global/bin,
+# ~/bin). System dirs are skipped: root and the user see them alike.
 count_harness_paths() {
-  local home="$1" n=0 d
-  for d in .claude .codex .hermes .openclaw .local/share/opencode .local/share/kilo .local/share/muse .pi/agent; do
-    [ -d "$home/$d" ] && n=$((n + 1))
+  local home="$1" n=0 entry dir bin b found
+  for entry in claude:.claude codex:.codex hermes:.hermes openclaw:.openclaw \
+               opencode:.local/share/opencode kilo:.local/share/kilo \
+               muse:.local/share/muse pi:.pi/agent salaam:; do
+    bin="${entry%%:*}"; dir="${entry#*:}"; found=0
+    if [ -n "$dir" ] && [ -d "$home/$dir" ]; then found=1; fi
+    for b in "$home/.local/bin" "$home/.npm-global/bin" "$home/bin"; do
+      [ -x "$b/$bin" ] && found=1
+    done
+    n=$((n + found))
   done
   echo "$n"
 }
 
 # decide_install_mode <explicit user|system|""> <system_unit_exists 0|1>
 #                     <sudo_user> <root_detect_json> <user_detect_json>
-# Prints "<user|system><TAB><reason>". Pure: no side effects.
+#                     [root_path_count] [user_path_count]
+# A side "has harnesses" if detect reports any station OR count_harness_paths
+# finds any. Prints "<user|system><TAB><reason>". Pure: no side effects.
 decide_install_mode() {
-  local explicit="$1" unit="$2" su="$3" rn un
+  local explicit="$1" unit="$2" su="$3" rn un rp="${6:-0}" up="${7:-0}"
   rn="$(detect_count "$4")"; un="$(detect_count "$5")"
+  [ "$rp" -gt "$rn" ] && rn="$rp"
+  [ "$up" -gt "$un" ] && un="$up"
   if [ "$explicit" = "system" ]; then printf 'system\t--system was given\n'; return; fi
   if [ "$explicit" = "user" ]; then printf 'user\t--user was given\n'; return; fi
   if [ "$unit" = "1" ]; then printf 'system\tan existing system install was found (%s); pass --user to switch\n' "$SYSTEM_UNIT"; return; fi
@@ -256,25 +271,26 @@ if [ -z "${MODE:-}" ]; then
     # $SUDO_USER, so detection matches what the node would see.
     _su="${SUDO_USER:-}"
     _unit=0; [ -f "$SYSTEM_UNIT" ] && _unit=1
-    _root_json="[]"; _user_json="[]"
+    _root_json="[]"; _user_json="[]"; _root_paths=0; _user_paths=0; _probe_dir=""
     if [ -z "$EXPLICIT_MODE" ] && [ "$_unit" = "0" ] && [ -n "$_su" ] && [ "$_su" != "root" ]; then
       _uhome="$(invoking_user_home)"
+      _root_paths="$(count_harness_paths /root)"
+      _user_paths="$(count_harness_paths "$_uhome")"
       _probe_dir="$(mktemp -d /tmp/agentpod-probe.XXXXXX)"; chmod 0755 "$_probe_dir"
       case "$(uname -m)" in x86_64) _parch=amd64 ;; aarch64|arm64) _parch=arm64 ;; *) _parch="" ;; esac
       if [ -n "${VERSION:-}" ]; then _pbase="${BASE_URL}/download/${VERSION}"; else _pbase="${BASE_URL}/latest/download"; fi
-      if [ -n "$_parch" ] && curl -fsSL -o "$_probe_dir/agentpod-node" "${_pbase}/agentpod-node-linux-${_parch}" 2>/dev/null \
+      if [ -n "$_parch" ] && curl -fSL --progress-bar -o "$_probe_dir/agentpod-node" "${_pbase}/agentpod-node-linux-${_parch}" \
          && chmod 0755 "$_probe_dir/agentpod-node" \
          && _root_json="$("$_probe_dir/agentpod-node" detect 2>/dev/null)" \
          && _user_json="$(cd / && sudo -u "$_su" -H "$_probe_dir/agentpod-node" detect 2>/dev/null)"; then
         :
       else
-        echo "INFO: couldn't run the node's harness detection; checking well-known paths instead."
-        _root_json="$(for _i in $(seq 1 "$(count_harness_paths "/root")"); do printf '{"key":1}'; done)"
-        _user_json="$(for _i in $(seq 1 "$(count_harness_paths "$_uhome")"); do printf '{"key":1}'; done)"
+        echo "INFO: couldn't run the node's harness detection; going by well-known harness paths."
+        _root_json="[]"; _user_json="[]"
+        [ -x "$_probe_dir/agentpod-node" ] || { rm -rf "$_probe_dir"; _probe_dir=""; }
       fi
-      rm -rf "$_probe_dir"
     fi
-    _decision="$(decide_install_mode "$EXPLICIT_MODE" "$_unit" "$_su" "$_root_json" "$_user_json")"
+    _decision="$(decide_install_mode "$EXPLICIT_MODE" "$_unit" "$_su" "$_root_json" "$_user_json" "$_root_paths" "$_user_paths")"
     install_mode_line "$_decision"
     MODE="$(printf '%s' "$_decision" | cut -f1)"
     if [ "$MODE" = "user" ]; then
@@ -291,10 +307,15 @@ if [ -z "${MODE:-}" ]; then
       # A copy $SUDO_USER can read (mktemp files and /root are root-only).
       _copy="$(mktemp /tmp/agentpod-install.XXXXXX)"
       cp "$SCRIPT_PATH" "$_copy" && chmod 0644 "$_copy" && SCRIPT_PATH="$_copy"
+      # Hand the probe binary to the child so it isn't downloaded twice; the
+      # child owns (and removes) it.
+      _pre=""
+      if [ -n "$_probe_dir" ]; then chown -R "$_su" "$_probe_dir" && _pre="$_probe_dir/agentpod-node"; fi
       # Enrollment happens only in the re-exec'd child (single-use token).
       exec sudo -u "$_su" -H VERSION="${VERSION:-}" AGENTPOD_USER_INSTALL=1 XDG_RUNTIME_DIR="/run/user/${_uid}" \
-        bash "$SCRIPT_PATH" "$HUB_URL" "$TOKEN"
+        AGENTPOD_PREFETCHED_BIN="$_pre" bash "$SCRIPT_PATH" "$HUB_URL" "$TOKEN"
     fi
+    if [ -n "$_probe_dir" ]; then AGENTPOD_PREFETCHED_BIN="$_probe_dir/agentpod-node"; fi
   elif [ -n "$USER_INSTALL" ]; then
     MODE=user
   elif command -v sudo >/dev/null 2>&1; then
@@ -344,13 +365,17 @@ if [ "$MODE" = "user" ]; then BIN_DIR="$HOME/.local/bin"; else BIN_DIR="/usr/loc
 mkdir -p "$BIN_DIR"
 DEST_BIN="$BIN_DIR/agentpod-node"
 
-echo "==> Downloading agentpod-node-${OS}-${ARCH}..."
 BINARY_URL="${DOWNLOAD_BASE}/agentpod-node-${OS}-${ARCH}"
 # Download to a sibling temp file, then atomically rename over the destination.
 # Writing directly to $DEST_BIN fails with ETXTBSY when re-running while the
 # service holds the running binary open; rename replaces the path safely.
 TMP_BIN="${DEST_BIN}.new.$$"
-if ! curl -fSL --progress-bar -o "$TMP_BIN" "$BINARY_URL"; then
+_pre="${AGENTPOD_PREFETCHED_BIN:-}"
+if [ -n "$_pre" ] && [ -x "$_pre" ] && cp "$_pre" "$TMP_BIN"; then
+  # The mode probe already downloaded this release's binary (same URL).
+  echo "==> Using agentpod-node-${OS}-${ARCH} downloaded for the mode check"
+  rm -rf "$(dirname "$_pre")"
+elif ! { echo "==> Downloading agentpod-node-${OS}-${ARCH}..."; curl -fSL --progress-bar -o "$TMP_BIN" "$BINARY_URL"; }; then
   rm -f "$TMP_BIN"
   echo "" >&2
   echo "ERROR: download failed: ${BINARY_URL}" >&2
