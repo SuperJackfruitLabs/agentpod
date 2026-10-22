@@ -258,7 +258,7 @@ func main() {
 			os.Exit(1)
 		}
 		cfg, cfgErr := config.Load(config.DefaultPath())
-		os.Exit(statusCmd(mgr, cfg, cfgErr, enroll.CheckCredential, jsonOut, os.Stdout))
+		os.Exit(statusCmdScoped(mgr, service.SystemScopeManager(nil), cfg, cfgErr, enroll.CheckCredential, jsonOut, os.Stdout))
 	case "logs":
 		mgr, err := service.NewManager(nil)
 		if err != nil {

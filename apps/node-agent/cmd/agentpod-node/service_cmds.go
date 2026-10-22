@@ -54,6 +54,46 @@ func parseStatusFlags(args []string, out io.Writer) (jsonOut, done bool, code in
 // blocks. Exit code is 0 iff the service is running AND the stored hub
 // credential is valid (scriptable); 1 otherwise.
 func statusCmd(mgr service.Manager, cfg config.Config, cfgErr error, checkCred func(hub, id, secret string) (bool, error), jsonOut bool, out io.Writer) int {
+	return statusCmdScoped(mgr, nil, cfg, cfgErr, checkCred, jsonOut, out)
+}
+
+// sudoStatusNote is what an unprivileged `apn status` says about the hub of a
+// system-wide install: its config lives under root's home and cannot be read.
+const sudoStatusNote = "system-wide install; run `sudo apn status` for hub details"
+
+// statusCmdScoped is statusCmd plus sys, the system-wide unit as seen by an
+// unprivileged caller (service.SystemScopeManager; nil when there is no
+// second scope). Without it, a non-root `apn status` on a host installed with
+// `sudo install.sh` printed "installed: no / running: no / not enrolled"
+// while the system service was running fine.
+func statusCmdScoped(mgr, sys service.Manager, cfg config.Config, cfgErr error, checkCred func(hub, id, secret string) (bool, error), jsonOut bool, out io.Writer) int {
+	var sysSt *service.Status
+	if sys != nil {
+		// Best effort: a failed probe of the other scope must not break the
+		// caller's own status.
+		if s, err := sys.Status(); err == nil && s.Installed {
+			sysSt = &s
+		}
+	}
+	if sysSt != nil {
+		if st, err := mgr.Status(); err == nil && !st.Installed {
+			// Only the system-wide install exists.
+			if jsonOut {
+				writeStatusJSONScoped(out, nil, sysSt, config.Config{}, false, false)
+			} else {
+				writeServiceBlock(out, "Service (system-wide):", *sysSt)
+				fmt.Fprintln(out, "Hub:")
+				fmt.Fprintln(out, "  "+sudoStatusNote)
+			}
+			// The credential cannot be checked without root; a running
+			// service is the best truthful signal we have.
+			if sysSt.Running {
+				return 0
+			}
+			return 1
+		}
+	}
+
 	// Status() failing means we genuinely don't know the service's state —
 	// rendering a zero-value block ("installed: no / running: no") would
 	// misread as "not installed" and send an operator toward `apn service
@@ -80,9 +120,18 @@ func statusCmd(mgr service.Manager, cfg config.Config, cfgErr error, checkCred f
 		}
 	}
 
-	if jsonOut {
+	switch {
+	case jsonOut && sysSt != nil:
+		writeStatusJSONScoped(out, &st, sysSt, cfg, reachable, credValid)
+	case jsonOut:
 		writeStatusJSON(out, st, cfg, reachable, credValid)
-	} else {
+	case sysSt != nil:
+		fmt.Fprintln(out, "NOTE: both a user-mode and a system-wide install exist on this host.")
+		writeStatusTextHeaded(out, "Service (user):", st, cfg, enrolled, reachable, credValid)
+		writeServiceBlock(out, "Service (system-wide):", *sysSt)
+		fmt.Fprintln(out, "Hub (system-wide):")
+		fmt.Fprintln(out, "  "+sudoStatusNote)
+	default:
 		writeStatusText(out, st, cfg, enrolled, reachable, credValid)
 	}
 
@@ -145,6 +194,12 @@ func writeStatusJSON(out io.Writer, st service.Status, cfg config.Config, reacha
 //	  reachable:  yes
 //	  credential: valid
 func writeStatusText(out io.Writer, st service.Status, cfg config.Config, enrolled, reachable, credValid bool) {
+	writeStatusTextHeaded(out, "Service:", st, cfg, enrolled, reachable, credValid)
+}
+
+// writeServiceBlock prints one service block under heading. version is this
+// binary's version, so it is only printed for the caller's own scope.
+func writeServiceBlock(out io.Writer, heading string, st service.Status) {
 	installed := "no"
 	if st.Installed {
 		installed = fmt.Sprintf("yes (%s)", st.UnitPath)
@@ -153,11 +208,42 @@ func writeStatusText(out io.Writer, st service.Status, cfg config.Config, enroll
 	if st.Running {
 		running = fmt.Sprintf("yes (pid %d)", st.PID)
 	}
-
-	fmt.Fprintln(out, "Service:")
+	fmt.Fprintln(out, heading)
 	statusLine(out, "installed:", installed)
 	statusLine(out, "enabled:", yesNo(st.Enabled))
 	statusLine(out, "running:", running)
+}
+
+// writeStatusJSONScoped is writeStatusJSON with the system-wide unit added
+// as SystemService and Hub.Note explaining why its hub is not shown. st is
+// nil when only the system-wide install exists.
+func writeStatusJSONScoped(out io.Writer, st, sysSt *service.Status, cfg config.Config, reachable, credValid bool) {
+	payload := struct {
+		Service       *service.Status
+		SystemService *service.Status
+		Hub           struct {
+			URL             string
+			NodeID          string
+			Reachable       bool
+			CredentialValid bool
+			Note            string
+		}
+	}{Service: st, SystemService: sysSt}
+	payload.Hub.URL = cfg.Hub
+	payload.Hub.NodeID = cfg.NodeID
+	payload.Hub.Reachable = reachable
+	payload.Hub.CredentialValid = credValid
+	payload.Hub.Note = sudoStatusNote
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		fmt.Fprintln(out, "error:", err)
+		return
+	}
+	fmt.Fprintln(out, string(b))
+}
+
+func writeStatusTextHeaded(out io.Writer, heading string, st service.Status, cfg config.Config, enrolled, reachable, credValid bool) {
+	writeServiceBlock(out, heading, st)
 	statusLine(out, "version:", version)
 
 	fmt.Fprintln(out, "Hub:")
@@ -349,10 +435,16 @@ func printServiceSummary(goos, unitPath string, out io.Writer) {
 		} else {
 			fmt.Fprintln(out, "Running as a systemd service (system-wide):")
 		}
-		fmt.Fprintln(out, "  status:     apn status")
-		fmt.Fprintln(out, "  logs:       apn logs -f")
-		fmt.Fprintln(out, "  restart:    apn restart")
-		fmt.Fprintln(out, "  uninstall:  apn service uninstall")
+		// A system-wide install's config is root-owned: without sudo,
+		// `apn status` cannot show the hub, so say sudo up front.
+		sudo := ""
+		if !userScope {
+			sudo = "sudo "
+		}
+		fmt.Fprintln(out, "  status:     "+sudo+"apn status")
+		fmt.Fprintln(out, "  logs:       "+sudo+"apn logs -f")
+		fmt.Fprintln(out, "  restart:    "+sudo+"apn restart")
+		fmt.Fprintln(out, "  uninstall:  "+sudo+"apn service uninstall")
 		if userScope {
 			fmt.Fprintln(out, "NOTE: to survive logout/reboot, an admin runs once: sudo loginctl enable-linger $USER")
 		}
@@ -456,6 +548,26 @@ func resolveUnitPathForLogs(goos string, mgr service.Manager, errOut io.Writer) 
 // error) — code is the caller's exit code in that case. cmd != nil means
 // code is always 0 and the caller should wire stdio and Run() it.
 func prepareLogsCmd(goos string, mgr service.Manager, homeDir func() (string, error), args []string, out, errOut io.Writer, stat func(string) error) (*exec.Cmd, int) {
+	return prepareLogsCmdScoped(goos, mgr, nil, homeDir, args, out, errOut, stat)
+}
+
+// resolveLogsUnit is resolveUnitPathForLogs plus sys (see statusCmdScoped):
+// when the caller's own scope has no unit but a system-wide one exists, it
+// reads the system unit's journal and tells the caller (on errOut, never the
+// log stream) that an unprivileged user may see nothing without sudo.
+func resolveLogsUnit(goos string, mgr, sys service.Manager, errOut io.Writer) string {
+	if goos == "linux" && sys != nil && mgr != nil {
+		if st, err := mgr.Status(); err == nil && !st.Installed {
+			if s, err := sys.Status(); err == nil && s.Installed {
+				fmt.Fprintln(errOut, "note: system-wide install; if no entries appear, run `sudo apn logs` or `sudo journalctl -u "+serviceUnitName+"`")
+				return s.UnitPath
+			}
+		}
+	}
+	return resolveUnitPathForLogs(goos, mgr, errOut)
+}
+
+func prepareLogsCmdScoped(goos string, mgr, sys service.Manager, homeDir func() (string, error), args []string, out, errOut io.Writer, stat func(string) error) (*exec.Cmd, int) {
 	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.Usage = func() {
@@ -477,7 +589,7 @@ func prepareLogsCmd(goos string, mgr service.Manager, homeDir func() (string, er
 		return nil, 1
 	}
 
-	unitPath := resolveUnitPathForLogs(goos, mgr, errOut)
+	unitPath := resolveLogsUnit(goos, mgr, sys, errOut)
 
 	cmd, err := resolveLogsCmd(goos, home, unitPath, logsOptions{Follow: *follow, Lines: *lines}, stat)
 	if err != nil {
@@ -490,7 +602,7 @@ func prepareLogsCmd(goos string, mgr service.Manager, homeDir func() (string, er
 // logsCmd is prepareLogsCmd's production wrapper: real platform/home dir/
 // filesystem, then exec.Cmd.Run() with stdio passthrough.
 func logsCmd(mgr service.Manager, args []string, out, errOut io.Writer) int {
-	cmd, code := prepareLogsCmd(runtime.GOOS, mgr, os.UserHomeDir, args, out, errOut, statFile)
+	cmd, code := prepareLogsCmdScoped(runtime.GOOS, mgr, service.SystemScopeManager(nil), os.UserHomeDir, args, out, errOut, statFile)
 	if cmd == nil {
 		return code
 	}

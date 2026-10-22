@@ -35,6 +35,85 @@ usage() {
 }
 
 # ---------------------------------------------------------------------------
+# Shadowed-apn detection. A stale apn earlier on the invoking user's PATH
+# (seen in real use: an old v0.1.34 at ~/.local/bin/apn ahead of
+# /usr/local/bin) makes plain `apn status` run the old binary. Under sudo,
+# PATH is reset, so the user's own bin dirs are checked explicitly as well as
+# every PATH entry that precedes the install dir. Warns only; never deletes.
+# ---------------------------------------------------------------------------
+
+# bin_version <path> — first line of `<path> version`, or "unknown". Runs the
+# user's binary as that user when we are root via sudo.
+bin_version() {
+  local v=""
+  if [ "$(id -u)" = "0" ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] && command -v sudo >/dev/null 2>&1; then
+    v="$(sudo -u "$SUDO_USER" "$1" version 2>/dev/null | head -n1 || true)"
+  else
+    v="$("$1" version 2>/dev/null | head -n1 || true)"
+  fi
+  echo "${v:-unknown}"
+}
+
+# resolve_path <path> — the path with symlinks resolved (best effort).
+resolve_path() {
+  readlink -f "$1" 2>/dev/null || realpath "$1" 2>/dev/null || echo "$1"
+}
+
+# invoking_user_home — the home of the human who ran the installer.
+invoking_user_home() {
+  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    local h=""
+    h="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
+    [ -n "$h" ] || h="$(eval echo "~${SUDO_USER}" 2>/dev/null || true)"
+    echo "${h:-$HOME}"
+  else
+    echo "$HOME"
+  fi
+}
+
+# warn_shadowed_apn <dest_bin> <bin_dir> <user_home> <user_path>
+warn_shadowed_apn() {
+  local dest="$1" bin_dir="$2" home="$3" upath="$4"
+  local real_dest; real_dest="$(resolve_path "$dest")"
+  local dirs=() d seen=":" found=0 name f stale=""
+  dirs+=("$home/.local/bin" "$home/bin")
+  local IFS=":"
+  for d in $upath; do
+    [ "$d" = "$bin_dir" ] && break
+    dirs+=("$d")
+  done
+  unset IFS
+  for d in "${dirs[@]}"; do
+    [ -n "$d" ] && [ "$d" != "$bin_dir" ] || continue
+    case "$seen" in *":$d:"*) continue ;; esac
+    seen="${seen}${d}:"
+    for name in apn agentpod-node; do
+      f="$d/$name"
+      [ -x "$f" ] || continue
+      [ "$(resolve_path "$f")" = "$real_dest" ] && continue
+      if [ "$found" = "0" ]; then
+        echo ""
+        echo "WARNING: another apn/agentpod-node will be found before the one just installed:"
+      fi
+      found=1
+      stale="${stale} $f"
+      echo "    $f  ($(bin_version "$f"))"
+    done
+  done
+  if [ "$found" = "1" ]; then
+    echo "  just installed:"
+    echo "    $bin_dir/apn  ($(bin_version "$dest"))"
+    echo "  Plain \`apn\` may run the old binary. To fix, remove the old one(s), e.g.:"
+    echo "    rm${stale}"
+    echo "  then run \`hash -r\` (or open a new terminal) so your shell finds $bin_dir/apn."
+    echo "  Or call $bin_dir/apn by its full path. (Nothing was deleted.)"
+  fi
+}
+
+# Tests source this file with AGENTPOD_INSTALL_LIB=1 to get the functions only.
+if [ "${AGENTPOD_INSTALL_LIB:-}" = "1" ]; then return 0 2>/dev/null || exit 0; fi
+
+# ---------------------------------------------------------------------------
 # Args — pull out --user, collect positional HUB_URL + TOKEN
 # ---------------------------------------------------------------------------
 USER_INSTALL="${AGENTPOD_USER_INSTALL:-}"
@@ -220,4 +299,14 @@ else
   # invoking user above, so MODE is never "system" on darwin.
   echo "==> Installing service..."
   "$DEST_BIN" service install
+  echo ""
+  echo "System-wide install: config and credentials are root-owned, so use sudo:"
+  echo "  status:     sudo ${BIN_DIR}/apn status"
+  echo "  logs:       sudo ${BIN_DIR}/apn logs -f"
+  echo "  restart:    sudo ${BIN_DIR}/apn restart"
 fi
+
+# Last, so it is not scrolled away: warn if the invoking user's shell would run
+# a different apn first. ${SUDO_USER}'s real PATH is not visible under sudo,
+# so the user's own bin dirs are checked explicitly inside the function.
+warn_shadowed_apn "$DEST_BIN" "$BIN_DIR" "$(invoking_user_home)" "$PATH" || true

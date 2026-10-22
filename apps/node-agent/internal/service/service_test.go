@@ -5,6 +5,36 @@ import (
 	"testing"
 )
 
+func TestSystemScopeManager(t *testing.T) {
+	var calls []string
+	run := func(name string, args ...string) (string, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return "active", nil
+	}
+	if m := systemScopeManager("linux", 0, run); m != nil {
+		t.Error("root already sees the system scope; want nil")
+	}
+	if m := systemScopeManager("darwin", 501, run); m != nil {
+		t.Error("macOS installs are per-user only; want nil")
+	}
+	m := systemScopeManager("linux", 501, run)
+	if m == nil {
+		t.Fatal("unprivileged linux: want a system-scope manager")
+	}
+	st, err := m.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.UnitPath != "/etc/systemd/system/agentpod-node.service" || !st.Running {
+		t.Errorf("status: %+v", st)
+	}
+	for _, c := range calls {
+		if strings.Contains(c, "--user") {
+			t.Errorf("system probe must not use --user: %s", c)
+		}
+	}
+}
+
 func TestNewManager_PlatformSelection(t *testing.T) {
 	t.Run("darwin_non_root_returns_launchd_manager", func(t *testing.T) {
 		mgr, err := newManager("darwin", 501, nil)
