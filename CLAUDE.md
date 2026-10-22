@@ -25,7 +25,7 @@ On an enrolled node, `apn status|stop|start|restart|logs [-f]` and `apn service 
 - TDD: failing test first, including a regression test for every bug fix.
 - Branches: trunk-based on `main` — short-lived branch → PR → `main`. **`develop` is dead** (419 commits behind, last touched 2026-08-08); do not branch from it. Required checks: `contract`, `hub`, `node-agent`, `console`, `worker`; `strict`, so a branch must be up to date before it merges — and nothing, including a workflow, can push straight to `main`. Full flow: `CONTRIBUTING.md`.
 - Releases: tag `v*` on `main` → `release-node-agent.yml` publishes binaries + `install.sh` + `SHA256SUMS` (self-update verifies against SHA256SUMS — an incomplete release bricks fleet updates). Nothing else to do: the Fly/worker images default to `releases/latest/download`, so there is no version pin to move. `publish-images.yml` still resolves a concrete release and passes `--build-arg AGENTPOD_VERSION`, so a published image stays reproducible.
-- Console production builds need `PUBLIC_HUB_URL=https://hub.agentpod.dev` baked in at build time (a plain build points the deployed console at localhost).
+- Console production builds need `PUBLIC_HUB_URL=https://hub.agentpod.dev` baked in at build time (a plain build points the deployed console at localhost). Production gets the console only on a `v*` tag, after the hub (`release-hub.yml`); `main` deploys it to staging.
 
 ## Gotchas
 
