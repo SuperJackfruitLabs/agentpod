@@ -250,6 +250,17 @@ A host requiring managed MCP refuses a session opened without its assignment.
 
 ## Reviewed host configuration
 
+With the node operator's `configManagement` opt-in, every Salaam station also
+reports four `report-only` settings, read from the daemon's `/v1/health`:
+`salaam.provider.route` (`{provider, model, endpoint}`), `salaam.mcp.operator`
+(`{digest, servers: [{name, transport, declarationDigest}]}`),
+`salaam.agentpod.pins` (the pins file digest) and `salaam.tools.user` (when the
+daemon reports one). No MCP command line, argument or environment, provider
+connection setting or key is ever included. Declaring one of them
+(`fleet config set`) makes the Console show whether the daemon matches it; the
+node never writes them.
+
+
 With the node operator's `configManagement` opt-in, a Salaam descriptor configured
 with absolute private Node, CLI and manifest paths exposes the existing
 `config.manage` interface. Its one registry entry, `salaam.host.manifest`, is the
