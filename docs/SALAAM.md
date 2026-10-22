@@ -338,3 +338,15 @@ The expiry receipt remains version 1. See
 `packages/contract/src/salaam-operator-settlement.ts`,
 `apps/hub/src/routes/admin-bridge-agents.ts`, and
 `apps/hub/src/services/bridge/salaam-dispatch.ts`.
+
+## Dispatch grant for board work
+
+A card the bridge dispatches runs as the station's adopter. Salaam's authority
+check (and the control pair, when enforced) requires that person's org-plane
+grant to name the station's agent in `mayDispatch`. `fleet bridge add`, and
+`fleet bridge set` on an enabled entry, record that grant when it is missing:
+exactly the station's own agent, for exactly its adopter, never the caller, and
+nothing is ever removed. The response carries `dispatchGrant`
+(`present`, `granted`, `no_agent`, `adopter_not_a_person`, or `unknown` with a
+reason). `GET /api/stations/:id/readiness` reports the same state and refuses
+readiness, with the fix in words, while it is missing.

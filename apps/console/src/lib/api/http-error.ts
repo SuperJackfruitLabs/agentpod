@@ -38,6 +38,11 @@ export class ApiError extends Error {
 
 import { WORKSPACE_ADMIN_REQUIRED, WORKSPACE_ADMIN_REQUIRED_MESSAGE } from "$lib/workspace-authority";
 
+/** The hub's 403 when Salaam's authority check refuses a session (spec 2026-10-23, C10). */
+export const SALAAM_AUTHORITY_DENIED = "salaam_authority_denied";
+export const SALAAM_AUTHORITY_DENIED_MESSAGE =
+  "You don't have a dispatch grant for this agent, or the agent is suspended. A workspace admin can grant dispatch at the organization plane";
+
 /** The hub's refusal for anything the organization plane now owns. */
 export const MANAGED_BY_ORG_PLANE = "managed_by_org_plane";
 
@@ -97,6 +102,10 @@ export async function apiError(res: Response, requestLine: string): Promise<ApiE
           // A member called a workspace-admin route: say who can, never the raw code.
           code = WORKSPACE_ADMIN_REQUIRED;
           hubMessage = WORKSPACE_ADMIN_REQUIRED_MESSAGE;
+        }
+        if (code === SALAAM_AUTHORITY_DENIED) {
+          // The hub's sentence is for operators reading logs; say what the person can do.
+          hubMessage = SALAAM_AUTHORITY_DENIED_MESSAGE;
         }
         if (parsed.error === MANAGED_BY_ORG_PLANE) {
           code = MANAGED_BY_ORG_PLANE;

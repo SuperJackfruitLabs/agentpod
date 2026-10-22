@@ -358,3 +358,18 @@ test("expired approval settlement forwards the exact decision behind existing op
     else process.env.SUPERPIPELINE_BASE_URL = savedOrigin;
   }
 });
+
+// Plan step 10 (spec 2026-10-23): an enabled roster entry records the bridge user's dispatch grant.
+// This station has no agent, so the route reports that rather than granting anything; the grant
+// itself is proven in bridge-dispatch-grant.test.ts.
+test("an enabled roster entry reports the dispatch grant it needs; a disabled one does not ask", async () => {
+  await db.delete(bridgeAgents).where(eq(bridgeAgents.key, "grant-check"));
+  const created = await post({ ...valid(), key: "grant-check" });
+  expect(created.status).toBe(201);
+  expect(((await created.json()) as { dispatchGrant?: unknown }).dispatchGrant).toEqual({ state: "no_agent" });
+  const disabled = await patch("grant-check", { enabled: false });
+  expect(((await disabled.json()) as { dispatchGrant?: unknown }).dispatchGrant).toBeUndefined();
+  const enabled = await patch("grant-check", { enabled: true });
+  expect(((await enabled.json()) as { dispatchGrant?: unknown }).dispatchGrant).toEqual({ state: "no_agent" });
+  await db.delete(bridgeAgents).where(eq(bridgeAgents.key, "grant-check"));
+});
