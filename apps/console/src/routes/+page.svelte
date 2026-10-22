@@ -28,6 +28,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import { relativeTime } from "$lib/utils/relative-time";
+  import { enrollmentCommand, enrollmentHubUrl } from "$lib/utils/enrollment-command";
   import { MediaQuery } from "svelte/reactivity";
 
   // ── The fleet in words ──────────────────────────────────────────────────────
@@ -176,7 +177,7 @@
             Enrollment token created — run this on the node you want to connect
           </p>
           <code class="block break-all font-mono text-sm">
-            curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh | sudo bash -s -- {lastToken}
+            {enrollmentCommand(enrollmentHubUrl(), lastToken)}
           </code>
           <p class="text-xs text-muted-foreground">The node joins the fleet as soon as it connects.</p>
         </div>

@@ -14,6 +14,15 @@
  *   const cmd = enrollmentCommand(hubUrl, token);
  */
 
+/** The repository moved to the organization; the old personal path only works by redirect. */
+export const INSTALLER_URL = "https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/install.sh";
+
 export function enrollmentCommand(hubUrl: string, token: string): string {
-  return `curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh | sudo bash -s -- ${hubUrl} ${token}`;
+  return `curl -fsSL ${INSTALLER_URL} | sudo bash -s -- ${hubUrl} ${token}`;
+}
+
+/** The hub a new node should dial: the console's own override, else the one it was built for. */
+export function enrollmentHubUrl(): string {
+  const stored = typeof window !== "undefined" ? window.localStorage.getItem("agentpod.apiUrl") : null;
+  return stored ?? import.meta.env.PUBLIC_HUB_URL ?? "http://localhost:3001";
 }
