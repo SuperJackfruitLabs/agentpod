@@ -100,6 +100,9 @@ type DaemonHealth struct {
 	ConfigurationDigest string
 	// Reason says why Running is false; empty when healthy.
 	Reason string
+	// LastActivityAt is the daemon's own `last_activity_at` (RFC3339, UTC), when it reports one.
+	// Empty when absent or unparseable; the descriptor then falls back to file times.
+	LastActivityAt string
 }
 
 func (c *Client) PassiveHealth(ctx context.Context) (bool, *int) {
@@ -126,6 +129,7 @@ func (c *Client) ObserveHealth(ctx context.Context) DaemonHealth {
 		ManifestDigest      string  `json:"host_manifest_digest"`
 		SupervisorConnected bool    `json:"host_supervisor_connected"`
 		RuntimeNode         string  `json:"runtime_node"`
+		LastActivityAt      string  `json:"last_activity_at"`
 		JobExecution        struct {
 			ControlError         any `json:"control_error"`
 			ScheduleControlError any `json:"schedule_control_error"`
@@ -145,6 +149,9 @@ func (c *Client) ObserveHealth(ctx context.Context) DaemonHealth {
 	}
 	if healthy && out.PID != nil && *out.PID > 0 {
 		health.PID = out.PID
+	}
+	if at, err := time.Parse(time.RFC3339Nano, out.LastActivityAt); err == nil {
+		health.LastActivityAt = at.UTC().Format(time.RFC3339)
 	}
 	if health.PID != nil && out.SupervisorConnected && regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(out.ManifestDigest) && (c.Runtime == nil || c.Runtime.Node == out.RuntimeNode) && out.JobExecution.ControlError == nil && out.JobExecution.ScheduleControlError == nil && out.JobExecution.InboxControlError == nil {
 		health.ConfigurationDigest = out.ManifestDigest

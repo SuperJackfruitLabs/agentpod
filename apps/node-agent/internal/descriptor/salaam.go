@@ -84,7 +84,7 @@ func (s *salaamDescriptor) Detect() ([]Station, error) {
 		}
 	}
 	s.miss("")
-	return []Station{{Key: salaam.StationKey(workspace), Harness: "salaam", Kind: "leaf", DisplayName: "Salaam", WorkspacePath: &workspace, Capabilities: []string{"inventory", "health", "acp", "skills.inventory"}}}, nil
+	return []Station{{Key: salaam.StationKey(workspace), Harness: "salaam", Kind: "leaf", DisplayName: "Salaam", WorkspacePath: &workspace, Capabilities: []string{"inventory", "health", "logs", "fs.read", "acp", "skills.inventory"}}}, nil
 }
 func (s *salaamDescriptor) Health(key string) (Health, error) {
 	if key != salaam.StationKey(s.config.Workspace) || !s.configured() {
@@ -94,7 +94,13 @@ func (s *salaamDescriptor) Health(key string) (Health, error) {
 	defer cancel()
 	note := "Daemon health observed; execution still requires a fresh bound authority lease"
 	health := s.client().ObserveHealth(ctx)
-	return Health{Running: health.Running, PID: health.PID, ConfigurationDigest: health.ConfigurationDigest, Note: &note}, nil
+	out := Health{Running: health.Running, PID: health.PID, ConfigurationDigest: health.ConfigurationDigest, Note: &note}
+	if health.PID != nil {
+		out.CpuPct, out.MemBytes, out.UptimeSec = gatherPidMetrics(*health.PID)
+	}
+	out.DiskBytes = salaamWorkspaceDisk(s.config.Workspace)
+	out.LastActivity = salaamLastActivity(health.LastActivityAt, s.config.StateDir)
+	return out, nil
 }
 func (s *salaamDescriptor) ACPCommand(key string) ([]string, string, []string, error) {
 	if key != salaam.StationKey(s.config.Workspace) || !s.configured() {
@@ -110,13 +116,4 @@ func (s *salaamDescriptor) ACPCommand(key string) ([]string, string, []string, e
 		command = append([]string{s.config.NodeBinary}, command...)
 	}
 	return command, s.config.Workspace, nil, nil
-}
-func (s *salaamDescriptor) ListDir(string, string) ([]FsEntry, error) {
-	return nil, fmt.Errorf("salaam: station filesystem access is not enabled")
-}
-func (s *salaamDescriptor) ReadFile(string, string, int64) ([]byte, string, bool, error) {
-	return nil, "", false, fmt.Errorf("salaam: station filesystem access is not enabled")
-}
-func (s *salaamDescriptor) TailLogs(context.Context, string, bool, func([]byte) error) error {
-	return fmt.Errorf("salaam: logs are not exposed as station files")
 }
