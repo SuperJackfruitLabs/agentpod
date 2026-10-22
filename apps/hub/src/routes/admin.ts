@@ -11,11 +11,21 @@
  * `retiredUnderPlane` answers those paths 410 `managed_by_org_plane`.
  */
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { adminMiddleware } from "../auth/admin-middleware";
+import { hubOperatorMiddleware, isHubOperator, workspaceAdminMiddleware } from "../auth/workspace-authority";
 import { authMiddleware } from "../auth/middleware";
+import { resolveTenantId } from "../auth/tenant";
+
+declare module "hono" {
+  interface ContextVariableMap {
+    /** Set by a route-specific admin guard that has already decided this request (admin.ts). */
+    adminGateDecided: boolean;
+    /** The caller holds the hub operator seat and reads every tenant's audit rows. */
+    auditLogAllTenants: boolean;
+  }
+}
 import { retiredUnderPlane } from "../auth/org-plane/retired";
 import { adminPrincipalsRouter } from "./admin-principals";
 import { agentsAdminRouter } from "./agents-admin";
@@ -40,12 +50,36 @@ export const adminRouter = new Hono();
 // and an unauthenticated one gets 401. Kept that way on purpose (security review finding 7b):
 // answering 410 before auth would add an unauthenticated path that enumerates the admin surface,
 // for no gain — the people who need the redirect are signed in. It runs ahead of this router's
-// own authMiddleware/adminMiddleware only so a non-operator learns the route moved instead of 403.
+// own authMiddleware and admin guards only so a non-operator learns the route moved instead of 403.
 adminRouter.use("*", retiredUnderPlane());
 
 // Apply auth middleware to all admin routes
 adminRouter.use("*", authMiddleware);
-adminRouter.use("*", adminMiddleware);
+
+// Two authorities (workspace authority spec, W1/W2; auth/workspace-authority.ts). The hub-wide
+// settings are the hub operator seat's and nobody else's. Every other route here is what a
+// workspace owns, and is its admins' — including a hub operator's only if their token says they
+// are an admin of the workspace it names. The audit log is the one route both may read: a
+// workspace admin reads their tenant's rows, the seat reads every row (a cross-tenant read named
+// as one).
+//
+// The settings and audit-log guards are registered BEFORE the workspace-admin guard and mark the
+// request as decided, so that guard does not refuse an operator who is a workspace member. Path
+// matching is relative to this router's mount (Hono `use(path)`), never a regex over the URL.
+const decided = (c: Context) => c.set("adminGateDecided", true);
+adminRouter.use("/settings", hubOperatorMiddleware, async (c, next) => (decided(c), next()));
+adminRouter.use("/settings/*", hubOperatorMiddleware, async (c, next) => (decided(c), next()));
+adminRouter.use("/audit-log", async (c, next) => {
+  if (await isHubOperator(c)) {
+    c.set("auditLogAllTenants", true);
+    decided(c);
+  }
+  return next();
+});
+adminRouter.use("*", async (c, next) => {
+  if (c.get("adminGateDecided")) return next();
+  return workspaceAdminMiddleware(c, next);
+});
 
 // Who exists in this workspace, read through the plane: a grant names a `prn_` id on
 // both sides and nothing else in this API says what those ids are.
@@ -86,7 +120,8 @@ const auditLogSchema = z.object({
  * Get system-wide statistics
  */
 adminRouter.get("/stats", async (c) => {
-  const stats = await getAdminStats();
+  // Counts for the caller's workspace (its `org`); the static API_TOKEN names none and counts all.
+  const stats = await getAdminStats({ org: c.get("user")?.org });
   return c.json(stats);
 });
 
@@ -102,6 +137,8 @@ adminRouter.get("/audit-log", zValidator("query", auditLogSchema), async (c) => 
   const query = c.req.valid("query");
 
   const result = await getAuditLogs({
+    // A workspace admin reads their tenant's rows only; the seat reads every row.
+    ...(c.get("auditLogAllTenants") ? {} : { tenantId: resolveTenantId(c) }),
     adminUserId: query.adminUserId,
     targetUserId: query.targetUserId,
     action: query.action as any,

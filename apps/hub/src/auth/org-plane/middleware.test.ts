@@ -41,8 +41,22 @@ describe("authMiddleware (the org plane is the only issuer)", () => {
       email: "op@example.com",
       authType: "org_plane",
       tenantId: "fleet_11111111111111111111",
+      // No orgRole on the token: a member (workspace authority spec W1, fails closed).
+      workspaceRole: "member",
       authority: { principalKind: "human", mayDispatch: ["prn_bbbbbbbbbbbbbbbbbbbb"], mayGrantReach: true, scopes: [] },
     });
+  });
+
+  test("the token's org and orgRole ride on AuthUser as org and workspaceRole", async () => {
+    for (const [orgRole, expected] of [["owner", "owner"], ["admin", "admin"], ["member", "member"], ["root", "member"]]) {
+      const withRole = {
+        ...human,
+        caller: { ...human.caller, claims: { ...human.caller.claims, org: "org_cccccccccccccccccccc", orgRole } },
+      } as PlaneBearerResult;
+      const u = (await (await app(withRole).request("/api/whoami", { headers: { Authorization: "Bearer t" } })).json()) as Record<string, unknown>;
+      expect(u.org).toBe("org_cccccccccccccccccccc");
+      expect(u.workspaceRole).toBe(expected);
+    }
   });
 
   test("the token's authority rides on AuthUser, so authorization never reads the plane (design §5.7)", async () => {

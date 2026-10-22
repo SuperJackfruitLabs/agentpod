@@ -12,7 +12,11 @@ import { stations } from "../db/schema/stations";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { createPrincipal } from "../../tests/helpers/principals";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
-import { adminMiddleware } from "../auth/admin-middleware";
+// Workspace authority spec: these routes are a workspace admin's. This file's "admin" fixture
+// (createTestUser role: "admin", a hub_operators seat) stands for one here; the real token path
+// is tests/integration/workspace-authority.test.ts.
+import { workspaceAdminMiddleware as adminMiddleware } from "../auth/workspace-authority";
+import { isUserAdmin } from "../models/admin-users";
 import { agentsAdminRouter } from "./agents-admin";
 import { onProvisionStation } from "../services/matrix-as/hooks";
 import { setOrgPlaneForTests, TEST_PLANE } from "../auth/org-plane/config";
@@ -45,8 +49,9 @@ function app(userId = actor, tenantId = BOOTSTRAP_TENANT_ID) {
   a.use("*", async (c, next) => {
     c.set("user", {
       id: userId,
-      authType: "api_key",
+      authType: "org_plane",
       tenantId,
+      workspaceRole: (await isUserAdmin(userId)) ? "admin" : "member",
     });
     await next();
   });

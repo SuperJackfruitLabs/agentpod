@@ -254,15 +254,25 @@ describe("routes", () => {
     expect(callerReads).toEqual([]);
   });
 
-  test("enrollment tokens: the caller's principal is their token's sub; admin is the hub_operators seat", async () => {
-    const post = () => mount(ALLOWED(), enrollmentTokenRoutes, "/").request("/", { method: "POST" });
+  test("enrollment tokens: the caller's principal is their token's sub; admin is the workspace role", async () => {
+    const post = (workspaceRole?: "admin" | "member") =>
+      new Hono()
+        .use("*", async (c, next) => {
+          c.set("user", { ...caller(ALLOWED()), ...(workspaceRole ? { workspaceRole } : {}) });
+          await next();
+        })
+        .route("/", enrollmentTokenRoutes)
+        .request("/", { method: "POST" });
     expect((await post()).status).toBe(403);
+    expect((await post("member")).status).toBe(403);
+    // The hub operator seat is not a workspace's admin (workspace authority spec, W2).
     await rawSql`INSERT INTO hub_operators (principal_id) VALUES (${ME}) ON CONFLICT DO NOTHING`;
     try {
-      expect((await post()).status).toBe(200);
+      expect((await post("member")).status).toBe(403);
     } finally {
       await rawSql`DELETE FROM hub_operators WHERE principal_id = ${ME}`;
     }
+    expect((await post("admin")).status).toBe(200);
     expect(callerReads).toEqual([]);
   });
 

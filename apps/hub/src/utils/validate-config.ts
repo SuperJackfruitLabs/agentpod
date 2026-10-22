@@ -9,6 +9,7 @@ import {
 import { resolveDockerDaemon } from "../services/provisioner/docker-daemon";
 import { loadBridgeConfig } from "../services/bridge/config";
 import { loadOperatorRules } from "../services/redact-content";
+import { HubOperatorsConfigError, parseHubOperators } from "../services/hub-operators-config";
 import { orgPlaneConfigErrors, type OrgPlaneConfigError } from "../auth/org-plane/config";
 
 export interface ValidationError {
@@ -163,7 +164,9 @@ export function collectConfigErrors(
   resolveImage: ResolveImage = imageForHarness,
   // ORG_PLANE_* is required, all five (auth/org-plane/config.ts). Read once at module load; injectable
   // so a test can hand in errors without touching the process environment.
-  planeErrors: OrgPlaneConfigError[] = orgPlaneConfigErrors()
+  planeErrors: OrgPlaneConfigError[] = orgPlaneConfigErrors(),
+  // HUB_OPERATORS (workspace authority spec W3). Injectable for the same reason as planeErrors.
+  hubOperators: string | undefined = process.env.HUB_OPERATORS
 ): ValidationError[] {
   const errors: ValidationError[] = [];
   const isProduction = cfg.nodeEnv === "production";
@@ -450,6 +453,15 @@ export function collectConfigErrors(
   }
 
   errors.push(...planeErrors);
+
+  // A malformed HUB_OPERATORS refuses the boot: reconciling it would add a seat nobody holds or
+  // drop one somebody needs. Unset is fine and leaves hub_operators as it is.
+  try {
+    parseHubOperators(hubOperators);
+  } catch (e) {
+    if (!(e instanceof HubOperatorsConfigError)) throw e;
+    errors.push({ field: "HUB_OPERATORS", message: e.message });
+  }
 
   return errors;
 }

@@ -18,7 +18,8 @@ import { db } from "../db/drizzle";
 import { stations } from "../db/schema";
 import { grantAllowsPrincipal } from "./grants";
 import { callerGrant, callerPrincipal, type CallerRef } from "../auth/caller-authority";
-import { isUserAdmin } from "../models/admin-users";
+import { isWorkspaceAdminUser } from "../auth/workspace-authority";
+import type { AuthUser } from "../auth/middleware";
 import { isControlPairEnforced, GrantReachDenied } from "./control-pair";
 import { createLogger } from "../utils/logger";
 
@@ -181,16 +182,12 @@ export async function requireIssueCredentials(
 }
 
 /**
- * Is this principal an admin? A human's principal id IS their account id (contract §2), so the
- * hub's operator seat (`hub_operators`, decision D4) is asked about the principal directly. A
- * principal with no seat (an agent, a service) is simply not an admin.
- */
-async function isAdminPrincipal(principalId: string): Promise<boolean> {
-  return isUserAdmin(principalId);
-}
-
-/**
- * Growing a fleet is an admin act.
+ * Growing a fleet is an admin act — of the workspace whose fleet it is (workspace authority spec:
+ * "its admin check becomes workspace admin"). It used to ask the hub operator seat, which made the
+ * hub's operators the only people who could grow any workspace's fleet, and nobody else's.
+ *
+ * Takes the caller (its `workspaceRole`, read from the token's `orgRole`), not a principal id: the
+ * role is per workspace, so a bare id cannot answer it.
  *
  * This used to require `mayGrantReach` plus a dispatch value whose node half was
  * `*` — "you may grow a fleet only if your authority already spans it". With no
@@ -199,9 +196,9 @@ async function isAdminPrincipal(principalId: string): Promise<boolean> {
  * scoped list as the asymmetric-grant hazard restated. Admin is the honest
  * remaining answer, and /api/admin/grants is already guarded that way.
  */
-export async function requireFleetGrantReach(principalId: string): Promise<void> {
+export async function requireFleetGrantReach(caller: Pick<AuthUser, "id" | "workspaceRole">): Promise<void> {
   if (!isControlPairEnforced()) return;
-  if (await isAdminPrincipal(principalId)) return;
-  log.warn("fleet-level reach refused: not an admin", { principalId });
-  throw new GrantReachDenied(principalId, "fleet", null);
+  if (isWorkspaceAdminUser(caller)) return;
+  log.warn("fleet-level reach refused: not a workspace admin", { principalId: caller.id });
+  throw new GrantReachDenied(caller.id, "fleet", null);
 }

@@ -71,11 +71,11 @@ describe("requireFleetGrantReach", () => {
     // The wildcard that encoded "your authority spans the fleet" no longer
     // exists. A second scoped list was rejected by
     // 2026-08-15-granting-reach-is-changing-an-agent, so this is admin.
-    await expect(requireFleetGrantReach(NON_ADMIN_PRINCIPAL)).rejects.toThrow(GrantReachDenied);
+    await expect(requireFleetGrantReach({ id: NON_ADMIN_PRINCIPAL, workspaceRole: "member" })).rejects.toThrow(GrantReachDenied);
   });
 
   test("an admin may", async () => {
-    await expect(requireFleetGrantReach(ADMIN_PRINCIPAL)).resolves.toBeUndefined();
+    await expect(requireFleetGrantReach({ id: ADMIN_PRINCIPAL, workspaceRole: "admin" })).resolves.toBeUndefined();
   });
 
   test("is a no-op when the pair is not enforced, admin or not", async () => {
@@ -83,7 +83,7 @@ describe("requireFleetGrantReach", () => {
     expect(isControlPairEnforced()).toBe(true);
     try {
       process.env.ENFORCE_CONTROL_PAIR = "false";
-      await expect(requireFleetGrantReach(NON_ADMIN_PRINCIPAL)).resolves.toBeUndefined();
+      await expect(requireFleetGrantReach({ id: NON_ADMIN_PRINCIPAL, workspaceRole: "member" })).resolves.toBeUndefined();
     } finally {
       if (before === undefined) delete process.env.ENFORCE_CONTROL_PAIR;
       else process.env.ENFORCE_CONTROL_PAIR = before;

@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { adminMiddleware } from "../../src/auth/admin-middleware";
+import { hubOperatorMiddleware } from "../../src/auth/workspace-authority";
 import { getAllSettings } from "../../src/models/system-settings";
 import {
   adminTranscriptionRoutes,
@@ -47,7 +47,7 @@ function as(userId: string) {
 function adminApp(userId: string) {
   return new Hono()
     .use("*", as(userId))
-    .use("*", adminMiddleware)
+    .use("*", hubOperatorMiddleware)
     .route("/settings/transcription", adminTranscriptionRoutes({ settings, audit: async () => {} }));
 }
 

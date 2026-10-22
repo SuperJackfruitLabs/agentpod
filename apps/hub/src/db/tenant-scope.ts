@@ -119,6 +119,8 @@ export type TenantScopedTable = Table & { tenantId: Parameters<typeof eq>[0] };
  * composite FK rather than by the rule.
  */
 export const TENANT_SCOPED_TABLES = {
+  // A workspace admin reads their tenant's rows (routes/admin.ts); a hub operator reads all.
+  adminAuditLog,
   executionExports,
   salaamWorkOwners,
   salaamWorkDecisions,
@@ -237,14 +239,6 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "One key-value row per setting for the whole hub — whether signup is open, for instance. " +
       "Per-tenant configuration would be a different table with a different primary key, not a " +
       "column added to this one.",
-  },
-  admin_audit_log: {
-    table: adminAuditLog,
-    reason:
-      "Records instance-admin actions, which cross tenants by definition: changing a hub-wide " +
-      "setting is not an act performed inside a fleet. Scoping it would either lose " +
-      "those rows or force them into a tenant that did not perform them. Per-tenant activity " +
-      "is station_audit, which IS scoped.",
   },
 };
 

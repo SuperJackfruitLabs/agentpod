@@ -195,7 +195,7 @@ describe("requireFleetGrantReach", () => {
 
   test("an admin may, even with no grant at all", async () => {
     clearGrant(ADMIN_PRINCIPAL); // NO_GRANT is legal, and irrelevant to an admin
-    expect(await denial(() => requireFleetGrantReach(ADMIN_PRINCIPAL))).toBeNull();
+    expect(await denial(() => requireFleetGrantReach({ id: ADMIN_PRINCIPAL, workspaceRole: "admin" }))).toBeNull();
   });
 
   test("a non-admin may not, however wide their grant", async () => {
@@ -203,7 +203,7 @@ describe("requireFleetGrantReach", () => {
     // mayGrantReach used to be sufficient on its own. It no longer is.
     await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
 
-    const e = await denial(() => requireFleetGrantReach(USER_PRINCIPAL));
+    const e = await denial(() => requireFleetGrantReach({ id: USER_PRINCIPAL, workspaceRole: "member" }));
     expect(isGrantReachDenied(e)).toBe(true);
   });
 });

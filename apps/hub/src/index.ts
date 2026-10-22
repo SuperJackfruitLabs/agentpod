@@ -8,6 +8,7 @@ import { describeDatabase } from './utils/describe-database.ts';
 import { connectionString, initDatabase } from './db/drizzle.ts';
 import { holdHubRunningLock } from './db/hub-running-lock.ts';
 import { resetOrphanedOnlineNodes } from './services/node-registry.ts';
+import { reconcileHubOperators } from './services/hub-operators.ts';
 import { authMiddleware } from './auth/middleware.ts';
 import { orgPlaneOutageBody } from './auth/caller-authority.ts';
 // A human at a terminal exchanging a device credential for a short-lived token
@@ -124,6 +125,18 @@ await holdHubRunningLock(connectionString);
 
 console.log('Initializing database...');
 await initDatabase();
+
+// The hub operator seat comes from HUB_OPERATORS, when set (workspace authority spec, W3).
+// validateConfig() has already refused a malformed value; unset leaves hub_operators alone.
+const operatorSeats = await reconcileHubOperators();
+if (operatorSeats) {
+  console.log(
+    `HUB_OPERATORS reconciled: +${operatorSeats.added.length} -${operatorSeats.removed.length}` +
+      (operatorSeats.added.length || operatorSeats.removed.length
+        ? ` (added ${operatorSeats.added.join(",") || "none"}; removed ${operatorSeats.removed.join(",") || "none"})`
+        : ""),
+  );
+}
 
 const orphans = await resetOrphanedOnlineNodes();
 if (orphans > 0) console.log(`Reset ${orphans} orphaned online node(s) to offline`);
@@ -259,7 +272,7 @@ const app = new Hono()
   .use('/api/*', activityLoggerMiddleware)
   // Admin endpoints (require admin role)
   .route('/api/admin', adminRouter)
-  .route('/api', meRoutes)                                 // GET /api/me — who the caller is; isAdmin from the operator seat
+  .route('/api', meRoutes)                                 // GET /api/me — who the caller is; workspace role + operator seat
   // Cloudflare webhook integration
   .route('/api/v2/cloudflare', cloudflareWebhookRoutes)
   // Node fleet management (authenticated)

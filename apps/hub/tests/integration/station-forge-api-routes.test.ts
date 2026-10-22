@@ -1,7 +1,7 @@
 /**
  * Forge API access routes: who may grant a station a forge credential, and what a response may say.
  *
- * Authority (plan Review Focus 4): every mutation needs BOTH the hub operator seat (`isUserAdmin`)
+ * Authority (plan Review Focus 4): every mutation needs BOTH workspace admin (`isWorkspaceAdmin`)
  * AND the control pair's reach (`requireIssueCredentials`, enforced under ENFORCE_CONTROL_PAIR).
  * Owning the station is not enough; an agent token never reaches a route; the account is never
  * taken from a body. Responses are a sanitised view: no sealed blob, no token handle, no token.
@@ -103,7 +103,8 @@ function app(user: Partial<AuthUser> | null, forge: typeof FORGE_CFG | null = FO
   return a;
 }
 const asOwner = () => app({ id: OWNER });
-const asAdmin = () => app({ id: ADMIN });
+// A workspace admin (orgRole admin on the token); the owner is a member (workspace authority spec).
+const asAdmin = () => app({ id: ADMIN, workspaceRole: "admin" });
 
 async function call(a: Hono, method: string, path: string, body?: unknown, raw?: string) {
   const res = await a.request(`/api${path}`, {
@@ -220,25 +221,29 @@ const MUTATIONS: [string, (st: string, gr: string) => string, unknown][] = [
 ];
 
 describe("authority", () => {
-  test("the station owner who is not an operator is refused every mutation (403), and nothing changes", async () => {
+  test("the station owner who is a workspace member is refused every mutation (403), and nothing changes", async () => {
     const st = await grantedStation();
     const before = await db.select().from(g).where(eq(g.id, st.grantId));
     for (const [method, path, body] of MUTATIONS) {
       const r = await call(asOwner(), method, path(st.id, st.grantId), body);
       expect(`${method} ${path(st.id, st.grantId)} ${r.status}`).toBe(`${method} ${path(st.id, st.grantId)} 403`);
-      expect(r.json.error).toBe("operator-required");
+      expect(r.json.error).toBe("workspace_admin_required");
     }
     const after = await db.select().from(g).where(eq(g.id, st.grantId));
     expect(after).toEqual(before);
   });
 
-  test("the owner may read status; a stranger in the tenant may not see it", async () => {
+  test("any member of the workspace reads status; another workspace may not see it", async () => {
     const st = await grantedStation();
     const own = await call(asOwner(), "GET", `/stations/${st.id}/forge-api`);
     expect(own.status).toBe(200);
     expect(own.json.grants).toHaveLength(1);
-    const stranger = await call(app({ id: `prn_${hex20()}` }), "GET", `/stations/${st.id}/forge-api`);
-    expect(stranger.status).toBe(404);
+    // Workspace authority spec, gate map: station forge-api reads are any workspace member's.
+    const teammate = await call(app({ id: `prn_${hex20()}` }), "GET", `/stations/${st.id}/forge-api`);
+    expect(teammate.status).toBe(200);
+    expect(teammate.json.grants).toHaveLength(1);
+    const elsewhere = await call(app({ id: ADMIN, workspaceRole: "admin", tenantId: OTHER_TENANT }), "GET", `/stations/${st.id}/forge-api`);
+    expect(elsewhere.status).toBe(404);
   });
 
   describe("with the control pair enforced", () => {
@@ -247,6 +252,7 @@ describe("authority", () => {
       process.env.ENFORCE_CONTROL_PAIR = "true";
       const noReach = app({
         id: ADMIN,
+        workspaceRole: "admin",
         authType: "org_plane",
         authority: { principalKind: "human", mayDispatch: [st.principalId!], mayGrantReach: false, scopes: [] },
       });
@@ -262,6 +268,7 @@ describe("authority", () => {
       process.env.ENFORCE_CONTROL_PAIR = "true";
       const elsewhere = app({
         id: ADMIN,
+        workspaceRole: "admin",
         authType: "org_plane",
         authority: { principalKind: "human", mayDispatch: [`prn_${hex20()}`], mayGrantReach: true, scopes: [] },
       });
@@ -275,6 +282,7 @@ describe("authority", () => {
       process.env.ENFORCE_CONTROL_PAIR = "true";
       const withReach = app({
         id: ADMIN,
+        workspaceRole: "admin",
         authType: "org_plane",
         authority: { principalKind: "human", mayDispatch: [st.principalId!], mayGrantReach: true, scopes: [] },
       });
@@ -387,7 +395,7 @@ describe("authority", () => {
 describe("preconditions and errors", () => {
   test("503 when the hub has no forge configured", async () => {
     const st = await freshStation();
-    const r = await call(app({ id: ADMIN }, null), "POST", `/stations/${st.id}/forge-api`, grantBody());
+    const r = await call(app({ id: ADMIN, workspaceRole: "admin" }, null), "POST", `/stations/${st.id}/forge-api`, grantBody());
     expect(r.status).toBe(503);
     expect(r.json.error).toBe("forge-not-configured");
   });
@@ -485,7 +493,7 @@ describe("preconditions and errors", () => {
     const st = await freshStation();
     const a = new Hono();
     a.use("*", async (c, next) => {
-      c.set("user", { id: ADMIN, authType: "api_key", tenantId: tenant } as AuthUser);
+      c.set("user", { id: ADMIN, authType: "api_key", tenantId: tenant, workspaceRole: "admin" } as AuthUser);
       await next();
     });
     a.route("/api", createStationForgeApiRoutes({ forge: FORGE_CFG, service: { ...service, forgeOrigin: "https://other.sfr.test" } }));
@@ -654,11 +662,11 @@ describe("GET /stations/:id/forge-api/key: the station's stk handover public key
     expect(audits[0]!.result).toBe("ok");
   });
 
-  test("the owner who is not an operator is 403", async () => {
+  test("the owner who is a workspace member is 403", async () => {
     const st = await freshStation();
     const r = await call(asOwner(), "GET", `/stations/${st.id}/forge-api/key`);
     expect(r.status).toBe(403);
-    expect(r.json.error).toBe("operator-required");
+    expect(r.json.error).toBe("workspace_admin_required");
     expect(r.text).not.toContain(PK);
   });
 
@@ -667,6 +675,7 @@ describe("GET /stations/:id/forge-api/key: the station's stk handover public key
     process.env.ENFORCE_CONTROL_PAIR = "true";
     const noReach = app({
       id: ADMIN,
+      workspaceRole: "admin",
       authType: "org_plane",
       authority: { principalKind: "human", mayDispatch: [st.principalId!], mayGrantReach: false, scopes: [] },
     });

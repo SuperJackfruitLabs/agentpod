@@ -4,7 +4,8 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { adminPrincipalsRouter } from "../../src/routes/admin-principals";
-import { adminMiddleware } from "../../src/auth/admin-middleware";
+import { workspaceAdminMiddleware as adminMiddleware } from "../../src/auth/workspace-authority";
+import { isUserAdmin } from "../../src/models/admin-users";
 import { principalById } from "../../src/services/principals";
 import { createPrincipal, forgetPrincipals, restorePrincipal, suspendPrincipal } from "../helpers/principals";
 
@@ -54,7 +55,8 @@ function app() {
 function guardedApp(actorId: string) {
   const a = new Hono();
   a.use("*", async (c, next) => {
-    c.set("user", { id: actorId, authType: "api_key", tenantId: "default" });
+    // The "admin" fixture (a hub_operators seat) stands for a workspace admin here.
+    c.set("user", { id: actorId, authType: "org_plane", tenantId: "default", workspaceRole: (await isUserAdmin(actorId)) ? "admin" : "member" });
     await next();
   });
   a.use("*", adminMiddleware);

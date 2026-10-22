@@ -32,7 +32,6 @@ tests/integration/admin-bridge-agents-route.test.ts	5
 tests/integration/admin-principals-route.test.ts	1
 tests/integration/bridge-dispatch.test.ts	4
 tests/integration/control-pair-dispatch.test.ts	10
-tests/integration/enrollment-token-reach.test.ts	1
 tests/integration/gateway-runtime-resume.test.ts	3
 tests/integration/gateway.test.ts	1
 tests/integration/harness-config-adopt.test.ts	6
@@ -63,7 +62,6 @@ tests/unit/agent-version.test.ts	6
 tests/unit/broker.test.ts	23
 tests/unit/docs-claims.test.ts	4
 tests/unit/harness-config-compare.test.ts	22
-tests/unit/nodes-telemetry-route.test.ts	1
 tests/unit/nodes-update-all-route.test.ts	6
 tests/unit/speech-apply-route.test.ts	5
 tests/unit/speech-routes.test.ts	2

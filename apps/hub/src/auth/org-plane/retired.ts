@@ -44,7 +44,7 @@ const RETIRED_ADMIN: Array<[method: string | null, pattern: RegExp]> = [
 ];
 
 /**
- * Registered first in `adminRouter`, ahead of its `adminMiddleware` — but behind index.ts's
+ * Registered first in `adminRouter`, ahead of its admin guards — but behind index.ts's
  * `/api/*` `authMiddleware`, so the caller is always authenticated first (see routes/admin.ts).
  */
 export function retiredUnderPlane(plane: () => OrgPlaneConfig = orgPlane) {

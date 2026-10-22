@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { OrgPlaneTokenClaims, audienceIncludes } from "./token-claims";
+import { OrgPlaneTokenClaims, audienceIncludes, workspaceRoleOf } from "./token-claims";
 
 const fixture = JSON.parse(
   readFileSync(join(import.meta.dir, "..", "..", "..", "fixtures", "ecosystem-identity", "token_claims.json"), "utf8"),
@@ -71,5 +71,28 @@ describe("token_claims.json v8 ↔ OrgPlaneTokenClaims", () => {
     expect(audienceIncludes(["a", "https://hub.agentpod.dev"], "https://hub.agentpod.dev")).toBe(true);
     expect(audienceIncludes("https://hub.agentpod.dev/x", "https://hub.agentpod.dev")).toBe(false);
     expect(audienceIncludes(["a"], "https://hub.agentpod.dev")).toBe(false);
+  });
+});
+
+describe("orgRole (workspace authority spec W1)", () => {
+  test("the fixture names orgRole as conditional, and the schema accepts each role", () => {
+    expect(fixture.conditional.map((c) => c.claim)).toContain("orgRole");
+    for (const orgRole of ["owner", "admin", "member"]) {
+      expect(OrgPlaneTokenClaims.safeParse({ ...valid, principalKind: "human", orgRole }).success).toBe(true);
+    }
+  });
+
+  test("an unknown orgRole does not fail the token (tolerant parse)", () => {
+    expect(OrgPlaneTokenClaims.safeParse({ ...valid, orgRole: "superuser" }).success).toBe(true);
+  });
+
+  test("workspaceRoleOf: owner and admin are read; absent or unknown is member (fails closed)", () => {
+    expect(workspaceRoleOf("owner")).toBe("owner");
+    expect(workspaceRoleOf("admin")).toBe("admin");
+    expect(workspaceRoleOf("member")).toBe("member");
+    expect(workspaceRoleOf(undefined)).toBe("member");
+    expect(workspaceRoleOf("superuser")).toBe("member");
+    expect(workspaceRoleOf("Admin")).toBe("member");
+    expect(workspaceRoleOf(1)).toBe("member");
   });
 });
