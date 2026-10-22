@@ -98,6 +98,8 @@ type DaemonHealth struct {
 	Running             bool
 	PID                 *int
 	ConfigurationDigest string
+	// Reason says why Running is false; empty when healthy.
+	Reason string
 }
 
 func (c *Client) PassiveHealth(ctx context.Context) (bool, *int) {
@@ -107,15 +109,15 @@ func (c *Client) PassiveHealth(ctx context.Context) (bool, *int) {
 func (c *Client) ObserveHealth(ctx context.Context) DaemonHealth {
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://salaam/v1/health", nil)
 	if err != nil {
-		return DaemonHealth{}
+		return DaemonHealth{Reason: err.Error()}
 	}
 	res, err := c.httpClient().Do(req)
 	if err != nil {
-		return DaemonHealth{}
+		return DaemonHealth{Reason: "operator socket unreachable: " + err.Error()}
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		return DaemonHealth{}
+		return DaemonHealth{Reason: fmt.Sprintf("health answered HTTP %d", res.StatusCode)}
 	}
 	var out struct {
 		Service             string  `json:"service"`
@@ -131,10 +133,16 @@ func (c *Client) ObserveHealth(ctx context.Context) DaemonHealth {
 		} `json:"job_execution"`
 	}
 	if json.NewDecoder(io.LimitReader(res.Body, 1024*1024)).Decode(&out) != nil {
-		return DaemonHealth{}
+		return DaemonHealth{Reason: "health response is not JSON"}
 	}
 	healthy := out.Service == "healthy" && out.AgentPodConfig != nil && *out.AgentPodConfig != ""
 	health := DaemonHealth{Running: healthy}
+	switch {
+	case out.Service != "healthy":
+		health.Reason = fmt.Sprintf("daemon reports service %q", out.Service)
+	case !healthy:
+		health.Reason = "daemon is not bound to AgentPod (agentpod_config unset): start it with --agentpod-config <pins.json>"
+	}
 	if healthy && out.PID != nil && *out.PID > 0 {
 		health.PID = out.PID
 	}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -376,7 +377,7 @@ func serviceInstallCmd(mgr service.Manager, out io.Writer) int {
 		fmt.Fprintln(out, "warning: could not read service status for the summary:", err)
 		return 0
 	}
-	printServiceSummary(runtime.GOOS, st.UnitPath, out)
+	printServiceSummary(runtime.GOOS, st.UnitPath, lingerEnabled(lingerDir, currentUsername(), os.Stat), out)
 	return 0
 }
 
@@ -411,12 +412,33 @@ func serviceUninstallCmd(mgr service.Manager, out io.Writer) int {
 	return 0
 }
 
+// currentUsername names the account the service runs as; env -i drops the user's environment.
+func currentUsername() string {
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return ""
+}
+
+// lingerDir is where logind records the users whose services run without a login.
+var lingerDir = "/var/lib/systemd/linger"
+
+// lingerEnabled reports whether user already lingers, so the summary does not
+// tell an operator to enable what is already on.
+func lingerEnabled(dir, user string, stat func(string) (os.FileInfo, error)) bool {
+	if user == "" {
+		return false
+	}
+	_, err := stat(filepath.Join(dir, user))
+	return err == nil
+}
+
 // printServiceSummary prints the "how to operate it" block that
 // install.sh's install_launch_agent() used to print for darwin — updated to
 // point at the apn verbs this slice adds instead of raw launchctl
 // invocations — plus a systemd equivalent for linux. It is a pure function
 // of (goos, unitPath) so both platform branches are testable on any host.
-func printServiceSummary(goos, unitPath string, out io.Writer) {
+func printServiceSummary(goos, unitPath string, lingered bool, out io.Writer) {
 	switch goos {
 	case "darwin":
 		fmt.Fprintln(out)
@@ -445,7 +467,7 @@ func printServiceSummary(goos, unitPath string, out io.Writer) {
 		fmt.Fprintln(out, "  logs:       "+sudo+"apn logs -f")
 		fmt.Fprintln(out, "  restart:    "+sudo+"apn restart")
 		fmt.Fprintln(out, "  uninstall:  "+sudo+"apn service uninstall")
-		if userScope {
+		if userScope && !lingered {
 			fmt.Fprintln(out, "NOTE: to survive logout/reboot, an admin runs once: sudo loginctl enable-linger $USER")
 		}
 	}

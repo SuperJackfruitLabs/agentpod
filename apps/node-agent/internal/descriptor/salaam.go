@@ -3,10 +3,12 @@ package descriptor
 import (
 	"context"
 	"fmt"
+	"log"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/salaam"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -14,6 +16,28 @@ type SalaamConfig struct{ Binary, StateDir, Workspace, NodeBinary, Manifest, Nod
 type salaamDescriptor struct {
 	config    SalaamConfig
 	configure func(context.Context, string, any) ([]byte, error)
+	mu        sync.Mutex
+	lastMiss  string
+	logf      func(string, ...any)
+}
+
+// miss logs why a configured Salaam was not detected, once per distinct reason,
+// so a silent zero-station inventory can be diagnosed from the node's journal.
+func (s *salaamDescriptor) miss(reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if reason == s.lastMiss {
+		return
+	}
+	s.lastMiss = reason
+	if reason == "" {
+		return
+	}
+	logf := s.logf
+	if logf == nil {
+		logf = log.Printf
+	}
+	logf("salaam: station not detected: %s", reason)
 }
 
 func NewSalaamFrom(c SalaamConfig) Descriptor { return &salaamDescriptor{config: c} }
@@ -33,15 +57,18 @@ func (s *salaamDescriptor) Detect() ([]Station, error) {
 		return nil, nil
 	}
 	if _, err := exec.LookPath(s.config.Binary); err != nil {
+		s.miss("binary not executable: " + err.Error())
 		return nil, nil
 	}
 	if s.config.Manifest == "" {
 		if _, err := os.Stat(filepath.Join(s.config.StateDir, "operator.sock")); err != nil {
+			s.miss("no operator socket: " + err.Error())
 			return nil, nil
 		}
 	}
 	workspace, err := filepath.EvalSymlinks(s.config.Workspace)
 	if err != nil || workspace != s.config.Workspace {
+		s.miss("workspace is not a canonical directory: " + s.config.Workspace)
 		return nil, fmt.Errorf("salaam: workspace must be a canonical directory")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
@@ -51,11 +78,12 @@ func (s *salaamDescriptor) Detect() ([]Station, error) {
 			return nil, err
 		}
 	} else {
-		healthy, _ := s.client().PassiveHealth(ctx)
-		if !healthy {
+		if health := s.client().ObserveHealth(ctx); !health.Running {
+			s.miss(health.Reason)
 			return nil, nil
 		}
 	}
+	s.miss("")
 	return []Station{{Key: salaam.StationKey(workspace), Harness: "salaam", Kind: "leaf", DisplayName: "Salaam", WorkspacePath: &workspace, Capabilities: []string{"inventory", "health", "acp", "skills.inventory"}}}, nil
 }
 func (s *salaamDescriptor) Health(key string) (Health, error) {

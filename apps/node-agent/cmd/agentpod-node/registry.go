@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"os/exec"
+
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 )
@@ -12,7 +15,8 @@ import (
 // stay unset, and each descriptor resolves what it can from the host).
 func buildRegistry(cfg config.Config) *descriptor.Registry {
 	reg := descriptor.NewRegistry()
-	reg.Register(descriptor.NewSalaamFrom(descriptor.SalaamConfig{Binary: cfg.SalaamBinary, StateDir: cfg.SalaamStateDir, Workspace: cfg.SalaamWorkspace, NodeBinary: cfg.SalaamNodeBinary, Manifest: cfg.SalaamManifest, NodeID: cfg.NodeID}))
+	home, _ := os.UserHomeDir()
+	reg.Register(descriptor.NewSalaamFrom(descriptor.DiscoverSalaam(descriptor.SalaamConfig{Binary: cfg.SalaamBinary, StateDir: cfg.SalaamStateDir, Workspace: cfg.SalaamWorkspace, NodeBinary: cfg.SalaamNodeBinary, Manifest: cfg.SalaamManifest, NodeID: cfg.NodeID}, home, exec.LookPath)))
 	reg.Register(descriptor.NewHermes("", cfg.HermesStartCmd))
 	reg.Register(descriptor.NewOpenClawFrom(descriptor.OpenClawConfig{
 		StartCmd:     cfg.OpenClawStartCmd,
