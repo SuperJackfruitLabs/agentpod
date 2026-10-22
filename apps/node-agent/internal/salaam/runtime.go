@@ -66,7 +66,13 @@ func (r *Runtime) ensure(ctx context.Context, requireStrict bool) error {
 			return out.Bytes(), nil
 		}
 	}
-	data, err := run(ctx, r.Node, []string{r.CLI, "host", "start", "--manifest", r.Manifest})
+	args := []string{r.CLI, "host", "start", "--manifest", r.Manifest}
+	if unit := r.launcherUnit(); unit != "" {
+		// Launcher profile: root owns the manifest and the host. The node only asks systemd
+		// to start the provisioned unit and reads the receipt the running daemon reports.
+		args = []string{r.CLI, "host", "unit-start", "--unit", unit, "--state", r.State}
+	}
+	data, err := run(ctx, r.Node, args)
 	if err != nil {
 		return err
 	}
@@ -104,6 +110,20 @@ func (r *Runtime) validatePaths() error {
 		return fmt.Errorf("salaam: private state, workspace and enrolled node are required")
 	}
 	return nil
+}
+
+// launcherRoot holds root-provisioned launcher-profile manifests, one directory per station.
+var launcherRoot = "/etc/salaam/stations"
+
+// launcherUnit names the root-owned salaam-host@ unit when the configured manifest is the
+// provisioned one for this workspace's station; otherwise the node starts the host itself.
+func (r *Runtime) launcherUnit() string {
+	dir := filepath.Dir(r.Manifest)
+	key := StationKey(r.Workspace)[len("salaam:"):]
+	if filepath.Base(r.Manifest) != "host.json" || filepath.Dir(dir) != launcherRoot || filepath.Base(dir) != key {
+		return ""
+	}
+	return "salaam-host@" + key + ".service"
 }
 
 // Validate checks configured installation paths without starting a process.

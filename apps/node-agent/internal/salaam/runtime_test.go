@@ -64,6 +64,50 @@ func TestReviewedRuntimeRejectsUnpinnedPathsAndForeignStartupReceipt(t *testing.
 	}
 }
 
+func TestLauncherProfileStartsOnlyTheProvisionedUnitForThisStation(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	node, _ := os.Executable()
+	node, _ = filepath.EvalSymlinks(node)
+	cli := filepath.Join(root, "salaam.mjs")
+	workspace := filepath.Join(root, "workspace")
+	key := StationKey(workspace)[len("salaam:"):]
+	old := launcherRoot
+	launcherRoot = filepath.Join(root, "stations")
+	t.Cleanup(func() { launcherRoot = old })
+	own := filepath.Join(launcherRoot, key, "host.json")
+	other := filepath.Join(launcherRoot, strings.Repeat("0", 16), "host.json")
+	for _, p := range []string{cli, own, other} {
+		_ = os.MkdirAll(filepath.Dir(p), 0755)
+		if err := os.WriteFile(p, []byte("fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state := filepath.Join(root, "state")
+	var got []string
+	r := &Runtime{Node: node, CLI: cli, Manifest: own, State: state, Workspace: workspace, NodeID: "node_fixture"}
+	r.run = func(ctx context.Context, exe string, args []string) ([]byte, error) {
+		got = args
+		return json.Marshal(map[string]any{"version": 1, "ready": true, "node": node, "cli": cli, "state": state, "workspace": workspace, "node_id": "node_fixture", "manifest_digest": strings.Repeat("a", 64), "pins_digest": strings.Repeat("b", 64), "strict_work": map[string]any{"version": 1}})
+	}
+	if err := r.ensureStrict(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{cli, "host", "unit-start", "--unit", "salaam-host@" + key + ".service", "--state", state}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("launcher command %q, want %q", got, want)
+	}
+	// Another station's manifest, or one outside the launcher root, keeps node-owned startup.
+	for _, m := range []string{other, cli} {
+		r.Manifest = m
+		if err := r.Ensure(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if got[1] != "host" || got[2] != "start" || got[4] != m {
+			t.Fatalf("manifest %s started via %q", m, got)
+		}
+	}
+}
+
 func TestPassiveHealthNeverStartsConfiguredRuntime(t *testing.T) {
 	calls := 0
 	r := &Runtime{run: func(context.Context, string, []string) ([]byte, error) { calls++; return nil, nil }}
