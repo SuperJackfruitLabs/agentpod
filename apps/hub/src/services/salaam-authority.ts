@@ -25,9 +25,20 @@ export function isSalaamAuthorityDenied(e: unknown): e is SalaamAuthorityDenied 
   return e instanceof SalaamAuthorityDenied || (e as { name?: string })?.name === "SalaamAuthorityDenied";
 }
 
+/**
+ * `workspaceAdmin`: the person is an owner or admin of the station's workspace (decision 3 on spec
+ * 2026-10-23). For an INTERACTIVE run (`run.source === "agentpod"`, console chat) that stands in
+ * for a `mayDispatch` grant over the occupant. It never does for board work (`superpipeline`):
+ * dispatching other work still needs the grant.
+ */
+export interface SalaamAuthorityOptions {
+  workspaceAdmin?: boolean;
+}
+
 export async function validateSalaamAuthority(
   binding: SalaamAuthority,
   userId: string,
+  options: SalaamAuthorityOptions = {},
 ): Promise<void> {
   const [station] = await db
     .select()
@@ -68,7 +79,8 @@ export async function validateSalaamAuthority(
     !owner ||
     owner.suspended ||
     owner.organizationId !== binding.organization_id ||
-    !owner.grant?.mayDispatch.includes(binding.principal_id)
+    (!(options.workspaceAdmin === true && binding.run.source === "agentpod") &&
+      !owner.grant?.mayDispatch.includes(binding.principal_id))
   )
     throw new SalaamAuthorityDenied(
       "Salaam execution authority was suspended or its dispatch grant was withdrawn",
@@ -103,6 +115,7 @@ export async function makeSalaamExecution(
   userId: string,
   sessionId: string,
   run?: SalaamRunAuthority,
+  options: SalaamAuthorityOptions = {},
 ): Promise<StoredSalaamExecution> {
   const [station] = await db
     .select()
@@ -125,7 +138,9 @@ export async function makeSalaamExecution(
     workspace: station?.workspacePath,
     run: run ?? { source: "agentpod", id: sessionId, epoch: 1 },
   });
-  await validateSalaamAuthority(binding, userId);
+  // Only an interactive run may stand on the person's workspace role (decision 3).
+  const workspaceAdmin = options.workspaceAdmin === true && binding.run.source === "agentpod";
+  await validateSalaamAuthority(binding, userId, { workspaceAdmin });
   if (binding.run.source === "superpipeline") {
     const [current] = await db
       .select()
@@ -167,6 +182,7 @@ export async function makeSalaamExecution(
   }
   return {
     binding,
+    ...(workspaceAdmin ? { workspaceAdmin: true as const } : {}),
     leaseSequence: 0,
     sessionId: null,
     admissionId: null,
@@ -186,7 +202,7 @@ export async function admitSalaamExecution(
   const saved = row?.executionAuthority;
   if (!saved || saved.state !== "active")
     throw Error("Salaam execution is not active");
-  await validateSalaamAuthority(saved.binding, userId);
+  await validateSalaamAuthority(saved.binding, userId, { workspaceAdmin: saved.workspaceAdmin === true });
   const result = await broker.request(saved.binding.node_id, "salaam.admit", {
     binding: saved.binding,
     request_id: "admit:" + id,
@@ -233,7 +249,9 @@ export async function renewSalaamExecution(
   if (!row?.executionAuthority) return null;
   if (row.executionAuthority.state !== "active" || row.status === "ended")
     throw Error("Salaam execution is stopping");
-  await validateSalaamAuthority(row.executionAuthority.binding, userId);
+  await validateSalaamAuthority(row.executionAuthority.binding, userId, {
+    workspaceAdmin: row.executionAuthority.workspaceAdmin === true,
+  });
   const [claimed] = await db
     .update(acpSessions)
     .set({

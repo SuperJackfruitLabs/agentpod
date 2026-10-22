@@ -46,11 +46,14 @@ import { db } from "../db/drizzle";
 import { acpEvents } from "../db/schema/acp";
 import { isAllowedOrigin } from "../config";
 import { getStation } from "../services/station-registry";
+import { bridgeReadiness } from "../services/bridge/station-readiness";
+import { probeSalaamWork } from "../services/bridge/salaam-dispatch";
 import * as acp from "../services/acp-sessions";
 import { isControlPairDenied } from "../services/control-pair";
 import { isSalaamAuthorityDenied } from "../services/salaam-authority";
 import { stationFailure } from "../services/station-failure";
 import type { AuthUser } from "../auth/middleware";
+import { roleOf } from "../auth/workspace-authority";
 import { isOrgPlaneUnavailable, ORG_PLANE_UNAVAILABLE_BODY } from "../auth/caller-authority";
 
 // ─── Error-to-status helper ───────────────────────────────────────────────────
@@ -150,7 +153,7 @@ export const stationAcpRoutes = new Hono()
       const { mode, mcpProxy } = c.req.valid("json");
 
       try {
-        const row = await acp.createSession({ stationId, tenantId: user.tenantId, userId: user.id, mode, mcpProxy, authority: user.authority });
+        const row = await acp.createSession({ stationId, tenantId: user.tenantId, userId: user.id, mode, mcpProxy, authority: user.authority, workspaceRole: roleOf(user) });
         return c.json(row, 201);
       } catch (err) {
         const { status, body } = createSessionFailure(err);
@@ -158,6 +161,26 @@ export const stationAcpRoutes = new Hono()
       }
     }
   )
+
+  /**
+   * GET /api/stations/:id/readiness → { ready, reason, checkedAt, strictWork }
+   *
+   * The bridge's own readiness answer for this station (spec 2026-10-23, C11): strict work,
+   * then the session gates. 401 anonymous, 404 not in the caller's workspace.
+   */
+  .get("/stations/:id/readiness", async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+    const stationId = c.req.param("id");
+    const scope = { tenantId: user.tenantId };
+    if (!(await getStation(scope, stationId))) return c.json({ error: "Station not found." }, 404);
+    return c.json(
+      await bridgeReadiness(scope, stationId, {
+        strictWork: probeSalaamWork,
+        stationReady: acp.stationReadiness,
+      }),
+    );
+  })
 
   /**
    * GET /api/stations/:id/acp/sessions?limit=&before=&beforeId=

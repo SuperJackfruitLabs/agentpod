@@ -173,6 +173,33 @@ test("admission uses the owner grant and current station facts; suspension and w
   ).rejects.toBeInstanceOf(SalaamAuthorityDenied);
 });
 
+// Decision 3 (spec 2026-10-23): a workspace owner/admin may chat without mayDispatch; dispatching
+// board work still needs the grant.
+test("an owner/admin opens and renews an interactive session with no dispatch grant", async () => {
+  await fakePlane.putGrant(owner, { mayDispatch: [], mayGrantReach: false, scopes: [] });
+  await expect(makeSalaamExecution(stationId, owner, "acps_" + hex())).rejects.toBeInstanceOf(SalaamAuthorityDenied);
+  const execution = await makeSalaamExecution(stationId, owner, "acps_" + hex(), undefined, { workspaceAdmin: true });
+  expect(execution.workspaceAdmin).toBe(true);
+  expect(execution.binding.run.source).toBe("agentpod");
+  await validateSalaamAuthority(execution.binding, owner, { workspaceAdmin: true });
+  // Without the role the same binding is refused: the role is what admits it.
+  await expect(validateSalaamAuthority(execution.binding, owner)).rejects.toBeInstanceOf(SalaamAuthorityDenied);
+  // Every other fence still holds for an admin: a suspended agent is refused.
+  await fakePlane.suspend(principal);
+  await expect(
+    validateSalaamAuthority(execution.binding, owner, { workspaceAdmin: true }),
+  ).rejects.toThrow(/suspended/i);
+});
+
+test("the role never stands in for the grant on board work", async () => {
+  const interactive = await makeSalaamExecution(stationId, owner, "acps_" + hex());
+  await fakePlane.putGrant(owner, { mayDispatch: [], mayGrantReach: false, scopes: [] });
+  const boardBinding = { ...interactive.binding, run: { source: "superpipeline" as const, id: "run_" + hex(), epoch: 1 } };
+  await expect(
+    validateSalaamAuthority(boardBinding, owner, { workspaceAdmin: true }),
+  ).rejects.toBeInstanceOf(SalaamAuthorityDenied);
+});
+
 test("MCP reconnect intent is durable session configuration and defaults off for old rows", async () => {
   const execution = await makeSalaamExecution(stationId, owner, "acps_" + hex());
   await save(execution);

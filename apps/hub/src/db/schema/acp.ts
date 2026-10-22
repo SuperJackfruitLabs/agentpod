@@ -28,6 +28,11 @@ import type { z } from "zod";
 
 export interface StoredSalaamExecution {
   binding: SalaamAuthority;
+  /**
+   * The session was opened by a workspace owner/admin, which for an interactive run stands in for
+   * a mayDispatch grant (decision 3, spec 2026-10-23). Renewal re-checks everything else.
+   */
+  workspaceAdmin?: true;
   leaseSequence: number;
   sessionId: string | null;
   admissionId: string | null;
