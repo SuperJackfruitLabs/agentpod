@@ -37,13 +37,17 @@ services:
       ORG_PLANE_JWKS_URL: https://staging-accounts.superjackfruit.com/api/auth/jwks
       ORG_PLANE_AUDIENCE: https://staging-hub.agentpod.dev
       ORG_PLANE_SERVICE_CREDENTIAL_FILE: /run/secrets/org-plane-credential
-      # Nothing real: no provisioning, no Matrix, no Superpipeline claims.
+      # No provisioning and no Matrix. The Superpipeline bridge is on, against staging Superpipeline
+      # only: it claims cards for the staging workspace's rostered agents (fleet bridge add).
+      # SUPERPIPELINE_PUSH_SECRET is in env/hub/hub.env, generated on the box.
       ENABLE_DOCKER_PROVISIONING: "false"
       ENABLE_MODAL_PROVISIONING: "false"
       ENABLE_FLY_PROVISIONING: "false"
       ENABLE_CLOUDFLARE_SANDBOXES: "false"
       ENABLE_MATRIX_BRIDGE: "false"
-      ENABLE_SUPERPIPELINE_BRIDGE: "false"
+      ENABLE_SUPERPIPELINE_BRIDGE: "true"
+      SUPERPIPELINE_BASE_URL: https://staging-app.superpipeline.dev
+      SUPERPIPELINE_BOARD_URL: https://staging-app.superpipeline.dev
     env_file: ../../../env/hub/hub.env
     volumes:
       - ../..:/app
