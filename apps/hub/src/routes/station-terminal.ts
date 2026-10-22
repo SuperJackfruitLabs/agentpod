@@ -40,6 +40,7 @@ import { recordAudit } from "../services/audit";
 import { db } from "../db/drizzle";
 import { isAllowedOrigin } from "../config";
 import type { AuthUser } from "../auth/middleware";
+import { isWorkspaceAdminUser } from "../auth/workspace-authority";
 
 export const stationTerminalRoutes = new Hono().get(
   "/stations/:id/terminal",
@@ -83,8 +84,16 @@ export const stationTerminalRoutes = new Hono().get(
           return;
         }
 
+        // ── 1b. A shell on the station's host is a workspace admin's (W1) ──
+        // A member may see and use stations (chat, sessions of their own); a
+        // terminal is not a session of their own, it is the host.
+        if (!isWorkspaceAdminUser(user)) {
+          ws.close(1008, "workspace_admin_required");
+          return;
+        }
+
         // ── 2. Resolve station → node ─────────────────────────────────────
-        const station = await getStation(user.id, stationId);
+        const station = await getStation(user, stationId);
         if (!station) {
           ws.send(JSON.stringify({ t: "exit" }));
           ws.close(1011, "station not found");

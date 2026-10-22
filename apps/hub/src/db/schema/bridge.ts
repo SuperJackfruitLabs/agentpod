@@ -145,9 +145,8 @@ export const bridgeDispatches = pgTable(
  * bridge, and nothing checked a `stationId` against a station that exists: a stale one surfaced
  * only at claim time, as "station not ready", which is what an offline node looks like too.
  *
- * **`hubUserId` is gone, not moved.** `getStation(userId, stationId)` filters on
- * `stations.userId`, so a roster entry naming any other user failed every ACP call as "Station not
- * found". The field could only ever hold one correct value; it is read from the station now.
+ * **`hubUserId` is gone, not moved.** `getStation` filtered on `stations.userId` then, so a
+ * roster entry naming any other user failed every ACP call as "Station not found". The field could only ever hold one correct value; it is read from the station now.
  *
  * Design: `docs/superpowers/specs/2026-09-29-bridge-roster-in-the-database-design.md`.
  */

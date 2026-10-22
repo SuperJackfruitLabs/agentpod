@@ -23,7 +23,7 @@ function fakeSessions(overrides: Partial<AcpSessionService> = {}): {
 }
 
 const connect = (service: AcpSessionService) =>
-  client().connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+  client().connect(buildAcpAgent({ userId: "usr_1", tenantId: "fleet_00000000000000000000", stationId: "station_1", sessions: service }));
 
 test('Salaam editor errors retain typed cause after an interrupted receipt, while max-output and refusal retain standard stop reasons', async () => {
   for(const kind of ['quota','max_tokens','refusal'] as const) {
@@ -82,7 +82,7 @@ describe("hub ACP agent — session/new", () => {
 
     expect(res.sessionId).toBe("acps_test");
     expect(calls).toEqual([
-      { fn: "createSession", stationId: "station_1", userId: "usr_1", mode: "ask" },
+      { fn: "createSession", stationId: "station_1", tenantId: "fleet_00000000000000000000", userId: "usr_1", mode: "ask" },
     ]);
   });
 
@@ -173,7 +173,7 @@ describe("hub ACP agent — session/prompt", () => {
       .onNotification(CLIENT_METHODS.session_update, async ({ params }) => {
         updates.push(params as Record<string, unknown>);
       })
-      .connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+      .connect(buildAcpAgent({ userId: "usr_1", tenantId: "fleet_00000000000000000000", stationId: "station_1", sessions: service }));
 
     await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
     await conn.agent.request(AGENT_METHODS.session_prompt, {
@@ -341,6 +341,7 @@ describe("hub ACP agent — durable Salaam prompts", () => {
       .connect(
         buildAcpAgent({
           userId: "usr_1",
+          tenantId: "fleet_00000000000000000000",
           stationId: "station_1",
           sessions: service,
         }),
@@ -433,7 +434,7 @@ describe("hub ACP agent — permissions", () => {
       .onRequest(CLIENT_METHODS.session_request_permission, async ({ params }) => {
         return onAsk(params as Record<string, unknown>);
       })
-      .connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+      .connect(buildAcpAgent({ userId: "usr_1", tenantId: "fleet_00000000000000000000", stationId: "station_1", sessions: service }));
     await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
     return conn;
   }
@@ -604,7 +605,7 @@ describe("hub ACP agent — session/load", () => {
       .onNotification(CLIENT_METHODS.session_update, async ({ params }) => {
         updates.push(params as Record<string, unknown>);
       })
-      .connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+      .connect(buildAcpAgent({ userId: "usr_1", tenantId: "fleet_00000000000000000000", stationId: "station_1", sessions: service }));
     await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
     return { conn, updates };
   }
@@ -701,7 +702,7 @@ describe("hub ACP agent — concurrent attach", () => {
     const mk = (sink: unknown[]) =>
       client()
         .onNotification(CLIENT_METHODS.session_update, async ({ params }) => { sink.push(params); })
-        .connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+        .connect(buildAcpAgent({ userId: "usr_1", tenantId: "fleet_00000000000000000000", stationId: "station_1", sessions: service }));
 
     const a = mk(seenA);
     const b = mk(seenB);
@@ -763,7 +764,7 @@ describe("hub ACP agent — the turn outlives promptSession", () => {
     const updates: unknown[] = [];
     const conn = client()
       .onNotification(CLIENT_METHODS.session_update, async ({ params }) => { updates.push(params); })
-      .connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+      .connect(buildAcpAgent({ userId: "usr_1", tenantId: "fleet_00000000000000000000", stationId: "station_1", sessions: service }));
     await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
 
     const turn = conn.agent.request(AGENT_METHODS.session_prompt, {
@@ -787,7 +788,7 @@ describe("hub ACP agent — the turn outlives promptSession", () => {
     const { service, chunk, finish } = realisticFake();
     const conn = client()
       .onNotification(CLIENT_METHODS.session_update, async () => {})
-      .connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+      .connect(buildAcpAgent({ userId: "usr_1", tenantId: "fleet_00000000000000000000", stationId: "station_1", sessions: service }));
     await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
 
     let settled = false;
@@ -808,7 +809,7 @@ describe("hub ACP agent — the turn outlives promptSession", () => {
     const { service, chunk, finish, wasUnsubscribed } = realisticFake();
     const conn = client()
       .onNotification(CLIENT_METHODS.session_update, async () => {})
-      .connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+      .connect(buildAcpAgent({ userId: "usr_1", tenantId: "fleet_00000000000000000000", stationId: "station_1", sessions: service }));
     await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
 
     const turn = conn.agent.request(AGENT_METHODS.session_prompt, { sessionId: "acps_test", prompt: [{ type: "text", text: "hi" }] });

@@ -17,7 +17,7 @@
  * the outcome. No secret ever moves: the node generates and keeps them, and answers with ids.
  */
 
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import {
   McpProxySetResult,
   McpProxyStatusResult,
@@ -106,27 +106,20 @@ function stationView(s: StationRow, served: Set<string> | null): McpProxyStation
   };
 }
 
-async function ownedStations(userId: string, tenantId: string, nodeId?: string): Promise<StationRow[]> {
+// The workspace's stations and nodes, whoever adopted or enrolled them (workspace authority, W4).
+async function workspaceStations(tenantId: string, nodeId?: string): Promise<StationRow[]> {
   return db
     .select()
     .from(stations)
-    .where(
-      nodeId
-        ? tenantScope(stations, tenantId, eq(stations.userId, userId), eq(stations.nodeId, nodeId))
-        : tenantScope(stations, tenantId, eq(stations.userId, userId)),
-    );
+    .where(tenantScope(stations, tenantId, nodeId ? eq(stations.nodeId, nodeId) : undefined));
 }
 
-export async function fleetView(userId: string, tenantId: string, nodeId?: string): Promise<McpProxyFleetView> {
+export async function fleetView(tenantId: string, nodeId?: string): Promise<McpProxyFleetView> {
   const nodeRows = await db
     .select({ id: nodes.id, name: nodes.name })
     .from(nodes)
-    .where(
-      nodeId
-        ? tenantScope(nodes, tenantId, eq(nodes.userId, userId), eq(nodes.id, nodeId))
-        : tenantScope(nodes, tenantId, eq(nodes.userId, userId)),
-    );
-  const all = await ownedStations(userId, tenantId, nodeId);
+    .where(tenantScope(nodes, tenantId, nodeId ? eq(nodes.id, nodeId) : undefined));
+  const all = await workspaceStations(tenantId, nodeId);
 
   const views: McpProxyNodeView[] = await Promise.all(
     nodeRows.map(async (n) => {
@@ -164,11 +157,11 @@ export async function fleetView(userId: string, tenantId: string, nodeId?: strin
   return { nodes: views, drifted };
 }
 
-export async function oneStation(userId: string, stationId: string): Promise<McpProxyStationView | null> {
+export async function oneStation(tenantId: string, stationId: string): Promise<McpProxyStationView | null> {
   const [s] = await db
     .select()
     .from(stations)
-    .where(and(eq(stations.id, stationId), eq(stations.userId, userId)));
+    .where(tenantScope(stations, tenantId, eq(stations.id, stationId)));
   if (!s) return null;
   const answer = await servedBy(s.nodeId);
   return stationView(s, "reason" in answer ? null : new Set(answer.stations));
@@ -176,12 +169,12 @@ export async function oneStation(userId: string, stationId: string): Promise<Mcp
 
 // ─── changing ────────────────────────────────────────────────────────────────
 
-async function namedStations(userId: string, ids: string[]): Promise<{ found: StationRow[]; missing: string[] }> {
+async function namedStations(tenantId: string, ids: string[]): Promise<{ found: StationRow[]; missing: string[] }> {
   const unique = [...new Set(ids)];
   const rows = await db
     .select()
     .from(stations)
-    .where(and(inArray(stations.id, unique), eq(stations.userId, userId)));
+    .where(tenantScope(stations, tenantId, inArray(stations.id, unique)));
   const have = new Set(rows.map((r) => r.id));
   return { found: rows, missing: unique.filter((id) => !have.has(id)) };
 }
@@ -203,7 +196,7 @@ export async function changeProxy(userId: string, tenantId: string, req: McpProx
   let skipped: { stationId: string; harness: string }[] | undefined;
 
   if (req.stationIds) {
-    const { found, missing } = await namedStations(userId, req.stationIds);
+    const { found, missing } = await namedStations(tenantId, req.stationIds);
     if (missing.length > 0) {
       return { status: 404, body: { error: "no such station", missing } };
     }
@@ -226,7 +219,7 @@ export async function changeProxy(userId: string, tenantId: string, req: McpProx
       }
     }
   } else {
-    const all = await ownedStations(userId, tenantId, req.nodeId);
+    const all = await workspaceStations(tenantId, req.nodeId);
     targets = all.filter((s) => mcpProxyEligible(s.harness));
     skipped = all
       .filter((s) => !mcpProxyEligible(s.harness))
@@ -311,7 +304,7 @@ export async function rotateProxy(userId: string, tenantId: string, req: McpProx
     const [node] = await db
       .select({ id: nodes.id, tenantId: nodes.tenantId })
       .from(nodes)
-      .where(tenantScope(nodes, tenantId, eq(nodes.userId, userId), eq(nodes.id, req.nodeId)));
+      .where(tenantScope(nodes, tenantId, eq(nodes.id, req.nodeId)));
     if (!node) return { status: 404, body: { error: "no such node" } };
     const audit = await recordAudit(db, { tenantId: node.tenantId, userId, nodeId: node.id, stationKey: "", verb: "mcp.proxy.rotate", params: {} });
     const why = await unaskable(node.id);
@@ -330,7 +323,7 @@ export async function rotateProxy(userId: string, tenantId: string, req: McpProx
     };
   }
 
-  const { found, missing } = await namedStations(userId, req.stationIds!);
+  const { found, missing } = await namedStations(tenantId, req.stationIds!);
   if (missing.length > 0) return { status: 404, body: { error: "no such station", missing } };
 
   for (const [nodeId, group] of byNode(found)) {

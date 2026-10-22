@@ -24,7 +24,7 @@
 import { Hono, type Context } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import {
@@ -44,6 +44,8 @@ import {
   type TranscriptionApplyTarget,
 } from "./transcription-settings";
 import { createLogger } from "../utils/logger";
+import { tenantScope } from "../db/tenant-scope";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
 const log = createLogger("speech-settings-routes");
 
@@ -177,14 +179,15 @@ export function adminSpeechRoutes(deps: AdminSpeechDeps = {}) {
 }
 
 // =============================================================================
-// Owner: one station's voice and override
+// Workspace: one station's voice and override
 // =============================================================================
 
 export interface StationSpeechDeps {
   settings?: SpeechSettings;
-  ownsStation?: (userId: string, stationId: string) => Promise<boolean>;
-  /** The station, if the caller owns it. Defaults to the stations table. */
-  applyTarget?: (userId: string, stationId: string) => Promise<TranscriptionApplyTarget | null>;
+  /** Is the station in the caller's workspace (W4)? Defaults to the stations table. */
+  stationInTenant?: (tenantId: string, stationId: string) => Promise<boolean>;
+  /** The station, if it is in the caller's workspace. Defaults to the stations table. */
+  applyTarget?: (tenantId: string, stationId: string) => Promise<TranscriptionApplyTarget | null>;
   /** Injected by tests; defaults to the broker. */
   brokerRequest?: BrokerRequest;
 }
@@ -202,31 +205,34 @@ const HARNESSES_WITH_TTS_WRITER: ReadonlySet<string> = new Set(["hermes"]);
 /** How a node that predates `speech.apply` answers it (descriptor/handler.go). */
 const UNKNOWN_VERB = /unknown verb "speech\.apply"/;
 
-async function ownsStationInDb(userId: string, stationId: string): Promise<boolean> {
+async function stationInTenantDb(tenantId: string, stationId: string): Promise<boolean> {
   const [row] = await db
     .select({ id: stations.id })
     .from(stations)
-    .where(and(eq(stations.id, stationId), eq(stations.userId, userId)))
+    .where(tenantScope(stations, tenantId, eq(stations.id, stationId)))
     .limit(1);
   return !!row;
 }
 
 export function stationSpeechRoutes(deps: StationSpeechDeps = {}) {
   const settings = deps.settings ?? speechSettings;
-  const ownsStation = deps.ownsStation ?? ownsStationInDb;
+  const stationInTenant = deps.stationInTenant ?? stationInTenantDb;
   const applyTarget = deps.applyTarget ?? applyTargetInDb;
   const request: BrokerRequest = deps.brokerRequest ?? broker.request;
 
   return new Hono()
     .get("/stations/:stationId/speech", async (c) => {
       const stationId = c.req.param("stationId");
-      if (!(await ownsStation(c.get("user").id, stationId))) return c.json({ error: "Not Found" }, 404);
+      if (!(await stationInTenant(c.get("user").tenantId, stationId))) return c.json({ error: "Not Found" }, 404);
       return c.json(await settings.getStationView(stationId));
     })
     .put("/stations/:stationId/speech", zValidator("json", StationBody), async (c) => {
       const userId = c.get("user").id;
       const stationId = c.req.param("stationId");
-      if (!(await ownsStation(userId, stationId))) return c.json({ error: "Not Found" }, 404);
+      // The setting changes what the station does for everyone in the workspace (W1).
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+      if (!(await stationInTenant(c.get("user").tenantId, stationId))) return c.json({ error: "Not Found" }, 404);
       const body = c.req.valid("json");
       try {
         return c.json(
@@ -249,9 +255,10 @@ export function stationSpeechRoutes(deps: StationSpeechDeps = {}) {
      * (routes/station-speech-node.ts).
      */
     .post("/stations/:stationId/speech/apply", async (c) => {
-      const userId = c.get("user").id;
       const stationId = c.req.param("stationId");
-      const station = await applyTarget(userId, stationId);
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+      const station = await applyTarget(c.get("user").tenantId, stationId);
       if (!station) return c.json({ error: "Not Found" }, 404);
 
       if (station.matrixIdentityMode !== "harness") {

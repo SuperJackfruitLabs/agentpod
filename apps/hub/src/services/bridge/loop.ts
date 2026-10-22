@@ -15,8 +15,8 @@ import { probeSalaamWork } from "./salaam-dispatch";
 
 import * as acpSessions from "../acp-sessions";
 import { BRIDGE_SOURCE, isBridgeEnabled, type BridgeAgentConfig } from "./config";
-import { reconcileRoster, type LoopRegistry, type ReconcileState } from "./reconcile";
-import { bridgePlaneCredential, readBridgeRoster, type BridgeAgentSecrets } from "./roster";
+import { loopKey, reconcileRoster, type LoopRegistry, type ReconcileState } from "./reconcile";
+import { bridgePlaneCredential, readEveryBridgeRoster, type BridgeAgentSecrets } from "./roster";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { runOnce, type AcpPort, type DispatchResult } from "./dispatch";
 import { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./superpipeline";
@@ -161,7 +161,7 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
 /** The hub's real ACP machinery, behind the port a dispatch talks to. */
 const hubAcpPort: AcpPort = {
   strictWork: probeSalaamWork,
-  stationReady: ({ stationId, userId }) => acpSessions.stationReadiness(userId, stationId),
+  stationReady: ({ stationId, tenantId }) => acpSessions.stationReadiness({ tenantId }, stationId),
   createSession: async (input) => {
     const row = await acpSessions.createSession(input);
     return { id: row.id, libraryTools: acpSessions.sessionHasLibraryTools(row.id) };
@@ -271,7 +271,7 @@ export async function startSuperpipelineBridge(
           }),
         log: (m, meta) => log(m, { agent: agent.key, ...meta }),
       });
-      live.set(agent.key, { handle, revision: agent.revision });
+      live.set(loopKey(agent), { handle, revision: agent.revision });
       log("claiming", describe(config, baseUrl));
     },
     async stop(key) {
@@ -287,7 +287,8 @@ export async function startSuperpipelineBridge(
   const readRoster =
     deps.roster ??
     (() =>
-      readBridgeRoster(BOOTSTRAP_TENANT_ID, (key, error) =>
+      // Every workspace's roster, each entry read under its own tenant (workspace authority, step 4).
+      readEveryBridgeRoster((key, error) =>
         log("an agent's credential could not be read; it is not being claimed with", { agent: key, error }),
       ));
 

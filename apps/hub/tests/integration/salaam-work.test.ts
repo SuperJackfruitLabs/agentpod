@@ -737,6 +737,7 @@ test("strict runtime capability missing or wrong version prevents claiming", asy
   } as never);
   try {
     const deps = {
+      tenantId,
       agent: { stationId: station, hubUserId: user },
       acp: { strictWork: probeSalaamWork },
       client: {

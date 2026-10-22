@@ -11,6 +11,16 @@
 
 import type { BridgeAgentSecrets } from "./roster";
 
+/**
+ * Which loop an entry is. A roster key is unique only inside its tenant (`bridge_agents`' key is
+ * `(tenant_id, key)`), and the bridge runs every tenant's roster, so two workspaces may both have
+ * a `coder`: the tenant is part of the loop's identity. An entry without one (a test seam's
+ * roster) is its key.
+ */
+export function loopKey(agent: Pick<BridgeAgentSecrets, "key" | "tenantId">): string {
+  return agent.tenantId ? `${agent.tenantId}/${agent.key}` : agent.key;
+}
+
 /** The live loops, as the reconciler is allowed to see and change them. */
 export interface LoopRegistry {
   /** Key → the revision the running loop was built from. */
@@ -80,7 +90,7 @@ export async function reconcileRoster(
   }
 
   const running = registry.running();
-  const wanted = new Map(roster.map((a) => [a.key, a]));
+  const wanted = new Map(roster.map((a) => [loopKey(a), a]));
 
   // Gone, or disabled — `readBridgeRoster` filters disabled rows out, so the two arrive here
   // identically. That is deliberate: the difference matters to a human reading the list, not to

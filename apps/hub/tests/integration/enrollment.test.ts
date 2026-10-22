@@ -111,7 +111,7 @@ describe("Enrollment service", () => {
     expect(await verifyNodeCredential(nodeId, "wrong-secret")).toBe(false);
 
     // 4. Node appears in list
-    const list = await listNodes(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
+    const list = await listNodes(BOOTSTRAP_TENANT_ID);
     const registered = list.find((n) => n.id === nodeId);
     expect(registered?.hostname).toBe("vps1");
     expect(registered?.os).toBe("linux");

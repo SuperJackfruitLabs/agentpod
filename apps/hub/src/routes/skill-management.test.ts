@@ -23,6 +23,16 @@ import { planFixture } from "../../../../packages/contract/src/fixtures/skill-in
 import { placementFixture } from "../../../../packages/contract/src/fixtures/skill-placement";
 import { pluginPlanFixture } from "../../../../packages/contract/src/fixtures/plugin-operation";
 import type { AuthUser } from "../auth/middleware";
+import { tenantForOrg } from "../auth/org-plane/tenant";
+
+/** A second, real workspace (W4: another member of the SAME workspace may use its stations and artifacts). */
+let foreignTenantId: string | undefined;
+async function foreignTenant(): Promise<string> {
+  if (foreignTenantId) return foreignTenantId;
+  const t = await tenantForOrg({ org: "org_99999999999999999999", ent: ["agentpod"] });
+  if (!t.ok) throw new Error("tenant resolution refused");
+  return (foreignTenantId = t.tenantId);
+}
 
 const userId = `test-skill-management-${crypto.randomUUID()}`;
 const otherUser = `test-skill-management-other-${crypto.randomUUID()}`;
@@ -42,6 +52,7 @@ const app = new Hono()
       id: c.req.header("X-Test-User") ?? userId,
       tenantId: c.req.header("X-Test-Tenant") ?? BOOTSTRAP_TENANT_ID,
       authType: "api_key",
+      workspaceRole: "admin",
     } satisfies AuthUser);
     await next();
   })
@@ -398,7 +409,7 @@ test("plugin routes need the station's capability and refuse other plugins or ac
     { requestId: crypto.randomUUID(), action: "enable", path: "/etc" },
   ])
     expect((await app.request(`/api/stations/${c.station.id}/plugins/plan`, json(body))).status).toBe(400);
-  expect((await app.request(`/api/stations/${c.station.id}/plugins/plan`, json({ requestId: crypto.randomUUID(), action: "enable" }, { "X-Test-User": otherUser }))).status).toBe(404);
+  expect((await app.request(`/api/stations/${c.station.id}/plugins/plan`, json({ requestId: crypto.randomUUID(), action: "enable" }, { "X-Test-User": otherUser, "X-Test-Tenant": await foreignTenant() }))).status).toBe(404);
   expect(c.requests).toHaveLength(0);
 });
 
@@ -412,7 +423,7 @@ test("ownership, tenancy, capability and explicit reach gate dispatch", async ()
       .status,
   ).toBe(401);
   expect(
-    (await app.request(path, json(body, { "X-Test-User": otherUser }))).status,
+    (await app.request(path, json(body, { "X-Test-User": otherUser, "X-Test-Tenant": await foreignTenant() }))).status,
   ).toBe(404);
   expect(
     (
@@ -422,7 +433,7 @@ test("ownership, tenancy, capability and explicit reach gate dispatch", async ()
       )
     ).status,
   ).toBe(404);
-  const otherArtifact = await upload({ "X-Test-User": otherUser });
+  const otherArtifact = await upload({ "X-Test-User": otherUser, "X-Test-Tenant": await foreignTenant() });
   expect(
     (await app.request(path, json({ ...body, artifactId: otherArtifact.id })))
       .status,
@@ -609,7 +620,8 @@ test("rollback is reviewed separately and cross-owner artifact references fail a
     json({ planDigest: rollback.plan!.planDigest }),
   );
   expect(SkillHubOperation.parse(await res.json()).state).toBe("applied");
-  const foreign = await upload({ "X-Test-User": otherUser });
+  // Another workspace's artifact: the key is (artifact, tenant) since migration 0114.
+  const foreign = await upload({ "X-Test-User": otherUser, "X-Test-Tenant": await foreignTenant() });
   await expect(
     Promise.resolve(
       db.insert(skillOperations).values({

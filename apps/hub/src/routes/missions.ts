@@ -12,7 +12,7 @@
  */
 
 import { Hono } from "hono";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
@@ -31,6 +31,7 @@ import {
 } from "../services/matrix-as/spaces";
 import { createLogger } from "../utils/logger";
 import type { AuthUser } from "../auth/middleware";
+import { tenantScope } from "../db/tenant-scope";
 
 const log = createLogger("missions");
 
@@ -99,7 +100,7 @@ export function createMissionRoutes(deps: MissionDeps) {
       })
       .from(stations)
       .innerJoin(nodes, eq(nodes.id, stations.nodeId))
-      .where(and(eq(stations.userId, user.id), inArray(stations.id, stationIds)));
+      .where(tenantScope(stations, user.tenantId, inArray(stations.id, stationIds)));
 
     if (members.length !== stationIds.length) {
       return c.json({ error: "Not Found" }, 404);

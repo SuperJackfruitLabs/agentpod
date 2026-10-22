@@ -22,12 +22,13 @@
  */
 
 import { Hono } from "hono";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { nodes } from "../db/schema/nodes";
 import * as broker from "../services/broker";
 import { recordAudit } from "../services/audit";
 import type { AuthUser } from "../auth/middleware";
+import { tenantScope } from "../db/tenant-scope";
 
 // ─── Error-to-status helper ───────────────────────────────────────────────────
 
@@ -47,12 +48,12 @@ export const nodePostureRoutes = new Hono().post(
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    // ── 2. Ownership check ─────────────────────────────────────────────────
+    // ── 2. The node is in the caller's workspace (W4) ───────────────────────
     const nodeId = c.req.param("id");
     const rows = await db
       .select()
       .from(nodes)
-      .where(and(eq(nodes.id, nodeId), eq(nodes.userId, user.id)));
+      .where(tenantScope(nodes, user.tenantId, eq(nodes.id, nodeId)));
     const node = rows[0];
     if (!node) {
       return c.json({ error: "Not Found" }, 404);

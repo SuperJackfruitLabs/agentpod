@@ -109,13 +109,13 @@ import {
  */
 export interface AcpPort {
   /** Fresh private probe; unsupported Salaam never falls back to generic ACP. */
-  strictWork?(input: { stationId: string; userId: string }): Promise<import("./salaam-dispatch").StrictWorkSelection>;
+  strictWork?(input: { stationId: string; tenantId: string; userId: string }): Promise<import("./salaam-dispatch").StrictWorkSelection>;
 
   /**
    * Could a session be opened on this station right now? Asked BEFORE a claim,
    * because a claim the bridge cannot execute strands a card on the board.
    */
-  stationReady(input: { stationId: string; userId: string }): Promise<{ ready: boolean; reason?: string }>;
+  stationReady(input: { stationId: string; tenantId: string; userId: string }): Promise<{ ready: boolean; reason?: string }>;
   /**
    * `mcpProxy` asks the station's node to add its loopback MCP proxy — the hub's MCP server and
    * Superlibrary's, reached as the station's own agent — to the session. `libraryTools` in the
@@ -124,6 +124,8 @@ export interface AcpPort {
    */
   createSession(input: {
     stationId: string;
+    /** The workspace the agent's station is in; the session opens only there (W4). */
+    tenantId: string;
     userId: string;
     mode: AcpSessionMode;
     mcpServers?: AcpMcpServer[];
@@ -330,6 +332,7 @@ export const READINESS_PROBE_TIMEOUT_MS = 10_000;
 async function probeReadiness(
   acp: AcpPort,
   agent: { stationId: string; hubUserId: string },
+  tenantId: string,
 ): Promise<{ ready: boolean; reason?: string }> {
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<{ ready: boolean; reason?: string }>((resolve) => {
@@ -340,7 +343,7 @@ async function probeReadiness(
   });
   try {
     return await Promise.race([
-      acp.stationReady({ stationId: agent.stationId, userId: agent.hubUserId }),
+      acp.stationReady({ stationId: agent.stationId, tenantId, userId: agent.hubUserId }),
       timeout,
     ]);
   } finally {
@@ -354,6 +357,7 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
 
   const strict = await acp.strictWork?.({
     stationId: agent.stationId,
+    tenantId: deps.tenantId,
     userId: agent.hubUserId,
   });
   if (strict?.required) {
@@ -371,7 +375,7 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   // minutes except by asking. Checking first is what removes the race entirely,
   // including the restart case that produced it — the bridge starts with the
   // hub, the node-agents dial back in seconds later.
-  const readiness = await probeReadiness(acp, agent);
+  const readiness = await probeReadiness(acp, agent, deps.tenantId);
   if (!readiness.ready) {
     const reason = readiness.reason ?? "the station cannot run work right now";
     log("not claiming: the station is not ready", { station: agent.stationId, reason });
@@ -453,6 +457,7 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
     // harness that takes HTTP MCP servers) and says what it injected.
     session = await acp.createSession({
       stationId: agent.stationId,
+      tenantId,
       userId: agent.hubUserId,
       mode: agent.mode,
       ...(boardTools(deps) ? { mcpServers: boardTools(deps)! } : {}),

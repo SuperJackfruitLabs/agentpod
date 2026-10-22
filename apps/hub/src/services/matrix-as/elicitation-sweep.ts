@@ -242,9 +242,11 @@ export async function sweepElicitationBoardNow(boardId: string): Promise<Elicita
   });
 }
 
-/** The rostered agents, read from the table the console edits. */
+/**
+ * Every workspace's rostered agents, read from the table the console edits. Each board's
+ * questions are projected into the board's own tenant (`tenantIdFor`).
+ */
 async function bridgeRoster(): Promise<Array<{ boardId: string; token: string }>> {
-  const { readBridgeRoster } = await import("../bridge/roster");
-  const { BOOTSTRAP_TENANT_ID } = await import("../../db/schema/tenants");
-  return readBridgeRoster(BOOTSTRAP_TENANT_ID);
+  const { readEveryBridgeRoster } = await import("../bridge/roster");
+  return readEveryBridgeRoster();
 }

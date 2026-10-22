@@ -1,9 +1,11 @@
 /**
  * Authenticated station routes.
  *
- * All routes verify that the target node belongs to c.get("user").id before
- * brokering or querying.  Station ownership is implicit: a station row always
- * carries userId, and the registry functions scope every query to that userId.
+ * All routes verify that the target node or station is in the caller's
+ * workspace (tenant) before brokering or querying. A node or station belongs to
+ * the workspace, not to whoever enrolled it (workspace authority spec, W4);
+ * adopting and unadopting change the fleet for everyone, so they are a
+ * workspace admin's.
  *
  * Mounted at /api in index.ts so paths here are relative to /api:
  *   GET    /nodes/:nodeId/detected          → detect + mark adopted
@@ -20,6 +22,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { nodes } from "../db/schema/nodes";
 import { resolveTenantId } from "../auth/tenant";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 import * as broker from "../services/broker";
 import { connectionManager } from "../services/connection-manager";
 import { VERB_RESULTS } from "@agentpod/contract";
@@ -37,14 +40,12 @@ const FILE_READ_MAX_BYTES = 8 * 1024 * 1024;
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
-/** Returns the node row if it belongs to userId, otherwise null. */
-async function requireNodeOwnership(userId: string, nodeId: string, tenantId: string) {
-  // The request's tenant as well as the owner (W5): the same person in another
-  // workspace does not reach this node.
+/** The node row if it is in the request's workspace, otherwise null (W4, W5). */
+async function nodeInTenant(nodeId: string, tenantId: string) {
   const rows = await db
     .select({ id: nodes.id })
     .from(nodes)
-    .where(and(eq(nodes.id, nodeId), eq(nodes.tenantId, tenantId), eq(nodes.userId, userId)));
+    .where(and(eq(nodes.id, nodeId), eq(nodes.tenantId, tenantId)));
   return rows[0] ?? null;
 }
 
@@ -58,14 +59,13 @@ export const stationRoutes = new Hono()
    * DetectedStation is annotated with adopted:true/false based on whether a
    * stations row already exists for (nodeId, stationKey).
    *
-   * Returns 404 if the node is not owned by the requesting user.
+   * Returns 404 if the node is not in the caller's workspace.
    * Returns 502 if the node is offline, times out, or returns invalid data.
    */
   .get("/nodes/:nodeId/detected", async (c) => {
-    const userId = c.get("user").id;
     const nodeId = c.req.param("nodeId");
 
-    if (!(await requireNodeOwnership(userId, nodeId, resolveTenantId(c)))) {
+    if (!(await nodeInTenant(nodeId, resolveTenantId(c)))) {
       return c.json({ error: "Not Found" }, 404);
     }
 
@@ -84,7 +84,7 @@ export const stationRoutes = new Hono()
     // reportUnknownCapabilities — but it must not be silent.
     reportUnknownCapabilities(nodeId, result.data);
 
-    const adoptedRows = await listAdopted(userId, nodeId, resolveTenantId(c));
+    const adoptedRows = await listAdopted(c.get("user"), nodeId);
     const adoptedKeys = new Set(adoptedRows.map((s) => s.stationKey));
 
     return c.json(
@@ -106,7 +106,11 @@ export const stationRoutes = new Hono()
       const nodeId = c.req.param("nodeId");
       const { keys } = c.req.valid("json");
 
-      if (!(await requireNodeOwnership(userId, nodeId, resolveTenantId(c)))) {
+      // Adopting puts a station in the workspace's fleet: a workspace admin's (W1).
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+
+      if (!(await nodeInTenant(nodeId, resolveTenantId(c)))) {
         return c.json({ error: "Not Found" }, 404);
       }
 
@@ -135,46 +139,46 @@ export const stationRoutes = new Hono()
    * The console builds the tree from parentStationId.
    */
   .get("/nodes/:nodeId/stations", async (c) => {
-    const userId = c.get("user").id;
     const nodeId = c.req.param("nodeId");
 
-    if (!(await requireNodeOwnership(userId, nodeId, resolveTenantId(c)))) {
+    if (!(await nodeInTenant(nodeId, resolveTenantId(c)))) {
       return c.json({ error: "Not Found" }, 404);
     }
 
-    return c.json(await listAdopted(userId, nodeId, resolveTenantId(c)));
+    return c.json(await listAdopted(c.get("user"), nodeId));
   })
   /**
    * DELETE /api/stations/:stationId
    *
-   * Removes a station row.  Ownership is verified via getStation (which scopes
-   * by userId).  Returns 404 if the station does not exist or belongs to a
-   * different user.
+   * Removes a station row: a workspace admin's (W1). Returns 404 if the
+   * station does not exist or is in another workspace.
    */
   .delete("/stations/:stationId", async (c) => {
-    const userId = c.get("user").id;
+    const user = c.get("user");
     const stationId = c.req.param("stationId");
 
-    const station = await getStation(userId, stationId);
+    const notAdmin = requireWorkspaceAdmin(c);
+    if (notAdmin) return notAdmin;
+
+    const station = await getStation(user, stationId);
     if (!station) {
       return c.json({ error: "Not Found" }, 404);
     }
 
-    await unadopt(userId, stationId);
+    await unadopt(user, stationId, "station-deleted", user.id);
     return new Response(null, { status: 204 });
   })
   /**
    * GET /api/stations/:stationId/health
    *
    * Forwards a "health" RPC to the node that owns this station.
-   * Returns 404 if the station is not owned by the requesting user.
+   * Returns 404 if the station is not in the caller's workspace.
    * Returns 502 if the node is offline, times out, or returns invalid data.
    */
   .get("/stations/:stationId/health", async (c) => {
-    const userId = c.get("user").id;
     const stationId = c.req.param("stationId");
 
-    const station = await getStation(userId, stationId);
+    const station = await getStation(c.get("user"), stationId);
     if (!station) {
       return c.json({ error: "Not Found" }, 404);
     }
@@ -197,18 +201,17 @@ export const stationRoutes = new Hono()
    * GET /api/stations/:stationId/files?path=<rel>
    *
    * Lists files/directories at the given path on the station's node.
-   * Returns 404 if the station is not owned by the requesting user.
+   * Returns 404 if the station is not in the caller's workspace.
    * Returns 502 if the node is offline, times out, or returns invalid data.
    */
   .get(
     "/stations/:stationId/files",
     zValidator("query", z.object({ path: z.string().default(".") })),
     async (c) => {
-      const userId = c.get("user").id;
       const stationId = c.req.param("stationId");
       const { path } = c.req.valid("query");
 
-      const station = await getStation(userId, stationId);
+      const station = await getStation(c.get("user"), stationId);
       if (!station) {
         return c.json({ error: "Not Found" }, 404);
       }
@@ -237,7 +240,7 @@ export const stationRoutes = new Hono()
    * application/octet-stream; utf8 content is returned as text/plain.
    * Sets X-Truncated: true when the node reports the file was capped.
    *
-   * Returns 404 if the station is not owned by the requesting user.
+   * Returns 404 if the station is not in the caller's workspace.
    * Returns 502 if the node is offline, times out, or returns invalid data.
    */
   .get(
@@ -253,11 +256,10 @@ export const stationRoutes = new Hono()
       })
     ),
     async (c) => {
-      const userId = c.get("user").id;
       const stationId = c.req.param("stationId");
       const { path, maxBytes } = c.req.valid("query");
 
-      const station = await getStation(userId, stationId);
+      const station = await getStation(c.get("user"), stationId);
       if (!station) {
         return c.json({ error: "Not Found" }, 404);
       }
@@ -305,14 +307,13 @@ export const stationRoutes = new Hono()
    * Each log chunk is forwarded as an SSE `data:` event.
    * The broker stream is cancelled when the client disconnects.
    *
-   * Returns 404 if the station is not owned by the requesting user.
+   * Returns 404 if the station is not in the caller's workspace.
    * Returns 502 if the node is offline.
    */
   .get("/stations/:stationId/logs", async (c) => {
-    const userId = c.get("user").id;
     const stationId = c.req.param("stationId");
 
-    const station = await getStation(userId, stationId);
+    const station = await getStation(c.get("user"), stationId);
     if (!station) {
       return c.json({ error: "Not Found" }, 404);
     }

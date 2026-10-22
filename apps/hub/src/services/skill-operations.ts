@@ -53,7 +53,6 @@ const scope = (owner: SkillOwner, id?: string) =>
   tenantScope(
     skillOperations,
     owner.tenantId,
-    eq(skillOperations.userId, owner.userId),
     id ? eq(skillOperations.id, id) : undefined,
   );
 function operationStatus(
@@ -157,7 +156,7 @@ export async function createSkillOperation(
     | { requestId: string; profile: string; action: NativeAction }
     | { requestId: string; plugin: typeof MANAGED_PLUGIN; action: PluginAction },
 ): Promise<Operation> {
-  if (station.userId !== owner.userId || station.tenantId !== owner.tenantId)
+  if (station.tenantId !== owner.tenantId)
     throw new SkillRequestError(404, "Station not found");
   const artifact =
     "artifactId" in request
@@ -187,7 +186,7 @@ export async function createSkillOperation(
     .slice(0, 32);
   return db.transaction(async (tx) => {
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["skill-operations", owner.tenantId, owner.userId, station.id])},0))`,
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["skill-operations", owner.tenantId, station.id])},0))`,
     );
     const [existing] = await tx
       .select()

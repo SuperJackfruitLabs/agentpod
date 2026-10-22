@@ -45,6 +45,7 @@ const log = createLogger("acp-agent");
 export interface AcpSessionService {
   createSession(input: {
     stationId: string;
+    tenantId: string;
     userId: string;
     mode: AcpSessionMode;
   }): Promise<{ id: string }>;
@@ -112,6 +113,8 @@ function toSessionMode(modeId: unknown): AcpSessionMode {
 
 export interface AcpAgentOptions {
   userId: string;
+  /** The workspace the caller acts in; the station must be in it (W4). */
+  tenantId: string;
   stationId: string;
   /** Defaults to the real session service. */
   sessions?: AcpSessionService;
@@ -164,6 +167,7 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
         const row = await asAcpError(() =>
           service.createSession({
             stationId: opts.stationId,
+            tenantId: opts.tenantId,
             userId: opts.userId,
             mode: "ask",
           }),

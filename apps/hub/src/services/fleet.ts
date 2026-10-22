@@ -18,6 +18,7 @@ import { getLatestAgentVersion } from "./agent-version";
 import { getHealth } from "./health-cache";
 import type { FleetAgent, FleetStats, StationHealthReport } from "@agentpod/contract";
 import type { CachedHealth } from "./health-cache";
+import { tenantScope } from "../db/tenant-scope";
 
 // ─── Internal raw-row type ────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ export type FleetDeps = {
    * Override the DB query (e.g. to return seeded rows in tests).
    * Defaults to the real Drizzle join.
    */
-  queryFn?: (userId: string) => Promise<RawFleetRow[]>;
+  queryFn?: (tenantId: string) => Promise<RawFleetRow[]>;
   /**
    * Override the health cache lookup (e.g. return stubbed cache entries in tests).
    * Defaults to the real in-memory health cache singleton.
@@ -191,9 +192,10 @@ export function computeFleetStats(agents: FleetAgent[]): FleetStats {
 /**
  * Real Drizzle join: adopted stations (all rows in the stations table are
  * adopted; there is no `adopted` boolean — presence in the table IS adoption)
- * inner-joined with their parent node, filtered by userId.
+ * inner-joined with their parent node, in the workspace (tenant) — whoever adopted
+ * them (workspace authority spec, W4).
  */
-async function defaultQueryFn(userId: string): Promise<RawFleetRow[]> {
+async function defaultQueryFn(tenantId: string): Promise<RawFleetRow[]> {
   return db
     .select({
       stationId: stations.id,
@@ -210,7 +212,7 @@ async function defaultQueryFn(userId: string): Promise<RawFleetRow[]> {
     })
     .from(stations)
     .innerJoin(nodes, eq(stations.nodeId, nodes.id))
-    .where(eq(stations.userId, userId));
+    .where(tenantScope(stations, tenantId));
 }
 
 // ─── Service factory ──────────────────────────────────────────────────────────
@@ -218,7 +220,7 @@ async function defaultQueryFn(userId: string): Promise<RawFleetRow[]> {
 /**
  * Create a fleet service with optional dep overrides (for tests).
  *
- * Returns `{ listFleetAgents, getFleetStats }` scoped to a userId.
+ * Returns `{ listFleetAgents, getFleetStats }` scoped to a workspace (tenant id).
  */
 export function createFleetService(deps?: FleetDeps) {
   const queryFn = deps?.queryFn ?? defaultQueryFn;
@@ -231,9 +233,9 @@ export function createFleetService(deps?: FleetDeps) {
    * Calls the version fetcher once per invocation (cached module-level for 1 h).
    * Health data comes from the in-memory cache — no DB round-trips.
    */
-  async function listFleetAgents(userId: string): Promise<FleetAgent[]> {
+  async function listFleetAgents(tenantId: string): Promise<FleetAgent[]> {
     const [rows, latestVersion] = await Promise.all([
-      queryFn(userId),
+      queryFn(tenantId),
       latestVersionFn(),
     ]);
     return annotateFleetRows(rows, latestVersion, getHealthFn, Date.now());
@@ -243,8 +245,8 @@ export function createFleetService(deps?: FleetDeps) {
    * Aggregate counts derived from listFleetAgents.
    * updatesAvailable = number of agents (stations) with updateAvailable:true.
    */
-  async function getFleetStats(userId: string): Promise<FleetStats> {
-    const agents = await listFleetAgents(userId);
+  async function getFleetStats(tenantId: string): Promise<FleetStats> {
+    const agents = await listFleetAgents(tenantId);
     return computeFleetStats(agents);
   }
 

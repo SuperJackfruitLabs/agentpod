@@ -30,7 +30,7 @@ const OTHER_AGENT = "prn_ffffffffffffffffffff";
 function app() {
   const a = new Hono();
   a.use("*", async (c, next) => {
-    c.set("user", { id: USER, role: "user" });
+    c.set("user", { id: USER, tenantId: "fleet_00000000000000000000", workspaceRole: "admin" } as never);
     await next();
   });
   a.route("/", stationWriteRoutes);

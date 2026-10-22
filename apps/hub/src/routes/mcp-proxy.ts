@@ -15,6 +15,7 @@ import { McpProxyChangeRequest, McpProxyRotateRequest } from "@agentpod/contract
 
 import { changeProxy, fleetView, oneStation, rotateProxy } from "../services/mcp-proxy";
 import type { AuthUser } from "../auth/middleware";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
 function caller(c: { get: (k: "user") => unknown }): AuthUser | null {
   const user = c.get("user") as AuthUser | undefined;
@@ -34,11 +35,14 @@ export function createMcpProxyRoutes() {
     .get("/fleet/mcp-proxy", async (c) => {
       const user = caller(c);
       if (!user) return c.json({ error: "Unauthorized" }, 401);
-      return c.json(await fleetView(user.id, user.tenantId, c.req.query("nodeId") || undefined));
+      return c.json(await fleetView(user.tenantId, c.req.query("nodeId") || undefined));
     })
     .post("/fleet/mcp-proxy", async (c) => {
       const user = caller(c);
       if (!user) return c.json({ error: "Unauthorized" }, 401);
+      // Turning the proxy on or off changes the station for everyone in the workspace (W1).
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
       const parsed = McpProxyChangeRequest.safeParse(await bodyOf(c.req.raw));
       if (!parsed.success) {
         return c.json({ error: parsed.error.issues.map((i) => i.message).join("; ") }, 400);
@@ -49,6 +53,8 @@ export function createMcpProxyRoutes() {
     .post("/fleet/mcp-proxy/rotate", async (c) => {
       const user = caller(c);
       if (!user) return c.json({ error: "Unauthorized" }, 401);
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
       const parsed = McpProxyRotateRequest.safeParse(await bodyOf(c.req.raw));
       if (!parsed.success) {
         return c.json({ error: parsed.error.issues.map((i) => i.message).join("; ") }, 400);
@@ -59,7 +65,7 @@ export function createMcpProxyRoutes() {
     .get("/stations/:id/mcp-proxy", async (c) => {
       const user = caller(c);
       if (!user) return c.json({ error: "Unauthorized" }, 401);
-      const view = await oneStation(user.id, c.req.param("id"));
+      const view = await oneStation(user.tenantId, c.req.param("id"));
       if (!view) return c.json({ error: "Not Found" }, 404);
       return c.json(view);
     });

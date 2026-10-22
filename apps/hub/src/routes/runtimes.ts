@@ -5,8 +5,8 @@
  * User identity comes from `c.get("user")` — same pattern as enrollment-tokens.ts.
  *
  * Routes:
- *   POST   /api/runtimes                — create a new runtime (body: ProvisionRequest)
- *   GET    /api/runtimes                — list the caller's runtimes
+ *   POST   /api/runtimes                — create a new runtime (workspace admin)
+ *   GET    /api/runtimes                — list the workspace's runtimes (any member)
  *   GET    /api/runtimes/providers      — list enabled providers (for UI)
  *   DELETE /api/runtimes/:id            — destroy a runtime
  *   POST   /api/runtimes/:id/start      — start a stopped runtime
@@ -23,13 +23,15 @@
  *         that is anything else still surfaces as one.
  *   400 — disabled provider OR body validation error OR unsupported operation
  *   401 — unauthenticated (enforced by authMiddleware in index.ts)
- *   404 — runtime not found / wrong owner
+ *   403 — a mutation by someone who is not a workspace admin
+ *   404 — runtime not found / in another workspace
  *   502 — driver (external system) failure during provision/destroy
  */
 
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { ProvisionRequest } from "@agentpod/contract";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 import {
   createRuntime,
   listRuntimes,
@@ -46,6 +48,11 @@ export const runtimeRoutes = new Hono()
   .post("/", zValidator("json", ProvisionRequest), async (c) => {
     const user = c.get("user");
     const body = c.req.valid("json");
+
+    // Provisioning a runtime enrols a node into the workspace's fleet, which is a workspace
+    // admin's act (W1) exactly as minting an enrollment token is.
+    const notAdmin = requireWorkspaceAdmin(c);
+    if (notAdmin) return notAdmin;
 
     // Resolve the hub URL — prefer env override (set in production / tests),
     // fall back to the origin of the incoming request.
@@ -82,7 +89,7 @@ export const runtimeRoutes = new Hono()
   // ── GET /api/runtimes ─────────────────────────────────────────────────────
   .get("/", async (c) => {
     const user = c.get("user");
-    const runtimes = await listRuntimes(user.id, user.tenantId);
+    const runtimes = await listRuntimes(user);
     return c.json(runtimes);
   })
 
@@ -92,7 +99,9 @@ export const runtimeRoutes = new Hono()
     const { id } = c.req.param();
 
     try {
-      await destroyRuntime(user.id, id);
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+      await destroyRuntime(user, id);
       return c.body(null, 204);
     } catch (err) {
       const e = err as Error & { status?: number };
@@ -115,7 +124,9 @@ export const runtimeRoutes = new Hono()
     const { id } = c.req.param();
 
     try {
-      await startRuntime(user.id, id);
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+      await startRuntime(user, id);
       return c.body(null, 204);
     } catch (err) {
       const e = err as Error & { status?: number };
@@ -145,7 +156,9 @@ export const runtimeRoutes = new Hono()
     const { id } = c.req.param();
 
     try {
-      await stopRuntime(user.id, id);
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+      await stopRuntime(user, id);
       return c.body(null, 204);
     } catch (err) {
       const e = err as Error & { status?: number };

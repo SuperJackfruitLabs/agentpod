@@ -139,6 +139,7 @@ export interface InboundDeps {
   acp: {
     createSession(input: {
       stationId: string;
+      tenantId: string;
       userId: string;
       mode: string;
     }): Promise<{ id: string }>;
@@ -195,6 +196,7 @@ async function roomContext(roomId: string) {
       sessionId: matrixRooms.acpSessionId,
       stationId: stations.id,
       stationUserId: stations.userId,
+      stationTenantId: stations.tenantId,
       stationKey: stations.stationKey,
       identityMode: stations.matrixIdentityMode,
       nodeName: nodes.name,
@@ -726,11 +728,11 @@ async function dispatchTurn(
       // One session per room, not per message: a conversation is a
       // conversation, and a session per message would throw away the agent's
       // context between two consecutive sentences.
-      // The station's OWNER, not the sender's principal. `createSession` looks
-      // the station up with `getStation(userId, stationId)`, which scopes on
-      // `stations.user_id` — a Better Auth id. Passing a `prn_…` matched no
-      // row, so every bridged room failed with "Station not found." after the
-      // hub had already received, resolved and authorised the message.
+      // The station's OWNER, not the sender's principal: the session is the
+      // owner's (sessions stay a person's own, W4), and it opens in the
+      // station's tenant. It once mattered for the lookup too: `getStation`
+      // scoped on `stations.user_id`, so a `prn_…` matched no row and every
+      // bridged room failed with "Station not found.".
       //
       // Authorisation still belongs to the principal: the control-pair check
       // in `handleRoomMessage` is what decides whether this sender may dispatch
@@ -743,6 +745,7 @@ async function dispatchTurn(
       // needs its own column, not this one doing two jobs.
       const session = await deps.acp.createSession({
         stationId: room.stationId,
+        tenantId: room.stationTenantId,
         userId: room.stationUserId,
         mode: "default",
       });

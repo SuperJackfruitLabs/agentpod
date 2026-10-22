@@ -39,7 +39,9 @@ const settings = createSpeechSettings({ store: dbSpeechStore, env: {}, cipher: {
 
 function as(userId: string) {
   return async (c: any, next: () => Promise<void>) => {
-    c.set("user", { id: userId, role: "user" });
+    // OTHER stands in another workspace: a station is the workspace's, not its adopter's (W4).
+    const tenantId = userId === OTHER ? "fleet_11111111111111111111" : "fleet_00000000000000000000";
+    c.set("user", { id: userId, tenantId, workspaceRole: "admin" } as never);
     await next();
   };
 }
@@ -181,7 +183,7 @@ describe("station routes", () => {
     expect((await settings.resolveFor(STATION))?.apiKey).toBe(KEY);
   });
 
-  test("another user's station is a 404, and nothing is written", async () => {
+  test("another workspace's station is a 404, and nothing is written", async () => {
     expect((await stationApp(OTHER).request(`/api/stations/${STATION}/speech`)).status).toBe(404);
     expect((await stationApp(OTHER).request(`/api/stations/${STATION}/speech`, json("PUT", { mode: "off" }))).status).toBe(404);
     expect((await rawSql`SELECT 1 FROM station_speech WHERE station_id = ${STATION}`) as any[]).toHaveLength(0);
@@ -265,7 +267,7 @@ describe("POST /api/stations/:id/speech/apply over the stations table", () => {
     expect(sent).toEqual([{ nodeId: NODE, verb: "speech.apply", params: { key: "hermes:h", stationId: HARNESS_STATION } }]);
   });
 
-  test("another user's station is a 404 and nothing is sent", async () => {
+  test("another workspace's station is a 404 and nothing is sent", async () => {
     const res = await applyApp(OTHER).request(`/api/stations/${HARNESS_STATION}/speech/apply`, { method: "POST" });
     expect(res.status).toBe(404);
     expect(sent).toHaveLength(0);

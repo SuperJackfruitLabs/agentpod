@@ -14,7 +14,7 @@ import { request as brokerRequest } from "../services/broker";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 import { logAdminAction, type LogAdminActionInput } from "../models/admin-audit-log";
 import { createLogger } from "../utils/logger";
-import { removeNode, ownsNode } from "../services/node-removal";
+import { removeNode, nodeInTenant } from "../services/node-removal";
 import { requireFleetGrantReach } from "../services/grant-reach";
 import { isControlPairEnforced, isGrantReachDenied, GrantReachDenied } from "../services/control-pair";
 import { callerPrincipal } from "../auth/caller-authority";
@@ -201,14 +201,17 @@ async function readForce(c: {
 export function createNodeRoutes(deps?: {
   request?: RequestFn;
   /** Replaces the database-backed node list so the rollout is unit-testable. */
-  listNodesFn?: (userId: string, tenantId: string) => Promise<RolloutNode[]>;
+  listNodesFn?: (tenantId: string) => Promise<RolloutNode[]>;
   /** Replaces the runtime lookup that answers which nodes boot from an image. */
-  fixedImageNodesFn?: (userId: string) => Promise<Set<string>>;
+  fixedImageNodesFn?: (tenantId: string) => Promise<Set<string>>;
   /** Replaces the audit-log writer. */
   auditFn?: (entry: LogAdminActionInput) => Promise<unknown>;
+  /** Replaces the database question "is this node in the request's workspace?". */
+  nodeInTenantFn?: (tenantId: string, nodeId: string) => Promise<boolean>;
 }) {
+  const _nodeInTenant = deps?.nodeInTenantFn ?? nodeInTenant;
   const _request: RequestFn = deps?.request ?? brokerRequest;
-  const _listNodes = deps?.listNodesFn ?? (listNodes as (u: string, t: string) => Promise<RolloutNode[]>);
+  const _listNodes = deps?.listNodesFn ?? (listNodes as (t: string) => Promise<RolloutNode[]>);
   const _fixedImageNodes = deps?.fixedImageNodesFn ?? nodesWithFixedImage;
   const _audit = deps?.auditFn ?? logAdminAction;
 
@@ -217,7 +220,7 @@ export function createNodeRoutes(deps?: {
       /**
        * GET /api/nodes → list nodes belonging to the current user.
        */
-      .get("/", async (c) => c.json(await listNodes(c.get("user").id, resolveTenantId(c))))
+      .get("/", async (c) => c.json(await listNodes(resolveTenantId(c))))
       /**
        * GET /api/nodes/telemetry  (workspace admin)
        *
@@ -228,9 +231,8 @@ export function createNodeRoutes(deps?: {
       .get("/telemetry", async (c) => {
         const refused = requireWorkspaceAdmin(c);
         if (refused) return refused;
-        const userId = c.get("user").id;
-        const nodes = (await _listNodes(userId, resolveTenantId(c))).slice().sort((a, b) => a.name.localeCompare(b.name));
-        const fixed = await _fixedImageNodes(userId);
+        const nodes = (await _listNodes(resolveTenantId(c))).slice().sort((a, b) => a.name.localeCompare(b.name));
+        const fixed = await _fixedImageNodes(resolveTenantId(c));
         const results: TelemetryRow[] = [];
         for (const n of nodes) {
           results.push(
@@ -279,7 +281,7 @@ export function createNodeRoutes(deps?: {
           only = body.only as string[];
         }
 
-        const all = await _listNodes(user.id, resolveTenantId(c));
+        const all = await _listNodes(resolveTenantId(c));
         let targets = all;
         if (only) {
           const unknown = only.filter((o) => !all.some((n) => n.id === o || n.name === o));
@@ -290,7 +292,7 @@ export function createNodeRoutes(deps?: {
         targets = targets.slice().sort((a, b) => a.name.localeCompare(b.name));
 
         const params = hasOff ? { off: true } : { endpoint: body.endpoint as string };
-        const fixed = await _fixedImageNodes(user.id);
+        const fixed = await _fixedImageNodes(resolveTenantId(c));
         const results: TelemetryRow[] = [];
         for (const n of targets) {
           if (fixed.has(n.id)) {
@@ -355,13 +357,12 @@ export function createNodeRoutes(deps?: {
           ? (body.only as unknown[]).filter((x): x is string => typeof x === "string")
           : undefined;
 
-        const userId = c.get("user").id;
-        const nodes = await _listNodes(userId, resolveTenantId(c));
+        const nodes = await _listNodes(resolveTenantId(c));
 
         // A node whose binary comes from an image is not updatable by RPC, and
         // asking stops it. A rollout that did that to every container station
         // would be far worse than one that updates nothing (#349).
-        const fixed = await _fixedImageNodes(userId);
+        const fixed = await _fixedImageNodes(resolveTenantId(c));
         const plan = planRollout(
           nodes.map((n) => ({ ...n, imageFixed: fixed.has(n.id) })),
           { force, only }
@@ -403,7 +404,7 @@ export function createNodeRoutes(deps?: {
         // caller learns nothing about an id that is not theirs here.
         const refused = requireWorkspaceAdmin(c);
         if (refused) {
-          if (!(await ownsNode(user.id, nodeId, tenantId))) return c.json({ ok: false as const, error: "Not Found" }, 404);
+          if (!(await _nodeInTenant(tenantId, nodeId))) return c.json({ ok: false as const, error: "Not Found" }, 404);
           return refused;
         }
         const force = await readForce(c);
@@ -421,7 +422,7 @@ export function createNodeRoutes(deps?: {
           if (!isGrantReachDenied(e)) throw e;
           // Still a 404 for a node that is not theirs: the refusal must not
           // become a way to probe for ids.
-          if (!(await ownsNode(user.id, nodeId, tenantId))) return c.json({ ok: false as const, error: "Not Found" }, 404);
+          if (!(await _nodeInTenant(tenantId, nodeId))) return c.json({ ok: false as const, error: "Not Found" }, 404);
           return c.json(
             { ok: false as const, error: "You do not have permission to remove machines from this fleet." },
             403
@@ -497,13 +498,23 @@ export function createNodeRoutes(deps?: {
        */
       .post("/:id/update", async (c) => {
         const nodeId = c.req.param("id");
+
+        // Updating a machine is a workspace admin's act (W1), and only on a node in this
+        // workspace: this route used to ask neither, so any signed-in caller could restart any
+        // node on the hub by id. Another workspace's node is a 404, never a 403, so the refusal
+        // does not confirm the id.
+        const tenantId = resolveTenantId(c);
+        const notAdmin = requireWorkspaceAdmin(c);
+        if (!(await _nodeInTenant(tenantId, nodeId))) return c.json({ ok: false as const, error: "Not Found" }, 404);
+        if (notAdmin) return notAdmin;
+
         const force = await readForce(c);
 
         // Refused BEFORE the RPC, because sending it is what stops the station:
         // the agent swaps its binary and exits for a supervisor that a
         // container substrate does not have, onto a disk that will not keep the
         // swap (#349). `force` does not apply — it cannot make this work.
-        if ((await _fixedImageNodes(c.get("user").id)).has(nodeId)) {
+        if ((await _fixedImageNodes(resolveTenantId(c))).has(nodeId)) {
           return c.json(
             {
               ok: false as const,

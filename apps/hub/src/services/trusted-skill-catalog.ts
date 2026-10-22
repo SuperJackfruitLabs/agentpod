@@ -63,15 +63,15 @@ export async function importTrustedSkillRelease(
     throw new SkillRequestError(400, "Trusted release must bind exactly one artifact per harness");
 
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["trusted-skill-releases", owner.tenantId, owner.userId, record.digest])},0))`);
-    const releaseScope = tenantScope(trustedSkillReleases, owner.tenantId, eq(trustedSkillReleases.userId, owner.userId));
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["trusted-skill-releases", owner.tenantId, record.digest])},0))`);
+    const releaseScope = tenantScope(trustedSkillReleases, owner.tenantId);
     const [existing] = await tx.select().from(trustedSkillReleases).where(and(releaseScope, eq(trustedSkillReleases.recordDigest, record.digest)));
     if (existing) return metadata(existing);
     const pins = new Map(rawPins.map((pin) => [pin.harness, pin.artifactId]));
     const resolved = await Promise.all(record.artifacts.map(async (expected) => {
       const artifactId = pins.get(expected.harness);
       if (!artifactId) throw new SkillRequestError(400, "Trusted release is missing a pinned harness artifact");
-      const [artifact] = await tx.select().from(skillArtifacts).where(tenantScope(skillArtifacts, owner.tenantId, eq(skillArtifacts.userId, owner.userId), eq(skillArtifacts.id, artifactId)));
+      const [artifact] = await tx.select().from(skillArtifacts).where(tenantScope(skillArtifacts, owner.tenantId, eq(skillArtifacts.id, artifactId)));
       if (!artifact || artifact.harness !== expected.harness || artifact.profile !== record.profile || artifact.archiveSHA256 !== expected.archive_sha256)
         throw new SkillRequestError(409, "Pinned artifact does not match the trusted release record");
       try {
@@ -109,14 +109,14 @@ export async function importTrustedSkillRelease(
 
 export async function listTrustedSkillReleases(owner: SkillOwner): Promise<TrustedSkillReleaseMetadata[]> {
   const rows = await db.select().from(trustedSkillReleases)
-    .where(tenantScope(trustedSkillReleases, owner.tenantId, eq(trustedSkillReleases.userId, owner.userId)))
+    .where(tenantScope(trustedSkillReleases, owner.tenantId))
     .orderBy(trustedSkillReleases.createdAt).limit(128);
   return rows.map(metadata);
 }
 
 export async function getTrustedSkillRelease(owner: SkillOwner, id: string) {
   const [row] = await db.select().from(trustedSkillReleases).where(
-    tenantScope(trustedSkillReleases, owner.tenantId, eq(trustedSkillReleases.userId, owner.userId), eq(trustedSkillReleases.id, id)),
+    tenantScope(trustedSkillReleases, owner.tenantId, eq(trustedSkillReleases.id, id)),
   );
   return row ?? null;
 }

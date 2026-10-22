@@ -71,7 +71,7 @@ function adminApp() {
 function sayApp(sent: Array<{ userId: string; roomId: string; body: string }>) {
   const a = new Hono();
   a.use("*", async (c, next) => {
-    c.set("user", { id: OWNER } as AuthUser);
+    c.set("user", { id: OWNER, tenantId: BOOTSTRAP_TENANT_ID } as AuthUser);
     await next();
   });
   a.route(

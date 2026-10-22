@@ -25,6 +25,7 @@ import { getStation } from "../services/station-registry";
 import { recordAudit } from "../services/audit";
 import { gateCapability } from "./station-writes";
 import type { AuthUser } from "../auth/middleware";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
 // ─── Error-to-status helper ───────────────────────────────────────────────────
 
@@ -59,9 +60,12 @@ export const stationLifecycleRoutes = new Hono()
         return c.json({ error: "Unauthorized" }, 401);
       }
 
-      // ── 2. Ownership check ──────────────────────────────────────────────────
+      // ── 2. Station in the caller's workspace ────────────────────────────────
       const stationId = c.req.param("id");
-      const station = await getStation(user.id, stationId);
+      // Changes the station for everyone in the workspace: a workspace admin's (W1).
+      const notAdmin = requireWorkspaceAdmin(c);
+      if (notAdmin) return notAdmin;
+      const station = await getStation(user, stationId);
       if (!station) {
         return c.json({ error: "Not Found" }, 404);
       }

@@ -34,7 +34,7 @@ const OTHER_AGENT = "prn_ffffffffffffffffffff";
 
 let sent: Array<{ userId: string; roomId: string; body: string }> = [];
 
-function app(user = { id: OWNER, role: "user" }) {
+function app(user = { id: OWNER, tenantId: BOOTSTRAP_TENANT_ID } as Record<string, unknown>) {
   const routes = createStationSayRoutes({
     domain: "id.agentpod.dev",
     client: {
@@ -135,7 +135,7 @@ describe("POST /api/stations/:id/matrix/say", () => {
     expect(sent).toHaveLength(0);
   });
 
-  test("404s for a station that is not the caller's", async () => {
+  test("404s for a station that is not in the caller's workspace", async () => {
     expect((await say({ body: "hi" }, "station_not_mine")).status).toBe(404);
   });
 

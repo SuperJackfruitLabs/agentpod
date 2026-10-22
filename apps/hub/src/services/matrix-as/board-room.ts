@@ -340,9 +340,9 @@ export async function matrixIdsForBoardHumans(boardId: string): Promise<string[]
     // matters here — the user comes off the STATION. The roster used to carry its own `hubUserId`,
     // which could disagree with the station it named; this cannot, because there is only one of
     // them now. See `services/bridge/roster.ts`.
-    const { listBridgeAgents } = await import("../bridge/roster");
-    const { BOOTSTRAP_TENANT_ID } = await import("../../db/schema/tenants");
-    const roster = await listBridgeAgents(BOOTSTRAP_TENANT_ID);
+    // Every workspace's roster: a board is one workspace's, and its agents are rostered there.
+    const { listEveryBridgeAgent } = await import("../bridge/roster");
+    const roster = await listEveryBridgeAgent();
     hubUserIds = [...new Set(roster.filter((a) => a.boardId === boardId).map((a) => a.hubUserId))];
   } catch {
     // A roster that cannot be read is an operator's problem and is reported where it is read; a

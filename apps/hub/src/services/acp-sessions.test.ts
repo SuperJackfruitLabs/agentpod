@@ -104,7 +104,7 @@ test("partial output followed by max-output, refusal or cancellation is never a 
     });
     let sessionId: string | undefined;
     try {
-      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
       sessionId = row.id;
       await promptSession(TEST_USER, row.id, "A fixture partial turn");
       await pollForEvent(row.id, sawSessionKey);
@@ -316,7 +316,7 @@ test(
   async () => {
     const { server, fake, station } = await setupRig("acpsess-create-host");
     try {
-      const row = await createSession({
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "ask",
@@ -337,7 +337,7 @@ test(
 
       // A second live session is allowed on a node that echoes the instance
       // (independence is covered by the multi-session test below).
-      const sibling = await createSession({
+      const sibling = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "ask",
@@ -372,7 +372,7 @@ test(
       await pollForEvent(row.id, stateWith("ended"));
 
       // A new session can start once the previous one ended.
-      const row2 = await createSession({
+      const row2 = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "full-auto",
@@ -399,13 +399,14 @@ test(
     try {
       // Unknown station.
       await expect(
-        createSession({ stationId: "station_nope", userId: TEST_USER, mode: "ask" })
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: "station_nope", userId: TEST_USER, mode: "ask" })
       ).rejects.toThrow();
 
-      // Wrong user (not the owner).
+      // Another workspace (W4): a station is the workspace's, so the same id
+      // asked for in another tenant is not found.
       await expect(
-        createSession({ stationId: station.id, userId: OTHER_USER, mode: "ask" })
-      ).rejects.toThrow();
+        createSession({ tenantId: "fleet_99999999999999999999", stationId: station.id, userId: OTHER_USER, mode: "ask" })
+      ).rejects.toThrow("Station not found.");
 
       // Station without the acp capability.
       const [noAcp] = await adoptStations(TEST_USER, nodeId, ["no-acp-station"], [
@@ -422,12 +423,12 @@ test(
         },
       ]);
       await expect(
-        createSession({ stationId: noAcp!.id, userId: TEST_USER, mode: "ask" })
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: noAcp!.id, userId: TEST_USER, mode: "ask" })
       ).rejects.toThrow();
 
       // acp.open failure → throws AND leaves the row ended with an error event.
       await expect(
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
       ).rejects.toThrow();
       const rows = await listSessions(TEST_USER, station.id);
       expect(rows.length).toBe(1);
@@ -439,14 +440,14 @@ test(
       // The failure exit cleaned the live maps: a retry hits the open failure
       // again — NOT the single-session guard (which would wedge the station).
       await expect(
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
       ).rejects.toThrow("Couldn't start the agent process");
 
       // Offline node.
       fake.close();
       await new Promise((r) => setTimeout(r, 200));
       await expect(
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
       ).rejects.toThrow();
     } finally {
       server.stop(true);
@@ -466,7 +467,7 @@ test(
     try {
       // Wedged on initialize → deadline fires with the standard copy.
       await expect(
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
       ).rejects.toThrow("Couldn't start the agent process");
 
       // The spawned process is torn down: node saw the best-effort acp.close.
@@ -487,13 +488,13 @@ test(
       // Wedged on session/new times out the same way.
       fake.opts.hangHandshake = "session/new";
       await expect(
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
       ).rejects.toThrow("Couldn't start the agent process");
 
       // Maps drained: with a healthy agent the station accepts a fresh
       // session — no "active session already exists" 409-lock.
       fake.opts.hangHandshake = undefined;
-      const row = await createSession({
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "ask",
@@ -518,7 +519,7 @@ test(
       stationKey: "acp-prompt-station",
     });
     try {
-      const row = await createSession({
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "full-auto",
@@ -606,7 +607,7 @@ test("promptSession persists an ACP rejection before returning the session to id
     failPrompt: "Provider quota exhausted",
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     const liveEvents: AcpEvent[] = [];
     const unsub = subscribe(row.id, (event) => liveEvents.push(event));
 
@@ -650,7 +651,7 @@ test("promptSession keeps the words a harness put in the error's data (Codex quo
     },
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "hello");
     const { hit } = await pollForEvent(row.id, (event) => event.type === "error", 8_000);
     expect(hit.payload).toMatchObject({
@@ -689,7 +690,7 @@ test("a rejection that said nothing, with the gateway unreachable, names the gat
     transport: { supported: true, reachable: false, detail: "connect ECONNREFUSED 127.0.0.1:18789" },
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "hello");
     const { hit } = await pollForEvent(row.id, (event) => event.type === "error", 8_000);
 
@@ -723,7 +724,7 @@ test("a rejection that said nothing, with the gateway reachable, keeps the harne
     transport: { supported: true, reachable: true },
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "hello");
     const { hit } = await pollForEvent(row.id, (event) => event.type === "error", 8_000);
 
@@ -745,7 +746,7 @@ test("a node that does not know the transport verb keeps the harness's own error
     // `transport` deliberately absent: the fake refuses the verb, as an old node does.
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "hello");
     const { hit } = await pollForEvent(row.id, (event) => event.type === "error", 8_000);
 
@@ -776,7 +777,7 @@ test("a disconnected harness is re-attached, and the next prompt works", async (
   });
   let sessionId: string | undefined;
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     sessionId = row.id;
     expect(fake.processes).toHaveLength(1);
 
@@ -844,7 +845,7 @@ test("a harness that stays unreachable is not re-attached forever", async () => 
     transport: { supported: true, reachable: false, detail: "connect ECONNREFUSED" },
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "hello");
     await pollForEvent(
       row.id,
@@ -891,7 +892,7 @@ test("promptSession reports an adapter that completes without any visible update
     silentPrompt: true,
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "hello");
     const { hit: error } = await pollForEvent(
       row.id,
@@ -935,7 +936,7 @@ test(
       permission: { toolKind: "execute" },
     });
     try {
-      const row = await createSession({
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "ask",
@@ -1011,7 +1012,7 @@ test(
       permission: { toolKind: "execute" },
     });
     try {
-      const row = await createSession({
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "full-auto",
@@ -1061,7 +1062,7 @@ test(
     });
     try {
       // Start in ask, then flip to accept-edits via setMode.
-      const row = await createSession({
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "ask",
@@ -1115,7 +1116,7 @@ test(
       hangPrompt: true,
     });
     try {
-      const row = await createSession({
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "full-auto",
@@ -1161,7 +1162,7 @@ test(
       stationKey: "acp-authz-station",
     });
     try {
-      const row = await createSession({
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "ask",
@@ -1197,7 +1198,7 @@ test(
       ignoreCancel: true, // prompts stay pending until releasePrompt()
     });
     try {
-      const row = await createSession({
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "full-auto",
@@ -1281,8 +1282,8 @@ test(
     });
     try {
       const results = await Promise.allSettled([
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" }),
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" }),
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" }),
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" }),
       ]);
       expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(2);
       const both = results.map(
@@ -1314,8 +1315,8 @@ test(
     });
     try {
       const results = await Promise.allSettled([
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" }),
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" }),
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" }),
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" }),
       ]);
       const won = results.filter((r) => r.status === "fulfilled");
       const lost = results.filter((r) => r.status === "rejected");
@@ -1351,7 +1352,7 @@ test(
       permission: { toolKind: "execute" },
     });
     try {
-      const row = await createSession({
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "ask",
@@ -1492,7 +1493,7 @@ test(
       stationKey: "acp-offline-station",
     });
     try {
-      const row = await createSession({
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "ask",
@@ -1644,12 +1645,12 @@ test(
       exitOnClose: true,
     });
     try {
-      const a = await createSession({
+      const a = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "full-auto",
       });
-      const b = await createSession({
+      const b = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "full-auto",
@@ -1741,7 +1742,7 @@ test(
       legacyOpen: true,
     });
     try {
-      const a = await createSession({
+      const a = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "full-auto",
@@ -1749,7 +1750,7 @@ test(
       expect(a.status).toBe("idle");
 
       await expect(
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
       ).rejects.toThrow("An active session already exists for this agent.");
 
       // Refused BEFORE touching the node: no second acp.open, no leaked wire.
@@ -1768,7 +1769,7 @@ test(
 
       // Ending it releases the station — no 409 lock.
       await endSession(TEST_USER, a.id, "cleanup");
-      const next = await createSession({
+      const next = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "ask",
@@ -1795,7 +1796,7 @@ test(
       exitOnClose: true,
     });
     try {
-      const a = await createSession({
+      const a = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "full-auto",
@@ -1807,7 +1808,7 @@ test(
       // the post-open layer can catch that.
       fake.opts.legacyOpen = true;
       await expect(
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
       ).rejects.toThrow("An active session already exists for this agent.");
 
       // The refused attempt did reach the node, and its row is ended with the
@@ -1836,7 +1837,7 @@ test(
 
       // No live entry leaked either: a fresh session starts (the node still
       // can't echo, so one at a time).
-      const next = await createSession({
+      const next = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "ask",
@@ -1872,12 +1873,12 @@ test(
           (err) => String(err)
         );
       const first = outcome(
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
       );
       await new Promise((r) => setTimeout(r, 100));
       // Passes the fail-fast gates while the node is still online, then queues.
       const queued = outcome(
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
       );
       await new Promise((r) => setTimeout(r, 100));
       fake.close();
@@ -1924,7 +1925,7 @@ test(
     try {
       await locked;
 
-      const attempt = createSession({
+      const attempt = createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "ask",
@@ -1947,7 +1948,7 @@ test(
       expect(rows[0]!.status).toBe("ended");
       expect(rows[0]!.endedReason).toContain("the database didn't respond");
 
-      const next = await createSession({
+      const next = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "ask",
@@ -1975,7 +1976,7 @@ test(
       { stationKey: "acp-orphan-multi-station" }
     );
     try {
-      const live = await createSession({
+      const live = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "ask",
@@ -2073,7 +2074,7 @@ test(
       stationKey: "acp-title-station",
     });
     try {
-      const row = await createSession({
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "full-auto",
@@ -2190,7 +2191,7 @@ test(
     try {
       /** Title a fresh session with `text` and read back what Postgres stored. */
       const titleFromPrompt = async (text: string) => {
-        const row = await createSession({
+        const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
           stationId: station.id,
           userId: TEST_USER,
           mode: "full-auto",
@@ -2240,7 +2241,7 @@ test(
       // wall-clock gaps would only hide) can be tested head-on.
       const ids: string[] = [];
       for (let i = 0; i < 5; i++) {
-        const s = await createSession({
+        const s = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
           stationId: station.id,
           userId: TEST_USER,
           mode: "ask",
@@ -2378,23 +2379,23 @@ test(
     );
     try {
       // A healthy, online, acp-capable station: ready, with nothing to explain.
-      expect(await stationReadiness(TEST_USER, station.id)).toEqual({
+      expect(await stationReadiness({ tenantId: BOOTSTRAP_TENANT_ID }, station.id)).toEqual({
         ready: true,
       });
 
-      expect(await stationReadiness(TEST_USER, "stn_nope")).toEqual({
+      expect(await stationReadiness({ tenantId: BOOTSTRAP_TENANT_ID }, "stn_nope")).toEqual({
         ready: false,
         reason: "Station not found.",
       });
-      // Another user's station is not visible, so it is not ready either.
-      expect(await stationReadiness(OTHER_USER, station.id)).toEqual({
+      // Another workspace's station is not visible, so it is not ready either (W4).
+      expect(await stationReadiness({ tenantId: "fleet_99999999999999999999" }, station.id)).toEqual({
         ready: false,
         reason: "Station not found.",
       });
 
       fake.close();
       await waitForNodeUnregistered(nodeId);
-      expect(await stationReadiness(TEST_USER, station.id)).toEqual({
+      expect(await stationReadiness({ tenantId: BOOTSTRAP_TENANT_ID }, station.id)).toEqual({
         ready: false,
         reason: "Node is offline.",
       });
@@ -2402,7 +2403,7 @@ test(
       // And the gate is load-bearing: the open it stands in front of throws the
       // same sentence.
       await expect(
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
       ).rejects.toThrow("Node is offline.");
     } finally {
       server.stop(true);
@@ -2439,7 +2440,7 @@ test(
     });
     try {
       await nodeReadsLargeFrames(station.nodeId);
-      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" });
       await promptSession(TEST_USER, row.id, "What region is this?", [IMAGE]);
 
       await pollUntil(() => lastPrompt(fake) !== undefined);
@@ -2472,7 +2473,7 @@ test(
       stationKey: "acp-image-no",
     });
     try {
-      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" });
       await promptSession(TEST_USER, row.id, "What region is this?", [IMAGE]);
 
       await pollUntil(() => lastPrompt(fake) !== undefined);
@@ -2505,7 +2506,7 @@ test(
       promptCapabilities: { image: true },
     });
     try {
-      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" });
       await promptSession(TEST_USER, row.id, "What region is this?", [IMAGE]);
 
       await pollUntil(() => lastPrompt(fake) !== undefined);
@@ -2561,7 +2562,7 @@ test("a plugin's report becomes a silent turn's error, arriving after the prompt
     harnessSessionKey: "agent:krishna:main",
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "Are you here?");
     await pollForEvent(row.id, sawSessionKey);
     await new Promise((r) => setTimeout(r, 150));
@@ -2596,7 +2597,7 @@ test("a report during the turn is used as soon as the turn ends, with no wait", 
     harnessSessionKey: "agent:krishna:main",
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "Are you here?");
     await pollForEvent(row.id, sawSessionKey);
     fake.ws.send(JSON.stringify(krishnaReport({ harnessSessionKey: "agent:krishna:main" })));
@@ -2622,7 +2623,7 @@ test("a report keyed by the hub session id matches that session (Pi's way)", asy
     silentPrompt: true,
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "hello");
     await new Promise((r) => setTimeout(r, 150));
     fake.ws.send(JSON.stringify(krishnaReport({ acpSessionId: row.id })));
@@ -2649,7 +2650,7 @@ test("a node cannot report into a session on another node", async () => {
   const intruderEnrol = await enrollTestNode("acpsess-plugin-intruder");
   const intruder = await connectFakeAcpNode(server.port!, intruderEnrol.nodeId, intruderEnrol.nodeSecret, {});
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "hello");
     intruder.ws.send(JSON.stringify(krishnaReport({ acpSessionId: row.id })));
 
@@ -2675,7 +2676,7 @@ test("with no report, the wait ends in the error the hub already had", async () 
     harnessSessionKey: "agent:krishna:main",
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "hello");
     const { all } = await pollForEvent(row.id, (e) => e.type === "error", 8_000);
     expect(errorEvents(all)[0]!.payload).toMatchObject({
@@ -2699,7 +2700,7 @@ test("a node lost mid-turn records why the turn failed, before the session ends"
     hangPrompt: true,
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "hello");
     await pollForEvent(row.id, stateWith("working"));
     fake.close();
@@ -2726,7 +2727,7 @@ test("a node lost between turns is not a failed turn", async () => {
     stationKey: "acp-lost-idle-station",
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     fake.close();
     const { all } = await pollForEvent(row.id, stateWith("ended"), 8_000);
     expect(errorEvents(all)).toHaveLength(0);
@@ -2755,7 +2756,7 @@ test("two reports during one turn become one error, led by the first, with every
     harnessSessionKey: "agent:krishna:main",
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "All good?");
     await pollForEvent(row.id, sawSessionKey);
     fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
@@ -2790,7 +2791,7 @@ test("a second report after the turn already shows the plugin's error is not pos
     harnessSessionKey: "agent:krishna:main",
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "All good?");
     await pollForEvent(row.id, sawSessionKey);
     await new Promise((r) => setTimeout(r, 150));
@@ -2817,7 +2818,7 @@ test("a report after the generic error still follows it: it says why", async () 
     harnessSessionKey: "agent:krishna:main",
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "All good?");
     await pollForEvent(row.id, (e) => e.type === "error", 5_000);
     fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
@@ -2847,7 +2848,7 @@ test("an answer after the plugin's report means the fallback recovered: no error
     harnessSessionKey: "agent:krishna:main",
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "Hi");
     await pollForEvent(row.id, sawSessionKey);
     fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
@@ -2878,7 +2879,7 @@ test("a report after the agent's last words is still the turn's error", async ()
     harnessSessionKey: "agent:krishna:main",
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "Hi");
     await pollForEvent(row.id, sawSessionKey);
     fake.agentSays("Retrying (attempt 1/2, waiting 1s)...");
@@ -2914,7 +2915,7 @@ test("a failure the plugin then says ended in deliberate silence is no error, an
     harnessSessionKey: "agent:krishna:main",
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "Okay.");
     await pollForEvent(row.id, sawSessionKey);
     fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
@@ -2944,7 +2945,7 @@ test("a silence that arrives while the hub waits for a report ends the wait at o
     harnessSessionKey: "agent:krishna:main",
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "Nothing.");
     await pollForEvent(row.id, sawSessionKey);
     await new Promise((r) => setTimeout(r, 150));
@@ -2971,7 +2972,7 @@ test("'answered' clears a reported failure too", async () => {
     harnessSessionKey: "agent:krishna:main",
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "Hi");
     await pollForEvent(row.id, sawSessionKey);
     fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "quota")));
@@ -3006,7 +3007,7 @@ test(
   async () => {
     const { server, fake, station } = await setupRig("acpsess-mcp", { stationKey: "acp-mcp" });
     try {
-      const row = await createSession({
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
         stationId: station.id,
         userId: TEST_USER,
         mode: "full-auto",
@@ -3048,7 +3049,7 @@ test(
   async () => {
     const { server, fake, station } = await setupRig("acpsess-mcp-none", { stationKey: "acp-mcp-none" });
     try {
-      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" });
       expect(sessionNewParams(fake)?.mcpServers).toEqual([]);
       await endSession(TEST_USER, row.id, "cleanup");
     } finally {
@@ -3071,7 +3072,7 @@ test(
       const ctx = trace.setSpan(context.active(), parent);
       const want = new RegExp(`^00-${parent.spanContext().traceId}-[0-9a-f]{16}-01$`);
 
-      const row = await context.with(ctx, () => createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" }));
+      const row = await context.with(ctx, () => createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" }));
       expect((sessionNewParams(fake) as WithMeta | undefined)?._meta?.traceparent).toMatch(want);
 
       await context.with(ctx, () => promptSession(TEST_USER, row.id, "hello"));
@@ -3096,7 +3097,7 @@ test(
     try {
       const parent = tracer().startSpan("dispatch");
       const row = await context.with(trace.setSpan(context.active(), parent), () =>
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" })
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" })
       );
       expect("_meta" in ((sessionNewParams(fake) ?? {}) as object)).toBe(false);
       parent.end();
@@ -3115,7 +3116,7 @@ test(
   async () => {
     const { server, fake, station } = await setupRig("acpsess-trace-none", { stationKey: "acp-trace-none" });
     try {
-      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" });
       expect("_meta" in ((sessionNewParams(fake) ?? {}) as object)).toBe(false);
       await endSession(TEST_USER, row.id, "cleanup");
     } finally {
@@ -3143,7 +3144,7 @@ test("a node running the proxy is asked for it, and a session with both servers 
   });
   try {
     await nodeRunsMcpProxy(nodeId);
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask", mcpProxy: true });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask", mcpProxy: true });
     const open = opensSeenBy(fake).at(-1) as { params?: { mcpProxy?: { stationId: string } } };
     expect(open.params?.mcpProxy).toEqual({ stationId: station.id });
     expect(sessionHasLibraryTools(row.id)).toBe(true);
@@ -3160,7 +3161,7 @@ test("a node without the proxy is not asked, and its session has no library tool
     mcpProxyEcho: ["agentpod", "superlibrary"],
   });
   try {
-    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask", mcpProxy: true });
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask", mcpProxy: true });
     const open = opensSeenBy(fake).at(-1) as { params?: { mcpProxy?: unknown } };
     expect(open.params?.mcpProxy).toBeUndefined();
     expect(sessionHasLibraryTools(row.id)).toBe(false);
@@ -3178,10 +3179,10 @@ test("the library tools need BOTH servers, and a session that did not ask has no
   });
   try {
     await nodeRunsMcpProxy(nodeId);
-    const half = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask", mcpProxy: true });
+    const half = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask", mcpProxy: true });
     expect(sessionHasLibraryTools(half.id)).toBe(false);
     await endSession(TEST_USER, half.id, "done");
-    const unasked = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const unasked = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
     expect((opensSeenBy(fake).at(-1) as { params?: { mcpProxy?: unknown } }).params?.mcpProxy).toBeUndefined();
     expect(sessionHasLibraryTools(unasked.id)).toBe(false);
     await endSession(TEST_USER, unasked.id, "done");
@@ -3198,7 +3199,7 @@ test("concurrent end waits for the same settled teardown before replacement", as
   let sessionId: string | undefined;
   let stopping: Promise<void> | undefined;
   try {
-    const row = await createSession({stationId: station.id,userId: TEST_USER,mode: "ask"});
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,stationId: station.id,userId: TEST_USER,mode: "ask"});
     sessionId = row.id;
     await promptSession(TEST_USER,row.id,"ask before running");
     await pollForEvent(row.id,event=>event.type==="permission-request");
@@ -3206,7 +3207,7 @@ test("concurrent end waits for the same settled teardown before replacement", as
     await endSession(TEST_USER,row.id,"concurrent stop");
     const rows = await rawSql`SELECT status FROM acp_sessions WHERE id = ${row.id}`;
     expect(rows[0]?.status).toBe("ended");
-    const replacement = await createSession({stationId:station.id,userId:TEST_USER,mode:"ask"});
+    const replacement = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,stationId:station.id,userId:TEST_USER,mode:"ask"});
     await endSession(TEST_USER,replacement.id,"cleanup");
     await stopping;
   } finally {

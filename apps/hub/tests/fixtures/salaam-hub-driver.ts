@@ -164,6 +164,7 @@ input.on("line", (line) => {
         case "create":
           result = await sessions.createSession({
             stationId: cfg.stationId,
+            tenantId: BOOTSTRAP_TENANT_ID,
             userId: cfg.userId,
             mode: "ask",
             ...(cfg.mcpRehearsal ? { mcpProxy: true } : {}),
@@ -271,6 +272,7 @@ input.on("line", (line) => {
           });
           result = await sessions.createSession({
             stationId: cfg.stationId,
+            tenantId: BOOTSTRAP_TENANT_ID,
             userId: cfg.userId,
             mode: "ask",
             executionRun: {

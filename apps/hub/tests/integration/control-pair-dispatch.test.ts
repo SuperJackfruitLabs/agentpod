@@ -71,7 +71,7 @@ beforeAll(async () => {
       adopted: false,
     },
   ]);
-  stationId = (await listAdopted(USER, nodeId, BOOTSTRAP_TENANT_ID)).find((s) => s.stationKey === stationKey)!.id;
+  stationId = (await listAdopted({ tenantId: BOOTSTRAP_TENANT_ID }, nodeId)).find((s) => s.stationKey === stationKey)!.id;
 
   USER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "controlpair-it-user", userId: USER });
   AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "controlpair-it-agent" });
@@ -95,7 +95,7 @@ beforeAll(async () => {
       adopted: false,
     },
   ]);
-  otherStationId = (await listAdopted(USER, OTHER_NODE, BOOTSTRAP_TENANT_ID)).find((s) => s.stationKey === stationKey)!.id;
+  otherStationId = (await listAdopted({ tenantId: BOOTSTRAP_TENANT_ID }, OTHER_NODE)).find((s) => s.stationKey === stationKey)!.id;
   await rawSql`UPDATE stations SET principal_id = ${OTHER_AGENT_PRINCIPAL} WHERE id = ${otherStationId}`;
 });
 
@@ -124,7 +124,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     process.env.ENFORCE_CONTROL_PAIR = "true";
 
     await expect(
-      createSession({ stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/permission/i);
   });
 
@@ -136,7 +136,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     });
 
     await expect(
-      createSession({ stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/permission/i);
   });
 
@@ -148,7 +148,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     await setGrant(USER_PRINCIPAL, { mayDispatch: ["superpipeline:agt_anything"], mayGrantReach: false });
 
     await expect(
-      createSession({ stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/permission/i);
   });
 
@@ -164,7 +164,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     });
 
     await expect(
-      createSession({ stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/permission/i);
   });
 
@@ -175,7 +175,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     process.env.ENFORCE_CONTROL_PAIR = "true";
 
     await expect(
-      createSession({ stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/permission/i);
 
     // With a grant naming the station's actual occupant, the SAME call gets
@@ -185,7 +185,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await expect(
-      createSession({ stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/offline|not ready|does not support/i);
   });
 
@@ -202,7 +202,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     });
 
     await expect(
-      createSession({ stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/permission/i);
   });
 
@@ -217,7 +217,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     await setGrant(USER_PRINCIPAL, { mayDispatch: ["*", "prn_*"], mayGrantReach: false });
 
     await expect(
-      createSession({ stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/permission/i);
   });
 
@@ -228,7 +228,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     delete process.env.ENFORCE_CONTROL_PAIR;
 
     await expect(
-      createSession({ stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/offline|not ready|does not support/i);
   });
 });
@@ -244,7 +244,7 @@ describe("the route reports a denial as a refusal, not a gateway failure", () =>
 
     const app = new Hono();
     app.use("*", async (c, next) => {
-      c.set("user", { id: USER });
+      c.set("user", { id: USER, tenantId: "fleet_00000000000000000000", workspaceRole: "admin" } as never);
       await next();
     });
     app.route("/api", stationAcpRoutes); // mounted at /api, as in index.ts

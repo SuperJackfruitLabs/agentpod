@@ -388,11 +388,14 @@ async function boardCredentials(
   return map;
 }
 
-/** The rostered agents, decrypted. Separated so a test can supply its own without a database. */
+/**
+ * The rostered agents of every workspace, decrypted. Separated so a test can supply its own
+ * without a database. A board is one workspace's (`tenantIdFor` answers which), so every tenant's
+ * roster is read and each board's gates are projected into its own tenant.
+ */
 async function defaultRoster(): Promise<Array<{ boardId: string; token: string }>> {
-  const { readBridgeRoster } = await import("../bridge/roster");
-  const { BOOTSTRAP_TENANT_ID } = await import("../../db/schema/tenants");
-  return readBridgeRoster(BOOTSTRAP_TENANT_ID);
+  const { readEveryBridgeRoster } = await import("../bridge/roster");
+  return readEveryBridgeRoster();
 }
 
 /**

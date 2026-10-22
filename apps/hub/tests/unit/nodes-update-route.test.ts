@@ -51,6 +51,7 @@ function makeTestApp(mockRequest: RequestFn) {
   const routes = createNodeRoutes({
     request: mockRequest,
     fixedImageNodesFn: async () => new Set<string>(),
+    nodeInTenantFn: async () => true,
   });
 
   return new Hono()
@@ -59,6 +60,7 @@ function makeTestApp(mockRequest: RequestFn) {
         id: TEST_USER_ID,
         authType: "api_key",
         tenantId: "fleet_00000000000000000000",
+        workspaceRole: "admin",
       } satisfies AuthUser);
       return next();
     })
@@ -256,6 +258,7 @@ function appWithFixedImageNode(mockRequest: RequestFn) {
   const routes = createNodeRoutes({
     request: mockRequest,
     fixedImageNodesFn: async () => new Set([TEST_NODE_ID]),
+    nodeInTenantFn: async () => true,
   });
   return new Hono()
     .use("/api/nodes/*", async (c, next) => {
@@ -263,6 +266,7 @@ function appWithFixedImageNode(mockRequest: RequestFn) {
         id: TEST_USER_ID,
         authType: "api_key",
         tenantId: "fleet_00000000000000000000",
+        workspaceRole: "admin",
       } satisfies AuthUser);
       return next();
     })

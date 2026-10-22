@@ -270,12 +270,14 @@ test("Matrix failure survives reload; a no-op provisioner does not prove a room 
   onProvisionStation(null);
 });
 
-test("setup endpoints reject another owner and a mismatched tenant", async () => {
+test("setup endpoints reject a mismatched tenant, and answer another admin of the workspace", async () => {
   const id = await station();
   const stranger = `setup-other-admin-${run}`;
   await createTestUser({ id: stranger, role: "admin" });
   try {
-    for (const client of [app(stranger), app(actor, "fleet_99999999999999999999")]) {
+    // The station is the workspace's (W4): another admin of it reads its setup.
+    expect((await app(stranger).request(`/stations/${id}/setup`)).status).toBe(200);
+    for (const client of [app(actor, "fleet_99999999999999999999")]) {
       expect((await client.request(`/stations/${id}/setup`)).status).toBe(404);
       for (const [suffix, body] of [
         ["", input()],

@@ -14,9 +14,9 @@
  * - `readBridgeRoster` is what the BRIDGE sees. It decrypts, because the loop has to spend the
  *   credential, and it is the only function here that does.
  *
- * **`hubUserId` is derived, not stored.** `getStation(userId, stationId)` filters on
- * `stations.userId`, so a roster entry naming any other user failed every ACP call as "Station not
- * found". A field that can only ever hold one correct value is a field that can only ever be
+ * **`hubUserId` is derived, not stored.** `getStation` used to filter on `stations.userId`, so a
+ * roster entry naming any other user failed every ACP call as "Station not found"; it is the
+ * tenant now (W4), but the session is still the station adopter's. A field that can only ever hold one correct value is a field that can only ever be
  * wrong, so it is read from the station instead — which is also why `stationId` carries a
  * composite foreign key rather than a convention.
  */
@@ -185,6 +185,39 @@ export async function listBridgeAgents(
  * credential encrypted under a since-changed `ENCRYPTION_KEY` must not stop the other three from
  * claiming. The omission is reported by the caller, which is the loop that can say whose it was.
  */
+/**
+ * Every tenant with at least one roster row. The bridge is one process serving every workspace on
+ * the hub (workspace authority spec, step 4); until this it read only the bootstrap tenant's
+ * roster, so a second workspace's agents were listed in its console and never ran.
+ */
+export async function bridgeRosterTenants(): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ tenantId: bridgeAgents.tenantId })
+    .from(bridgeAgents)
+    .orderBy(asc(bridgeAgents.tenantId));
+  return rows.map((r) => r.tenantId);
+}
+
+/**
+ * `readBridgeRoster` for every tenant, each read under its own tenant: every entry carries the
+ * `tenantId` it was read in, and its station is joined inside that tenant only.
+ */
+export async function readEveryBridgeRoster(
+  onUnreadable?: (key: string, reason: string) => void,
+): Promise<BridgeAgentSecrets[]> {
+  const out: BridgeAgentSecrets[] = [];
+  for (const tenantId of await bridgeRosterTenants()) out.push(...(await readBridgeRoster(tenantId, onUnreadable)));
+  return out;
+}
+
+/** `listBridgeAgents` for every tenant, each entry with the tenant it was read in. */
+export async function listEveryBridgeAgent(): Promise<Array<BridgeAgentView & { tenantId: string }>> {
+  const out: Array<BridgeAgentView & { tenantId: string }> = [];
+  for (const tenantId of await bridgeRosterTenants())
+    out.push(...(await listBridgeAgents(tenantId)).map((a) => ({ ...a, tenantId })));
+  return out;
+}
+
 export async function readBridgeRoster(
   tenantId: string,
   onUnreadable?: (key: string, reason: string) => void,

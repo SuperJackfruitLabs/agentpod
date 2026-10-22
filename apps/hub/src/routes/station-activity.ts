@@ -13,11 +13,12 @@
  */
 
 import { Hono } from "hono";
-import { desc, and, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stationAudit } from "../db/schema/audit";
 import { getStation } from "../services/station-registry";
 import type { AuthUser } from "../auth/middleware";
+import { tenantScope } from "../db/tenant-scope";
 
 const ACTIVITY_LIMIT = 200;
 
@@ -30,9 +31,9 @@ export const stationActivityRoutes = new Hono().get(
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    // ── 2. Verify ownership ───────────────────────────────────────────
+    // ── 2. Station in the caller's workspace ──────────────────────────
     const stationId = c.req.param("id");
-    const station = await getStation(user.id, stationId);
+    const station = await getStation(user, stationId);
     if (!station) {
       return c.json({ error: "Not Found" }, 404);
     }
@@ -41,9 +42,11 @@ export const stationActivityRoutes = new Hono().get(
     const rows = await db
       .select()
       .from(stationAudit)
+      // The station's activity in this workspace, by whoever acted (W4).
       .where(
-        and(
-          eq(stationAudit.userId, user.id),
+        tenantScope(
+          stationAudit,
+          user.tenantId,
           eq(stationAudit.nodeId, station.nodeId),
           eq(stationAudit.stationKey, station.stationKey)
         )

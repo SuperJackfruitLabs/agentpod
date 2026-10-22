@@ -66,14 +66,18 @@ function setup(opts: { env?: Record<string, string>; fetch?: typeof fetch } = {}
     );
   const station = new Hono()
     .use("*", async (c, next) => {
-      c.set("user", { id: c.req.header("x-user") ?? OWNER, role: "user" } as never);
+            // Each person stands in their own workspace here (tenant "t_<id>"), so "another user" is
+      // another workspace: a station is the workspace's (W4). An admin, since these are
+      // per-station configuration (W1); tests/integration/workspace-reads.test.ts holds the member's 403.
+      const id = c.req.header("x-user") ?? OWNER;
+      c.set("user", { id, tenantId: "t_" + id, workspaceRole: "admin" } as never);
       await next();
     })
     .route(
       "/api",
       stationTranscriptionRoutes({
         settings,
-        ownsStation: async (userId, stationId) => userId === OWNER && stationId === "st_1",
+        stationInTenant: async (tenantId, stationId) => tenantId === "t_" + OWNER && stationId === "st_1",
       })
     );
   return { store, settings, admin, station, audited };
