@@ -2,7 +2,7 @@
 
 Day-2 operations: enrolling nodes, adopting stations, driving capability panels, and provisioning runtimes.
 
-> **Sign-in is the organization plane's.** People, their accounts and service principals are made and managed at the plane; the hub's own sign-up, sessions and token issuer were removed after the P4 cutover (§11). Who operates the hub is `hub_operators`, set from `HUB_OPERATORS`; who administers a workspace is its role at the plane (§11).
+> **Sign-in is the organization plane's.** People, their accounts and service principals are made and managed at the plane; the hub's own sign-up, sessions and token issuer were removed after the P4 cutover (§11). Who operates the hub is the owners and admins of the workspace that owns its service credential, plus anyone listed in the optional `HUB_OPERATORS`; who administers a workspace is its role at the plane (§11).
 
 ---
 
@@ -2035,12 +2035,17 @@ What this means for an operator:
     updating and setting telemetry on nodes, agents and station assignment, the bridge roster and
     board links, station forge access, workspace stats and the workspace's audit log. Granted and
     revoked at the plane's pages, like membership; nothing to do on the hub.
-  - **Hub operator** — the hub's own seat, `hub_operators`: the hub-wide provider settings
+  - **Hub operator** — an owner or admin of the hub's home workspace (the workspace that owns
+    its service credential), or a seat in `hub_operators`: the hub-wide provider settings
     (`/api/admin/settings*`: transcription, speech) and reading every workspace's audit log. It
     is **not** an admin of any workspace by itself. The static `API_TOKEN` is both (hub operator,
     and admin of the bootstrap workspace).
-- **Who operates the hub** is set by `HUB_OPERATORS` in `hub.env` (`DEPLOYMENT.md` §4,
-  "Hub operators"): a comma-separated list of `prn_…` ids reconciled into `hub_operators` at
+- **Who operates the hub** needs no setting on a self-hosted hub: the owners and admins of the
+  workspace that owns the hub's service credential (learned from the plane at boot — log line
+  `hub home workspace learned`; plane down means nobody derived until a retry succeeds;
+  `HUB_OPERATORS` and the optional `HUB_HOME_ORG` pin are in `DEPLOYMENT.md` §4, "Hub operators").
+  Promote or demote them at the plane. **Extra operators** outside that workspace are set by
+  `HUB_OPERATORS` in `hub.env`: a comma-separated list of `prn_…` ids reconciled into `hub_operators` at
   every boot — listed principals are added, unlisted ones removed. To add or remove an operator,
   edit the list and restart the hub; nobody opens psql. Unset leaves the table as it is; a
   malformed entry stops the boot, naming it. The boot log prints

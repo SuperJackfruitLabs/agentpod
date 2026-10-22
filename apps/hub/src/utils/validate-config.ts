@@ -10,6 +10,7 @@ import { resolveDockerDaemon } from "../services/provisioner/docker-daemon";
 import { loadBridgeConfig } from "../services/bridge/config";
 import { loadOperatorRules } from "../services/redact-content";
 import { HubOperatorsConfigError, parseHubOperators } from "../services/hub-operators-config";
+import { HubHomeOrgConfigError, parseHubHomeOrg } from "../services/hub-home-org";
 import { orgPlaneConfigErrors, type OrgPlaneConfigError } from "../auth/org-plane/config";
 
 export interface ValidationError {
@@ -166,7 +167,8 @@ export function collectConfigErrors(
   // so a test can hand in errors without touching the process environment.
   planeErrors: OrgPlaneConfigError[] = orgPlaneConfigErrors(),
   // HUB_OPERATORS (workspace authority spec W3). Injectable for the same reason as planeErrors.
-  hubOperators: string | undefined = process.env.HUB_OPERATORS
+  hubOperators: string | undefined = process.env.HUB_OPERATORS,
+  hubHomeOrgPin: string | undefined = process.env.HUB_HOME_ORG
 ): ValidationError[] {
   const errors: ValidationError[] = [];
   const isProduction = cfg.nodeEnv === "production";
@@ -461,6 +463,14 @@ export function collectConfigErrors(
   } catch (e) {
     if (!(e instanceof HubOperatorsConfigError)) throw e;
     errors.push({ field: "HUB_OPERATORS", message: e.message });
+  }
+
+  // A malformed HUB_HOME_ORG pin refuses the boot (services/hub-home-org.ts).
+  try {
+    parseHubHomeOrg(hubHomeOrgPin);
+  } catch (e) {
+    if (!(e instanceof HubHomeOrgConfigError)) throw e;
+    errors.push({ field: "HUB_HOME_ORG", message: e.message });
   }
 
   return errors;
