@@ -191,24 +191,27 @@ jobs:
       # and a job of its own would not gate.
       - name: Test the release version comparator
         run: sh fly/node-image/test-latest-release.sh
-  # The hub is deployed BY HAND (ssh + git pull + systemctl restart), so nothing
-  # here ships it. What this does is notice when the thing that is running stops
-  # serving what it should — which on 2026-09-20 took a person curling a route to
-  # discover, hours after a green deploy.
-  #
-  # Runs on main only, and never fails the build: it reports on a deployment this
-  # workflow did not perform and may legitimately be mid-restart. It is a signal,
-  # not a gate. The gate is running it yourself after deploying, per
-  # docs/DEPLOYMENT.md.
-  hub-smoke:
-    name: hub smoke (production)
+  # Every push to main puts the hub on the staging plane (staging-hub.agentpod.dev) at once; the
+  # PR's required checks already ran the tests. Production moves only on a `v*` tag
+  # (release-hub.yml). The key can only run /usr/local/sbin/staging-deploy (`<product> <sha>`),
+  # and the deploy ends with deploy/smoke.sh against the staging issuer.
+  deploy-hub-staging:
+    name: deploy hub (staging)
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    continue-on-error: true
+    concurrency: { group: deploy-hub-staging, cancel-in-progress: false }
+    environment: { name: staging, url: https://staging-hub.agentpod.dev }
     steps:
-      - uses: actions/checkout@v7
-      - name: Probe the deployed hub's routes
-        run: sh deploy/smoke.sh https://hub.agentpod.dev
+      - name: Deploy
+        env:
+          KEY: ${{ secrets.STAGING_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS }}
+          HOST: ${{ vars.STAGING_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh root@"$HOST" agentpod "$GITHUB_SHA"
 
   console:
     name: console

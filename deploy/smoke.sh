@@ -22,6 +22,8 @@
 # Usage:
 #   sh deploy/smoke.sh                        # against https://hub.agentpod.dev
 #   sh deploy/smoke.sh http://127.0.0.1:3001  # against a local hub
+#   EXPECT_ISSUER=https://staging-accounts.superjackfruit.com sh deploy/smoke.sh https://staging-hub.agentpod.dev
+#                                             # and fail unless the hub trusts that issuer
 set -eu
 
 BASE="${1:-${HUB_URL:-https://hub.agentpod.dev}}"
@@ -106,6 +108,13 @@ expect GET /health 200 "the process is up"
 # /api/auth/* route answers 410 issuer_moved, and tokens come from the plane. The
 # discovery route says which mode the hub is in; each mode has its own contract.
 PLANE=$(curl -s "$BASE/public/org-plane" 2>/dev/null | sed -n 's/.*"issuer":"\([^"]*\)".*/\1/p')
+
+if [ -n "${EXPECT_ISSUER:-}" ] && [ "$PLANE" != "$EXPECT_ISSUER" ]; then
+  # A staging hub that trusts the production issuer (or the reverse) passes every
+  # refusal below, so the issuer itself is checked when the caller knows it.
+  echo "FAIL  GET /public/org-plane -> issuer \"$PLANE\", wanted \"$EXPECT_ISSUER\""
+  FAILURES=$((FAILURES + 1))
+fi
 
 if [ -n "$PLANE" ]; then
   echo "mode: organization plane ($PLANE)"
