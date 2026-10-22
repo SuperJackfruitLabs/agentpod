@@ -34,7 +34,7 @@
   import NewRuntimeDialog from "./NewRuntimeDialog.svelte";
   import ConnectBanner from "./connect-banner.svelte";
 
-  import { enrollmentCommand } from "$lib/utils/enrollment-command";
+  import { enrollmentCommand, enrollmentHubUrl } from "$lib/utils/enrollment-command";
   import { relativeTime } from "$lib/utils/relative-time";
 
   let nodes = $state<NodeSummary[]>([]);
@@ -71,12 +71,6 @@
         !nodes.some((n) => n.id === r.nodeId && n.status === "online")
     )
   );
-
-  function resolvedHubUrl(): string {
-    const stored =
-      typeof window !== "undefined" ? window.localStorage.getItem("agentpod.apiUrl") : null;
-    return stored ?? import.meta.env.PUBLIC_HUB_URL ?? "http://localhost:3001";
-  }
 
   async function loadData(background = false) {
     if (!background) {
@@ -281,7 +275,7 @@
   }
 
   function handleCopyEnrollCmd() {
-    const cmd = enrollmentCommand(resolvedHubUrl(), lastToken ?? "");
+    const cmd = enrollmentCommand(enrollmentHubUrl(), lastToken ?? "");
     navigator.clipboard.writeText(cmd).then(() => {
       copied = true;
       if (copyTimeout) clearTimeout(copyTimeout);
@@ -354,7 +348,7 @@
   {#if lastToken && (nodes.length > 0 || provisioningRuntimes.length > 0)}
     <div class="ap-card space-y-2">
       <p class="text-sm text-muted-foreground">Run this on the target node to connect it</p>
-      <EnrollmentCommand token={lastToken} hubUrl={resolvedHubUrl()} {copied} onCopy={handleCopyEnrollCmd} />
+      <EnrollmentCommand token={lastToken} hubUrl={enrollmentHubUrl()} {copied} onCopy={handleCopyEnrollCmd} />
     </div>
   {/if}
 
@@ -382,7 +376,7 @@
             <p class="text-sm text-muted-foreground">
               Enrollment token created — run this on the target node to connect it
             </p>
-            <EnrollmentCommand token={lastToken} hubUrl={resolvedHubUrl()} {copied} onCopy={handleCopyEnrollCmd} />
+            <EnrollmentCommand token={lastToken} hubUrl={enrollmentHubUrl()} {copied} onCopy={handleCopyEnrollCmd} />
             <p class="text-xs text-muted-foreground/60">The node will appear below once it connects</p>
           </div>
         {:else}
