@@ -8,6 +8,7 @@
    */
 
   import { Button } from "$lib/components/ui/button";
+  import { enrollmentCommand, enrollmentHubUrl } from "$lib/utils/enrollment-command";
 
   // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -62,8 +63,8 @@
       </p>
 
       <!-- Code hint -->
-      <p class="mt-2 text-xs font-mono text-muted-foreground">
-        curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh | sudo bash -s -- &lt;hub-url&gt; &lt;token&gt;
+      <p class="mt-2 text-xs font-mono text-muted-foreground break-all">
+        {enrollmentCommand(enrollmentHubUrl(), "<token>")}
       </p>
 
       <!-- CTA -->

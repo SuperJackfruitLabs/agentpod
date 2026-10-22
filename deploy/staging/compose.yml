@@ -55,6 +55,18 @@ services:
       hub-postgres:
         condition: service_healthy
 
+  # The console is a static SPA; deploy.sh builds it per commit into
+  # /opt/suite-staging/agentpod-console/<sha> with the staging hub baked in, and points `current`
+  # at it. Caddy serves `current`, falling back to index.html for client-side routes.
+  console:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/suite-staging/agentpod-console:/srv:ro
+    networks: [suite-staging]
+
 networks:
   suite-staging:
     external: true
