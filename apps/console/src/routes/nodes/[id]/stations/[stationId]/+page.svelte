@@ -197,6 +197,11 @@
     wsAdmin && Array.isArray(station?.capabilities) && station!.capabilities.includes("lifecycle")
   );
 
+  // Logs and Files are always tabs, but only a station that advertises the capability gets the
+  // panel. Without it the node has nothing to send: the log tail sat on "Reconnecting…" forever
+  // and the file tree failed (spec 2026-10-23, C5/C6). Say so plainly instead.
+  const hasLogs = $derived(station?.capabilities?.includes("logs") ?? false);
+  const hasFsRead = $derived(station?.capabilities?.includes("fs.read") ?? false);
   const hasSkillInventory = $derived(station?.capabilities?.includes("skills.inventory") ?? false);
   const hasSkillManagement = $derived(station?.capabilities?.includes("skills.manage") ?? false);
   const hasNativeSkillManagement = $derived(station?.capabilities?.includes("skills.native") ?? false);
@@ -750,24 +755,32 @@
 
   {@render keepAlivePanel("logs", logsContent)}
   {#snippet logsContent()}
-    <div class="min-h-0 flex-1">
-      <LogTail {stationId} />
-    </div>
+    {#if hasLogs}
+      <div class="min-h-0 flex-1">
+        <LogTail {stationId} />
+      </div>
+    {:else if station}
+      <p class="p-6 text-sm text-muted-foreground" data-testid="logs-unavailable">This agent doesn't share its logs with AgentPod.</p>
+    {/if}
   {/snippet}
 
   {@render keepAlivePanel("files", filesContent)}
   {#snippet filesContent()}
-    <div class="flex min-h-0 flex-1 flex-col">
-      <div class="min-h-0 flex-1">
-        <FileBrowser
-          bind:this={fileBrowser}
-          {stationId}
-          {canWrite}
-          {canSetAvatar}
-          onOpenConfigEditor={canWrite ? (p) => (configEditorPath = p) : undefined}
-        />
+    {#if hasFsRead}
+      <div class="flex min-h-0 flex-1 flex-col">
+        <div class="min-h-0 flex-1">
+          <FileBrowser
+            bind:this={fileBrowser}
+            {stationId}
+            {canWrite}
+            {canSetAvatar}
+            onOpenConfigEditor={canWrite ? (p) => (configEditorPath = p) : undefined}
+          />
+        </div>
       </div>
-    </div>
+    {:else if station}
+      <p class="p-6 text-sm text-muted-foreground" data-testid="files-unavailable">This agent doesn't share its files with AgentPod.</p>
+    {/if}
   {/snippet}
 
   {#if hasTerminal}

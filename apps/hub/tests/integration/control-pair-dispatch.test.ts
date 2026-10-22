@@ -221,6 +221,30 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     ).rejects.toThrow(/permission/i);
   });
 
+  // Decision 3 (spec 2026-10-23): an owner/admin chatting from the console needs no grant…
+  test("a workspace owner or admin opening an interactive session gets past the pair with no grant", async () => {
+    process.env.ENFORCE_CONTROL_PAIR = "true";
+    for (const workspaceRole of ["owner", "admin"] as const) {
+      await expect(
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "ask", workspaceRole })
+      ).rejects.toThrow(/offline|not ready|does not support/i);
+    }
+  });
+
+  // …but a member still needs one, and so does board work, whatever role is claimed.
+  test("a member, or any bridge run, is still refused without a grant", async () => {
+    process.env.ENFORCE_CONTROL_PAIR = "true";
+    await expect(
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "ask", workspaceRole: "member" })
+    ).rejects.toThrow(/permission/i);
+    await expect(
+      createSession({
+        tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "ask", workspaceRole: "admin",
+        executionRun: { source: "superpipeline", id: "run_x", epoch: 1 },
+      })
+    ).rejects.toThrow(/permission/i);
+  });
+
   test("is not enforced when the switch is off, whatever the grants say", async () => {
     // An explicit switch rather than "are there any grants": those differ in
     // exactly the dangerous case, where a deployment MEANT to enforce and whose
@@ -244,7 +268,8 @@ describe("the route reports a denial as a refusal, not a gateway failure", () =>
 
     const app = new Hono();
     app.use("*", async (c, next) => {
-      c.set("user", { id: USER, tenantId: "fleet_00000000000000000000", workspaceRole: "admin" } as never);
+      // A member: an owner/admin may chat without a grant (decision 3, spec 2026-10-23).
+      c.set("user", { id: USER, tenantId: "fleet_00000000000000000000", workspaceRole: "member" } as never);
       await next();
     });
     app.route("/api", stationAcpRoutes); // mounted at /api, as in index.ts
@@ -257,5 +282,24 @@ describe("the route reports a denial as a refusal, not a gateway failure", () =>
 
     expect(res.status).toBe(403);
     expect(((await res.json()) as { error: string }).error).toMatch(/permission/i);
+  });
+
+  test("the console route lets a workspace admin past the pair with no grant (decision 3)", async () => {
+    process.env.ENFORCE_CONTROL_PAIR = "true";
+    clearGrant(USER_PRINCIPAL);
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("user", { id: USER, tenantId: "fleet_00000000000000000000", workspaceRole: "admin" } as never);
+      await next();
+    });
+    app.route("/api", stationAcpRoutes);
+    const res = await app.request(`/api/stations/${stationId}/acp/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "ask" }),
+    });
+    // Past the pair, the next gate is readiness: the node is not connected here.
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code: string }).code).toBe("station_unavailable");
   });
 });

@@ -359,7 +359,11 @@ test("a full load before auth resolves shows no connection error and loads the s
 });
 
 /** The hub's answer for a node it cannot reach: a 502 with a reason, CORS and all. */
-async function withHub502(status: "online" | "offline", run: (r: ReturnType<typeof render>) => Promise<void>) {
+async function withHub502(
+  status: "online" | "offline",
+  run: (r: ReturnType<typeof render>) => Promise<void>,
+  answer: { status: number; body: Record<string, string> } = { status: 502, body: { error: "node offline" } },
+) {
   const authStore = await import("$lib/stores/auth.svelte");
   authStore.clearAuthSession();
   localStorage.setItem("agentpod.apiUrl", "https://hub.test");
@@ -369,7 +373,7 @@ async function withHub502(status: "online" | "offline", run: (r: ReturnType<type
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
     if (url.endsWith("/detected")) {
-      return new Response(JSON.stringify({ error: "node offline" }), { status: 502, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { "content-type": "application/json" } });
     }
     const body = url.endsWith("/stations") ? [] : [{ ...mockNode, status }];
     return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
@@ -397,6 +401,20 @@ test("a 502 from detect blames the node even while the list still says online", 
     expect(queryByText(/reach the hub|check your connection/i)).toBeNull();
   });
 });
+
+// The hub stopped sending 502 (an edge replaces it with CORS-less HTML): node failures are now 503
+// station_unavailable or 424 node_failed, and they must still blame the node.
+for (const answer of [
+  { status: 503, body: { error: "node offline", code: "station_unavailable" } },
+  { status: 424, body: { error: "invalid detect response from node", code: "node_failed" } },
+]) {
+  test(`a ${answer.status} ${answer.body.code} from detect blames the node, never the hub`, async () => {
+    await withHub502("online", async ({ findByText, queryByText }) => {
+      expect(await findByText("hermes-01 is offline. Detected agents show here when it reconnects.")).toBeTruthy();
+      expect(queryByText(/reach the hub|check your connection/i)).toBeNull();
+    }, answer);
+  });
+}
 
 test("a real network failure keeps the hub-connection copy", async () => {
   vi.spyOn(api, "listNodes").mockResolvedValue([mockNode]);

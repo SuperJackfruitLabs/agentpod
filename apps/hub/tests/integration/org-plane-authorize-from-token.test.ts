@@ -83,11 +83,16 @@ const caller = (authority?: TokenAuthority) => ({
   ...(authority ? { authority } : {}),
 });
 
-function mount(authority: TokenAuthority | undefined, routes: Hono, at = "/api") {
+function mount(
+  authority: TokenAuthority | undefined,
+  routes: Hono,
+  at = "/api",
+  workspaceRole: "admin" | "member" = "admin",
+) {
   return new Hono()
     .use("*", async (c, next) => {
       // A workspace admin: these routes are an admin's (W1), and the question here is reach.
-      c.set("user", { ...caller(authority), workspaceRole: "admin" });
+      c.set("user", { ...caller(authority), workspaceRole });
       await next();
     })
     .route(at, routes);
@@ -160,7 +165,9 @@ describe("services/acp-sessions createSession — the dispatch control pair", ()
 
   test("the console route hands the caller's token to the pair: 403 from the claims, and 503 is never needed", async () => {
     const post = (a: TokenAuthority | undefined) =>
-      mount(a, stationAcpRoutes).request(`/api/stations/${STATION}/acp/sessions`, {
+      // A member: an owner/admin chats with no grant (decision 3, spec 2026-10-23), so the pair is
+      // a member's question here.
+      mount(a, stationAcpRoutes, "/api", "member").request(`/api/stations/${STATION}/acp/sessions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: "ask" }),
@@ -173,7 +180,7 @@ describe("services/acp-sessions createSession — the dispatch control pair", ()
 
   test("the console route answers a plane outage with 503, never a 500 or a refusal", async () => {
     // The static API_TOKEN carries no token authority, so it must ask the directory.
-    const res = await mount(undefined, stationAcpRoutes).request(`/api/stations/${STATION}/acp/sessions`, {
+    const res = await mount(undefined, stationAcpRoutes, "/api", "member").request(`/api/stations/${STATION}/acp/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode: "ask" }),

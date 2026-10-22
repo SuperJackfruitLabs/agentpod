@@ -6,7 +6,7 @@
  *     1. POST /api/stations/:id/acp/sessions {mode} → 201 AcpSessionRow;
  *        error statuses: 400 invalid mode, 401 anonymous, 403 no acp
  *        capability, 404 unknown station, 409 the node can't host a second
- *        session, 502 node offline / acp.open failure.
+ *        session, 503 node offline, 424 acp.open failure (never 502).
  *     2. GET /api/stations/:id/acp/sessions → rows newest ACTIVITY first,
  *        straight from the service's SQL ordering (the route never re-sorts),
  *        with ?limit= / ?before= paging (slice 4c) — out-of-range numbers are
@@ -520,7 +520,7 @@ test(
 );
 
 test(
-  "POST create → 502 when the node is offline and 502 when acp.open fails",
+  "POST create → 503 when the node is offline and 424 when acp.open fails (never 502)",
   async () => {
     // Offline node: enrolled but never connected to the gateway.
     const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
@@ -536,7 +536,8 @@ test(
       if (!station) throw new Error("station adoption failed");
 
       const offline = await createSessionReq(baseUrl, station.id, { mode: "ask" });
-      expect(offline.status).toBe(502);
+      expect(offline.status).toBe(503);
+      expect(((await offline.json()) as { code?: string }).code).toBe("station_unavailable");
 
       // Online node whose acp.open fails.
       const { nodeId: failNodeId, nodeSecret } = await enrollTestNode(
@@ -557,7 +558,8 @@ test(
       const openFail = await createSessionReq(baseUrl, failStation.id, {
         mode: "ask",
       });
-      expect(openFail.status).toBe(502);
+      expect(openFail.status).toBe(424);
+      expect(((await openFail.json()) as { code?: string }).code).toBe("node_failed");
 
       fake.close();
       await new Promise((r) => setTimeout(r, 100));
@@ -987,3 +989,38 @@ test("public session creation forwards explicit managed proxy intent to the assi
     expect((await createSessionReq(baseUrl,station.id,{mode:"ask",mcpProxy:"true"})).status).toBe(400);
   } finally {if(id)await endSession(TEST_USER,id,"test done");fake.close();server.stop(true)}
 },30000);
+
+// ─── readiness (spec 2026-10-23, C11) ───────────────────────────────────────
+
+test(
+  "GET readiness: what the bridge would decide, live; 404 off-workspace, 401 anonymous",
+  async () => {
+    const { server, fake, station, baseUrl } = await setupRig("acproute-ready-host", {
+      stationKey: "acproute-ready",
+    });
+    try {
+      const get = (id: string, userId: string | null = TEST_USER) =>
+        fetch(`${baseUrl}/api/stations/${id}/readiness`, {
+          headers: userId ? { "X-Test-User-Id": userId } : {},
+        });
+      const ready = await get(station.id);
+      expect(ready.status).toBe(200);
+      const body = (await ready.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({ ready: true, reason: null, strictWork: { required: false, version: null } });
+      expect(Number.isNaN(Date.parse(String(body.checkedAt)))).toBe(false);
+
+      fake.close();
+      await pollUntil(async () => {
+        const r = (await (await get(station.id)).json()) as { ready: boolean };
+        return r.ready === false;
+      });
+      expect(await (await get(station.id)).json()).toMatchObject({ ready: false, reason: "Node is offline." });
+
+      expect((await get("station_does_not_exist")).status).toBe(404);
+      expect((await get(station.id, null)).status).toBe(401);
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);

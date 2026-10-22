@@ -14,6 +14,7 @@
  *   DELETE /stations/:stationId             → unadopt
  */
 
+import { stationFailure } from "../services/station-failure";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { zValidator } from "@hono/zod-validator";
@@ -60,7 +61,7 @@ export const stationRoutes = new Hono()
    * stations row already exists for (nodeId, stationKey).
    *
    * Returns 404 if the node is not in the caller's workspace.
-   * Returns 502 if the node is offline, times out, or returns invalid data.
+   * Returns 503 if the node is offline or times out, 424 if it fails or returns invalid data.
    */
   .get("/nodes/:nodeId/detected", async (c) => {
     const nodeId = c.req.param("nodeId");
@@ -71,12 +72,12 @@ export const stationRoutes = new Hono()
 
     const result = await broker.request(nodeId, "detect", {}, { timeoutMs: 10_000 });
     if (!result.ok) {
-      return c.json({ error: result.error ?? "detect failed" }, 502);
+      { const f = stationFailure(result.error, "detect failed"); return c.json(f.body, f.status); }
     }
 
     const parsed = VERB_RESULTS.detect.safeParse(result.data);
     if (!parsed.success) {
-      return c.json({ error: "invalid detect response from node" }, 502);
+      return c.json({ error: "invalid detect response from node", code: "node_failed" }, 424);
     }
 
     // A capability this hub does not know is filtered out of the row above
@@ -116,12 +117,12 @@ export const stationRoutes = new Hono()
 
       const result = await broker.request(nodeId, "detect", {}, { timeoutMs: 10_000 });
       if (!result.ok) {
-        return c.json({ error: result.error ?? "detect failed" }, 502);
+        { const f = stationFailure(result.error, "detect failed"); return c.json(f.body, f.status); }
       }
 
       const parsed = VERB_RESULTS.detect.safeParse(result.data);
       if (!parsed.success) {
-        return c.json({ error: "invalid detect response from node" }, 502);
+        return c.json({ error: "invalid detect response from node", code: "node_failed" }, 424);
       }
 
       // Adoption is the path the incident ran down: the capability the node
@@ -173,7 +174,7 @@ export const stationRoutes = new Hono()
    *
    * Forwards a "health" RPC to the node that owns this station.
    * Returns 404 if the station is not in the caller's workspace.
-   * Returns 502 if the node is offline, times out, or returns invalid data.
+   * Returns 503 if the node is offline or times out, 424 if it fails or returns invalid data.
    */
   .get("/stations/:stationId/health", async (c) => {
     const stationId = c.req.param("stationId");
@@ -187,12 +188,12 @@ export const stationRoutes = new Hono()
       key: station.stationKey,
     });
     if (!result.ok) {
-      return c.json({ error: result.error ?? "health failed" }, 502);
+      { const f = stationFailure(result.error, "health failed"); return c.json(f.body, f.status); }
     }
 
     const parsed = VERB_RESULTS.health.safeParse(result.data);
     if (!parsed.success) {
-      return c.json({ error: "invalid health response from node" }, 502);
+      return c.json({ error: "invalid health response from node", code: "node_failed" }, 424);
     }
 
     return c.json(parsed.data);
@@ -202,7 +203,7 @@ export const stationRoutes = new Hono()
    *
    * Lists files/directories at the given path on the station's node.
    * Returns 404 if the station is not in the caller's workspace.
-   * Returns 502 if the node is offline, times out, or returns invalid data.
+   * Returns 503 if the node is offline or times out, 424 if it fails or returns invalid data.
    */
   .get(
     "/stations/:stationId/files",
@@ -221,12 +222,12 @@ export const stationRoutes = new Hono()
         path,
       });
       if (!result.ok) {
-        return c.json({ error: result.error ?? "fs.list failed" }, 502);
+        { const f = stationFailure(result.error, "fs.list failed"); return c.json(f.body, f.status); }
       }
 
       const parsed = VERB_RESULTS["fs.list"].safeParse(result.data);
       if (!parsed.success) {
-        return c.json({ error: "invalid fs.list response from node" }, 502);
+        return c.json({ error: "invalid fs.list response from node", code: "node_failed" }, 424);
       }
 
       return c.json(parsed.data);
@@ -241,7 +242,7 @@ export const stationRoutes = new Hono()
    * Sets X-Truncated: true when the node reports the file was capped.
    *
    * Returns 404 if the station is not in the caller's workspace.
-   * Returns 502 if the node is offline, times out, or returns invalid data.
+   * Returns 503 if the node is offline or times out, 424 if it fails or returns invalid data.
    */
   .get(
     "/stations/:stationId/file",
@@ -270,12 +271,12 @@ export const stationRoutes = new Hono()
         ...(maxBytes ? { maxBytes } : {}),
       });
       if (!result.ok) {
-        return c.json({ error: result.error ?? "fs.read failed" }, 502);
+        { const f = stationFailure(result.error, "fs.read failed"); return c.json(f.body, f.status); }
       }
 
       const parsed = VERB_RESULTS["fs.read"].safeParse(result.data);
       if (!parsed.success) {
-        return c.json({ error: "invalid fs.read response from node" }, 502);
+        return c.json({ error: "invalid fs.read response from node", code: "node_failed" }, 424);
       }
 
       const { content, encoding, truncated } = parsed.data;
@@ -308,7 +309,7 @@ export const stationRoutes = new Hono()
    * The broker stream is cancelled when the client disconnects.
    *
    * Returns 404 if the station is not in the caller's workspace.
-   * Returns 502 if the node is offline.
+   * Returns 503 if the node is offline.
    */
   .get("/stations/:stationId/logs", async (c) => {
     const stationId = c.req.param("stationId");
@@ -318,9 +319,9 @@ export const stationRoutes = new Hono()
       return c.json({ error: "Not Found" }, 404);
     }
 
-    // Finding 1: Return 502 immediately instead of opening a dead SSE stream.
+    // Finding 1: Return 503 immediately instead of opening a dead SSE stream.
     if (!connectionManager.isOnline(station.nodeId)) {
-      return c.json({ error: "node offline" }, 502);
+      { const f = stationFailure("node offline", "node offline"); return c.json(f.body, f.status); }
     }
 
     return streamSSE(c, async (stream) => {

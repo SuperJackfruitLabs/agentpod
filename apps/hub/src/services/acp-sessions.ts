@@ -283,6 +283,13 @@ export interface CreateSessionInput {
    * `OrgPlaneUnavailable`. Ignored in legacy mode.
    */
   authority?: TokenAuthority;
+  /**
+   * The caller's role in the station's workspace, set ONLY by the console route (interactive
+   * chat). An owner or admin may chat with the workspace's agent without a mayDispatch grant
+   * (decision 3, spec 2026-10-23). Ignored whenever `executionRun` is set: dispatching board work
+   * still needs the grant.
+   */
+  workspaceRole?: "owner" | "admin" | "member";
   /** Trusted bridge fields, never copied from an HTTP/ACP request body. */
   executionRun?: import("@agentpod/contract").SalaamRunAuthority;
   validateExecutionRun?: () => Promise<unknown>;
@@ -1369,6 +1376,15 @@ export async function stationReadiness(
   return { ready: true };
 }
 
+/**
+ * Decision 3 (spec 2026-10-23): a workspace owner or admin chatting with the workspace's agent
+ * from the console needs no separate mayDispatch grant. Interactive only: a bridge run (any
+ * `executionRun`) never qualifies, whatever role is passed.
+ */
+export function interactiveWorkspaceAdmin(input: Pick<CreateSessionInput, "workspaceRole" | "executionRun">): boolean {
+  return input.executionRun === undefined && (input.workspaceRole === "owner" || input.workspaceRole === "admin");
+}
+
 export async function createSession(
   input: CreateSessionInput,
 ): Promise<AcpSessionRow> {
@@ -1388,7 +1404,7 @@ export async function createSession(
   // on whether that station happens to be online, and answering "node offline"
   // to someone who was never permitted leaks which stations exist.
   const station = await getStation({ tenantId }, stationId);
-  if (station && isControlPairEnforced()) {
+  if (station && isControlPairEnforced() && !interactiveWorkspaceAdmin(input)) {
     // The grant is keyed by principal id, not the session's `userId`. A caller
     // with no principal has no grant to hold. Under the org plane a caller's
     // token answers both (`auth/caller-authority.ts`).
@@ -1465,7 +1481,9 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
   const tenantId = station.tenantId;
   const execution =
     harness === "salaam"
-      ? await makeSalaamExecution(stationId, userId, id, input.executionRun)
+      ? await makeSalaamExecution(stationId, userId, id, input.executionRun, {
+          workspaceAdmin: interactiveWorkspaceAdmin(input),
+        })
       : null;
   if (execution && input.mcpServers?.length)
     throw Error("Salaam managed MCP is not enabled yet");

@@ -132,7 +132,7 @@ async function connectFakeNode(
   serverPort: number,
   nodeId: string,
   nodeSecret: string,
-  overrides?: { fsRead?: unknown }
+  overrides?: { fsRead?: unknown; fsListError?: string }
 ): Promise<WebSocket> {
   const ws = new WebSocket(
     `ws://localhost:${serverPort}/public/nodes/gateway`,
@@ -165,7 +165,11 @@ async function connectFakeNode(
 
         case "fs.list":
           ws.send(
-            JSON.stringify({ type: "res", id: msg.id, ok: true, data: fakeFiles })
+            JSON.stringify(
+              overrides?.fsListError
+                ? { type: "res", id: msg.id, ok: false, error: overrides.fsListError }
+                : { type: "res", id: msg.id, ok: true, data: fakeFiles }
+            )
           );
           break;
 
@@ -449,7 +453,7 @@ test(
 );
 
 test(
-  "GET /api/stations/:id/logs returns 502 when node is offline",
+  "GET /api/stations/:id/logs returns 503 when node is offline",
   async () => {
     const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
     const baseUrl = `http://localhost:${server.port}`;
@@ -474,10 +478,11 @@ test(
       const res = await fetch(`${baseUrl}/api/stations/${station.id}/logs`, {
         headers: { "X-Test-User-Id": TEST_USER },
       });
-      expect(res.status).toBe(502);
+      expect(res.status).toBe(503);
 
-      const body = await res.json() as { error: string };
+      const body = await res.json() as { error: string; code: string };
       expect(body.error).toBe("node offline");
+      expect(body.code).toBe("station_unavailable");
     } finally {
       server.stop(true);
     }
@@ -518,4 +523,43 @@ test(
     }
   },
   10_000
+);
+
+test(
+  "a station that refuses fs.list answers 424 node_failed with the node's message, never 502",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+
+    try {
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
+      const { nodeId, nodeSecret } = await enrollNode(token, {
+        hostname: "observe-files-fail-host",
+        os: "linux",
+        arch: "amd64",
+        cpuCount: 2,
+      });
+
+      const ws = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        fsListError: "salaam: station filesystem access is not enabled",
+      });
+      const station = await adoptStation(baseUrl, nodeId, TEST_USER);
+
+      const res = await fetch(`${baseUrl}/api/stations/${station.id}/files?path=.`, {
+        headers: { "X-Test-User-Id": TEST_USER },
+      });
+      // An edge replaces a 502 with HTML and no CORS headers (spec 2026-10-23, C16).
+      expect(res.status).toBe(424);
+      expect(await res.json()).toEqual({
+        error: "salaam: station filesystem access is not enabled",
+        code: "node_failed",
+      });
+
+      ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  15_000
 );
