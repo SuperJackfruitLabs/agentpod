@@ -1,23 +1,37 @@
 /**
- * `GET /api/me` — who the caller is, and whether they operate this hub.
+ * `GET /api/me` — who the caller is, and what they may do here.
  *
- * What the console reads instead of a session and its `role` (`apps/console/src/lib/stores/
- * auth.svelte.ts`, `initAuth`): `{ id, email, isAdmin }`. `email` is the token's `email` claim for a
- * human and null when the token has none; `isAdmin` is the hub's own seat (`hub_operators`,
- * decision D4). `issuer` is always `"org-plane"` now that the hub's own issuer is gone (P3 plan,
- * Task 17); kept so a console that branches on it keeps working. Mounted behind `/api/*`'s
- * authMiddleware.
+ * `{ id, email, org, workspaceRole, isWorkspaceAdmin, isHubOperator, isAdmin, issuer }`
+ * (workspace authority spec, "Hub changes"):
+ *
+ * - `org` is the workspace the token names (null for the static API_TOKEN, which names none);
+ *   `workspaceRole` is the caller's role in it, `member` when the token carries no `orgRole`.
+ * - `isWorkspaceAdmin`: owner or admin of that workspace — the fleet's admin actions.
+ * - `isHubOperator`: the hub's own seat (`hub_operators`, set from `HUB_OPERATORS`) — the hub-wide
+ *   settings.
+ * - `isAdmin` = `isWorkspaceAdmin || isHubOperator`, kept for a console that reads only it
+ *   (`apps/console/src/lib/stores/auth.svelte.ts`, `initAuth`).
+ *
+ * `email` is the token's `email` claim for a human and null when the token has none. `issuer` is
+ * always `"org-plane"`; kept so a console that branches on it keeps working. Mounted behind
+ * `/api/*`'s authMiddleware.
  */
 import { Hono } from "hono";
-import { isUserAdmin } from "../models/admin-users";
+import { isHubOperator, isWorkspaceAdmin, workspaceRole } from "../auth/workspace-authority";
 
 export const meRoutes = new Hono().get("/me", async (c) => {
   const u = c.get("user");
   if (!u) return c.json({ error: "Unauthorized" }, 401);
+  const workspaceAdmin = isWorkspaceAdmin(c);
+  const hubOperator = await isHubOperator(c);
   return c.json({
     id: u.id,
     email: u.email ?? null,
-    isAdmin: await isUserAdmin(u.id),
+    org: u.org ?? null,
+    workspaceRole: workspaceRole(c),
+    isWorkspaceAdmin: workspaceAdmin,
+    isHubOperator: hubOperator,
+    isAdmin: workspaceAdmin || hubOperator,
     issuer: "org-plane" as const,
   });
 });

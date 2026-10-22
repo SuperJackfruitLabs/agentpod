@@ -113,11 +113,12 @@ describe("tenant guard — unscoped tables are legitimate, and stay refusable", 
   });
 
   test("instance-wide tables are exempt", () => {
-    // system_settings is one row per key for the whole hub (signup open/closed);
-    // admin_audit_log records instance-admin actions that cross tenants by
-    // definition — banning a user is not an act inside a fleet.
+    // system_settings is one row per key for the whole hub (signup open/closed).
     expect(TENANT_EXEMPT_TABLES["system_settings"]).toBeDefined();
-    expect(TENANT_EXEMPT_TABLES["admin_audit_log"]).toBeDefined();
+    // admin_audit_log was exempt until the workspace authority spec: a workspace admin reads their
+    // own workspace's rows now, so each row records the tenant its actor acted in.
+    expect(TENANT_EXEMPT_TABLES["admin_audit_log"]).toBeUndefined();
+    expect(TENANT_SCOPED_TABLES).toHaveProperty("adminAuditLog");
   });
 
   test("the tenants table is exempt from itself", () => {

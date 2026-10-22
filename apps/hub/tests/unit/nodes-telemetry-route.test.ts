@@ -25,7 +25,7 @@ function setup(opts: {
   const audits: any[] = [];
   const app = new Hono();
   app.use("*", async (c, next) => {
-    c.set("user", { id: "user_1" });
+    c.set("user", { id: "user_1", authType: "org_plane", tenantId: "t", workspaceRole: (opts.admin ?? true) ? "admin" : "member" });
     await next();
   });
   app.route(
@@ -38,7 +38,6 @@ function setup(opts: {
       },
       listNodesFn: async () => fleet,
       fixedImageNodesFn: async () => new Set(opts.fixed ?? []),
-      isAdminFn: async () => opts.admin ?? true,
       auditFn: async (e) => {
         if (opts.auditFails) throw new Error("db down");
         audits.push(e);
@@ -60,7 +59,9 @@ const get = (app: Hono) => app.request("/api/nodes/telemetry");
 describe("GET /api/nodes/telemetry", () => {
   test("non-admin gets 403 and no node is contacted", async () => {
     const { app, calls } = setup({ admin: false });
-    expect((await get(app)).status).toBe(403);
+    const res = await get(app);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "workspace_admin_required" });
     expect(calls).toEqual([]);
   });
 

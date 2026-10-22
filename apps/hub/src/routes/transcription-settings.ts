@@ -106,8 +106,9 @@ export interface AdminTranscriptionDeps {
 async function auditToLog(adminId: string, summary: string, c: Context): Promise<void> {
   const { logSettingsUpdate } = await import("../models/admin-audit-log");
   const { getRequestContext } = await import("../auth/admin-middleware");
+  const { resolveTenantId } = await import("../auth/tenant");
   const ctx = getRequestContext(c);
-  await logSettingsUpdate(adminId, "transcription", summary, ctx.ipAddress, ctx.userAgent);
+  await logSettingsUpdate(resolveTenantId(c), adminId, "transcription", summary, ctx.ipAddress, ctx.userAgent);
 }
 
 export function adminTranscriptionRoutes(deps: AdminTranscriptionDeps = {}) {

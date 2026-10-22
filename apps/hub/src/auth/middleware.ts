@@ -15,6 +15,7 @@ import { config } from "../config";
 import { createLogger } from "../utils/logger";
 import { verifyPlaneBearer } from "./hub-token";
 import { authorityFromClaims, type TokenAuthority } from "./caller-authority";
+import { workspaceRoleOf, type WorkspaceRole } from "@agentpod/contract";
 
 const log = createLogger("auth-middleware");
 
@@ -50,6 +51,21 @@ export interface AuthUser {
    */
   tenantId: string;
   /**
+   * The raw `org_` id the token named — the workspace this request acts in. Absent for the static
+   * API_TOKEN, which names no workspace.
+   */
+  org?: string;
+  /**
+   * The caller's role in that workspace: the token's `orgRole`, or `member` when it carries none or
+   * one this hub does not know (workspace authority spec W1, fails closed). The hub keeps no copy.
+   * Read it through `auth/workspace-authority.ts`; a context built without it (a test stub) is a
+   * member there.
+   *
+   * The static API_TOKEN is `admin` of the bootstrap tenant: it is the hub's own operator key, set
+   * in the hub's env by whoever runs it, and it is also a hub operator (`isHubOperator`).
+   */
+  workspaceRole?: WorkspaceRole;
+  /**
    * What the caller's org-plane token says they may do (contract §2). Absent for the static
    * API_TOKEN. Authorization checks read this through `auth/caller-authority.ts` instead of
    * asking the plane (design §5.7).
@@ -82,7 +98,7 @@ export function createAuthMiddleware(deps: { verifyPlane?: typeof verifyPlaneBea
     const header = c.req.header("Authorization");
     const bearer = header?.startsWith("Bearer ") ? header.slice(7) : c.req.query("token");
     if (bearer && safeCompare(bearer, config.auth.token)) {
-      c.set("user", { id: config.defaultUserId, authType: "api_key", tenantId: BOOTSTRAP_TENANT_ID });
+      c.set("user", { id: config.defaultUserId, authType: "api_key", tenantId: BOOTSTRAP_TENANT_ID, workspaceRole: "admin" });
       return next();
     }
     if (bearer) {
@@ -105,6 +121,8 @@ export function createAuthMiddleware(deps: { verifyPlane?: typeof verifyPlaneBea
           ...(r.caller.claims.email ? { email: r.caller.claims.email } : {}),
           authType: "org_plane",
           tenantId: r.caller.tenantId,
+          org: r.caller.claims.org,
+          workspaceRole: workspaceRoleOf(r.caller.claims.orgRole),
           authority: authorityFromClaims(r.caller.claims),
         });
         log.debug("Authenticated via org-plane token", { principal: r.caller.sub, tenantId: r.caller.tenantId });

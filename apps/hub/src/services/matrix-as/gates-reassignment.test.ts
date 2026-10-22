@@ -40,7 +40,11 @@ import { bridgeDispatches } from "../../db/schema/bridge";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { mintEnrollmentToken, enrollNode } from "../enrollment";
 import { createPrincipal } from "../../../tests/helpers/principals";
-import { adminMiddleware } from "../../auth/admin-middleware";
+// Workspace authority spec: these routes are a workspace admin's. This file's "admin" fixture
+// (createTestUser role: "admin", a hub_operators seat) stands for one here; the real token path
+// is tests/integration/workspace-authority.test.ts.
+import { workspaceAdminMiddleware as adminMiddleware } from "../../auth/workspace-authority";
+import { isUserAdmin } from "../../models/admin-users";
 import { agentsAdminRouter } from "../../routes/agents-admin";
 import { projectGate, roomAgentUser } from "./gates";
 import { roomForStation } from "./station-room";
@@ -62,7 +66,7 @@ let sharedNodeName: string;
 function adminApp() {
   const a = new Hono();
   a.use("*", async (c, next) => {
-    c.set("user", { id: ADMIN_ACTOR, authType: "api_key", tenantId: "default" });
+    c.set("user", { id: ADMIN_ACTOR, authType: "org_plane", tenantId: BOOTSTRAP_TENANT_ID, workspaceRole: (await isUserAdmin(ADMIN_ACTOR)) ? "admin" : "member" });
     await next();
   });
   a.use("*", adminMiddleware);

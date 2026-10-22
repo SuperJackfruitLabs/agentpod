@@ -33,10 +33,12 @@ const ADMIN = "test-user-node-remove-admin";
 
 const HOST = { hostname: "noderm-host", os: "linux", arch: "amd64", cpuCount: 2 };
 
-function api(userId: string) {
+// Removing a node is a workspace admin's act (workspace authority spec): every caller here is an
+// admin of the bootstrap workspace unless a test says "member".
+function api(userId: string, workspaceRole: "admin" | "member" = "admin") {
   return new Hono()
     .use("*", async (c, next) => {
-      c.set("user", { id: userId, role: "user" } as never);
+      c.set("user", { id: userId, authType: "org_plane", tenantId: BOOTSTRAP_TENANT_ID, workspaceRole });
       await next();
     })
     .route("/api/nodes", createNodeRoutes())
@@ -44,8 +46,8 @@ function api(userId: string) {
     .route("/public/nodes", gatewayRoutes);
 }
 
-async function del(userId: string, nodeId: string, force = false) {
-  return api(userId).request(`/api/nodes/${nodeId}${force ? "?force=1" : ""}`, { method: "DELETE" });
+async function del(userId: string, nodeId: string, force = false, workspaceRole: "admin" | "member" = "admin") {
+  return api(userId, workspaceRole).request(`/api/nodes/${nodeId}${force ? "?force=1" : ""}`, { method: "DELETE" });
 }
 
 async function enrol(userId: string) {
@@ -91,7 +93,7 @@ beforeAll(async () => {
 afterAll(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
   try {
-    const users = [OWNER, OTHER, ADMIN];
+    const users = [OWNER, OTHER, ADMIN, "test-user-node-remove-unmapped"];
     await rawSql`DELETE FROM bridge_agents WHERE station_id IN (SELECT id FROM stations WHERE user_id = ANY(${users}))`;
     await rawSql`DELETE FROM provisioned_runtimes WHERE user_id = ANY(${users})`;
     await rawSql`DELETE FROM nodes WHERE user_id = ANY(${users})`;
@@ -116,11 +118,21 @@ describe("who may remove a node", () => {
     expect(await nodeExists(nodeId)).toBe(true);
   });
 
-  test("where the control pair is enforced, an owner who may not grow the fleet may not shrink it", async () => {
+  test("an owner who is a workspace member may not remove it, pair or no pair", async () => {
     const { nodeId } = await enrol(OWNER);
+    const res = await del(OWNER, nodeId, false, "member");
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "workspace_admin_required" });
+    expect(await nodeExists(nodeId)).toBe(true);
+    // ...and a stranger member still cannot tell the id exists.
+    expect((await del(OTHER, nodeId, false, "member")).status).toBe(404);
+  });
+
+  test("where the control pair is enforced, an admin with no principal may not shrink the fleet", async () => {
+    const { nodeId } = await enrol("test-user-node-remove-unmapped");
     process.env.ENFORCE_CONTROL_PAIR = "true";
     try {
-      const res = await del(OWNER, nodeId);
+      const res = await del("test-user-node-remove-unmapped", nodeId);
       expect(res.status).toBe(403);
       expect(await res.text()).toMatch(/remove machines/i);
       expect(await nodeExists(nodeId)).toBe(true);

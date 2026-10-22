@@ -43,11 +43,13 @@ const fleet: RolloutNode[] = [
 /** Mounts the routes behind a stub that supplies the authenticated user. */
 function appWith(
   request: Parameters<typeof createNodeRoutes>[0]["request"],
-  fixedImage: Set<string> = new Set()
+  fixedImage: Set<string> = new Set(),
+  workspaceRole: "owner" | "admin" | "member" | null = "admin"
 ) {
   const app = new Hono();
   app.use("*", async (c, next) => {
-    c.set("user", { id: "user_1" });
+    // null: a caller whose context carries no role at all, which must read as a member.
+    c.set("user", { id: "user_1", authType: "org_plane", tenantId: "t", ...(workspaceRole ? { workspaceRole } : {}) });
     await next();
   });
   app.route(
@@ -72,6 +74,27 @@ const post = (app: Hono, body?: unknown) =>
   });
 
 describe("POST /api/nodes/update-all (#295)", () => {
+  // Workspace authority spec, gate map: this route was ungated — any signed-in caller could
+  // restart every node they own.
+  for (const role of ["member", null] as const) {
+    test(`a workspace ${role ?? "caller with no role"} is refused 403 workspace_admin_required, and no node is asked`, async () => {
+      const asked: string[] = [];
+      const app = appWith(async (nodeId) => {
+        asked.push(nodeId);
+        return { ok: true, data: { ok: true, updating: true, tag: "v0.1.26" } };
+      }, new Set(), role);
+      const res = await post(app);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "workspace_admin_required" });
+      expect(asked).toEqual([]);
+    });
+  }
+
+  test("an owner rolls the fleet", async () => {
+    const app = appWith(async () => ({ ok: true, data: { ok: true, updating: true, tag: "v0.1.26" } }), new Set(), "owner");
+    expect((await post(app)).status).toBe(200);
+  });
+
   test("updates only the node that is behind, and says why the others were left", async () => {
     const asked: string[] = [];
     const app = appWith(async (nodeId) => {

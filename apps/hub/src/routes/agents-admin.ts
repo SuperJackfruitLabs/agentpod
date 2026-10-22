@@ -53,6 +53,7 @@ import { principalById } from "../services/principals";
 import { markGrantsRevoking } from "../services/station-forge-api";
 import { kickForgeApiRevoke } from "../services/forge-api-reconcile";
 import { createLogger } from "../utils/logger";
+import { resolveTenantId } from "../auth/tenant";
 
 const log = createLogger("agents-admin");
 
@@ -145,10 +146,12 @@ export const agentsAdminRouter = new Hono()
     const stationId = c.req.param("stationId");
     const { principalId } = c.req.valid("json");
 
+    // In the caller's workspace only: a workspace admin administers their own fleet, and a station
+    // in another tenant is answered like one that does not exist (workspace authority spec, W2).
     const [station] = await db
       .select({ id: stations.id, principalId: stations.principalId })
       .from(stations)
-      .where(eq(stations.id, stationId));
+      .where(and(eq(stations.id, stationId), eq(stations.tenantId, resolveTenantId(c))));
     if (!station) return c.json({ error: "no such station" }, 404);
 
     const principal = await principalById(principalId);
@@ -160,6 +163,12 @@ export const agentsAdminRouter = new Hono()
     const planeAgent = await principalDirectory().principal(principalId);
     if (planeAgent?.kind !== "agent") {
       return c.json({ error: "only an agent can occupy a station" }, 400);
+    }
+    // Another workspace's agent is not this workspace admin's to move: assigning it here would
+    // vacate its station there (workspace authority spec, W2).
+    const callerOrg = c.get("user")?.org;
+    if (callerOrg && planeAgent.organizationId && planeAgent.organizationId !== callerOrg) {
+      return c.json({ error: "no such principal" }, 404);
     }
 
     // Read BEFORE the transaction overwrites it — fix round 2: assigning a
@@ -333,7 +342,7 @@ export const agentsAdminRouter = new Hono()
     const [station] = await db
       .select({ id: stations.id, tenantId: stations.tenantId })
       .from(stations)
-      .where(eq(stations.id, stationId));
+      .where(and(eq(stations.id, stationId), eq(stations.tenantId, resolveTenantId(c))));
     if (!station) return c.json({ error: "no such station" }, 404);
 
     // The station's forge API grants go to `revoking` in the same transaction as the unassign;

@@ -27,8 +27,24 @@ export const OrgPlaneTokenClaims = z.looseObject({
   amr: z.array(z.string()).optional(),
   email: z.string().optional(),
   email_verified: z.boolean().optional(),
+  // The human's role in `org` (workspace authority spec W1). A plain string, not an enum: a token
+  // carrying a value this contract does not know must still verify. Read it through
+  // `workspaceRoleOf`, which answers "member" for anything else — absent included.
+  orgRole: z.string().optional(),
 });
 export type OrgPlaneTokenClaims = z.infer<typeof OrgPlaneTokenClaims>;
+
+export const WORKSPACE_ROLES = ["owner", "admin", "member"] as const;
+export type WorkspaceRole = (typeof WORKSPACE_ROLES)[number];
+
+/**
+ * A token's `orgRole` as a role. Absent (a token minted before the issuer spoke it, an agent or a
+ * service) and unrecognised values are `member`: the default is the least authority, so an old or
+ * unexpected token fails closed rather than open.
+ */
+export function workspaceRoleOf(orgRole: unknown): WorkspaceRole {
+  return orgRole === "owner" || orgRole === "admin" ? orgRole : "member";
+}
 
 /** Equals, or contains. Never a prefix match. */
 export function audienceIncludes(aud: string | string[], audience: string): boolean {

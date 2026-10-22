@@ -628,6 +628,24 @@ loopback host), or a credential file that is unreadable, empty or not `svc_<20 h
 `GET /public/org-plane` tells the console and `fleet login` which issuer to use:
 `{ issuer, url, audience }`.
 
+### Hub operators
+
+```bash
+HUB_OPERATORS=prn_0123456789abcdef0123,prn_fedcba9876543210fedc
+```
+
+Who holds the hub operator seat: the hub-wide provider settings (transcription, speech) and
+every workspace's audit log. Read at every boot and reconciled into `hub_operators`: listed
+principals are added, unlisted ones removed, so the env file is the record. **Unset (or blank)
+leaves the table as it is** — set it to today's seats before deploying a release that reads it
+(`SELECT principal_id FROM hub_operators;`), then manage the seat only here. An entry that is not
+`prn_` + 20 hex stops the boot, naming it.
+
+The seat is not workspace administration. Enrolling and removing nodes, agents, the bridge
+roster and station forge access belong to a workspace's **owners and admins**, read from the
+plane token's `orgRole` (a token without one is a member); that is managed at the plane, not
+here.
+
 ## 5. Hub — build + deploy
 
 ```bash
@@ -862,7 +880,7 @@ On the co-hosted Matrix box, also confirm: `curl -sI https://id.<your-domain>` s
 
 ## 9. Smoke test
 
-1. Open `https://console.<your-domain>` in a browser (the custom domain — not `*.pages.dev`); sign in through the organization plane. An operator is a row in `hub_operators` (`docs/OPERATING.md` §11).
+1. Open `https://console.<your-domain>` in a browser (the custom domain — not `*.pages.dev`); sign in through the organization plane. A workspace's owners and admins administer its fleet; the hub operator seat (`HUB_OPERATORS`, §4) holds the hub-wide settings (`docs/OPERATING.md` §11).
 2. Confirm the session cookie is `Domain=.<your-domain>; Secure; SameSite=Lax` in DevTools.
 3. Navigate to **Settings → Nodes** and generate an enrollment token.
 4. Enroll a real host (curl one-liner — see [docs/OPERATING.md](./OPERATING.md) Option A).

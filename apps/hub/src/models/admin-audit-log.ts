@@ -12,6 +12,7 @@ import {
 } from "../db/schema/admin";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
 import { createLogger } from "../utils/logger";
+import { tenantScope } from "../db/tenant-scope";
 
 const log = createLogger("admin-audit-log");
 
@@ -37,6 +38,8 @@ export interface AdminAuditLogEntry {
 }
 
 export interface LogAdminActionInput {
+  /** The tenant the actor acted in (the request's, `resolveTenantId(c)`). */
+  tenantId: string;
   adminUserId: string;
   action: AdminAction;
   targetUserId?: string;
@@ -48,6 +51,11 @@ export interface LogAdminActionInput {
 }
 
 export interface AuditLogQueryOptions {
+  /**
+   * Only this workspace's rows. Omitted means every tenant's rows: a hub operator's
+   * read. A workspace admin's read always passes it (routes/admin.ts).
+   */
+  tenantId?: string;
   adminUserId?: string;
   targetUserId?: string;
   action?: AdminAction;
@@ -82,6 +90,7 @@ export async function logAdminAction(input: LogAdminActionInput): Promise<string
 
   await db.insert(adminAuditLog).values({
     id,
+    tenantId: input.tenantId,
     adminUserId: input.adminUserId,
     action: input.action,
     targetUserId: input.targetUserId ?? null,
@@ -106,6 +115,7 @@ export async function logAdminAction(input: LogAdminActionInput): Promise<string
  * Helper to log settings update
  */
 export async function logSettingsUpdate(
+  tenantId: string,
   adminUserId: string,
   settingKey: string,
   newValue: string,
@@ -113,6 +123,7 @@ export async function logSettingsUpdate(
   userAgent?: string
 ): Promise<string> {
   return logAdminAction({
+    tenantId,
     adminUserId,
     action: "settings_update",
     targetResourceId: settingKey,
@@ -134,6 +145,7 @@ export async function getAuditLogs(
   options: AuditLogQueryOptions = {}
 ): Promise<{ entries: AdminAuditLogEntry[]; total: number }> {
   const {
+    tenantId,
     adminUserId,
     targetUserId,
     action,
@@ -145,7 +157,10 @@ export async function getAuditLogs(
 
   // Build conditions
   const conditions = [];
-  
+
+  if (tenantId !== undefined) {
+    conditions.push(tenantScope(adminAuditLog, tenantId));
+  }
   if (adminUserId) {
     conditions.push(eq(adminAuditLog.adminUserId, adminUserId));
   }

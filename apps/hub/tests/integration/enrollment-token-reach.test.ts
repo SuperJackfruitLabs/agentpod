@@ -27,10 +27,12 @@ const ADMIN_USER = "test-user-enroll-reach-admin";
 
 let USER_PRINCIPAL: string;
 
-function app(userId: string) {
+// The workspace role comes from the token's orgRole (workspace authority spec); ADMIN_USER is an
+// admin of the workspace, USER a member.
+function app(userId: string, workspaceRole: "admin" | "member" = userId === ADMIN_USER ? "admin" : "member") {
   const a = new Hono();
   a.use("*", async (c, next) => {
-    c.set("user", { id: userId, role: "user", tenantId: BOOTSTRAP_TENANT_ID });
+    c.set("user", { id: userId, authType: "org_plane", tenantId: BOOTSTRAP_TENANT_ID, workspaceRole });
     await next();
   });
   a.route("/", enrollmentTokenRoutes);
@@ -54,7 +56,7 @@ beforeAll(async () => {
 afterAll(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
   try {
-    await rawSql`DELETE FROM enrollment_tokens WHERE user_id IN (${USER}, ${ADMIN_USER})`;
+    await rawSql`DELETE FROM enrollment_tokens WHERE user_id IN (${USER}, ${ADMIN_USER}, ${"test-user-enroll-reach-unmapped"})`;
     await forgetPrincipals({ handles: ["enroll-reach-user", "enroll-reach-admin"] });
     await deleteTestUsers([USER, ADMIN_USER]);
   } catch {
@@ -62,14 +64,14 @@ afterAll(async () => {
   }
 });
 
-describe("growing the fleet is an admin act", () => {
-  test("an admin may mint an enrollment token", async () => {
+describe("growing the fleet is a workspace admin's act", () => {
+  test("a workspace admin may mint an enrollment token", async () => {
     const res = await app(ADMIN_USER).request("/", { method: "POST" });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { token: string }).token).toBeTruthy();
   });
 
-  test("a non-admin may not, however permissive their grant", async () => {
+  test("a workspace member may not, however permissive their grant", async () => {
     // This is the exact case the wildcard used to permit: a dispatch pattern
     // spanning every node, plus mayGrantReach. It used to be sufficient on its
     // own. It no longer is — admin is the only thing that answers now, and
@@ -78,17 +80,24 @@ describe("growing the fleet is an admin act", () => {
 
     const res = await app(USER).request("/", { method: "POST" });
     expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "workspace_admin_required" });
+  });
+
+  test("a workspace admin with no principal at the plane is refused by the pair", async () => {
+    const res = await app("test-user-enroll-reach-unmapped", "admin").request("/", { method: "POST" });
+    expect(res.status).toBe(403);
     expect(await res.text()).toMatch(/add machines/i);
   });
 
-  test("is a no-op when the pair is not enforced", async () => {
-    // A deployment that has not switched the pair on must enrol exactly as it
-    // did before — this control ships live, so its off-state has to be silent.
+  test("with the pair off the workspace gate still holds; only the pair's own checks go quiet", async () => {
+    // The workspace gate is not the control pair's: a member is refused either way (workspace
+    // authority spec, gate map), while an admin enrols exactly as before.
     const before = process.env.ENFORCE_CONTROL_PAIR;
     try {
       process.env.ENFORCE_CONTROL_PAIR = "false";
 
-      const res = await app(USER).request("/", { method: "POST" });
+      expect((await app(USER).request("/", { method: "POST" })).status).toBe(403);
+      const res = await app("test-user-enroll-reach-unmapped", "admin").request("/", { method: "POST" });
       expect(res.status).toBe(200);
     } finally {
       if (before === undefined) delete process.env.ENFORCE_CONTROL_PAIR;

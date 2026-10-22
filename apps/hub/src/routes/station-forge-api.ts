@@ -1,9 +1,9 @@
 /**
  * Forge API access routes (spec docs/superpowers/specs/2026-10-17-forge-api-access-design.md):
  *
- *   GET    /api/stations/:id/forge-api                              status (owner or operator)
+ *   GET    /api/stations/:id/forge-api                              status (any workspace member)
  *   GET    /api/stations/:id/forge-api/key                          the station's stk handover public key
- *                                                                   (operator; the CLI seals supplied/app
+ *                                                                   (workspace admin; the CLI seals supplied/app
  *                                                                   credentials to it)
  *   POST   /api/stations/:id/forge-api                              grant
  *   POST   /api/stations/:id/forge-api/:grantId/verify
@@ -14,7 +14,8 @@
  *   POST   /api/stations/:id/forge-api/:grantId/confirm-revoked     supplied: the operator revoked it
  *
  * **Authority.** Granting an agent a forge credential is granting it reach. Every mutation needs
- * BOTH the hub operator seat (`isUserAdmin`) AND the control pair (`requireIssueCredentials`, the
+ * BOTH workspace admin (`isWorkspaceAdmin`: owner or admin of the station's workspace, from the
+ * token's `orgRole`; workspace authority spec) AND the control pair (`requireIssueCredentials`, the
  * same check `station-matrix.ts` uses for a Matrix credential; it enforces under
  * ENFORCE_CONTROL_PAIR). Owning the station is NOT enough — unlike `station-git-identity.ts`, whose
  * ownership-only check must not be copied here. Agent tokens never get this far (authMiddleware
@@ -46,7 +47,7 @@ import {
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { stationForgeApiGrants as g, type StationForgeApiGrant } from "../db/schema/forge-api-grants";
-import { isUserAdmin } from "../models/admin-users";
+import { isWorkspaceAdmin } from "../auth/workspace-authority";
 import { requireIssueCredentials } from "../services/grant-reach";
 import { isGrantReachDenied } from "../services/control-pair";
 import { recordAudit } from "../services/audit";
@@ -282,21 +283,20 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
   }
 
   /**
-   * The gate every mutation passes, in order: caller → station (404) → operator seat (403) →
+   * The gate every mutation passes, in order: caller → station in the tenant (404) → workspace admin (403) →
    * control pair (403) → forge configured (503). Returns the station or a response.
    */
   async function authorise(c: Context): Promise<{ user: AuthUser; station: Station; forge: ForgeConfig } | Response> {
     const user = await caller(c);
     if (!user) return c.json({ error: "unauthorized", message: "Sign in." }, 401);
     const station = await stationFor(user, c.req.param("id")!);
-    const admin = await isUserAdmin(user.id);
-    if (!station || (!admin && station.userId !== user.id)) {
+    if (!station) {
       return c.json({ error: "not-found", message: "No such station." }, 404);
     }
-    if (!admin) {
-      log.warn("forge API mutation refused: caller is not an operator", { userId: user.id, stationId: station.id });
+    if (!isWorkspaceAdmin(c)) {
+      log.warn("forge API mutation refused: caller is not a workspace admin", { userId: user.id, stationId: station.id });
       return c.json(
-        { error: "operator-required", message: "Granting forge API access is an operator action." },
+        { error: "workspace_admin_required", message: "Granting forge API access is a workspace admin's action." },
         403,
       );
     }
@@ -404,12 +404,13 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
       .use("/stations/:id/forge-api", limit)
       .use("/stations/:id/forge-api/*", limit)
 
-      /** Status: owner or operator. No audit row; it is a read. */
+      /** Status: any member of the station's workspace. No audit row; it is a read. */
       .get("/stations/:id/forge-api", async (c) => {
         const user = await caller(c);
         if (!user) return c.json({ error: "unauthorized", message: "Sign in." }, 401);
+        // Any member of the workspace reads it (workspace authority spec, gate map).
         const station = await stationFor(user, c.req.param("id"));
-        if (!station || (station.userId !== user.id && !(await isUserAdmin(user.id)))) {
+        if (!station) {
           return c.json({ error: "not-found", message: "No such station." }, 404);
         }
         const rows = await db

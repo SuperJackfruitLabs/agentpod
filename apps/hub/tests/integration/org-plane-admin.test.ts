@@ -6,7 +6,7 @@ import { db } from "../../src/db/drizzle";
 import { hubOperators } from "../../src/db/schema/operators";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { setOrgPlaneForTests, TEST_PLANE } from "../../src/auth/org-plane/config";
-import { adminMiddleware } from "../../src/auth/admin-middleware";
+import { hubOperatorMiddleware } from "../../src/auth/workspace-authority";
 import { isUserAdmin } from "../../src/models/admin-users";
 import { requireFleetGrantReach } from "../../src/services/grant-reach";
 import { adminRouter } from "../../src/routes/admin";
@@ -45,7 +45,7 @@ describe("operator seat under the plane", () => {
     expect(await isUserAdmin(NOBODY)).toBe(false);
   });
 
-  test("adminMiddleware admits an operator and refuses everyone else under the plane", async () => {
+  test("hubOperatorMiddleware admits an operator and refuses everyone else under the plane", async () => {
     restore = setOrgPlaneForTests(TEST_PLANE);
     const guarded = (id: string) =>
       new Hono()
@@ -53,19 +53,22 @@ describe("operator seat under the plane", () => {
           c.set("user", { id, authType: "org_plane", tenantId: "fleet_00000000000000000000" });
           await next();
         })
-        .use("*", adminMiddleware)
+        .use("*", hubOperatorMiddleware)
         .get("/x", (c) => c.text("in"));
     expect((await guarded(OP).request("/x")).status).toBe(200);
     expect((await guarded(NOBODY).request("/x")).status).toBe(403);
   });
 
-  test("fleet-level reach is an operator's under the plane (the principal is the caller's prn_)", async () => {
+  test("fleet-level reach is a workspace admin's, not the operator seat's (workspace authority spec)", async () => {
     restore = setOrgPlaneForTests(TEST_PLANE);
     const was = process.env.ENFORCE_CONTROL_PAIR;
     process.env.ENFORCE_CONTROL_PAIR = "true";
     try {
-      await expect(requireFleetGrantReach(OP)).resolves.toBeUndefined();
-      await expect(requireFleetGrantReach(NOBODY)).rejects.toThrow();
+      await expect(requireFleetGrantReach({ id: NOBODY, workspaceRole: "admin" })).resolves.toBeUndefined();
+      await expect(requireFleetGrantReach({ id: NOBODY, workspaceRole: "owner" })).resolves.toBeUndefined();
+      // The seat alone is not a workspace's admin (W2).
+      await expect(requireFleetGrantReach({ id: OP, workspaceRole: "member" })).rejects.toThrow();
+      await expect(requireFleetGrantReach({ id: NOBODY })).rejects.toThrow();
     } finally {
       if (was === undefined) delete process.env.ENFORCE_CONTROL_PAIR;
       else process.env.ENFORCE_CONTROL_PAIR = was;
@@ -91,13 +94,31 @@ describe("GET /api/me", () => {
   test("under the plane: who the caller is and whether they hold an operator seat", async () => {
     restore = setOrgPlaneForTests(TEST_PLANE);
     const body = await (await asCaller(OP).request("/api/me")).json();
-    expect(body).toEqual({ id: OP, email: null, isAdmin: true, issuer: "org-plane" });
+    expect(body).toEqual({
+      id: OP,
+      email: null,
+      org: null,
+      workspaceRole: "member",
+      isWorkspaceAdmin: false,
+      isHubOperator: true,
+      isAdmin: true,
+      issuer: "org-plane",
+    });
   });
 
   test("under the plane: the token's email claim when it has one; a non-operator is not admin", async () => {
     restore = setOrgPlaneForTests(TEST_PLANE);
     const body = await (await asCaller(NOBODY, "someone@example.com").request("/api/me")).json();
-    expect(body).toEqual({ id: NOBODY, email: "someone@example.com", isAdmin: false, issuer: "org-plane" });
+    expect(body).toEqual({
+      id: NOBODY,
+      email: "someone@example.com",
+      org: null,
+      workspaceRole: "member",
+      isWorkspaceAdmin: false,
+      isHubOperator: false,
+      isAdmin: false,
+      issuer: "org-plane",
+    });
   });
 
   test("no caller is 401, never a guess", async () => {

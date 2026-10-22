@@ -34,7 +34,8 @@ const app = new Hono()
   .route("/api/nodes", nodeRoutes)
   .route("/api", stationRoutes);
 
-const bearer = async (org: string) => ({ Authorization: `Bearer ${await signPlaneToken({ sub: ME, org })}` });
+// An admin of both workspaces: enrolling is a workspace admin's act (workspace authority spec).
+const bearer = async (org: string) => ({ Authorization: `Bearer ${await signPlaneToken({ sub: ME, org, orgRole: "admin" })}` });
 
 beforeAll(async () => {
   await ensurePgMigrations();

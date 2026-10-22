@@ -11,7 +11,7 @@ import {
   type RolloutNode,
 } from "../services/rollout";
 import { request as brokerRequest } from "../services/broker";
-import { isUserAdmin } from "../models/admin-users";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 import { logAdminAction, type LogAdminActionInput } from "../models/admin-audit-log";
 import { createLogger } from "../utils/logger";
 import { removeNode, ownsNode } from "../services/node-removal";
@@ -204,15 +204,12 @@ export function createNodeRoutes(deps?: {
   listNodesFn?: (userId: string, tenantId: string) => Promise<RolloutNode[]>;
   /** Replaces the runtime lookup that answers which nodes boot from an image. */
   fixedImageNodesFn?: (userId: string) => Promise<Set<string>>;
-  /** Replaces the database-backed admin check (telemetry routes are admin-only). */
-  isAdminFn?: (userId: string) => Promise<boolean>;
   /** Replaces the audit-log writer. */
   auditFn?: (entry: LogAdminActionInput) => Promise<unknown>;
 }) {
   const _request: RequestFn = deps?.request ?? brokerRequest;
   const _listNodes = deps?.listNodesFn ?? (listNodes as (u: string, t: string) => Promise<RolloutNode[]>);
   const _fixedImageNodes = deps?.fixedImageNodesFn ?? nodesWithFixedImage;
-  const _isAdmin = deps?.isAdminFn ?? isUserAdmin;
   const _audit = deps?.auditFn ?? logAdminAction;
 
   return (
@@ -222,17 +219,16 @@ export function createNodeRoutes(deps?: {
        */
       .get("/", async (c) => c.json(await listNodes(c.get("user").id, resolveTenantId(c))))
       /**
-       * GET /api/nodes/telemetry  (admin only)
+       * GET /api/nodes/telemetry  (workspace admin)
        *
        * Fans out `telemetry.status` to every online node. Always 200 with a row
        * per node: `ok | unsupported | offline | failed`. A fixed-image node is
        * answered `unsupported` by the hub without being asked (#349).
        */
       .get("/telemetry", async (c) => {
+        const refused = requireWorkspaceAdmin(c);
+        if (refused) return refused;
         const userId = c.get("user").id;
-        if (!(await _isAdmin(userId))) {
-          return c.json({ ok: false as const, error: "Forbidden: Admin access required" }, 403);
-        }
         const nodes = (await _listNodes(userId, resolveTenantId(c))).slice().sort((a, b) => a.name.localeCompare(b.name));
         const fixed = await _fixedImageNodes(userId);
         const results: TelemetryRow[] = [];
@@ -248,7 +244,7 @@ export function createNodeRoutes(deps?: {
         return c.json({ ok: true as const, summary: countBy(results), results });
       })
       /**
-       * POST /api/nodes/telemetry  (admin only)
+       * POST /api/nodes/telemetry  (workspace admin)
        * Body: exactly one of {"endpoint":"<http(s) url>"} / {"off":true},
        * optional "only": string[] of node names or ids.
        *
@@ -260,10 +256,9 @@ export function createNodeRoutes(deps?: {
        * `unsupported` and not audited.
        */
       .post("/telemetry", async (c) => {
+        const refused = requireWorkspaceAdmin(c);
+        if (refused) return refused;
         const user = c.get("user");
-        if (!(await _isAdmin(user.id))) {
-          return c.json({ ok: false as const, error: "Forbidden: Admin access required" }, 403);
-        }
         const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
         const bad = (error: string) => c.json({ ok: false as const, error }, 400);
         if (typeof body !== "object" || body === null || Array.isArray(body)) {
@@ -311,6 +306,7 @@ export function createNodeRoutes(deps?: {
           if (row.status === "offline") continue;
           try {
             await _audit({
+              tenantId: resolveTenantId(c),
               adminUserId: user.id,
               action: "node_telemetry_update",
               targetResourceType: "node",
@@ -343,9 +339,13 @@ export function createNodeRoutes(deps?: {
        * defect as the single-node route's old envelope: an operator reading
        * "ok" while machines sat on the old binary. `failed` here means a node
        * was asked and did not update; `skipped` means it was never asked, and
-       * says why.
+       * says why. Workspace admin only.
        */
       .post("/update-all", async (c) => {
+        // Rolling a workspace's fleet is its admins' act. It was ungated — any signed-in caller
+        // could restart every node they own (workspace authority spec, gate map).
+        const refused = requireWorkspaceAdmin(c);
+        if (refused) return refused;
         const body = (await c.req.json().catch(() => null)) as {
           force?: unknown;
           only?: unknown;
@@ -378,14 +378,15 @@ export function createNodeRoutes(deps?: {
        * DELETE /api/nodes/:id  [?force=1  |  body {"force":true}]
        *
        * Remove a node from the fleet — `services/node-removal.ts` says what goes
-       * and what stays. Who may: the node's OWNER, and — where the control pair
-       * is enforced — only an owner who may also grow the fleet. Shrinking a
+       * and what stays. Who may: the node's OWNER, in the workspace the request
+       * acts in, who is an admin of that workspace — and, where the control pair
+       * is enforced, who may also grow the fleet. Shrinking a
        * fleet is the same authority as growing it (`POST /api/enrollment-tokens`
        * asks `requireFleetGrantReach`), and it fails closed the same way: an
        * unmapped caller is refused, never let through.
        *
        *   200 RemoveNodeResponse
-       *   403 the control pair refuses the caller
+       *   403 workspace_admin_required, or the control pair refuses the caller
        *   404 no such node, or not the caller's (indistinguishable on purpose)
        *   409 RemoveNodeRefusal — provisioned | bridged | online (needs force)
        *
@@ -395,6 +396,16 @@ export function createNodeRoutes(deps?: {
       .delete("/:id", async (c) => {
         const user = c.get("user");
         const nodeId = c.req.param("id");
+        const tenantId = resolveTenantId(c);
+
+        // Removing a machine is a workspace admin's act (workspace authority spec, gate map), with
+        // the control pair on top when enforced. Ownership in this workspace is asked first, so a
+        // caller learns nothing about an id that is not theirs here.
+        const refused = requireWorkspaceAdmin(c);
+        if (refused) {
+          if (!(await ownsNode(user.id, nodeId, tenantId))) return c.json({ ok: false as const, error: "Not Found" }, 404);
+          return refused;
+        }
         const force = await readForce(c);
 
         try {
@@ -404,20 +415,20 @@ export function createNodeRoutes(deps?: {
               log.warn("node removal refused: no principal for this caller", { principalId: user.id });
               throw new GrantReachDenied(user.id, "fleet", null);
             }
-            await requireFleetGrantReach(principal.id);
+            await requireFleetGrantReach(user);
           }
         } catch (e) {
           if (!isGrantReachDenied(e)) throw e;
           // Still a 404 for a node that is not theirs: the refusal must not
           // become a way to probe for ids.
-          if (!(await ownsNode(user.id, nodeId))) return c.json({ ok: false as const, error: "Not Found" }, 404);
+          if (!(await ownsNode(user.id, nodeId, tenantId))) return c.json({ ok: false as const, error: "Not Found" }, 404);
           return c.json(
             { ok: false as const, error: "You do not have permission to remove machines from this fleet." },
             403
           );
         }
 
-        const outcome = await removeNode(user.id, nodeId, { force });
+        const outcome = await removeNode(user.id, nodeId, { force, tenantId });
         if (outcome.kind === "not_found") {
           return c.json({ ok: false as const, error: "Not Found" }, 404);
         }
@@ -429,6 +440,7 @@ export function createNodeRoutes(deps?: {
         const { result } = outcome;
         try {
           await _audit({
+            tenantId: resolveTenantId(c),
             adminUserId: user.id,
             action: "node_remove",
             targetResourceType: "node",

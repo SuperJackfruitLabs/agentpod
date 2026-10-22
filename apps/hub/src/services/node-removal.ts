@@ -56,12 +56,12 @@ export type RemoveNodeOutcome =
     }
   | { kind: "removed"; result: RemoveNodeResponse };
 
-/** Does `userId` own `nodeId`? */
-export async function ownsNode(userId: string, nodeId: string): Promise<boolean> {
+/** Does `userId` own `nodeId` — in `tenantId`, when given (the route always gives it)? */
+export async function ownsNode(userId: string, nodeId: string, tenantId?: string): Promise<boolean> {
   const [row] = await db
     .select({ id: nodes.id })
     .from(nodes)
-    .where(and(eq(nodes.id, nodeId), eq(nodes.userId, userId)));
+    .where(and(eq(nodes.id, nodeId), eq(nodes.userId, userId), tenantId ? eq(nodes.tenantId, tenantId) : undefined));
   return row !== undefined;
 }
 
@@ -72,12 +72,15 @@ export async function ownsNode(userId: string, nodeId: string): Promise<boolean>
 export async function removeNode(
   userId: string,
   nodeId: string,
-  opts: { force: boolean }
+  // `tenantId`: the workspace the request acts in. The same person is a member of several
+  // workspaces, so owning a node is not enough: it must be in this one (workspace authority spec,
+  // W2). Optional only for fixtures; the route always passes it.
+  opts: { force: boolean; tenantId?: string }
 ): Promise<RemoveNodeOutcome> {
   const [node] = await db
     .select({ id: nodes.id, name: nodes.name, status: nodes.status })
     .from(nodes)
-    .where(and(eq(nodes.id, nodeId), eq(nodes.userId, userId)));
+    .where(and(eq(nodes.id, nodeId), eq(nodes.userId, userId), opts.tenantId ? eq(nodes.tenantId, opts.tenantId) : undefined));
   if (!node) return { kind: "not_found" };
 
   const [runtime] = await db

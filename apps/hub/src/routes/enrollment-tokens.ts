@@ -3,6 +3,7 @@ import { mintEnrollmentToken } from "../services/enrollment";
 import { requireFleetGrantReach } from "../services/grant-reach";
 import { isControlPairEnforced, isGrantReachDenied, GrantReachDenied } from "../services/control-pair";
 import { callerPrincipal } from "../auth/caller-authority";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("enrollment-tokens");
@@ -25,17 +26,16 @@ const log = createLogger("enrollment-tokens");
  * (charter decisions/2026-08-30-an-agent-is-a-principal.md §3) there is no way
  * to write "spans", and 2026-08-15-granting-reach-is-changing-an-agent
  * explicitly rejected a second scoped list as the asymmetric-grant hazard
- * restated. So `requireFleetGrantReach` asks whether the caller is an admin,
- * which is what `/api/admin/grants` is already guarded by, and this route
- * carries the same answer. Enforced on the route rather than in
+ * restated. So `requireFleetGrantReach` asks whether the caller is an admin
+ * of the workspace (workspace authority spec), the same gate this route now
+ * applies unconditionally ahead of it. Enforced on the route rather than in
  * `mintEnrollmentToken`, because the service is also how the *node* re-enrols
  * itself and how tests build fixtures; this is a check on a person asking, not
  * on a token being made.
  *
- * `requireFleetGrantReach` takes a principal id, not a Better Auth user id, so
- * the caller is resolved to one here via `callerPrincipal` — `principalForUser`
- * in legacy mode, the token's own `sub` under the org plane (design §5.7) —
- * before the guard runs. Gated behind
+ * The caller is resolved to a principal here via `callerPrincipal` (the
+ * token's own `sub` under the org plane, design §5.7) before the guard runs,
+ * so an unmapped caller is refused. Gated behind
  * `isControlPairEnforced()` up front, not just inside the guard: resolving
  * a principal and refusing an unmapped one must stay exactly as inert as the
  * guard itself when the pair is off, or a deployment that never enabled the
@@ -45,6 +45,10 @@ const log = createLogger("enrollment-tokens");
  * non-admin one: fail closed on an unmapped identity, never fail open.
  */
 export const enrollmentTokenRoutes = new Hono().post("/", async (c) => {
+  // Enrolling a machine is a workspace admin's act, always (workspace authority spec, gate map);
+  // the control pair, when enforced, still applies on top of it.
+  const refused = requireWorkspaceAdmin(c);
+  if (refused) return refused;
   const user = c.get("user");
 
   try {
@@ -54,7 +58,7 @@ export const enrollmentTokenRoutes = new Hono().post("/", async (c) => {
         log.warn("fleet-level reach refused: no principal for this caller", { principalId: user.id });
         throw new GrantReachDenied(user.id, "fleet", null);
       }
-      await requireFleetGrantReach(principal.id);
+      await requireFleetGrantReach(user);
     }
   } catch (e) {
     if (!isGrantReachDenied(e)) throw e;

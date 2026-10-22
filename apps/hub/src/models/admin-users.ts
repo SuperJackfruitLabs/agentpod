@@ -3,10 +3,10 @@
  *
  * People's accounts live at the organization plane; the hub's Better Auth `user` table was dropped
  * after the rollback window (P3 plan, Task 17). What stays here is AgentPod's own seat:
- * `hub_operators` (decision D4) — the plane's token carries no role.
+ * `hub_operators` (decision D4), now for the hub-wide settings only (workspace authority spec, W2).
  */
 
-import { count, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { hubOperators } from "../db/schema/operators";
 import { principalDirectory } from "../services/org-plane/directory";
@@ -25,12 +25,17 @@ export interface AdminStats {
  * (contract §3.5 lists them); "banned" is the plane's suspension. The plane reports no sign-up
  * time, so `usersThisWeek` is 0.
  */
-export async function getAdminStats(): Promise<AdminStats> {
-  const humans = await principalDirectory().list("human");
-  const [operators] = await db.select({ count: count() }).from(hubOperators);
+export async function getAdminStats(opts: { org?: string } = {}): Promise<AdminStats> {
+  // A workspace admin's counts are their workspace's (workspace authority spec): the humans whose
+  // organization is the caller's `org`. Without an org (the static API_TOKEN) every human counts.
+  const all = await principalDirectory().list("human");
+  const humans = opts.org === undefined ? all : all.filter((h) => h.organizationId === opts.org);
+  const seats = await db.select({ id: hubOperators.principalId }).from(hubOperators);
+  const ids = new Set(humans.map((h) => h.id));
   return {
     totalUsers: humans.length,
-    adminUsers: operators?.count ?? 0,
+    // Seat holders among those humans; never the hub-wide number for a workspace's view.
+    adminUsers: seats.filter((s) => ids.has(s.id)).length,
     bannedUsers: humans.filter((h) => h.suspended).length,
     totalSandboxes: 0,
     runningSandboxes: 0,

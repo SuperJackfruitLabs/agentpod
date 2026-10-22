@@ -12,6 +12,7 @@ import {
   timestamp,
   index,
 } from "drizzle-orm/pg-core";
+import { tenants } from "./tenants";
 
 // =============================================================================
 // System Settings Table
@@ -51,7 +52,12 @@ export const adminAuditLog = pgTable(
   "admin_audit_log",
   {
     id: text("id").primaryKey(),
-    
+
+    // The tenant the actor acted in (workspace authority spec: a workspace admin reads their own
+    // workspace's rows; a hub operator reads every row). A hub-wide act — a provider setting — is
+    // recorded in the tenant its operator acted from.
+    tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
+
     // Who performed the action
     adminUserId: text("admin_user_id")
       .notNull(),
@@ -79,6 +85,7 @@ export const adminAuditLog = pgTable(
     index("admin_audit_log_target_user_id_idx").on(table.targetUserId),
     index("admin_audit_log_action_idx").on(table.action),
     index("admin_audit_log_created_at_idx").on(table.createdAt),
+    index("admin_audit_log_tenant_id_idx").on(table.tenantId),
   ]
 );
 

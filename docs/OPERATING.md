@@ -2,7 +2,7 @@
 
 Day-2 operations: enrolling nodes, adopting stations, driving capability panels, and provisioning runtimes.
 
-> **Sign-in is the organization plane's.** People, their accounts and service principals are made and managed at the plane; the hub's own sign-up, sessions and token issuer were removed after the P4 cutover (§11). Who operates the hub is `hub_operators`.
+> **Sign-in is the organization plane's.** People, their accounts and service principals are made and managed at the plane; the hub's own sign-up, sessions and token issuer were removed after the P4 cutover (§11). Who operates the hub is `hub_operators`, set from `HUB_OPERATORS`; who administers a workspace is its role at the plane (§11).
 
 ---
 
@@ -2021,8 +2021,22 @@ What this means for an operator:
   `/api/admin/service-principals*` and `/api/admin/principals/:id/{suspend,restore}` answer
   `410 { error: "managed_by_org_plane", url }`; every `/api/auth/*` route answers
   `410 { error: "issuer_moved", issuer }` (the device inventory: `managed_by_org_plane`).
-- **Who operates the hub** is the hub's own seat, `hub_operators`. To add an operator:
-  `INSERT INTO hub_operators (principal_id) VALUES ('prn_…');` — their next request is admin.
+- **Two authorities** (workspace authority spec, `docs/superpowers/specs/2026-10-22-workspace-authority-design.md`):
+  - **Workspace admin** — an `owner` or `admin` of the workspace the token names (the plane's
+    `orgRole` claim, read on every request; a token without it is a member). Enrolling, removing,
+    updating and setting telemetry on nodes, agents and station assignment, the bridge roster and
+    board links, station forge access, workspace stats and the workspace's audit log. Granted and
+    revoked at the plane's pages, like membership; nothing to do on the hub.
+  - **Hub operator** — the hub's own seat, `hub_operators`: the hub-wide provider settings
+    (`/api/admin/settings*`: transcription, speech) and reading every workspace's audit log. It
+    is **not** an admin of any workspace by itself. The static `API_TOKEN` is both (hub operator,
+    and admin of the bootstrap workspace).
+- **Who operates the hub** is set by `HUB_OPERATORS` in `hub.env` (`DEPLOYMENT.md` §4,
+  "Hub operators"): a comma-separated list of `prn_…` ids reconciled into `hub_operators` at
+  every boot — listed principals are added, unlisted ones removed. To add or remove an operator,
+  edit the list and restart the hub; nobody opens psql. Unset leaves the table as it is; a
+  malformed entry stops the boot, naming it. The boot log prints
+  `HUB_OPERATORS reconciled: +N -M`.
 - **Whom the hub invites to a person's rooms** is the plane's answer: the hub reads a person's
   Matrix id with `GET /api/principals/:id/identities?system=matrix` (contract §3.5), cached
   60 s. A person whose Matrix id is not linked at the plane is not invited until it is.
@@ -2060,8 +2074,9 @@ server). The hub delivers the credential **sealed** to the station's broker key.
 app grant the hub relays ciphertext it cannot open; for a minted grant it holds the token briefly
 between minting and sealing (see Limits).
 
-**Operator only.** Every verb except `list` needs the hub operator seat **and** the control pair's
-reach over the station's agent; owning the station is not enough (403). An agent must not, and
+**Workspace admin only.** Every verb except `list` needs workspace admin (owner or admin of the
+station's workspace) **and** the control pair's reach over the station's agent; owning the station
+is not enough (403 `workspace_admin_required`). `list` is any member of the workspace. An agent must not, and
 cannot, grant itself access. The forge account is never taken from the request: a minted grant is
 for the station's occupying agent, a supplied or app grant for the `--expect-login` you declare.
 A minted grant on a station with no occupant is refused (409); a supplied or app grant does not
