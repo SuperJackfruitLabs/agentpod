@@ -319,3 +319,41 @@ test.each([360, 390])("at %ipx nothing on a node's page is wider than the screen
     restore();
   }
 });
+
+// ---------------------------------------------------------------------------
+// A full page load under the org plane (staging, 2026-10-22): the page mounts before the session
+// is re-established. It used to fire its requests with no token, show "Couldn't reach the hub",
+// and never recover. Its requests now wait for auth, then load.
+// ---------------------------------------------------------------------------
+
+test("a full load before auth resolves shows no connection error and loads the stations once it does", async () => {
+  const authStore = await import("$lib/stores/auth.svelte");
+  authStore.clearAuthSession();
+  localStorage.setItem("agentpod.apiUrl", "https://hub.test");
+  authStore.setAuthApiUrl("https://hub.test");
+  authStore.setPlane({ issuer: "https://accounts.test", url: "https://accounts.test", audience: "hub" });
+  vi.spyOn(authStore, "getToken").mockResolvedValue("at1");
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    const body = url.endsWith("/stations") ? [adoptedStation] : url.endsWith("/stations/adopt") ? [] : [mockNode];
+    return new Response(JSON.stringify(body), { status: 200 });
+  });
+
+  try {
+    const { queryByText, findByText } = render(NodeDetailPage);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(queryByText(/reach the hub/)).toBeNull();
+
+    await authStore.initAuth();
+
+    expect(await findByText("Workspace")).toBeTruthy();
+    expect(queryByText(/reach the hub/)).toBeNull();
+    for (const [, init] of fetchSpy.mock.calls) {
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer at1");
+    }
+  } finally {
+    authStore.clearAuthSession();
+    localStorage.clear();
+  }
+});

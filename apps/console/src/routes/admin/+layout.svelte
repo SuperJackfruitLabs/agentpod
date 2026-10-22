@@ -7,7 +7,6 @@
   import { ApiError } from "$lib/api/http-error";
   import { adminAudience } from "$lib/components/shell/nav";
   import { ASK_AN_ADMIN, ASK_THE_OPERATOR } from "$lib/workspace-authority";
-  import { onMount } from "svelte";
   import { Spinner } from "$lib/components/ui/spinner";
   import { Button } from "$lib/components/ui/button";
 
@@ -28,7 +27,6 @@
   let refused = $state(false);
   /** Anything else that stopped the check (hub unreachable, a 500): retryable. */
   let failure = $state<string | null>(null);
-  let mounted = $state(false);
   let heading = $state<HTMLHeadingElement | null>(null);
 
   async function check() {
@@ -48,23 +46,23 @@
     }
   }
 
-  onMount(() => {
-    if (!connection.isConnected || !auth.isAuthenticated) {
-      goto("/login");
-      return;
-    }
-    mounted = true;
-  });
+  /**
+   * Decide only once auth has settled. On a full load the session is still being re-established
+   * when this mounts; sending the person to /login then (staging, 2026-10-22) beat the root
+   * layout's silent re-authorization. Someone who turns out signed out is the root guard's to
+   * handle (it re-authorizes, or goes to /login), never this one's.
+   */
+  const ready = $derived(auth.isInitialized && auth.isAuthenticated && connection.isConnected);
 
   // Re-checked when the audience changes (Users → Speech is a different question).
   $effect(() => {
-    if (!mounted) return;
+    if (!ready) return;
     void audience;
     if (allowed) void check();
     else isChecking = false;
   });
 
-  const showNotFor = $derived(!isChecking && (!allowed || refused));
+  const showNotFor = $derived(ready && !isChecking && (!allowed || refused));
 
   // The page a member lands on replaces the one they asked for: say so to a screen reader.
   $effect(() => {

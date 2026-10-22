@@ -6,6 +6,7 @@
   import { connection, initConnection, startReachabilityProbe } from "$lib/stores/connection.svelte";
   import { auth, currentPlane, initAuth, signedOutElsewhere } from "$lib/stores/auth.svelte";
   import { autoSignIn, watchSession } from "$lib/auth/org-plane";
+  import { showConnecting } from "$lib/auth/route-gate";
   import { VibeRoot } from "@superjackfruit/vibekit";
   import { appearance } from "$lib/appearance.svelte";
   import AuthFrame from "$lib/components/brand/AuthFrame.svelte";
@@ -37,7 +38,10 @@
   // Derived: should we show the loading spinner?
   // Only show loading during initial app startup
   // Don't show loading during redirects (e.g., after logout) - just let the redirect happen
-  let shouldShowLoading = $derived(isInitializing || autoSigningIn);
+  // (and never mount a protected route signed out — see showConnecting)
+  let shouldShowLoading = $derived(
+    showConnecting({ isInitializing, autoSigningIn, isPublicRoute, isAuthenticated: auth.isAuthenticated }),
+  );
 
   // Derived: should we show the AppShell with bottom navigation?
   // Hide on public routes (login) and show on all authenticated routes

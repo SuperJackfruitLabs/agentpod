@@ -1,6 +1,6 @@
 import type { NodeSummary, DetectedStation, StationHealth, FsEntry, ProvisionedRuntime, RuntimeProviderManifest, FleetAgent, FleetStats, SkillInventory, RemoveNodeResponse } from "@agentpod/contract";
 import { goto } from "$app/navigation";
-import { clearAuthSession, currentPlane, getToken, planeSessionLost } from "$lib/stores/auth.svelte";
+import { authReady, clearAuthSession, currentPlane, getToken, planeSessionLost } from "$lib/stores/auth.svelte";
 import { apiError, networkError } from "./http-error";
 
 /** Resolves the hub base URL at call time so it reflects the runtime connection. */
@@ -52,7 +52,16 @@ export const SOCKET_MIN_VALIDITY_SEC = 60;
  * Better Auth session cookie, unchanged.
  */
 export async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  // A page that mounts during a full load must not race the session being re-established.
+  if (currentPlane()) await authReady();
   const token = await getToken();
+  if (!token && currentPlane()) {
+    // Under the plane there is no cookie to fall back on: a bare request can only be refused (and
+    // a refusal without CORS headers reads as a network failure). Answer it here as the hub would.
+    const res = new Response(null, { status: 401 });
+    remember(res, null);
+    return res;
+  }
   if (!token) {
     const res = await fetch(url, { credentials: "include", ...init });
     remember(res, null);
@@ -97,8 +106,22 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
     throw networkError(requestLine, err);
   }
   if (res.status === 401) {
+    const sent = sentWith.get(res) ?? null;
     handleUnauthorized(res);
-    throw await apiError(res, requestLine);
+    // Under the plane, re-authorize once: a token other than the refused one (refreshed, or a
+    // sign-in that finished meanwhile) gets one more try. Then it is a sign-in prompt.
+    if (currentPlane() && sent) {
+      const fresh = await getToken();
+      if (fresh && fresh !== sent) {
+        try {
+          res = await authFetch(`${hubUrl()}${path}`, init);
+        } catch (err) {
+          throw networkError(requestLine, err);
+        }
+        if (res.status === 401) handleUnauthorized(res);
+      }
+    }
+    if (res.status === 401) throw await apiError(res, requestLine);
   }
   if (!res.ok) throw await apiError(res, requestLine);
   // 204 No Content (and other empty bodies, e.g. DELETE/start/stop) have nothing
