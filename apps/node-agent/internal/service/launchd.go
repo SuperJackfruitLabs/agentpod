@@ -50,8 +50,43 @@ func newLaunchdManager(home string, uid int, run Runner) *launchdManager {
 }
 
 func execRunner(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).CombinedOutput()
+	out, err := commandFor(name, args, exec.LookPath, os.Getenv, os.Stat, os.Getuid()).CombinedOutput()
 	return strings.TrimSpace(string(out)), err
+}
+
+// systemBinDirs are searched for a service tool (systemctl, launchctl,
+// journalctl) when PATH does not name it: an installer run under `env -i`
+// has no PATH, and a missing systemctl used to read as "not enabled / not
+// running" for a healthy service.
+var systemBinDirs = []string{"/usr/bin", "/bin", "/usr/sbin", "/sbin"}
+
+// runtimeDirRoot is where a user's systemd runtime directory lives.
+var runtimeDirRoot = "/run/user"
+
+// commandFor builds the command for a service tool. It resolves a bare name
+// outside PATH from systemBinDirs, and gives `systemctl --user` the caller's
+// XDG_RUNTIME_DIR when the environment lacks it (runuser/env -i), so the user
+// manager is reachable.
+func commandFor(name string, args []string, lookPath func(string) (string, error), getenv func(string) string, stat func(string) (os.FileInfo, error), uid int) *exec.Cmd {
+	path := name
+	if !strings.Contains(name, "/") {
+		if _, err := lookPath(name); err != nil {
+			for _, dir := range systemBinDirs {
+				if fi, err := stat(filepath.Join(dir, name)); err == nil && !fi.IsDir() {
+					path = filepath.Join(dir, name)
+					break
+				}
+			}
+		}
+	}
+	cmd := exec.Command(path, args...)
+	if len(args) > 0 && args[0] == "--user" && getenv("XDG_RUNTIME_DIR") == "" {
+		dir := filepath.Join(runtimeDirRoot, strconv.Itoa(uid))
+		if fi, err := stat(dir); err == nil && fi.IsDir() {
+			cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+dir)
+		}
+	}
+	return cmd
 }
 
 func resolveBinPath() (string, error) {

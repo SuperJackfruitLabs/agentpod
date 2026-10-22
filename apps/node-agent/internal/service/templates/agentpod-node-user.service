@@ -5,6 +5,8 @@ Wants=network-online.target
 
 [Service]
 ExecStart={{.BinaryPath}} run
+# User-installed harnesses (Salaam, Pi, ...) and the Node next to them.
+Environment=PATH=%h/.local/bin:%h/.local/node/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=-%h/.config/agentpod-node/otel.env
 Restart=always
 RestartSec=5

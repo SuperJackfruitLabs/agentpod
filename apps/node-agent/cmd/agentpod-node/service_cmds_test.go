@@ -542,7 +542,7 @@ func TestRunServiceVerbHelp(t *testing.T) {
 func TestPrintServiceSummary(t *testing.T) {
 	t.Run("darwin", func(t *testing.T) {
 		var buf bytes.Buffer
-		printServiceSummary("darwin", "/Users/x/Library/LaunchAgents/dev.agentpod.node.plist", &buf)
+		printServiceSummary("darwin", "/Users/x/Library/LaunchAgents/dev.agentpod.node.plist", false, &buf)
 		out := buf.String()
 		for _, want := range []string{"apn status", "apn logs -f", "apn restart", "apn service uninstall", "LaunchAgent"} {
 			if !strings.Contains(out, want) {
@@ -553,7 +553,7 @@ func TestPrintServiceSummary(t *testing.T) {
 
 	t.Run("linux_user_scope", func(t *testing.T) {
 		var buf bytes.Buffer
-		printServiceSummary("linux", "/home/x/.config/systemd/user/agentpod-node.service", &buf)
+		printServiceSummary("linux", "/home/x/.config/systemd/user/agentpod-node.service", false, &buf)
 		out := buf.String()
 		if !strings.Contains(out, "systemd --user") {
 			t.Errorf("missing user-scope label, got:\n%s", out)
@@ -563,9 +563,24 @@ func TestPrintServiceSummary(t *testing.T) {
 		}
 	})
 
+	t.Run("linux_user_scope_already_lingering", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "salaam"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if !lingerEnabled(dir, "salaam", os.Stat) || lingerEnabled(dir, "other", os.Stat) {
+			t.Fatal("linger state misread")
+		}
+		var buf bytes.Buffer
+		printServiceSummary("linux", "/home/x/.config/systemd/user/agentpod-node.service", true, &buf)
+		if strings.Contains(buf.String(), "loginctl enable-linger") {
+			t.Errorf("linger hint shown although linger is on:\n%s", buf.String())
+		}
+	})
+
 	t.Run("linux_system_scope", func(t *testing.T) {
 		var buf bytes.Buffer
-		printServiceSummary("linux", "/etc/systemd/system/agentpod-node.service", &buf)
+		printServiceSummary("linux", "/etc/systemd/system/agentpod-node.service", false, &buf)
 		out := buf.String()
 		if !strings.Contains(out, "sudo apn status") {
 			t.Errorf("system scope must say sudo for status, got:\n%s", out)
