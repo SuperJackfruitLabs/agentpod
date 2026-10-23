@@ -76,3 +76,24 @@ test("a feed restored after a restart starts after the last posted step", () => 
   expect(feed.next([step(1, "started", "a"), step(2, "finished", "a"), step(3, "started", "b")])).toHaveLength(1);
   expect(feed.cursor()).toBe(3);
 });
+
+test("the plan reaches the card as a durable thought, once per change", () => {
+  const feed = new SalaamActivityFeed();
+  const plan = (status: string) => ({
+    sessionUpdate: "plan",
+    entries: [
+      { content: "Read RFC 9110", priority: "medium", status },
+      { content: "Write answer.md", priority: "medium", status: "pending" },
+    ],
+  });
+  // Not ephemeral: superpipeline leaves ephemeral activities out of a card's activity list.
+  expect(feed.plan(plan("pending"))).toEqual([
+    { type: "thought", body: "Plan:\n1. Read RFC 9110 (pending)\n2. Write answer.md (pending)" },
+  ]);
+  expect(feed.plan(plan("pending"))).toEqual([]);
+  expect(feed.plan(plan("in_progress"))).toEqual([
+    { type: "thought", body: "Plan:\n1. Read RFC 9110 (in progress)\n2. Write answer.md (pending)" },
+  ]);
+  expect(feed.plan({ sessionUpdate: "plan", entries: "nope" })).toEqual([]);
+  expect(feed.plan(null)).toEqual([]);
+});

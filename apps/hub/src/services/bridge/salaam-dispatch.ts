@@ -1201,7 +1201,10 @@ async function driveSalaamWork(
         .passthrough()
         .parse(result.ok ? result.data : null);
       hop("status", { run: runId, state: status.state, auto: status.auto_enabled, reason: status.reason });
-      for (const step of activity.next((status as { activity?: unknown }).activity)) {
+      for (const step of [
+        ...activity.plan((status as { plan?: unknown }).plan),
+        ...activity.next((status as { activity?: unknown }).activity),
+      ]) {
         try {
           await client.activity(claim, step);
         } catch {

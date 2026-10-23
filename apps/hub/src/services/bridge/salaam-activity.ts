@@ -18,6 +18,24 @@ const SalaamActivityTail = z
   )
   .max(64);
 
+/** The ACP plan update Salaam's work-status carries (salaam `planUpdate`). */
+const SalaamPlan = z
+  .object({
+    sessionUpdate: z.literal("plan"),
+    entries: z
+      .array(
+        z
+          .object({
+            content: z.string().max(512),
+            priority: z.enum(["high", "medium", "low"]),
+            status: z.enum(["pending", "in_progress", "completed"]),
+          })
+          .strict(),
+      )
+      .max(32),
+  })
+  .strict();
+
 const rawInput = (input: string | null) => {
   if (input === null) return undefined;
   try {
@@ -37,6 +55,24 @@ export class SalaamActivityFeed {
   private last: number;
   constructor(after = 0) {
     this.last = after;
+  }
+  private lastPlan: string | undefined;
+  /**
+   * The task plan, posted when it changes. A durable thought, not the coalescer's ephemeral
+   * plan thought: superpipeline leaves ephemeral activities out of a card's activity list, and
+   * the plan has to be there before work starts.
+   */
+  plan(update: unknown): BoardActivity[] {
+    const parsed = SalaamPlan.safeParse(update);
+    if (!parsed.success || !parsed.data.entries.length) return [];
+    const body =
+      "Plan:\n" +
+      parsed.data.entries
+        .map((e, n) => `${n + 1}. ${e.content} (${e.status.replace("_", " ")})`)
+        .join("\n");
+    if (body === this.lastPlan) return [];
+    this.lastPlan = body;
+    return [{ type: "thought", body }];
   }
   cursor(): number {
     return this.last;

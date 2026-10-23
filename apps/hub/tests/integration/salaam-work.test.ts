@@ -906,6 +906,10 @@ test("strict work posts each tool step to the card once, as card actions, while 
             state: polls < 3 ? "running" : "succeeded",
             auto_enabled: true,
             activity,
+            plan: {
+              sessionUpdate: "plan",
+              entries: [{ content: "Research", priority: "medium", status: polls === 1 ? "pending" : "in_progress" }],
+            },
           },
         } as never;
       }
@@ -932,7 +936,7 @@ test("strict work posts each tool step to the card once, as card actions, while 
         },
         activity: async (_lease: unknown, activity: unknown) => {
           posted.push(activity);
-          if (posted.length === 1) throw Error("board briefly unavailable");
+          if (posted.length === 2) throw Error("board briefly unavailable");
         },
         completeVerified: async (_lease: unknown, handoff: unknown) => {
           live = {
@@ -968,8 +972,11 @@ test("strict work posts each tool step to the card once, as card actions, while 
     (deps as unknown as { permissionPollMs: number }).permissionPollMs = 1;
     expect(await runOnce(deps)).toMatchObject({ status: "reported" });
     // An activity post that fails is not retried and cannot fail the work.
+    // The plan comes first, before any step ran, and again when it changed.
     expect(posted).toEqual([
+      { type: "thought", body: "Plan:\n1. Research (pending)" },
       { type: "action", action: "fetch · fetch", parameter: { url: "https://x" } },
+      { type: "thought", body: "Plan:\n1. Research (in progress)" },
       { type: "action", action: "fetch · fetch", parameter: { url: "https://x" } },
     ]);
     expect(polls).toBe(3);
