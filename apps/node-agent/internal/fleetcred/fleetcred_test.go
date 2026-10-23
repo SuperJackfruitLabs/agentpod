@@ -186,3 +186,24 @@ func TestInspectReadsAnOrgPlaneShapedToken(t *testing.T) {
 		t.Fatalf("got %+v", c)
 	}
 }
+
+func TestStoredHubIsTheOneTheLoginWasMadeAgainst(t *testing.T) {
+	withConfigDir(t)
+	if StoredHub() != "" {
+		t.Fatal("no login, but a stored hub")
+	}
+	if err := Save("tok", "https://staging-hub.agentpod.dev/"); err != nil {
+		t.Fatal(err)
+	}
+	if got := StoredHub(); got != "https://staging-hub.agentpod.dev" {
+		t.Fatalf("stored hub = %q", got)
+	}
+	for _, bad := range []string{"http://evil.example", "ftp://x", "https://user:pw@hub.example", "not a url"} {
+		if err := Save("tok", bad); err != nil {
+			t.Fatal(err)
+		}
+		if got := StoredHub(); got != "" {
+			t.Fatalf("unsafe stored hub %q accepted as %q", bad, got)
+		}
+	}
+}

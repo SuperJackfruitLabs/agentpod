@@ -42,7 +42,7 @@ var reference = clidoc.Binary{
 		"verb that talks to the hub prints the hub's JSON response unchanged on stdout: it is the " +
 		"hub's shape, not a summary of it, so scripts and agents can depend on it.",
 	Env: []clidoc.Env{
-		{Name: "AGENTPOD_HUB", Meaning: "Hub base URL. Default `https://hub.agentpod.dev`. Never taken from a node's config."},
+		{Name: "AGENTPOD_HUB", Meaning: "Hub base URL. Else the hub the stored login (token.json) was made against, else `https://hub.agentpod.dev`. Never taken from a node's config."},
 		{Name: "AGENTPOD_TOKEN", Meaning: "A principal's token to use instead of the stored credential. Checked first; nothing is stored. When it has expired, commands say so rather than falling back."},
 		{Name: "AGENTPOD_DEVICE_NAME", Meaning: "What `fleet login` names this machine in the device list. Default: the hostname."},
 		{Name: "AGENTPOD_LOGIN_TIMEOUT", Meaning: "How long the older hub sign-in waits for the browser, as a Go duration (`90s`, `10m`). Default `5m`."},

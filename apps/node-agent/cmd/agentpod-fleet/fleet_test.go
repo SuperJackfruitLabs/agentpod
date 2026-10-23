@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcred"
 )
 
 // build compiles apn once per test binary and returns its path.
@@ -113,5 +115,26 @@ func TestUnknownFleetVerbExitsTwo(t *testing.T) {
 	_, code := run(t, bin, nil, "nonsense")
 	if code != 2 {
 		t.Fatalf("unknown subcommand should exit 2, got %d", code)
+	}
+}
+
+func TestHubBaseFollowsTheStoredLoginUnlessTheEnvironmentNamesOne(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
+	t.Setenv(fleetcred.EnvHub, "")
+	t.Setenv(fleetcred.EnvToken, "")
+	if got := hubBase(); got != defaultHub {
+		t.Fatalf("no login: hub = %q", got)
+	}
+	if err := fleetcred.Save("tok", "https://staging-hub.agentpod.dev"); err != nil {
+		t.Fatal(err)
+	}
+	if got := hubBase(); got != "https://staging-hub.agentpod.dev" {
+		t.Fatalf("stored login ignored: hub = %q", got)
+	}
+	t.Setenv(fleetcred.EnvHub, "https://other.example/")
+	if got := hubBase(); got != "https://other.example" {
+		t.Fatalf("environment did not win: hub = %q", got)
 	}
 }
