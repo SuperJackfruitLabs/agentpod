@@ -28,6 +28,7 @@ import {
   SalaamWorkPlan,
 } from "../../../../../packages/contract/src/salaam-work-payload";
 import * as broker from "../broker";
+import { createLogger } from "../../utils/logger";
 import { openDispatch, markReleased } from "./ledger";
 import { reserveSalaamWork, deliverSalaamWork } from "./salaam-work";
 import {
@@ -890,12 +891,18 @@ export async function startSalaamWork(
   }
 }
 
+const workLog = createLogger("bridge");
+/** Every hop of the strict Salaam work path logs at info, so a stall names its step. */
+const hop = (step: string, meta: Record<string, unknown>) =>
+  workLog.info("salaam work: " + step, meta);
+
 async function driveSalaamWork(
   deps: DispatchDeps,
   runId: string,
   sessionId: string,
 ): Promise<DispatchResult> {
   const { agent, client, acp } = deps;
+  hop("drive", { run: runId, session: sessionId, agent: agent.key });
   const started = Date.now(),
     deadline = started + (deps.turnTimeoutMs ?? 30 * 60_000);
   let mustStop = false;
@@ -996,7 +1003,9 @@ async function driveSalaamWork(
         planFrom(context),
       );
     const payload = SalaamWorkPayload.parse(work.payload);
+    hop("deliver", { run: runId, work: work.requestId });
     const admitted = await deliverSalaamWork(sessionId, agent.hubUserId);
+    hop("admitted", { run: runId, task: admitted.task_id, plan: admitted.plan_revision });
     // These are saved/admitted identities, not new telemetry-owned attempts.
     try {
       trace.getSpan(otelContext.active())?.setAttributes({
@@ -1012,6 +1021,7 @@ async function driveSalaamWork(
     if (!acp.renewExecution) throw Error("Strict work renewal is unavailable");
     await acp.renewExecution(agent.hubUserId, sessionId, execution.binding.run);
     const telemetryStatus = await forwardSalaamWorkTrace(execution.binding);
+    hop("trace", { run: runId, status: telemetryStatus });
     if (telemetryStatus !== "unreported") {
       // This optional ledger write cannot turn a telemetry outage into task failure.
       try {
@@ -1050,10 +1060,17 @@ async function driveSalaamWork(
       })
       .strict()
       .safeParse(progress.ok ? progress.data : null);
-    if (!receipt.success)
+    if (!receipt.success) {
+      hop("progress refused", {
+        run: runId,
+        ok: progress.ok,
+        error: progress.ok ? "receipt did not match" : String((progress as { error?: unknown }).error),
+      });
       throw Error(
         "Strict bounded progression was not acknowledged; recover original request",
       );
+    }
+    hop("progress acknowledged", { run: runId, steps: payload.plan.steps.length });
     for (;;) {
       if (Date.now() >= deadline) {
         mustStop = true;
@@ -1100,6 +1117,7 @@ async function driveSalaamWork(
         })
         .passthrough()
         .parse(result.ok ? result.data : null);
+      hop("status", { run: runId, state: status.state, auto: status.auto_enabled, reason: status.reason });
       if (
         status.task_id !== admitted.task_id ||
         status.plan_revision !== admitted.plan_revision
@@ -1164,6 +1182,7 @@ async function driveSalaamWork(
       await sleep(Math.min(deps.permissionPollMs ?? 5000, 5000));
     }
   } catch (error) {
+    hop("failed", { run: runId, error: String(error), stopping: mustStop });
     // Explicit revocation is attempted even on lost board lease; failures remain
     // durable owner fences and are not converted into a replacement task.
     if (mustStop)

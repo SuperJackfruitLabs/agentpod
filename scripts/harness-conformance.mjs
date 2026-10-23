@@ -208,6 +208,10 @@ record("acp.list", sessions.status === 200 ? "PASS" : "FAIL", sessions.status ==
 if (!allowWrites) {
   for (const mode of ["ask", "accept-edits", "full-auto"]) record(`acp.open.${mode}`, "SKIP", "needs --allow-writes");
 } else {
+  // Close every session this run opened, even when a request times out after the hub
+  // created it: an open session holds the station's one live Salaam execution.
+  const before = new Set((sessionList ?? []).map((x) => x.id));
+  try {
   for (const mode of ["ask", "accept-edits", "full-auto"]) {
     const r = await call(`/api/stations/${STATION}/acp/sessions`, { method: "POST", body: { mode }, timeout: 60000 });
     const ok = r.status === 201 && r.json?.id;
@@ -219,6 +223,12 @@ if (!allowWrites) {
     }
     record(`acp.open.${mode}`, ok ? "PASS" : "FAIL", ok ? `session ${r.json.id} status=${r.json.status}` : why);
     if (ok) await call(`/api/acp/sessions/${r.json.id}`, { method: "DELETE" });
+  }
+  } finally {
+    const after = await call(`/api/stations/${STATION}/acp/sessions`);
+    const list = Array.isArray(after.json) ? after.json : after.json?.sessions;
+    for (const x of list ?? [])
+      if (!before.has(x.id) && x.status !== "ended") await call(`/api/acp/sessions/${x.id}`, { method: "DELETE" });
   }
 }
 
@@ -244,9 +254,14 @@ else {
     lines = execFileSync("docker", ["logs", "--since", "10m", CONTAINER], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 << 20 });
   } catch (e) { lines = String(e.stdout ?? "") + String(e.stderr ?? ""); }
   const all = lines.split("\n").filter((l) => l.includes('"component":"bridge"'));
-  const notReady = all.filter((l) => l.includes("not ready")).pop();
+  const notReadyAt = all.map((l) => l.includes("not ready")).lastIndexOf(true);
+  const notReady = notReadyAt >= 0 ? all[notReadyAt] : undefined;
   const cycles = all.filter((l) => l.includes('"cycle"')).length;
-  if (notReady) {
+  // Readiness is the latest state: two or more clean cycles after the last back-off mean it recovered.
+  const cleanSince = all.slice(notReadyAt + 1).filter((l) => l.includes('"cycle"')).length;
+  if (notReady && cleanSince >= 2) {
+    record("bridge.readiness", "PASS", `last 10m: ${cycles} cycle(s); ${cleanSince} clean cycle(s) since the last back-off`);
+  } else if (notReady) {
     let reason = notReady;
     try { reason = JSON.parse(notReady).context?.reason ?? notReady; } catch { /* keep line */ }
     record("bridge.readiness", "FAIL", `last 10m: ${cycles} cycle(s), latest backs off: ${reason}`);
@@ -260,8 +275,12 @@ if (isSalaam) {
   const strictBlocked = bridge?.status === "FAIL" && /strict work/i.test(bridge.evidence);
   record("salaam.strict-work", strictBlocked ? "FAIL" : bridge?.status === "PASS" ? "PASS" : "SKIP",
     (strictBlocked ? "" : "no strict-work refusal seen; ") + "hub requires node salaam.work-capability → {version:1,enabled:true}; the node answers that only for a Salaam it launched from a reviewed schema-6 host manifest (salaamManifest + salaamNodeBinary in node config). Nothing produces the station config or manifest today.");
-  record("salaam.binding", /lease|bound/i.test(note) ? "FAIL" : "SKIP",
-    `pins are written by hand; no producer of agentpod-pins.json at enrollment (health note: "${note}")`);
+  // Strict work is only available from a node-launched, reviewed schema-6 host, which needs the
+  // pins, station config and manifest that `salaam host bind` (estate 306) produces.
+  const strict = results.find((r) => r.item === "salaam.strict-work");
+  if (strict?.status === "PASS") record("salaam.binding", "PASS", "station bound: strict work is available, so pins, station config and the reviewed manifest are in place");
+  else record("salaam.binding", /lease|bound/i.test(note) ? "FAIL" : "SKIP",
+    `no reviewed binding observed: strict work is not available (health note: "${note}")`);
   record("salaam.tools-user", "SKIP", "not observable from the hub; salaam #46 (--tools-user) open");
 } else {
   record("salaam.*", "SKIP", `harness is ${harness}`);
