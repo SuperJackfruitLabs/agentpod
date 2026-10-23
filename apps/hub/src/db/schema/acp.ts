@@ -33,6 +33,8 @@ export interface StoredSalaamExecution {
    * a mayDispatch grant (decision 3, spec 2026-10-23). Renewal re-checks everything else.
    */
   workspaceAdmin?: true;
+  /** A resume: the hub session id whose conversation this admission continues in Salaam. */
+  continueFrom?: string;
   leaseSequence: number;
   sessionId: string | null;
   admissionId: string | null;
@@ -69,6 +71,12 @@ export const acpSessions = pgTable("acp_sessions", {
   mode: text("mode").notNull(),                                       // ask | accept-edits | full-auto
   status: text("status").notNull(),                                   // starting|idle|working|waiting|ended
   endedReason: text("ended_reason"),
+  // Who ended it when it was not the owner's own end: "idle" (the hub, after no activity) or
+  // "admin" (a workspace owner/admin). Null otherwise.
+  endedCause: text("ended_cause"),
+  // A resumed session names the ended one it continues; the ended one names its successor, once.
+  resumedFrom: text("resumed_from"),
+  resumedAs: text("resumed_as"),
   nodeSessionId: text("node_session_id"),                             // the node-side acp_* id, for reconciliation acp.close
   executionAuthority: jsonb("execution_authority").$type<StoredSalaamExecution>(),
   // Public reconnect intent, never a credential or an execution grant.

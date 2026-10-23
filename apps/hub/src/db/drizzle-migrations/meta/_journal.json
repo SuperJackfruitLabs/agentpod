@@ -806,6 +806,13 @@
       "when": 1792580400004,
       "tag": "0114_workspace_owned_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1792580400005,
+      "tag": "0115_acp_session_lifecycle",
+      "breakpoints": true
     }
   ]
 }
