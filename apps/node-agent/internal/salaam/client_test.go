@@ -108,3 +108,33 @@ func TestPassiveConfigurationActivationRequiresLiveReadySupervisedManifest(t *te
 		}
 	}
 }
+
+func TestRefusalNamesTheDaemonsCodeAndMessage(t *testing.T) {
+	cases := map[string]string{
+		`{"code":"control_busy","error":"Local controller currently owns this session"}`: ": control_busy: Local controller currently owns this session",
+		`{"code":"work_request_conflict","error":"line\nbreak"}`:                         ": work_request_conflict: linebreak",
+		`{"code":"Bad Code","error":"x"}`:                                                "",
+		`not json`:                                                                       "",
+		`{"code":"work_disabled"}`:                                                       ": work_disabled",
+	}
+	for body, want := range cases {
+		if got := refusalReason(strings.NewReader(body)); got != want {
+			t.Fatalf("refusalReason(%s) = %q, want %q", body, got, want)
+		}
+	}
+	long := `{"code":"x","error":"` + strings.Repeat("a", 500) + `"}`
+	if got := refusalReason(strings.NewReader(long)); len(got) != len(": x: ")+200 {
+		t.Fatalf("message not bounded: %d", len(got))
+	}
+}
+
+func TestARefusedProgressionCarriesTheDaemonsReasonToTheHub(t *testing.T) {
+	b := Binding{Version: 1, OrganizationID: "org_00000000000000000001", PrincipalID: "prn_00000000000000000002", NodeID: "node_fixture", StationID: "station_fixture", StationKey: StationKey("/workspace"), OccupancyEpoch: 3, HubSessionID: "acps_fixture", Workspace: "/workspace", Run: Run{Source: "superpipeline", ID: "run_fixture", Epoch: 7}}
+	c := &Client{State: "/private", NodeID: b.NodeID, Workspace: b.Workspace, HTTP: &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 409, Body: io.NopCloser(strings.NewReader(`{"code":"control_busy","error":"Local controller currently owns this session"}`))}, nil
+	})}}
+	_, err := c.Request(context.Background(), "status", b, "work-progression-owner", 0, "")
+	if err == nil || err.Error() != "salaam: authority request refused (409): control_busy: Local controller currently owns this session" {
+		t.Fatalf("refusal lost its reason: %v", err)
+	}
+}

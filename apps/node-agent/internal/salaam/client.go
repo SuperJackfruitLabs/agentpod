@@ -193,7 +193,7 @@ func (c *Client) call(ctx context.Context, action string, body any, out any) err
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= 400 {
-		return fmt.Errorf("salaam: authority request refused (%d)", res.StatusCode)
+		return fmt.Errorf("salaam: authority request refused (%d)%s", res.StatusCode, refusalReason(res.Body))
 	}
 	// Only explicitly versioned evidence reads admit a larger response. Existing
 	// authority/control receipts retain their original 1 MiB cap.
@@ -231,6 +231,7 @@ func (c *Client) Request(ctx context.Context, action string, b Binding, request 
 	}
 	return out, err
 }
+
 // AdmitContinuing admits a binding that carries on an earlier, revoked interactive conversation.
 // Salaam decides whether it may; the receipt must say which conversation it continued.
 func (c *Client) AdmitContinuing(ctx context.Context, b Binding, request, continueFrom string) (Status, error) {
@@ -262,4 +263,33 @@ func (c *Client) ACPEnv(ctx context.Context, b Binding) ([]string, error) {
 		return nil, fmt.Errorf("salaam: fresh bound authority is required")
 	}
 	return []string{"SALAAM_AGENTPOD_ADMISSION=" + out.AdmissionID, "SALAAM_AGENTPOD_TOKEN=" + out.Token}, nil
+}
+
+var refusalCode = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
+// refusalReason names why the daemon refused, from its {code, error} body, so a stalled
+// strict run says which guard stopped it. Bounded and printable-only: the reason reaches
+// hub logs, and a daemon reply never carries prompt or tool content by contract.
+func refusalReason(body io.Reader) string {
+	var v struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	if json.NewDecoder(io.LimitReader(body, 4096)).Decode(&v) != nil || !refusalCode.MatchString(v.Code) {
+		return ""
+	}
+	msg := []rune(v.Error)
+	if len(msg) > 200 {
+		msg = msg[:200]
+	}
+	clean := make([]rune, 0, len(msg))
+	for _, r := range msg {
+		if r >= 0x20 && r != 0x7f {
+			clean = append(clean, r)
+		}
+	}
+	if len(clean) == 0 {
+		return ": " + v.Code
+	}
+	return ": " + v.Code + ": " + string(clean)
 }
