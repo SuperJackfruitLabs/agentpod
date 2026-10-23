@@ -18,6 +18,12 @@
  * - Provisioning, scan/posture and macOS signing carry their ledger caveats (AP-05, AP-04,
  *   AP-01/#228).
  *
+ * Two bands carry a small three.js scene (src/scripts/scenes). How it works walks its three steps
+ * beside one pinned stage (a machine, its pods and the hub: dial out, detection, adoption), and the
+ * laptop behind its router shows a node dialling out. One canvas visits every stage, loaded only
+ * near the first; public/scenes holds a still per scene, beat and sun phase for reduced motion and
+ * no WebGL. The scenes show only what the copy beside them says.
+ *
  * The suite frame adds the claims list, "works on its own", the version and the footer, so
  * this page does not.
  */
@@ -270,6 +276,27 @@ const nodes = [
         100% { opacity: 0; transform: scale(3.2); }
       }
 
+      /* ── the scenes: one lazy three.js canvas (src/scripts/scenes) visits these stages ── */
+      .stage { position: relative; margin: 0; width: 100%; }
+      .stage { aspect-ratio: 4 / 3; }
+      /* How it works, one step at a time: on a wide screen the steps stand in a column beside one
+         pinned stage, each tall enough to be the only one in focus; on a narrow one each step has
+         its own stage above its text. loader.js marks the step at the viewport's middle current. */
+      .walk { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 56px; }
+      .walk .cell { min-height: 62vh; display: flex; flex-direction: column; justify-content: center; transition: opacity .35s ease; }
+      .walk.walking .cell:not(.current) { opacity: .5; }
+      .walk .per-step { display: none; }
+      .pin { position: relative; }
+      .pinned { position: sticky; top: calc(50vh - 180px); }
+      /* The canvas is made by script, so it carries no scoped-style attribute: hence :global. */
+      .stage img, .stage :global(canvas) { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+      .stage :global(canvas) { opacity: 0; transition: opacity .5s ease; touch-action: pan-y; }
+      .stage img { transition: opacity .5s ease; }
+      .stage.live :global(canvas) { opacity: 1; }
+      .stage.live img, .stage.pending img { opacity: 0; }
+      .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: center; }
+      .split .sub { margin-bottom: 0; }
+
       section.band { border-top: 1px solid var(--line); }
       section.band .wrap { padding-top: 88px; padding-bottom: 88px; }
       section.band p, section.band ul, section.band ol { text-align: left; }
@@ -307,6 +334,13 @@ const nodes = [
         section.band .wrap { padding-top: 64px; padding-bottom: 64px; }
       }
       @media (max-width: 899px) {
+        .split { grid-template-columns: 1fr; gap: 32px; }
+        .walk { grid-template-columns: 1fr; gap: 0; }
+        .walk .pin { display: none; }
+        .walk .per-step { display: block; order: -1; margin-bottom: 18px; }
+        .walk .cell { min-height: 0; padding: 0 0 44px; }
+        .walk.walking .cell:not(.current) { opacity: 1; }
+        .split .stage { order: -1; }
         .hero-grid { grid-template-columns: 1fr; gap: 40px; min-height: auto; padding-top: 40px; padding-bottom: 56px; }
         .demo { width: 100%; }
       }
@@ -373,26 +407,46 @@ const nodes = [
     <section class="band">
       <div class="wrap">
         <h2>How it works</h2>
-        <ol class="grid steps">
-          <li class="cell">
+        <div class="walk" data-steps>
+        <ol class="steps">
+          <li class="cell" data-step="1">
+            <figure class="stage per-step" data-scene="fleet" data-beat="1" aria-hidden="true">
+            <img data-still alt="" width="480" height="360" loading="lazy" decoding="async" />
+            <noscript><img src="/scenes/fleet-1-noon.webp" alt="" width="480" height="360" loading="lazy" decoding="async" /></noscript>
+          </figure>
             <h3>Install <code>apn</code> on a machine</h3>
             <p>One install script on a server, a laptop or a container. The node agent dials out
               to your hub over a WebSocket, so it needs no inbound port and works from behind
               NAT.</p>
           </li>
-          <li class="cell">
+          <li class="cell" data-step="2">
+            <figure class="stage per-step" data-scene="fleet" data-beat="2" aria-hidden="true">
+            <img data-still alt="" width="480" height="360" loading="lazy" decoding="async" />
+            <noscript><img src="/scenes/fleet-2-noon.webp" alt="" width="480" height="360" loading="lazy" decoding="async" /></noscript>
+          </figure>
             <h3>It finds the agents there</h3>
             <p>A descriptor per harness detects what is running and where its config and logs
               live. {RELEASE} has descriptors for:</p>
             <ul class="chips">{harnesses.map((h) => <li>{h}</li>)}</ul>
           </li>
-          <li class="cell">
+          <li class="cell" data-step="3">
+            <figure class="stage per-step" data-scene="fleet" data-beat="3" aria-hidden="true">
+            <img data-still alt="" width="480" height="360" loading="lazy" decoding="async" />
+            <noscript><img src="/scenes/fleet-3-noon.webp" alt="" width="480" height="360" loading="lazy" decoding="async" /></noscript>
+          </figure>
             <h3>You work from the console</h3>
             <p>Adopt a station, then use its panels: files, logs, terminal, health, start and
               stop, cleanup, changesets. A request for a capability the station has not declared
               is refused at the hub.</p>
           </li>
         </ol>
+        <div class="pin">
+          <figure class="stage pinned" data-scene="fleet" data-beat="1" aria-hidden="true">
+            <img data-still alt="" width="480" height="360" loading="lazy" decoding="async" />
+            <noscript><img src="/scenes/fleet-1-noon.webp" alt="" width="480" height="360" loading="lazy" decoding="async" /></noscript>
+          </figure>
+        </div>
+        </div>
         <p class="note" style="margin-top: 28px;">
           A descriptor means AgentPod can detect that harness. What it can do with each one
           depends on the harness and how the host is set up, so the panels are not the same for
@@ -403,6 +457,8 @@ const nodes = [
 
     <section class="band">
       <div class="wrap">
+        <div class="split">
+        <div>
         <h2>What it's like to use</h2>
         <p class="sub">
           Say you have a Hermes agent on a VPS and Codex on a laptop that sits behind your
@@ -412,6 +468,12 @@ const nodes = [
           the changeset to see what it actually changed in its working tree. Then the VPS is
           low on disk: you plan a cleanup, read the plan, and only then apply it.
         </p>
+        </div>
+        <figure class="stage tall" data-scene="dial-out" aria-hidden="true">
+          <img data-still alt="" width="512" height="384" loading="lazy" decoding="async" />
+          <noscript><img src="/scenes/dial-out-noon.webp" alt="" width="512" height="384" loading="lazy" decoding="async" /></noscript>
+        </figure>
+        </div>
       </div>
     </section>
 
@@ -491,6 +553,9 @@ chmod +x agentpod-node-linux-amd64
       </div>
     </section>
 
+    <script>
+      import '../scripts/scenes/loader.js';
+    </script>
     <script is:inline>
       // Hero moment: once, ~600ms after the demo is first in view. Never loops.
       (() => {

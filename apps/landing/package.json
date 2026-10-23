@@ -18,7 +18,8 @@
     "@astrojs/sitemap": "^3.7.4",
     "@superjackfruit/frontdoor": "file:vendor/superjackfruit-frontdoor-0.0.10.tgz",
     "@superjackfruit/vibekit": "file:vendor/superjackfruit-vibekit-0.0.14.tgz",
-    "astro": "^5.18.2"
+    "astro": "^5.18.2",
+    "three": "^0.186.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

@@ -21,8 +21,54 @@ env:
   DO_NOT_TRACK: 1
 
 jobs:
+  # Which parts changed. A pull request or push that only touches apps/landing/ runs just the
+  # landing build (and, on main, its deploy); anything else, including the root lockfile, the
+  # workflows themselves, or a manual run, runs it all. A job skipped by its `if` counts as passed
+  # for the required checks.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      app: ${{ steps.plan.outputs.app }}
+      landing: ${{ steps.plan.outputs.landing }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          predicate-quantifier: every
+          filters: |
+            app:
+              - '**'
+              - '!apps/landing/**'
+            workflows:
+              - '.github/**'
+            landing:
+              - 'apps/landing/**'
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          APP: ${{ steps.filter.outputs.app }}
+          WORKFLOWS: ${{ steps.filter.outputs.workflows }}
+          LANDING: ${{ steps.filter.outputs.landing }}
+        run: |
+          app=false
+          case "$EVENT" in push|pull_request) ;; *) app=true ;; esac
+          if [ "$APP" = true ] || [ "$WORKFLOWS" = true ]; then app=true; fi
+          landing=$LANDING
+          if [ "$app" = true ]; then landing=true; fi
+          { echo "app=$app"; echo "landing=$landing"; } >> "$GITHUB_OUTPUT"
+          echo "app=$app landing=$landing"
+
   contract:
     name: contract
+    needs: [changes]
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -50,6 +96,8 @@ jobs:
 
   hub:
     name: hub
+    needs: [changes]
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -139,6 +187,8 @@ jobs:
 
   node-agent:
     name: node-agent
+    needs: [changes]
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -204,8 +254,9 @@ jobs:
   # and the deploy ends with deploy/smoke.sh against the staging issuer.
   deploy-hub-staging:
     name: deploy hub (staging)
+    needs: [changes]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: needs.changes.outputs.app == 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push'
     concurrency: { group: deploy-hub-staging, cancel-in-progress: false }
     environment: { name: staging, url: https://staging-hub.agentpod.dev }
     steps:
@@ -222,6 +273,8 @@ jobs:
 
   console:
     name: console
+    needs: [changes]
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -257,6 +310,8 @@ jobs:
   # sandbox. The tests existed; nothing ran them.
   worker:
     name: worker
+    needs: [changes]
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -383,6 +438,8 @@ jobs:
   # and type-checks.
   landing:
     name: landing
+    needs: [changes]
+    if: needs.changes.outputs.landing == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
