@@ -218,3 +218,15 @@ test("parity across events the console ignores: chunk, usage, chunk and chunk, w
     expect(evidenceView(events)).toHaveLength(1);
   }
 });
+
+// The evidence fold splits on ACP messageId the same way the console's fold does.
+test("evidence: chunks with different messageIds are separate messages", () => {
+  const m = (seq: number, text: string, messageId: string) =>
+    ev(seq, "agent-update", { sessionUpdate: "agent_message_chunk", messageId, content: { type: "text", text } });
+  const items = fold([m(1, "one ", "m1"), m(2, "piece.", "m1"), m(3, "two", "m2")]);
+  expect(items).toEqual([
+    { kind: "message", seq_from: 1, seq_to: 2, text: "one piece." },
+    { kind: "message", seq_from: 3, seq_to: 3, text: "two" },
+  ]);
+  expect(fold([chunk(1, "a"), chunk(2, "b")])).toEqual([{ kind: "message", seq_from: 1, seq_to: 2, text: "ab" }]);
+});

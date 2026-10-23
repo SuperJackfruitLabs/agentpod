@@ -20,7 +20,7 @@
 
 import type { AcpEvent, AcpSessionStatus } from "./acp-session";
 import type { ToolStatus } from "./matrix-events";
-import { chunkText, isRecord, str, toolStatus } from "./transcript-narrow";
+import { chunkMessageId, chunkText, isRecord, sameMessage, str, toolStatus } from "./transcript-narrow";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -30,8 +30,8 @@ export type ToolContent =
 
 export type ChatItem =
   | { kind: "user"; seq: number; text: string; pending?: boolean }
-  | { kind: "assistant"; seq: number; text: string; streaming: boolean }
-  | { kind: "reasoning"; seq: number; text: string; streaming: boolean }
+  | { kind: "assistant"; seq: number; text: string; streaming: boolean; messageId?: string }
+  | { kind: "reasoning"; seq: number; text: string; streaming: boolean; messageId?: string }
   | {
       kind: "tool";
       seq: number;
@@ -273,9 +273,9 @@ function foldAgentUpdate(t: Transcript, ev: AcpEvent): Transcript {
 
   switch (payload.sessionUpdate) {
     case "agent_message_chunk":
-      return appendChunk(t, ev.seq, "assistant", chunkText(payload));
+      return appendChunk(t, ev.seq, "assistant", chunkText(payload), chunkMessageId(payload));
     case "agent_thought_chunk":
-      return appendChunk(t, ev.seq, "reasoning", chunkText(payload));
+      return appendChunk(t, ev.seq, "reasoning", chunkText(payload), chunkMessageId(payload));
     case "tool_call": {
       const toolCallId = str(payload.toolCallId);
       if (toolCallId === undefined) return t;
@@ -351,14 +351,16 @@ function appendChunk(
   seq: number,
   kind: "assistant" | "reasoning",
   text: string | undefined,
+  messageId?: string,
 ): Transcript {
   if (text === undefined) return t;
   const items = t.items.slice();
   const last = items.at(-1);
-  if (last && last.kind === kind && last.streaming) {
-    items[items.length - 1] = { ...last, text: last.text + text };
+  if (last && last.kind === kind && last.streaming && sameMessage(last.messageId, messageId)) {
+    items[items.length - 1] = { ...last, text: last.text + text, ...(messageId ? { messageId } : {}) };
   } else {
-    items.push({ kind, seq, text, streaming: true });
+    if (last && last.kind === kind && last.streaming) items[items.length - 1] = { ...last, streaming: false };
+    items.push({ kind, seq, text, streaming: true, ...(messageId ? { messageId } : {}) });
   }
   return { ...t, items };
 }

@@ -27,3 +27,18 @@ export function chunkText(payload: Record<string, unknown>): string | undefined 
   if (!isRecord(content) || content.type !== "text") return undefined;
   return str(content.text);
 }
+
+/**
+ * The ACP `messageId` of a message chunk, when the agent sends one. Two chunks with different ids
+ * are two messages: Salaam sends one per history entry, and before this the console ran
+ * consecutive messages together ("…in the document.## RFC 9110…").
+ */
+export function chunkMessageId(payload: Record<string, unknown>): string | undefined {
+  const id = payload.messageId;
+  return typeof id === "string" && id !== "" ? id : undefined;
+}
+
+/** Same message unless both chunks name an id and the ids differ (an agent without ids is unchanged). */
+export function sameMessage(a: string | undefined, b: string | undefined): boolean {
+  return a === undefined || b === undefined || a === b;
+}
