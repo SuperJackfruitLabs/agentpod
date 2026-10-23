@@ -105,6 +105,7 @@ export async function runExecutionExport(
   scope: { requestId: string; tenantId: string; principalId: string },
   lib: SuperlibraryCaller,
   readContent: (url: string) => Promise<Uint8Array>,
+  opts: { title?: string } = {},
 ) {
   let record = await store.get(
     scope.requestId,
@@ -128,7 +129,7 @@ export async function runExecutionExport(
       throw Error("export_in_progress");
     const response = await lib.request("POST", "/api/v1/uploads", {
       json: {
-        title: "Execution evidence",
+        title: opts.title ?? "Execution evidence",
         scope: `board:${manifest.task.board_id}`,
         entry,
         files: files.map((f) => ({

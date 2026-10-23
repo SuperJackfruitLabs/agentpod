@@ -1,3 +1,4 @@
+import { livePublisher } from "./salaam-publish-live";
 import { SalaamActivityFeed } from "./salaam-activity";
 import { runScopedPlan } from "./salaam-run-scope";
 import { context as otelContext, trace } from "@opentelemetry/api";
@@ -1002,6 +1003,19 @@ async function driveSalaamWork(
         throw error;
       }
     };
+    // Verified deliverables go to SuperLibrary and the agent's handoff to the board.
+    const publisher = () =>
+      deps.salaamPublish ??
+      livePublisher({
+        tenantId: deps.tenantId,
+        source: deps.source ?? "superpipeline",
+        runId,
+        boardId: agent.boardId,
+        cardId: SalaamWorkPayload.parse(work!.payload).admission.work.card_id,
+        principalId: execution.binding.principal_id,
+        workRequestId: work!.requestId,
+        client,
+      });
     const observation = {
       observe: async <T>(action: () => Promise<T>) => {
         await renew();
@@ -1024,6 +1038,7 @@ async function driveSalaamWork(
           agent.hubUserId,
           client,
           observation,
+          publisher(),
         );
         await acp.endSession(
           agent.hubUserId,
@@ -1204,6 +1219,7 @@ async function driveSalaamWork(
           agent.hubUserId,
           client,
           observation,
+          publisher(),
         );
         await acp.endSession(
           agent.hubUserId,

@@ -231,6 +231,8 @@ for (const outage of [false, true])
     const deps = {
       tenantId: tenant,
       source: "superpipeline",
+    // Publication is tested on its own (salaam-publish.test.ts); here it returns the agent's handoff.
+    salaamPublish: async () => ({ agent: { summary: "done" }, deliverables: [], publication: "none" as const }),
       agent: {
         key: "proof",
         boardId: board,

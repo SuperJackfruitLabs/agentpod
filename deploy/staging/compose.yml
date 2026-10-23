@@ -48,6 +48,9 @@ services:
       ENABLE_SUPERPIPELINE_BRIDGE: "true"
       SUPERPIPELINE_BASE_URL: https://staging-app.superpipeline.dev
       SUPERPIPELINE_BOARD_URL: https://staging-app.superpipeline.dev
+      # Strict Salaam work publishes verified deliverables to staging SuperLibrary and links them
+      # from the card; the work record links items on this host.
+      SUPERLIBRARY_URL: https://staging-app.superlibrary.dev
     env_file: ../../../env/hub/hub.env
     volumes:
       - ../..:/app

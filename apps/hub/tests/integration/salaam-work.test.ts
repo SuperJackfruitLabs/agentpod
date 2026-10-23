@@ -728,6 +728,15 @@ test("unverified or failed daemon work never creates report intent", async () =>
 });
 
 import { runOnce, type DispatchDeps } from "../../src/services/bridge/dispatch";
+// What the publisher returns for a verified run: the agent's handoff and a published deliverable.
+const publication = {
+  agent: { summary: "Quoted RFC 9110 15.6.3", findings: ["502 means an invalid upstream response"] },
+  deliverables: [
+    { path: "answer.md", sha256: "c".repeat(64), url: "https://app.lib.test/a/itm_0123456789abcdef" },
+  ],
+  publication: "published" as const,
+  library: { item_id: "itm_0123456789abcdef", url: "https://app.lib.test/a/itm_0123456789abcdef", export_id: "e" },
+};
 import { probeSalaamWork } from "../../src/services/bridge/salaam-dispatch";
 test("strict runtime capability missing or wrong version prevents claiming", async () => {
   let claims = 0;
@@ -789,6 +798,7 @@ test("strict resumed task drives private bounded progression and verified report
     const deps = {
       tenantId,
       source: "superpipeline",
+      salaamPublish: async () => publication,
       agent: {
         key: "proof",
         boardId: board,
@@ -835,6 +845,14 @@ test("strict resumed task drives private bounded progression and verified report
     expect(events.indexOf("heartbeat")).toBeLessThan(events.indexOf("renew"));
     expect(events.filter((x) => x === "salaam.work-progress")).toHaveLength(1);
     expect(events.filter((x) => x === "verified-report")).toHaveLength(1);
+    // The board gets the agent's own handoff, the published deliverable, and Salaam's proof.
+    const reported = live.run.handoff as Record<string, any>;
+    expect(reported.summary).toBe(publication.agent.summary);
+    expect(reported.findings).toEqual(publication.agent.findings);
+    expect(reported.deliverables).toEqual(publication.deliverables);
+    expect(reported.library).toEqual(publication.library);
+    expect(reported.publication).toBe("published");
+    expect(reported.verification).toMatchObject({ version: 1, source: "salaam", completion });
   } finally {
     mock.mockRestore();
   }
@@ -900,6 +918,7 @@ test("strict work posts each tool step to the card once, as card actions, while 
     const deps = {
       tenantId,
       source: "superpipeline",
+      salaamPublish: async () => publication,
       agent: {
         key: "proof",
         boardId: board,
@@ -1006,6 +1025,7 @@ for (const lostVerb of ["salaam.work-progress", "salaam.work-status"]) {
     const deps = {
       tenantId,
       source: "superpipeline",
+      salaamPublish: async () => publication,
       agent: {
         key: "proof",
         boardId: board,
@@ -1076,6 +1096,7 @@ for (const code of ["STALE_LEASE", "NOT_RUN_OWNER"]) {
     const deps = {
       tenantId,
       source: "superpipeline",
+      salaamPublish: async () => publication,
       agent: {
         key: "proof",
         boardId: board,
@@ -1142,6 +1163,7 @@ test("strict lease loss after progression prevents status, completion and anothe
   const deps = {
     tenantId,
     source: "superpipeline",
+    salaamPublish: async () => publication,
     agent: {
       key: "proof",
       boardId: board,
@@ -1271,6 +1293,7 @@ for (const declared of [null, false, true]) {
     const deps = {
       tenantId,
       source: "superpipeline",
+      salaamPublish: async () => publication,
       agent: {
         key: "proof",
         boardId: board,
@@ -1316,6 +1339,7 @@ test("unconfirmed strict release never records a released ledger outcome", async
   const deps = {
     tenantId,
     source: "superpipeline",
+    salaamPublish: async () => publication,
     agent: {
       key: "proof",
       boardId: board,
@@ -1359,6 +1383,7 @@ test("original released run reconciles only without a session or work owner", as
   const deps = {
     tenantId,
     source: "superpipeline",
+    salaamPublish: async () => publication,
     agent: {
       key: "proof",
       boardId: board,
@@ -1456,6 +1481,7 @@ test("failed create with a hidden terminal session needs exact stop receipt befo
   const deps = {
     tenantId,
     source: "superpipeline",
+    salaamPublish: async () => publication,
     agent: {
       key: "proof",
       boardId: board,
@@ -1595,6 +1621,7 @@ test.each([
     const deps = {
       tenantId,
       source: "superpipeline",
+      salaamPublish: async () => publication,
       agent: {
         key: "proof",
         boardId: board,
@@ -1833,6 +1860,7 @@ test("expired lost question receipt is recovered by exact original GET without p
   const deps = {
     tenantId,
     source: "superpipeline",
+    salaamPublish: async () => publication,
     agent: {
       key: "proof",
       boardId: board,
