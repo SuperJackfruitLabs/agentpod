@@ -18,9 +18,10 @@
  * - Provisioning, scan/posture and macOS signing carry their ledger caveats (AP-05, AP-04,
  *   AP-01/#228).
  *
- * How it works carries a small three.js scene (src/scripts/scenes): its three steps walk beside one
- * pinned stage (a machine, its pods and the hub: dial out, detection, adoption). One canvas visits
- * every stage, loaded only near the first; public/scenes holds a still per scene, beat and sun phase for reduced motion and
+ * Two bands carry a small three.js scene (src/scripts/scenes). How it works walks its three steps
+ * beside one pinned stage (a machine, its pods and the hub: dial out, detection, adoption), and the
+ * laptop behind its router shows a node dialling out. One canvas visits every stage, loaded only
+ * near the first; public/scenes holds a still per scene, beat and sun phase for reduced motion and
  * no WebGL. The scenes show only what the copy beside them says.
  *
  * The suite frame adds the claims list, "works on its own", the version and the footer, so
@@ -293,6 +294,8 @@ const nodes = [
       .stage img { transition: opacity .5s ease; }
       .stage.live :global(canvas) { opacity: 1; }
       .stage.live img, .stage.pending img { opacity: 0; }
+      .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: center; }
+      .split .sub { margin-bottom: 0; }
 
       section.band { border-top: 1px solid var(--line); }
       section.band .wrap { padding-top: 88px; padding-bottom: 88px; }
@@ -454,6 +457,8 @@ const nodes = [
 
     <section class="band">
       <div class="wrap">
+        <div class="split">
+        <div>
         <h2>What it's like to use</h2>
         <p class="sub">
           Say you have a Hermes agent on a VPS and Codex on a laptop that sits behind your
@@ -463,6 +468,12 @@ const nodes = [
           the changeset to see what it actually changed in its working tree. Then the VPS is
           low on disk: you plan a cleanup, read the plan, and only then apply it.
         </p>
+        </div>
+        <figure class="stage tall" data-scene="dial-out" aria-hidden="true">
+          <img data-still alt="" width="512" height="384" loading="lazy" decoding="async" />
+          <noscript><img src="/scenes/dial-out-noon.webp" alt="" width="512" height="384" loading="lazy" decoding="async" /></noscript>
+        </figure>
+        </div>
       </div>
     </section>
 

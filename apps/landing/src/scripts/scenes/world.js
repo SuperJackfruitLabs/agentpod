@@ -18,8 +18,9 @@ import { Color, DirectionalLight, HemisphereLight, PCFShadowMap, PerspectiveCame
 import { accentRGB, clamp, stageProgress } from './common.js';
 import { disposeMaterials } from './kit.js';
 import fleet from './fleet.js';
+import dialOut from './dial-out.js';
 
-const SCENES = { fleet };
+const SCENES = { fleet, 'dial-out': dialOut };
 
 // Sun direction (degrees: elevation, azimuth from the front, + to the right), colour and sky per
 // phase. The same table as the other SJL landing pages, so their scenes share one day.
