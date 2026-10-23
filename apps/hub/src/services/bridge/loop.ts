@@ -28,8 +28,11 @@ const DEFAULT_POLL_MS = 5_000;
 const DEFAULT_BACKOFF_MS = 30_000;
 
 export interface AgentLoopOptions {
-  /** One work cycle. Injected so the loop's control flow is testable alone. */
-  run: () => Promise<DispatchResult>;
+  /**
+   * One work cycle. Injected so the loop's control flow is testable alone. `handover` is aborted
+   * when the loop is stopped for a rebuild: a strict driver then yields its run to the successor.
+   */
+  run: (handover: AbortSignal) => Promise<DispatchResult>;
   pollMs?: number;
   backoffMs?: number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -38,8 +41,12 @@ export interface AgentLoopOptions {
 }
 
 export interface LoopHandle {
-  /** Resolves once the loop has left its current cycle. */
-  stop(): Promise<void>;
+  /**
+   * Resolves once the loop has left its current cycle. With `handover`, the current cycle is also
+   * asked to yield strict work it is driving, so a rebuilt loop can resume it (#776); without it,
+   * the cycle drains as before.
+   */
+  stop(opts?: { handover?: boolean }): Promise<void>;
   /** Resolves when the loop exits on its own — a fault, or a stop. */
   done: Promise<void>;
 }
@@ -67,6 +74,7 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
   const sleep = opts.sleep ?? defaultSleep;
   const log = opts.log ?? (() => {});
   const controller = new AbortController();
+  const handover = new AbortController();
 
   const done = (async () => {
     let cycle = 0;
@@ -89,7 +97,7 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
         // alone defaults to thirty minutes. A cycle deadline here would abandon real work
         // mid-run. What must be fast is the READINESS PROBE, and that is bounded where it is
         // made, in `dispatch.ts`.
-        result = await opts.run();
+        result = await opts.run(handover.signal);
       } catch (err) {
         // **An authentication failure is not retryable, and retrying hides it.**
         //
@@ -165,7 +173,8 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
 
   return {
     done,
-    async stop() {
+    async stop(stopOpts) {
+      if (stopOpts?.handover) handover.abort();
       controller.abort();
       await done;
     },
@@ -250,6 +259,10 @@ export async function startSuperpipelineBridge(
   const registry: LoopRegistry = {
     running: () => new Map([...live].map(([k, v]) => [k, v.revision])),
     start(agent) {
+      // Never two loops on one key: a second would be orphaned here, unstoppable by any later
+      // roster edit, and would drive the same strict run as the first (#776).
+      if (live.has(loopKey(agent)))
+        throw new Error("a loop is already running for this agent");
       const config: BridgeAgentConfig = {
         key: agent.key,
         boardId: agent.boardId,
@@ -270,8 +283,9 @@ export async function startSuperpipelineBridge(
         fetch: fetchAdapter,
       });
       const handle = startAgentLoop({
-        run: async () =>
+        run: async (handover) =>
           runOnce({
+            handover,
             client,
             acp,
             agent: config,
@@ -288,12 +302,18 @@ export async function startSuperpipelineBridge(
       live.set(loopKey(agent), { handle, revision: agent.revision });
       log("claiming", describe(config, baseUrl));
     },
-    async stop(key) {
+    async stop(key, why = "removed") {
       const entry = live.get(key);
       if (!entry) return;
-      // Drain, not abandon: `stop()` waits for the in-flight card. See `LoopRegistry.stop`.
-      log("no longer rostered; finishing the current card and stopping", { agent: key });
-      await entry.handle.stop();
+      // Drain, not abandon: `stop()` waits for the in-flight card. See `LoopRegistry.stop`. A
+      // rebuild hands strict work over instead, because the successor resumes it.
+      log(
+        why === "rebuild"
+          ? "the row was edited; handing the current card to the rebuilt loop"
+          : "no longer rostered; finishing the current card and stopping",
+        { agent: key },
+      );
+      await entry.handle.stop({ handover: why === "rebuild" });
       live.delete(key);
     },
   };
