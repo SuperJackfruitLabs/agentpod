@@ -133,6 +133,58 @@ import {
 
 const log = createLogger("acp-sessions");
 
+// ─── Salaam idle end ──────────────────────────────────────────────────────────
+
+/** Default minutes of no activity after which the hub ends an interactive Salaam session. */
+export const SALAAM_IDLE_END_DEFAULT_MINUTES = 15;
+
+/**
+ * How long an interactive Salaam session may sit with no activity before the hub ends it
+ * (`SALAAM_IDLE_END_MINUTES`, default 15). A Salaam station runs one execution at a time, so an
+ * idle session left open holds the station against everyone else; ending it goes through the
+ * normal end and confirmed revocation, and the session stays resumable. Fractions are allowed
+ * (a short timeout for a live check); anything not a positive number is the default.
+ */
+export function salaamIdleEndMs(env: Record<string, string | undefined> = process.env): number {
+  const minutes = Number(env.SALAAM_IDLE_END_MINUTES);
+  return (Number.isFinite(minutes) && minutes > 0 ? minutes : SALAAM_IDLE_END_DEFAULT_MINUTES) * 60_000;
+}
+
+/** What the idle decision reads from a live session. */
+export interface IdleCandidate {
+  ended: boolean;
+  status: AcpSessionStatus;
+  turnInFlight: boolean;
+  pendingPermissions: number;
+  interactive: boolean;
+  lastActivityAt: number;
+}
+
+/**
+ * Is this session due to be ended for inactivity? Never mid-turn, never while a permission
+ * prompt waits for its answer, never board work (its run owns its lifecycle), and only once the
+ * last activity is at least `idleMs` old.
+ */
+export function idleEndDue(s: IdleCandidate, now: number, idleMs: number): boolean {
+  return (
+    !s.ended &&
+    s.interactive &&
+    s.status === "idle" &&
+    !s.turnInFlight &&
+    s.pendingPermissions === 0 &&
+    now - s.lastActivityAt >= idleMs
+  );
+}
+
+/** The reason the row records for an idle end. */
+export function idleEndReason(idleMs: number): string {
+  const minutes = idleMs / 60_000;
+  const amount = Number.isInteger(minutes)
+    ? `${minutes} minute${minutes === 1 ? "" : "s"}`
+    : `${Math.round(idleMs / 1000)} seconds`;
+  return `Ended after ${amount} without activity. Resume it to carry on.`;
+}
+
 // How long a session survives at `waiting` after its node goes offline before
 // the hub gives up (no reattach in slice 2).
 let offlineGraceMs = 60_000;
@@ -403,6 +455,8 @@ interface LiveSession {
   managedMcpVerified?: boolean;
   /** A re-attach is running; a second would race it for the same wire. */
   reattaching: boolean;
+  /** Last time anything happened on this session (an event persisted, or the open). */
+  lastActivityAt: number;
 }
 
 /** Live sessions per station — one-to-many since slice 4b. */
@@ -588,6 +642,7 @@ function persistEvent(
 ): { seq: number; done: Promise<void> } {
   const seq = ++live.seq;
   const createdAt = new Date();
+  live.lastActivityAt = createdAt.getTime();
   const done = enqueue(live, async () => {
     const inserted = await db.transaction(async (tx) => {
       const insert = tx.insert(acpEvents).values({
@@ -647,6 +702,7 @@ function setStatus(
   opts: {
     extra?: Record<string, unknown>;
     endedReason?: string;
+    endedCause?: "idle" | "admin";
     force?: boolean;
   } = {},
 ): { seq: number; done: Promise<void> } {
@@ -663,6 +719,7 @@ function setStatus(
       ...(opts.endedReason !== undefined
         ? { endedReason: opts.endedReason }
         : {}),
+      ...(opts.endedCause !== undefined ? { endedCause: opts.endedCause } : {}),
     },
   );
 }
@@ -740,6 +797,7 @@ function makeLive(
     mcpProxyRequested,
     mcpProxied: [],
     reattaching: false,
+    lastActivityAt: Date.now(),
   };
 }
 
@@ -981,17 +1039,25 @@ function rejectPendingPermissions(live: LiveSession): void {
 
 const finalizations = new WeakMap<LiveSession, Promise<void>>();
 /** Every concurrent stop caller waits for the same authority/teardown barrier. */
-function finalizeEnd(live: LiveSession, reason: string): Promise<void> {
+function finalizeEnd(
+  live: LiveSession,
+  reason: string,
+  cause?: "idle" | "admin",
+): Promise<void> {
   const pending = finalizations.get(live);
   if (pending) return pending;
   if (live.ended) return Promise.resolve();
   live.ended = true;
-  const completion = Promise.resolve().then(() => finalizeEndOnce(live, reason));
+  const completion = Promise.resolve().then(() => finalizeEndOnce(live, reason, cause));
   finalizations.set(live, completion);
   return completion;
 }
 /** Terminal transition: row ended(reason) + state event, wire torn down. */
-async function finalizeEndOnce(live: LiveSession, reason: string): Promise<void> {
+async function finalizeEndOnce(
+  live: LiveSession,
+  reason: string,
+  cause?: "idle" | "admin",
+): Promise<void> {
   clearInterval(live.authorityTimer);
   if (live.executionAuthority)
     live.executionAuthority = await revokeSalaamExecution(live.id, reason);
@@ -1040,8 +1106,10 @@ async function finalizeEndOnce(live: LiveSession, reason: string): Promise<void>
             },
           }
         : {}),
+      ...(cause ? { cause } : {}),
     },
     endedReason: reason,
+    ...(cause ? { endedCause: cause } : {}),
     force: true,
   });
   removeLive(live);
@@ -1998,9 +2066,47 @@ export async function renewExecution(
   }
 }
 
+function idleCandidate(live: LiveSession): IdleCandidate {
+  return {
+    ended: live.ended,
+    status: live.status,
+    turnInFlight: live.turnInFlight,
+    pendingPermissions: live.pending.size,
+    interactive: live.executionAuthority?.binding.run.source === "agentpod",
+    lastActivityAt: live.lastActivityAt,
+  };
+}
+
+/**
+ * End every interactive Salaam session idle for `idleMs` (spec: session lifecycle, 2026-10-23).
+ * Each goes through `finalizeEnd`, the same end and confirmed revocation as a person's own end, and
+ * its row records `endedCause: "idle"`. Runs on each session's authority tick; exported so a test
+ * can drive it with its own clock. Returns the ids it ended.
+ */
+export async function endIdleSalaamSessions(
+  now: number = Date.now(),
+  idleMs: number = salaamIdleEndMs(),
+): Promise<string[]> {
+  const due = [...liveById.values()].filter(
+    (live) => live.executionAuthority && idleEndDue(idleCandidate(live), now, idleMs),
+  );
+  await Promise.all(
+    due.map((live) => {
+      log.info("Ending idle Salaam session", { sessionId: live.id, stationId: live.stationId });
+      return finalizeEnd(live, idleEndReason(idleMs), "idle");
+    }),
+  );
+  return due.map((live) => live.id);
+}
+
 function startSalaamAuthorityWatch(live: LiveSession): void {
   if (!live.executionAuthority || live.authorityTimer) return;
   live.authorityTimer = setInterval(() => {
+    const idleMs = salaamIdleEndMs();
+    if (idleEndDue(idleCandidate(live), Date.now(), idleMs)) {
+      void finalizeEnd(live, idleEndReason(idleMs), "idle");
+      return;
+    }
     if (
       live.ended ||
       live.authorityRenewing ||
@@ -2194,6 +2300,9 @@ async function restoreSalaamRow(
     mcpProxyRequested: row.mcpProxyRequested,
   });
   live.seq = row.lastSeq;
+  // Idle time keeps counting across a hub restart: a session idle for 14 minutes before it is
+  // not given a fresh 15.
+  live.lastActivityAt = row.lastEventAt.getTime();
   live.executionAuthority = saved;
   live.acpSessionId = saved.sessionId ?? "";
   live.transportLost = true;
