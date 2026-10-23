@@ -409,7 +409,7 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
         observation: "strict-start",
         runEpoch: work.leaseEpoch,
       },
-      () => startSalaamWork(deps, work),
+      (spans) => startSalaamWork(deps, work, spans),
     );
 
   return inDispatchSpan(

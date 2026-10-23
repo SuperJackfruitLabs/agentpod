@@ -26,6 +26,8 @@ export interface SalaamPublication {
    * when no Library is configured, which the handoff states rather than hides. */
   publication: "published" | "none" | "unavailable";
   library?: { item_id: string; url: string; export_id: string };
+  /** Salaam's recorded usage for this work, from the same evidence read; telemetry only. */
+  usage?: unknown;
 }
 export interface PublishDeps {
   /** Exact, integrity-checked bytes of these artifacts from the original owner (work-evidence-artifacts). */
@@ -106,10 +108,12 @@ export async function publishSalaamWork(
   const handoff = verified.find((d) => d.path === posix.join(dir, HANDOFF_FILE));
   if (!handoff) throw Error("The agent's handoff was not verified");
   const agent = agentHandoff(handoff.bytes);
+  const usage = bundle.evidence.usage;
   const outputs = verified.filter((d) => d !== handoff);
   const listed = outputs.map((d) => ({ path: d.relative, sha256: d.sha256 }));
-  if (!outputs.length) return { agent, deliverables: [], publication: "none" };
-  if (!deps.library || !deps.appUrl) return { agent, deliverables: listed, publication: "unavailable" };
+  if (!outputs.length) return { agent, deliverables: [], publication: "none", usage };
+  if (!deps.library || !deps.appUrl)
+    return { agent, deliverables: listed, publication: "unavailable", usage };
 
   const exportScope = {
     requestId: deliverableExportId(scope.workRequestId),
@@ -129,6 +133,7 @@ export async function publishSalaamWork(
   await deps.addReference({ url, title: scope.title });
   return {
     agent,
+    usage,
     publication: "published",
     library: { item_id: receipt.library.item_id, url, export_id: receipt.export_id },
     deliverables: outputs.map((d) => ({

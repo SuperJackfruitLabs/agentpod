@@ -174,7 +174,8 @@ test("a completion without the agent's handoff is refused", async () => {
 test("without a Library the handoff says so and lists the verified digests", async () => {
   const s = station({ "answer.md": "verified", "handoff.json": "plain words" });
   const { d } = deps(s);
-  const out = await publishSalaamWork({ ...d, library: null }, scope, completion(s.completionId));
+  const { usage, ...out } = await publishSalaamWork({ ...d, library: null }, scope, completion(s.completionId));
+  expect(usage).toEqual(base.usage);
   expect(out).toEqual({
     agent: { summary: "plain words" },
     publication: "unavailable",

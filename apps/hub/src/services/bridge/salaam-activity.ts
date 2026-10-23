@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AcpEvent } from "@agentpod/contract";
 import { ActivityCoalescer, type BoardActivity } from "./coalesce";
 
 /** The tool-step tail Salaam's work-status carries (salaam `AgentPodWork.activity`). */
@@ -53,7 +54,11 @@ const rawInput = (input: string | null) => {
  */
 export class SalaamActivityFeed {
   private last: number;
-  constructor(after = 0) {
+  /** `onEvent` sees each synthetic ACP event, for the standard agent spans. */
+  constructor(
+    after = 0,
+    private readonly onEvent: (event: AcpEvent) => void = () => {},
+  ) {
     this.last = after;
   }
   private lastPlan: string | undefined;
@@ -85,8 +90,7 @@ export class SalaamActivityFeed {
     for (const step of [...parsed.data].sort((a, b) => a.seq - b.seq)) {
       if (step.seq <= this.last) continue;
       this.last = step.seq;
-      out.push(
-        ...coalescer.push({
+      const event: AcpEvent = {
           sessionId: "salaam",
           seq: step.seq,
           type: "agent-update",
@@ -107,8 +111,13 @@ export class SalaamActivityFeed {
                   title: step.title,
                   status: step.failed ? "failed" : "completed",
                 },
-        }),
-      );
+      };
+      try {
+        this.onEvent(event);
+      } catch {
+        /* telemetry never changes the work */
+      }
+      out.push(...coalescer.push(event));
     }
     return [...out, ...coalescer.flush()];
   }

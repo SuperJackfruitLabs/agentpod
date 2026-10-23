@@ -221,7 +221,20 @@ for (const outage of [false, true])
         if (verb === "salaam.work-status")
           return {
             ok: true,
-            data: { ...completion, state: "succeeded", auto_enabled: false },
+            data: {
+              ...completion,
+              state: "succeeded",
+              auto_enabled: false,
+              activity: [1, 2].map((seq) => ({
+                seq,
+                phase: seq === 1 ? "started" : "finished",
+                tool_call_id: "fetch-1",
+                title: "fetch · fetch",
+                kind: seq === 1 ? "fetch" : null,
+                input: null,
+                failed: false,
+              })),
+            },
           };
         if (verb === "salaam.work-completion")
           return { ok: true, data: completion };
@@ -344,6 +357,11 @@ for (const outage of [false, true])
         forwarded[1]!.split("-")[1]!,
       );
       expect(savedSourceParent).toBe(original);
+      // Salaam's tool steps become the standard agent spans every harness gets.
+      const tool = attempted.find((s) => s.name === "tool_call" && s.attributes["run.id"] === run)!;
+      expect(tool.attributes).toMatchObject({ "tool.kind": "fetch", "tool.status": "completed" });
+      const attempt = attempted.find((s) => s.name === "attempt" && s.attributes["run.id"] === run)!;
+      expect(attempt.attributes["fingerprint.digest"]).toBe(bindingDigest);
       expect(nativeInvocationParents).toEqual([original, original]);
       // The no-op API shares one counter across instruments, including the SDK
       // span metrics. Only dispatch outcomes count claims; recovery adds none.

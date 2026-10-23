@@ -1,3 +1,6 @@
+import type { AgentSpanRecorder } from "../../telemetry/agent-spans";
+import { meter } from "../../telemetry/otel";
+import { recordSalaamUsage } from "../../telemetry/salaam-usage";
 import { livePublisher } from "./salaam-publish-live";
 import { SalaamActivityFeed } from "./salaam-activity";
 import { runScopedPlan } from "./salaam-run-scope";
@@ -840,20 +843,22 @@ async function resumeOwnedSalaamWork(
       nativeSessionId: session.executionAuthority.sessionId ?? undefined,
       countClaim: false,
     },
-    () => driveSalaamWork(deps, dispatch.externalRunId, session.id),
+    (spans) => driveSalaamWork(deps, dispatch.externalRunId, session.id, spans),
   );
 }
 
 export async function startSalaamWork(
   deps: DispatchDeps,
   claim: ClaimedWork,
+  spans?: AgentSpanRecorder,
 ): Promise<DispatchResult> {
-  return exclusively(claim.runId, () => startClaimedSalaamWork(deps, claim));
+  return exclusively(claim.runId, () => startClaimedSalaamWork(deps, claim, spans));
 }
 
 async function startClaimedSalaamWork(
   deps: DispatchDeps,
   claim: ClaimedWork,
+  spans?: AgentSpanRecorder,
 ): Promise<DispatchResult> {
   const { agent, client, acp } = deps;
   let session: string | undefined;
@@ -902,7 +907,7 @@ async function startClaimedSalaamWork(
       context,
       planFrom(context),
     );
-    return driveSalaamWork(deps, claim.runId, session);
+    return driveSalaamWork(deps, claim.runId, session, spans);
   } catch (error) {
     if (!session) {
       await client.release(claim);
@@ -957,6 +962,7 @@ async function driveSalaamWork(
   deps: DispatchDeps,
   runId: string,
   sessionId: string,
+  spans?: AgentSpanRecorder,
 ): Promise<DispatchResult> {
   const { agent, client, acp } = deps;
   hop("drive", { run: runId, session: sessionId, agent: agent.key });
@@ -1004,9 +1010,10 @@ async function driveSalaamWork(
       }
     };
     // Verified deliverables go to SuperLibrary and the agent's handoff to the board.
-    const publisher = () =>
-      deps.salaamPublish ??
-      livePublisher({
+    const publisher = () => {
+      const publish =
+        deps.salaamPublish ??
+        livePublisher({
         tenantId: deps.tenantId,
         source: deps.source ?? "superpipeline",
         runId,
@@ -1016,6 +1023,21 @@ async function driveSalaamWork(
         workRequestId: work!.requestId,
         client,
       });
+      return async (completion: Parameters<typeof publish>[0]) => {
+        const publication = await publish(completion);
+        try {
+          recordSalaamUsage(meter(), publication.usage, {
+            "harness.name": "salaam",
+            "run.id": runId,
+            "attempt.id": work!.requestId,
+            "station.id": agent.stationId,
+          });
+        } catch {
+          /* telemetry never changes the work */
+        }
+        return publication;
+      };
+    };
     const observation = {
       observe: async <T>(action: () => Promise<T>) => {
         await renew();
@@ -1077,6 +1099,17 @@ async function driveSalaamWork(
     hop("deliver", { run: runId, work: work.requestId });
     const admitted = await deliverSalaamWork(sessionId, agent.hubUserId);
     hop("admitted", { run: runId, task: admitted.task_id, plan: admitted.plan_revision });
+    try {
+      spans?.openAttempt({
+        attemptId: work.requestId,
+        sessionId,
+        startSeq: 0,
+        fingerprintDigest: admitted.binding_digest,
+        harnessName: "salaam",
+      });
+    } catch {
+      /* products never block on telemetry */
+    }
     // These are saved/admitted identities, not new telemetry-owned attempts.
     try {
       trace.getSpan(otelContext.active())?.setAttributes({
@@ -1143,7 +1176,7 @@ async function driveSalaamWork(
     }
     hop("progress acknowledged", { run: runId, steps: payload.plan.steps.length });
     // Tool steps reach the card as they happen, the way a streamed session's do.
-    const activity = new SalaamActivityFeed();
+    const activity = new SalaamActivityFeed(0, (event) => spans?.onEvent(event));
     for (;;) {
       // A rebuilt loop takes this run over. Safe here: no renewal or observation is in flight,
       // and the durable owner is left exactly as it is for the successor's resume.
