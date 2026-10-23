@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sync/atomic"
@@ -74,6 +75,14 @@ func TestSalaamRequiresObservedBoundDaemonAndAdvertisesOnlyProvedCapabilities(t 
 	}
 	if _, ok := d.(Lifecycle); ok {
 		t.Fatal("lifecycle enabled")
+	}
+	// A workspace that is a git repository shows its changes, the way every other harness does.
+	if out, err := exec.Command("git", "-C", workspace, "init", "-q").CombinedOutput(); err != nil {
+		t.Skipf("git unavailable: %v %s", err, out)
+	}
+	found, err = d.Detect()
+	if err != nil || len(found) != 1 || !reflect.DeepEqual(found[0].Capabilities, []string{"inventory", "health", "logs", "fs.read", "acp", "skills.inventory", "changeset"}) {
+		t.Fatalf("changeset not advertised for a git workspace: %+v %v", found, err)
 	}
 	command, cwd, _, err := d.(ACPCommander).ACPCommand(key)
 	if err != nil || cwd != workspace || !reflect.DeepEqual(command, []string{binary, "acp", "--state", base}) {
