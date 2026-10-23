@@ -54,6 +54,9 @@ type Status struct {
 	UnresolvedOperations  []string `json:"unresolved_operations"`
 	ActiveAttempts        []string `json:"active_attempts"`
 	InterruptedAttempts   []string `json:"interrupted_attempts"`
+	// The hub session this admission continued (a resume), null when it started fresh. An older
+	// daemon omits it, which the hub reads as "cannot resume".
+	ContinuedFrom *string `json:"continued_from"`
 }
 type admission struct {
 	Status
@@ -225,6 +228,25 @@ func (c *Client) Request(ctx context.Context, action string, b Binding, request 
 	err := c.call(ctx, action, map[string]any{"binding": b, "request_id": request, "lease_sequence": sequence, "reason": reason}, &out)
 	if err == nil && (out.Binding != b || out.AdmissionID == "" || out.SessionID == "") {
 		return Status{}, fmt.Errorf("salaam: receipt belongs to another admission")
+	}
+	return out, err
+}
+// AdmitContinuing admits a binding that carries on an earlier, revoked interactive conversation.
+// Salaam decides whether it may; the receipt must say which conversation it continued.
+func (c *Client) AdmitContinuing(ctx context.Context, b Binding, request, continueFrom string) (Status, error) {
+	var out Status
+	if err := c.validate(b); err != nil {
+		return out, err
+	}
+	if request == "" || continueFrom == "" || len(continueFrom) > 128 {
+		return out, fmt.Errorf("salaam: missing continuation identity")
+	}
+	err := c.call(ctx, "admit", map[string]any{"binding": b, "request_id": request, "continue_from": continueFrom}, &out)
+	if err == nil && (out.Binding != b || out.AdmissionID == "" || out.SessionID == "") {
+		return Status{}, fmt.Errorf("salaam: receipt belongs to another admission")
+	}
+	if err == nil && (out.ContinuedFrom == nil || *out.ContinuedFrom != continueFrom) {
+		return Status{}, fmt.Errorf("salaam: this daemon did not continue the conversation; upgrade Salaam")
 	}
 	return out, err
 }

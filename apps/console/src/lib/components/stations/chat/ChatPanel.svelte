@@ -213,6 +213,28 @@
     }
   });
 
+  /**
+   * Resume the ended session on screen: a NEW session carrying the same conversation, on this
+   * person's own authority. Lands on it through the same settle path as a create.
+   */
+  async function resumeSession() {
+    const from = chat.session?.id ?? null;
+    await chat.resume();
+    const landed = settleOn(from, true, true);
+    if (chat.error !== null && landed === from) {
+      toast.error("Couldn't resume the session", { description: chat.error });
+    }
+  }
+
+  /** The ended session's own words for why: the hub's idle end says so. */
+  const endedWhy = $derived(
+    chat.session?.endedCause === "idle"
+      ? "This session ended after a while without activity"
+      : chat.session?.endedCause === "admin"
+        ? "A workspace admin ended this session"
+        : "This session has ended",
+  );
+
   async function handleSend(text: string) {
     // The composer is already disabled in every refusal window; this guard just
     // keeps a stale `error` from being re-toasted if one slips through.
@@ -282,6 +304,10 @@
   {#if chat.error}
     <div class="flex shrink-0 items-center gap-2 border-t px-3 py-1.5" role="alert">
       <p class="t-label min-w-0 flex-1 text-status-error">{chat.error}</p>
+      {#if chat.busyHolder?.you && chat.busyHolder.sessionId && chat.busyHolder.sessionId !== chat.session?.id}
+        {@const held = chat.busyHolder.sessionId}
+        <Button variant="ghost" size="xs" onclick={() => void selectSession(held)}>Open that session</Button>
+      {/if}
       {#if chat.connection === "disconnected"}
         <Button variant="ghost" size="xs" onclick={() => chat.retry()}>Retry</Button>
       {/if}
@@ -292,9 +318,20 @@
     {#if endedNotice}
       <!-- Not a live region: the header owns the ONE status announcement. This is
            the composer's description, read when focus lands on it. -->
-      <p id={endedNoticeId} class="t-label mb-2 text-muted-foreground">
-        This session has ended — sending starts a new one.
-      </p>
+      <div class="mb-2 flex items-center gap-2">
+        <p id={endedNoticeId} class="t-label min-w-0 flex-1 text-muted-foreground">
+          {#if chat.session?.resumable}
+            {endedWhy}. Resume carries on the same conversation; sending starts a new one.
+          {:else}
+            {endedWhy} — sending starts a new one.
+          {/if}
+        </p>
+        {#if chat.session?.resumable}
+          <Button variant="outline" size="xs" disabled={!chat.canResume} onclick={() => void resumeSession()}>
+            Resume
+          </Button>
+        {/if}
+      </div>
     {/if}
     <PromptInput
       bind:value={draft}
@@ -317,6 +354,11 @@
     {stationId}
     currentSessionId={chat.session?.id ?? null}
     onSelect={(id) => void selectSession(id)}
+    onResume={(id) =>
+      void (async () => {
+        await selectSession(id);
+        await resumeSession();
+      })()}
     onClose={() => (historyOpen = false)}
   />
 {/if}

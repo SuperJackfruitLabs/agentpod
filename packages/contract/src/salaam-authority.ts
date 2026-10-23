@@ -46,6 +46,12 @@ export const SalaamAuthorityParams = z
       .max(Number.MAX_SAFE_INTEGER)
       .optional(),
     reason: z.string().min(1).max(1024).optional(),
+    /**
+     * Admit only: the hub session id of an earlier, revoked interactive admission whose
+     * conversation this one carries on (a resume). The new admission still gets its own session,
+     * lease and authority; Salaam refuses unless the earlier one is stopped and reconciled.
+     */
+    continue_from: id.optional(),
   })
   .strict();
 export const SalaamAuthorityStatus = z.object({
@@ -61,4 +67,7 @@ export const SalaamAuthorityStatus = z.object({
   unresolved_operations: z.array(z.string()),
   active_attempts: z.array(z.string()),
   interrupted_attempts: z.array(z.string()),
+  /** The hub session id this admission continued, null when it started fresh. Absent from an
+   * older Salaam, which cannot continue a conversation. */
+  continued_from: z.string().nullable().optional(),
 });

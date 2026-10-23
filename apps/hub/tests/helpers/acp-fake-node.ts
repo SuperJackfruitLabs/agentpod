@@ -121,6 +121,14 @@ export interface FakeAcpNodeOpts {
    * fake always did — which the hub must read as "no images".
    */
   promptCapabilities?: Record<string, boolean>;
+  /**
+   * Speak as a Salaam station: `initialize` declares Salaam's ACP and execution features, the
+   * agent answers `session/load`, and the node answers the `salaam.*` authority verbs with
+   * receipts for the binding it was sent (one admission per hub session id). Every authority
+   * request is recorded in `salaamRequests`. `salaam.oldDaemon` leaves `continued_from` off the
+   * receipts, as a Salaam from before resume does.
+   */
+  salaam?: { oldDaemon?: boolean };
 }
 
 /** One scripted agent process, as spawned by an `acp.open`. */
@@ -148,6 +156,8 @@ export interface FakeAcpNode {
   permissionOutcomes: unknown[];
   /** Scripted agent processes, in the order acp.open spawned them. */
   processes: FakeAgentProcess[];
+  /** Every `salaam.*` request the node answered, in order (verb + params). */
+  salaamRequests: Array<{ verb: string; params: Record<string, unknown> }>;
   /** The process spawned for a given acp.open instance, if any. */
   processFor(instance: string): FakeAgentProcess | undefined;
   /** Complete the OLDEST still-hanging prompt turn with the given stopReason. */
@@ -214,6 +224,30 @@ export async function connectFakeAcpNode(
 
   const processes: Proc[] = [];
   const decoder = new TextDecoder();
+  const salaamRequests: Array<{ verb: string; params: Record<string, unknown> }> = [];
+  /** Salaam admissions by hub session id. */
+  const admissions = new Map<
+    string,
+    { admission_id: string; session_id: string; lease: number; revoked: boolean; continued_from: string | null }
+  >();
+  const salaamStatus = (binding: { hub_session_id: string }) => {
+    const a = admissions.get(binding.hub_session_id)!;
+    return {
+      admission_id: a.admission_id,
+      session_id: a.session_id,
+      binding,
+      binding_digest: "fixture",
+      lease_sequence: a.lease,
+      expires_at: Date.now() + 90_000,
+      authorized: !a.revoked && a.lease > 0,
+      revoked: a.revoked,
+      owned_execution_stopped: true,
+      unresolved_operations: [],
+      active_attempts: [],
+      interrupted_attempts: [],
+      ...(opts.salaam?.oldDaemon ? {} : { continued_from: a.continued_from }),
+    };
+  };
 
   const spawnProcess = (instance: string | null): Proc => {
     const n = processes.length;
@@ -403,8 +437,18 @@ export async function connectFakeAcpNode(
           agentCapabilities: opts.promptCapabilities
             ? { promptCapabilities: opts.promptCapabilities }
             : {},
+          ...(opts.salaam
+            ? {
+                _meta: {
+                  "salaam.dev/features": { promptReceipts: 1, updateIds: 1 },
+                  "salaam.dev/executionFeatures": { failures: 1, cancellationReceipts: 1, toolSemantics: 1 },
+                },
+              }
+            : {}),
         },
       });
+    } else if (method === "session/load" && opts.salaam) {
+      sendAgent(proc, { jsonrpc: "2.0", id, result: {} });
     } else if (method === "session/new") {
       if (opts.hangHandshake === "session/new") return; // wedged agent
       sendAgent(proc, {
@@ -459,6 +503,27 @@ export async function connectFakeAcpNode(
 
     if (msg.type === "req") {
       const id = msg.id as string;
+      if (opts.salaam && typeof msg.verb === "string" && msg.verb.startsWith("salaam.")) {
+        const params = msg.params as { binding: { hub_session_id: string }; lease_sequence?: number; continue_from?: string };
+        salaamRequests.push({ verb: msg.verb, params: params as unknown as Record<string, unknown> });
+        const key = params.binding.hub_session_id;
+        if (msg.verb === "salaam.admit" && !admissions.has(key))
+          admissions.set(key, {
+            admission_id: crypto.randomUUID(),
+            session_id: crypto.randomUUID(),
+            lease: 0,
+            revoked: false,
+            continued_from: params.continue_from ?? null,
+          });
+        if (!admissions.has(key)) {
+          ws.send(JSON.stringify({ type: "res", id, ok: false, error: "admission not found" }));
+          return;
+        }
+        if (msg.verb === "salaam.renew") admissions.get(key)!.lease = params.lease_sequence ?? 0;
+        if (msg.verb === "salaam.revoke") admissions.get(key)!.revoked = true;
+        ws.send(JSON.stringify({ type: "res", id, ok: true, data: salaamStatus(params.binding) }));
+        return;
+      }
       switch (msg.verb) {
         case "detect":
           ws.send(
@@ -614,6 +679,7 @@ export async function connectFakeAcpNode(
     agentReceived,
     permissionOutcomes,
     processes,
+    salaamRequests,
     processFor: (instance: string) =>
       processes.find((p) => p.instance === instance),
     /** Oldest hanging turn across processes, in process-spawn order. */

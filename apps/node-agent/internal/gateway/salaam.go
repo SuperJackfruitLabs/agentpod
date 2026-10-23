@@ -213,6 +213,8 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 		RequestID     string         `json:"request_id"`
 		LeaseSequence int64          `json:"lease_sequence"`
 		Reason        string         `json:"reason"`
+		// Admit only: the hub session whose conversation a resume continues (Salaam checks it).
+		ContinueFrom string `json:"continue_from"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(params)))
 	decoder.DisallowUnknownFields()
@@ -222,6 +224,13 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 	action := strings.TrimPrefix(verb, "salaam.")
 	if p.RequestID == "" || (action == "renew" && p.LeaseSequence < 1) || (action == "revoke" && (p.Reason == "" || len(p.Reason) > 1024)) {
 		return nil, false, fmt.Errorf("salaam: missing authority request identity")
+	}
+	if p.ContinueFrom != "" && action != "admit" {
+		return nil, false, fmt.Errorf("salaam: only an admission can continue a conversation")
+	}
+	if p.ContinueFrom != "" {
+		result, err := h.client.AdmitContinuing(ctx, p.Binding, p.RequestID, p.ContinueFrom)
+		return result, false, err
 	}
 	result, err := h.client.Request(ctx, action, p.Binding, p.RequestID, p.LeaseSequence, p.Reason)
 	return result, false, err

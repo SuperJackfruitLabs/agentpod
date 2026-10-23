@@ -34,6 +34,7 @@ import {
   gt,
   inArray,
   isNotNull,
+  isNull,
   lt,
   ne,
   or,
@@ -71,6 +72,7 @@ import type {
   AcpSessionMode,
   AcpSessionRow,
   AcpSessionStatus,
+  StationBusyHolder,
   TurnError,
   TurnErrorReport,
   TurnResolution,
@@ -102,9 +104,11 @@ import {
   renewSalaamExecution,
   revokeSalaamExecution,
   validateSalaamAuthority,
-  salaamStationStopped,
+  salaamStationHolder,
   inspectSalaamExecution,
+  type SalaamStationHolder,
 } from "./salaam-authority";
+import { principalDirectory } from "./org-plane/directory";
 import { getStation } from "./station-registry";
 import { gateCapability } from "../routes/station-writes";
 import { connectionManager } from "./connection-manager";
@@ -128,6 +132,58 @@ import {
 } from "./turn-error";
 
 const log = createLogger("acp-sessions");
+
+// ─── Salaam idle end ──────────────────────────────────────────────────────────
+
+/** Default minutes of no activity after which the hub ends an interactive Salaam session. */
+export const SALAAM_IDLE_END_DEFAULT_MINUTES = 15;
+
+/**
+ * How long an interactive Salaam session may sit with no activity before the hub ends it
+ * (`SALAAM_IDLE_END_MINUTES`, default 15). A Salaam station runs one execution at a time, so an
+ * idle session left open holds the station against everyone else; ending it goes through the
+ * normal end and confirmed revocation, and the session stays resumable. Fractions are allowed
+ * (a short timeout for a live check); anything not a positive number is the default.
+ */
+export function salaamIdleEndMs(env: Record<string, string | undefined> = process.env): number {
+  const minutes = Number(env.SALAAM_IDLE_END_MINUTES);
+  return (Number.isFinite(minutes) && minutes > 0 ? minutes : SALAAM_IDLE_END_DEFAULT_MINUTES) * 60_000;
+}
+
+/** What the idle decision reads from a live session. */
+export interface IdleCandidate {
+  ended: boolean;
+  status: AcpSessionStatus;
+  turnInFlight: boolean;
+  pendingPermissions: number;
+  interactive: boolean;
+  lastActivityAt: number;
+}
+
+/**
+ * Is this session due to be ended for inactivity? Never mid-turn, never while a permission
+ * prompt waits for its answer, never board work (its run owns its lifecycle), and only once the
+ * last activity is at least `idleMs` old.
+ */
+export function idleEndDue(s: IdleCandidate, now: number, idleMs: number): boolean {
+  return (
+    !s.ended &&
+    s.interactive &&
+    s.status === "idle" &&
+    !s.turnInFlight &&
+    s.pendingPermissions === 0 &&
+    now - s.lastActivityAt >= idleMs
+  );
+}
+
+/** The reason the row records for an idle end. */
+export function idleEndReason(idleMs: number): string {
+  const minutes = idleMs / 60_000;
+  const amount = Number.isInteger(minutes)
+    ? `${minutes} minute${minutes === 1 ? "" : "s"}`
+    : `${Math.round(idleMs / 1000)} seconds`;
+  return `Ended after ${amount} without activity. Resume it to carry on.`;
+}
 
 // How long a session survives at `waiting` after its node goes offline before
 // the hub gives up (no reattach in slice 2).
@@ -290,6 +346,11 @@ export interface CreateSessionInput {
    * still needs the grant.
    */
   workspaceRole?: "owner" | "admin" | "member";
+  /**
+   * Set only by `resumeSession`: the ended session whose conversation this one continues. Never
+   * copied from a request body.
+   */
+  resumeFrom?: string;
   /** Trusted bridge fields, never copied from an HTTP/ACP request body. */
   executionRun?: import("@agentpod/contract").SalaamRunAuthority;
   validateExecutionRun?: () => Promise<unknown>;
@@ -394,6 +455,8 @@ interface LiveSession {
   managedMcpVerified?: boolean;
   /** A re-attach is running; a second would race it for the same wire. */
   reattaching: boolean;
+  /** Last time anything happened on this session (an event persisted, or the open). */
+  lastActivityAt: number;
 }
 
 /** Live sessions per station — one-to-many since slice 4b. */
@@ -469,6 +532,10 @@ function toContract(r: DbRow): AcpSessionRow {
     // every session labelled "Session" no matter what was persisted.
     title: r.title,
     lastSeq: r.lastSeq,
+    endedCause: (r.endedCause as "idle" | "admin" | null) ?? null,
+    resumedFrom: r.resumedFrom ?? null,
+    resumedAs: r.resumedAs ?? null,
+    resumable: isResumable(r),
     ...(r.executionAuthority
       ? {
           execution: {
@@ -483,6 +550,18 @@ function toContract(r: DbRow): AcpSessionRow {
         }
       : {}),
   };
+}
+
+/**
+ * An ended interactive Salaam session that nobody has resumed yet. Whether the CALLER may resume
+ * it is the owner check in `resumeSession`; a row is only ever listed resumable to its owner.
+ */
+function isResumable(r: DbRow): boolean {
+  return (
+    r.status === "ended" &&
+    r.executionAuthority?.binding.run.source === "agentpod" &&
+    !r.resumedAs
+  );
 }
 
 // ─── Session titles ───────────────────────────────────────────────────────────
@@ -563,6 +642,7 @@ function persistEvent(
 ): { seq: number; done: Promise<void> } {
   const seq = ++live.seq;
   const createdAt = new Date();
+  live.lastActivityAt = createdAt.getTime();
   const done = enqueue(live, async () => {
     const inserted = await db.transaction(async (tx) => {
       const insert = tx.insert(acpEvents).values({
@@ -622,6 +702,7 @@ function setStatus(
   opts: {
     extra?: Record<string, unknown>;
     endedReason?: string;
+    endedCause?: "idle" | "admin";
     force?: boolean;
   } = {},
 ): { seq: number; done: Promise<void> } {
@@ -638,6 +719,7 @@ function setStatus(
       ...(opts.endedReason !== undefined
         ? { endedReason: opts.endedReason }
         : {}),
+      ...(opts.endedCause !== undefined ? { endedCause: opts.endedCause } : {}),
     },
   );
 }
@@ -715,6 +797,7 @@ function makeLive(
     mcpProxyRequested,
     mcpProxied: [],
     reattaching: false,
+    lastActivityAt: Date.now(),
   };
 }
 
@@ -956,17 +1039,25 @@ function rejectPendingPermissions(live: LiveSession): void {
 
 const finalizations = new WeakMap<LiveSession, Promise<void>>();
 /** Every concurrent stop caller waits for the same authority/teardown barrier. */
-function finalizeEnd(live: LiveSession, reason: string): Promise<void> {
+function finalizeEnd(
+  live: LiveSession,
+  reason: string,
+  cause?: "idle" | "admin",
+): Promise<void> {
   const pending = finalizations.get(live);
   if (pending) return pending;
   if (live.ended) return Promise.resolve();
   live.ended = true;
-  const completion = Promise.resolve().then(() => finalizeEndOnce(live, reason));
+  const completion = Promise.resolve().then(() => finalizeEndOnce(live, reason, cause));
   finalizations.set(live, completion);
   return completion;
 }
 /** Terminal transition: row ended(reason) + state event, wire torn down. */
-async function finalizeEndOnce(live: LiveSession, reason: string): Promise<void> {
+async function finalizeEndOnce(
+  live: LiveSession,
+  reason: string,
+  cause?: "idle" | "admin",
+): Promise<void> {
   clearInterval(live.authorityTimer);
   if (live.executionAuthority)
     live.executionAuthority = await revokeSalaamExecution(live.id, reason);
@@ -1015,8 +1106,10 @@ async function finalizeEndOnce(live: LiveSession, reason: string): Promise<void>
             },
           }
         : {}),
+      ...(cause ? { cause } : {}),
     },
     endedReason: reason,
+    ...(cause ? { endedCause: cause } : {}),
     force: true,
   });
   removeLive(live);
@@ -1338,6 +1431,54 @@ export interface StationReadiness {
   ready: boolean;
   /** The sentence `createSession` would have thrown. Absent when ready. */
   reason?: string;
+  /** A Salaam station's one live execution, when that is what refused. */
+  holder?: SalaamStationHolder;
+}
+
+/** The generic refusal sentence, for readers that cannot say who (the bridge's readiness). */
+export const STATION_BUSY_REASON =
+  "Another session holds this agent's one live execution; it takes one at a time.";
+
+/**
+ * A Salaam station already runs someone's execution (one at a time: an agent must never act on
+ * two people's authority at once). Carries who, and since when, so the refusal can say so.
+ */
+export class SalaamStationBusy extends Error {
+  override name = "SalaamStationBusy";
+  readonly code = "station_busy";
+  constructor(readonly holder: StationBusyHolder) {
+    const who = holder.you ? "You are" : `${holder.name} is`;
+    super(
+      holder.state === "stopping"
+        ? `${holder.you ? "Your" : `${holder.name}'s`} last session with this agent is still stopping (since ${holder.since}). It takes one at a time.`
+        : `${who} in a session with this agent since ${holder.since}. It takes one at a time.`,
+    );
+  }
+}
+
+export function isSalaamStationBusy(e: unknown): e is SalaamStationBusy {
+  return e instanceof SalaamStationBusy || (e as { name?: string })?.name === "SalaamStationBusy";
+}
+
+/** A person's display name for a refusal or a list; never throws (a plane outage says "Someone"). */
+async function displayName(userId: string): Promise<string> {
+  try {
+    const p = await principalDirectory().principal(userId);
+    return p?.displayName || p?.handle || "Someone";
+  } catch {
+    return "Someone";
+  }
+}
+
+async function busyRefusal(holder: SalaamStationHolder, callerId: string): Promise<SalaamStationBusy> {
+  const you = holder.userId === callerId;
+  return new SalaamStationBusy({
+    name: you ? "You" : await displayName(holder.userId),
+    you,
+    since: holder.since.toISOString(),
+    state: holder.state,
+    ...(you ? { sessionId: holder.sessionId } : {}),
+  });
 }
 
 /**
@@ -1368,11 +1509,10 @@ export async function stationReadiness(
   if (!connectionManager.isOnline(station.nodeId)) {
     return { ready: false, reason: "Node is offline." };
   }
-  if (station.harness === "salaam" && !(await salaamStationStopped(station.id)))
-    return {
-      ready: false,
-      reason: "Prior Salaam execution has not been confirmed stopped.",
-    };
+  if (station.harness === "salaam") {
+    const holder = await salaamStationHolder(station.id);
+    if (holder) return { ready: false, reason: STATION_BUSY_REASON, holder };
+  }
   return { ready: true };
 }
 
@@ -1431,7 +1571,10 @@ export async function createSession(
   // Fail fast on the obvious gates before queueing (openSession re-checks them
   // under the lock, where the answers are current).
   const readiness = await stationReadiness({ tenantId }, stationId);
-  if (!readiness.ready) throw new Error(readiness.reason);
+  if (!readiness.ready)
+    throw readiness.holder
+      ? await busyRefusal(readiness.holder, userId)
+      : new Error(readiness.reason);
 
   return withStationOpenLock(stationId, () => openSession(input));
 }
@@ -1452,8 +1595,12 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     throw new Error("Node is offline.");
   }
   const { nodeId, stationKey, workspacePath, harness } = station;
-  if (harness === "salaam" && !(await salaamStationStopped(station.id)))
-    throw Error("Prior Salaam execution has not been confirmed stopped.");
+  if (harness === "salaam") {
+    const holder = await salaamStationHolder(station.id);
+    if (holder) throw await busyRefusal(holder, userId);
+  }
+  if (input.resumeFrom !== undefined && harness !== "salaam")
+    throw new SessionNotResumable("Only an interactive Salaam session can be resumed.");
   // Asked only of a node that runs the proxy; read before the sibling check, so no await
   // separates that check from addLive.
   const mcpProxyRequested =
@@ -1483,6 +1630,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     harness === "salaam"
       ? await makeSalaamExecution(stationId, userId, id, input.executionRun, {
           workspaceAdmin: interactiveWorkspaceAdmin(input),
+          ...(input.resumeFrom !== undefined ? { continueFrom: input.resumeFrom } : {}),
         })
       : null;
   if (execution && input.mcpServers?.length)
@@ -1513,7 +1661,28 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
   // station with 409s until restart.
   addLive(live);
 
+  // A resume claims its predecessor once, atomically: two resumes of one conversation would fork
+  // it into two branches. Released below if nothing was admitted, so the person can try again.
+  let claimed = false;
   try {
+    if (input.resumeFrom !== undefined) {
+      const [won] = await boundedDb(
+        db
+          .update(acpSessions)
+          .set({ resumedAs: id })
+          .where(
+            and(
+              eq(acpSessions.id, input.resumeFrom),
+              eq(acpSessions.userId, userId),
+              isNull(acpSessions.resumedAs),
+            ),
+          )
+          .returning({ id: acpSessions.id }),
+        "claim resumed session",
+      );
+      if (!won) throw new SessionNotResumable("This session was already resumed.");
+      claimed = true;
+    }
     // Every DB step below is bounded (boundedDb): a stalled query must reject
     // into the catch so the live-map entry is cleaned up, never hang holding it.
     await boundedDb(
@@ -1528,11 +1697,13 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
         nodeSessionId: null,
         executionAuthority: execution,
         mcpProxyRequested,
+        resumedFrom: input.resumeFrom ?? null,
         createdAt: now,
         lastEventAt: now,
       }),
       "insert session row",
     );
+    if (input.resumeFrom !== undefined) await carryTranscript(live, input.resumeFrom);
 
     // The hub session id doubles as the ACP instance: stable by construction
     // across a re-open of this session, and it correlates node-side processes
@@ -1567,7 +1738,14 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
         .where(eq(acpSessions.id, id)),
       "record node session id",
     );
-    await boundedDb(setStatus(live, "idle").done, "idle state event");
+    await boundedDb(
+      setStatus(
+        live,
+        "idle",
+        input.resumeFrom !== undefined ? { extra: { resumedFrom: input.resumeFrom } } : {},
+      ).done,
+      "idle state event",
+    );
     startSalaamAuthorityWatch(live);
 
     const rows = await boundedDb(
@@ -1579,8 +1757,111 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     const reason = err instanceof Error ? err.message : String(err);
     persistEvent(live, "error", turnErrorFromRejection(err, live.harness));
     await finalizeEnd(live, reason);
+    // Salaam never admitted the continuation, so the conversation was not carried anywhere:
+    // give the claim back. Once admitted, the new session holds the history and is the one to
+    // resume.
+    if (claimed && !live.executionAuthority?.sessionId)
+      await db
+        .update(acpSessions)
+        .set({ resumedAs: null })
+        .where(and(eq(acpSessions.id, input.resumeFrom!), eq(acpSessions.resumedAs, id)))
+        .catch(() => {});
     throw err;
   }
+}
+
+/**
+ * Copy the resumed session's transcript into the new one, so the console (and any reader of this
+ * session's events) sees one conversation. State events stay behind: an `ended` among them would
+ * read as this session ending. Seqs are renumbered from 1; the live counter continues after them.
+ */
+async function carryTranscript(live: LiveSession, from: string): Promise<void> {
+  const rows = await boundedDb(
+    db
+      .select()
+      .from(acpEvents)
+      .where(and(eq(acpEvents.sessionId, from), ne(acpEvents.type, "state")))
+      .orderBy(asc(acpEvents.seq)),
+    "read resumed transcript",
+  );
+  const [prior] = await boundedDb(
+    db.select({ title: acpSessions.title }).from(acpSessions).where(eq(acpSessions.id, from)),
+    "read resumed title",
+  );
+  if (rows.length) {
+    await boundedDb(
+      db.insert(acpEvents).values(
+        rows.map((r, i) => ({
+          sessionId: live.id,
+          tenantId: live.tenantId,
+          seq: i + 1,
+          type: r.type,
+          payload: r.payload as object,
+          createdAt: r.createdAt,
+        })),
+      ),
+      "carry resumed transcript",
+    );
+  }
+  live.seq = rows.length;
+  await boundedDb(
+    db
+      .update(acpSessions)
+      .set({ lastSeq: rows.length, title: prior?.title ?? null })
+      .where(eq(acpSessions.id, live.id)),
+    "record carried transcript",
+  );
+}
+
+/** A resume that cannot happen: not ended, not Salaam, already resumed, or stop unconfirmed. */
+export class SessionNotResumable extends Error {
+  override name = "SessionNotResumable";
+}
+export function isSessionNotResumable(e: unknown): e is SessionNotResumable {
+  return e instanceof SessionNotResumable || (e as { name?: string })?.name === "SessionNotResumable";
+}
+
+/**
+ * Resume an ended interactive Salaam session: the same conversation (Salaam carries its history
+ * into a new admission, the hub carries the transcript), under a FRESH execution authority for
+ * the person resuming. They pass every check a new session does (the control pair or decision 3,
+ * the one-live-execution rule), because it IS a new session.
+ *
+ * Owner only. An admin can see and end another person's session, but resuming it would carry
+ * that person's conversation, and whatever they told the agent, into the admin's own authority.
+ * Restricting resume to the owner keeps one conversation on one person's authority from start to
+ * end. Someone else's session is "not found", as on every other per-session door.
+ */
+export async function resumeSession(
+  input: Omit<CreateSessionInput, "stationId" | "mode" | "resumeFrom" | "executionRun" | "validateExecutionRun"> & {
+    sessionId: string;
+    mode?: AcpSessionMode;
+  },
+): Promise<AcpSessionRow> {
+  const [prior] = await db
+    .select()
+    .from(acpSessions)
+    .where(and(eq(acpSessions.id, input.sessionId), eq(acpSessions.tenantId, input.tenantId)));
+  if (!prior || prior.userId !== input.userId) throw new Error("Session not found.");
+  if (prior.status !== "ended") throw new SessionNotResumable("This session is still running.");
+  const saved = prior.executionAuthority;
+  if (!saved || saved.binding.run.source !== "agentpod")
+    throw new SessionNotResumable("Only an interactive Salaam session can be resumed.");
+  if (prior.resumedAs) throw new SessionNotResumable("This session was already resumed.");
+  if (saved.state !== "revoked") {
+    const status = await revokeSalaamExecution(prior.id, "Reconcile before resume");
+    if (status?.state !== "revoked")
+      throw new SessionNotResumable(
+        "This session's last execution has not been confirmed stopped yet. Try again in a moment.",
+      );
+  }
+  const { sessionId, mode, ...rest } = input;
+  return createSession({
+    ...rest,
+    stationId: prior.stationId,
+    mode: mode ?? (prior.mode as AcpSessionMode),
+    resumeFrom: sessionId,
+  });
 }
 
 // ─── Session listing ─────────────────────────────────────────────────────────
@@ -1591,6 +1872,10 @@ const SESSION_PAGE_DEFAULT_LIMIT = 20;
 const SESSION_PAGE_MAX_LIMIT = 100;
 
 export interface ListSessionsOptions {
+  /** Every person's sessions on the station (a workspace owner/admin's read). */
+  everyone?: boolean;
+  /** Name each row's owner (`owner`), for a list that can hold other people's sessions. */
+  withOwners?: boolean;
   /** Page size; defaults to 20 and is clamped into [1, 100]. */
   limit?: number;
   /**
@@ -1647,10 +1932,10 @@ export async function listSessions(
   stationId: string,
   opts: ListSessionsOptions = {},
 ): Promise<AcpSessionRow[]> {
-  const filters = [
-    eq(acpSessions.userId, userId),
-    eq(acpSessions.stationId, stationId),
-  ];
+  const filters = [eq(acpSessions.stationId, stationId)];
+  // Everyone's sessions only for a workspace owner/admin, and only when asked for (the history
+  // dialog). The caller must already have scoped the station to their workspace.
+  if (!opts.everyone) filters.push(eq(acpSessions.userId, userId));
   if (opts.before !== undefined) {
     const cursor = new Date(opts.before);
     if (Number.isNaN(cursor.getTime())) {
@@ -1675,7 +1960,16 @@ export async function listSessions(
     .where(and(...filters))
     .orderBy(desc(acpSessions.lastEventAt), desc(acpSessions.id))
     .limit(clampSessionLimit(opts.limit));
-  return rows.map(toContract);
+  if (!opts.withOwners) return rows.map(toContract);
+  const names = new Map<string, string>();
+  for (const id of new Set(rows.map((r) => r.userId)))
+    if (id !== userId) names.set(id, await displayName(id));
+  return rows.map((r) => {
+    const you = r.userId === userId;
+    const row = toContract(r);
+    // Only the owner may resume (see resumeSession), so nobody else is told it is resumable.
+    return { ...row, resumable: you && row.resumable, owner: { name: you ? "You" : names.get(r.userId)!, you } };
+  });
 }
 
 export async function getSession(
@@ -1785,9 +2079,47 @@ export async function renewExecution(
   }
 }
 
+function idleCandidate(live: LiveSession): IdleCandidate {
+  return {
+    ended: live.ended,
+    status: live.status,
+    turnInFlight: live.turnInFlight,
+    pendingPermissions: live.pending.size,
+    interactive: live.executionAuthority?.binding.run.source === "agentpod",
+    lastActivityAt: live.lastActivityAt,
+  };
+}
+
+/**
+ * End every interactive Salaam session idle for `idleMs` (spec: session lifecycle, 2026-10-23).
+ * Each goes through `finalizeEnd`, the same end and confirmed revocation as a person's own end, and
+ * its row records `endedCause: "idle"`. Runs on each session's authority tick; exported so a test
+ * can drive it with its own clock. Returns the ids it ended.
+ */
+export async function endIdleSalaamSessions(
+  now: number = Date.now(),
+  idleMs: number = salaamIdleEndMs(),
+): Promise<string[]> {
+  const due = [...liveById.values()].filter(
+    (live) => live.executionAuthority && idleEndDue(idleCandidate(live), now, idleMs),
+  );
+  await Promise.all(
+    due.map((live) => {
+      log.info("Ending idle Salaam session", { sessionId: live.id, stationId: live.stationId });
+      return finalizeEnd(live, idleEndReason(idleMs), "idle");
+    }),
+  );
+  return due.map((live) => live.id);
+}
+
 function startSalaamAuthorityWatch(live: LiveSession): void {
   if (!live.executionAuthority || live.authorityTimer) return;
   live.authorityTimer = setInterval(() => {
+    const idleMs = salaamIdleEndMs();
+    if (idleEndDue(idleCandidate(live), Date.now(), idleMs)) {
+      void finalizeEnd(live, idleEndReason(idleMs), "idle");
+      return;
+    }
     if (
       live.ended ||
       live.authorityRenewing ||
@@ -1981,6 +2313,9 @@ async function restoreSalaamRow(
     mcpProxyRequested: row.mcpProxyRequested,
   });
   live.seq = row.lastSeq;
+  // Idle time keeps counting across a hub restart: a session idle for 14 minutes before it is
+  // not given a fresh 15.
+  live.lastActivityAt = row.lastEventAt.getTime();
   live.executionAuthority = saved;
   live.acpSessionId = saved.sessionId ?? "";
   live.transportLost = true;
@@ -2823,12 +3158,38 @@ export async function endSession(
 }
 
 /**
+ * A workspace owner/admin ends someone else's session (spec: session lifecycle, 2026-10-23):
+ * the same end and confirmed revocation as the owner's own, with `endedCause: "admin"` on the row.
+ * The caller decides the role and writes the audit entry; this checks only that the session is in
+ * the caller's workspace. Returns the ended row's owner and station, or null when not found.
+ */
+export async function endSessionAsWorkspaceAdmin(
+  tenantId: string,
+  sessionId: string,
+  reason: string,
+): Promise<{ userId: string; stationId: string } | null> {
+  const [row] = await db
+    .select()
+    .from(acpSessions)
+    .where(and(eq(acpSessions.id, sessionId), eq(acpSessions.tenantId, tenantId)));
+  if (!row) return null;
+  const live = liveById.get(sessionId);
+  if (live) await finalizeEnd(live, reason, "admin");
+  else {
+    if (row.executionAuthority) await revokeSalaamExecution(sessionId, reason);
+    if (row.status !== "ended") await appendEndedState(sessionId, reason, "admin");
+  }
+  return { userId: row.userId, stationId: row.stationId };
+}
+
+/**
  * Append a state-ended event (seq = MAX(seq)+1) and mark a NON-LIVE row ended.
  * Live sessions go through finalizeEnd instead (in-memory seq counter).
  */
 async function appendEndedState(
   sessionId: string,
   reason: string,
+  cause?: "idle" | "admin",
 ): Promise<void> {
   const [agg] = await db
     .select({ maxSeq: sql<number>`COALESCE(MAX(${acpEvents.seq}), 0)` })
@@ -2858,6 +3219,7 @@ async function appendEndedState(
     .set({
       status: "ended",
       endedReason: reason,
+      ...(cause ? { endedCause: cause } : {}),
       lastEventAt: createdAt,
       // This row is not live, so seq came from MAX(seq)+1 — the same
       // last_seq invariant persistEvent maintains for live sessions.

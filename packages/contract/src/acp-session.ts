@@ -67,7 +67,39 @@ export const AcpSessionRow = z.object({
   title: z.string().nullable().optional(),   // first prompt, truncated; null until the first prompt
   lastSeq: z.number().int().optional(),      // highest event seq persisted for the session
   execution: z.object({ state: z.enum(['active','revocation_pending','revoked']), sessionId: z.string().nullable(), stopConfirmed: z.boolean(), promptReceipts: z.literal(1).optional() }).optional(),
+  // Salaam session lifecycle (2026-10-23). All optional, so either side can deploy first.
+  /** Why the hub ended it, when it was not the owner: no activity (`idle`) or a workspace admin. */
+  endedCause: z.enum(["idle", "admin"]).nullable().optional(),
+  /** The ended session this one resumed (same conversation, fresh execution authority). */
+  resumedFrom: z.string().nullable().optional(),
+  /** The session that resumed this one, once it has been. */
+  resumedAs: z.string().nullable().optional(),
+  /** The caller may resume it: theirs, ended, an interactive Salaam session, not yet resumed. */
+  resumable: z.boolean().optional(),
+  /** Whose session it is. Sent on the workspace-wide list a workspace admin reads. */
+  owner: z.object({ name: z.string(), you: z.boolean() }).optional(),
 });
+
+/** POST /api/acp/sessions/:id/resume. The mode defaults to the resumed session's. */
+export const ResumeAcpSessionBody = z.object({ mode: AcpSessionMode.optional() });
+export type ResumeAcpSessionBody = z.infer<typeof ResumeAcpSessionBody>;
+
+/**
+ * The refusal when a Salaam station already has its one live execution (424, code `station_busy`).
+ * A station runs one person's authority at a time; this says whose, and since when.
+ */
+export const StationBusyHolder = z.object({
+  /** Display name ("You" for the caller's own session, with `you` set). */
+  name: z.string(),
+  you: z.boolean(),
+  /** When the holding session started (ISO). */
+  since: z.string(),
+  /** `active`: in a session. `stopping`: its stop is not yet confirmed. */
+  state: z.enum(["active", "stopping"]),
+  /** Only for the caller's own session, so the console can open it. */
+  sessionId: z.string().optional(),
+});
+export type StationBusyHolder = z.infer<typeof StationBusyHolder>;
 export type AcpSessionRow = z.infer<typeof AcpSessionRow>;
 
 // ─── ACP transcript event ───────────────────────────────────────────────────

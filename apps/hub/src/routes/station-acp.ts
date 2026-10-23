@@ -8,7 +8,11 @@
  *         503 node offline, 424 agent open failure — never 502, see station-failure.ts)
  *   GET  /stations/:id/acp/sessions → AcpSessionRow[] (newest activity first)
  *   DELETE /acp/sessions/:sessionId → 204 (ends the session; WS clients get
- *        {t:"bye"}); 401 anonymous, 404 absent/foreign
+ *        {t:"bye"}); 401 anonymous, 404 absent/foreign. A workspace owner/admin may end
+ *        another person's session in their workspace (audited); a member gets 404.
+ *   POST /acp/sessions/:sessionId/resume {mode?} → 201 AcpSessionRow: an ended interactive
+ *        Salaam session carried on under a fresh authority (owner only; 404 otherwise,
+ *        409 not resumable, 424 station_busy when the station holds another execution)
  *
  * WS: GET /acp/sessions/:sessionId/ws (upgrade)
  *   Mirrors station-terminal.ts for the security preamble: CSWSH origin
@@ -37,6 +41,7 @@ import { and, asc, eq, gt } from "drizzle-orm";
 import {
   AcpClientMsg,
   CreateAcpSessionBody,
+  ResumeAcpSessionBody,
   type AcpEvent,
   type AcpEventType,
   type AcpServerMsg,
@@ -54,7 +59,8 @@ import { checkBridgeDispatchGrant } from "../services/bridge/dispatch-grant";
 import { isSalaamAuthorityDenied } from "../services/salaam-authority";
 import { stationFailure } from "../services/station-failure";
 import type { AuthUser } from "../auth/middleware";
-import { roleOf } from "../auth/workspace-authority";
+import { roleOf, isWorkspaceAdminUser } from "../auth/workspace-authority";
+import { logAdminAction } from "../models/admin-audit-log";
 import { isOrgPlaneUnavailable, ORG_PLANE_UNAVAILABLE_BODY } from "../auth/caller-authority";
 
 // ─── Error-to-status helper ───────────────────────────────────────────────────
@@ -81,8 +87,16 @@ function createErrorStatus(message: string): 403 | 404 | 409 | "node" {
  */
 export function createSessionFailure(err: unknown): {
   status: 403 | 404 | 409 | 424 | 503;
-  body: { error: string; code?: string } | typeof ORG_PLANE_UNAVAILABLE_BODY;
+  body:
+    | { error: string; code?: string; holder?: import("@agentpod/contract").StationBusyHolder }
+    | typeof ORG_PLANE_UNAVAILABLE_BODY;
 } {
+  // The station's one live execution is someone's (spec 2026-10-23, session lifecycle): say whose
+  // and since when, with a code the console words. Not a node failure, and not retryable now.
+  if (acp.isSalaamStationBusy(err))
+    return { status: 424, body: { error: err.message, code: "station_busy", holder: err.holder } };
+  if (acp.isSessionNotResumable(err))
+    return { status: 409, body: { error: err.message, code: "not_resumable" } };
   // The plane was needed (a caller with no token authority, under ORG_PLANE_*) and is down.
   if (isOrgPlaneUnavailable(err)) return { status: 503, body: ORG_PLANE_UNAVAILABLE_BODY };
   // A refusal by the control pair is 403. A node-failure status would invite a retry that can
@@ -118,6 +132,9 @@ const blankToUndefined = (v: unknown) => (v === "" ? undefined : v);
  */
 const ListQuery = z
   .object({
+    // `workspace`: everyone's sessions for an owner/admin (the history dialog); a member still
+    // gets only their own. Rows then name their owner.
+    scope: z.preprocess(blankToUndefined, z.enum(["mine", "workspace"]).optional()),
     limit: z.preprocess(blankToUndefined, z.coerce.number().finite().optional()),
     before: z.preprocess(
       blankToUndefined,
@@ -205,13 +222,16 @@ export const stationAcpRoutes = new Hono()
       return c.json({ error: "Not Found" }, 404);
     }
 
-    const { limit, before, beforeId } = c.req.valid("query");
+    const { limit, before, beforeId, scope } = c.req.valid("query");
     // Already ordered newest-activity-first and limited in SQL — never re-sort
     // or re-slice here.
     const rows = await acp.listSessions(user.id, stationId, {
       limit,
       before,
       beforeId,
+      ...(scope === "workspace"
+        ? { withOwners: true, everyone: isWorkspaceAdminUser(user) }
+        : {}),
     });
     return c.json(rows);
   })
@@ -236,12 +256,59 @@ export const stationAcpRoutes = new Hono()
     const sessionId = c.req.param("sessionId");
     const row = await acp.getSession(user.id, sessionId);
     if (!row) {
-      return c.json({ error: "Not Found" }, 404);
+      // Someone else's session: only a workspace owner/admin may end it, through the same end
+      // and confirmed revocation, and it is audited. Anyone else is told it does not exist.
+      if (!isWorkspaceAdminUser(user)) return c.json({ error: "Not Found" }, 404);
+      const reason = "Ended by a workspace admin.";
+      const ended = await acp.endSessionAsWorkspaceAdmin(user.tenantId, sessionId, reason);
+      if (!ended) return c.json({ error: "Not Found" }, 404);
+      await logAdminAction({
+        tenantId: user.tenantId,
+        adminUserId: user.id,
+        action: "acp_session_end",
+        targetUserId: ended.userId,
+        targetResourceId: sessionId,
+        targetResourceType: "acp_session",
+        details: { stationId: ended.stationId, reason },
+      });
+      return c.body(null, 204);
     }
 
     await acp.endSession(user.id, sessionId, "Ended from the console.");
     return c.body(null, 204);
   })
+
+  /**
+   * POST /api/acp/sessions/:sessionId/resume
+   *
+   * Carry an ended interactive Salaam session on, under the caller's own fresh authority. Owner
+   * only (see resumeSession for why); the same refusals as a new session otherwise.
+   */
+  .post(
+    "/acp/sessions/:sessionId/resume",
+    zValidator("json", ResumeAcpSessionBody),
+    async (c) => {
+      const user = c.get("user") as AuthUser | undefined;
+      if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+      const { mode } = c.req.valid("json");
+      try {
+        const row = await acp.resumeSession({
+          sessionId: c.req.param("sessionId"),
+          tenantId: user.tenantId,
+          userId: user.id,
+          ...(mode ? { mode } : {}),
+          authority: user.authority,
+          workspaceRole: roleOf(user),
+        });
+        return c.json(row, 201);
+      } catch (err) {
+        if (err instanceof Error && err.message === "Session not found.")
+          return c.json({ error: "Not Found" }, 404);
+        const { status, body } = createSessionFailure(err);
+        return c.json(body, status);
+      }
+    },
+  )
 
   /**
    * GET /api/acp/sessions/:sessionId/ws (WebSocket upgrade)

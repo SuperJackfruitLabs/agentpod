@@ -66,11 +66,13 @@ import {
   createAcpSocket,
   endAcpSession,
   listAcpSessions,
+  resumeAcpSession,
   type AcpServerMsg,
   type AcpSessionRow,
   type AcpSocket,
 } from "$lib/api/acp";
 import { rememberPrompt, acknowledgePrompt, PendingPromptConflict } from "./prompt-identity";
+import { ApiError, type StationBusyHolder } from "$lib/api/http-error";
 import { socketToken } from "$lib/api/client";
 import {
   addPendingPrompt,
@@ -186,6 +188,12 @@ export class AcpChat {
    */
   #creating = $state(false);
 
+  /**
+   * Who holds the station, when the last create or resume was refused because a Salaam station
+   * runs one session at a time. The panel offers a link when it is the person's own session.
+   */
+  #busyHolder = $state<StationBusyHolder | null>(null);
+
   /** Explicit intent for the next session, never a grant of new station tools. */
   managedTools = $state(false);
 
@@ -223,6 +231,40 @@ export class AcpChat {
    */
   get creating(): boolean {
     return this.#creating;
+  }
+
+  get busyHolder(): StationBusyHolder | null {
+    return this.#busyHolder;
+  }
+
+  /** The attached session has ended and its owner (this person) can carry it on. */
+  get canResume(): boolean {
+    return this.#session?.resumable === true && this.status === "ended" && !this.#creating;
+  }
+
+  /**
+   * Resume the attached ended session: the hub opens a NEW session on this person's own, fresh
+   * authority that carries the same conversation, and the panel moves onto it. Shares the create
+   * window (`#creating`), so a second click is a no-op.
+   */
+  async resume(): Promise<void> {
+    const from = this.#session;
+    if (!from || !this.canResume || this.destroyed) return;
+    this.#creating = true;
+    this.#error = null;
+    this.#busyHolder = null;
+    let row: AcpSessionRow | null = null;
+    try {
+      row = await resumeAcpSession(from.id, this.mode);
+    } catch (err) {
+      this.#error = errMessage(err);
+      this.#busyHolder = err instanceof ApiError ? (err.holder ?? null) : null;
+    } finally {
+      this.#creating = false;
+    }
+    if (row === null || this.destroyed) return;
+    this.attachRow(row);
+    await this.refreshSessions();
   }
 
   get transcript(): Transcript {
@@ -490,6 +532,7 @@ export class AcpChat {
   private async createSession(): Promise<AcpSessionRow | null> {
     if (this.destroyed || this.#creating) return null;
     this.#creating = true;
+    this.#busyHolder = null;
     try {
       const row = this.managedTools
         ? await createAcpSession(this.stationId, this.mode, {mcpProxy:true})
@@ -498,6 +541,7 @@ export class AcpChat {
     } catch (err) {
       // The ApiError message already carries the right "Couldn't …" grammar.
       this.#error = errMessage(err);
+      this.#busyHolder = err instanceof ApiError ? (err.holder ?? null) : null;
       return null;
     } finally {
       this.#creating = false;
