@@ -90,6 +90,39 @@ function planFrom(context: RunContext) {
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/**
+ * The strict runs this hub process is driving right now. One driver per run, whatever the roster
+ * says: two drivers on one run renew the same execution lease concurrently, and each renewal's
+ * compare-and-set on `leaseSequence` then fails the other ("Salaam authority changed while renewal
+ * was in flight"), which ends the session and strands the run (run_d187f3907dd8470c, #776).
+ *
+ * Taken synchronously at the point of decision, so drivers that read the ledger together still
+ * cannot both pass. The ledger's transaction fences stay the cross-process guard; this is the
+ * in-process one that keeps them from ever being exercised by our own loops.
+ */
+const drivingRuns = new Set<string>();
+
+function busy(runId: string): DispatchResult {
+  return {
+    status: "idle",
+    externalRunId: runId,
+    reason: "Another driver in this hub owns this strict run",
+  };
+}
+
+async function exclusively(
+  runId: string,
+  drive: () => Promise<DispatchResult>,
+): Promise<DispatchResult> {
+  if (drivingRuns.has(runId)) return busy(runId);
+  drivingRuns.add(runId);
+  try {
+    return await drive();
+  } finally {
+    drivingRuns.delete(runId);
+  }
+}
+
 function stoppedUnownedSession(
   row: typeof acpSessions.$inferSelect,
   runId: string,
@@ -739,6 +772,16 @@ export async function resumeSalaamWork(
       reason: "Multiple strict run owners require reconciliation",
     };
   const { session, dispatch } = pending[0]!;
+  return exclusively(dispatch.externalRunId, () =>
+    resumeOwnedSalaamWork(deps, session, dispatch),
+  );
+}
+
+async function resumeOwnedSalaamWork(
+  deps: DispatchDeps,
+  session: typeof acpSessions.$inferSelect,
+  dispatch: typeof bridgeDispatches.$inferSelect,
+): Promise<DispatchResult> {
   if (
     !session.executionAuthority ||
     session.executionAuthority.binding.run.source !== "superpipeline"
@@ -795,6 +838,13 @@ export async function resumeSalaamWork(
 }
 
 export async function startSalaamWork(
+  deps: DispatchDeps,
+  claim: ClaimedWork,
+): Promise<DispatchResult> {
+  return exclusively(claim.runId, () => startClaimedSalaamWork(deps, claim));
+}
+
+async function startClaimedSalaamWork(
   deps: DispatchDeps,
   claim: ClaimedWork,
 ): Promise<DispatchResult> {
@@ -1072,6 +1122,16 @@ async function driveSalaamWork(
     }
     hop("progress acknowledged", { run: runId, steps: payload.plan.steps.length });
     for (;;) {
+      // A rebuilt loop takes this run over. Safe here: no renewal or observation is in flight,
+      // and the durable owner is left exactly as it is for the successor's resume.
+      if (deps.handover?.aborted) {
+        hop("handed over", { run: runId });
+        return {
+          status: "failed",
+          externalRunId: runId,
+          reason: "Strict work handed over to the rebuilt loop",
+        };
+      }
       if (Date.now() >= deadline) {
         mustStop = true;
         throw Error("Strict work controller deadline reached");

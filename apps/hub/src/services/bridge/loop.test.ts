@@ -82,6 +82,34 @@ describe("the loop keeps claiming", () => {
   });
 });
 
+describe("a rebuild hands strict work over (#776)", () => {
+  test("stop with handover aborts the signal the running cycle holds; a plain stop drains", async () => {
+    const seen: AbortSignal[] = [];
+    let release!: () => void;
+    const loopWith = () =>
+      startAgentLoop({
+        run: (handover) => {
+          seen.push(handover);
+          return new Promise<DispatchResult>((r) => (release = () => r({ status: "idle" })));
+        },
+        sleep: noSleep,
+      });
+    const rebuilt = loopWith();
+    await Promise.resolve();
+    const stopping = rebuilt.stop({ handover: true });
+    expect(seen[0]!.aborted).toBe(true);
+    release();
+    await stopping;
+
+    const removed = loopWith();
+    await Promise.resolve();
+    const draining = removed.stop();
+    expect(seen[1]!.aborted).toBe(false);
+    release();
+    await draining;
+  });
+});
+
 describe("a run that belonged to another agent halts the loop", () => {
   test("nothing is claimed after it", async () => {
     const s = scripted({ status: "foreign-run", externalRunId: "run_1" });

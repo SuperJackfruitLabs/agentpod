@@ -161,6 +161,14 @@ export interface DispatchDeps {
   /** How often the run is re-read while a question is outstanding. */
   permissionPollMs?: number;
   /**
+   * Aborted when this agent's loop is being rebuilt from an edited roster row. A strict Salaam
+   * driver then hands its run over at its next safe point (between observations, with no renewal
+   * in flight) and leaves the durable owner intact, so the rebuilt loop resumes the same run with
+   * the new configuration (#776). The old loop's credential is pinned to the old row revision and
+   * could no longer publish or answer anything for it.
+   */
+  handover?: AbortSignal;
+  /**
    * superpipeline's MCP endpoint, for the agent's own board tools. Together with
    * the agent's `mcpToken` it is what makes a harness able to report for
    * itself; either one missing means it cannot, and is told nothing about it.
