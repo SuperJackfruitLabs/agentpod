@@ -2,20 +2,20 @@
 // stage nears the viewport.
 //
 // Each stage holds a still. The canvas moves into whichever stage is most in view, draws that
-// stage's scene there, and leaves it when another stage takes over; a stage without the canvas
-// shows its still, which is the same scene settled. A scene plays its one movement once, the first
-// time its stage comes into view, and then rests.
+// stage's scene there, and leaves it when another stage takes over.
 //
-// A scene can have beats, one per step of a section (data-beat on the stage, 1 to n). Each beat is
-// one movement, and the beats before it are shown done. A pinned stage beside a list of steps
-// changes beat as each step crosses the middle of the viewport (loader.js calls setBeat); a beat
-// plays the first time it is reached and is shown settled after that.
+// Every movement is scrubbed by native scroll, never played on a timer: a scene's timeline is read
+// from where its stage, or the step beside it, is on screen (common.js timeline), and the scene
+// follows it with a light damping. Scrolling back reverses it. A scene can have beats, one per step
+// of a section (1 to n); each beat is one movement, and the beats before it are shown done. A stage
+// without the canvas shows its still (its beat, done) once scroll has passed that point, and nothing
+// before it, so it never shows a later state than the scene would.
 //
 // Calm by construction: no post-processing, no auto-orbit, no animation loop of its own. A frame is
-// drawn only when something moved (the scene's one movement, scroll, a resize), and drawing stops
-// once it has settled. Scroll turns the camera at most 3° across a stage.
+// drawn only while the timeline, the camera or the stage's size is changing, and drawing stops once
+// it has settled. Scroll turns the camera at most 3° across a stage.
 import { Color, DirectionalLight, HemisphereLight, PCFShadowMap, PerspectiveCamera, Scene, SpotLight, Vector3, WebGLRenderer } from 'three';
-import { accentRGB, clamp, stageProgress } from './common.js';
+import { accentRGB, stageProgress, stillAt, timeline } from './common.js';
 import { disposeMaterials } from './kit.js';
 import fleet from './fleet.js';
 import dialOut from './dial-out.js';
@@ -62,7 +62,14 @@ function make(name, phase, small) {
     scene.add(lamp, lamp.target);
   }
   const camera = new PerspectiveCamera(def.view.fov ?? 28, 1, 0.1, 60);
-  return { def, scene, parts, camera, look: new Vector3(...def.view.look), beat: 1, t: 1, played: new Set(), start: 0, yaw: 0 };
+  return { def, scene, parts, camera, look: new Vector3(...def.view.look), v: 0, yaw: 0 };
+}
+
+/** Shows timeline value `v` (0 to the scene's beats): beat = the one in progress, t = its part. */
+function show(w, v) {
+  const n = w.def.beats ?? 1;
+  const beat = Math.min(n, Math.floor(v) + 1);
+  w.parts.set(beat, Math.min(1, v - (beat - 1)));
 }
 
 function aim(w, aspect, yaw) {
@@ -105,26 +112,23 @@ export function mountWorld(stages, opts) {
     const w = active.clientWidth, h = active.clientHeight;
     if (w && h) renderer.setSize(w, h, false);
   }
+  // A stage without the canvas shows its still only once scroll has reached the end of its beat.
+  function stills() {
+    for (const st of stages) if (st !== active && st.offsetWidth) st.classList.toggle('pending', timeline(st) < stillAt(st) - 0.01);
+  }
   function activate(st) {
-    if (active) {
-      // The stage being left shows its still: the scene settled, so a movement cut short ends there.
-      const w = get(active);
-      w.t = 1;
-      active.classList.remove('live', 'pending');
-    }
+    if (active) active.classList.remove('live');
     active = st;
+    stills();
     if (!st) { canvas.remove(); return; }
+    const w = get(st);
+    // Arrive where scroll already is: no catching up from the start.
+    w.v = timeline(st);
+    w.yaw = yawAt(st);
+    st.classList.add('pending');
     st.appendChild(canvas);
     size();
-    play(st, +st.dataset.beat || 1, 250);
-  }
-  /** Shows `beat` on a stage's scene: played the first time, settled after that. */
-  function play(st, beat, delay) {
-    const w = get(st);
-    w.beat = beat;
-    if (w.played.has(beat)) w.t = 1;
-    else { w.played.add(beat); w.t = 0; w.start = performance.now() + delay; }
-    if (st === active) request();
+    request();
   }
   // The stage most in view gets the canvas; one only just in view keeps it until another is further in.
   function pick() {
@@ -133,6 +137,7 @@ export function mountWorld(stages, opts) {
     const next = top >= 0.4 ? best : active && ratios.get(active) > 0 ? active : null;
     if (next !== active) activate(next);
   }
+  const yawAt = (st) => ((stageProgress(st) - 0.5) * 3 * Math.PI) / 180; // ±1.5°: 3° across the stage
 
   function frame(now) {
     raf = 0;
@@ -140,11 +145,12 @@ export function mountWorld(stages, opts) {
     const w = get(active);
     const dt = Math.min(0.05, last ? (now - last) / 1000 : 0.016);
     last = now;
+    const k = 1 - Math.exp(-dt * 9);
     let moving = false;
-    if (w.t < 1) { w.t = clamp((now - w.start) / w.def.duration); moving = true; }
-    w.parts.set(w.beat, w.t);
-    const yawTo = ((stageProgress(active) - 0.5) * 3 * Math.PI) / 180; // ±1.5°: 3° across the stage
-    if (Math.abs(yawTo - w.yaw) > 1e-5) { w.yaw += (yawTo - w.yaw) * (1 - Math.exp(-dt * 9)); moving = true; }
+    const to = timeline(active), yawTo = yawAt(active);
+    if (Math.abs(to - w.v) > 1e-4) { w.v += (to - w.v) * k; moving = true; } else w.v = to;
+    if (Math.abs(yawTo - w.yaw) > 1e-5) { w.yaw += (yawTo - w.yaw) * k; moving = true; }
+    show(w, w.v);
     aim(w, active.clientWidth / Math.max(1, active.clientHeight), w.yaw);
     renderer.render(w.scene, w.camera);
     active.classList.add('live');
@@ -159,12 +165,12 @@ export function mountWorld(stages, opts) {
   stages.forEach((s) => io.observe(s));
   const ro = new ResizeObserver(() => { if (active) { size(); request(); } });
   stages.forEach((s) => ro.observe(s));
-  const onScroll = () => { if (active) request(); };
+  const onScroll = () => { stills(); if (active) request(); };
   addEventListener('scroll', onScroll, { passive: true });
   canvas.addEventListener('webglcontextlost', () => opts.onLost?.());
+  stills();
 
   return {
-    setBeat(st, beat) { if (worlds.has(st) && get(st).beat !== beat) play(st, beat, 120); },
     dispose() {
       cancelAnimationFrame(raf);
       io.disconnect();
@@ -183,7 +189,7 @@ export async function renderStill(stage, phase, beat = 1) {
   const renderer = newRenderer(true);
   const w = make(stage.dataset.scene, phase, false);
   renderer.setSize(stage.clientWidth, stage.clientHeight, false);
-  w.parts.set(beat, 1);
+  show(w, beat);
   aim(w, stage.clientWidth / stage.clientHeight, 0);
   renderer.render(w.scene, w.camera);
   const url = renderer.domElement.toDataURL('image/webp', 0.86);

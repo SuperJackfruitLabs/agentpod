@@ -6,8 +6,9 @@
 //
 // A section with several steps (`[data-steps]`) has one pinned stage beside them on a wide screen,
 // and a stage above each step on a narrow one. The step crossing the middle of the viewport is the
-// current one: the others dim a little, and the pinned stage shows that step's beat, as a scene
-// or as its still. Only native scroll is read; nothing is pinned or scrolled by script.
+// current one: the others dim a little, and the pinned stage's still is that step's. The scenes
+// themselves are scrubbed by scroll (world.js). Only native scroll is read; nothing is pinned or
+// scrolled by script.
 import { hasWebGL, onMotionChange, reducedMotion, scenePhase } from './common.js';
 
 const stages = [...document.querySelectorAll('.stage[data-scene]')];
@@ -32,7 +33,6 @@ if (stages.length) {
       if (pinned && pinned.dataset.beat !== beat) {
         pinned.dataset.beat = beat;
         still(pinned);
-        world?.setBeat(pinned, +beat);
       }
     }, { rootMargin: '-50% 0px -50% 0px' });
     steps.forEach((st) => at.observe(st));
@@ -46,8 +46,7 @@ if (stages.length) {
   async function start() {
     if (world || loading || reducedMotion() || !hasWebGL()) return;
     loading = true;
-    // A stage whose scene has not played yet shows nothing until it does, rather than its settled
-    // still and then a rewind to the start.
+    // While the world loads no still shows, so none shows a state the scene then rewinds from.
     for (const s of stages) s.classList.add('pending');
     try {
       const { mountWorld } = await import('./world.js');

@@ -23,7 +23,7 @@ const glowing = (m, c, k) => { m.color.set(c); m.emissive.set(c).multiplyScalar(
 export default {
   view: { look: [0.15, 0.62, 0.1], dist: 7.3, rise: 0.36, yaw: -0.3, aspect: 4 / 3, fov: 28 },
   shadow: { left: -2.8, right: 2.8, top: 2.4, bottom: -1.4 },
-  duration: 2200,
+  beats: 3,
   build(scene, { accent, night }) {
     const root = new Group();
     scene.add(root);

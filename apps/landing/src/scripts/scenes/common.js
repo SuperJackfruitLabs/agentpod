@@ -48,3 +48,25 @@ export function stageProgress(el) {
   const r = el.getBoundingClientRect();
   return clamp((innerHeight - r.top) / (innerHeight + r.height));
 }
+
+/**
+ * Where a stage's scene stands, read from native scroll: the beats done plus the current beat's
+ * part, 0 to n. A pinned stage beside a list of steps follows the steps: each step's beat plays
+ * while that step crosses the middle of the viewport. Any other stage plays as it rises into view
+ * (its pinned column, for a sticky one); its beat is data-beat. Scrolling back reverses it.
+ */
+export function timeline(stage) {
+  const steps = stage.classList.contains('pinned') && stage.closest('[data-steps]');
+  if (steps) {
+    const mid = innerHeight / 2;
+    let v = 0;
+    for (const st of steps.querySelectorAll('[data-step]')) {
+      const r = st.getBoundingClientRect();
+      v += clamp(((mid - r.top) / r.height - 0.1) / 0.55);
+    }
+    return v;
+  }
+  return (+stage.dataset.beat || 1) - 1 + clamp((stageProgress(stage.closest('.pin') ?? stage) - 0.2) / 0.4);
+}
+/** The timeline value a stage's still shows: the end of its beat. */
+export const stillAt = (stage) => +stage.dataset.beat || 1;

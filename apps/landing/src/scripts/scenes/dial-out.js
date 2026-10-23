@@ -13,7 +13,7 @@ const SEG = 64, RADIAL = 6;
 export default {
   view: { look: [0.12, 0.6, 0.2], dist: 6.2, rise: 0.42, yaw: -0.34, aspect: 4 / 3, fov: 28 },
   shadow: { left: -2.2, right: 2.2, top: 2.2, bottom: -1.6 },
-  duration: 2400,
+  beats: 1,
   build(scene, { accent, night }) {
     const root = new Group();
     scene.add(root);
