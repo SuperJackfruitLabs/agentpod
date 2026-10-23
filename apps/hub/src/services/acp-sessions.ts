@@ -2272,10 +2272,44 @@ async function reconnectSalaam(live: LiveSession): Promise<void> {
   }
 }
 
+let salaamRestoreBeforeLockForTest: (() => Promise<void>) | undefined;
+/** Test seam: runs after recovery read a row and before it takes the session lock (#773). */
+export function _setSalaamRestoreBeforeLockForTest(hook: (() => Promise<void>) | undefined): void {
+  salaamRestoreBeforeLockForTest = hook;
+}
+/** Test seam: forget a live session as a hub restart would, without ending its row. */
+export function _forgetLiveForTest(sessionId: string): void {
+  const live = liveById.get(sessionId);
+  if (!live) return;
+  clearInterval(live.authorityTimer);
+  live.ended = true; // this process forgets it; nothing more is written for it
+  removeLive(live);
+}
+
+/**
+ * Restoring a row and ending it after a hub restart are serialised per session (#773).
+ * Recovery used to restore from a row read before a concurrent end committed: the end wrote
+ * the ended state while the restored live session kept the station, wrote events at the
+ * row's stale seq (duplicate key), and refused the next open.
+ */
+const sessionLockKey = (id: string) => "session:" + id;
+
 async function restoreSalaamRow(
-  row: typeof acpSessions.$inferSelect,
+  staleRow: typeof acpSessions.$inferSelect,
 ): Promise<void> {
-  if (!row.executionAuthority || liveById.has(row.id)) return;
+  if (!staleRow.executionAuthority || liveById.has(staleRow.id)) return;
+  await salaamRestoreBeforeLockForTest?.();
+  const restored = await withStationOpenLock(sessionLockKey(staleRow.id), () =>
+    restoreSalaamRowLocked(staleRow),
+  );
+  if (restored) await reconnectSalaam(restored);
+}
+async function restoreSalaamRowLocked(
+  staleRow: typeof acpSessions.$inferSelect,
+): Promise<LiveSession | null> {
+  const [row] = await db.select().from(acpSessions).where(eq(acpSessions.id, staleRow.id));
+  if (!row || !row.executionAuthority || row.status === "ended" || liveById.has(row.id))
+    return null;
   const saved = row.executionAuthority;
   if (
     saved.state !== "active" ||
@@ -2290,15 +2324,20 @@ async function restoreSalaamRow(
         row.id,
         "Hub restart interrupted board execution; no prompt was replayed",
       );
-    return;
+    return null;
   }
   if (!connectionManager.isOnline(saved.binding.node_id)) {
     await db
       .update(acpSessions)
       .set({ status: "waiting" })
       .where(eq(acpSessions.id, row.id));
-    return;
+    return null;
   }
+  // The transcript's own high-water mark: row.lastSeq can trail an end appended without it.
+  const [agg] = await db
+    .select({ maxSeq: sql<number>`COALESCE(MAX(${acpEvents.seq}), 0)` })
+    .from(acpEvents)
+    .where(eq(acpEvents.sessionId, row.id));
   const b = saved.binding;
   const live = makeLive({
     id: row.id,
@@ -2312,15 +2351,16 @@ async function restoreSalaamRow(
     workspacePath: b.workspace,
     mcpProxyRequested: row.mcpProxyRequested,
   });
-  live.seq = row.lastSeq;
+  live.seq = Math.max(row.lastSeq, Number(agg?.maxSeq ?? 0));
   // Idle time keeps counting across a hub restart: a session idle for 14 minutes before it is
   // not given a fresh 15.
   live.lastActivityAt = row.lastEventAt.getTime();
   live.executionAuthority = saved;
   live.acpSessionId = saved.sessionId ?? "";
   live.transportLost = true;
+  if (liveById.has(row.id)) return null;
   addLive(live);
-  await reconnectSalaam(live);
+  return live;
 }
 
 export async function recoverSalaamForNode(nodeId: string): Promise<void> {
@@ -3145,16 +3185,25 @@ export async function endSession(
     await finalizeEnd(live, reason);
     return;
   }
-  // Not live (e.g. found via a stale row): mark the row ended if owned.
-  const rows = await db
-    .select()
-    .from(acpSessions)
-    .where(and(eq(acpSessions.id, sessionId), eq(acpSessions.userId, userId)));
-  if (!rows[0]) throw new Error("Session not found.");
-  if (rows[0].executionAuthority)
-    await revokeSalaamExecution(sessionId, reason);
-  if (rows[0].status === "ended") return;
-  await appendEndedState(sessionId, reason);
+  // Not live (e.g. found via a stale row): mark the row ended if owned — under the same
+  // per-session lock as recovery, so a restore cannot interleave with this end (#773).
+  const restored = await withStationOpenLock(sessionLockKey(sessionId), async () => {
+    const now = liveById.get(sessionId);
+    if (now) return now;
+    const rows = await db
+      .select()
+      .from(acpSessions)
+      .where(and(eq(acpSessions.id, sessionId), eq(acpSessions.userId, userId)));
+    if (!rows[0]) throw new Error("Session not found.");
+    if (rows[0].executionAuthority)
+      await revokeSalaamExecution(sessionId, reason);
+    if (rows[0].status !== "ended") await appendEndedState(sessionId, reason);
+    return null;
+  });
+  if (restored) {
+    if (restored.userId !== userId) throw new Error("Session not found.");
+    await finalizeEnd(restored, reason);
+  }
 }
 
 /**
@@ -3176,8 +3225,15 @@ export async function endSessionAsWorkspaceAdmin(
   const live = liveById.get(sessionId);
   if (live) await finalizeEnd(live, reason, "admin");
   else {
-    if (row.executionAuthority) await revokeSalaamExecution(sessionId, reason);
-    if (row.status !== "ended") await appendEndedState(sessionId, reason, "admin");
+    const restored = await withStationOpenLock(sessionLockKey(sessionId), async () => {
+      const now = liveById.get(sessionId);
+      if (now) return now;
+      const [fresh] = await db.select().from(acpSessions).where(eq(acpSessions.id, sessionId));
+      if (fresh?.executionAuthority) await revokeSalaamExecution(sessionId, reason);
+      if (fresh && fresh.status !== "ended") await appendEndedState(sessionId, reason, "admin");
+      return null;
+    });
+    if (restored) await finalizeEnd(restored, reason, "admin");
   }
   return { userId: row.userId, stationId: row.stationId };
 }

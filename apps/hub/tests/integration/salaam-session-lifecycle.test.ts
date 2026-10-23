@@ -294,3 +294,38 @@ test("a workspace admin ends another person's session through the confirmed stop
   const after = await routes(user(chitra, "admin")).request(`/api/stations/${stationId}/acp/sessions?scope=workspace`);
   expect(((await after.json()) as Array<{ id: string; resumable?: boolean }>).find((r) => r.id === held.id)?.resumable).toBe(false);
 });
+
+test("an end racing recovery after a hub restart leaves no restored ghost holding the station (#773)", async () => {
+  const held = await open(asha);
+  // The hub restarts: the row is active, nothing is live.
+  acp._forgetLiveForTest(held.id);
+  // Recovery has read the row (still active); before it restores, the person ends the session.
+  let afterEnd = 0;
+  acp._setSalaamRestoreBeforeLockForTest(async () => {
+    acp._setSalaamRestoreBeforeLockForTest(undefined);
+    await acp.endSession(asha, held.id, "done");
+    afterEnd = fake.salaamRequests.length;
+    unsubscribe = acp.subscribe(held.id, (e) => published.push(e.type));
+  });
+  const published: string[] = [];
+  let unsubscribe: (() => void) | undefined;
+  try {
+    await acp.recoverSalaamForNode(nodeId);
+  } finally {
+    acp._setSalaamRestoreBeforeLockForTest(undefined);
+    unsubscribe?.();
+  }
+  // A restored ghost would write its own end (or recovery error) onto this transcript.
+  expect(published).toEqual([]);
+  // Recovery did not restore the ended session: it sent the node nothing for it.
+  const restoredFor = fake.salaamRequests
+    .slice(afterEnd)
+    .filter((r) => JSON.stringify(r.params).includes(held.id));
+  expect(restoredFor).toEqual([]);
+  expect((await row(held.id)).status).toBe("ended");
+  const seqs = (await db.select().from(acpEvents).where(eq(acpEvents.sessionId, held.id))).map((e) => e.seq);
+  expect(new Set(seqs).size).toBe(seqs.length);
+  // The station is free: recovery did not resurrect the ended session.
+  const next = await open(asha);
+  expect(next.id).not.toBe(held.id);
+});
