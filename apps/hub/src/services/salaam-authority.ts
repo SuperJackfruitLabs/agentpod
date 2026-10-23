@@ -351,9 +351,24 @@ export async function revokeSalaamExecution(
   return next;
 }
 
-export async function salaamStationStopped(
+/**
+ * Who holds a Salaam station's one live execution, or null when it is free. `active`: a live
+ * session. `stopping`: a revocation the node has not yet confirmed (reconciled here first).
+ */
+export interface SalaamStationHolder {
+  sessionId: string;
+  userId: string;
+  since: Date;
+  state: "active" | "stopping";
+}
+
+export async function salaamStationStopped(stationId: string): Promise<boolean> {
+  return (await salaamStationHolder(stationId)) === null;
+}
+
+export async function salaamStationHolder(
   stationId: string,
-): Promise<boolean> {
+): Promise<SalaamStationHolder | null> {
   const [station] = await db
     .select()
     .from(stations)
@@ -370,16 +385,18 @@ export async function salaamStationStopped(
         execution.binding.principal_id !== station.principalId)
     )
       continue;
-    if (execution.state === "active" && row.status !== "ended") return false;
+    const holder = { sessionId: row.id, userId: row.userId, since: row.createdAt };
+    if (execution.state === "active" && row.status !== "ended")
+      return { ...holder, state: "active" };
     if (execution.state !== "revoked") {
       const status = await revokeSalaamExecution(
         row.id,
         "Reconcile pending revocation",
       );
-      if (status?.state !== "revoked") return false;
+      if (status?.state !== "revoked") return { ...holder, state: "stopping" };
     }
   }
-  return true;
+  return null;
 }
 
 export async function inspectSalaamExecution(saved: StoredSalaamExecution) {

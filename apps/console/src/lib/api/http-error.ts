@@ -25,15 +25,59 @@ export class ApiError extends Error {
    * hub answers `410 { error: "managed_by_org_plane", url }` for users, grants and devices.
    */
   readonly url?: string;
+  /** Who holds a Salaam station, on a `station_busy` refusal. */
+  readonly holder?: StationBusyHolder;
 
-  constructor(message: string, opts: { status: number | null; detail: string; code?: string; url?: string }) {
+  constructor(
+    message: string,
+    opts: { status: number | null; detail: string; code?: string; url?: string; holder?: StationBusyHolder },
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = opts.status;
     this.detail = opts.detail;
     this.code = opts.code;
     this.url = opts.url;
+    this.holder = opts.holder;
   }
+}
+
+/** The hub's 424 when a Salaam station already runs someone's session (one at a time). */
+export const STATION_BUSY = "station_busy";
+export type StationBusyHolder = import("@agentpod/contract").StationBusyHolder;
+
+/** "14:02", or "23 Oct, 14:02" when it was not today. Local time: it is read by a person. */
+function sinceTime(iso: string, now = new Date()): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "a while";
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return d.toDateString() === now.toDateString()
+    ? time
+    : `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })}, ${time}`;
+}
+
+/**
+ * "Asha is in a session with this agent since 14:02. It takes one at a time." — and "You are …"
+ * for the caller's own session (the panel offers a link to it).
+ */
+export function stationBusyMessage(holder: StationBusyHolder, now = new Date()): string {
+  const since = sinceTime(holder.since, now);
+  if (holder.state === "stopping")
+    return `${holder.you ? "Your" : `${holder.name}'s`} last session with this agent is still stopping (since ${since}). It takes one at a time; try again in a moment.`;
+  return `${holder.you ? "You are" : `${holder.name} is`} in a session with this agent since ${since}. It takes one at a time.`;
+}
+
+function parseHolder(v: unknown): StationBusyHolder | undefined {
+  if (typeof v !== "object" || v === null) return undefined;
+  const h = v as Record<string, unknown>;
+  if (typeof h.name !== "string" || typeof h.you !== "boolean" || typeof h.since !== "string") return undefined;
+  return {
+    name: h.name,
+    you: h.you,
+    since: h.since,
+    state: h.state === "stopping" ? "stopping" : "active",
+    ...(typeof h.sessionId === "string" ? { sessionId: h.sessionId } : {}),
+  };
 }
 
 import { WORKSPACE_ADMIN_REQUIRED, WORKSPACE_ADMIN_REQUIRED_MESSAGE } from "$lib/workspace-authority";
@@ -90,6 +134,7 @@ export async function apiError(res: Response, requestLine: string): Promise<ApiE
   let hubMessage: string | undefined;
   let code: string | undefined;
   let url: string | undefined;
+  let holder: StationBusyHolder | undefined;
   try {
     const text = await res.text();
     if (text) {
@@ -102,6 +147,10 @@ export async function apiError(res: Response, requestLine: string): Promise<ApiE
           // A member called a workspace-admin route: say who can, never the raw code.
           code = WORKSPACE_ADMIN_REQUIRED;
           hubMessage = WORKSPACE_ADMIN_REQUIRED_MESSAGE;
+        }
+        if (code === STATION_BUSY) {
+          holder = parseHolder(parsed.holder);
+          if (holder) hubMessage = stationBusyMessage(holder);
         }
         if (code === SALAAM_AUTHORITY_DENIED) {
           // The hub's sentence is for operators reading logs; say what the person can do.
@@ -123,7 +172,7 @@ export async function apiError(res: Response, requestLine: string): Promise<ApiE
   }
 
   const message = hubMessage ? asSentence(hubMessage) : copyForStatus(res.status);
-  return new ApiError(message, { status: res.status, detail, code, url });
+  return new ApiError(message, { status: res.status, detail, code, url, holder });
 }
 
 /** Build an ApiError for a request that never got a response (fetch threw). */

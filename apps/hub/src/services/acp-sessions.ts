@@ -71,6 +71,7 @@ import type {
   AcpSessionMode,
   AcpSessionRow,
   AcpSessionStatus,
+  StationBusyHolder,
   TurnError,
   TurnErrorReport,
   TurnResolution,
@@ -102,9 +103,11 @@ import {
   renewSalaamExecution,
   revokeSalaamExecution,
   validateSalaamAuthority,
-  salaamStationStopped,
+  salaamStationHolder,
   inspectSalaamExecution,
+  type SalaamStationHolder,
 } from "./salaam-authority";
+import { principalDirectory } from "./org-plane/directory";
 import { getStation } from "./station-registry";
 import { gateCapability } from "../routes/station-writes";
 import { connectionManager } from "./connection-manager";
@@ -1338,6 +1341,54 @@ export interface StationReadiness {
   ready: boolean;
   /** The sentence `createSession` would have thrown. Absent when ready. */
   reason?: string;
+  /** A Salaam station's one live execution, when that is what refused. */
+  holder?: SalaamStationHolder;
+}
+
+/** The generic refusal sentence, for readers that cannot say who (the bridge's readiness). */
+export const STATION_BUSY_REASON =
+  "Another session holds this agent's one live execution; it takes one at a time.";
+
+/**
+ * A Salaam station already runs someone's execution (one at a time: an agent must never act on
+ * two people's authority at once). Carries who, and since when, so the refusal can say so.
+ */
+export class SalaamStationBusy extends Error {
+  override name = "SalaamStationBusy";
+  readonly code = "station_busy";
+  constructor(readonly holder: StationBusyHolder) {
+    const who = holder.you ? "You are" : `${holder.name} is`;
+    super(
+      holder.state === "stopping"
+        ? `${holder.you ? "Your" : `${holder.name}'s`} last session with this agent is still stopping (since ${holder.since}). It takes one at a time.`
+        : `${who} in a session with this agent since ${holder.since}. It takes one at a time.`,
+    );
+  }
+}
+
+export function isSalaamStationBusy(e: unknown): e is SalaamStationBusy {
+  return e instanceof SalaamStationBusy || (e as { name?: string })?.name === "SalaamStationBusy";
+}
+
+/** A person's display name for a refusal or a list; never throws (a plane outage says "Someone"). */
+async function displayName(userId: string): Promise<string> {
+  try {
+    const p = await principalDirectory().principal(userId);
+    return p?.displayName || p?.handle || "Someone";
+  } catch {
+    return "Someone";
+  }
+}
+
+async function busyRefusal(holder: SalaamStationHolder, callerId: string): Promise<SalaamStationBusy> {
+  const you = holder.userId === callerId;
+  return new SalaamStationBusy({
+    name: you ? "You" : await displayName(holder.userId),
+    you,
+    since: holder.since.toISOString(),
+    state: holder.state,
+    ...(you ? { sessionId: holder.sessionId } : {}),
+  });
 }
 
 /**
@@ -1368,11 +1419,10 @@ export async function stationReadiness(
   if (!connectionManager.isOnline(station.nodeId)) {
     return { ready: false, reason: "Node is offline." };
   }
-  if (station.harness === "salaam" && !(await salaamStationStopped(station.id)))
-    return {
-      ready: false,
-      reason: "Prior Salaam execution has not been confirmed stopped.",
-    };
+  if (station.harness === "salaam") {
+    const holder = await salaamStationHolder(station.id);
+    if (holder) return { ready: false, reason: STATION_BUSY_REASON, holder };
+  }
   return { ready: true };
 }
 
@@ -1431,7 +1481,10 @@ export async function createSession(
   // Fail fast on the obvious gates before queueing (openSession re-checks them
   // under the lock, where the answers are current).
   const readiness = await stationReadiness({ tenantId }, stationId);
-  if (!readiness.ready) throw new Error(readiness.reason);
+  if (!readiness.ready)
+    throw readiness.holder
+      ? await busyRefusal(readiness.holder, userId)
+      : new Error(readiness.reason);
 
   return withStationOpenLock(stationId, () => openSession(input));
 }
@@ -1452,8 +1505,12 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     throw new Error("Node is offline.");
   }
   const { nodeId, stationKey, workspacePath, harness } = station;
-  if (harness === "salaam" && !(await salaamStationStopped(station.id)))
-    throw Error("Prior Salaam execution has not been confirmed stopped.");
+  if (harness === "salaam") {
+    const holder = await salaamStationHolder(station.id);
+    if (holder) throw await busyRefusal(holder, userId);
+  }
+  if (input.resumeFrom !== undefined && harness !== "salaam")
+    throw new SessionNotResumable("Only an interactive Salaam session can be resumed.");
   // Asked only of a node that runs the proxy; read before the sibling check, so no await
   // separates that check from addLive.
   const mcpProxyRequested =
