@@ -1941,3 +1941,20 @@ test("execution evidence keeps original task and binding after lease expiry with
       .where(eq(salaamWorkOwners.requestId, owner!.requestId));
   }
 });
+
+import { planFrom } from "../../src/services/bridge/salaam-dispatch";
+test("the admitted plan is the card's plan scoped to this run's own directory", () => {
+  const spec = { salaam: { version: 1, plan } };
+  const admitted = planFrom({ ...context, card: { ...context.card, spec } } as RunContext);
+  const dir = "runs/" + context.run.runId + "/";
+  expect(admitted.deliverables.length).toBe(plan.deliverables.length + 1);
+  expect(admitted.deliverables.every((d) => d.startsWith(dir))).toBe(true);
+  expect(admitted.deliverables).toContain(dir + "handoff.json");
+  expect(admitted.acceptance.every((c) => (c.cwd + "/").startsWith(dir))).toBe(true);
+  const other = planFrom({
+    ...context,
+    run: { ...context.run, runId: "run_" + hex() },
+    card: { ...context.card, spec },
+  } as RunContext);
+  for (const d of admitted.deliverables) expect(other.deliverables).not.toContain(d);
+});

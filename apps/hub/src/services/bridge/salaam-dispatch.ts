@@ -1,3 +1,4 @@
+import { runScopedPlan } from "./salaam-run-scope";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { inDispatchSpan } from "../../telemetry/dispatch-span";
 import { forwardSalaamWorkTrace } from "./salaam-trace";
@@ -81,11 +82,15 @@ export async function probeSalaamWork(input: {
 const taskSpec = z
   .object({ version: z.literal(1), plan: SalaamWorkPlan })
   .strict();
-function planFrom(context: RunContext) {
+export function planFrom(context: RunContext) {
   const spec = context.card.spec;
   if (!spec || typeof spec !== "object" || Array.isArray(spec))
     throw Error("Strict Salaam work requires an explicit spec.salaam plan");
-  return taskSpec.parse((spec as Record<string, unknown>).salaam).plan;
+  // Each run works in its own directory and declares the agent's handoff (salaam-run-scope).
+  return runScopedPlan(
+    taskSpec.parse((spec as Record<string, unknown>).salaam).plan,
+    context.run.runId,
+  );
 }
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
