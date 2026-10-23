@@ -60,7 +60,7 @@ What is NOT here, deliberately: anything that acts as THIS MACHINE rather than a
 (that is apn), and the interactive surfaces — a terminal, an ACP session — which are a
 console's job rather than a script's.
 
-Set $AGENTPOD_HUB to talk to a hub other than the default, and
+Set $AGENTPOD_HUB to talk to a hub other than the one you last signed in to, and
 $AGENTPOD_DEVICE_NAME to name this machine in the device list.
 Every verb, flag and variable: https://docs.agentpod.dev/reference/fleet/`
 

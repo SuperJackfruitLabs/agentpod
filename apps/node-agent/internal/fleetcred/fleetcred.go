@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,30 @@ func Load() (Credential, error) {
 		return Credential{}, ErrNoCredential
 	}
 	return Credential{Token: s.Token, Source: p}, nil
+}
+
+// StoredHub is the hub the stored login was made against, or "" when there is none. A token
+// belongs to the hub (and organization plane) that issued it; a later `fleet` call must not
+// quietly send it to, or sign in again against, the production default instead.
+func StoredHub() string {
+	p := Path()
+	if p == "" {
+		return ""
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	var s stored
+	if json.Unmarshal(b, &s) != nil {
+		return ""
+	}
+	h := strings.TrimRight(strings.TrimSpace(s.Hub), "/")
+	u, err := url.Parse(h)
+	if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost"))) {
+		return ""
+	}
+	return h
 }
 
 // Save writes the token for later `fleet` calls, 0600 inside a 0700 directory — the same

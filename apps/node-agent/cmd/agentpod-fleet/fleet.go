@@ -28,7 +28,8 @@ import (
 
 const defaultHub = "https://hub.agentpod.dev"
 
-// hubBase is the hub a fleet command talks to: the environment, else the default.
+// hubBase is the hub a fleet command talks to: the environment, else the hub the stored login
+// was made against (token.json), else the default.
 //
 // Deliberately NOT the node config's `hub` field. A machine enrolled against one hub does not
 // make that hub the one a person is signed in to, and quietly borrowing it would blur the very
@@ -36,6 +37,9 @@ const defaultHub = "https://hub.agentpod.dev"
 func hubBase() string {
 	if h := strings.TrimSpace(os.Getenv(fleetcred.EnvHub)); h != "" {
 		return strings.TrimRight(h, "/")
+	}
+	if h := fleetcred.StoredHub(); h != "" {
+		return h
 	}
 	return defaultHub
 }

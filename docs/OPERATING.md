@@ -187,7 +187,7 @@ payload it does not fully model silently drops the field somebody needed.
 | Variable | Meaning |
 |---|---|
 | `AGENTPOD_TOKEN` | A hub token, used instead of the stored one. What CI and an agent harness set. |
-| `AGENTPOD_HUB` | The hub to talk to. Defaults to `https://hub.agentpod.dev`. |
+| `AGENTPOD_HUB` | The hub to talk to. Defaults to the hub the stored `fleet login` was made against, else `https://hub.agentpod.dev`. |
 | `AGENTPOD_LOGIN_TIMEOUT` | How long `login` waits for the browser. Defaults to five minutes — right for a person, wrong for anything scripted. |
 | `BROWSER` | The command `login` opens. May carry arguments. `BROWSER=none` opens nothing and leaves the printed URL as the whole interface, which is what you want over SSH. |
 
