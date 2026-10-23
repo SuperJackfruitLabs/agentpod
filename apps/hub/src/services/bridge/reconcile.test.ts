@@ -171,3 +171,40 @@ describe("the quiet-board signal the boot-time check used to give", () => {
     expect(empties).toHaveLength(2);
   });
 });
+
+describe("ticks keep coming while a loop drains (#776)", () => {
+  test("ticks during a long rebuild start exactly one loop, and the rebuild hands the card over", async () => {
+    // The supervisor ticks every ten seconds whatever the last tick is doing. A drain lasts as long
+    // as the card. Every tick that saw the old loop still registered used to stop it again and
+    // start its own loop afterwards: seven drivers on one strict run within 5 ms on staging.
+    const live = new Map<string, string>([["coder-kai", "rev-1"]]);
+    const starts: string[] = [];
+    const stops: Array<string | undefined> = [];
+    let drained!: () => void;
+    const drain = new Promise<void>((r) => (drained = r));
+    const registry: LoopRegistry = {
+      running: () => new Map(live),
+      start: (a) => {
+        starts.push(a.revision);
+        live.set(a.key, a.revision);
+      },
+      stop: async (key, why) => {
+        stops.push(why);
+        await drain;
+        live.delete(key);
+      },
+    };
+    const state: ReconcileState = {};
+    const edited = [agent("coder-kai", { revision: "rev-2" })];
+    const ticks = [1, 2, 3, 4, 5, 6, 7].map(() => reconcileRoster(registry, edited, { state }));
+    // Another agent's edit is not held back by this one's drain.
+    await reconcileRoster(registry, [...edited, agent("writer-quill")], { state });
+    expect(starts).toEqual(["rev-writer-quill-1"]);
+    drained();
+    await Promise.all(ticks);
+    expect(stops).toEqual(["rebuild"]);
+    expect(starts).toEqual(["rev-writer-quill-1", "rev-2"]);
+    await reconcileRoster(registry, edited, { state });
+    expect(starts).toEqual(["rev-writer-quill-1", "rev-2"]);
+  });
+});

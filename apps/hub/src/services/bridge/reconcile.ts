@@ -35,7 +35,7 @@ export interface LoopRegistry {
    * cannot resolve until the in-flight `runOnce` returns. A removed agent finishes the card it is
    * holding and then exits — it does not abandon it mid-run.
    */
-  stop(key: string): Promise<void>;
+  stop(key: string, why?: "removed" | "rebuild"): Promise<void>;
 }
 
 /**
@@ -47,6 +47,14 @@ export interface LoopRegistry {
  */
 export interface ReconcileState {
   reportedEmpty?: boolean;
+  /**
+   * Keys with a stop or rebuild still in progress. A stop drains the in-flight card, which can
+   * take as long as the card does, and the supervisor ticks every few seconds meanwhile. Each of
+   * those ticks used to see the old loop still registered, call stop again, and then start its own
+   * loop when the drain ended: seven loops on one agent (#776), all but one orphaned. A key in
+   * here is left alone until its transition is over.
+   */
+  transitioning?: Set<string>;
 }
 
 export interface ReconcileOptions {
@@ -91,18 +99,20 @@ export async function reconcileRoster(
 
   const running = registry.running();
   const wanted = new Map(roster.map((a) => [loopKey(a), a]));
-
-  // Gone, or disabled — `readBridgeRoster` filters disabled rows out, so the two arrive here
-  // identically. That is deliberate: the difference matters to a human reading the list, not to
-  // the supervisor, which only ever asks "should this be running".
-  for (const key of running.keys()) {
-    if (!wanted.has(key)) await registry.stop(key);
-  }
-
-  for (const [key, agent] of wanted) {
-    const live = running.get(key);
-    if (live === agent.revision) continue;
-    if (live !== undefined) await registry.stop(key);
+  const transitioning = state ? (state.transitioning ??= new Set()) : new Set<string>();
+  const transitions: Promise<void>[] = [];
+  // One transition per key at a time, and each key's independent of the others': one agent
+  // draining a long card must not hold every other agent's edit back.
+  const transition = (key: string, work: () => Promise<void>) => {
+    if (transitioning.has(key)) return;
+    transitioning.add(key);
+    transitions.push(
+      work().finally(() => {
+        transitioning.delete(key);
+      }),
+    );
+  };
+  const start = (key: string, agent: BridgeAgentSecrets) => {
     try {
       registry.start(agent);
     } catch (err) {
@@ -110,5 +120,25 @@ export async function reconcileRoster(
       // not stop the other three from claiming.
       opts.onError?.(key, err instanceof Error ? err.message : String(err));
     }
+  };
+
+  // Gone, or disabled — `readBridgeRoster` filters disabled rows out, so the two arrive here
+  // identically. That is deliberate: the difference matters to a human reading the list, not to
+  // the supervisor, which only ever asks "should this be running".
+  for (const key of running.keys()) {
+    if (!wanted.has(key)) transition(key, () => registry.stop(key, "removed"));
   }
+
+  for (const [key, agent] of wanted) {
+    if (transitioning.has(key)) continue;
+    const live = running.get(key);
+    if (live === agent.revision) continue;
+    if (live === undefined) start(key, agent);
+    else
+      transition(key, async () => {
+        await registry.stop(key, "rebuild");
+        start(key, agent);
+      });
+  }
+  await Promise.all(transitions);
 }
