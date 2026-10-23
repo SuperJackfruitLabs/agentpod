@@ -106,4 +106,5 @@ export type AdminAction =
   | "user_create"
   | "settings_update"
   | "node_telemetry_update"
-  | "node_remove";
+  | "node_remove"
+  | "acp_session_end";

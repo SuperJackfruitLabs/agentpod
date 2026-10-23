@@ -1872,6 +1872,10 @@ const SESSION_PAGE_DEFAULT_LIMIT = 20;
 const SESSION_PAGE_MAX_LIMIT = 100;
 
 export interface ListSessionsOptions {
+  /** Every person's sessions on the station (a workspace owner/admin's read). */
+  everyone?: boolean;
+  /** Name each row's owner (`owner`), for a list that can hold other people's sessions. */
+  withOwners?: boolean;
   /** Page size; defaults to 20 and is clamped into [1, 100]. */
   limit?: number;
   /**
@@ -1928,10 +1932,10 @@ export async function listSessions(
   stationId: string,
   opts: ListSessionsOptions = {},
 ): Promise<AcpSessionRow[]> {
-  const filters = [
-    eq(acpSessions.userId, userId),
-    eq(acpSessions.stationId, stationId),
-  ];
+  const filters = [eq(acpSessions.stationId, stationId)];
+  // Everyone's sessions only for a workspace owner/admin, and only when asked for (the history
+  // dialog). The caller must already have scoped the station to their workspace.
+  if (!opts.everyone) filters.push(eq(acpSessions.userId, userId));
   if (opts.before !== undefined) {
     const cursor = new Date(opts.before);
     if (Number.isNaN(cursor.getTime())) {
@@ -1956,7 +1960,16 @@ export async function listSessions(
     .where(and(...filters))
     .orderBy(desc(acpSessions.lastEventAt), desc(acpSessions.id))
     .limit(clampSessionLimit(opts.limit));
-  return rows.map(toContract);
+  if (!opts.withOwners) return rows.map(toContract);
+  const names = new Map<string, string>();
+  for (const id of new Set(rows.map((r) => r.userId)))
+    if (id !== userId) names.set(id, await displayName(id));
+  return rows.map((r) => {
+    const you = r.userId === userId;
+    const row = toContract(r);
+    // Only the owner may resume (see resumeSession), so nobody else is told it is resumable.
+    return { ...row, resumable: you && row.resumable, owner: { name: you ? "You" : names.get(r.userId)!, you } };
+  });
 }
 
 export async function getSession(
@@ -3145,12 +3158,38 @@ export async function endSession(
 }
 
 /**
+ * A workspace owner/admin ends someone else's session (spec: session lifecycle, 2026-10-23):
+ * the same end and confirmed revocation as the owner's own, with `endedCause: "admin"` on the row.
+ * The caller decides the role and writes the audit entry; this checks only that the session is in
+ * the caller's workspace. Returns the ended row's owner and station, or null when not found.
+ */
+export async function endSessionAsWorkspaceAdmin(
+  tenantId: string,
+  sessionId: string,
+  reason: string,
+): Promise<{ userId: string; stationId: string } | null> {
+  const [row] = await db
+    .select()
+    .from(acpSessions)
+    .where(and(eq(acpSessions.id, sessionId), eq(acpSessions.tenantId, tenantId)));
+  if (!row) return null;
+  const live = liveById.get(sessionId);
+  if (live) await finalizeEnd(live, reason, "admin");
+  else {
+    if (row.executionAuthority) await revokeSalaamExecution(sessionId, reason);
+    if (row.status !== "ended") await appendEndedState(sessionId, reason, "admin");
+  }
+  return { userId: row.userId, stationId: row.stationId };
+}
+
+/**
  * Append a state-ended event (seq = MAX(seq)+1) and mark a NON-LIVE row ended.
  * Live sessions go through finalizeEnd instead (in-memory seq counter).
  */
 async function appendEndedState(
   sessionId: string,
   reason: string,
+  cause?: "idle" | "admin",
 ): Promise<void> {
   const [agg] = await db
     .select({ maxSeq: sql<number>`COALESCE(MAX(${acpEvents.seq}), 0)` })
@@ -3180,6 +3219,7 @@ async function appendEndedState(
     .set({
       status: "ended",
       endedReason: reason,
+      ...(cause ? { endedCause: cause } : {}),
       lastEventAt: createdAt,
       // This row is not live, so seq came from MAX(seq)+1 — the same
       // last_seq invariant persistEvent maintains for live sessions.
