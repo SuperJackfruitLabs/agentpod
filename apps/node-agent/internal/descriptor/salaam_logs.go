@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/salaam"
 )
@@ -16,6 +17,34 @@ const salaamUnit = "salaam"
 
 // salaamJournalctl is the journalctl the log tail runs; a variable so tests can point it at a stub.
 var salaamJournalctl = "journalctl"
+
+// A launcher-profile host (estate 306) runs as root in salaam-host@<key>.service, whose
+// journal the unprivileged node cannot read. The unit appends its output to
+// salaamLauncherLogDir/<key>.log (root-owned, group salaam-operator, 0640), which the
+// node tails instead. Variables so tests can point them at a temporary tree.
+var (
+	salaamLauncherRoot   = "/etc/salaam/stations"
+	salaamLauncherLogDir = "/var/log/salaam"
+	salaamTail           = "tail"
+)
+
+// salaamLogCommand picks the journal query, or the launcher log file when the configured
+// manifest is the provisioned launcher manifest for this station.
+func (s *salaamDescriptor) salaamLogCommand(key string, follow bool) (string, []string, []string) {
+	id := key[len("salaam:"):]
+	if s.config.Manifest == filepath.Join(salaamLauncherRoot, id, "host.json") {
+		args := []string{"-n", fmt.Sprint(tailDefaultN)}
+		if follow {
+			args = append(args, "-F")
+		}
+		return salaamTail, append(args, filepath.Join(salaamLauncherLogDir, id+".log")), os.Environ()
+	}
+	args := []string{"--user", "-u", salaamUnit, "-n", fmt.Sprint(tailDefaultN), "-o", "cat", "--no-pager"}
+	if follow {
+		args = append(args, "-f")
+	}
+	return salaamJournalctl, args, userSessionEnv(os.Environ())
+}
 
 // TailLogs streams the Salaam daemon's journal: the last tailDefaultN lines, then (when follow)
 // every new line (spec 2026-10-23, C5). Daemon logs carry no session content; if they ever
@@ -27,12 +56,9 @@ func (s *salaamDescriptor) TailLogs(ctx context.Context, key string, follow bool
 	if key != salaam.StationKey(s.config.Workspace) || !s.configured() {
 		return fmt.Errorf("salaam: unknown station")
 	}
-	args := []string{"--user", "-u", salaamUnit, "-n", fmt.Sprint(tailDefaultN), "-o", "cat", "--no-pager"}
-	if follow {
-		args = append(args, "-f")
-	}
-	cmd := exec.CommandContext(ctx, salaamJournalctl, args...)
-	cmd.Env = userSessionEnv(os.Environ())
+	name, args, env := s.salaamLogCommand(key, follow)
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = env
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err

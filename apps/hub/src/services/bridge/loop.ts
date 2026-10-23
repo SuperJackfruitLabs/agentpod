@@ -70,6 +70,7 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
 
   const done = (async () => {
     let cycle = 0;
+    let lastFailedRun: string | undefined;
     while (!controller.signal.aborted) {
       // **Liveness, not decoration.** Twice now a bridge agent has stopped and left nothing
       // behind: a 401 retried into noise, then a cycle that never came back. Both were invisible
@@ -119,6 +120,19 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
         await sleep(opts.backoffMs ?? DEFAULT_BACKOFF_MS, controller.signal);
         continue;
       }
+
+      // **A failed dispatch is never silent.** A strict Salaam run that fails on resume
+      // used to return here unlogged, and the next cycle resumed it again: 2026-10-23, a
+      // card sat "working" through hundreds of cycles with nothing in the log saying why.
+      // The same run failing twice in a row also backs off, so a resume loop is not a storm.
+      if (result.status === "failed") {
+        log("the dispatch failed", { run: result.externalRunId, reason: result.reason });
+        const repeat = result.externalRunId !== undefined && result.externalRunId === lastFailedRun;
+        lastFailedRun = result.externalRunId;
+        if (repeat) await sleep(opts.backoffMs ?? DEFAULT_BACKOFF_MS, controller.signal);
+        continue;
+      }
+      lastFailedRun = undefined;
 
       if (result.status === "foreign-run") {
         // Never retried, and never claimed past: an agent driving another

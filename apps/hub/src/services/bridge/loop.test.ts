@@ -105,6 +105,35 @@ describe("a run that belonged to another agent halts the loop", () => {
   });
 });
 
+describe("a failed dispatch is logged, and a repeating one backs off", () => {
+  test("failed carries its reason into the log and the same run failing twice waits out the backoff", async () => {
+    const s = scripted(
+      { status: "failed", externalRunId: "run_1", reason: "Strict bounded progression was not acknowledged" },
+      { status: "failed", externalRunId: "run_1", reason: "Strict bounded progression was not acknowledged" },
+      { status: "idle" },
+    );
+    const slept: number[] = [];
+    const lines: [string, Record<string, unknown> | undefined][] = [];
+    const loop = startAgentLoop({
+      run: s.run,
+      pollMs: 5_000,
+      backoffMs: 30_000,
+      log: (m, meta) => lines.push([m, meta]),
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+    while (s.calls.length < 3) await Promise.resolve();
+    await loop.stop();
+
+    const failed = lines.filter(([m]) => m === "the dispatch failed");
+    expect(failed).toHaveLength(2);
+    expect(failed[0]![1]).toEqual({ run: "run_1", reason: "Strict bounded progression was not acknowledged" });
+    // First failure retries at once (a lost lease is ordinary); the repeat backs off.
+    expect(slept[0]).toBe(30_000);
+  });
+});
+
 describe("a station that is down does not become a claim storm", () => {
   test("a station that is not ready backs off — it does not poll every 5s", async () => {
     const s = scripted({ status: "not-ready", reason: "Node is offline." });

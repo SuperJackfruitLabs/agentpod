@@ -55,6 +55,35 @@ func TestSalaamTailLogsReadsTheDaemonJournalLast500(t *testing.T) {
 	}
 }
 
+func TestSalaamLauncherHostLogsTailTheUnitLogFileNotTheUserJournal(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	ws := filepath.Join(base, "workspace")
+	_ = os.Mkdir(ws, 0o700)
+	key := salaam.StationKey(ws)
+	id := key[len("salaam:"):]
+	oldRoot, oldDir, oldTail := salaamLauncherRoot, salaamLauncherLogDir, salaamTail
+	t.Cleanup(func() { salaamLauncherRoot, salaamLauncherLogDir, salaamTail = oldRoot, oldDir, oldTail })
+	salaamLauncherRoot, salaamLauncherLogDir = filepath.Join(base, "stations"), filepath.Join(base, "log")
+	argsFile := filepath.Join(base, "args")
+	stub := filepath.Join(base, "tail")
+	_ = os.WriteFile(stub, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsFile+"\necho 'host ready'\n"), 0o755)
+	salaamTail = stub
+	journal := stubJournalctl(t)
+	bin, _ := os.Executable()
+	d := NewSalaamFrom(SalaamConfig{Binary: bin, StateDir: filepath.Join(base, "state"), Workspace: ws, Manifest: filepath.Join(salaamLauncherRoot, id, "host.json")})
+	var got strings.Builder
+	if err := d.TailLogs(context.Background(), key, false, func(b []byte) error { got.Write(b); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := os.ReadFile(argsFile)
+	if got.String() != "host ready\n" || strings.TrimSpace(string(args)) != "-n 500 "+filepath.Join(salaamLauncherLogDir, id+".log") {
+		t.Fatalf("launcher log not tailed: out=%q args=%q", got.String(), args)
+	}
+	if _, err := os.Stat(journal); err == nil {
+		t.Fatal("the user journal was queried for a launcher host")
+	}
+}
+
 func TestSalaamTailLogsFollowsUntilCancelled(t *testing.T) {
 	argsFile := stubJournalctl(t)
 	d, key := salaamForLogs(t)
