@@ -491,3 +491,33 @@ test("emptyTranscript starts at seq 0, starting status, no usage", () => {
   const t = emptyTranscript();
   expect(t).toEqual({ items: [], lastSeq: 0, status: "starting", usage: undefined });
 });
+
+// Salaam sends one ACP messageId per history entry. The console ran two consecutive messages
+// together: "…skipping ahead in the document.## RFC 9110 §15.6.3…" (staging, 2026-10-23).
+function idChunk(seq: number, text: string, messageId?: string): AcpEvent {
+  return ev(seq, "agent-update", {
+    sessionUpdate: "agent_message_chunk",
+    ...(messageId ? { messageId } : {}),
+    content: { type: "text", text },
+  });
+}
+
+test("chunks with different messageIds are separate assistant messages", () => {
+  const t = fold([
+    idChunk(1, "I'll fetch the section ", "m1"),
+    idChunk(2, "by skipping ahead in the document.", "m1"),
+    idChunk(3, "## RFC 9110 §15.6.3", "m2"),
+  ]);
+  expect(t.items.map((i) => (i.kind === "assistant" ? i.text : i.kind))).toEqual([
+    "I'll fetch the section by skipping ahead in the document.",
+    "## RFC 9110 §15.6.3",
+  ]);
+  expect(t.items[0]).toMatchObject({ streaming: false, messageId: "m1" });
+  expect(t.items[1]).toMatchObject({ streaming: true, messageId: "m2" });
+});
+
+test("an agent that sends no messageId still streams into one message", () => {
+  const t = fold([idChunk(1, "a"), idChunk(2, "b", "m1"), idChunk(3, "c")]);
+  expect(t.items).toHaveLength(1);
+  expect(t.items[0]).toMatchObject({ kind: "assistant", text: "abc" });
+});

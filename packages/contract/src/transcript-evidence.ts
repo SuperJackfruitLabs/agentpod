@@ -24,7 +24,7 @@
  * hub's job and happen after folding (so a secret split across two chunks is whole by then).
  */
 import type { ToolStatus } from "./matrix-events";
-import { chunkText, isRecord, str, toolStatus } from "./transcript-narrow";
+import { chunkMessageId, chunkText, isRecord, sameMessage, str, toolStatus } from "./transcript-narrow";
 
 /**
  * A persisted event as the fold reads it. `type` is a plain string, not `AcpEventType`: rows
@@ -78,6 +78,8 @@ export type EvidenceItemKind = EvidenceItem["kind"];
 export interface EvidenceFold {
   items: EvidenceItem[];
   open: number | null;
+  /** The ACP messageId of the open message, when the agent names one (see chunkMessageId). */
+  openMessageId?: string;
 }
 
 export function emptyEvidenceFold(): EvidenceFold {
@@ -147,9 +149,9 @@ function foldUpdate(f: EvidenceFold, ev: Ev): boolean {
   if (!isRecord(p)) return false;
   switch (p.sessionUpdate) {
     case "agent_message_chunk":
-      return appendChunk(f, ev.seq, "message", chunkText(p));
+      return appendChunk(f, ev.seq, "message", chunkText(p), chunkMessageId(p));
     case "agent_thought_chunk":
-      return appendChunk(f, ev.seq, "reasoning", chunkText(p));
+      return appendChunk(f, ev.seq, "reasoning", chunkText(p), chunkMessageId(p));
     case "tool_call":
     case "tool_call_update": {
       const id = str(p.toolCallId);
@@ -195,15 +197,23 @@ function findTool(f: EvidenceFold, id: string): number {
   return f.items.findLastIndex((it) => it.kind === "tool_call" && it.id === id);
 }
 
-function appendChunk(f: EvidenceFold, seq: number, kind: "message" | "reasoning", text: string | undefined): boolean {
+function appendChunk(
+  f: EvidenceFold,
+  seq: number,
+  kind: "message" | "reasoning",
+  text: string | undefined,
+  messageId?: string,
+): boolean {
   if (text === undefined) return false;
   const open = f.open === null ? undefined : f.items[f.open];
-  if (open && open.kind === kind) {
+  if (open && open.kind === kind && sameMessage(f.openMessageId, messageId)) {
     f.items[f.open!] = { ...open, seq_to: seq, text: open.text + text };
+    if (messageId) f.openMessageId = messageId;
     return true;
   }
   push(f, { kind, seq_from: seq, seq_to: seq, text });
   f.open = f.items.length - 1;
+  f.openMessageId = messageId;
   return true;
 }
 
