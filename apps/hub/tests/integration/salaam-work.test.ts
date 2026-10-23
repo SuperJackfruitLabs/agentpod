@@ -840,6 +840,128 @@ test("strict resumed task drives private bounded progression and verified report
   }
 });
 
+test("strict work posts each tool step to the card once, as card actions, while it runs", async () => {
+  const { work, completion } = await reportFixture();
+  const events: string[] = [];
+  const posted: unknown[] = [];
+  let polls = 0;
+  let live: RunContext = {
+    ...context,
+    run: { ...context.run, handoff: null, completion: null },
+  };
+  const mock = spyOn(broker, "request").mockImplementation(
+    async (_node, verb, body: any) => {
+      events.push(verb);
+      if (verb === "salaam.work-progress")
+        return {
+          ok: true,
+          data: {
+            version: 1,
+            request_id: work.requestId,
+            work_request_id: work.requestId,
+            task_id: completion.task_id,
+            plan_revision: 1,
+            binding_digest: completion.binding_digest,
+          },
+        } as never;
+      if (verb === "salaam.work-decisions")
+        return { ok: true, data: { version: 1, decisions: [] } } as never;
+      if (verb === "salaam.work-status") {
+        polls++;
+        const step = (seq: number, phase: string, id: string) => ({
+          seq,
+          phase,
+          tool_call_id: id,
+          title: "fetch · fetch",
+          kind: phase === "started" ? "fetch" : null,
+          input: phase === "started" ? JSON.stringify({ url: "https://x" }) : null,
+          failed: false,
+        });
+        const activity =
+          polls === 1
+            ? [step(1, "started", "a")]
+            : [step(1, "started", "a"), step(2, "finished", "a"), step(3, "started", "b")];
+        return {
+          ok: true,
+          data: {
+            ...completion,
+            state: polls < 3 ? "running" : "succeeded",
+            auto_enabled: true,
+            activity,
+          },
+        } as never;
+      }
+      if (verb === "salaam.work-completion")
+        return { ok: true, data: completion } as never;
+      throw Error("Unexpected private verb: " + verb);
+    },
+  );
+  try {
+    const deps = {
+      tenantId,
+      source: "superpipeline",
+      agent: {
+        key: "proof",
+        boardId: board,
+        stationId: station,
+        hubUserId: user,
+      },
+      client: {
+        context: async () => live,
+        heartbeat: async () => {
+          events.push("heartbeat");
+        },
+        activity: async (_lease: unknown, activity: unknown) => {
+          posted.push(activity);
+          if (posted.length === 1) throw Error("board briefly unavailable");
+        },
+        completeVerified: async (_lease: unknown, handoff: unknown) => {
+          live = {
+            ...live,
+            run: {
+              ...live.run,
+              status: "ended",
+              outcome: "completed",
+              handoff,
+              completion: { met: true, outcome: "pass" },
+            },
+          };
+          events.push("verified-report");
+          return { ok: true };
+        },
+        claim: async () => {
+          throw Error("new claim forbidden");
+        },
+      },
+      acp: {
+        strictWork: async () => ({ required: true, version: 1 }),
+        renewExecution: async () => {
+          events.push("renew");
+        },
+        endSession: async () => {
+          events.push("end");
+        },
+        promptSession: async () => {
+          throw Error("generic prompt forbidden");
+        },
+      },
+    } as unknown as DispatchDeps;
+    (deps as unknown as { permissionPollMs: number }).permissionPollMs = 1;
+    expect(await runOnce(deps)).toMatchObject({ status: "reported" });
+    // An activity post that fails is not retried and cannot fail the work.
+    expect(posted).toEqual([
+      { type: "action", action: "fetch · fetch", parameter: { url: "https://x" } },
+      { type: "action", action: "fetch · fetch", parameter: { url: "https://x" } },
+    ]);
+    expect(polls).toBe(3);
+    expect(events.indexOf("heartbeat")).toBeLessThan(events.indexOf("renew"));
+    expect(events.filter((x) => x === "salaam.work-progress")).toHaveLength(1);
+    expect(events.filter((x) => x === "verified-report")).toHaveLength(1);
+  } finally {
+    mock.mockRestore();
+  }
+});
+
 for (const lostVerb of ["salaam.work-progress", "salaam.work-status"]) {
   test(`strict controller recovers lost ${lostVerb} reply under original request`, async () => {
     const { work, completion } = await reportFixture();

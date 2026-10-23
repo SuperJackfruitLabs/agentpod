@@ -1,3 +1,4 @@
+import { SalaamActivityFeed } from "./salaam-activity";
 import { runScopedPlan } from "./salaam-run-scope";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { inDispatchSpan } from "../../telemetry/dispatch-span";
@@ -1126,6 +1127,8 @@ async function driveSalaamWork(
       );
     }
     hop("progress acknowledged", { run: runId, steps: payload.plan.steps.length });
+    // Tool steps reach the card as they happen, the way a streamed session's do.
+    const activity = new SalaamActivityFeed();
     for (;;) {
       // A rebuilt loop takes this run over. Safe here: no renewal or observation is in flight,
       // and the durable owner is left exactly as it is for the successor's resume.
@@ -1183,6 +1186,13 @@ async function driveSalaamWork(
         .passthrough()
         .parse(result.ok ? result.data : null);
       hop("status", { run: runId, state: status.state, auto: status.auto_enabled, reason: status.reason });
+      for (const step of activity.next((status as { activity?: unknown }).activity)) {
+        try {
+          await client.activity(claim, step);
+        } catch {
+          /* card activity is observation; it never changes the work */
+        }
+      }
       if (
         status.task_id !== admitted.task_id ||
         status.plan_revision !== admitted.plan_revision
