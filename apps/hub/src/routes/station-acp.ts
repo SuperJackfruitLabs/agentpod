@@ -37,6 +37,7 @@ import { and, asc, eq, gt } from "drizzle-orm";
 import {
   AcpClientMsg,
   CreateAcpSessionBody,
+  ResumeAcpSessionBody,
   type AcpEvent,
   type AcpEventType,
   type AcpServerMsg,
@@ -81,8 +82,16 @@ function createErrorStatus(message: string): 403 | 404 | 409 | "node" {
  */
 export function createSessionFailure(err: unknown): {
   status: 403 | 404 | 409 | 424 | 503;
-  body: { error: string; code?: string } | typeof ORG_PLANE_UNAVAILABLE_BODY;
+  body:
+    | { error: string; code?: string; holder?: import("@agentpod/contract").StationBusyHolder }
+    | typeof ORG_PLANE_UNAVAILABLE_BODY;
 } {
+  // The station's one live execution is someone's (spec 2026-10-23, session lifecycle): say whose
+  // and since when, with a code the console words. Not a node failure, and not retryable now.
+  if (acp.isSalaamStationBusy(err))
+    return { status: 424, body: { error: err.message, code: "station_busy", holder: err.holder } };
+  if (acp.isSessionNotResumable(err))
+    return { status: 409, body: { error: err.message, code: "not_resumable" } };
   // The plane was needed (a caller with no token authority, under ORG_PLANE_*) and is down.
   if (isOrgPlaneUnavailable(err)) return { status: 503, body: ORG_PLANE_UNAVAILABLE_BODY };
   // A refusal by the control pair is 403. A node-failure status would invite a retry that can
@@ -242,6 +251,38 @@ export const stationAcpRoutes = new Hono()
     await acp.endSession(user.id, sessionId, "Ended from the console.");
     return c.body(null, 204);
   })
+
+  /**
+   * POST /api/acp/sessions/:sessionId/resume
+   *
+   * Carry an ended interactive Salaam session on, under the caller's own fresh authority. Owner
+   * only (see resumeSession for why); the same refusals as a new session otherwise.
+   */
+  .post(
+    "/acp/sessions/:sessionId/resume",
+    zValidator("json", ResumeAcpSessionBody),
+    async (c) => {
+      const user = c.get("user") as AuthUser | undefined;
+      if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+      const { mode } = c.req.valid("json");
+      try {
+        const row = await acp.resumeSession({
+          sessionId: c.req.param("sessionId"),
+          tenantId: user.tenantId,
+          userId: user.id,
+          ...(mode ? { mode } : {}),
+          authority: user.authority,
+          workspaceRole: roleOf(user),
+        });
+        return c.json(row, 201);
+      } catch (err) {
+        if (err instanceof Error && err.message === "Session not found.")
+          return c.json({ error: "Not Found" }, 404);
+        const { status, body } = createSessionFailure(err);
+        return c.json(body, status);
+      }
+    },
+  )
 
   /**
    * GET /api/acp/sessions/:sessionId/ws (WebSocket upgrade)

@@ -10,10 +10,15 @@
    * overlay idiom for one list isn't worth introducing, and every other overlay
    * here (ConfirmDialog, NewRuntimeDialog, …) is a Dialog.
    *
-   * Read-only by construction: a row ATTACHES (through the panel's one
-   * `selectSession` path — this component only reports the id it was given), and
-   * there is no end/delete action anywhere on the surface. Sessions are
-   * hub-owned; browsing history must never stop an agent process.
+   * A row of your own ATTACHES (through the panel's one `selectSession` path —
+   * this component only reports the id it was given). An ended one you can carry
+   * on shows Resume. Browsing never stops an agent process by itself.
+   *
+   * A workspace owner/admin also sees other people's sessions (the list asks for
+   * `scope=workspace`; a member's answer is just their own). Those rows name
+   * their owner and never attach: a transcript stays its owner's. A live one has
+   * End, which the hub runs through the same confirmed stop and audits. Nobody
+   * resumes another person's session.
    *
    * It adds NO live region: the chat header owns the ONE status region in the
    * panel, and a second one would announce every session flip twice. The load
@@ -33,7 +38,7 @@
    * duplicate would break the keyed list.
    */
   import { onMount } from "svelte";
-  import { listAcpSessions, type AcpSessionRow } from "$lib/api/acp";
+  import { endAcpSession, listAcpSessions, type AcpSessionRow } from "$lib/api/acp";
   import { Button } from "$lib/components/ui/button";
   import * as Dialog from "$lib/components/ui/dialog";
   import { Empty } from "$lib/components/ui/empty";
@@ -47,10 +52,32 @@
     currentSessionId: string | null;
     /** Attach this session. The panel routes it through its own switcher path. */
     onSelect: (sessionId: string) => void;
+    /** Resume this ended session of your own (the panel attaches it, then resumes). */
+    onResume?: (sessionId: string) => void;
     onClose: () => void;
   }
 
-  let { stationId, currentSessionId, onSelect, onClose }: Props = $props();
+  let { stationId, currentSessionId, onSelect, onResume, onClose }: Props = $props();
+
+  /** Someone else's session (only a workspace owner/admin is sent these). */
+  const othersSession = (s: AcpSessionRow) => s.owner !== undefined && !s.owner.you;
+
+  /** Ids with an admin End in flight, so the button cannot be pressed twice. */
+  let ending = $state<string[]>([]);
+
+  async function endOthers(s: AcpSessionRow): Promise<void> {
+    if (ending.includes(s.id)) return;
+    ending = [...ending, s.id];
+    error = null;
+    try {
+      await endAcpSession(s.id);
+      rows = rows.map((r) => (r.id === s.id ? { ...r, status: "ended" as const } : r));
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    } finally {
+      ending = ending.filter((id) => id !== s.id);
+    }
+  }
 
   /** Page size. The hub clamps at 100; 20 is one screenful of scrolling. */
   const PAGE_SIZE = 20;
@@ -70,7 +97,9 @@
     try {
       const page = await listAcpSessions(
         stationId,
-        cursor === undefined ? { limit: PAGE_SIZE } : { limit: PAGE_SIZE, ...cursor },
+        cursor === undefined
+          ? { limit: PAGE_SIZE, scope: "workspace" }
+          : { limit: PAGE_SIZE, scope: "workspace", ...cursor },
       );
       // Append, never replace: the user keeps their place in the list. Rows
       // already on screen win — a bumped session must not jump to the bottom.
@@ -163,7 +192,30 @@
     {:else}
       <ul class="-mx-1 max-h-[55vh] min-w-0 overflow-y-auto">
         {#each rows as s (s.id)}
-          <li class="min-w-0">
+          <li class="flex min-w-0 items-center gap-1">
+            {#if othersSession(s)}
+              <!-- Another person's session: named, never attached (the transcript is theirs). -->
+              <div class="flex min-w-0 flex-1 items-center gap-2 px-2 py-2">
+                <span class="shrink-0">
+                  <Status form="badge" status={ACP_STATUS_TOKEN[s.status]} label={s.status} />
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm text-foreground">{s.owner?.name}'s session</span>
+                  <span class="t-label block truncate">{relativeTime(s.lastEventAt)}</span>
+                </span>
+              </div>
+              {#if s.status !== "ended"}
+                <Button
+                  variant="outline"
+                  size="xs"
+                  disabled={ending.includes(s.id)}
+                  aria-label={`End ${s.owner?.name}'s session`}
+                  onclick={() => void endOthers(s)}
+                >
+                  End
+                </Button>
+              {/if}
+            {:else}
             <button
               type="button"
               class="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
@@ -186,6 +238,20 @@
                 <span class="t-label shrink-0">on screen</span>
               {/if}
             </button>
+            {#if s.resumable && onResume}
+              <Button
+                variant="outline"
+                size="xs"
+                aria-label={`Resume ${nameOf(s)}`}
+                onclick={() => {
+                  onResume(s.id);
+                  onClose();
+                }}
+              >
+                Resume
+              </Button>
+            {/if}
+            {/if}
           </li>
         {/each}
       </ul>

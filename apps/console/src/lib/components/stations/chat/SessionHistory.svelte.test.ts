@@ -62,16 +62,18 @@ function fullPage(prefix: string, ageOffset = 0): AcpSessionRow[] {
 function setup(rows: AcpSessionRow[], props: { currentSessionId?: string | null } = {}) {
   const list = vi.spyOn(api, "listAcpSessions").mockResolvedValue(rows);
   const onSelect = vi.fn();
+  const onResume = vi.fn();
   const onClose = vi.fn();
   const utils = render(SessionHistory, {
     props: {
       stationId: "st1",
       currentSessionId: props.currentSessionId ?? null,
       onSelect,
+      onResume,
       onClose,
     },
   });
-  return { ...utils, list, onSelect, onClose };
+  return { ...utils, list, onSelect, onResume, onClose };
 }
 
 /** The dialog element, once its first page has landed. */
@@ -89,7 +91,7 @@ test("lists the station's sessions with title, status, activity and event count"
   const u = setup(rows);
 
   const dialog = await dialogOf(u);
-  await waitFor(() => expect(u.list).toHaveBeenCalledWith("st1", { limit: PAGE_SIZE }));
+  await waitFor(() => expect(u.list).toHaveBeenCalledWith("st1", { limit: PAGE_SIZE, scope: "workspace" }));
 
   const buttons = await waitFor(() => {
     const found = within(dialog)
@@ -163,7 +165,7 @@ test("a failed load says so instead of looking empty, and can be retried", async
   await waitFor(() => expect(within(dialog).getByText("back from the dead")).toBeTruthy());
   // The stale error goes with the successful retry.
   expect(within(dialog).queryByText("Couldn't reach the hub.")).toBeNull();
-  expect(list).toHaveBeenLastCalledWith("st1", { limit: PAGE_SIZE });
+  expect(list).toHaveBeenLastCalledWith("st1", { limit: PAGE_SIZE, scope: "workspace" });
 });
 
 // ─── Pagination ─────────────────────────────────────────────────────────────
@@ -184,6 +186,7 @@ test("Load older requests the next page with the compound cursor and appends it"
   await waitFor(() =>
     expect(u.list).toHaveBeenLastCalledWith("st1", {
       limit: PAGE_SIZE,
+      scope: "workspace",
       before: first.at(-1)!.lastEventAt,
       beforeId: first.at(-1)!.id,
     }),
@@ -310,4 +313,33 @@ test("closing the dialog reports it up (Escape, backdrop, close button)", async 
 
   await waitFor(() => expect(u.onClose).toHaveBeenCalled());
   expect(u.onSelect).not.toHaveBeenCalled();
+});
+
+// ─── Session lifecycle (2026-10-23) ────────────────────────────────────────────
+
+test("an ended session of your own that can be resumed offers Resume; others' rows never do", async () => {
+  const u = setup([
+    row({ id: "mine", title: "Mine", status: "ended", resumable: true, owner: { name: "You", you: true } }),
+    row({ id: "theirs", title: "Theirs", status: "ended", resumable: false, owner: { name: "Asha", you: false } }),
+  ]);
+  const dialog = await dialogOf(u);
+  await waitFor(() => within(dialog).getByText("Mine"));
+  const resume = within(dialog).getAllByRole("button", { name: /^Resume/ });
+  expect(resume).toHaveLength(1);
+  await fireEvent.click(resume[0]!);
+  expect(u.onResume).toHaveBeenCalledWith("mine");
+  expect(u.onClose).toHaveBeenCalled();
+});
+
+test("an admin sees whose session it is, cannot open it, and can end a live one", async () => {
+  const end = vi.spyOn(api, "endAcpSession").mockResolvedValue(undefined);
+  const u = setup([row({ id: "theirs", status: "idle", owner: { name: "Asha", you: false } })]);
+  const dialog = await dialogOf(u);
+  await waitFor(() => within(dialog).getByText("Asha's session"));
+  // Never attachable: the transcript is Asha's.
+  expect(within(dialog).queryByRole("button", { name: /^Asha's session/ })).toBeNull();
+  await fireEvent.click(within(dialog).getByRole("button", { name: "End Asha's session" }));
+  expect(end).toHaveBeenCalledWith("theirs");
+  expect(u.onSelect).not.toHaveBeenCalled();
+  await waitFor(() => expect(within(dialog).queryByRole("button", { name: "End Asha's session" })).toBeNull());
 });

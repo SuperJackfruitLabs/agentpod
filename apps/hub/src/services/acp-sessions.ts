@@ -34,6 +34,7 @@ import {
   gt,
   inArray,
   isNotNull,
+  isNull,
   lt,
   ne,
   or,
@@ -293,6 +294,11 @@ export interface CreateSessionInput {
    * still needs the grant.
    */
   workspaceRole?: "owner" | "admin" | "member";
+  /**
+   * Set only by `resumeSession`: the ended session whose conversation this one continues. Never
+   * copied from a request body.
+   */
+  resumeFrom?: string;
   /** Trusted bridge fields, never copied from an HTTP/ACP request body. */
   executionRun?: import("@agentpod/contract").SalaamRunAuthority;
   validateExecutionRun?: () => Promise<unknown>;
@@ -472,6 +478,10 @@ function toContract(r: DbRow): AcpSessionRow {
     // every session labelled "Session" no matter what was persisted.
     title: r.title,
     lastSeq: r.lastSeq,
+    endedCause: (r.endedCause as "idle" | "admin" | null) ?? null,
+    resumedFrom: r.resumedFrom ?? null,
+    resumedAs: r.resumedAs ?? null,
+    resumable: isResumable(r),
     ...(r.executionAuthority
       ? {
           execution: {
@@ -486,6 +496,18 @@ function toContract(r: DbRow): AcpSessionRow {
         }
       : {}),
   };
+}
+
+/**
+ * An ended interactive Salaam session that nobody has resumed yet. Whether the CALLER may resume
+ * it is the owner check in `resumeSession`; a row is only ever listed resumable to its owner.
+ */
+function isResumable(r: DbRow): boolean {
+  return (
+    r.status === "ended" &&
+    r.executionAuthority?.binding.run.source === "agentpod" &&
+    !r.resumedAs
+  );
 }
 
 // ─── Session titles ───────────────────────────────────────────────────────────
@@ -1540,6 +1562,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     harness === "salaam"
       ? await makeSalaamExecution(stationId, userId, id, input.executionRun, {
           workspaceAdmin: interactiveWorkspaceAdmin(input),
+          ...(input.resumeFrom !== undefined ? { continueFrom: input.resumeFrom } : {}),
         })
       : null;
   if (execution && input.mcpServers?.length)
@@ -1570,7 +1593,28 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
   // station with 409s until restart.
   addLive(live);
 
+  // A resume claims its predecessor once, atomically: two resumes of one conversation would fork
+  // it into two branches. Released below if nothing was admitted, so the person can try again.
+  let claimed = false;
   try {
+    if (input.resumeFrom !== undefined) {
+      const [won] = await boundedDb(
+        db
+          .update(acpSessions)
+          .set({ resumedAs: id })
+          .where(
+            and(
+              eq(acpSessions.id, input.resumeFrom),
+              eq(acpSessions.userId, userId),
+              isNull(acpSessions.resumedAs),
+            ),
+          )
+          .returning({ id: acpSessions.id }),
+        "claim resumed session",
+      );
+      if (!won) throw new SessionNotResumable("This session was already resumed.");
+      claimed = true;
+    }
     // Every DB step below is bounded (boundedDb): a stalled query must reject
     // into the catch so the live-map entry is cleaned up, never hang holding it.
     await boundedDb(
@@ -1585,11 +1629,13 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
         nodeSessionId: null,
         executionAuthority: execution,
         mcpProxyRequested,
+        resumedFrom: input.resumeFrom ?? null,
         createdAt: now,
         lastEventAt: now,
       }),
       "insert session row",
     );
+    if (input.resumeFrom !== undefined) await carryTranscript(live, input.resumeFrom);
 
     // The hub session id doubles as the ACP instance: stable by construction
     // across a re-open of this session, and it correlates node-side processes
@@ -1624,7 +1670,14 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
         .where(eq(acpSessions.id, id)),
       "record node session id",
     );
-    await boundedDb(setStatus(live, "idle").done, "idle state event");
+    await boundedDb(
+      setStatus(
+        live,
+        "idle",
+        input.resumeFrom !== undefined ? { extra: { resumedFrom: input.resumeFrom } } : {},
+      ).done,
+      "idle state event",
+    );
     startSalaamAuthorityWatch(live);
 
     const rows = await boundedDb(
@@ -1636,8 +1689,111 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     const reason = err instanceof Error ? err.message : String(err);
     persistEvent(live, "error", turnErrorFromRejection(err, live.harness));
     await finalizeEnd(live, reason);
+    // Salaam never admitted the continuation, so the conversation was not carried anywhere:
+    // give the claim back. Once admitted, the new session holds the history and is the one to
+    // resume.
+    if (claimed && !live.executionAuthority?.sessionId)
+      await db
+        .update(acpSessions)
+        .set({ resumedAs: null })
+        .where(and(eq(acpSessions.id, input.resumeFrom!), eq(acpSessions.resumedAs, id)))
+        .catch(() => {});
     throw err;
   }
+}
+
+/**
+ * Copy the resumed session's transcript into the new one, so the console (and any reader of this
+ * session's events) sees one conversation. State events stay behind: an `ended` among them would
+ * read as this session ending. Seqs are renumbered from 1; the live counter continues after them.
+ */
+async function carryTranscript(live: LiveSession, from: string): Promise<void> {
+  const rows = await boundedDb(
+    db
+      .select()
+      .from(acpEvents)
+      .where(and(eq(acpEvents.sessionId, from), ne(acpEvents.type, "state")))
+      .orderBy(asc(acpEvents.seq)),
+    "read resumed transcript",
+  );
+  const [prior] = await boundedDb(
+    db.select({ title: acpSessions.title }).from(acpSessions).where(eq(acpSessions.id, from)),
+    "read resumed title",
+  );
+  if (rows.length) {
+    await boundedDb(
+      db.insert(acpEvents).values(
+        rows.map((r, i) => ({
+          sessionId: live.id,
+          tenantId: live.tenantId,
+          seq: i + 1,
+          type: r.type,
+          payload: r.payload as object,
+          createdAt: r.createdAt,
+        })),
+      ),
+      "carry resumed transcript",
+    );
+  }
+  live.seq = rows.length;
+  await boundedDb(
+    db
+      .update(acpSessions)
+      .set({ lastSeq: rows.length, title: prior?.title ?? null })
+      .where(eq(acpSessions.id, live.id)),
+    "record carried transcript",
+  );
+}
+
+/** A resume that cannot happen: not ended, not Salaam, already resumed, or stop unconfirmed. */
+export class SessionNotResumable extends Error {
+  override name = "SessionNotResumable";
+}
+export function isSessionNotResumable(e: unknown): e is SessionNotResumable {
+  return e instanceof SessionNotResumable || (e as { name?: string })?.name === "SessionNotResumable";
+}
+
+/**
+ * Resume an ended interactive Salaam session: the same conversation (Salaam carries its history
+ * into a new admission, the hub carries the transcript), under a FRESH execution authority for
+ * the person resuming. They pass every check a new session does (the control pair or decision 3,
+ * the one-live-execution rule), because it IS a new session.
+ *
+ * Owner only. An admin can see and end another person's session, but resuming it would carry
+ * that person's conversation, and whatever they told the agent, into the admin's own authority.
+ * Restricting resume to the owner keeps one conversation on one person's authority from start to
+ * end. Someone else's session is "not found", as on every other per-session door.
+ */
+export async function resumeSession(
+  input: Omit<CreateSessionInput, "stationId" | "mode" | "resumeFrom" | "executionRun" | "validateExecutionRun"> & {
+    sessionId: string;
+    mode?: AcpSessionMode;
+  },
+): Promise<AcpSessionRow> {
+  const [prior] = await db
+    .select()
+    .from(acpSessions)
+    .where(and(eq(acpSessions.id, input.sessionId), eq(acpSessions.tenantId, input.tenantId)));
+  if (!prior || prior.userId !== input.userId) throw new Error("Session not found.");
+  if (prior.status !== "ended") throw new SessionNotResumable("This session is still running.");
+  const saved = prior.executionAuthority;
+  if (!saved || saved.binding.run.source !== "agentpod")
+    throw new SessionNotResumable("Only an interactive Salaam session can be resumed.");
+  if (prior.resumedAs) throw new SessionNotResumable("This session was already resumed.");
+  if (saved.state !== "revoked") {
+    const status = await revokeSalaamExecution(prior.id, "Reconcile before resume");
+    if (status?.state !== "revoked")
+      throw new SessionNotResumable(
+        "This session's last execution has not been confirmed stopped yet. Try again in a moment.",
+      );
+  }
+  const { sessionId, mode, ...rest } = input;
+  return createSession({
+    ...rest,
+    stationId: prior.stationId,
+    mode: mode ?? (prior.mode as AcpSessionMode),
+    resumeFrom: sessionId,
+  });
 }
 
 // ─── Session listing ─────────────────────────────────────────────────────────

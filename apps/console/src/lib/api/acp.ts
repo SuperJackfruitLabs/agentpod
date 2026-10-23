@@ -7,6 +7,7 @@
  *   POST   /api/stations/:id/acp/sessions {mode}          → 201 AcpSessionRow
  *   GET    /api/stations/:id/acp/sessions[?limit&before]  → AcpSessionRow[]
  *   DELETE /api/acp/sessions/:sessionId                   → 204
+ *   POST   /api/acp/sessions/:sessionId/resume {mode?}    → 201 AcpSessionRow
  *
  * WS (mirrors terminal.ts):
  *   /api/acp/sessions/:sessionId/ws speaking AcpClientMsg / AcpServerMsg
@@ -59,9 +60,11 @@ export const createAcpSession = (stationId: string, mode: AcpSessionMode, tools?
  */
 export const listAcpSessions = (
   stationId: string,
-  opts: { limit?: number; before?: string; beforeId?: string } = {},
+  opts: { limit?: number; before?: string; beforeId?: string; scope?: "workspace" } = {},
 ) => {
   const params = new URLSearchParams();
+  // `workspace`: a workspace owner/admin also gets other people's sessions, each naming its owner.
+  if (opts.scope !== undefined) params.set("scope", opts.scope);
   if (opts.limit !== undefined) params.set("limit", String(opts.limit));
   // The cursor is an ISO timestamp — colons and '+' MUST be encoded, which is
   // exactly what URLSearchParams does (hand-built query strings have shipped
@@ -76,6 +79,17 @@ export const listAcpSessions = (
 
 export const endAcpSession = (sessionId: string) =>
   http<void>(`/api/acp/sessions/${sessionId}`, { method: "DELETE" });
+
+/**
+ * Carry an ended session on: same conversation, a NEW session row running on the caller's own,
+ * fresh authority. Only the owner can (the hub answers 404 for anyone else's).
+ */
+export const resumeAcpSession = (sessionId: string, mode?: AcpSessionMode) =>
+  http<AcpSessionRow>(`/api/acp/sessions/${sessionId}/resume`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(mode ? { mode } : {}),
+  });
 
 // ─── WebSocket client ─────────────────────────────────────────────────────────
 
