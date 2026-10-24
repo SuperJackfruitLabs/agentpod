@@ -1,3 +1,4 @@
+import { nextSalaamDecision } from "./salaam-decision-order";
 import type { AgentSpanRecorder } from "../../telemetry/agent-spans";
 import { meter } from "../../telemetry/otel";
 import { recordSalaamUsage } from "../../telemetry/salaam-usage";
@@ -1286,7 +1287,9 @@ async function driveSalaamWork(
         sessionId,
       );
       if (expiredRecovery) return expiredRecovery;
-      for (const decision of decisions.decisions) {
+      // One question at a time: a board holds one per run, and a second cancels the first.
+      const next = nextSalaamDecision(decisions.decisions);
+      for (const decision of next ? [next] : []) {
         await publishSalaamDecision(
           sessionId,
           agent.hubUserId,
