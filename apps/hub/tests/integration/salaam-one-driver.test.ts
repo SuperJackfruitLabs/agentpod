@@ -201,6 +201,8 @@ test("delivery unresolved, a rebuild handover, then two loops resume the run: on
   const deps = {
     tenantId: tenant,
     source: "superpipeline",
+    // Publication is tested on its own (salaam-publish.test.ts); here it returns the agent's handoff.
+    salaamPublish: async () => ({ agent: { summary: "done" }, deliverables: [], publication: "none" as const }),
     agent: { key: "proof", boardId: board, stationId: station, hubUserId: user },
     client: {
       claim: async () =>

@@ -84,7 +84,7 @@ func (s *salaamDescriptor) Detect() ([]Station, error) {
 		}
 	}
 	s.miss("")
-	return []Station{{Key: salaam.StationKey(workspace), Harness: "salaam", Kind: "leaf", DisplayName: "Salaam", WorkspacePath: &workspace, Capabilities: []string{"inventory", "health", "logs", "fs.read", "acp", "skills.inventory"}}}, nil
+	return []Station{{Key: salaam.StationKey(workspace), Harness: "salaam", Kind: "leaf", DisplayName: "Salaam", WorkspacePath: &workspace, Capabilities: AppendChangesetCap([]string{"inventory", "health", "logs", "fs.read", "acp", "skills.inventory"}, &workspace)}}, nil
 }
 func (s *salaamDescriptor) Health(key string) (Health, error) {
 	if key != salaam.StationKey(s.config.Workspace) || !s.configured() {

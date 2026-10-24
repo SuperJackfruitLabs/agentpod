@@ -154,6 +154,8 @@ export interface DispatchDeps {
   agent: BridgeAgentConfig;
   tenantId: string;
   source: string;
+  /** Strict Salaam publication; tests replace it, production uses livePublisher. */
+  salaamPublish?: (completion: import("zod").infer<typeof import("../../../../../packages/contract/src/salaam-work-completion").SalaamWorkCompletion>) => Promise<import("./salaam-publish").SalaamPublication>;
   heartbeatMs?: number;
   turnTimeoutMs?: number;
   /** Overrides the agent's own `permissionWaitMs`. A test seam. */
@@ -407,7 +409,7 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
         observation: "strict-start",
         runEpoch: work.leaseEpoch,
       },
-      () => startSalaamWork(deps, work),
+      (spans) => startSalaamWork(deps, work, spans),
     );
 
   return inDispatchSpan(

@@ -13,10 +13,12 @@ import {
   canonicalSalaamWork,
 } from "../../../../../packages/contract/src/salaam-work-payload";
 import { SalaamWorkCompletion } from "../../../../../packages/contract/src/salaam-work-completion";
+type SalaamWorkCompletionValue = import("zod").infer<typeof SalaamWorkCompletion>;
 import { workDigest } from "../salaam-work";
 import { validateSalaamAuthority } from "../salaam-authority";
 import * as broker from "../broker";
 import type { SuperpipelineClient, RunContext } from "./superpipeline";
+import type { SalaamPublication } from "./salaam-publish";
 const same = (a: unknown, b: unknown) =>
   canonicalSalaamWork(a) === canonicalSalaamWork(b);
 async function owner(sessionId: string, userId: string) {
@@ -96,17 +98,40 @@ function checkIntent(
   intent: typeof salaamWorkReports.$inferSelect,
 ) {
   const completion = checkCompletion(o, intent.completion);
-  const expected = {
-    version: 1,
-    source: "salaam",
-    report_request_id: intent.requestId,
-    completion,
-  };
+  const expected = verification(intent.requestId, completion);
+  const handoff = intent.handoff as { verification?: unknown } | null;
   if (
-    !same(intent.handoff, expected) ||
-    workDigest(expected) !== intent.handoffDigest
+    !(
+      same(handoff, expected) ||
+      (handoff?.verification !== undefined && same(handoff.verification, expected))
+    ) ||
+    workDigest(intent.handoff) !== intent.handoffDigest
   )
     throw Error("Saved report digest or handoff mismatch");
+}
+/** Salaam's verified-completion receipt, as the proof a strict handoff carries. */
+function verification(requestId: string, completion: unknown) {
+  return {
+    version: 1,
+    source: "salaam",
+    report_request_id: requestId,
+    completion,
+  };
+}
+/** The handoff for the next stage: what the agent wrote, what was published, and the proof. */
+export function strictHandoff(
+  requestId: string,
+  completion: unknown,
+  publication?: SalaamPublication,
+) {
+  if (!publication) return verification(requestId, completion);
+  return {
+    ...publication.agent,
+    deliverables: publication.deliverables,
+    publication: publication.publication,
+    ...(publication.library ? { library: publication.library } : {}),
+    verification: verification(requestId, completion),
+  };
 }
 async function acknowledge(
   o: Awaited<ReturnType<typeof owner>>,
@@ -174,6 +199,8 @@ export async function reportSalaamCompletion(
     observe<T>(action: () => Promise<T>): Promise<T>;
     beforeReport(): Promise<void>;
   },
+  /** Publishes the verified deliverables and reads the agent's handoff (salaam-publish). */
+  publish?: (completion: SalaamWorkCompletionValue) => Promise<SalaamPublication>,
 ) {
   const fresh = () =>
     observation
@@ -194,13 +221,10 @@ export async function reportSalaamCompletion(
     throw Error("Reported original run changed unexpectedly");
   if (!intent) {
     const completion = await fresh();
+    // Publication reads the verified revision only; a failure leaves no intent, so it retries.
+    const publication = publish ? await publish(completion) : undefined;
     const requestId = crypto.randomUUID(),
-      handoff = {
-        version: 1,
-        source: "salaam",
-        report_request_id: requestId,
-        completion,
-      };
+      handoff = strictHandoff(requestId, completion, publication);
     intent = await db.transaction(async (tx) => {
       await tx
         .select()

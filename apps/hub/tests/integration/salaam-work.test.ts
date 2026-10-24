@@ -728,6 +728,15 @@ test("unverified or failed daemon work never creates report intent", async () =>
 });
 
 import { runOnce, type DispatchDeps } from "../../src/services/bridge/dispatch";
+// What the publisher returns for a verified run: the agent's handoff and a published deliverable.
+const publication = {
+  agent: { summary: "Quoted RFC 9110 15.6.3", findings: ["502 means an invalid upstream response"] },
+  deliverables: [
+    { path: "answer.md", sha256: "c".repeat(64), url: "https://app.lib.test/a/itm_0123456789abcdef" },
+  ],
+  publication: "published" as const,
+  library: { item_id: "itm_0123456789abcdef", url: "https://app.lib.test/a/itm_0123456789abcdef", export_id: "e" },
+};
 import { probeSalaamWork } from "../../src/services/bridge/salaam-dispatch";
 test("strict runtime capability missing or wrong version prevents claiming", async () => {
   let claims = 0;
@@ -789,6 +798,7 @@ test("strict resumed task drives private bounded progression and verified report
     const deps = {
       tenantId,
       source: "superpipeline",
+      salaamPublish: async () => publication,
       agent: {
         key: "proof",
         boardId: board,
@@ -832,6 +842,144 @@ test("strict resumed task drives private bounded progression and verified report
       },
     } as unknown as DispatchDeps;
     expect(await runOnce(deps)).toMatchObject({ status: "reported" });
+    expect(events.indexOf("heartbeat")).toBeLessThan(events.indexOf("renew"));
+    expect(events.filter((x) => x === "salaam.work-progress")).toHaveLength(1);
+    expect(events.filter((x) => x === "verified-report")).toHaveLength(1);
+    // The board gets the agent's own handoff, the published deliverable, and Salaam's proof.
+    const reported = live.run.handoff as Record<string, any>;
+    expect(reported.summary).toBe(publication.agent.summary);
+    expect(reported.findings).toEqual(publication.agent.findings);
+    expect(reported.deliverables).toEqual(publication.deliverables);
+    expect(reported.library).toEqual(publication.library);
+    expect(reported.publication).toBe("published");
+    expect(reported.verification).toMatchObject({ version: 1, source: "salaam", completion });
+  } finally {
+    mock.mockRestore();
+  }
+});
+
+test("strict work posts each tool step to the card once, as card actions, while it runs", async () => {
+  const { work, completion } = await reportFixture();
+  const events: string[] = [];
+  const posted: unknown[] = [];
+  let polls = 0;
+  let live: RunContext = {
+    ...context,
+    run: { ...context.run, handoff: null, completion: null },
+  };
+  const mock = spyOn(broker, "request").mockImplementation(
+    async (_node, verb, body: any) => {
+      events.push(verb);
+      if (verb === "salaam.work-progress")
+        return {
+          ok: true,
+          data: {
+            version: 1,
+            request_id: work.requestId,
+            work_request_id: work.requestId,
+            task_id: completion.task_id,
+            plan_revision: 1,
+            binding_digest: completion.binding_digest,
+          },
+        } as never;
+      if (verb === "salaam.work-decisions")
+        return { ok: true, data: { version: 1, decisions: [] } } as never;
+      if (verb === "salaam.work-status") {
+        polls++;
+        const step = (seq: number, phase: string, id: string) => ({
+          seq,
+          phase,
+          tool_call_id: id,
+          title: "fetch · fetch",
+          kind: phase === "started" ? "fetch" : null,
+          input: phase === "started" ? JSON.stringify({ url: "https://x" }) : null,
+          failed: false,
+        });
+        const activity =
+          polls === 1
+            ? [step(1, "started", "a")]
+            : [step(1, "started", "a"), step(2, "finished", "a"), step(3, "started", "b")];
+        return {
+          ok: true,
+          data: {
+            ...completion,
+            state: polls < 3 ? "running" : "succeeded",
+            auto_enabled: true,
+            activity,
+            plan: {
+              sessionUpdate: "plan",
+              entries: [{ content: "Research", priority: "medium", status: polls === 1 ? "pending" : "in_progress" }],
+            },
+          },
+        } as never;
+      }
+      if (verb === "salaam.work-completion")
+        return { ok: true, data: completion } as never;
+      throw Error("Unexpected private verb: " + verb);
+    },
+  );
+  try {
+    const deps = {
+      tenantId,
+      source: "superpipeline",
+      salaamPublish: async () => publication,
+      agent: {
+        key: "proof",
+        boardId: board,
+        stationId: station,
+        hubUserId: user,
+      },
+      client: {
+        context: async () => live,
+        heartbeat: async () => {
+          events.push("heartbeat");
+        },
+        activity: async (_lease: unknown, activity: unknown) => {
+          posted.push(activity);
+          if (posted.length === 2) throw Error("board briefly unavailable");
+        },
+        completeVerified: async (_lease: unknown, handoff: unknown) => {
+          live = {
+            ...live,
+            run: {
+              ...live.run,
+              status: "ended",
+              outcome: "completed",
+              handoff,
+              completion: { met: true, outcome: "pass" },
+            },
+          };
+          events.push("verified-report");
+          return { ok: true };
+        },
+        claim: async () => {
+          throw Error("new claim forbidden");
+        },
+      },
+      acp: {
+        strictWork: async () => ({ required: true, version: 1 }),
+        renewExecution: async () => {
+          events.push("renew");
+        },
+        endSession: async () => {
+          events.push("end");
+        },
+        promptSession: async () => {
+          throw Error("generic prompt forbidden");
+        },
+      },
+    } as unknown as DispatchDeps;
+    (deps as unknown as { permissionPollMs: number }).permissionPollMs = 1;
+    expect(await runOnce(deps)).toMatchObject({ status: "reported" });
+    // An activity post that fails is not retried and cannot fail the work.
+    // The plan comes first, before any step ran, and again when it changed.
+    expect(posted).toEqual([
+      { type: "thought", body: "Plan:\n1. Research (pending)" },
+      { type: "action", action: "fetch · fetch", parameter: { url: "https://x" } },
+      { type: "thought", body: "Plan:\n1. Research (in progress)" },
+      { type: "action", action: "fetch · fetch", parameter: { url: "https://x" } },
+    ]);
+    expect(polls).toBe(3);
     expect(events.indexOf("heartbeat")).toBeLessThan(events.indexOf("renew"));
     expect(events.filter((x) => x === "salaam.work-progress")).toHaveLength(1);
     expect(events.filter((x) => x === "verified-report")).toHaveLength(1);
@@ -884,6 +1032,7 @@ for (const lostVerb of ["salaam.work-progress", "salaam.work-status"]) {
     const deps = {
       tenantId,
       source: "superpipeline",
+      salaamPublish: async () => publication,
       agent: {
         key: "proof",
         boardId: board,
@@ -954,6 +1103,7 @@ for (const code of ["STALE_LEASE", "NOT_RUN_OWNER"]) {
     const deps = {
       tenantId,
       source: "superpipeline",
+      salaamPublish: async () => publication,
       agent: {
         key: "proof",
         boardId: board,
@@ -1020,6 +1170,7 @@ test("strict lease loss after progression prevents status, completion and anothe
   const deps = {
     tenantId,
     source: "superpipeline",
+    salaamPublish: async () => publication,
     agent: {
       key: "proof",
       boardId: board,
@@ -1149,6 +1300,7 @@ for (const declared of [null, false, true]) {
     const deps = {
       tenantId,
       source: "superpipeline",
+      salaamPublish: async () => publication,
       agent: {
         key: "proof",
         boardId: board,
@@ -1194,6 +1346,7 @@ test("unconfirmed strict release never records a released ledger outcome", async
   const deps = {
     tenantId,
     source: "superpipeline",
+    salaamPublish: async () => publication,
     agent: {
       key: "proof",
       boardId: board,
@@ -1237,6 +1390,7 @@ test("original released run reconciles only without a session or work owner", as
   const deps = {
     tenantId,
     source: "superpipeline",
+    salaamPublish: async () => publication,
     agent: {
       key: "proof",
       boardId: board,
@@ -1334,6 +1488,7 @@ test("failed create with a hidden terminal session needs exact stop receipt befo
   const deps = {
     tenantId,
     source: "superpipeline",
+    salaamPublish: async () => publication,
     agent: {
       key: "proof",
       boardId: board,
@@ -1473,6 +1628,7 @@ test.each([
     const deps = {
       tenantId,
       source: "superpipeline",
+      salaamPublish: async () => publication,
       agent: {
         key: "proof",
         boardId: board,
@@ -1711,6 +1867,7 @@ test("expired lost question receipt is recovered by exact original GET without p
   const deps = {
     tenantId,
     source: "superpipeline",
+    salaamPublish: async () => publication,
     agent: {
       key: "proof",
       boardId: board,
@@ -1940,4 +2097,21 @@ test("execution evidence keeps original task and binding after lease expiry with
       .set({ receipt: owner!.receipt })
       .where(eq(salaamWorkOwners.requestId, owner!.requestId));
   }
+});
+
+import { planFrom } from "../../src/services/bridge/salaam-dispatch";
+test("the admitted plan is the card's plan scoped to this run's own directory", () => {
+  const spec = { salaam: { version: 1, plan } };
+  const admitted = planFrom({ ...context, card: { ...context.card, spec } } as RunContext);
+  const dir = "runs/" + context.run.runId + "/";
+  expect(admitted.deliverables.length).toBe(plan.deliverables.length + 1);
+  expect(admitted.deliverables.every((d) => d.startsWith(dir))).toBe(true);
+  expect(admitted.deliverables).toContain(dir + "handoff.json");
+  expect(admitted.acceptance.every((c) => (c.cwd + "/").startsWith(dir))).toBe(true);
+  const other = planFrom({
+    ...context,
+    run: { ...context.run, runId: "run_" + hex() },
+    card: { ...context.card, spec },
+  } as RunContext);
+  for (const d of admitted.deliverables) expect(other.deliverables).not.toContain(d);
 });

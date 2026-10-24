@@ -313,7 +313,7 @@ export class SuperpipelineClient {
    * otherwise. The bridge polls `claims` every five seconds per agent, and a root span per poll
    * would fill the trace store with nothing.
    */
-  private async send(method: "GET" | "POST", path: string, body?: unknown, beforeSend?: () => Promise<void>): Promise<unknown> {
+  private async send(method: "GET" | "POST" | "PUT", path: string, body?: unknown, beforeSend?: () => Promise<void>): Promise<unknown> {
     if (!trace.getSpan(context.active())) { const headers = await this.headers(); await beforeSend?.(); return this.request(method, path, body, headers); }
     const template = pathTemplate(path);
     const runId = /\/runs\/(run_[^/?]+)/.exec(path)?.[1];
@@ -348,7 +348,7 @@ export class SuperpipelineClient {
   }
 
   private async request(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT",
     path: string,
     body: unknown,
     headers: Record<string, string>,
@@ -426,6 +426,18 @@ export class SuperpipelineClient {
   }
 
   /** Original live run reference only; the Pipeline hint remains unverified. */
+  /** Idempotent card reference upsert (superpipeline PUT cards/:cardId/references). */
+  async addCardReference(
+    cardId: string,
+    input: { url: string; title: string; provider: "superlibrary"; addedBy: "agent" },
+  ): Promise<unknown> {
+    return this.send(
+      "PUT",
+      `/v1/boards/${this.boardId}/cards/${encodeURIComponent(cardId)}/references`,
+      input,
+    );
+  }
+
   async addEvidenceReference(
     runId: string,
     input: {

@@ -1,3 +1,9 @@
+import type { AgentSpanRecorder } from "../../telemetry/agent-spans";
+import { meter } from "../../telemetry/otel";
+import { recordSalaamUsage } from "../../telemetry/salaam-usage";
+import { livePublisher } from "./salaam-publish-live";
+import { SalaamActivityFeed } from "./salaam-activity";
+import { runScopedPlan } from "./salaam-run-scope";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { inDispatchSpan } from "../../telemetry/dispatch-span";
 import { forwardSalaamWorkTrace } from "./salaam-trace";
@@ -81,11 +87,15 @@ export async function probeSalaamWork(input: {
 const taskSpec = z
   .object({ version: z.literal(1), plan: SalaamWorkPlan })
   .strict();
-function planFrom(context: RunContext) {
+export function planFrom(context: RunContext) {
   const spec = context.card.spec;
   if (!spec || typeof spec !== "object" || Array.isArray(spec))
     throw Error("Strict Salaam work requires an explicit spec.salaam plan");
-  return taskSpec.parse((spec as Record<string, unknown>).salaam).plan;
+  // Each run works in its own directory and declares the agent's handoff (salaam-run-scope).
+  return runScopedPlan(
+    taskSpec.parse((spec as Record<string, unknown>).salaam).plan,
+    context.run.runId,
+  );
 }
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -833,20 +843,22 @@ async function resumeOwnedSalaamWork(
       nativeSessionId: session.executionAuthority.sessionId ?? undefined,
       countClaim: false,
     },
-    () => driveSalaamWork(deps, dispatch.externalRunId, session.id),
+    (spans) => driveSalaamWork(deps, dispatch.externalRunId, session.id, spans),
   );
 }
 
 export async function startSalaamWork(
   deps: DispatchDeps,
   claim: ClaimedWork,
+  spans?: AgentSpanRecorder,
 ): Promise<DispatchResult> {
-  return exclusively(claim.runId, () => startClaimedSalaamWork(deps, claim));
+  return exclusively(claim.runId, () => startClaimedSalaamWork(deps, claim, spans));
 }
 
 async function startClaimedSalaamWork(
   deps: DispatchDeps,
   claim: ClaimedWork,
+  spans?: AgentSpanRecorder,
 ): Promise<DispatchResult> {
   const { agent, client, acp } = deps;
   let session: string | undefined;
@@ -895,7 +907,7 @@ async function startClaimedSalaamWork(
       context,
       planFrom(context),
     );
-    return driveSalaamWork(deps, claim.runId, session);
+    return driveSalaamWork(deps, claim.runId, session, spans);
   } catch (error) {
     if (!session) {
       await client.release(claim);
@@ -950,6 +962,7 @@ async function driveSalaamWork(
   deps: DispatchDeps,
   runId: string,
   sessionId: string,
+  spans?: AgentSpanRecorder,
 ): Promise<DispatchResult> {
   const { agent, client, acp } = deps;
   hop("drive", { run: runId, session: sessionId, agent: agent.key });
@@ -996,6 +1009,35 @@ async function driveSalaamWork(
         throw error;
       }
     };
+    // Verified deliverables go to SuperLibrary and the agent's handoff to the board.
+    const publisher = () => {
+      const publish =
+        deps.salaamPublish ??
+        livePublisher({
+        tenantId: deps.tenantId,
+        source: deps.source ?? "superpipeline",
+        runId,
+        boardId: agent.boardId,
+        cardId: SalaamWorkPayload.parse(work!.payload).admission.work.card_id,
+        principalId: execution.binding.principal_id,
+        workRequestId: work!.requestId,
+        client,
+      });
+      return async (completion: Parameters<typeof publish>[0]) => {
+        const publication = await publish(completion);
+        try {
+          recordSalaamUsage(meter(), publication.usage, {
+            "harness.name": "salaam",
+            "run.id": runId,
+            "attempt.id": work!.requestId,
+            "station.id": agent.stationId,
+          });
+        } catch {
+          /* telemetry never changes the work */
+        }
+        return publication;
+      };
+    };
     const observation = {
       observe: async <T>(action: () => Promise<T>) => {
         await renew();
@@ -1018,6 +1060,7 @@ async function driveSalaamWork(
           agent.hubUserId,
           client,
           observation,
+          publisher(),
         );
         await acp.endSession(
           agent.hubUserId,
@@ -1056,6 +1099,17 @@ async function driveSalaamWork(
     hop("deliver", { run: runId, work: work.requestId });
     const admitted = await deliverSalaamWork(sessionId, agent.hubUserId);
     hop("admitted", { run: runId, task: admitted.task_id, plan: admitted.plan_revision });
+    try {
+      spans?.openAttempt({
+        attemptId: work.requestId,
+        sessionId,
+        startSeq: 0,
+        fingerprintDigest: admitted.binding_digest,
+        harnessName: "salaam",
+      });
+    } catch {
+      /* products never block on telemetry */
+    }
     // These are saved/admitted identities, not new telemetry-owned attempts.
     try {
       trace.getSpan(otelContext.active())?.setAttributes({
@@ -1121,6 +1175,8 @@ async function driveSalaamWork(
       );
     }
     hop("progress acknowledged", { run: runId, steps: payload.plan.steps.length });
+    // Tool steps reach the card as they happen, the way a streamed session's do.
+    const activity = new SalaamActivityFeed(0, (event) => spans?.onEvent(event));
     for (;;) {
       // A rebuilt loop takes this run over. Safe here: no renewal or observation is in flight,
       // and the durable owner is left exactly as it is for the successor's resume.
@@ -1178,6 +1234,16 @@ async function driveSalaamWork(
         .passthrough()
         .parse(result.ok ? result.data : null);
       hop("status", { run: runId, state: status.state, auto: status.auto_enabled, reason: status.reason });
+      for (const step of [
+        ...activity.plan((status as { plan?: unknown }).plan),
+        ...activity.next((status as { activity?: unknown }).activity),
+      ]) {
+        try {
+          await client.activity(claim, step);
+        } catch {
+          /* card activity is observation; it never changes the work */
+        }
+      }
       if (
         status.task_id !== admitted.task_id ||
         status.plan_revision !== admitted.plan_revision
@@ -1189,6 +1255,7 @@ async function driveSalaamWork(
           agent.hubUserId,
           client,
           observation,
+          publisher(),
         );
         await acp.endSession(
           agent.hubUserId,

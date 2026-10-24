@@ -1,0 +1,81 @@
+import { expect, test } from "bun:test";
+import { SalaamWorkPlan } from "../../../../../packages/contract/src/salaam-work-payload";
+import { HANDOFF_FILE, runDirectory, runScopedPlan } from "./salaam-run-scope";
+
+const plan = SalaamWorkPlan.parse({
+  objective: "Answer a question",
+  constraints: ["Quote exactly."],
+  steps: [
+    {
+      key: "research",
+      title: "Research",
+      instruction: "Write answer.md",
+      depends_on: [],
+      checks: ["answer"],
+    },
+  ],
+  acceptance: [
+    { key: "answer", command: "grep -q 502 answer.md", cwd: "." },
+    { key: "nested", command: "test -s out.txt", cwd: "out" },
+  ],
+  deliverables: ["answer.md", "out/out.txt"],
+  limits: {
+    requests: 24,
+    runtime_ms: 900000,
+    concurrency: 1,
+    token_units: null,
+    input_token_bound: 400000,
+    output_token_bound: null,
+    verification_runs: 2,
+  },
+});
+
+test("each run works in its own directory, so a check cannot pass on another run's files", () => {
+  const a = runScopedPlan(plan, "run_aaaaaa111"),
+    b = runScopedPlan(plan, "run_bbbbbb222");
+  expect(runDirectory("run_aaaaaa111")).toBe("runs/run_aaaaaa111");
+  expect(a.deliverables).toEqual([
+    "runs/run_aaaaaa111/answer.md",
+    "runs/run_aaaaaa111/out/out.txt",
+    "runs/run_aaaaaa111/" + HANDOFF_FILE,
+  ]);
+  expect(a.acceptance.map((c) => c.cwd)).toEqual([
+    "runs/run_aaaaaa111",
+    "runs/run_aaaaaa111/out",
+  ]);
+  expect(a.acceptance.map((c) => c.command)).toEqual(
+    plan.acceptance.map((c) => c.command),
+  );
+  for (const path of a.deliverables) expect(b.deliverables).not.toContain(path);
+  expect(a.constraints.at(-1)).toBe("Quote exactly.");
+  expect(a.constraints[0]).toContain("runs/run_aaaaaa111/");
+  expect(a.constraints.join("\n")).toContain(HANDOFF_FILE);
+  expect(SalaamWorkPlan.parse(a)).toEqual(a);
+  // The same run always scopes the same way, so a resumed run keeps its admitted digest.
+  expect(runScopedPlan(plan, "run_aaaaaa111")).toEqual(a);
+});
+
+test("an author-declared handoff file is not declared twice", () => {
+  const scoped = runScopedPlan(
+    { ...plan, deliverables: [HANDOFF_FILE, "answer.md"] },
+    "run_aaaaaa111",
+  );
+  expect(scoped.deliverables.filter((d) => d.endsWith(HANDOFF_FILE))).toHaveLength(1);
+});
+
+test("scoping refuses run ids that are not plain run ids and plans with no room", () => {
+  expect(() => runScopedPlan(plan, "../run_x")).toThrow(/run id/);
+  expect(() => runScopedPlan(plan, "run_a/b")).toThrow(/run id/);
+  expect(() =>
+    runScopedPlan(
+      { ...plan, constraints: Array.from({ length: 15 }, (_, n) => "c" + n) },
+      "run_aaaaaa111",
+    ),
+  ).toThrow();
+  expect(() =>
+    runScopedPlan(
+      { ...plan, deliverables: Array.from({ length: 32 }, (_, n) => "d" + n) },
+      "run_aaaaaa111",
+    ),
+  ).toThrow();
+});
