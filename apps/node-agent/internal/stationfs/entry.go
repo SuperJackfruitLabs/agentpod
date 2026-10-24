@@ -14,20 +14,22 @@ import (
 
 type Request struct {
 	effectPossible *bool
-	deadline       time.Time
-	Version        int     `json:"version"`
-	Query          string  `json:"query,omitempty"`
-	Action         string  `json:"action"`
-	RootIdentity   string  `json:"root_identity"`
-	Root           string  `json:"root"`
-	Path           string  `json:"path,omitempty"`
-	Offset         int     `json:"offset,omitempty"`
-	ExpectedTree   string  `json:"expected_tree,omitempty"`
-	ExpectedHash   *string `json:"expected_hash,omitempty"`
-	Content        *string `json:"content,omitempty"`
-	Snapshot       string  `json:"snapshot,omitempty"`
-	RequestID      string  `json:"request_id,omitempty"`
-	DeadlineMs     int64   `json:"deadline_ms,omitempty"`
+	// createdDirs collects the parent directories a patch created, for its recorded effect.
+	createdDirs  *[]string
+	deadline     time.Time
+	Version      int     `json:"version"`
+	Query        string  `json:"query,omitempty"`
+	Action       string  `json:"action"`
+	RootIdentity string  `json:"root_identity"`
+	Root         string  `json:"root"`
+	Path         string  `json:"path,omitempty"`
+	Offset       int     `json:"offset,omitempty"`
+	ExpectedTree string  `json:"expected_tree,omitempty"`
+	ExpectedHash *string `json:"expected_hash,omitempty"`
+	Content      *string `json:"content,omitempty"`
+	Snapshot     string  `json:"snapshot,omitempty"`
+	RequestID    string  `json:"request_id,omitempty"`
+	DeadlineMs   int64   `json:"deadline_ms,omitempty"`
 }
 
 // Entry is deliberately separate from node configuration/enrollment and inherits
@@ -63,6 +65,8 @@ func Entry(in io.Reader, out, errOut io.Writer) int {
 	}
 	effectPossible := false
 	request.effectPossible = &effectPossible
+	createdDirs := []string{}
+	request.createdDirs = &createdDirs
 	if request.Action == "patch" {
 		remaining := time.Until(time.UnixMilli(request.DeadlineMs))
 		if remaining > 0 && remaining <= 5*time.Second {
