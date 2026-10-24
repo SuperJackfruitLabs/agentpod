@@ -1,0 +1,4 @@
+# The manifest's type is spelled out rather than left to extension sniffing: an install prompt
+# ignores a manifest served as anything but application/manifest+json.
+/manifest.webmanifest
+  Content-Type: application/manifest+json
