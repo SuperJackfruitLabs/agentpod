@@ -988,6 +988,122 @@ test("strict work posts each tool step to the card once, as card actions, while 
   }
 });
 
+test("two pending strict decisions reach the board one at a time, oldest first", async () => {
+  const { work, completion } = await reportFixture();
+  const payload = work.payload as (typeof corpus.cases)[0]["payload"];
+  const offer = (expires_at: number) =>
+    SalaamWorkDecision.parse({
+      ...decisionFixture.decision,
+      request_id: crypto.randomUUID(),
+      work_request_id: work.requestId,
+      binding_digest: workDigest(payload.admission.binding),
+      task_id: completion.task_id,
+      plan_revision: completion.plan_revision,
+      expires_at,
+    });
+  const older = offer(Date.now() + 60000),
+    newer = offer(Date.now() + 120000);
+  const offered: string[] = [];
+  const questions: unknown[] = [];
+  let polls = 0;
+  let live: RunContext = {
+    ...context,
+    run: { ...context.run, handoff: null, completion: null },
+  };
+  const mock = spyOn(broker, "request").mockImplementation(async (_node, verb) => {
+    if (verb === "salaam.work-progress")
+      return {
+        ok: true,
+        data: {
+          version: 1,
+          request_id: work.requestId,
+          work_request_id: work.requestId,
+          task_id: completion.task_id,
+          plan_revision: 1,
+          binding_digest: completion.binding_digest,
+        },
+      } as never;
+    if (verb === "salaam.work-status") {
+      polls++;
+      return {
+        ok: true,
+        data: {
+          ...completion,
+          state: polls < 3 ? "waiting_for_person" : "succeeded",
+          auto_enabled: true,
+        },
+      } as never;
+    }
+    if (verb === "salaam.work-decisions")
+      // Newest first on purpose: the bridge must not take Salaam's order as given.
+      return { ok: true, data: { version: 1, decisions: [newer, older] } } as never;
+    if (verb === "salaam.work-completion") return { ok: true, data: completion } as never;
+    throw Error("Unexpected private verb: " + verb);
+  });
+  try {
+    const deps = {
+      tenantId,
+      source: "superpipeline",
+      salaamPublish: async () => publication,
+      permissionPollMs: 1,
+      agent: { key: "proof", boardId: board, stationId: station, hubUserId: user },
+      client: {
+        context: async () => ({ ...live, elicitations: questions }),
+        heartbeat: async () => {},
+        activity: async (_lease: unknown, activity: any) => {
+          if (!activity.strictDecision) return { ok: true };
+          offered.push(activity.strictDecision.request_id);
+          const id = "elc_" + activity.strictDecision.request_id.slice(0, 8);
+          questions.push({
+            id,
+            runId: live.run.runId,
+            cardId: live.run.cardId,
+            stageKey: live.run.stageKey,
+            question: activity.body,
+            options: activity.parameter.options,
+            strictDecision: activity.strictDecision,
+            status: "pending",
+            createdAt: new Date().toISOString(),
+          });
+          return {
+            accepted: true,
+            cardState: "input-required",
+            elicitationId: id,
+            strictDecision: activity.strictDecision,
+          };
+        },
+        completeVerified: async (_lease: unknown, handoff: unknown) => {
+          live = {
+            ...live,
+            run: {
+              ...live.run,
+              status: "ended",
+              outcome: "completed",
+              handoff,
+              completion: { met: true, outcome: "pass" },
+            },
+          };
+          return { ok: true };
+        },
+        claim: async () => {
+          throw Error("new claim forbidden");
+        },
+      },
+      acp: {
+        strictWork: async () => ({ required: true, version: 1 }),
+        renewExecution: async () => {},
+        endSession: async () => {},
+      },
+    } as unknown as DispatchDeps;
+    expect(await runOnce(deps)).toMatchObject({ status: "reported" });
+    // Both polls saw two pending decisions; only the older one was ever offered.
+    expect(polls).toBe(3);
+    expect(offered).toEqual([older.request_id]);
+  } finally {
+    mock.mockRestore();
+  }
+});
+
 for (const lostVerb of ["salaam.work-progress", "salaam.work-status"]) {
   test(`strict controller recovers lost ${lostVerb} reply under original request`, async () => {
     const { work, completion } = await reportFixture();
