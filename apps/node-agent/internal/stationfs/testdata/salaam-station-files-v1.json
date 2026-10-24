@@ -540,10 +540,7 @@
         "path": "runs/r/a.md",
         "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
         "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
-        "created_directories": [
-          "runs",
-          "runs/r"
-        ]
+        "created_directories": ["runs", "runs/r"]
       }
     },
     {
@@ -565,9 +562,7 @@
         "path": "runs/r/a.md",
         "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
         "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
-        "created_directories": [
-          "runs/r"
-        ]
+        "created_directories": ["runs/r"]
       }
     },
     {
@@ -589,9 +584,7 @@
         "path": "runs/r/a.md",
         "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
         "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
-        "created_directories": [
-          "other"
-        ]
+        "created_directories": ["other"]
       }
     },
     {
@@ -613,10 +606,7 @@
         "path": "runs/r/a.md",
         "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
         "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
-        "created_directories": [
-          "runs/r",
-          "runs"
-        ]
+        "created_directories": ["runs/r", "runs"]
       }
     },
     {
@@ -638,10 +628,7 @@
         "path": "runs/r/a.md",
         "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
         "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
-        "created_directories": [
-          "runs",
-          "runs"
-        ]
+        "created_directories": ["runs", "runs"]
       }
     },
     {
@@ -685,11 +672,7 @@
         "path": "runs/r/a.md",
         "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
         "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
-        "created_directories": [
-          "runs",
-          "runs/r",
-          "runs/r/a.md"
-        ]
+        "created_directories": ["runs", "runs/r", "runs/r/a.md"]
       }
     },
     {
@@ -711,10 +694,7 @@
         "path": "../r/a.md",
         "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
         "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
-        "created_directories": [
-          "..",
-          "../r"
-        ]
+        "created_directories": ["..", "../r"]
       }
     },
     {
@@ -736,9 +716,7 @@
         "path": "runs/r/a.md",
         "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
         "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
-        "created_directories": [
-          1
-        ]
+        "created_directories": [1]
       }
     },
     {
@@ -760,9 +738,7 @@
         "path": "runs/r/a.md",
         "sha256": null,
         "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
-        "created_directories": [
-          "runs/r"
-        ]
+        "created_directories": ["runs/r"]
       }
     },
     {
@@ -784,10 +760,7 @@
         "path": "runs/r/x/a.md",
         "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
         "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
-        "created_directories": [
-          "runs",
-          "runs/r/x"
-        ]
+        "created_directories": ["runs", "runs/r/x"]
       }
     }
   ]
