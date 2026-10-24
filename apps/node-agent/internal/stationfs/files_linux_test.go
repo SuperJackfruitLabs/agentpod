@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestStationFilesChild(t *testing.T) {
@@ -250,5 +252,135 @@ func TestCanonicalPrivateStationRequestCorpus(t *testing.T) {
 				t.Fatalf("unexpected acceptance: %v", result)
 			}
 		})
+	}
+}
+
+func TestStationPatchCreatesMissingParentsBeneathRootOnly(t *testing.T) {
+	root := t.TempDir()
+	tree := inspect(t, root)["tree_digest"].(string)
+	content := "answer"
+	result := patch(t, root, tree, "runs/run_abc/answer.md", nil, &content, "1")
+	if result["ok"] != true {
+		t.Fatalf("write under missing parents refused: %v", result)
+	}
+	created, _ := result["created_directories"].([]any)
+	if fmt.Sprint(created) != "[runs runs/run_abc]" {
+		t.Fatalf("created directories not recorded: %v", result["created_directories"])
+	}
+	for _, d := range []string{"runs", "runs/run_abc"} {
+		st, err := os.Lstat(filepath.Join(root, d))
+		if err != nil || !st.IsDir() || st.Mode().Perm() != 0700 {
+			t.Fatalf("%s not a 0700 directory: %v %v", d, st, err)
+		}
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "runs/run_abc/answer.md")); string(data) != content {
+		t.Fatal("file missed its new directory")
+	}
+	// A second write into the now-existing directory creates nothing.
+	tree = inspect(t, root)["tree_digest"].(string)
+	more := "handoff"
+	second := patch(t, root, tree, "runs/run_abc/handoff.json", nil, &more, "2")
+	if second["ok"] != true || second["created_directories"] != nil {
+		t.Fatalf("existing parent treated as created: %v", second)
+	}
+}
+
+func TestStationTreeDigestCoversDirectories(t *testing.T) {
+	root := t.TempDir()
+	before := inspect(t, root)["tree_digest"].(string)
+	_ = os.Mkdir(filepath.Join(root, "empty"), 0700)
+	if inspect(t, root)["tree_digest"].(string) == before {
+		t.Fatal("a new directory left the tree digest unchanged")
+	}
+	// Listings are unchanged: directories are digested, not listed as files.
+	if fmt.Sprint(inspect(t, root)["files"]) != "0" {
+		t.Fatalf("directory counted as a file: %v", inspect(t, root)["files"])
+	}
+}
+
+func TestStationPatchParentsRefuseEscapesAndNonDirectories(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	_ = os.WriteFile(filepath.Join(root, "file.txt"), []byte("x"), 0600)
+	_ = os.Symlink(outside, filepath.Join(root, "link"))
+	content := "denied"
+	for i, p := range []string{"../escape/a.md", "/abs/a.md", "link/new/a.md", "file.txt/a.md", "a/../../b.md"} {
+		// The symlink makes the tree itself refused; a patch must still create nothing.
+		tree, _ := request(t, map[string]any{"version": 1, "action": "inspect", "root": root})["tree_digest"].(string)
+		if tree == "" {
+			tree = strings.Repeat("0", 64)
+		}
+		result := patch(t, root, tree, p, nil, &content, fmt.Sprintf("%x", i+10))
+		if result["ok"] != false {
+			t.Fatalf("unsafe parent %q accepted: %v", p, result)
+		}
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatalf("created outside the root: %v", entries)
+	}
+	for _, d := range []string{"escape", "abs", "new", "a", "b.md"} {
+		if _, err := os.Lstat(filepath.Join(root, d)); !os.IsNotExist(err) {
+			t.Fatalf("stray %s left in the root", d)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "new")); !os.IsNotExist(err) {
+		t.Fatal("followed the symlinked parent")
+	}
+}
+
+func TestStationPatchCreatesNoParentsWhenRefusedEarly(t *testing.T) {
+	root := t.TempDir()
+	tree := inspect(t, root)["tree_digest"]
+	result := request(t, map[string]any{"version": 1, "action": "patch", "root": root, "path": "runs/late/a.md", "content": "x", "expected_hash": nil, "expected_tree": tree, "request_id": strings.Repeat("f", 64), "deadline_ms": time.Now().Add(-time.Second).UnixMilli()})
+	if result["ok"] != false {
+		t.Fatal("expired grant used")
+	}
+	if _, err := os.Lstat(filepath.Join(root, "runs")); !os.IsNotExist(err) {
+		t.Fatal("an expired grant still created directories")
+	}
+	// A stale expected tree also creates nothing.
+	stale := patch(t, root, strings.Repeat("9", 64), "runs/stale/a.md", nil, new(string), "3")
+	if stale["ok"] != false {
+		t.Fatal("stale tree accepted")
+	}
+	if _, err := os.Lstat(filepath.Join(root, "runs")); !os.IsNotExist(err) {
+		t.Fatal("a stale tree still created directories")
+	}
+}
+
+func TestStationPatchParentsRefuseAConcurrentChange(t *testing.T) {
+	// In-process: the station child is a separate process, so the seam is exercised on parents.
+	dir := t.TempDir()
+	r, err := openRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(r.fd)
+	_, tree, err := r.index()
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := Request{DeadlineMs: time.Now().Add(time.Minute).UnixMilli(), deadline: time.Now().Add(time.Minute)}
+	// A tree that is no longer the reviewed one creates nothing.
+	if _, _, err := r.parents(q, "runs/stale", strings.Repeat("9", 64)); err == nil {
+		t.Fatal("a stale tree created directories")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "runs")); !os.IsNotExist(err) {
+		t.Fatal("a stale tree left directories")
+	}
+	// The tree changes after the reviewed check: the created directories are not all that changed.
+	beforeMkdir = func() { _ = os.WriteFile(filepath.Join(dir, "intruder.txt"), []byte("x"), 0600) }
+	t.Cleanup(func() { beforeMkdir = func() {} })
+	if _, _, err := r.parents(q, "runs/race", tree); err == nil {
+		t.Fatal("a concurrent change was absorbed into the new tree")
+	}
+	// Without a concurrent change the same call succeeds and reports the directories.
+	beforeMkdir = func() {}
+	_ = os.Remove(filepath.Join(dir, "intruder.txt"))
+	_ = os.RemoveAll(filepath.Join(dir, "runs"))
+	_, tree, _ = r.index()
+	created, after, err := r.parents(q, "runs/ok", tree)
+	if err != nil || fmt.Sprint(created) != "[runs runs/ok]" || after == tree {
+		t.Fatalf("clean creation failed: %v %v %v", created, after, err)
 	}
 }

@@ -3,6 +3,7 @@
 package stationfs
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -102,7 +103,22 @@ func (r *root) open(p string, flags int) (int, error) {
 	return unix.Openat2(r.fd, p, &unix.OpenHow{Flags: uint64(flags | unix.O_NOFOLLOW | unix.O_CLOEXEC), Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV})
 }
 func (r *root) index() ([]entry, string, error) {
+	files, _, digest, err := r.indexAll()
+	return files, digest, err
+}
+
+// dirEntry is a directory as the tree digest sees it. Times are left out on purpose: staging a
+// file inside a directory changes its mtime, and the digest must not move for that.
+type dirEntry struct {
+	Path  string `json:"path"`
+	Dev   uint64 `json:"dev"`
+	Inode uint64 `json:"inode"`
+	Mode  uint32 `json:"dir_mode"`
+}
+
+func (r *root) indexAll() ([]entry, []dirEntry, string, error) {
 	result := make([]entry, 0)
+	dirs := make([]dirEntry, 0)
 	count := 0
 	var walk func(string, int) error
 	walk = func(base string, depth int) error {
@@ -147,6 +163,7 @@ func (r *root) index() ([]entry, string, error) {
 			}
 			switch st.Mode & unix.S_IFMT {
 			case unix.S_IFDIR:
+				dirs = append(dirs, dirEntry{p, st.Dev, st.Ino, st.Mode & 0777})
 				if err := walk(p, depth+1); err != nil {
 					return err
 				}
@@ -162,15 +179,19 @@ func (r *root) index() ([]entry, string, error) {
 		return nil
 	}
 	if err := walk(".", 0); err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	if err := r.unchanged(); err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Path < result[j].Path })
-	data, _ := json.Marshal(result)
+	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Path < dirs[j].Path })
+	data, _ := json.Marshal(struct {
+		Files []entry    `json:"files"`
+		Dirs  []dirEntry `json:"dirs"`
+	}{result, dirs})
 	sum := sha256.Sum256(data)
-	return result, hex.EncodeToString(sum[:]), nil
+	return result, dirs, hex.EncodeToString(sum[:]), nil
 }
 func stable(a, b unix.Stat_t) bool {
 	return a.Dev == b.Dev && a.Ino == b.Ino && a.Size == b.Size && a.Mode == b.Mode && a.Nlink == b.Nlink && a.Mtim == b.Mtim && a.Ctim == b.Ctim
@@ -335,6 +356,9 @@ func execute(q Request) (any, error) {
 		result["before_tree_digest"] = tree
 		result["tree_digest"] = after
 		result["path"] = q.Path
+		if q.createdDirs != nil && len(*q.createdDirs) > 0 {
+			result["created_directories"] = *q.createdDirs
+		}
 		result["sha256"] = nil
 		if q.Content != nil {
 			actual, _, err := r.read(q.Path, maxFileBytes)
@@ -371,6 +395,19 @@ func (r *root) patch(q Request, tree string) error {
 		parent = "."
 	}
 	fd, err := r.open(parent, unix.O_RDONLY|unix.O_DIRECTORY)
+	if errors.Is(err, unix.ENOENT) && q.ExpectedHash == nil {
+		// A new file may need its directories. They are created one at a time beneath the root
+		// (openat2 RESOLVE_BENEATH, no symlinks), 0700 like a new file's 0600, and only after the
+		// reviewed tree is confirmed; the digest must then differ by exactly those directories.
+		var created []string
+		if created, tree, err = r.parents(q, parent, tree); err != nil {
+			return err
+		}
+		if q.createdDirs != nil {
+			*q.createdDirs = created
+		}
+		fd, err = r.open(parent, unix.O_RDONLY|unix.O_DIRECTORY)
+	}
 	if err != nil {
 		return err
 	}
@@ -470,3 +507,95 @@ func (r *root) patch(q Request, tree string) error {
 	}
 	return r.unchanged()
 }
+
+// parents creates the missing directories of parent, beneath the root only, and returns them with
+// the tree digest that now includes them. Nothing is created unless the tree still equals the
+// reviewed tree, and the new tree must differ from it by exactly the created directories.
+func (r *root) parents(q Request, parent, tree string) ([]string, string, error) {
+	files0, dirs0, now, err := r.indexAll()
+	if err != nil || now != tree {
+		return nil, "", refused
+	}
+	var created []string
+	undo := func() {
+		for i := len(created) - 1; i >= 0; i-- {
+			_ = unix.Unlinkat(r.fd, created[i], unix.AT_REMOVEDIR)
+		}
+	}
+	prefix := ""
+	for _, name := range strings.Split(parent, "/") {
+		next := name
+		if prefix != "" {
+			next = prefix + "/" + name
+		}
+		fd, err := r.open(next, unix.O_RDONLY|unix.O_DIRECTORY)
+		if err == nil {
+			unix.Close(fd)
+			prefix = next
+			continue
+		}
+		// Missing or not: mkdirat refuses a symlink or a file in the way (EEXIST), and openat2
+		// refused to resolve through either, so nothing below is ever reached through a link.
+		base := "."
+		if prefix != "" {
+			base = prefix
+		}
+		bfd, err := r.open(base, unix.O_RDONLY|unix.O_DIRECTORY)
+		if err != nil {
+			undo()
+			return nil, "", refused
+		}
+		if q.effectPossible != nil {
+			*q.effectPossible = true
+		}
+		beforeMkdir()
+		err = unix.Mkdirat(bfd, name, 0700)
+		unix.Close(bfd)
+		if err != nil {
+			undo()
+			return nil, "", refused
+		}
+		created = append(created, next)
+		prefix = next
+	}
+	files1, dirs1, after, err := r.indexAll()
+	if err != nil || !sameFiles(files0, files1) || !addedOnly(dirs0, dirs1, created) {
+		undo()
+		return nil, "", refused
+	}
+	return created, after, nil
+}
+
+func sameFiles(a, b []entry) bool {
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return bytes.Equal(x, y)
+}
+
+// addedOnly holds when after is before plus exactly the created directories.
+func addedOnly(before, after []dirEntry, created []string) bool {
+	if len(after) != len(before)+len(created) {
+		return false
+	}
+	seen := map[string]dirEntry{}
+	for _, d := range after {
+		seen[d.Path] = d
+	}
+	for _, d := range before {
+		if seen[d.Path] != d {
+			return false
+		}
+		delete(seen, d.Path)
+	}
+	for _, c := range created {
+		d, ok := seen[c]
+		if !ok || d.Mode != 0700 {
+			return false
+		}
+		delete(seen, c)
+	}
+	return len(seen) == 0
+}
+
+// beforeMkdir lets a test change the tree between the reviewed check and a directory creation.
+var beforeMkdir = func() {}

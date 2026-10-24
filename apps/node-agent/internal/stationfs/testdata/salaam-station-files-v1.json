@@ -520,6 +520,275 @@
         "files": 1,
         "root_identity": "0000000000000000000000000000000000000000000000000000000000000000"
       }
+    },
+    {
+      "name": "create-with-parents",
+      "accept": true,
+      "request": {
+        "action": "patch",
+        "path": "runs/r/a.md",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": "hello\n",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "runs/r/a.md",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
+        "created_directories": [
+          "runs",
+          "runs/r"
+        ]
+      }
+    },
+    {
+      "name": "create-with-inner-parent",
+      "accept": true,
+      "request": {
+        "action": "patch",
+        "path": "runs/r/a.md",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": "hello\n",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "runs/r/a.md",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
+        "created_directories": [
+          "runs/r"
+        ]
+      }
+    },
+    {
+      "name": "parents-not-ancestors",
+      "accept": false,
+      "request": {
+        "action": "patch",
+        "path": "runs/r/a.md",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": "hello\n",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "runs/r/a.md",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
+        "created_directories": [
+          "other"
+        ]
+      }
+    },
+    {
+      "name": "parents-out-of-order",
+      "accept": false,
+      "request": {
+        "action": "patch",
+        "path": "runs/r/a.md",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": "hello\n",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "runs/r/a.md",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
+        "created_directories": [
+          "runs/r",
+          "runs"
+        ]
+      }
+    },
+    {
+      "name": "parents-duplicated",
+      "accept": false,
+      "request": {
+        "action": "patch",
+        "path": "runs/r/a.md",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": "hello\n",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "runs/r/a.md",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
+        "created_directories": [
+          "runs",
+          "runs"
+        ]
+      }
+    },
+    {
+      "name": "parents-empty",
+      "accept": false,
+      "request": {
+        "action": "patch",
+        "path": "runs/r/a.md",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": "hello\n",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "runs/r/a.md",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
+        "created_directories": []
+      }
+    },
+    {
+      "name": "parents-include-the-file",
+      "accept": false,
+      "request": {
+        "action": "patch",
+        "path": "runs/r/a.md",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": "hello\n",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "runs/r/a.md",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
+        "created_directories": [
+          "runs",
+          "runs/r",
+          "runs/r/a.md"
+        ]
+      }
+    },
+    {
+      "name": "parents-escape",
+      "accept": false,
+      "request": {
+        "action": "patch",
+        "path": "../r/a.md",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": "hello\n",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "../r/a.md",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
+        "created_directories": [
+          "..",
+          "../r"
+        ]
+      }
+    },
+    {
+      "name": "parents-not-strings",
+      "accept": false,
+      "request": {
+        "action": "patch",
+        "path": "runs/r/a.md",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": "hello\n",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "runs/r/a.md",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
+        "created_directories": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "parents-on-delete",
+      "accept": false,
+      "request": {
+        "action": "patch",
+        "path": "runs/r/a.md",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": null,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "runs/r/a.md",
+        "sha256": null,
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
+        "created_directories": [
+          "runs/r"
+        ]
+      }
+    },
+    {
+      "name": "parents-skip-a-level",
+      "accept": false,
+      "request": {
+        "action": "patch",
+        "path": "runs/r/x/a.md",
+        "expected_tree": "1111111111111111111111111111111111111111111111111111111111111111",
+        "content": "hello\n",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "receipt": {
+        "version": 1,
+        "ok": true,
+        "tree_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "files": 1,
+        "before_tree_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "path": "runs/r/x/a.md",
+        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "root_identity": "3333333333333333333333333333333333333333333333333333333333333333",
+        "created_directories": [
+          "runs",
+          "runs/r/x"
+        ]
+      }
     }
   ]
 }
