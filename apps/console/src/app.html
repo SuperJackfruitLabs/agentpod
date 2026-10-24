@@ -5,6 +5,16 @@
     <link rel="icon" type="image/svg+xml" href="%sveltekit.assets%/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AgentPod</title>
+    <!-- Installable to a home screen. No service worker: nothing is cached offline, because a
+         stale app shell would fight the sign-in. installable.test.ts checks these and the files. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#17162a" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#fff8ee" media="(prefers-color-scheme: light)" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="AgentPod" />
     <!-- First frame: the person's vibe and theme, before any stylesheet (vibekit HEAD_SCRIPT; the
          console serves no CSP, so it is inline). The first script carries a light/dark choice made
          with the old theme system into the cookie, once (system and auto mean follow the sun).
