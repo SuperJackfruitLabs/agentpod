@@ -269,8 +269,8 @@ func TestStationPatchCreatesMissingParentsBeneathRootOnly(t *testing.T) {
 	}
 	for _, d := range []string{"runs", "runs/run_abc"} {
 		st, err := os.Lstat(filepath.Join(root, d))
-		if err != nil || !st.IsDir() || st.Mode().Perm() != 0700 {
-			t.Fatalf("%s not a 0700 directory: %v %v", d, st, err)
+		if err != nil || !st.IsDir() || st.Mode().Perm() != 0750 {
+			t.Fatalf("%s not a 0750 directory: %v %v", d, st, err)
 		}
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, "runs/run_abc/answer.md")); string(data) != content {
@@ -382,5 +382,45 @@ func TestStationPatchParentsRefuseAConcurrentChange(t *testing.T) {
 	created, after, err := r.parents(q, "runs/ok", tree)
 	if err != nil || fmt.Sprint(created) != "[runs runs/ok]" || after == tree {
 		t.Fatalf("clean creation failed: %v %v %v", created, after, err)
+	}
+}
+
+// New files and directories follow the station's 0027 umask (0640 and 0750) whatever the helper's
+// own umask, so the workspace group can read them; a setgid parent's group carries down.
+func TestStationPatchModesFollowTheWorkspaceGroup(t *testing.T) {
+	old := syscall.Umask(0077)
+	defer syscall.Umask(old)
+	root := t.TempDir()
+	if err := os.Chmod(root, os.ModeSetgid|0770); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(root); st.Mode()&os.ModeSetgid == 0 {
+		t.Fatalf("root lost setgid: %v", st.Mode())
+	}
+	tree := inspect(t, root)["tree_digest"].(string)
+	content := "answer"
+	if result := patch(t, root, tree, "runs/r/answer.md", nil, &content, "5"); result["ok"] != true {
+		t.Fatalf("write refused: %v", result)
+	}
+	file, _ := os.Stat(filepath.Join(root, "runs/r/answer.md"))
+	if file.Mode().Perm() != 0640 {
+		t.Fatalf("new file mode %v, want 0640", file.Mode().Perm())
+	}
+	for _, d := range []string{"runs", "runs/r"} {
+		st, _ := os.Stat(filepath.Join(root, d))
+		if st.Mode().Perm() != 0750 || st.Mode()&os.ModeSetgid == 0 {
+			t.Fatalf("%s mode %v, want setgid 0750", d, st.Mode())
+		}
+	}
+	// An edit keeps the file's own mode.
+	_ = os.Chmod(filepath.Join(root, "runs/r/answer.md"), 0600)
+	tree = inspect(t, root)["tree_digest"].(string)
+	before := hash([]byte(content))
+	after := "edited"
+	if result := patch(t, root, tree, "runs/r/answer.md", &before, &after, "6"); result["ok"] != true {
+		t.Fatalf("edit refused: %v", result)
+	}
+	if st, _ := os.Stat(filepath.Join(root, "runs/r/answer.md")); st.Mode().Perm() != 0600 {
+		t.Fatalf("edit changed the mode to %v", st.Mode().Perm())
 	}
 }

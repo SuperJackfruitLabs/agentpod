@@ -397,7 +397,7 @@ func (r *root) patch(q Request, tree string) error {
 	fd, err := r.open(parent, unix.O_RDONLY|unix.O_DIRECTORY)
 	if errors.Is(err, unix.ENOENT) && q.ExpectedHash == nil {
 		// A new file may need its directories. They are created one at a time beneath the root
-		// (openat2 RESOLVE_BENEATH, no symlinks), 0700 like a new file's 0600, and only after the
+		// (openat2 RESOLVE_BENEATH, no symlinks), 0750 like a new file's 0640, and only after the
 		// reviewed tree is confirmed; the digest must then differ by exactly those directories.
 		var created []string
 		if created, tree, err = r.parents(q, parent, tree); err != nil {
@@ -412,7 +412,8 @@ func (r *root) patch(q Request, tree string) error {
 		return err
 	}
 	defer unix.Close(fd)
-	mode := uint32(0600)
+	// A new file is 0640, the station umask (0027) whatever the helper process has; an edit keeps its mode.
+	mode := uint32(0640)
 	var original unix.Stat_t
 	if q.ExpectedHash != nil {
 		data, st, err := r.read(q.Path, maxFileBytes)
@@ -431,6 +432,11 @@ func (r *root) patch(q Request, tree string) error {
 	f, err := unix.Openat(fd, stage, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, mode)
 	if err != nil {
 		return err
+	}
+	if err := unix.Fchmod(f, mode); err != nil {
+		unix.Close(f)
+		_ = unix.Unlinkat(fd, stage, 0)
+		return refused
 	}
 	var stagedStat unix.Stat_t
 	if unix.Fstat(f, &stagedStat) != nil {
@@ -549,13 +555,28 @@ func (r *root) parents(q Request, parent, tree string) ([]string, string, error)
 			*q.effectPossible = true
 		}
 		beforeMkdir()
-		err = unix.Mkdirat(bfd, name, 0700)
+		err = unix.Mkdirat(bfd, name, 0750)
+		var parentStat unix.Stat_t
+		if err == nil {
+			err = unix.Fstat(bfd, &parentStat)
+		}
 		unix.Close(bfd)
 		if err != nil {
 			undo()
 			return nil, "", refused
 		}
 		created = append(created, next)
+		// 0750, the station umask (0027) whatever the helper has, keeping a setgid parent's group.
+		dmode := uint32(0750) | parentStat.Mode&unix.S_ISGID
+		dfd, err := r.open(next, unix.O_RDONLY|unix.O_DIRECTORY)
+		if err == nil {
+			err = unix.Fchmod(dfd, dmode)
+			unix.Close(dfd)
+		}
+		if err != nil {
+			undo()
+			return nil, "", refused
+		}
 		prefix = next
 	}
 	files1, dirs1, after, err := r.indexAll()
@@ -589,7 +610,7 @@ func addedOnly(before, after []dirEntry, created []string) bool {
 	}
 	for _, c := range created {
 		d, ok := seen[c]
-		if !ok || d.Mode != 0700 {
+		if !ok || d.Mode != 0750 {
 			return false
 		}
 		delete(seen, c)
