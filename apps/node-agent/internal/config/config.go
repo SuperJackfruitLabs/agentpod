@@ -80,6 +80,11 @@ type Config struct {
 	// Explicit private Node and reviewed host manifest opt into deterministic daemon startup.
 	SalaamNodeBinary string `json:"salaamNodeBinary,omitempty"`
 	SalaamManifest   string `json:"salaamManifest,omitempty"`
+	// A separately provisioned launcher (estate 306 dev station): its manifest root, unit prefix
+	// and log directory. Empty keeps /etc/salaam/stations, salaam-host and /var/log/salaam.
+	SalaamLauncherRoot   string `json:"salaamLauncherRoot,omitempty"`
+	SalaamUnitPrefix     string `json:"salaamUnitPrefix,omitempty"`
+	SalaamLauncherLogDir string `json:"salaamLauncherLogDir,omitempty"`
 	// NativeSkillActivation is an explicit operator opt-in for the separate
 	// native-placement transaction. It is off by default.
 	NativeSkillActivation bool `json:"nativeSkillActivation,omitempty"`

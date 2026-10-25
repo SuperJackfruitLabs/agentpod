@@ -32,12 +32,19 @@ var (
 // manifest is the provisioned launcher manifest for this station.
 func (s *salaamDescriptor) salaamLogCommand(key string, follow bool) (string, []string, []string) {
 	id := key[len("salaam:"):]
-	if s.config.Manifest == filepath.Join(salaamLauncherRoot, id, "host.json") {
+	root, logDir := salaamLauncherRoot, salaamLauncherLogDir
+	if s.config.LauncherRoot != "" {
+		root = s.config.LauncherRoot
+	}
+	if s.config.LauncherLogDir != "" {
+		logDir = s.config.LauncherLogDir
+	}
+	if s.config.Manifest == filepath.Join(root, id, "host.json") {
 		args := []string{"-n", fmt.Sprint(tailDefaultN)}
 		if follow {
 			args = append(args, "-F")
 		}
-		return salaamTail, append(args, filepath.Join(salaamLauncherLogDir, id+".log")), os.Environ()
+		return salaamTail, append(args, filepath.Join(logDir, id+".log")), os.Environ()
 	}
 	args := []string{"--user", "-u", salaamUnit, "-n", fmt.Sprint(tailDefaultN), "-o", "cat", "--no-pager"}
 	if follow {
