@@ -140,7 +140,9 @@ export async function runExecutionExport(
         source: {
           station: manifest.binding.station_id,
           stationName: manifest.binding.station_key,
-          path: entry,
+          // SuperLibrary versions an item by (station, board, source path): the run's own path, so
+          // each verified run is its own item and only a retry of the same run reuses it.
+          path: runSourcePath(manifest.binding.run.id, entry),
           board: manifest.task.board_id,
           card: manifest.task.card_id,
           run: manifest.binding.run.id,
@@ -460,4 +462,9 @@ export function libraryDigest(files: FrozenExportFile[]) {
           ),
         ),
       );
+}
+
+/** The station path SuperLibrary keys an export's item on: the run's directory and its entry. */
+export function runSourcePath(runId: string, entry: string): string {
+  return `runs/${runId}/${entry}`;
 }
