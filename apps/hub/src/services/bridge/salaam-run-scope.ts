@@ -34,7 +34,14 @@ export function runScopedPlan(plan: Plan, runId: string): Plan {
         `it was met) and "evidence" (sources and checks). It is verified and reported with your work.`,
       ...plan.constraints,
     ],
-    acceptance: plan.acceptance.map((check) => ({ ...check, cwd: inside(check.cwd) })),
+    acceptance: plan.acceptance.map((check) => scopedCheck(check, inside(check.cwd))),
     deliverables: deliverables.map(inside),
   });
+}
+
+/** A station check only runs at the workspace root (cwd "."), so the run's directory is entered
+ * by the command itself. The directory is single-quoted; one that holds a quote is refused. */
+function scopedCheck(check: Plan["acceptance"][number], dir: string): Plan["acceptance"][number] {
+  if (!/^[A-Za-z0-9._/-]+$/.test(dir)) throw Error("Strict check directory must be a plain path");
+  return { ...check, cwd: ".", command: `cd '${dir}' && (${check.command})` };
 }
