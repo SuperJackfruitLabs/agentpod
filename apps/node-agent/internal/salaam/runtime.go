@@ -16,7 +16,10 @@ import (
 // Runtime is operator-reviewed startup configuration. It never comes from ACP or a station.
 type Runtime struct {
 	Node, CLI, Manifest, State, Workspace, NodeID string
-	run                                           func(context.Context, string, []string) ([]byte, error)
+	// LauncherRoot and UnitPrefix name a separately provisioned launcher; empty keeps
+	// /etc/salaam/stations and salaam-host.
+	LauncherRoot, UnitPrefix string
+	run                      func(context.Context, string, []string) ([]byte, error)
 }
 type strictWorkVersion struct {
 	Version int `json:"version"`
@@ -118,13 +121,27 @@ var launcherRoot = "/etc/salaam/stations"
 // launcherUnit names the root-owned salaam-host@ unit when the configured manifest is the
 // provisioned one for this workspace's station; otherwise the node starts the host itself.
 func (r *Runtime) launcherUnit() string {
-	dir := filepath.Dir(r.Manifest)
-	key := StationKey(r.Workspace)[len("salaam:"):]
-	if filepath.Base(r.Manifest) != "host.json" || filepath.Dir(dir) != launcherRoot || filepath.Base(dir) != key {
+	root, prefix := launcherRoot, "salaam-host"
+	if r.LauncherRoot != "" {
+		root = r.LauncherRoot
+	}
+	if r.UnitPrefix != "" {
+		prefix = r.UnitPrefix
+	}
+	if !LauncherPrefix.MatchString(prefix) {
 		return ""
 	}
-	return "salaam-host@" + key + ".service"
+	dir := filepath.Dir(r.Manifest)
+	key := StationKey(r.Workspace)[len("salaam:"):]
+	if filepath.Base(r.Manifest) != "host.json" || filepath.Dir(dir) != root || filepath.Base(dir) != key {
+		return ""
+	}
+	return prefix + "@" + key + ".service"
 }
+
+// LauncherPrefix is salaam-host, or one lower-case word between salaam- and -host for a second
+// launcher (Salaam host-bind launcherPrefix); anything else names no unit.
+var LauncherPrefix = regexp.MustCompile(`^salaam(-[a-z][a-z0-9]{0,15})?-host$`)
 
 // Validate checks configured installation paths without starting a process.
 func (r *Runtime) Validate() error { return r.validatePaths() }

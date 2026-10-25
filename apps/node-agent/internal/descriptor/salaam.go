@@ -3,8 +3,8 @@ package descriptor
 import (
 	"context"
 	"fmt"
-	"log"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/salaam"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,7 +12,11 @@ import (
 	"time"
 )
 
-type SalaamConfig struct{ Binary, StateDir, Workspace, NodeBinary, Manifest, NodeID string }
+type SalaamConfig struct {
+	Binary, StateDir, Workspace, NodeBinary, Manifest, NodeID string
+	// A separately provisioned launcher's manifest root and log directory; empty keeps the defaults.
+	LauncherRoot, LauncherLogDir string
+}
 type salaamDescriptor struct {
 	config    SalaamConfig
 	configure func(context.Context, string, any) ([]byte, error)

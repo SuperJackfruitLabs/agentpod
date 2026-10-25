@@ -134,3 +134,32 @@ func TestSalaamTailLogsRefusesAnotherStation(t *testing.T) {
 		t.Fatal("tailed logs for a station this node does not hold")
 	}
 }
+
+func TestSalaamConfiguredLauncherTailsItsOwnLogDir(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	ws := filepath.Join(base, "workspace")
+	_ = os.Mkdir(ws, 0o700)
+	key := salaam.StationKey(ws)
+	id := key[len("salaam:"):]
+	oldTail := salaamTail
+	t.Cleanup(func() { salaamTail = oldTail })
+	argsFile := filepath.Join(base, "args")
+	stub := filepath.Join(base, "tail")
+	_ = os.WriteFile(stub, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsFile+"\necho 'dev ready'\n"), 0o755)
+	salaamTail = stub
+	journal := stubJournalctl(t)
+	bin, _ := os.Executable()
+	devRoot, devLog := filepath.Join(base, "dev-stations"), filepath.Join(base, "dev-log")
+	d := NewSalaamFrom(SalaamConfig{Binary: bin, StateDir: filepath.Join(base, "state"), Workspace: ws, Manifest: filepath.Join(devRoot, id, "host.json"), LauncherRoot: devRoot, LauncherLogDir: devLog})
+	var got strings.Builder
+	if err := d.TailLogs(context.Background(), key, false, func(b []byte) error { got.Write(b); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := os.ReadFile(argsFile)
+	if strings.TrimSpace(string(args)) != "-n 500 "+filepath.Join(devLog, id+".log") {
+		t.Fatalf("dev launcher log not tailed: args=%q", args)
+	}
+	if _, err := os.Stat(journal); err == nil {
+		t.Fatal("the user journal was queried for a launcher host")
+	}
+}

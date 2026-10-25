@@ -117,3 +117,49 @@ func TestPassiveHealthNeverStartsConfiguredRuntime(t *testing.T) {
 		t.Fatalf("passive health started runtime: healthy=%v pid=%v calls=%d", healthy, pid, calls)
 	}
 }
+
+// A second, separately provisioned launcher (its own root and unit prefix) is used only when the
+// node is configured for it; the defaults keep the salaam-host@ unit under /etc/salaam/stations.
+func TestConfiguredLauncherRootAndPrefixNameTheirOwnUnit(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	node, _ := os.Executable()
+	node, _ = filepath.EvalSymlinks(node)
+	cli := filepath.Join(root, "salaam.mjs")
+	workspace := filepath.Join(root, "workspace")
+	key := StationKey(workspace)[len("salaam:"):]
+	devRoot := filepath.Join(root, "dev-stations")
+	own := filepath.Join(devRoot, key, "host.json")
+	for _, p := range []string{cli, own} {
+		_ = os.MkdirAll(filepath.Dir(p), 0755)
+		_ = os.WriteFile(p, []byte("fixture"), 0600)
+	}
+	state := filepath.Join(root, "state")
+	var got []string
+	r := &Runtime{Node: node, CLI: cli, Manifest: own, State: state, Workspace: workspace, NodeID: "node_fixture", LauncherRoot: devRoot, UnitPrefix: "salaam-dev-host"}
+	r.run = func(ctx context.Context, exe string, args []string) ([]byte, error) {
+		got = args
+		return json.Marshal(map[string]any{"version": 1, "ready": true, "node": node, "cli": cli, "state": state, "workspace": workspace, "node_id": "node_fixture", "manifest_digest": strings.Repeat("a", 64), "pins_digest": strings.Repeat("b", 64), "strict_work": map[string]any{"version": 1}})
+	}
+	if err := r.ensureStrict(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{cli, "host", "unit-start", "--unit", "salaam-dev-host@" + key + ".service", "--state", state}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("launcher command %q, want %q", got, want)
+	}
+	// The same manifest without the configured root is not a launcher manifest.
+	r.LauncherRoot, r.UnitPrefix = "", ""
+	if err := r.Ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got[2] != "start" {
+		t.Fatalf("an unconfigured root still used the launcher: %q", got)
+	}
+	// A prefix that is not salaam-<word>-host never names a unit.
+	for _, bad := range []string{"other-host", "salaam-host-x", "salaam-a-b-host", "Salaam-host"} {
+		r.LauncherRoot, r.UnitPrefix = devRoot, bad
+		if u := r.launcherUnit(); u != "" {
+			t.Fatalf("prefix %q named unit %q", bad, u)
+		}
+	}
+}

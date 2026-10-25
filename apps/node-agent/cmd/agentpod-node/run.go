@@ -298,7 +298,7 @@ func runCmd() {
 			salaamClient.BindMCP = proxy.BindIdentity
 		}
 		if cfg.SalaamManifest != "" || cfg.SalaamNodeBinary != "" {
-			salaamClient.Runtime = &salaam.Runtime{Node: cfg.SalaamNodeBinary, CLI: cfg.SalaamBinary, Manifest: cfg.SalaamManifest, State: cfg.SalaamStateDir, Workspace: cfg.SalaamWorkspace, NodeID: cfg.NodeID}
+			salaamClient.Runtime = &salaam.Runtime{Node: cfg.SalaamNodeBinary, CLI: cfg.SalaamBinary, Manifest: cfg.SalaamManifest, State: cfg.SalaamStateDir, Workspace: cfg.SalaamWorkspace, NodeID: cfg.NodeID, LauncherRoot: cfg.SalaamLauncherRoot, UnitPrefix: cfg.SalaamUnitPrefix}
 		}
 	}
 	h = gateway.NewSalaamHandler(h, salaamClient)

@@ -16,7 +16,7 @@ import (
 func buildRegistry(cfg config.Config) *descriptor.Registry {
 	reg := descriptor.NewRegistry()
 	home, _ := os.UserHomeDir()
-	reg.Register(descriptor.NewSalaamFrom(descriptor.DiscoverSalaam(descriptor.SalaamConfig{Binary: cfg.SalaamBinary, StateDir: cfg.SalaamStateDir, Workspace: cfg.SalaamWorkspace, NodeBinary: cfg.SalaamNodeBinary, Manifest: cfg.SalaamManifest, NodeID: cfg.NodeID}, home, exec.LookPath)))
+	reg.Register(descriptor.NewSalaamFrom(descriptor.DiscoverSalaam(descriptor.SalaamConfig{Binary: cfg.SalaamBinary, StateDir: cfg.SalaamStateDir, Workspace: cfg.SalaamWorkspace, NodeBinary: cfg.SalaamNodeBinary, Manifest: cfg.SalaamManifest, NodeID: cfg.NodeID, LauncherRoot: cfg.SalaamLauncherRoot, LauncherLogDir: cfg.SalaamLauncherLogDir}, home, exec.LookPath)))
 	reg.Register(descriptor.NewHermes("", cfg.HermesStartCmd))
 	reg.Register(descriptor.NewOpenClawFrom(descriptor.OpenClawConfig{
 		StartCmd:     cfg.OpenClawStartCmd,
