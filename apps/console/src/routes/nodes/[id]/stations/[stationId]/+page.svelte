@@ -31,6 +31,7 @@
   import PluginManagementPanel from "$lib/components/stations/PluginManagementPanel.svelte";
   import HarnessConfigPanel from "$lib/components/stations/HarnessConfigPanel.svelte";
   import McpProxyStatus from "$lib/components/stations/McpProxyStatus.svelte";
+  import ApprovalRulesPanel from "$lib/components/stations/ApprovalRulesPanel.svelte";
   import ChangesetPanel from "$lib/components/stations/ChangesetPanel.svelte";
   import PostureBanner from "$lib/components/stations/PostureBanner.svelte";
   import ActivityPanel from "$lib/components/stations/ActivityPanel.svelte";
@@ -832,6 +833,9 @@
              switch must not be able to tear it down mid-review. -->
         <div data-config-section="settings" class={configSection === "settings" ? "contents" : "hidden"}>
           <McpProxyStatus {stationId} />
+          {#if station?.harness === "salaam"}
+            <ApprovalRulesPanel {stationId} canChange={wsAdmin} />
+          {/if}
           {#if hasConfigManagement && !wsAdmin}
             <div class="ap-cfg-placeholder space-y-2 p-4" data-testid="config-member">
               <h2 class="font-semibold">Declared configuration</h2>

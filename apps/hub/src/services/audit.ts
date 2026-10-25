@@ -84,6 +84,9 @@ export const SAFE_PARAM_KEYS: ReadonlySet<string> = new Set<string>([
   "generation",
   "username",
   "outcome",
+  // agent approval rules (routes/agent-approval-rules.ts): ids and the scope only.
+  "ruleId",
+  "scope",
 ]);
 
 /**

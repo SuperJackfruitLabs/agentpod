@@ -62,6 +62,7 @@ import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
 import { stations } from "./schema/stations";
 import { stationSetups } from "./schema/station-setup";
+import { agentApprovalRules } from "./schema/agent-approval-rules";
 import { stationTranscription } from "./schema/transcription";
 import { stationSpeech } from "./schema/speech";
 import {
@@ -135,6 +136,7 @@ export const TENANT_SCOPED_TABLES = {
   trustedSkillReleaseArtifacts,
   skillReleaseCohorts,
   stationSetups,
+  agentApprovalRules,
   stationTranscription,
   stationSpeech,
   stationAudit,

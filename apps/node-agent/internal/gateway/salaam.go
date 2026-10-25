@@ -215,6 +215,8 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 		Reason        string         `json:"reason"`
 		// Admit only: the hub session whose conversation a resume continues (Salaam checks it).
 		ContinueFrom string `json:"continue_from"`
+		// Admit and renew: the agent's standing approval rules, validated by Salaam.
+		ApprovalRules json.RawMessage `json:"approval_rules"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(params)))
 	decoder.DisallowUnknownFields()
@@ -228,8 +230,15 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 	if p.ContinueFrom != "" && action != "admit" {
 		return nil, false, fmt.Errorf("salaam: only an admission can continue a conversation")
 	}
+	if p.ContinueFrom != "" && len(p.ApprovalRules) > 0 {
+		return nil, false, fmt.Errorf("salaam: a resumed conversation carries no approval rules")
+	}
 	if p.ContinueFrom != "" {
 		result, err := h.client.AdmitContinuing(ctx, p.Binding, p.RequestID, p.ContinueFrom)
+		return result, false, err
+	}
+	if len(p.ApprovalRules) > 0 {
+		result, err := h.client.RequestWithRules(ctx, action, p.Binding, p.RequestID, p.LeaseSequence, p.ApprovalRules)
 		return result, false, err
 	}
 	result, err := h.client.Request(ctx, action, p.Binding, p.RequestID, p.LeaseSequence, p.Reason)

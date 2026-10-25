@@ -11,6 +11,7 @@ import { stations } from "../db/schema/stations";
 import { tenants } from "../db/schema/tenants";
 import { bridgeDispatches } from "../db/schema/bridge";
 import { orgPlaneClient } from "./org-plane/client";
+import { approvalRulesFor } from "./agent-approval-rules";
 import * as broker from "./broker";
 
 /**
@@ -211,10 +212,13 @@ export async function admitSalaamExecution(
   if (!saved || saved.state !== "active")
     throw Error("Salaam execution is not active");
   await validateSalaamAuthority(saved.binding, userId, { workspaceAdmin: saved.workspaceAdmin === true });
+  // The agent's standing approval rules, pinned by Salaam for this run (approval scopes).
+  const approvalRules = await approvalRulesFor(saved.binding);
   const result = await broker.request(saved.binding.node_id, "salaam.admit", {
     binding: saved.binding,
     request_id: "admit:" + id,
     ...(saved.continueFrom !== undefined ? { continue_from: saved.continueFrom } : {}),
+    ...(approvalRules ? { approval_rules: approvalRules } : {}),
   });
   if (!result.ok)
     throw Error(
@@ -283,10 +287,13 @@ export async function renewSalaamExecution(
     .returning();
   const saved = claimed?.executionAuthority;
   if (!saved) throw Error("Salaam execution changed during renewal");
+  // Every renewal restates the live rules: one revoked since admission ends now (approval scopes).
+  const approvalRules = await approvalRulesFor(saved.binding);
   const result = await broker.request(saved.binding.node_id, "salaam.renew", {
     binding: saved.binding,
     request_id: `renew:${id}:${saved.leaseSequence}`,
     lease_sequence: saved.leaseSequence,
+    ...(approvalRules ? { approval_rules: approvalRules } : {}),
   });
   if (!result.ok)
     throw Error(
