@@ -24,6 +24,8 @@ export const SalaamApprovalDetail = z
   })
   .strict();
 export type SalaamApprovalDetail = z.infer<typeof SalaamApprovalDetail>;
+const option = <T extends string>(id: T) =>
+  z.object({ id: z.literal(id), title: z.string().min(1).max(256) }).strict();
 /** A protected daemon offers one exact existing ManagedWork approval. This is
  * correlation metadata, never an independent grant or a model-generated policy. */
 export const SalaamWorkDecision = z
@@ -42,13 +44,10 @@ export const SalaamWorkDecision = z
     question: z.string().min(1).max(8192),
     /** Readable approvals: what is being approved, as structured fields (never parsed from text). */
     detail: SalaamApprovalDetail.optional(),
-    options: z.tuple([
-      z
-        .object({ id: z.literal("approve"), title: z.string().min(1).max(256) })
-        .strict(),
-      z
-        .object({ id: z.literal("deny"), title: z.string().min(1).max(256) })
-        .strict(),
+    // approve, deny; or approve, approve-run ("Approve for this run"), deny. Nothing else.
+    options: z.union([
+      z.tuple([option("approve"), option("deny")]),
+      z.tuple([option("approve"), option("approve-run"), option("deny")]),
     ]),
   })
   .strict();
@@ -65,7 +64,7 @@ export const SalaamWorkDecisionAnswer = z
       .string()
       .regex(/^elc_[A-Za-z0-9]{6,}$/)
       .max(128),
-    option_id: z.enum(["approve", "deny"]),
+    option_id: z.enum(["approve", "approve-run", "deny"]),
     answered_by: z.string().min(1).max(128),
     answered_at: z.string().datetime(),
   })

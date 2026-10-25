@@ -83,3 +83,33 @@ for (const [name, bad] of Object.entries({
 }))
   test(`decision detail rejects ${name}`, () =>
     expect(SalaamWorkDecision.safeParse({ ...corpus.decision, detail: bad }).success).toBe(false));
+
+// Approval scopes: "Approve for this run" sits between approve and deny, nowhere else.
+const runOptions = [
+  { id: "approve", title: "Approve once" },
+  { id: "approve-run", title: "Approve for this run" },
+  { id: "deny", title: "Deny" },
+];
+test("a decision may offer approve, approve-run, deny in that order", () => {
+  expect(SalaamWorkDecision.parse({ ...corpus.decision, options: runOptions }).options).toEqual(runOptions);
+  for (const bad of [
+    [runOptions[1], runOptions[0], runOptions[2]],
+    [runOptions[0], runOptions[1]],
+    [runOptions[0], { id: "approve-always", title: "Always" }, runOptions[2]],
+  ])
+    expect(SalaamWorkDecision.safeParse({ ...corpus.decision, options: bad }).success).toBe(false);
+});
+test("an answer may choose approve-run", () => {
+  const answer = {
+    version: 1,
+    request_id: crypto.randomUUID(),
+    decision: { ...corpus.decision, options: runOptions },
+    decision_digest: corpus.decision_digest,
+    elicitation_id: "elc_abcdef",
+    option_id: "approve-run",
+    answered_by: "prn_human",
+    answered_at: new Date().toISOString(),
+  };
+  expect(SalaamWorkDecisionAnswer.safeParse(answer).success).toBe(true);
+  expect(SalaamWorkDecisionAnswer.safeParse({ ...answer, option_id: "approve-always" }).success).toBe(false);
+});
