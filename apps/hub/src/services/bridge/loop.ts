@@ -191,6 +191,7 @@ const hubAcpPort: AcpPort = {
   },
   promptSession: (userId, sessionId, text, run) => acpSessions.promptSession(userId, sessionId, text, [], run),
   renewExecution: (userId,sessionId,run) => acpSessions.renewExecution(userId,sessionId,run),
+  ensureStrictSession: (userId, sessionId) => acpSessions.ensureSalaamLive(userId, sessionId),
   subscribe: (sessionId, fn) => acpSessions.subscribe(sessionId, fn),
   endSession: (userId, sessionId, reason) => acpSessions.endSession(userId, sessionId, reason),
   answerPermission: (userId, sessionId, requestSeq, optionId) =>

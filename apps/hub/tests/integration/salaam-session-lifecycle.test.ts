@@ -12,6 +12,7 @@ import { tenants } from "../../src/db/schema/tenants";
 import { nodes } from "../../src/db/schema/nodes";
 import { stations } from "../../src/db/schema/stations";
 import { acpEvents, acpSessions } from "../../src/db/schema/acp";
+import { bridgeDispatches } from "../../src/db/schema/bridge";
 import { adminAuditLog } from "../../src/db/schema/admin";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { stationAcpRoutes, createSessionFailure } from "../../src/routes/station-acp";
@@ -328,4 +329,58 @@ test("an end racing recovery after a hub restart leaves no restored ghost holdin
   // The station is free: recovery did not resurrect the ended session.
   const next = await open(asha);
   expect(next.id).not.toBe(held.id);
+});
+
+// "Hub restart strands live strict work": a board run's session was revoked on every hub restart
+// (run_b2bfa162da60440f, run_687cded4738d4241), although the board work owner renews it and Salaam
+// carries the durable task on its own. It is restored like any Salaam session instead.
+test("a hub restart restores a board-bound Salaam session instead of revoking it", async () => {
+  const held = await open(asha);
+  const saved = (await row(held.id)).executionAuthority!;
+  const board = structuredClone(saved);
+  const runId = "run_" + hex();
+  board.binding.run = { source: "superpipeline", id: runId, epoch: 1 };
+  await db.update(acpSessions).set({ executionAuthority: board }).where(eq(acpSessions.id, held.id));
+  // The live board claim that owns this run, as the bridge records it.
+  await db.insert(bridgeDispatches).values({
+    tenantId,
+    externalSource: "superpipeline",
+    externalRunId: runId,
+    boardId: "brd_" + hex(),
+    externalCardId: "card_" + hex(),
+    agentKey: "proof",
+    stationId,
+    leaseEpoch: 1,
+    outcome: "working",
+    eventsReceived: 0,
+    activitiesPosted: 0,
+    startedAt: new Date(),
+    updatedAt: new Date(),
+  });
+  acp._forgetLiveForTest(held.id);
+  await acp.recoverSalaamForNode(nodeId);
+  const after = await row(held.id);
+  expect(after.status).not.toBe("ended");
+  expect(after.executionAuthority?.state).toBe("active");
+  expect(acp._isLiveForTest(held.id)).toBe(true);
+  await db.delete(bridgeDispatches).where(eq(bridgeDispatches.externalRunId, runId));
+});
+
+test("a re-drive brings back a board session the restart left un-held, and reports a gone one", async () => {
+  const held = await open(asha);
+  acp._forgetLiveForTest(held.id);
+  expect(await acp.ensureSalaamLive(asha, held.id)).toBe("live");
+  expect(acp._isLiveForTest(held.id)).toBe(true);
+  // Someone else's session, or an ended one, is never restored through this door.
+  expect(await acp.ensureSalaamLive(bilal, held.id)).toBe("gone");
+  acp._forgetLiveForTest(held.id);
+  expect(await acp.ensureSalaamLive(bilal, held.id)).toBe("gone");
+  expect(acp._isLiveForTest(held.id)).toBe(false);
+  // An ended row whose authority still reads active is not resurrected either.
+  await db.update(acpSessions).set({ status: "ended" }).where(eq(acpSessions.id, held.id));
+  expect(await acp.ensureSalaamLive(asha, held.id)).toBe("gone");
+  await db.update(acpSessions).set({ status: "idle" }).where(eq(acpSessions.id, held.id));
+  expect(await acp.ensureSalaamLive(asha, held.id)).toBe("live");
+  await acp.endSession(asha, held.id, "done");
+  expect(await acp.ensureSalaamLive(asha, held.id)).toBe("gone");
 });

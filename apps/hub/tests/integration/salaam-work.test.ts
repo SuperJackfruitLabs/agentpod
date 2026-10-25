@@ -2346,3 +2346,28 @@ describe("resume parks a revoked unreported run and skips settled ones", () => {
     }
   });
 });
+
+test("a re-drive waits, delivering nothing, while the station's node is not connected", async () => {
+  await reportFixture();
+  const calls: string[] = [];
+  const mock = spyOn(broker, "request").mockImplementation(async (_n, verb) => {
+    calls.push(String(verb));
+    return { ok: false, error: "fixture" } as never;
+  });
+  const deps = {
+    tenantId,
+    source: "superpipeline",
+    salaamPublish: async () => publication,
+    agent: { key: "proof", boardId: board, stationId: station, hubUserId: user },
+    acp: { ensureStrictSession: async () => "waiting", renewExecution: async () => {} },
+    client: { context: async () => context, heartbeat: async () => ({}) },
+  } as unknown as DispatchDeps;
+  try {
+    const result = await resumeSalaamWork(deps);
+    expect(result).toMatchObject({ status: "idle" });
+    expect(String(result?.reason)).toContain("station node");
+    expect(calls).toEqual([]);
+  } finally {
+    mock.mockRestore();
+  }
+});

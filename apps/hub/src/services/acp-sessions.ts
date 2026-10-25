@@ -2278,6 +2278,10 @@ export function _setSalaamRestoreBeforeLockForTest(hook: (() => Promise<void>) |
   salaamRestoreBeforeLockForTest = hook;
 }
 /** Test seam: forget a live session as a hub restart would, without ending its row. */
+/** Test seam: whether a session is held live in this hub process. */
+export function _isLiveForTest(sessionId: string): boolean {
+  return liveById.has(sessionId);
+}
 export function _forgetLiveForTest(sessionId: string): void {
   const live = liveById.get(sessionId);
   if (!live) return;
@@ -2311,18 +2315,17 @@ async function restoreSalaamRowLocked(
   if (!row || !row.executionAuthority || row.status === "ended" || liveById.has(row.id))
     return null;
   const saved = row.executionAuthority;
-  if (
-    saved.state !== "active" ||
-    saved.binding.run.source === "superpipeline"
-  ) {
+  // A board run's session is restored like any other: its owner (the bridge) renews it and Salaam
+  // carries the durable task itself, so a hub restart must not strand it (run_b2bfa162, run_687cded4).
+  if (saved.state !== "active") {
     await revokeSalaamExecution(
       row.id,
-      "Hub restart requires the board work owner to recover explicitly",
+      "Hub restart found an execution that was not active; recover explicitly",
     );
     if (row.status !== "ended")
       await appendEndedState(
         row.id,
-        "Hub restart interrupted board execution; no prompt was replayed",
+        "Hub restart interrupted an inactive execution; no prompt was replayed",
       );
     return null;
   }
@@ -2361,6 +2364,37 @@ async function restoreSalaamRowLocked(
   if (liveById.has(row.id)) return null;
   addLive(live);
   return live;
+}
+
+/**
+ * A strict run's owner (the bridge) asks for its session before driving it: restored if a hub
+ * restart left it un-held, "waiting" while its node is not connected, "gone" if it ended, is not
+ * active, or is not this user's. Nothing is replayed; Salaam carries the durable task itself.
+ */
+export async function ensureSalaamLive(
+  userId: string,
+  sessionId: string,
+): Promise<"live" | "waiting" | "gone"> {
+  const held = liveById.get(sessionId);
+  if (held) {
+    if (held.userId !== userId || held.ended) return "gone";
+    if (held.transportLost) {
+      if (!connectionManager.isOnline(held.nodeId)) return "waiting";
+      await reconnectSalaam(held);
+    }
+    return "live";
+  }
+  const [row] = await db.select().from(acpSessions).where(eq(acpSessions.id, sessionId));
+  if (
+    !row ||
+    row.userId !== userId ||
+    !row.executionAuthority ||
+    row.executionAuthority.state !== "active"
+  )
+    return "gone";
+  if (!connectionManager.isOnline(row.executionAuthority.binding.node_id)) return "waiting";
+  await restoreSalaamRow(row);
+  return liveById.has(sessionId) ? "live" : "gone";
 }
 
 export async function recoverSalaamForNode(nodeId: string): Promise<void> {
