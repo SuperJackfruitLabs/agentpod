@@ -2407,3 +2407,63 @@ test("a strict question carries the decision's readable detail to the producer a
   expect(offers[0]?.parameter?.detail).toEqual(detail);
   expect(offers[0]?.parameter?.options).toEqual(decision.options.map((v) => ({ name: v.id, title: v.title })));
 });
+
+// A strict run whose Salaam work stopped and whose session ended (run_84d49db766224895: a provider
+// 429 failed its only step) was re-driven every 30s with "Session not found or not active". It is
+// parked like the revoked case: once, surfaced once, and the roster claims again.
+describe("a strict run whose session is gone is parked, not re-driven", () => {
+  function depsWith(activities: unknown[], held: "live" | "waiting" | "gone") {
+    return {
+      tenantId,
+      source: "superpipeline",
+      salaamPublish: async () => publication,
+      agent: { key: "proof", boardId: board, stationId: station, hubUserId: user },
+      acp: { ensureStrictSession: async () => held, renewExecution: async () => { throw Error("Session not found or not active."); } },
+      client: {
+        context: async () => context,
+        heartbeat: async () => ({}),
+        activity: async (_lease: unknown, a: unknown) => {
+          activities.push(a);
+          return { accepted: true };
+        },
+      },
+    } as unknown as DispatchDeps;
+  }
+  const dispatchRow = async () =>
+    (await db.select().from(bridgeDispatches).where(eq(bridgeDispatches.externalRunId, run)))[0]!;
+  test("gone with no report intent: parked once, surfaced once, then no longer resumed", async () => {
+    await reportFixture();
+    const activities: unknown[] = [];
+    const deps = depsWith(activities, "gone");
+    try {
+      const first = await resumeSalaamWork(deps);
+      expect(first).toMatchObject({ status: "failed" });
+      expect(String(first?.reason)).toContain("session ended");
+      expect((await dispatchRow()).outcome).toBe("parked");
+      expect(activities).toHaveLength(1);
+      expect(await resumeSalaamWork(deps)).toBeNull();
+      expect(activities).toHaveLength(1);
+    } finally {
+      await db.update(bridgeDispatches).set({ outcome: "working", reason: null }).where(eq(bridgeDispatches.externalRunId, run));
+    }
+  });
+  test("gone with a saved report intent is not parked: the report path keeps it", async () => {
+    const { work, completion } = await reportFixture();
+    await db.insert(salaamWorkReports).values({
+      workRequestId: work.requestId,
+      tenantId,
+      requestId: crypto.randomUUID(),
+      completion,
+      handoff: { historical: true },
+      handoffDigest: "a".repeat(64),
+      state: "prepared",
+    });
+    try {
+      await resumeSalaamWork(depsWith([], "gone")).catch(() => null);
+      expect((await dispatchRow()).outcome).not.toBe("parked");
+    } finally {
+      await db.delete(salaamWorkReports).where(eq(salaamWorkReports.workRequestId, work.requestId));
+      await db.update(bridgeDispatches).set({ outcome: "working", reason: null }).where(eq(bridgeDispatches.externalRunId, run));
+    }
+  });
+});
