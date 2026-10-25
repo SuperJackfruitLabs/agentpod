@@ -51,6 +51,10 @@ services:
       # Strict Salaam work publishes verified deliverables to staging SuperLibrary and links them
       # from the card; the work record links items on this host.
       SUPERLIBRARY_URL: https://staging-app.superlibrary.dev
+      # Traces, logs and metrics go to staging Superwitness's OTLP collector (superwitness
+      # deploy/staging/otelcol.yaml), reached on the suite-staging network.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://staging-otelcol:4318
+      OTEL_LOGS_EXPORTER: otlp
     env_file: ../../../env/hub/hub.env
     volumes:
       - ../..:/app
