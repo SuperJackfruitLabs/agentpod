@@ -649,6 +649,39 @@ function verifiedSettlement(
   );
 }
 
+/**
+ * #786: park a strict run that cannot be driven any more, so the roster can claim new work. Only the
+ * transition from "working" surfaces it (card and log), so it is said once. Parking settles and
+ * completes nothing: an operator settlement still reads the stopped owner and retires the row.
+ */
+async function parkStrictRun(
+  deps: DispatchDeps,
+  runId: string,
+  leaseEpoch: number,
+  reason: string,
+  note: string,
+): Promise<void> {
+  const parked = await db
+    .update(bridgeDispatches)
+    .set({ outcome: "parked", reason, updatedAt: new Date() })
+    .where(
+      and(
+        eq(bridgeDispatches.tenantId, deps.tenantId),
+        eq(bridgeDispatches.externalRunId, runId),
+        eq(bridgeDispatches.externalSource, deps.source),
+        eq(bridgeDispatches.outcome, "working"),
+      ),
+    )
+    .returning({ id: bridgeDispatches.externalRunId });
+  if (!parked.length) return;
+  workLog.info("salaam work: parked", { run: runId, reason });
+  try {
+    await deps.client.activity({ runId, leaseEpoch }, { type: "thought", body: note });
+  } catch {
+    /* the card note is best effort; the log and the parked row are the record */
+  }
+}
+
 /** Recover original owned sessions BEFORE asking the board for any new claim. */
 export async function resumeSalaamWork(
   deps: DispatchDeps,
@@ -847,37 +880,14 @@ async function resumeOwnedSalaamWork(
     if (!report) {
       const reason =
         "Execution revoked before report intent; explicit original-run reconciliation required";
-      // #786: parked, so the roster can claim new work. Only the transition from "working"
-      // surfaces it (card and log), so it is said once. Parking settles and completes nothing:
-      // an operator settlement still reads the stopped owner and retires the row.
-      const parked = await db
-        .update(bridgeDispatches)
-        .set({ outcome: "parked", reason, updatedAt: new Date() })
-        .where(
-          and(
-            eq(bridgeDispatches.tenantId, deps.tenantId),
-            eq(bridgeDispatches.externalRunId, dispatch.externalRunId),
-            eq(bridgeDispatches.externalSource, deps.source),
-            eq(bridgeDispatches.outcome, "working"),
-          ),
-        )
-        .returning({ id: bridgeDispatches.externalRunId });
-      if (parked.length) {
-        workLog.info("salaam work: parked", { run: dispatch.externalRunId, reason });
-        try {
-          await deps.client.activity(
-            { runId: dispatch.externalRunId, leaseEpoch: dispatch.leaseEpoch },
-            {
-              type: "thought",
-              body:
-                "This run stopped before it could report (its execution was revoked). It needs " +
-                "operator reconciliation; nothing was completed or settled automatically.",
-            },
-          );
-        } catch {
-          /* the card note is best effort; the log and the parked row are the record */
-        }
-      }
+      await parkStrictRun(
+        deps,
+        dispatch.externalRunId,
+        dispatch.leaseEpoch,
+        reason,
+        "This run stopped before it could report (its execution was revoked). It needs " +
+          "operator reconciliation; nothing was completed or settled automatically.",
+      );
       return {
         status: "failed",
         externalRunId: dispatch.externalRunId,
@@ -1062,6 +1072,33 @@ async function driveSalaamWork(
           externalRunId: runId,
           reason: "Strict session is waiting for its station node to reconnect",
         };
+      if (held === "gone") {
+        // Its Salaam work stopped and the session ended (a failed step, an end). Re-driving it can
+        // only renew a dead session forever; with no report intent it is parked like a revoked run.
+        const [owner] = await db
+          .select({ id: salaamWorkOwners.requestId })
+          .from(salaamWorkOwners)
+          .where(eq(salaamWorkOwners.sessionId, sessionId));
+        const [intent] = owner
+          ? await db
+              .select({ id: salaamWorkReports.requestId })
+              .from(salaamWorkReports)
+              .where(eq(salaamWorkReports.workRequestId, owner.id))
+          : [];
+        if (!intent) {
+          const reason =
+            "Strict session ended before report intent; explicit original-run reconciliation required";
+          await parkStrictRun(
+            deps,
+            runId,
+            execution.binding.run.epoch,
+            reason,
+            "This run's session ended before it could report (its work stopped). It needs " +
+              "operator review; nothing was completed or settled automatically.",
+          );
+          return { status: "failed", externalRunId: runId, reason };
+        }
+      }
     }
     const renew = async () => {
       try {
