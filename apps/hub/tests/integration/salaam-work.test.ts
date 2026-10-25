@@ -2223,7 +2223,8 @@ test("the admitted plan is the card's plan scoped to this run's own directory", 
   expect(admitted.deliverables.length).toBe(plan.deliverables.length + 1);
   expect(admitted.deliverables.every((d) => d.startsWith(dir))).toBe(true);
   expect(admitted.deliverables).toContain(dir + "handoff.json");
-  expect(admitted.acceptance.every((c) => (c.cwd + "/").startsWith(dir))).toBe(true);
+  // Station checks run at the workspace root; each command enters the run directory itself.
+  expect(admitted.acceptance.every((c) => c.cwd === "." && c.command.startsWith(`cd '${dir.replace(/\/$/, "")}`))).toBe(true);
   const other = planFrom({
     ...context,
     run: { ...context.run, runId: "run_" + hex() },

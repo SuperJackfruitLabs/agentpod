@@ -39,13 +39,13 @@ test("each run works in its own directory, so a check cannot pass on another run
     "runs/run_aaaaaa111/out/out.txt",
     "runs/run_aaaaaa111/" + HANDOFF_FILE,
   ]);
-  expect(a.acceptance.map((c) => c.cwd)).toEqual([
-    "runs/run_aaaaaa111",
-    "runs/run_aaaaaa111/out",
+  // A station check runs only at the workspace root (cwd "."), so the run's directory goes in
+  // the command, never in cwd (run_8a58b17fbea94bbb: every per-run check failed unrun).
+  expect(a.acceptance.map((c) => c.cwd)).toEqual([".", "."]);
+  expect(a.acceptance.map((c) => c.command)).toEqual([
+    "cd 'runs/run_aaaaaa111' && (grep -q 502 answer.md)",
+    "cd 'runs/run_aaaaaa111/out' && (test -s out.txt)",
   ]);
-  expect(a.acceptance.map((c) => c.command)).toEqual(
-    plan.acceptance.map((c) => c.command),
-  );
   for (const path of a.deliverables) expect(b.deliverables).not.toContain(path);
   expect(a.constraints.at(-1)).toBe("Quote exactly.");
   expect(a.constraints[0]).toContain("runs/run_aaaaaa111/");
@@ -75,6 +75,15 @@ test("scoping refuses run ids that are not plain run ids and plans with no room"
   expect(() =>
     runScopedPlan(
       { ...plan, deliverables: Array.from({ length: 32 }, (_, n) => "d" + n) },
+      "run_aaaaaa111",
+    ),
+  ).toThrow();
+});
+
+test("a check directory that could break out of its quoting is refused", () => {
+  expect(() =>
+    runScopedPlan(
+      { ...plan, acceptance: [{ key: "answer", command: "true", cwd: "it's" }] },
       "run_aaaaaa111",
     ),
   ).toThrow();
