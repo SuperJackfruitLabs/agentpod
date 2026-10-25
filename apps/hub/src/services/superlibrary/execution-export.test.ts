@@ -410,3 +410,42 @@ test("verification grant cannot substitute another upload or committed result", 
     expect(h.rows.get(h.scope.requestId)?.status).toBe("integrity_failed");
   }
 });
+
+// SuperLibrary files "a link of a station path already linked" as that item's next version, keyed on
+// station, board and source path. Every export sent the same path (its entry file), so the second
+// card's verified work became a new version of the first card's item (card_a82c75333f7a4b42 linked
+// card_3840e13b50de4924's itm_ed950ae516a7415f). The source path is the run's own.
+test("two runs on one station and board declare distinct source paths; a retry keeps its own", async () => {
+  const declared: { source: { path: string; run: string } }[] = [];
+  const base = corpus.success[0]!.value;
+  const runA = structuredClone(base),
+    runB = structuredClone(base);
+  runA.binding.run = { ...runA.binding.run, id: "run_aaaaaaaa1111" };
+  runB.binding.run = { ...runB.binding.run, id: "run_bbbbbbbb2222" };
+  async function exportFor(manifest: typeof base, requestId: string) {
+    const h = harness();
+    const bytes = manifestBytes(manifest);
+    const lib = {
+      async request(method: string, path: string, opts?: { json?: unknown }) {
+        if (path === "/api/v1/uploads") {
+          declared.push(opts!.json as (typeof declared)[number]);
+          return Response.json({ uploadId: "upl_" + requestId.slice(0, 4) });
+        }
+        if (path.endsWith("/commit"))
+          return Response.json({ itemId: "itm_" + requestId.slice(0, 6), version: 1, sha256: evidenceHash(bytes), bytes: bytes.length });
+        return new Response(null, { status: 200 });
+      },
+    };
+    const scope = { ...h.scope, requestId };
+    await reserveExecutionExport(h.store, { ...scope, manifest });
+    await runExecutionExport(h.store, scope, lib, async () => bytes).catch(() => {});
+  }
+  await exportFor(runA, "33333333-3333-4333-8333-333333333333");
+  await exportFor(runB, "44444444-4444-4444-8444-444444444444");
+  await exportFor(runA, "55555555-5555-4555-8555-555555555555");
+  const [a, b, again] = declared.map((d) => d.source.path);
+  expect(a).not.toBe(b);
+  expect(a).toContain("run_aaaaaaaa1111");
+  expect(b).toContain("run_bbbbbbbb2222");
+  expect(again).toBe(a);
+});
