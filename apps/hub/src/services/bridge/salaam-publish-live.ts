@@ -23,7 +23,8 @@ export function livePublisher(input: {
   cardId: string;
   principalId: string;
   workRequestId: string;
-  client: Pick<SuperpipelineClient, "context" | "addCardReference">;
+  leaseEpoch: number;
+  client: Pick<SuperpipelineClient, "context" | "addRunReference">;
 }) {
   return async (completion: import("zod").infer<typeof SalaamWorkCompletion>) => {
     const title = (await input.client.context(input.runId)).card.title || input.cardId;
@@ -45,12 +46,10 @@ export function livePublisher(input: {
         store: executionExportStore,
         readContent: readLibraryContent,
         addReference: async ({ url, title }) => {
-          await input.client.addCardReference(input.cardId, {
-            url,
-            title,
-            provider: "superlibrary",
-            addedBy: "agent",
-          });
+          await input.client.addRunReference(
+            { runId: input.runId, leaseEpoch: input.leaseEpoch },
+            { url, title, provider: "superlibrary" },
+          );
         },
       },
       {

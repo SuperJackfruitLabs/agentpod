@@ -1018,6 +1018,7 @@ async function driveSalaamWork(
         tenantId: deps.tenantId,
         source: deps.source ?? "superpipeline",
         runId,
+        leaseEpoch: execution.binding.run.epoch,
         boardId: agent.boardId,
         cardId: SalaamWorkPayload.parse(work!.payload).admission.work.card_id,
         principalId: execution.binding.principal_id,
