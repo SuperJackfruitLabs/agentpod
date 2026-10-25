@@ -129,7 +129,7 @@ export const bridgeDispatches = pgTable(
     check("bridge_dispatches_external_is_not_agentpod", sql`${t.externalRunId} NOT LIKE 'attempt\\_%'`),
     check(
       "bridge_dispatches_outcome",
-      sql`${t.outcome} IN ('working', 'produced', 'reported', 'released', 'abandoned')`,
+      sql`${t.outcome} IN ('working', 'produced', 'reported', 'released', 'abandoned', 'parked')`,
     ),
   ],
 );

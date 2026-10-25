@@ -1,5 +1,5 @@
 /** Synthetic plane + real owned Postgres; no model or deployed station. */
-import { beforeAll, afterAll, expect, test, spyOn } from "bun:test";
+import { describe, beforeAll, afterAll, expect, test, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "../../src/db/drizzle";
 import { tenants } from "../../src/db/schema/tenants";
@@ -1887,6 +1887,11 @@ test.each([
             .where(eq(bridgeDispatches.externalRunId, run))
         )[0]?.outcome,
       ).toBe("abandoned");
+      // #786: a verified settlement is skipped whatever the dispatch outcome (run_bab4c853 kept
+      // its settlement but stayed "working", and was re-driven forever).
+      await db.update(bridgeDispatches).set({ outcome: "working" }).where(eq(bridgeDispatches.externalRunId, run));
+      expect(await resumeSalaamWork(deps)).toBe(null);
+      await db.update(bridgeDispatches).set({ outcome: "abandoned" }).where(eq(bridgeDispatches.externalRunId, run));
       live = { ...live, run: { ...live.run, leaseEpoch: 2 } };
       await expect(settle(request)).rejects.toThrow("run changed");
       authority.receipt.owned_execution_stopped = false;
@@ -2231,4 +2236,113 @@ test("the admitted plan is the card's plan scoped to this run's own directory", 
     card: { ...context.card, spec },
   } as RunContext);
   for (const d of admitted.deliverables) expect(other.deliverables).not.toContain(d);
+});
+
+// #786: a revoked strict run that never reported must not hold its roster forever.
+describe("resume parks a revoked unreported run and skips settled ones", () => {
+  async function revoke() {
+    const [original] = await db.select().from(acpSessions).where(eq(acpSessions.id, session));
+    if (!original?.executionAuthority) throw Error("missing authority");
+    const authority = structuredClone(original.executionAuthority);
+    authority.state = "revoked";
+    await db
+      .update(acpSessions)
+      .set({ status: "ended", executionAuthority: authority })
+      .where(eq(acpSessions.id, session));
+    return async () =>
+      db
+        .update(acpSessions)
+        .set({ status: original.status, executionAuthority: original.executionAuthority })
+        .where(eq(acpSessions.id, session));
+  }
+  const dispatchRow = async () =>
+    (await db.select().from(bridgeDispatches).where(eq(bridgeDispatches.externalRunId, run)))[0]!;
+  function depsWith(activities: unknown[]) {
+    return {
+      tenantId,
+      source: "superpipeline",
+      salaamPublish: async () => publication,
+      agent: { key: "proof", boardId: board, stationId: station, hubUserId: user },
+      client: {
+        context: async () => context,
+        activity: async (_lease: unknown, a: unknown) => {
+          activities.push(a);
+          return { accepted: true };
+        },
+      },
+    } as unknown as DispatchDeps;
+  }
+
+  test("a revoked run with no report is parked once, surfaced once, and no longer blocks a claim", async () => {
+    await reportFixture();
+    const restore = await revoke();
+    const activities: unknown[] = [];
+    const deps = depsWith(activities);
+    try {
+      const first = await resumeSalaamWork(deps);
+      expect(first?.reason).toContain("revoked before report intent");
+      const row = await dispatchRow();
+      expect(row.outcome).toBe("parked");
+      expect(row.reason).toContain("explicit original-run reconciliation");
+      expect(activities).toHaveLength(1);
+      expect(JSON.stringify(activities[0])).toContain("operator reconciliation");
+      // The roster may claim again, and the run is not surfaced a second time.
+      expect(await resumeSalaamWork(deps)).toBeNull();
+      expect(await resumeSalaamWork(deps)).toBeNull();
+      expect(activities).toHaveLength(1);
+      // Parking settles nothing and completes nothing.
+      const [owner] = await db.select().from(salaamWorkOwners).where(eq(salaamWorkOwners.sessionId, session));
+      expect(owner?.settlement).toBeNull();
+      expect(
+        await db.select().from(salaamWorkReports).where(eq(salaamWorkReports.workRequestId, owner!.requestId)),
+      ).toHaveLength(0);
+    } finally {
+      await restore();
+      await db.update(bridgeDispatches).set({ outcome: "working", reason: null }).where(eq(bridgeDispatches.externalRunId, run));
+    }
+  });
+
+  test("only a working dispatch is parked; an abandoned one keeps its outcome", async () => {
+    await reportFixture();
+    const restore = await revoke();
+    await db.update(bridgeDispatches).set({ outcome: "abandoned" }).where(eq(bridgeDispatches.externalRunId, run));
+    const activities: unknown[] = [];
+    try {
+      await resumeSalaamWork(depsWith(activities));
+      expect((await dispatchRow()).outcome).toBe("abandoned");
+      expect(activities).toHaveLength(0);
+    } finally {
+      await restore();
+      await db.update(bridgeDispatches).set({ outcome: "working", reason: null }).where(eq(bridgeDispatches.externalRunId, run));
+    }
+  });
+
+  test("a live (not revoked) run is still resumed, and never parked", async () => {
+    await reportFixture();
+    const activities: unknown[] = [];
+    const deps = depsWith(activities);
+    const mock = spyOn(broker, "request").mockImplementation(async () => ({ ok: false, error: "fixture" }) as never);
+    try {
+      const result = await resumeSalaamWork(deps);
+      expect(result).not.toBeNull();
+      expect((await dispatchRow()).outcome).toBe("working");
+    } finally {
+      mock.mockRestore();
+    }
+  });
+
+  test("a parked run can still be settled by the operator", async () => {
+    await reportFixture();
+    const restore = await revoke();
+    const deps = depsWith([]);
+    try {
+      await resumeSalaamWork(deps);
+      expect((await dispatchRow()).outcome).toBe("parked");
+      // Settlement reads the stopped owner, not the dispatch outcome: parking does not lock it.
+      await expect(settleNeverDispatchedSalaamWork(deps, run, crypto.randomUUID())).rejects.not.toThrow("parked");
+    } finally {
+      await restore();
+      await db.update(bridgeDispatches).set({ outcome: "working", reason: null }).where(eq(bridgeDispatches.externalRunId, run));
+    }
+  });
 });
