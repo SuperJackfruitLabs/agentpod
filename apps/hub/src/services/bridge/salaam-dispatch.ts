@@ -624,6 +624,31 @@ export async function recoverExpiredSalaamDecision(
   };
 }
 
+/** An operator settlement whose daemon receipt matches this exact stopped owner. */
+function verifiedSettlement(
+  owner: { id: string; settlement: unknown; admissionReceipt: unknown },
+  session: typeof acpSessions.$inferSelect,
+): boolean {
+  const retired = settlementRecord.safeParse(owner.settlement);
+  if (!retired.success || !retired.data.receipt || retired.data.terminal === null) return false;
+  const r = retired.data.receipt;
+  const admitted = owner.admissionReceipt as { task_id?: string; plan_revision?: number } | null;
+  const effects = "effects" in r ? r.effects : undefined,
+    outcome = "outcome" in r ? r.outcome : undefined;
+  return (
+    Boolean(retired.data.known_effects_failure) === (effects === "known_effects_preserved") &&
+    Boolean(retired.data.unreported_local_success) === (outcome === "unreported_local_success") &&
+    !!session.executionAuthority &&
+    r.binding_digest === workDigest(session.executionAuthority.binding) &&
+    r.work_request_id === owner.id &&
+    r.request_id === retired.data.request_id &&
+    r.session_id === session.executionAuthority.sessionId &&
+    r.producer_terminal_digest === workDigest(retired.data.terminal) &&
+    r.task_id === admitted?.task_id &&
+    r.plan_revision === admitted?.plan_revision
+  );
+}
+
 /** Recover original owned sessions BEFORE asking the board for any new claim. */
 export async function resumeSalaamWork(
   deps: DispatchDeps,
@@ -647,6 +672,8 @@ export async function resumeSalaamWork(
         eq(bridgeDispatches.agentKey, deps.agent.key),
         eq(bridgeDispatches.boardId, deps.agent.boardId),
         sql`(${acpSessions.executionAuthority}->>'state' != 'revoked' OR ${bridgeDispatches.outcome} != 'reported')`,
+        // Parked (#786): classified for operator reconciliation; it no longer holds the roster.
+        sql`${bridgeDispatches.outcome} != 'parked'`,
       ),
     );
   // Only explicit operator settlement plus its exact terminal receipt can retire
@@ -677,6 +704,14 @@ export async function resumeSalaamWork(
       knownFailure.data.receipt.effects === "known_effects_preserved",
     );
 
+    // #786: a verified operator settlement retires the row even if its dispatch never moved off
+    // "working" (run_bab4c853d6ac4f21 was re-driven forever with a settlement on record).
+    if (
+      owner &&
+      row.dispatch.outcome !== "abandoned" &&
+      verifiedSettlement(owner, row.session)
+    )
+      continue;
     if (
       row.dispatch.outcome === "abandoned" &&
       stoppedUnownedSession(
@@ -812,16 +847,37 @@ async function resumeOwnedSalaamWork(
     if (!report) {
       const reason =
         "Execution revoked before report intent; explicit original-run reconciliation required";
-      await db
+      // #786: parked, so the roster can claim new work. Only the transition from "working"
+      // surfaces it (card and log), so it is said once. Parking settles and completes nothing:
+      // an operator settlement still reads the stopped owner and retires the row.
+      const parked = await db
         .update(bridgeDispatches)
-        .set({ reason, updatedAt: new Date() })
+        .set({ outcome: "parked", reason, updatedAt: new Date() })
         .where(
           and(
             eq(bridgeDispatches.tenantId, deps.tenantId),
             eq(bridgeDispatches.externalRunId, dispatch.externalRunId),
             eq(bridgeDispatches.externalSource, deps.source),
+            eq(bridgeDispatches.outcome, "working"),
           ),
-        );
+        )
+        .returning({ id: bridgeDispatches.externalRunId });
+      if (parked.length) {
+        workLog.info("salaam work: parked", { run: dispatch.externalRunId, reason });
+        try {
+          await deps.client.activity(
+            { runId: dispatch.externalRunId, leaseEpoch: dispatch.leaseEpoch },
+            {
+              type: "thought",
+              body:
+                "This run stopped before it could report (its execution was revoked). It needs " +
+                "operator reconciliation; nothing was completed or settled automatically.",
+            },
+          );
+        } catch {
+          /* the card note is best effort; the log and the parked row are the record */
+        }
+      }
       return {
         status: "failed",
         externalRunId: dispatch.externalRunId,

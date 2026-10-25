@@ -813,6 +813,13 @@
       "when": 1792580400005,
       "tag": "0115_acp_session_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1792580400006,
+      "tag": "0116_bridge_dispatch_parked",
+      "breakpoints": true
     }
   ]
 }
