@@ -2371,3 +2371,39 @@ test("a re-drive waits, delivering nothing, while the station's node is not conn
     mock.mockRestore();
   }
 });
+
+test("a strict question carries the decision's readable detail to the producer as structured fields", async () => {
+  const [work] = await db.select().from(salaamWorkOwners).where(eq(salaamWorkOwners.sessionId, session));
+  const payload = work!.payload as (typeof corpus.cases)[0]["payload"];
+  const detail = {
+    version: 1,
+    summary: "Create runs/run_x/answer.md in the workspace",
+    reason: "Write the quoted sentence the card asks for.",
+    files: [{ path: "runs/run_x/answer.md", change: "create", bytes: 249, preview: "# RFC 9110: 502 Bad Gateway" }],
+    digest: "f".repeat(64),
+  };
+  const decision = SalaamWorkDecision.parse({
+    ...decisionFixture.decision,
+    request_id: crypto.randomUUID(),
+    work_request_id: work!.requestId,
+    binding_digest: workDigest(payload.admission.binding),
+    task_id: "99999999-9999-4999-8999-999999999999",
+    expires_at: Date.now() + 60000,
+    detail,
+  });
+  const offers: { parameter?: { detail?: unknown; options?: unknown } }[] = [];
+  const client = {
+    activity: async (_lease: unknown, activity: unknown) => {
+      offers.push(activity as never);
+      return {
+        accepted: true as const,
+        cardState: "input-required" as const,
+        elicitationId: "elc_detail1",
+        strictDecision: { version: 1 as const, request_id: decision.request_id, decision_digest: workDigest(decision), expires_at: decision.expires_at },
+      };
+    },
+  };
+  await publishSalaamDecision(session, user, decision, client);
+  expect(offers[0]?.parameter?.detail).toEqual(detail);
+  expect(offers[0]?.parameter?.options).toEqual(decision.options.map((v) => ({ name: v.id, title: v.title })));
+});
