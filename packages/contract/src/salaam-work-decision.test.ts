@@ -60,3 +60,26 @@ for (const sample of producerCorpus)
     expect(SuperpipelineStrictDecision.safeParse(sample.value).success).toBe(
       sample.valid,
     ));
+
+// Readable approvals: an optional structured detail of what is being approved.
+const detail = {
+    version: 1,
+    summary: "Create runs/run_x/answer.md in the workspace",
+    reason: "Write the quoted sentence the card asks for.",
+    files: [{ path: "runs/run_x/answer.md", change: "create", bytes: 249, preview: "# RFC 9110: 502 Bad Gateway" }],
+    digest: "f".repeat(64),
+  };
+test("a decision may carry a readable approval detail, bound into its digest", () => {
+  const withDetail = SalaamWorkDecision.parse({ ...corpus.decision, detail });
+  expect(withDetail.detail).toEqual(detail);
+  expect(createHash("sha256").update(canonicalSalaamWork(withDetail)).digest("hex")).not.toBe(corpus.decision_digest);
+});
+for (const [name, bad] of Object.entries({
+  version: { ...detail, version: 2 },
+  digest: { ...detail, digest: "x" },
+  change: { ...detail, files: [{ ...detail.files[0], change: "rename" }] },
+  extra: { ...detail, grant: true },
+  empty: { ...detail, summary: "" },
+}))
+  test(`decision detail rejects ${name}`, () =>
+    expect(SalaamWorkDecision.safeParse({ ...corpus.decision, detail: bad }).success).toBe(false));

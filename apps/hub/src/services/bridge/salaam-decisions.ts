@@ -207,6 +207,8 @@ export async function publishSalaamDecision(
               name: v.id,
               title: v.title,
             })),
+            // Readable approvals: the producer shows what is being approved from these fields.
+            ...(decision.detail ? { detail: decision.detail } : {}),
           },
           strictDecision: correlation(decision),
         },

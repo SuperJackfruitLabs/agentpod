@@ -1,5 +1,29 @@
 import { z } from "zod";
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
+/** What a person approving a strict decision is shown: the operation in plain words, each file
+ * with its size and a short preview, the agent's one-line reason, and the operation digest.
+ * Mirrors Superpipeline's ApprovalDetail. */
+export const SalaamApprovalDetail = z
+  .object({
+    version: z.literal(1),
+    summary: z.string().min(1).max(200),
+    reason: z.string().min(1).max(300).nullable(),
+    files: z
+      .array(
+        z
+          .object({
+            path: z.string().min(1).max(512),
+            change: z.enum(["create", "edit", "delete"]),
+            bytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+            preview: z.string().max(1200).nullable(),
+          })
+          .strict(),
+      )
+      .max(16),
+    digest,
+  })
+  .strict();
+export type SalaamApprovalDetail = z.infer<typeof SalaamApprovalDetail>;
 /** A protected daemon offers one exact existing ManagedWork approval. This is
  * correlation metadata, never an independent grant or a model-generated policy. */
 export const SalaamWorkDecision = z
@@ -16,6 +40,8 @@ export const SalaamWorkDecision = z
     approval_revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
     expires_at: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
     question: z.string().min(1).max(8192),
+    /** Readable approvals: what is being approved, as structured fields (never parsed from text). */
+    detail: SalaamApprovalDetail.optional(),
     options: z.tuple([
       z
         .object({ id: z.literal("approve"), title: z.string().min(1).max(256) })
