@@ -41,7 +41,9 @@ function checkedDaemonReceipt(
       request_id: z.string().uuid(),
       decision_digest: z.string(),
       approval_id: z.string().uuid(),
-      decision: z.enum(["approve", "deny"]),
+      decision: z.enum(["approve", "approve-run", "deny"]),
+      // "Approve for this run": the grant Salaam recorded with the decision.
+      grant_id: z.string().uuid().optional(),
     })
     .strict()
     .parse(value);
