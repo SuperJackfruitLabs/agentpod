@@ -372,3 +372,23 @@ test("evidence reference uses original run and existing principal credential wit
     },
   ]);
 });
+
+// An agent token cannot use the card route (a human route: 401 "sign in to continue", staging
+// run_b2bfa162da60440f). The run holder links its item through its own run, under its lease.
+test("a run reference posts to the run's own references verb with the lease", async () => {
+  const { calls, client } = fakeBoard(() => ({ status: 200, body: { reference: { id: "ref_1" } } }));
+  await client.addRunReference(
+    { runId: "run_abc123def", leaseEpoch: 3 },
+    { url: "https://library.test/a/itm_1", title: "answer.md", provider: "superlibrary" },
+  );
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.method).toBe("POST");
+  expect(calls[0]!.url).toBe(`https://board.test/v1/boards/${BOARD}/runs/run_abc123def/references`);
+  expect(JSON.parse(calls[0]!.body!)).toEqual({
+    leaseEpoch: 3,
+    url: "https://library.test/a/itm_1",
+    title: "answer.md",
+    provider: "superlibrary",
+  });
+  expect(calls.some((c) => c.url.includes("/cards/"))).toBe(false);
+});

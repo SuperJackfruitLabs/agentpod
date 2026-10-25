@@ -426,15 +426,16 @@ export class SuperpipelineClient {
   }
 
   /** Original live run reference only; the Pipeline hint remains unverified. */
-  /** Idempotent card reference upsert (superpipeline PUT cards/:cardId/references). */
-  async addCardReference(
-    cardId: string,
-    input: { url: string; title: string; provider: "superlibrary"; addedBy: "agent" },
+  /** Idempotent reference on the run's own card (superpipeline POST runs/:runId/references).
+   * The card route is a human route; an agent links what it produced through its run. */
+  async addRunReference(
+    run: { runId: string; leaseEpoch: number },
+    input: { url: string; title: string; provider: "superlibrary" },
   ): Promise<unknown> {
     return this.send(
-      "PUT",
-      `/v1/boards/${this.boardId}/cards/${encodeURIComponent(cardId)}/references`,
-      input,
+      "POST",
+      `/v1/boards/${this.boardId}/runs/${encodeURIComponent(run.runId)}/references`,
+      { leaseEpoch: run.leaseEpoch, ...input },
     );
   }
 
