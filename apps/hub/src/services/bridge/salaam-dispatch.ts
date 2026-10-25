@@ -1052,6 +1052,17 @@ async function driveSalaamWork(
     const execution = session?.executionAuthority;
     if (!execution || execution.binding.run.id !== runId)
       throw Error("Strict session owner changed");
+    // A hub restart leaves the session un-held: bring it back before driving, and never drive
+    // (deliver, renew, publish) while its node is not connected.
+    if (acp.ensureStrictSession) {
+      const held = await acp.ensureStrictSession(agent.hubUserId, sessionId);
+      if (held === "waiting")
+        return {
+          status: "idle",
+          externalRunId: runId,
+          reason: "Strict session is waiting for its station node to reconnect",
+        };
+    }
     const renew = async () => {
       try {
         await heartbeat({ runId, leaseEpoch: execution.binding.run.epoch });

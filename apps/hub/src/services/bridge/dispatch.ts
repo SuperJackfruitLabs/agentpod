@@ -135,6 +135,8 @@ export interface AcpPort {
   }): Promise<{ id: string; libraryTools?: boolean }>;
   promptSession(userId: string, sessionId: string, text: string, run?: import('@agentpod/contract').SalaamRunAuthority): Promise<void>;
   renewExecution?(userId: string, sessionId: string, run: import('@agentpod/contract').SalaamRunAuthority): Promise<void>;
+  /** Before a strict re-drive: restore a session a hub restart left un-held; "waiting" while its node is offline. */
+  ensureStrictSession?(userId: string, sessionId: string): Promise<"live" | "waiting" | "gone">;
   subscribe(sessionId: string, fn: (e: AcpEvent) => void): () => void;
   endSession(userId: string, sessionId: string, reason: string): Promise<void>;
   /**
