@@ -225,7 +225,29 @@ func (c *Client) Request(ctx context.Context, action string, b Binding, request 
 	if action != "admit" && action != "renew" && action != "revoke" && action != "status" {
 		return out, fmt.Errorf("salaam: unknown authority action")
 	}
-	err := c.call(ctx, action, map[string]any{"binding": b, "request_id": request, "lease_sequence": sequence, "reason": reason}, &out)
+	return c.authority(ctx, action, b, map[string]any{"binding": b, "request_id": request, "lease_sequence": sequence, "reason": reason})
+}
+
+// RequestWithRules admits or renews carrying the agent's standing approval rules, which Salaam
+// validates, pins at admission and drops at the renewal that no longer lists them. Admit and renew
+// only: a revoke or status never carries rules.
+func (c *Client) RequestWithRules(ctx context.Context, action string, b Binding, request string, sequence int64, rules json.RawMessage) (Status, error) {
+	if action != "admit" && action != "renew" {
+		return Status{}, fmt.Errorf("salaam: approval rules ride only on admit and renew")
+	}
+	if err := c.validate(b); err != nil {
+		return Status{}, err
+	}
+	body := map[string]any{"binding": b, "request_id": request, "lease_sequence": sequence, "reason": ""}
+	if len(rules) > 0 {
+		body["approval_rules"] = rules
+	}
+	return c.authority(ctx, action, b, body)
+}
+
+func (c *Client) authority(ctx context.Context, action string, b Binding, body map[string]any) (Status, error) {
+	var out Status
+	err := c.call(ctx, action, body, &out)
 	if err == nil && (out.Binding != b || out.AdmissionID == "" || out.SessionID == "") {
 		return Status{}, fmt.Errorf("salaam: receipt belongs to another admission")
 	}

@@ -57,6 +57,7 @@ import { stationTokenRoutes } from './routes/station-token.ts';
 import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-credential.ts';
 import { createStationGitIdentityRoutes } from './routes/station-git-identity.ts';
 import { createStationForgeApiRoutes } from './routes/station-forge-api.ts';
+import { createAgentApprovalRuleRoutes } from './routes/agent-approval-rules.ts';
 import { createMcpProxyRoutes } from './routes/mcp-proxy.ts';
 import { configureGitAuthorSync } from './services/station-git-identity.ts';
 import { configureForgeApiReconcile, forgeApiServiceDeps } from './services/forge-api-reconcile.ts';
@@ -328,6 +329,7 @@ const app = new Hono()
    * the route itself demands the operator seat AND the control pair on every mutation.
    */
   .route('/api', createStationForgeApiRoutes({ forge: forgeConfig }))
+  .route('/api', createAgentApprovalRuleRoutes())
   .route('/api', nodePostureRoutes)                        // POST /api/nodes/:id/posture/scan
   .route('/public', runtimeCallbackRoutes)                 // POST /public/runtimes/:id/state
   .route('/api', stationAcpRoutes)                         // POST/GET /api/stations/:id/acp/sessions, WS /api/acp/sessions/:sessionId/ws

@@ -35,6 +35,17 @@ export const SalaamAuthority = z
 export type SalaamAuthority = z.infer<typeof SalaamAuthority>;
 export type SalaamRunAuthority = z.infer<typeof SalaamRunAuthority>;
 
+/** An agent's standing "Always allow" rule, set by a workspace owner or admin (approval scopes).
+ * v1 has one scope: workspace writes. Salaam never lets it cover deletes, hidden paths, commands,
+ * network or anything outside the workspace. */
+export const SalaamApprovalRule = z
+  .object({
+    id: z.string().uuid(),
+    scope: z.literal("workspace-write"),
+    set_by: z.string().min(1).max(128).regex(/^[^\u0000-\u001f\u007f]+$/),
+  })
+  .strict();
+export type SalaamApprovalRule = z.infer<typeof SalaamApprovalRule>;
 export const SalaamAuthorityParams = z
   .object({
     binding: SalaamAuthority,
@@ -52,6 +63,15 @@ export const SalaamAuthorityParams = z
      * lease and authority; Salaam refuses unless the earlier one is stopped and reconciled.
      */
     continue_from: id.optional(),
+    /** Admit and renew: the agent's active rules. Salaam pins them at admission and drops each at
+     * the first renewal that no longer lists it, so revoking a rule applies to a run in flight.
+     * Absent means none. */
+    approval_rules: z
+      .array(SalaamApprovalRule)
+      .min(1)
+      .max(16)
+      .refine((rules) => new Set(rules.map((r) => r.id)).size === rules.length, "duplicate rule")
+      .optional(),
   })
   .strict();
 export const SalaamAuthorityStatus = z.object({
