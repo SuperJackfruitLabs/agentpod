@@ -103,13 +103,13 @@ test("completion hooks are scoped to the run directory like acceptance checks", 
   expect("completion_gate" in runScopedPlan(plan, "run_aaaaaa111")).toBe(false);
 });
 
-test("a completion gate is closed: unique hooks, at most 8, none colliding with an acceptance check, critic null", () => {
+test("a completion gate is closed: unique hooks, at most 8, none colliding with an acceptance check, a critic only by rubric", () => {
   const hook = (key: string) => ({ key, command: "true", cwd: "." });
   for (const gate of [
     { critic: null, hooks: [] },
     { critic: null, hooks: [hook("a"), hook("a")] },
     { critic: null, hooks: Array.from({ length: 9 }, (_, n) => hook("h" + n)) },
-    { critic: { rubric: "x" }, hooks: [hook("a")] },
+    { critic: { rubric: "x", profile: "salaam/builder" }, hooks: [hook("a")] },
     { critic: null, hooks: [hook("a")], extra: 1 },
   ])
     expect(SalaamWorkPlan.safeParse({ ...plan, completion_gate: gate }).success).toBe(false);
@@ -117,4 +117,16 @@ test("a completion gate is closed: unique hooks, at most 8, none colliding with 
   // check were called that; here an acceptance key "hook-x" collides with hook "x".
   const colliding = { ...plan, acceptance: [...plan.acceptance, { key: "hook-x", command: "true", cwd: "." }] };
   expect(SalaamWorkPlan.safeParse({ ...colliding, completion_gate: { critic: null, hooks: [hook("x")] } }).success).toBe(false);
+});
+
+// Item 8 part 2: a plan may declare a critic: a rubric the built-in reviewer judges the verified
+// deliverables against. It passes through the run scoping unchanged.
+test("a completion gate may declare a critic rubric; nothing else about it", () => {
+  const gate = { critic: { rubric: "Every claim cites RFC 9110." }, hooks: [{ key: "lint", command: "true", cwd: "." }] };
+  const scoped = runScopedPlan(SalaamWorkPlan.parse({ ...plan, completion_gate: gate }), "run_aaaaaa111");
+  expect(scoped.completion_gate?.critic).toEqual({ rubric: "Every claim cites RFC 9110." });
+  for (const critic of [{ rubric: "" }, { rubric: "x".repeat(4097) }, { rubric: "x", model: "y" }, { profile: "salaam/builder" }])
+    expect(SalaamWorkPlan.safeParse({ ...plan, completion_gate: { ...gate, critic } }).success).toBe(false);
+  // A critic alone, with no hooks, is a gate too.
+  expect(SalaamWorkPlan.safeParse({ ...plan, completion_gate: { critic: { rubric: "x" }, hooks: [] } }).success).toBe(true);
 });

@@ -48,11 +48,16 @@ export const SalaamWorkPlan = z
       .min(1)
       .max(32),
     acceptance: z.array(check).max(8),
-    /** Item 8: checks required at completion (run as `hook-<key>`). Present only when declared,
-     * so a plan without one keeps its digest. The critic is not yet admitted (null). */
+    /** Item 8: checks required at completion (run as `hook-<key>`) and an optional critic rubric.
+     * Present only when declared, so a plan without one keeps its digest. */
     completion_gate: z
-      .object({ critic: z.null(), hooks: z.array(check).min(1).max(8) })
+      .object({
+        /** The built-in reviewer judges the verified deliverables against this rubric. */
+        critic: z.object({ rubric: text(4096) }).strict().nullable(),
+        hooks: z.array(check).max(8),
+      })
       .strict()
+      .refine((g) => g.critic !== null || g.hooks.length > 0, "An empty completion gate")
       .optional(),
     deliverables: z.array(path).max(32),
     limits: z
