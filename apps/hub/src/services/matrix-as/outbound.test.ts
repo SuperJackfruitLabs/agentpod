@@ -1913,6 +1913,28 @@ describe("a turn the safety timer flushed before its end", () => {
     expect(spoken[0]).toMatchObject({ text: "one two three", textEventId: "$text1" });
   });
 
+  test("an edit that does not land still gets the tail into the room", async () => {
+    const base = timedDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, {
+      ...base,
+      client: {
+        ...base.client,
+        sendText: async (userId: string, roomId: string, body: string, extra?: Record<string, unknown>) => {
+          if (extra?.["m.relates_to"] !== undefined) throw new Error("edit refused");
+          return base.client.sendText(userId, roomId, body, extra);
+        },
+      },
+    });
+    emit(state("working", 1));
+    emit(chunk("Bulk of it"));
+    await timerFires();
+    emit(chunk(" tail."));
+    emit(state("idle", 2));
+    await settle();
+
+    expect(messages().map((m) => m.body)).toEqual(["Bulk of it", " tail."]);
+  });
+
   test("the next turn starts a new message", async () => {
     attachRoomToSession(SESSION, ROOM, AGENT, timedDeps());
     emit(state("working", 1));
