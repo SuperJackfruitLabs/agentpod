@@ -2220,7 +2220,7 @@ test("execution evidence keeps original task and binding after lease expiry with
   }
 });
 
-import { planFrom } from "../../src/services/bridge/salaam-dispatch";
+import { planFrom, settleStoppedSalaamWork } from "../../src/services/bridge/salaam-dispatch";
 test("the admitted plan is the card's plan scoped to this run's own directory", () => {
   const spec = { salaam: { version: 1, plan } };
   const admitted = planFrom({ ...context, card: { ...context.card, spec } } as RunContext);
@@ -2464,6 +2464,193 @@ describe("a strict run whose session is gone is parked, not re-driven", () => {
     } finally {
       await db.delete(salaamWorkReports).where(eq(salaamWorkReports.workRequestId, work.requestId));
       await db.update(bridgeDispatches).set({ outcome: "working", reason: null }).where(eq(bridgeDispatches.externalRunId, run));
+    }
+  });
+});
+
+// Card 9 (card_81a3e7a5f62b4564): a run the task runtime limit stopped ended its session and was
+// parked for an operator, so the card sat on "needs you" with no run. A stopped run whose effects
+// Salaam can prove is settled automatically, as an expired approval already is; only a run Salaam
+// cannot prove is still parked for review.
+describe("a stopped strict run is settled automatically when Salaam proves its effects", () => {
+  // A revoked, stopped session: everything the settlement itself checks holds, so only the status
+  // proof stands between this run and a failed board run.
+  async function revokeStopped() {
+    const [original] = await db.select().from(acpSessions).where(eq(acpSessions.id, session));
+    const authority = structuredClone(original!.executionAuthority!);
+    authority.state = "revoked";
+    (authority as any).receipt = {
+      admission_id: authority.admissionId,
+      session_id: authority.sessionId,
+      binding: authority.binding,
+      binding_digest: workDigest(authority.binding),
+      lease_sequence: 1,
+      expires_at: 0,
+      authorized: false,
+      revoked: true,
+      owned_execution_stopped: true,
+      unresolved_operations: [],
+      active_attempts: [],
+      interrupted_attempts: [],
+    };
+    await db.update(acpSessions).set({ status: "ended", executionAuthority: authority }).where(eq(acpSessions.id, session));
+    return () =>
+      db
+        .update(acpSessions)
+        .set({ status: original!.status, executionAuthority: original!.executionAuthority })
+        .where(eq(acpSessions.id, session));
+  }
+  test("without Salaam's proof nothing changes: no settlement is started and the board run is not failed", async () => {
+    await reportFixture();
+    const restore = await revokeStopped();
+    const failed: unknown[] = [];
+    const verbs: string[] = [];
+    const mock = spyOn(broker, "request").mockImplementation(async (_n, verb) => {
+      verbs.push(String(verb));
+      // A status without settlement_ready: Salaam cannot prove this run.
+      return { ok: true, data: { version: 1, state: "blocked", auto_enabled: false } } as never;
+    });
+    const deps = {
+      tenantId,
+      source: "superpipeline",
+      salaamPublish: async () => publication,
+      agent: { key: "proof", boardId: board, stationId: station, hubUserId: user },
+      acp: { ensureStrictSession: async () => "gone", renewExecution: async () => {} },
+      client: {
+        context: async () => context,
+        heartbeat: async () => ({}),
+        fail: async (...a: unknown[]) => void failed.push(a),
+        activity: async () => ({ accepted: true }),
+      },
+    } as unknown as DispatchDeps;
+    try {
+      await resumeSalaamWork(deps);
+      expect(verbs).toContain("salaam.work-status");
+      expect(verbs).not.toContain("salaam.work-fail");
+      expect(failed).toHaveLength(0);
+      const [owner] = await db.select().from(salaamWorkOwners).where(eq(salaamWorkOwners.sessionId, session));
+      expect(owner?.settlement).toBeNull();
+      expect((await dispatchRow()).outcome).toBe("parked");
+    } finally {
+      mock.mockRestore();
+      await restore();
+      await reset();
+    }
+  });
+  test("the settlement is refused at the proof, before anything else is asked or changed", async () => {
+    await reportFixture();
+    const verbs: string[] = [];
+    const mock = spyOn(broker, "request").mockImplementation(async (_n, verb) => {
+      verbs.push(String(verb));
+      return { ok: true, data: { version: 1, state: "blocked", auto_enabled: false } } as never;
+    });
+    try {
+      const refused = await settleStoppedSalaamWork(
+        { tenantId, source: "superpipeline", agent: { key: "proof", boardId: board, stationId: station, hubUserId: user } } as unknown as DispatchDeps,
+        run,
+      ).then(() => "settled", (e) => String(e));
+      expect(refused).toContain("cannot prove");
+      expect(verbs).toEqual(["salaam.work-status"]);
+    } finally {
+      mock.mockRestore();
+    }
+  });
+  test("a run whose settlement an operator already started is left to that settlement", async () => {
+    await reportFixture();
+    const [owner] = await db.select().from(salaamWorkOwners).where(eq(salaamWorkOwners.sessionId, session));
+    const verbs: string[] = [];
+    const mock = spyOn(broker, "request").mockImplementation(async (_n, verb) => {
+      verbs.push(String(verb));
+      return { ok: false, error: "fixture" } as never;
+    });
+    await db
+      .update(salaamWorkOwners)
+      .set({ settlement: { version: 1, request_id: crypto.randomUUID(), terminal: null, receipt: null } })
+      .where(eq(salaamWorkOwners.requestId, owner!.requestId));
+    try {
+      await settleStoppedSalaamWork({ tenantId, source: "superpipeline" } as unknown as DispatchDeps, run).catch(
+        (e) => expect(String(e)).toContain("already in progress"),
+      );
+      expect(verbs).toEqual([]);
+    } finally {
+      mock.mockRestore();
+      await db.update(salaamWorkOwners).set({ settlement: null }).where(eq(salaamWorkOwners.requestId, owner!.requestId));
+    }
+  });
+
+  const dispatchRow = async () =>
+    (await db.select().from(bridgeDispatches).where(eq(bridgeDispatches.externalRunId, run)))[0]!;
+  function depsWith(activities: unknown[], settle: (runId: string) => Promise<void>) {
+    return {
+      tenantId,
+      source: "superpipeline",
+      salaamPublish: async () => publication,
+      agent: { key: "proof", boardId: board, stationId: station, hubUserId: user },
+      acp: { ensureStrictSession: async () => "gone", renewExecution: async () => {} },
+      settleStoppedWork: settle,
+      client: {
+        context: async () => context,
+        heartbeat: async () => ({}),
+        activity: async (_lease: unknown, a: unknown) => {
+          activities.push(a);
+          return { accepted: true };
+        },
+      },
+    } as unknown as DispatchDeps;
+  }
+  const reset = () =>
+    db.update(bridgeDispatches).set({ outcome: "working", reason: null }).where(eq(bridgeDispatches.externalRunId, run));
+
+  test("proven: settled, not parked, and the card says the run was retired", async () => {
+    await reportFixture();
+    const activities: unknown[] = [];
+    const settled: string[] = [];
+    try {
+      const result = await resumeSalaamWork(depsWith(activities, async (id) => void settled.push(id)));
+      expect(settled).toEqual([run]);
+      expect(result).toMatchObject({ status: "failed" });
+      expect(String(result?.reason)).toContain("settled");
+      expect((await dispatchRow()).outcome).not.toBe("parked");
+      expect(JSON.stringify(activities)).toContain("retired");
+      expect(JSON.stringify(activities)).not.toContain("operator review");
+    } finally {
+      await reset();
+    }
+  });
+
+  test("not proven: parked for review exactly as before", async () => {
+    await reportFixture();
+    const activities: unknown[] = [];
+    try {
+      const result = await resumeSalaamWork(
+        depsWith(activities, async () => {
+          throw Error("Terminal settlement refused");
+        }),
+      );
+      expect(String(result?.reason)).toContain("session ended");
+      expect((await dispatchRow()).outcome).toBe("parked");
+      expect(JSON.stringify(activities)).toContain("operator review");
+    } finally {
+      await reset();
+    }
+  });
+
+  test("a run parked earlier is offered the settlement once, and then left alone", async () => {
+    await reportFixture();
+    await db
+      .update(bridgeDispatches)
+      .set({ outcome: "parked", updatedAt: new Date(), reason: "Strict session ended before report intent; explicit original-run reconciliation required" })
+      .where(eq(bridgeDispatches.externalRunId, run));
+    const activities: unknown[] = [];
+    const settled: string[] = [];
+    const deps = depsWith(activities, async (id) => void settled.push(id));
+    try {
+      await resumeSalaamWork(deps);
+      await resumeSalaamWork(deps);
+      expect(settled).toEqual([run]);
+      expect(JSON.stringify(activities)).toContain("retired");
+    } finally {
+      await reset();
     }
   });
 });

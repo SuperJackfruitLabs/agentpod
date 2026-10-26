@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { nextSalaamDecision } from "./salaam-decision-order";
 import type { AgentSpanRecorder } from "../../telemetry/agent-spans";
 import { meter } from "../../telemetry/otel";
@@ -654,13 +655,81 @@ function verifiedSettlement(
  * transition from "working" surfaces it (card and log), so it is said once. Parking settles and
  * completes nothing: an operator settlement still reads the stopped owner and retires the row.
  */
+/** The settlement's request id for one run: stable, so a retry replays the same request. */
+const stoppedSettlementId = (runId: string) => {
+  const h = createHash("sha256").update("stopped-known-effects:" + runId).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+};
+
+/**
+ * Settle a stopped strict run with its known effects preserved, but only after Salaam's own status
+ * says the run is one it can prove (`settlement_ready`). Asking first matters: the settlement ends
+ * the board run before Salaam records it, so without the proof up front a refusal would leave the
+ * card free to re-run over effects nobody had proved. Throws, having changed nothing, otherwise.
+ */
+export async function settleStoppedSalaamWork(deps: DispatchDeps, runId: string): Promise<void> {
+  const [owner] = await db
+    .select()
+    .from(salaamWorkOwners)
+    .where(
+      and(
+        eq(salaamWorkOwners.tenantId, deps.tenantId),
+        eq(salaamWorkOwners.externalSource, deps.source),
+        eq(salaamWorkOwners.externalRunId, runId),
+      ),
+    );
+  if (!owner) throw Error("No strict work owner");
+  if (owner.settlement) throw Error("A settlement is already in progress for this run");
+  const binding = SalaamWorkPayload.parse(owner.payload).admission.binding;
+  const status = await broker.request(binding.node_id, "salaam.work-status", { binding }, { timeoutMs: 125_000 });
+  const ready = z
+    .object({ work_request_id: z.literal(owner.requestId), settlement_ready: z.literal("known_effects_failure") })
+    .passthrough()
+    .safeParse(status.ok ? status.data : null);
+  if (!ready.success) throw Error("Salaam cannot prove this stopped run's effects");
+  await settleNeverDispatchedSalaamWork(deps, runId, stoppedSettlementId(runId), undefined, true);
+}
+
+/**
+ * A stopped strict run (a runtime or budget limit, a failed step) that Salaam can prove is retired
+ * as not completed with its effects kept, as an expired approval already is, so the card can run
+ * again without anyone clearing it. True when settled; false leaves everything as it was.
+ */
+async function settleStoppedRun(deps: DispatchDeps, runId: string, leaseEpoch: number): Promise<boolean> {
+  try {
+    await (deps.settleStoppedWork ?? ((id: string) => settleStoppedSalaamWork(deps, id)))(runId);
+  } catch (error) {
+    workLog.info("salaam work: stopped run not settled automatically", { run: runId, error: String(error) });
+    return false;
+  }
+  workLog.info("salaam work: stopped run settled", { run: runId });
+  try {
+    await deps.client.activity(
+      { runId, leaseEpoch },
+      {
+        type: "thought",
+        body:
+          "This run stopped before it could finish. Salaam checked what it had changed and kept it, " +
+          "and the run was retired as not completed, so the card can be run again.",
+      },
+    );
+  } catch {
+    /* the card note is best effort; the settlement is the record */
+  }
+  return true;
+}
+
+/** Parked runs (by park time) this process has already offered the settlement to. */
+const offeredSettlement = new Set<string>();
+
 async function parkStrictRun(
   deps: DispatchDeps,
   runId: string,
   leaseEpoch: number,
   reason: string,
   note: string,
-): Promise<void> {
+): Promise<"settled" | "parked"> {
+  if (await settleStoppedRun(deps, runId, leaseEpoch)) return "settled";
   const parked = await db
     .update(bridgeDispatches)
     .set({ outcome: "parked", reason, updatedAt: new Date() })
@@ -672,13 +741,42 @@ async function parkStrictRun(
         eq(bridgeDispatches.outcome, "working"),
       ),
     )
-    .returning({ id: bridgeDispatches.externalRunId });
-  if (!parked.length) return;
+    .returning({ id: bridgeDispatches.externalRunId, updatedAt: bridgeDispatches.updatedAt });
+  if (!parked.length) return "parked";
+  // Just offered: the sweep below need not offer this parking again.
+  offeredSettlement.add(runId + "@" + parked[0]!.updatedAt.getTime());
   workLog.info("salaam work: parked", { run: runId, reason });
   try {
     await deps.client.activity({ runId, leaseEpoch }, { type: "thought", body: note });
   } catch {
     /* the card note is best effort; the log and the parked row are the record */
+  }
+  return "parked";
+}
+
+/** A run parked before automatic settlement existed, or since a hub restart, gets one offer. */
+async function offerParkedSettlements(deps: DispatchDeps): Promise<void> {
+  const parked = await db
+    .select({
+      runId: bridgeDispatches.externalRunId,
+      leaseEpoch: bridgeDispatches.leaseEpoch,
+      updatedAt: bridgeDispatches.updatedAt,
+    })
+    .from(bridgeDispatches)
+    .where(
+      and(
+        eq(bridgeDispatches.tenantId, deps.tenantId),
+        eq(bridgeDispatches.externalSource, deps.source),
+        eq(bridgeDispatches.agentKey, deps.agent.key),
+        eq(bridgeDispatches.boardId, deps.agent.boardId),
+        eq(bridgeDispatches.outcome, "parked"),
+      ),
+    );
+  for (const row of parked) {
+    const key = row.runId + "@" + row.updatedAt.getTime();
+    if (offeredSettlement.has(key)) continue;
+    offeredSettlement.add(key);
+    await settleStoppedRun(deps, row.runId, row.leaseEpoch);
   }
 }
 
@@ -686,6 +784,7 @@ async function parkStrictRun(
 export async function resumeSalaamWork(
   deps: DispatchDeps,
 ): Promise<DispatchResult | null> {
+  await offerParkedSettlements(deps);
   const rows = await db
     .select({ session: acpSessions, dispatch: bridgeDispatches })
     .from(acpSessions)
@@ -880,7 +979,7 @@ async function resumeOwnedSalaamWork(
     if (!report) {
       const reason =
         "Execution revoked before report intent; explicit original-run reconciliation required";
-      await parkStrictRun(
+      const parked = await parkStrictRun(
         deps,
         dispatch.externalRunId,
         dispatch.leaseEpoch,
@@ -891,7 +990,7 @@ async function resumeOwnedSalaamWork(
       return {
         status: "failed",
         externalRunId: dispatch.externalRunId,
-        reason,
+        reason: parked === "settled" ? "Stopped run settled with its known effects preserved" : reason,
       };
     }
   }
@@ -1088,7 +1187,7 @@ async function driveSalaamWork(
         if (!intent) {
           const reason =
             "Strict session ended before report intent; explicit original-run reconciliation required";
-          await parkStrictRun(
+          const parked = await parkStrictRun(
             deps,
             runId,
             execution.binding.run.epoch,
@@ -1096,7 +1195,11 @@ async function driveSalaamWork(
             "This run's session ended before it could report (its work stopped). It needs " +
               "operator review; nothing was completed or settled automatically.",
           );
-          return { status: "failed", externalRunId: runId, reason };
+          return {
+            status: "failed",
+            externalRunId: runId,
+            reason: parked === "settled" ? "Stopped run settled with its known effects preserved" : reason,
+          };
         }
       }
     }
