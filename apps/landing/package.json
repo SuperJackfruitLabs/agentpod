@@ -13,7 +13,7 @@
     "check:frame": "node scripts/check-frame.mjs"
   },
   "dependencies": {
-    "@astrojs/check": "^0.9.10",
+    "@astrojs/check": "^0.9.12",
     "@astrojs/mdx": "^4.3.14",
     "@astrojs/sitemap": "^3.7.4",
     "@superjackfruit/frontdoor": "file:vendor/superjackfruit-frontdoor-0.0.11.tgz",
