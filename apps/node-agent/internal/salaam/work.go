@@ -95,6 +95,30 @@ func (c *Client) WorkControl(ctx context.Context, action string, binding Binding
 	return out, nil
 }
 
+// WorkCheckpoints reads the run's checkpoints (no id) or one checkpoint's diff (an id), for the
+// run's own owner only. Read-only: the daemon changes nothing for either.
+func (c *Client) WorkCheckpoints(ctx context.Context, binding Binding, checkpoint string, owner Status) (json.RawMessage, error) {
+	if err := c.validate(binding); err != nil {
+		return nil, err
+	}
+	if owner.Binding != binding || owner.SessionID == "" || binding.Run.Source != "superpipeline" {
+		return nil, fmt.Errorf("salaam: private checkpoint owner mismatch")
+	}
+	if len(checkpoint) > 128 {
+		return nil, fmt.Errorf("salaam: invalid checkpoint id")
+	}
+	action, body := "work-checkpoints", map[string]any{"binding": binding}
+	if checkpoint != "" {
+		action = "work-checkpoint-diff"
+		body["checkpoint_id"] = checkpoint
+	}
+	var out json.RawMessage
+	if err := c.call(ctx, action, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // WorkCapability is a fresh private observation, never cached inventory/model metadata.
 func (c *Client) WorkCapability(ctx context.Context, node, workspace, key string) (any, error) {
 	if node != c.NodeID || workspace != c.Workspace || key != StationKey(c.Workspace) || node == "" {

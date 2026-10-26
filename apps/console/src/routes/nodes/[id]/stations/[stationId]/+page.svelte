@@ -33,6 +33,7 @@
   import McpProxyStatus from "$lib/components/stations/McpProxyStatus.svelte";
   import ApprovalRulesPanel from "$lib/components/stations/ApprovalRulesPanel.svelte";
   import ChangesetPanel from "$lib/components/stations/ChangesetPanel.svelte";
+  import TimelinePanel from "$lib/components/stations/TimelinePanel.svelte";
   import PostureBanner from "$lib/components/stations/PostureBanner.svelte";
   import ActivityPanel from "$lib/components/stations/ActivityPanel.svelte";
   import { lifecycle, listStations, setStationPurpose } from "$lib/api/client";
@@ -57,6 +58,7 @@
   import FolderIcon from "@lucide/svelte/icons/folder";
   import TerminalIcon from "@lucide/svelte/icons/terminal";
   import GitCompareIcon from "@lucide/svelte/icons/git-compare";
+  import HistoryIcon from "@lucide/svelte/icons/history";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
   import ActivityIcon from "@lucide/svelte/icons/activity";
   import MessageSquareIcon from "@lucide/svelte/icons/message-square";
@@ -76,6 +78,7 @@
     | "terminal"
     | "config"
     | "changes"
+    | "timeline"
     | "cleanup"
     | "activity"
     | "identity";
@@ -87,6 +90,7 @@
     "terminal",
     "config",
     "changes",
+    "timeline",
     "cleanup",
     "activity",
     "identity",
@@ -448,6 +452,7 @@
       ? [{ id: "config" as const, label: "Configuration", icon: SlidersHorizontalIcon }]
       : []),
     ...(hasChangeset ? [{ id: "changes" as const, label: "Changes", icon: GitCompareIcon }] : []),
+    ...(station?.harness === "salaam" ? [{ id: "timeline" as const, label: "Timeline", icon: HistoryIcon }] : []),
     ...(hasCleanup ? [{ id: "cleanup" as const, label: "Cleanup", icon: Trash2Icon }] : []),
     { id: "activity" as const, label: "Activity", icon: ActivityIcon },
   ]);
@@ -885,6 +890,15 @@
             {/if}
           </div>
         {/if}
+      </div>
+    {/snippet}
+  {/if}
+
+  {#if station?.harness === "salaam"}
+    {@render mountedPanel("timeline", timelineContent)}
+    {#snippet timelineContent()}
+      <div class="min-h-[200px]">
+        <TimelinePanel {stationId} />
       </div>
     {/snippet}
   {/if}
