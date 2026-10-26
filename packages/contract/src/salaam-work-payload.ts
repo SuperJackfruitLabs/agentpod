@@ -20,6 +20,13 @@ const path = text(512).refine(
       ),
 );
 const limit = (max: number) => z.number().int().min(1).max(max);
+const check = z
+  .object({
+    key,
+    command: text(4096),
+    cwd: z.union([z.literal("."), path]),
+  })
+  .strict();
 /** Fully expanded subset of Salaam TaskPlan. No implicit defaults: a changed
  * daemon default cannot silently alter the admitted plan digest. */
 export const SalaamWorkPlan = z
@@ -40,17 +47,13 @@ export const SalaamWorkPlan = z
       )
       .min(1)
       .max(32),
-    acceptance: z
-      .array(
-        z
-          .object({
-            key,
-            command: text(4096),
-            cwd: z.union([z.literal("."), path]),
-          })
-          .strict(),
-      )
-      .max(8),
+    acceptance: z.array(check).max(8),
+    /** Item 8: checks required at completion (run as `hook-<key>`). Present only when declared,
+     * so a plan without one keeps its digest. The critic is not yet admitted (null). */
+    completion_gate: z
+      .object({ critic: z.null(), hooks: z.array(check).min(1).max(8) })
+      .strict()
+      .optional(),
     deliverables: z.array(path).max(32),
     limits: z
       .object({
@@ -73,8 +76,11 @@ export const SalaamWorkPlan = z
         message: "Invalid task dependency, check, deliverable or budget",
       });
     const checks = new Set(plan.acceptance.map((c) => c.key));
+    const hooks = (plan.completion_gate?.hooks ?? []).map((h) => "hook-" + h.key);
     if (
       checks.size !== plan.acceptance.length ||
+      new Set(hooks).size !== hooks.length ||
+      hooks.some((h) => checks.has(h)) ||
       new Set(plan.deliverables).size !== plan.deliverables.length ||
       (plan.limits.token_units !== null &&
         plan.limits.output_token_bound === null)

@@ -35,6 +35,14 @@ export function runScopedPlan(plan: Plan, runId: string): Plan {
       ...plan.constraints,
     ],
     acceptance: plan.acceptance.map((check) => scopedCheck(check, inside(check.cwd))),
+    ...(plan.completion_gate
+      ? {
+          completion_gate: {
+            ...plan.completion_gate,
+            hooks: plan.completion_gate.hooks.map((hook) => scopedCheck(hook, inside(hook.cwd))),
+          },
+        }
+      : {}),
     deliverables: deliverables.map(inside),
   });
 }

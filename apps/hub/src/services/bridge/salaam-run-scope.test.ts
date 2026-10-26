@@ -88,3 +88,33 @@ test("a check directory that could break out of its quoting is refused", () => {
     ),
   ).toThrow();
 });
+
+// Item 8: completion hooks are required completion checks; they run inside the run directory too.
+test("completion hooks are scoped to the run directory like acceptance checks", () => {
+  const gated = SalaamWorkPlan.parse({
+    ...plan,
+    completion_gate: { critic: null, hooks: [{ key: "lint", command: "test -s answer.md", cwd: "." }] },
+  });
+  const scoped = runScopedPlan(gated, "run_aaaaaa111");
+  expect(scoped.completion_gate).toEqual({
+    critic: null,
+    hooks: [{ key: "lint", cwd: ".", command: "cd \x27runs/run_aaaaaa111\x27 && (test -s answer.md)" }],
+  });
+  expect("completion_gate" in runScopedPlan(plan, "run_aaaaaa111")).toBe(false);
+});
+
+test("a completion gate is closed: unique hooks, at most 8, none colliding with an acceptance check, critic null", () => {
+  const hook = (key: string) => ({ key, command: "true", cwd: "." });
+  for (const gate of [
+    { critic: null, hooks: [] },
+    { critic: null, hooks: [hook("a"), hook("a")] },
+    { critic: null, hooks: Array.from({ length: 9 }, (_, n) => hook("h" + n)) },
+    { critic: { rubric: "x" }, hooks: [hook("a")] },
+    { critic: null, hooks: [hook("a")], extra: 1 },
+  ])
+    expect(SalaamWorkPlan.safeParse({ ...plan, completion_gate: gate }).success).toBe(false);
+  // "hook-answer" would collide with the derived key of a hook named "answer" if an acceptance
+  // check were called that; here an acceptance key "hook-x" collides with hook "x".
+  const colliding = { ...plan, acceptance: [...plan.acceptance, { key: "hook-x", command: "true", cwd: "." }] };
+  expect(SalaamWorkPlan.safeParse({ ...colliding, completion_gate: { critic: null, hooks: [hook("x")] } }).success).toBe(false);
+});
