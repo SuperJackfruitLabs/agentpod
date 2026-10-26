@@ -154,6 +154,8 @@ export interface DispatchDeps {
   /** Test seam: settle a stopped strict run with its known effects preserved, only once Salaam's
    * status says it can prove them; throws otherwise. Defaults to salaam-dispatch's settlement. */
   settleStoppedWork?: (runId: string) => Promise<void>;
+  /** How long a parked run waits before its settlement is offered again (default 10 min). */
+  settlementRetryMs?: number;
   client: SuperpipelineClient;
   acp: AcpPort;
   agent: BridgeAgentConfig;
