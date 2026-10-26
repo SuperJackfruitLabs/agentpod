@@ -187,6 +187,30 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 		result, err := h.client.WorkTrace(ctx, input.Binding, input.Traceparent)
 		return result, false, err
 	}
+	if verb == "salaam.work-checkpoints" || verb == "salaam.work-checkpoint-diff" {
+		var input struct {
+			Binding      salaam.Binding `json:"binding"`
+			CheckpointID string         `json:"checkpoint_id"`
+		}
+		decoder := json.NewDecoder(strings.NewReader(string(params)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			return nil, false, fmt.Errorf("salaam: malformed checkpoint request")
+		}
+		var extra any
+		if decoder.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing checkpoint request")
+		}
+		if (verb == "salaam.work-checkpoint-diff") != (input.CheckpointID != "") {
+			return nil, false, fmt.Errorf("salaam: a diff names exactly one checkpoint")
+		}
+		owner, err := h.client.Request(ctx, "status", input.Binding, "work-checkpoint-owner", 0, "")
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := h.client.WorkCheckpoints(ctx, input.Binding, input.CheckpointID, owner)
+		return result, false, err
+	}
 	if verb == "salaam.work-evidence" || verb == "salaam.work-decisions" || verb == "salaam.work-decision" || verb == "salaam.work-completion" || verb == "salaam.work-status" {
 		var work struct {
 			Binding salaam.Binding  `json:"binding"`
