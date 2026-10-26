@@ -719,8 +719,11 @@ async function settleStoppedRun(deps: DispatchDeps, runId: string, leaseEpoch: n
   return true;
 }
 
-/** Parked runs (by park time) this process has already offered the settlement to. */
-const offeredSettlement = new Set<string>();
+/** When each parked run (by park time) was last offered the settlement; settled ones are kept
+ * as Infinity so they are never offered again. A refusal is offered again after the retry
+ * interval, so a run parked before Salaam could prove it settles once it can, unattended. */
+const offeredSettlement = new Map<string, number>();
+const SETTLEMENT_RETRY_MS = 10 * 60_000;
 
 async function parkStrictRun(
   deps: DispatchDeps,
@@ -744,7 +747,7 @@ async function parkStrictRun(
     .returning({ id: bridgeDispatches.externalRunId, updatedAt: bridgeDispatches.updatedAt });
   if (!parked.length) return "parked";
   // Just offered: the sweep below need not offer this parking again.
-  offeredSettlement.add(runId + "@" + parked[0]!.updatedAt.getTime());
+  offeredSettlement.set(runId + "@" + parked[0]!.updatedAt.getTime(), Date.now());
   workLog.info("salaam work: parked", { run: runId, reason });
   try {
     await deps.client.activity({ runId, leaseEpoch }, { type: "thought", body: note });
@@ -774,9 +777,10 @@ async function offerParkedSettlements(deps: DispatchDeps): Promise<void> {
     );
   for (const row of parked) {
     const key = row.runId + "@" + row.updatedAt.getTime();
-    if (offeredSettlement.has(key)) continue;
-    offeredSettlement.add(key);
-    await settleStoppedRun(deps, row.runId, row.leaseEpoch);
+    const last = offeredSettlement.get(key);
+    if (last !== undefined && Date.now() - last < (deps.settlementRetryMs ?? SETTLEMENT_RETRY_MS)) continue;
+    offeredSettlement.set(key, Date.now());
+    if (await settleStoppedRun(deps, row.runId, row.leaseEpoch)) offeredSettlement.set(key, Infinity);
   }
 }
 

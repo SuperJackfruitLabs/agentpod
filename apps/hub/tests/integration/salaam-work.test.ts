@@ -2654,3 +2654,34 @@ describe("a stopped strict run is settled automatically when Salaam proves its e
     }
   });
 });
+
+// A parked run whose proof was missing when it was first offered (Salaam not yet rolled out) is
+// offered again after the retry interval, until it settles; then it is left alone.
+test("a parked run is offered the settlement again later, and left alone once settled", async () => {
+  await reportFixture();
+  await db
+    .update(bridgeDispatches)
+    .set({ outcome: "parked", updatedAt: new Date(), reason: "Strict session ended before report intent; explicit original-run reconciliation required" })
+    .where(eq(bridgeDispatches.externalRunId, run));
+  let tries = 0;
+  const deps = {
+    tenantId,
+    source: "superpipeline",
+    salaamPublish: async () => publication,
+    agent: { key: "proof", boardId: board, stationId: station, hubUserId: user },
+    acp: { ensureStrictSession: async () => "gone", renewExecution: async () => {} },
+    settlementRetryMs: 0,
+    settleStoppedWork: async () => {
+      if (++tries === 1) throw Error("Salaam cannot prove this stopped run's effects");
+    },
+    client: { context: async () => context, heartbeat: async () => ({}), activity: async () => ({ accepted: true }) },
+  } as unknown as DispatchDeps;
+  try {
+    await resumeSalaamWork(deps);
+    await resumeSalaamWork(deps);
+    await resumeSalaamWork(deps);
+    expect(tries).toBe(2);
+  } finally {
+    await db.update(bridgeDispatches).set({ outcome: "working", reason: null }).where(eq(bridgeDispatches.externalRunId, run));
+  }
+});
