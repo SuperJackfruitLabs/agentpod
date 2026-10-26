@@ -84,6 +84,7 @@ import { stationSkillsRoutes } from './routes/station-skills.ts';
 import { harnessConfigRoutes } from './routes/harness-config.ts';
 import { createSkillManagementRoutes, skillArtifactDownloadRoutes } from './routes/skill-management.ts';
 import { stationChangesetRoutes } from './routes/station-changeset.ts';
+import { stationTimelineRoutes } from './routes/station-timeline.ts';
 import { nodePostureRoutes } from './routes/node-posture.ts';
 import { runtimeCallbackRoutes } from './routes/runtime-callback.ts';
 // ACP session routes (REST session management + console session WebSocket)
@@ -313,6 +314,7 @@ const app = new Hono()
   .route('/api', stationCleanupRoutes)                     // POST /api/stations/:id/cleanup/{plan,apply}
   .route('/api', stationSkillsRoutes)
   .route('/api', createSkillManagementRoutes())
+  .route('/api', stationTimelineRoutes)                    // GET /api/stations/:id/timeline[/:session/checkpoints[/:id/diff]]
   .route('/api', stationChangesetRoutes)                   // POST /api/stations/:id/changeset/{status,diff}
   .route('/api', harnessConfigRoutes)                       // GET/PUT/DELETE /api/fleet/config/*, GET /api/stations/:id/config
   .route('/api', createMcpProxyRoutes())                     // GET/POST /api/fleet/mcp-proxy[/rotate], GET /api/stations/:id/mcp-proxy
