@@ -99,6 +99,8 @@ export function planFrom(context: RunContext) {
     context.run.runId,
   );
 }
+/** Extra strict progression steps for re-running a step; Salaam accepts steps or steps + this. */
+export const SALAAM_RERUN_ALLOWANCE = 3;
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -1362,7 +1364,9 @@ async function driveSalaamWork(
         binding: execution.binding,
         request_id: work.requestId,
         work_request_id: work.requestId,
-        max_steps: payload.plan.steps.length,
+        // The plan's steps plus the capped re-run allowance: it funds re-running a rate-limited
+        // or reopened step only, since every step completes once (Salaam refuses any other count).
+        max_steps: payload.plan.steps.length + SALAAM_RERUN_ALLOWANCE,
         compact: false,
       },
     );

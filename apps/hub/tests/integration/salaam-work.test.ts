@@ -764,6 +764,7 @@ test("strict runtime capability missing or wrong version prevents claiming", asy
 });
 test("strict resumed task drives private bounded progression and verified reporting without new claim or ACP prompt", async () => {
   const { work, completion } = await reportFixture();
+  let progressSteps: unknown;
   const events: string[] = [];
   let live: RunContext = {
     ...context,
@@ -772,6 +773,7 @@ test("strict resumed task drives private bounded progression and verified report
   const mock = spyOn(broker, "request").mockImplementation(
     async (_node, verb, body: any) => {
       events.push(verb);
+      if (verb === "salaam.work-progress") progressSteps = body.max_steps;
       if (verb === "salaam.work-progress")
         return {
           ok: true,
@@ -844,6 +846,8 @@ test("strict resumed task drives private bounded progression and verified report
     expect(await runOnce(deps)).toMatchObject({ status: "reported" });
     expect(events.indexOf("heartbeat")).toBeLessThan(events.indexOf("renew"));
     expect(events.filter((x) => x === "salaam.work-progress")).toHaveLength(1);
+    // The grant is the plan's steps plus the capped re-run allowance (429 retries, critic reopens).
+    expect(progressSteps).toBe((work.payload as { plan: { steps: unknown[] } }).plan.steps.length + 3);
     expect(events.filter((x) => x === "verified-report")).toHaveLength(1);
     // The board gets the agent's own handoff, the published deliverable, and Salaam's proof.
     const reported = live.run.handoff as Record<string, any>;
