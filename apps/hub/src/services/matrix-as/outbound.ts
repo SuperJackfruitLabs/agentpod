@@ -196,6 +196,17 @@ interface Attachment {
    */
   turnText: string[];
   turnTextEventId: string | null;
+  /**
+   * The message the safety timer posted and left open, and the text it holds.
+   *
+   * A timer flush is not a turn end, so it must not close the turn's message.
+   * Measured in production on 2026-10-26: an agent streamed almost its whole
+   * reply, then sent the last few characters only with the turn's final event
+   * 20+ s later. The timer posted the bulk and the turn end posted "it?" as a
+   * second message, which the voice reply then spoke. Now the next flush in
+   * the same turn edits this event (`m.replace`) with the full text instead.
+   */
+  open: { eventId: string; text: string } | null;
   /** Whether a voice note from the user started this turn. */
   voiceTriggered: boolean;
   /**
@@ -409,6 +420,7 @@ export function attachRoomToSession(
     lastTurnCounts: null,
     turnText: [],
     turnTextEventId: null,
+    open: null,
     voiceTriggered: false,
     chain: Promise.resolve(),
   };
@@ -430,7 +442,30 @@ export function attachRoomToSession(
     }
   };
 
-  const flush = async () => {
+  /**
+   * Replace an open message's text with `full`: an `m.replace` edit through
+   * the same `say` (and so the same encrypted path) as the original. Quiet —
+   * the original already buzzed the phone; its edit must not buzz again.
+   */
+  const edit = async (eventId: string, full: string): Promise<string | null> => {
+    const end = beginQuietSend(roomId);
+    try {
+      const id = await say(`* ${full}`, {
+        "m.new_content": { msgtype: "m.text", body: full },
+        "m.relates_to": { rel_type: "m.replace", event_id: eventId },
+      });
+      noteHubEvent(id, "quiet");
+      return id;
+    } finally {
+      end();
+    }
+  };
+
+  const flush = async (byTimer = false) => {
+    // Taken (or kept, for another timer flush) before any await, like the
+    // tools below: a turn-end flush racing a timer flush must not edit twice.
+    const open = state.open;
+    if (!byTimer) state.open = null;
     if (state.timer) {
       clearTimeout(state.timer);
       state.timer = null;
@@ -463,10 +498,28 @@ export function attachRoomToSession(
     state.toolSeq = 0;
     const counts = tools.size > 0 ? await recordTurn(tools) : null;
     if (text.trim() === "") return;
+    if (open) {
+      const full = open.text + text;
+      if (byTimer) state.open = { eventId: open.eventId, text: full };
+      const id = await edit(open.eventId, full);
+      if (id) {
+        // The turn's text and its event stay the original message's: that is
+        // the one the voice reply attaches to, now holding the whole answer.
+        const i = state.turnText.lastIndexOf(open.text);
+        if (i >= 0) state.turnText[i] = full;
+        else state.turnText.push(full);
+        state.turnTextEventId = open.eventId;
+        return;
+      }
+      // The edit did not land: the tail goes out on its own, as it used to,
+      // rather than not at all.
+      if (byTimer) state.open = null;
+    }
     const posted = (id: string | null) => {
       if (!id) return;
       state.turnText.push(text);
       state.turnTextEventId = id;
+      if (byTimer) state.open = { eventId: id, text };
     };
     if (!counts) {
       posted(await say(text));
@@ -666,7 +719,7 @@ export function attachRoomToSession(
 
   const scheduleFlush = () => {
     if (state.timer) clearTimeout(state.timer);
-    state.timer = setTimeout(() => void flush(), flushDelayMs);
+    state.timer = setTimeout(() => void flush(true), flushDelayMs);
   };
 
   const typingRefreshMs = deps.typingRefreshMs ?? TYPING_REFRESH_MS;
@@ -908,6 +961,7 @@ export function attachRoomToSession(
           }
           state.turnText = [];
           state.turnTextEventId = null;
+          state.open = null;
           state.voiceTriggered = false;
           state.produced = false;
           state.reportedError = false;

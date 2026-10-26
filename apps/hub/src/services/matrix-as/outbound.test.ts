@@ -1802,3 +1802,152 @@ describe("a turn's end hands its text to the voice replier", () => {
     expect(sent.map((m) => m.body)).toEqual(["Answer.", "Next."]);
   });
 });
+
+describe("a turn the safety timer flushed before its end", () => {
+  /**
+   * Measured in production on 2026-10-26: an agent streamed almost its whole
+   * reply, then sent the last few characters only with the turn's final event,
+   * more than the safety timer's delay later. The timer posted the bulk and the
+   * turn end posted the tail as a second message, which the voice reply spoke.
+   * A timer flush is not a turn end: the rest of the turn edits that message.
+   */
+  let spoken: Array<Record<string, unknown>> = [];
+
+  function timedDeps() {
+    let n = 0;
+    const base = deps();
+    return {
+      ...base,
+      flushDelayMs: 20,
+      client: {
+        ...base.client,
+        sendText: async (userId: string, roomId: string, body: string, extra?: Record<string, unknown>) => {
+          sent.push({ userId, roomId, body, ...(extra ? { extra } : {}) });
+          n += 1;
+          return `$text${n}`;
+        },
+      },
+      speak: async (turn: any) => {
+        spoken.push(turn);
+      },
+    };
+  }
+
+  const timerFires = () => new Promise((r) => setTimeout(r, 60));
+  const messages = () => sent.filter((m) => m.extra?.["m.relates_to"] === undefined);
+  const edits = () => sent.filter((m) => m.extra?.["m.relates_to"] !== undefined);
+
+  beforeEach(() => {
+    spoken = [];
+    _resetHubEventsForTest();
+  });
+
+  test("the tail that arrives at turn end edits the timer's message instead of posting a second", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, timedDeps());
+    noteTurnTrigger(SESSION, "$asked");
+    emit(state("working", 1));
+    emit(chunk("Is anything still "));
+    emit(chunk("waiting"));
+    await timerFires();
+    emit(chunk("?"));
+    emit(state("idle", 2));
+    await settle();
+
+    expect(messages()).toHaveLength(1);
+    expect(messages()[0]!.body).toBe("Is anything still waiting");
+    expect(edits()).toHaveLength(1);
+    expect(edits()[0]!.body).toBe("* Is anything still waiting?");
+    expect(edits()[0]!.extra).toEqual({
+      "m.new_content": { msgtype: "m.text", body: "Is anything still waiting?" },
+      "m.relates_to": { rel_type: "m.replace", event_id: "$text1" },
+    });
+  });
+
+  test("the voice reply gets the whole text and the original event; the done mark goes on once", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, timedDeps());
+    noteTurnTrigger(SESSION, "$asked", { voice: true });
+    emit(state("working", 1));
+    emit(chunk("Most of the answer"));
+    await timerFires();
+    emit(chunk(", and the end."));
+    emit(state("idle", 2));
+    await settle();
+
+    expect(spoken).toHaveLength(1);
+    expect(spoken[0]).toMatchObject({
+      text: "Most of the answer, and the end.",
+      textEventId: "$text1",
+      voiceTriggered: true,
+    });
+    expect(reactions.filter((r) => r.key === "✅")).toEqual([{ targetId: "$asked", key: "✅" }]);
+  });
+
+  test("the edit does not buzz the phone a second time", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, timedDeps());
+    emit(state("working", 1));
+    emit(chunk("First part"));
+    await timerFires();
+    emit(chunk(" and rest."));
+    emit(state("idle", 2));
+    await settle();
+
+    expect(edits()).toHaveLength(1);
+    expect(hubEventKind("$text2")).toBe("quiet");
+    expect(hubEventKind("$text1")).not.toBe("quiet");
+  });
+
+  test("a second timer flush in the same turn edits the same message with everything so far", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, timedDeps());
+    emit(state("working", 1));
+    emit(chunk("one"));
+    await timerFires();
+    emit(chunk(" two"));
+    await timerFires();
+    emit(chunk(" three"));
+    emit(state("idle", 2));
+    await settle();
+
+    expect(messages().map((m) => m.body)).toEqual(["one"]);
+    expect(edits().map((m) => (m.extra!["m.new_content"] as any).body)).toEqual(["one two", "one two three"]);
+    expect(edits().every((m) => (m.extra!["m.relates_to"] as any).event_id === "$text1")).toBe(true);
+    expect(spoken[0]).toMatchObject({ text: "one two three", textEventId: "$text1" });
+  });
+
+  test("an edit that does not land still gets the tail into the room", async () => {
+    const base = timedDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, {
+      ...base,
+      client: {
+        ...base.client,
+        sendText: async (userId: string, roomId: string, body: string, extra?: Record<string, unknown>) => {
+          if (extra?.["m.relates_to"] !== undefined) throw new Error("edit refused");
+          return base.client.sendText(userId, roomId, body, extra);
+        },
+      },
+    });
+    emit(state("working", 1));
+    emit(chunk("Bulk of it"));
+    await timerFires();
+    emit(chunk(" tail."));
+    emit(state("idle", 2));
+    await settle();
+
+    expect(messages().map((m) => m.body)).toEqual(["Bulk of it", " tail."]);
+  });
+
+  test("the next turn starts a new message", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, timedDeps());
+    emit(state("working", 1));
+    emit(chunk("first turn"));
+    await timerFires();
+    emit(state("idle", 2));
+    await settle();
+    emit(state("working", 3));
+    emit(chunk("second turn"));
+    emit(state("idle", 4));
+    await settle();
+
+    expect(messages().map((m) => m.body)).toEqual(["first turn", "second turn"]);
+    expect(edits()).toHaveLength(0);
+  });
+});
