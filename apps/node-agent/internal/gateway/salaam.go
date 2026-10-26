@@ -187,6 +187,30 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 		result, err := h.client.WorkTrace(ctx, input.Binding, input.Traceparent)
 		return result, false, err
 	}
+	if verb == "salaam.work-restore" {
+		var input struct {
+			Binding       salaam.Binding `json:"binding"`
+			RequestID     string         `json:"request_id"`
+			CheckpointID  string         `json:"checkpoint_id"`
+			RestoreDigest string         `json:"restore_digest"`
+			ApprovedBy    string         `json:"approved_by"`
+		}
+		decoder := json.NewDecoder(strings.NewReader(string(params)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			return nil, false, fmt.Errorf("salaam: malformed restore request")
+		}
+		var extra any
+		if decoder.Decode(&extra) != io.EOF {
+			return nil, false, fmt.Errorf("salaam: trailing restore request")
+		}
+		owner, err := h.client.Request(ctx, "status", input.Binding, "work-restore-owner", 0, "")
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := h.client.WorkRestore(ctx, input.Binding, input.RequestID, input.CheckpointID, input.RestoreDigest, input.ApprovedBy, owner)
+		return result, false, err
+	}
 	if verb == "salaam.work-checkpoints" || verb == "salaam.work-checkpoint-diff" {
 		var input struct {
 			Binding      salaam.Binding `json:"binding"`

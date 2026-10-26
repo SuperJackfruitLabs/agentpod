@@ -898,7 +898,7 @@
     {@render mountedPanel("timeline", timelineContent)}
     {#snippet timelineContent()}
       <div class="min-h-[200px]">
-        <TimelinePanel {stationId} />
+        <TimelinePanel {stationId} canRestore={wsAdmin} />
       </div>
     {/snippet}
   {/if}
