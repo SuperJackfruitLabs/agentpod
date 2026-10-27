@@ -24,6 +24,9 @@ type ConfigurationObservation struct {
 	PinsDigest string
 	// ToolsUser is the OS user tools run as, when this Salaam reports one (salaam #46).
 	ToolsUser string
+	// Persona is {digest, text}: the operator's pinned persona (item 9), or nil when none. It is
+	// the operator's own reviewed prose, shown read-only; it carries no secret.
+	Persona map[string]any
 }
 
 // ObserveConfiguration reads /v1/health and keeps only ConfigurationObservation's fields.
@@ -58,6 +61,10 @@ func (c *Client) ObserveConfiguration(ctx context.Context) ConfigurationObservat
 		} `json:"operator_mcp"`
 		PinsDigest string `json:"agentpod_pins_digest"`
 		ToolsUser  string `json:"tools_user"`
+		Persona    *struct {
+			Digest string `json:"digest"`
+			Text   string `json:"text"`
+		} `json:"persona"`
 	}
 	if json.NewDecoder(io.LimitReader(res.Body, 1024*1024)).Decode(&out) != nil {
 		return ConfigurationObservation{Reason: "health response is not JSON"}
@@ -76,6 +83,9 @@ func (c *Client) ObserveConfiguration(ctx context.Context) ConfigurationObservat
 			servers = append(servers, map[string]any{"name": s.Name, "transport": s.Transport, "declarationDigest": s.DeclarationDigest})
 		}
 		obs.OperatorMCP = map[string]any{"digest": m.Digest, "servers": servers}
+	}
+	if p := out.Persona; p != nil && p.Digest != "" && len(p.Text) <= 16*1024 {
+		obs.Persona = map[string]any{"digest": p.Digest, "text": p.Text}
 	}
 	return obs
 }

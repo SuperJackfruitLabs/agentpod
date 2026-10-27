@@ -13,7 +13,7 @@ import (
 func TestSalaamConfigManagerDelegatesReviewedNativeCommands(t *testing.T) {
 	s := &salaamDescriptor{config: SalaamConfig{Binary: "/private/salaam.mjs", NodeBinary: "/private/node", Manifest: "/private/host.json", StateDir: "/private/state", Workspace: "/private/work", NodeID: "node_fixture"}}
 	var _ ConfigManager = s
-	if got := s.ConfigSettings(); len(got) != 5 || got[4].ID != "salaam.host.manifest" || !got[4].RestartToTakeEffect || got[4].Policy != "reconcilable" {
+	if got := s.ConfigSettings(); len(got) != 6 || got[5].ID != "salaam.host.manifest" || !got[5].RestartToTakeEffect || got[5].Policy != "reconcilable" {
 		t.Fatalf("registry: %+v", got)
 	}
 	key := salaam.StationKey(s.config.Workspace)
