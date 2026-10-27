@@ -36,12 +36,12 @@ describe("comparing a station against the declaration", () => {
     // Postgres jsonb stores a declaration's keys in its own order (shorter keys first), while the
     // node reports them in its own; the same value must not read as drift forever.
     const declared = { text: "Warm and brief.", digest: "9f1c" };
-    const [o] = compare({ ...base, declared: { [SETTING.id]: at(declared, "station") }, values: [{ settingId: SETTING.id, readable: true, observed: { digest: "9f1c", text: "Warm and brief." } }] });
+    const o = compare({ ...base, declared: { [SETTING.id]: at(declared, "station") }, values: [{ settingId: SETTING.id, readable: true, observed: { digest: "9f1c", text: "Warm and brief." } }] })[0]!;
     expect(o.state).toBe("matches");
-    const [nested] = compare({ ...base, declared: { [SETTING.id]: at({ a: { y: 1, x: [2, { q: 1, p: 0 }] } }, "station") }, values: [{ settingId: SETTING.id, readable: true, observed: { a: { x: [2, { p: 0, q: 1 }], y: 1 } } }] });
+    const nested = compare({ ...base, declared: { [SETTING.id]: at({ a: { y: 1, x: [2, { q: 1, p: 0 }] } }, "station") }, values: [{ settingId: SETTING.id, readable: true, observed: { a: { x: [2, { p: 0, q: 1 }], y: 1 } } }] })[0]!;
     expect(nested.state).toBe("matches");
     // Arrays keep their order: a reordered list is a different value.
-    const [list] = compare({ ...base, declared: { [SETTING.id]: at(["a", "b"], "station") }, values: [{ settingId: SETTING.id, readable: true, observed: ["b", "a"] }] });
+    const list = compare({ ...base, declared: { [SETTING.id]: at(["a", "b"], "station") }, values: [{ settingId: SETTING.id, readable: true, observed: ["b", "a"] }] })[0]!;
     expect(list.state).toBe("drifted");
   });
 
