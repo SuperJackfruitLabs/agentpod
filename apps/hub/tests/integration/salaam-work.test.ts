@@ -2581,6 +2581,20 @@ describe("a stopped strict run is settled automatically when Salaam proves its e
       mock.mockRestore();
     }
   });
+  test("a settlement whose status could not be read says why", async () => {
+    await reportFixture();
+    const mock = spyOn(broker, "request").mockImplementation(async () => ({ ok: false, error: "salaam: private work owner mismatch" }) as never);
+    try {
+      const refused = await settleStoppedSalaamWork(
+        { tenantId, source: "superpipeline", agent: { key: "proof", boardId: board, stationId: station, hubUserId: user } } as unknown as DispatchDeps,
+        run,
+      ).then(() => "settled", (e) => String(e));
+      expect(refused).toContain("cannot prove");
+      expect(refused).toContain("status unreadable: salaam: private work owner mismatch");
+    } finally {
+      mock.mockRestore();
+    }
+  });
   test("a run whose settlement an operator already started is left to that settlement", async () => {
     await reportFixture();
     const [owner] = await db.select().from(salaamWorkOwners).where(eq(salaamWorkOwners.sessionId, session));

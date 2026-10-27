@@ -692,7 +692,12 @@ export async function settleStoppedSalaamWork(deps: DispatchDeps, runId: string)
     // Salaam names the refusing guard (a code and fixed message) for a stopped run; say it.
     const refused = z.object({ settlement_refused: z.string().max(300) }).safeParse(status.ok ? status.data : null);
     throw Error(
-      "Salaam cannot prove this stopped run's effects" + (refused.success ? ` (${refused.data.settlement_refused})` : ""),
+      "Salaam cannot prove this stopped run's effects" +
+        (refused.success
+          ? ` (${refused.data.settlement_refused})`
+          : !status.ok
+            ? ` (status unreadable: ${String(status.error ?? "no answer").slice(0, 300)})`
+            : ""),
     );
   }
   await settleNeverDispatchedSalaamWork(deps, runId, stoppedSettlementId(runId), undefined, true);
