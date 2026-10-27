@@ -539,12 +539,23 @@ export async function listOptOuts(
  * drift on every numeric setting forever, and a drift report that is always
  * wrong is one nobody reads.
  */
+function sortedJson(value: unknown): string {
+  const sort = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(sort)
+      : v !== null && typeof v === "object"
+        ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, sort((v as Record<string, unknown>)[k])]))
+        : v;
+  return JSON.stringify(sort(value));
+}
 function sameValue(declared: unknown, observed: unknown): boolean {
   if (declared === null || declared === undefined || observed === null || observed === undefined) {
     return declared === observed;
   }
   if (typeof declared === "object" || typeof observed === "object") {
-    return JSON.stringify(declared) === JSON.stringify(observed);
+    // Key order is not part of a value: Postgres jsonb reorders a declaration's keys, the node
+    // reports its own order. Arrays keep theirs.
+    return sortedJson(declared) === sortedJson(observed);
   }
   return String(declared) === String(observed);
 }
