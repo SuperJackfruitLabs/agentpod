@@ -26,6 +26,8 @@ export interface CheckpointDiff {
   checkpoint: Checkpoint;
   current_tree: string;
   files: CheckpointFile[];
+  /** Binds the checkpoint, the current tree and every file change; a restore names exactly this. */
+  restore_digest: string;
 }
 const base = (station: string) => `/api/stations/${encodeURIComponent(station)}/timeline`;
 export const listTimelineRuns = async (station: string) =>
@@ -35,4 +37,10 @@ export const listCheckpoints = async (station: string, session: string) =>
 export const checkpointDiff = (station: string, session: string, checkpoint: string) =>
   http<CheckpointDiff>(
     `${base(station)}/${encodeURIComponent(session)}/checkpoints/${encodeURIComponent(checkpoint)}/diff`,
+  );
+/** Item 11b: restore a checkpoint's files, exactly as shown (workspace admins, ended runs only). */
+export const restoreCheckpoint = (station: string, session: string, checkpoint: string, restoreDigest: string) =>
+  http<{ version: 1 }>(
+    `${base(station)}/${encodeURIComponent(session)}/checkpoints/${encodeURIComponent(checkpoint)}/restore`,
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ restoreDigest }) },
   );

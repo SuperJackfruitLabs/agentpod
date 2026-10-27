@@ -3,6 +3,13 @@
  *   GET /api/stations/:id/timeline                                     the station's strict runs
  *   GET /api/stations/:id/timeline/:sessionId/checkpoints              a run's checkpoints
  *   GET /api/stations/:id/timeline/:sessionId/checkpoints/:ckp/diff    what restoring one would do
+ *   POST /api/stations/:id/timeline/:sessionId/checkpoints/:ckp/restore {restoreDigest}  (11b)
+ *
+ * Restore is a workspace owner's or admin's, only for a run that has ended (its execution revoked
+ * and its session over), never automatic and never while it runs. The restore digest is the one the
+ * diff showed: Salaam recomputes it and refuses any other, so the approval binds the checkpoint,
+ * the current tree and every file change. The request id is fixed per approval, so a replay is the
+ * same request (Salaam refuses a second use of it). Files only; nothing re-runs afterwards.
  *
  * The station must be in the caller's workspace (404 otherwise), and the session must be one of
  * that station's strict runs (404 otherwise). Checkpoints come from Salaam, derived from the run's
@@ -16,6 +23,8 @@ import { acpSessions } from "../db/schema/acp";
 import * as broker from "../services/broker";
 import { getStation } from "../services/station-registry";
 import { recordAudit } from "../services/audit";
+import { requireWorkspaceAdmin } from "../auth/workspace-authority";
+import { z } from "zod";
 import type { AuthUser } from "../auth/middleware";
 
 const brokerStatus = (error?: string) =>
@@ -99,5 +108,40 @@ export const stationTimelineRoutes = new Hono()
     });
     await audit.done(result.ok ? "ok" : "error", result.ok ? undefined : result.error);
     if (!result.ok) return c.json({ error: result.error ?? "diff unavailable" }, brokerStatus(result.error));
+    return c.json(result.data);
+  })
+  .post("/stations/:id/timeline/:sessionId/checkpoints/:checkpointId/restore", async (c) => {
+    const s = await stationOf(c);
+    if ("error" in s) return s.error;
+    const denied = requireWorkspaceAdmin(c);
+    if (denied) return denied;
+    const parsed = z
+      .object({ restoreDigest: z.string().regex(/^[a-f0-9]{64}$/) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "A restore names exactly the approved restore digest" }, 400);
+    const run = await runOf(s.station.id, c.req.param("sessionId"));
+    const checkpoint = c.req.param("checkpointId");
+    if (!run || checkpoint.length > 128) return c.json({ error: "Not Found" }, 404);
+    if (run.executionAuthority!.state !== "revoked" || run.status !== "ended")
+      return c.json({ error: "Restore is only for a run that has ended" }, 409);
+    const binding = run.executionAuthority!.binding;
+    const audit = await recordAudit(db, {
+      tenantId: s.station.tenantId,
+      userId: s.user.id,
+      nodeId: s.station.nodeId,
+      stationKey: s.station.stationKey,
+      verb: "salaam.work-restore",
+      params: { actor: s.user.id },
+    });
+    const result = await broker.request(binding.node_id, "salaam.work-restore", {
+      binding,
+      request_id: `restore:${run.id}:${parsed.data.restoreDigest.slice(0, 32)}`,
+      checkpoint_id: checkpoint,
+      restore_digest: parsed.data.restoreDigest,
+      approved_by: s.user.id,
+    });
+    await audit.done(result.ok ? "ok" : "error", result.ok ? undefined : result.error);
+    if (!result.ok) return c.json({ error: result.error ?? "restore refused" }, brokerStatus(result.error));
     return c.json(result.data);
   });

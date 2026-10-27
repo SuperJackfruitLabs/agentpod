@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // WorkPayload is private node control input, never ACP/model metadata. Payload
@@ -114,6 +115,32 @@ func (c *Client) WorkCheckpoints(ctx context.Context, binding Binding, checkpoin
 	}
 	var out json.RawMessage
 	if err := c.call(ctx, action, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// WorkRestore asks the run's owner to restore one checkpoint's files, exactly as approved: the
+// restore digest binds the checkpoint, the current tree and every file change, and the daemon
+// recomputes and refuses any other. Only for an ended run; the hub checks the approver.
+func (c *Client) WorkRestore(ctx context.Context, binding Binding, request, checkpoint, restoreDigest, approvedBy string, owner Status) (json.RawMessage, error) {
+	if err := c.validate(binding); err != nil {
+		return nil, err
+	}
+	if owner.Binding != binding || owner.SessionID == "" || binding.Run.Source != "superpipeline" {
+		return nil, fmt.Errorf("salaam: private restore owner mismatch")
+	}
+	if request == "" || len(request) > 128 || checkpoint == "" || len(checkpoint) > 128 || len(restoreDigest) != 64 || approvedBy == "" || len(approvedBy) > 128 {
+		return nil, fmt.Errorf("salaam: invalid restore request")
+	}
+	for _, r := range restoreDigest {
+		if !strings.ContainsRune("0123456789abcdef", r) {
+			return nil, fmt.Errorf("salaam: invalid restore digest")
+		}
+	}
+	body := map[string]any{"binding": binding, "request_id": request, "checkpoint_id": checkpoint, "restore_digest": restoreDigest, "approved_by": approvedBy}
+	var out json.RawMessage
+	if err := c.call(ctx, "work-restore", body, &out); err != nil {
 		return nil, err
 	}
 	return out, nil

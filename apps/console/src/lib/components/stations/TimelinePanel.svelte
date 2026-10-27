@@ -5,10 +5,15 @@
   import { Button } from "$lib/components/ui/button";
   import { Empty } from "$lib/components/ui/empty";
   import { DiffLines } from "$lib/components/ui/diff-lines";
+  import * as Dialog from "$lib/components/ui/dialog";
 
   // Item 11a: a Salaam station's board runs, each completed step's checkpoint, and what restoring
   // one would do to each file. Read-only: restoring is a separate, approved operation.
-  let { stationId }: { stationId: string } = $props();
+  // `canRestore`: the viewer is a workspace owner or admin. Restore is only for an ended run.
+  let { stationId, canRestore = false }: { stationId: string; canRestore?: boolean } = $props();
+  let confirming = $state(false);
+  let restoring = $state(false);
+  let restored = $state<string | null>(null);
 
   let runs = $state<api.TimelineRun[] | null>(null);
   let run = $state<api.TimelineRun | null>(null);
@@ -16,6 +21,7 @@
   let open = $state<string | null>(null);
   let diff = $state<api.CheckpointDiff | null>(null);
   let error = $state<string | null>(null);
+  const ended = $derived(run?.state === "revoked" && run?.status === "ended");
   let epoch = 0;
 
   const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
@@ -73,6 +79,21 @@
     not_restorable: "Can't restore (existed before this run)",
   };
   const contentAt = (f: api.CheckpointFile) => (f.at_checkpoint.state === "content" ? f.at_checkpoint.content : "");
+
+  async function restore() {
+    if (!run || !diff || !canRestore || !ended) return;
+    restoring = true;
+    error = null;
+    try {
+      await api.restoreCheckpoint(stationId, run.sessionId, diff.checkpoint.id, diff.restore_digest);
+      restored = diff.checkpoint.id;
+      confirming = false;
+    } catch (e) {
+      error = message(e, "Could not restore this checkpoint");
+    } finally {
+      restoring = false;
+    }
+  }
 </script>
 
 <div class="flex flex-col gap-4">
@@ -137,6 +158,15 @@
                   <p class="text-muted-foreground text-sm">Nothing was written after this checkpoint.</p>
                 {:else}
                   <p class="text-muted-foreground text-sm">Restoring this checkpoint would change:</p>
+                  {#if restored === c.id}
+                    <p class="text-sm">Restored. The files are back as they were at this checkpoint; nothing re-runs.</p>
+                  {:else if canRestore && ended}
+                    <div>
+                      <Button size="sm" onclick={() => (confirming = true)}>Restore files to here…</Button>
+                    </div>
+                  {:else if canRestore}
+                    <p class="text-muted-foreground text-sm">Restore is available after the run has ended.</p>
+                  {/if}
                   {#each diff.files as f (f.path)}
                     <div class="flex flex-col gap-1">
                       <div class="flex items-center justify-between gap-3">
@@ -157,3 +187,35 @@
     {/if}
   {/if}
 </div>
+
+{#if diff}
+  <Dialog.Root open={confirming} onOpenChange={(v) => { if (!restoring) confirming = v; }}>
+    <Dialog.Content>
+      <Dialog.Header>
+        <Dialog.Title>Restore files to after {diff.checkpoint.step_key}?</Dialog.Title>
+        <Dialog.Description>
+          Salaam writes these files back through the station, each with a receipt. Checks run after this
+          checkpoint no longer count. Only files change: the conversation stays as it is, and nothing re-runs.
+        </Dialog.Description>
+      </Dialog.Header>
+      <div class="flex flex-col gap-2 text-sm">
+        {#each diff.files as f (f.path)}
+          <div class="flex items-center justify-between gap-3">
+            <code class="font-mono">{f.path}</code>
+            <span class="text-muted-foreground">{f.change === "not_restorable" ? "left as it is (existed before this run)" : label[f.change]}</span>
+          </div>
+        {/each}
+        <p class="text-muted-foreground text-xs">
+          Bound to checkpoint <code class="font-mono">{diff.checkpoint.tree_digest.slice(0, 12)}</code> and the current tree
+          <code class="font-mono">{diff.current_tree.slice(0, 12)}</code>: if the files change first, this approval no longer applies.
+        </p>
+      </div>
+      <Dialog.Footer>
+        <Button variant="outline" disabled={restoring} onclick={() => (confirming = false)}>Cancel</Button>
+        <Button variant="destructive" disabled={restoring} onclick={restore}>
+          {restoring ? "Restoring…" : "Approve restore"}
+        </Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+{/if}
