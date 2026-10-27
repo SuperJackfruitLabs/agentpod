@@ -2613,6 +2613,26 @@ describe("a stopped strict run is settled automatically when Salaam proves its e
       mock.mockRestore();
     }
   });
+  test("a long refusal is never dropped: it is kept, cut with a marker", async () => {
+    await reportFixture();
+    const long = "work_settlement_unsafe: " + "x".repeat(2000);
+    const mock = spyOn(broker, "request").mockImplementation(async () => ({
+      ok: true,
+      data: { version: 1, state: "blocked", auto_enabled: false, settlement_refused: long },
+    }) as never);
+    try {
+      const refused = await settleStoppedSalaamWork(
+        { tenantId, source: "superpipeline", agent: { key: "proof", boardId: board, stationId: station, hubUserId: user } } as unknown as DispatchDeps,
+        run,
+      ).then(() => "settled", (e) => String(e));
+      expect(refused).toContain("(work_settlement_unsafe: xxx");
+      expect(refused).toContain("… [cut]");
+      expect(refused).not.toContain("status does not match");
+      expect(refused.length).toBeLessThan(1200);
+    } finally {
+      mock.mockRestore();
+    }
+  });
   test("a run whose settlement an operator already started is left to that settlement", async () => {
     await reportFixture();
     const [owner] = await db.select().from(salaamWorkOwners).where(eq(salaamWorkOwners.sessionId, session));
