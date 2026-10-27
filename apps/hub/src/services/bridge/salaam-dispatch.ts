@@ -690,7 +690,10 @@ export async function settleStoppedSalaamWork(deps: DispatchDeps, runId: string)
     .safeParse(status.ok ? status.data : null);
   if (!ready.success) {
     // Salaam names the refusing guard (a code and fixed message) for a stopped run; say it.
-    const refused = z.object({ settlement_refused: z.string().max(300) }).safeParse(status.ok ? status.data : null);
+    // Never dropped for length (that read the same as absent): kept, cut with a marker.
+    const refused = z
+      .object({ settlement_refused: z.string().transform((s) => (s.length > 1000 ? s.slice(0, 1000) + "… [cut]" : s)) })
+      .safeParse(status.ok ? status.data : null);
     throw Error(
       "Salaam cannot prove this stopped run's effects" +
         (refused.success
