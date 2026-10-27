@@ -688,7 +688,13 @@ export async function settleStoppedSalaamWork(deps: DispatchDeps, runId: string)
     .object({ work_request_id: z.literal(owner.requestId), settlement_ready: z.literal("known_effects_failure") })
     .passthrough()
     .safeParse(status.ok ? status.data : null);
-  if (!ready.success) throw Error("Salaam cannot prove this stopped run's effects");
+  if (!ready.success) {
+    // Salaam names the refusing guard (a code and fixed message) for a stopped run; say it.
+    const refused = z.object({ settlement_refused: z.string().max(300) }).safeParse(status.ok ? status.data : null);
+    throw Error(
+      "Salaam cannot prove this stopped run's effects" + (refused.success ? ` (${refused.data.settlement_refused})` : ""),
+    );
+  }
   await settleNeverDispatchedSalaamWork(deps, runId, stoppedSettlementId(runId), undefined, true);
 }
 
