@@ -2595,6 +2595,24 @@ describe("a stopped strict run is settled automatically when Salaam proves its e
       mock.mockRestore();
     }
   });
+  test("a status that does not match this run's owner names the field that differs", async () => {
+    await reportFixture();
+    const mock = spyOn(broker, "request").mockImplementation(async () => ({
+      ok: true,
+      data: { version: 1, state: "blocked", work_request_id: "someone-else", settlement_ready: "known_effects_failure" },
+    }) as never);
+    try {
+      const refused = await settleStoppedSalaamWork(
+        { tenantId, source: "superpipeline", agent: { key: "proof", boardId: board, stationId: station, hubUserId: user } } as unknown as DispatchDeps,
+        run,
+      ).then(() => "settled", (e) => String(e));
+      expect(refused).toContain("cannot prove");
+      expect(refused).toContain("status does not match: work_request_id");
+      expect(refused).not.toContain("settlement_ready,");
+    } finally {
+      mock.mockRestore();
+    }
+  });
   test("a run whose settlement an operator already started is left to that settlement", async () => {
     await reportFixture();
     const [owner] = await db.select().from(salaamWorkOwners).where(eq(salaamWorkOwners.sessionId, session));

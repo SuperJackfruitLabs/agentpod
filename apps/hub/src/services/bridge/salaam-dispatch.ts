@@ -697,7 +697,7 @@ export async function settleStoppedSalaamWork(deps: DispatchDeps, runId: string)
           ? ` (${refused.data.settlement_refused})`
           : !status.ok
             ? ` (status unreadable: ${String(status.error ?? "no answer").slice(0, 300)})`
-            : ""),
+            : ` (status does not match: ${ready.error.issues.map((i) => i.path.join(".") || "status").join(", ")})`),
     );
   }
   await settleNeverDispatchedSalaamWork(deps, runId, stoppedSettlementId(runId), undefined, true);
