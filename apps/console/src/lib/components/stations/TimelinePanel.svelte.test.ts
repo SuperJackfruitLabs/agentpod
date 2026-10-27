@@ -85,3 +85,36 @@ test("a member, or a run that has not ended, gets no restore", async () => {
   expect(live.queryByRole("button", { name: /Restore files to here/ })).toBeNull();
   expect(live.getByText(/after the run has ended/)).toBeTruthy();
 });
+
+// The diff is against the live workspace: a change made outside the run shows, and is named.
+test("a change made outside the run shows in the diff and the approval, never as nothing to change", async () => {
+  vi.spyOn(api, "restoreCheckpoint").mockResolvedValue({ version: 1 });
+  vi.spyOn(api, "listTimelineRuns").mockResolvedValue([run]);
+  vi.spyOn(api, "listCheckpoints").mockResolvedValue([diff.checkpoint]);
+  vi.spyOn(api, "checkpointDiff").mockResolvedValue({
+    ...diff,
+    recorded_tree: "t".repeat(64),
+    drift: true,
+    files: [
+      { path: "runs/r/a.md", current: "edited by hand", current_state: "content", at_checkpoint: { state: "content", content: "v1" }, change: "revert" },
+    ],
+  });
+  const view = render(TimelinePanel, { props: { stationId: "station_1", canRestore: true } });
+  await fireEvent.click(await waitFor(() => view.getByRole("button", { name: /After draft/ })));
+  await waitFor(() => expect(view.getByText("runs/r/a.md")).toBeTruthy());
+  expect(view.getByText(/changed outside this run/)).toBeTruthy();
+  await fireEvent.click(view.getByRole("button", { name: /Restore files to here/ }));
+  await waitFor(() => expect(view.getByRole("dialog")).toBeTruthy());
+  expect(view.getAllByText(/changed outside this run/).length).toBeGreaterThan(1);
+});
+
+test("a workspace that moved outside the run with nothing to restore says exactly that", async () => {
+  vi.spyOn(api, "listTimelineRuns").mockResolvedValue([run]);
+  vi.spyOn(api, "listCheckpoints").mockResolvedValue([diff.checkpoint]);
+  vi.spyOn(api, "checkpointDiff").mockResolvedValue({ ...diff, recorded_tree: "t".repeat(64), drift: true, files: [] });
+  const view = render(TimelinePanel, { props: { stationId: "station_1", canRestore: true } });
+  await fireEvent.click(await waitFor(() => view.getByRole("button", { name: /After draft/ })));
+  await waitFor(() => expect(view.getByText(/changed outside this run/)).toBeTruthy());
+  expect(view.queryByText("Nothing was written after this checkpoint.")).toBeNull();
+  expect(view.queryByRole("button", { name: /Restore files to here/ })).toBeNull();
+});

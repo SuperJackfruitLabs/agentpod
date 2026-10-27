@@ -78,6 +78,10 @@
     unchanged: "Unchanged",
     not_restorable: "Can't restore (existed before this run)",
   };
+  const fileLabel = (f: api.CheckpointFile) =>
+    f.change === "not_restorable" && f.current_state === "unreadable" ? "Can't restore (can't be read now)" : label[f.change];
+  const driftNote =
+    "The workspace changed outside this run since its last recorded write. This compares the files as they are now; files this run never wrote are left as they are.";
   const contentAt = (f: api.CheckpointFile) => (f.at_checkpoint.state === "content" ? f.at_checkpoint.content : "");
 
   async function restore() {
@@ -155,8 +159,15 @@
                 {#if diff === null}
                   <p class="text-muted-foreground text-sm">Comparing with now…</p>
                 {:else if diff.files.length === 0}
-                  <p class="text-muted-foreground text-sm">Nothing was written after this checkpoint.</p>
+                  {#if diff.drift}
+                    <p class="text-sm">{driftNote} Nothing this run wrote differs from this checkpoint, so there is nothing to restore.</p>
+                  {:else}
+                    <p class="text-muted-foreground text-sm">Nothing was written after this checkpoint.</p>
+                  {/if}
                 {:else}
+                  {#if diff.drift}
+                    <p class="text-sm">{driftNote}</p>
+                  {/if}
                   <p class="text-muted-foreground text-sm">Restoring this checkpoint would change:</p>
                   {#if restored === c.id}
                     <p class="text-sm">Restored. The files are back as they were at this checkpoint; nothing re-runs.</p>
@@ -171,7 +182,7 @@
                     <div class="flex flex-col gap-1">
                       <div class="flex items-center justify-between gap-3">
                         <code class="font-mono text-sm">{f.path}</code>
-                        <Badge variant={f.change === "not_restorable" ? "destructive" : "outline"}>{label[f.change]}</Badge>
+                        <Badge variant={f.change === "not_restorable" ? "destructive" : "outline"}>{fileLabel(f)}</Badge>
                       </div>
                       {#if f.change !== "not_restorable" && f.change !== "unchanged"}
                         <div class="ap-diff-box"><DiffLines oldText={f.current ?? ""} newText={contentAt(f)} /></div>
@@ -199,10 +210,13 @@
         </Dialog.Description>
       </Dialog.Header>
       <div class="flex flex-col gap-2 text-sm">
+        {#if diff.drift}
+          <p>{driftNote}</p>
+        {/if}
         {#each diff.files as f (f.path)}
           <div class="flex items-center justify-between gap-3">
             <code class="font-mono">{f.path}</code>
-            <span class="text-muted-foreground">{f.change === "not_restorable" ? "left as it is (existed before this run)" : label[f.change]}</span>
+            <span class="text-muted-foreground">{f.change === "not_restorable" ? (f.current_state === "unreadable" ? "left as it is (can't be read now)" : "left as it is (existed before this run)") : label[f.change]}</span>
           </div>
         {/each}
         <p class="text-muted-foreground text-xs">

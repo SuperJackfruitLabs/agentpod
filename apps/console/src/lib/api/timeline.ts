@@ -18,13 +18,20 @@ export interface Checkpoint {
 export type FileAt = { state: "content"; content: string } | { state: "absent" } | { state: "unknown" };
 export interface CheckpointFile {
   path: string;
+  /** The file as the live workspace holds it now. */
   current: string | null;
+  current_state?: "content" | "absent" | "unreadable";
   at_checkpoint: FileAt;
   change: "revert" | "delete" | "bring_back" | "unchanged" | "not_restorable";
 }
 export interface CheckpointDiff {
   checkpoint: Checkpoint;
+  /** The live workspace's tree now, read through the station; the restore is bound to it. */
   current_tree: string;
+  /** The tree after this run's last recorded write. */
+  recorded_tree?: string;
+  /** The workspace changed outside this run since its last recorded write. */
+  drift?: boolean;
   files: CheckpointFile[];
   /** Binds the checkpoint, the current tree and every file change; a restore names exactly this. */
   restore_digest: string;
