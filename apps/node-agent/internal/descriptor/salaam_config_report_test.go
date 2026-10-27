@@ -47,7 +47,7 @@ func salaamWithHealth(t *testing.T, body string) (*salaamDescriptor, string) {
 func TestSalaamReportsItsConfigurationWithoutSecrets(t *testing.T) {
 	s, key := salaamWithHealth(t, salaamHealthWithConfig)
 	got := s.ConfigSettings()
-	if len(got) != 4 {
+	if len(got) != 5 {
 		t.Fatalf("an unmanaged Salaam must still report its configuration: %+v", got)
 	}
 	for _, g := range got {
@@ -55,8 +55,8 @@ func TestSalaamReportsItsConfigurationWithoutSecrets(t *testing.T) {
 			t.Fatalf("report-only setting is writable: %+v", g)
 		}
 	}
-	values, err := s.ObserveConfig(context.Background(), key, []string{"salaam.provider.route", "salaam.mcp.operator", "salaam.agentpod.pins", "salaam.tools.user"})
-	if err != nil || len(values) != 4 {
+	values, err := s.ObserveConfig(context.Background(), key, []string{"salaam.provider.route", "salaam.mcp.operator", "salaam.agentpod.pins", "salaam.tools.user", "salaam.persona"})
+	if err != nil || len(values) != 5 {
 		t.Fatalf("observe: %+v %v", values, err)
 	}
 	encoded, _ := json.Marshal(values)
@@ -68,7 +68,8 @@ func TestSalaamReportsItsConfigurationWithoutSecrets(t *testing.T) {
 	want := `[{"settingId":"salaam.provider.route","observed":{"endpoint":"https://api.kimi.com/coding/v1","model":"k3","provider":"kimi-coding"},"readable":true},` +
 		`{"settingId":"salaam.mcp.operator","observed":{"digest":"295b","servers":[{"declarationDigest":"3154","name":"fetch","transport":"stdio"}]},"readable":true},` +
 		`{"settingId":"salaam.agentpod.pins","observed":"ead22c0d","readable":true},` +
-		`{"settingId":"salaam.tools.user","readable":true}]`
+		`{"settingId":"salaam.tools.user","readable":true},` +
+		`{"settingId":"salaam.persona","readable":true}]`
 	if string(encoded) != want {
 		t.Fatalf("observations:\n got %s\nwant %s", encoded, want)
 	}
@@ -92,5 +93,24 @@ func TestSalaamConfigurationRefusesOtherStationsAndSettings(t *testing.T) {
 	}
 	if _, err := s.ObserveConfig(context.Background(), key, []string{"auth.json"}); err == nil {
 		t.Fatal("unknown setting observed")
+	}
+}
+
+// Item 9: the host's pinned persona is reported read-only, digest and text, as the daemon has it.
+func TestSalaamReportsItsPinnedPersona(t *testing.T) {
+	body := strings.Replace(salaamHealthWithConfig, `"pid":1,`, `"pid":1,"persona":{"digest":"9f1c","text":"Warm and brief."},`, 1)
+	s, key := salaamWithHealth(t, body)
+	values, err := s.ObserveConfig(context.Background(), key, []string{"salaam.persona"})
+	if err != nil || len(values) != 1 {
+		t.Fatalf("observe: %+v %v", values, err)
+	}
+	encoded, _ := json.Marshal(values)
+	if want := `[{"settingId":"salaam.persona","observed":{"digest":"9f1c","text":"Warm and brief."},"readable":true}]`; string(encoded) != want {
+		t.Fatalf("persona:\n got %s\nwant %s", encoded, want)
+	}
+	for _, g := range s.ConfigSettings() {
+		if g.ID == "salaam.persona" && g.Policy != "report-only" {
+			t.Fatalf("persona is writable from the node: %+v", g)
+		}
 	}
 }

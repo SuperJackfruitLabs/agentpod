@@ -19,9 +19,10 @@ const (
 	salaamOperatorMCPSetting   = "salaam.mcp.operator"
 	salaamPinsDigestSetting    = "salaam.agentpod.pins"
 	salaamToolsUserSetting     = "salaam.tools.user"
+	salaamPersonaSetting       = "salaam.persona"
 )
 
-var salaamReportOnly = []string{salaamProviderRouteSetting, salaamOperatorMCPSetting, salaamPinsDigestSetting, salaamToolsUserSetting}
+var salaamReportOnly = []string{salaamProviderRouteSetting, salaamOperatorMCPSetting, salaamPinsDigestSetting, salaamToolsUserSetting, salaamPersonaSetting}
 
 func (s *salaamDescriptor) manifestManaged() bool {
 	return s.config.Manifest != "" && s.config.NodeBinary != ""
@@ -133,6 +134,10 @@ func salaamReportedValues(obs salaam.ConfigurationObservation, ids []string) []C
 		case salaamToolsUserSetting:
 			if obs.ToolsUser != "" {
 				observed = obs.ToolsUser
+			}
+		case salaamPersonaSetting:
+			if obs.Persona != nil {
+				observed = obs.Persona
 			}
 		}
 		v.Readable = true
