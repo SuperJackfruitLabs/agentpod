@@ -37,14 +37,19 @@ services:
       ORG_PLANE_JWKS_URL: https://staging-accounts.superjackfruit.com/api/auth/jwks
       ORG_PLANE_AUDIENCE: https://staging-hub.agentpod.dev
       ORG_PLANE_SERVICE_CREDENTIAL_FILE: /run/secrets/org-plane-credential
-      # No provisioning and no Matrix. The Superpipeline bridge is on, against staging Superpipeline
-      # only: it claims cards for the staging workspace's rostered agents (fleet bridge add).
+      # No provisioning. The Matrix bridge is on against staging Matrix only (estate
+      # provision/307-staging-tuwunel.sh: tuwunel staging-id.agentpod.dev on the suite-staging
+      # network; MATRIX_AS_TOKEN and MATRIX_HS_TOKEN are in env/hub/hub.env, generated on the box).
+      # The Superpipeline bridge is on, against staging Superpipeline only: it claims cards for the staging workspace's rostered agents (fleet bridge add).
       # SUPERPIPELINE_PUSH_SECRET is in env/hub/hub.env, generated on the box.
       ENABLE_DOCKER_PROVISIONING: "false"
       ENABLE_MODAL_PROVISIONING: "false"
       ENABLE_FLY_PROVISIONING: "false"
       ENABLE_CLOUDFLARE_SANDBOXES: "false"
-      ENABLE_MATRIX_BRIDGE: "false"
+      ENABLE_MATRIX_BRIDGE: "true"
+      MATRIX_HOMESERVER_URL: http://staging-tuwunel:6167
+      MATRIX_SERVER_NAME: staging-id.agentpod.dev
+      MATRIX_CRYPTO_STORE_DIR: /var/lib/matrix-crypto
       ENABLE_SUPERPIPELINE_BRIDGE: "true"
       SUPERPIPELINE_BASE_URL: https://staging-app.superpipeline.dev
       SUPERPIPELINE_BOARD_URL: https://staging-app.superpipeline.dev
@@ -59,6 +64,7 @@ services:
     volumes:
       - ../..:/app
       - ../../../env/hub/org-plane-credential:/run/secrets/org-plane-credential:ro
+      - matrixcrypto:/var/lib/matrix-crypto
     ports:
       - "127.0.0.1:3101:3001"
     networks: [default, suite-staging]
@@ -84,3 +90,4 @@ networks:
 
 volumes:
   hubdata:
+  matrixcrypto:
