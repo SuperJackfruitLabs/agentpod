@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "status_excerpt": {
+    "board_reads": [
+      {
+        "id": "read-1",
+        "action": "card",
+        "args": {}
+      },
+      {
+        "id": "read-2",
+        "action": "attempts",
+        "args": {}
+      },
+      {
+        "id": "read-3",
+        "action": "library_search",
+        "args": {
+          "query": "gateway timeout"
+        }
+      },
+      {
+        "id": "read-4",
+        "action": "library_get",
+        "args": {
+          "item_id": "itm_0123456789abcdef"
+        }
+      }
+    ]
+  },
+  "answer_keys": {
+    "ok": [
+      "ok",
+      "read_id",
+      "text"
+    ],
+    "refused": [
+      "error",
+      "ok",
+      "read_id"
+    ]
+  },
+  "max_text_bytes": 262144,
+  "max_error_bytes": 2048,
+  "answers": [
+    {
+      "read_id": "read-1",
+      "ok": true,
+      "text": "{\"card\":{\"id\":\"card_0123456789abcdef\"}}"
+    },
+    {
+      "read_id": "read-2",
+      "ok": false,
+      "error": "That library item belongs to another board."
+    }
+  ]
+}

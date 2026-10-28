@@ -5,6 +5,8 @@ import { meter } from "../../telemetry/otel";
 import { recordSalaamUsage } from "../../telemetry/salaam-usage";
 import { livePublisher } from "./salaam-publish-live";
 import { SalaamActivityFeed } from "./salaam-activity";
+import { serveSalaamBoardReads } from "./salaam-board-reads";
+import { superlibraryClient } from "../superlibrary/client";
 import { runScopedPlan } from "./salaam-run-scope";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { inDispatchSpan } from "../../telemetry/dispatch-span";
@@ -1476,6 +1478,18 @@ async function driveSalaamWork(
         .passthrough()
         .parse(result.ok ? result.data : null);
       hop("status", { run: runId, state: status.state, auto: status.auto_enabled, reason: status.reason });
+      // Board reads the agent is waiting on, served here with the hub's own clients and scoped to
+      // this run's card and board (operator ruling 2026-10-28). No credential goes to the station.
+      await serveSalaamBoardReads({
+        status: result.ok ? result.data : null,
+        binding: execution.binding,
+        run: { runId, cardId: claim.card.id, boardId: client.board },
+        agentPrincipal: execution.binding.principal_id,
+        sp: client,
+        library: superlibraryClient(),
+        send: (payload) => broker.request(execution.binding.node_id, "salaam.work-read", payload),
+        log: hop,
+      });
       for (const step of [
         ...activity.plan((status as { plan?: unknown }).plan),
         ...activity.next((status as { activity?: unknown }).activity),

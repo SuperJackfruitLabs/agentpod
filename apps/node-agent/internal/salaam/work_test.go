@@ -1,10 +1,13 @@
 package salaam
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -314,5 +317,83 @@ func TestEvidenceArtifactTransportBoundIsExplicitAndControlRemainsSmall(t *testi
 	size = 9 << 20
 	if _, err := client.WorkEvidenceArtifacts(context.Background(), b, []string{id}); err == nil {
 		t.Fatal("oversized evidence accepted")
+	}
+}
+
+// Board reads (operator ruling 2026-10-28): the hub answer is relayed to Salaam as is, bounded,
+// on its own path; a read answer never rides on another action.
+func TestWorkReadRelaysTheHubAnswerBounded(t *testing.T) {
+	b := Binding{Version: 1, OrganizationID: "org_00000000000000000000", PrincipalID: "prn_00000000000000000000", NodeID: "node", StationID: "station", StationKey: StationKey("/work"), Workspace: "/work", OccupancyEpoch: 1, HubSessionID: "hub", Run: Run{Source: "superpipeline", ID: "run_abcdef", Epoch: 1}}
+	owner := Status{Binding: b, SessionID: "session"}
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/agentpod/work-read" {
+			t.Fatal(r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.Write([]byte(`{"state":"answered"}`))
+	}))
+	defer server.Close()
+	client := Client{NodeID: "node", Workspace: "/work", HTTP: &http.Client{Transport: roundTripWork{server.URL}}}
+	answer := json.RawMessage(`{"read_id":"r1","ok":true,"text":"the card"}`)
+	if _, err := client.WorkControl(context.Background(), "work-read", b, answer, owner); err != nil {
+		t.Fatal(err)
+	}
+	var want any
+	_ = json.Unmarshal(answer, &want)
+	if a, w := fmt.Sprint(got["answer"]), fmt.Sprint(want); a != w {
+		t.Fatalf("answer changed in relay: %s != %s", a, w)
+	}
+	if _, err := client.WorkControl(context.Background(), "work-read", b, json.RawMessage(`{"text":"`+strings.Repeat("x", 300*1024)+`"}`), owner); err == nil {
+		t.Fatal("accepted an unbounded read answer")
+	}
+	if _, err := client.WorkControl(context.Background(), "work-read", b, json.RawMessage(`not json`), owner); err == nil {
+		t.Fatal("accepted an invalid read answer")
+	}
+}
+
+// The board-read contract fixture (a byte copy of Salaam's own): every answer the hub may send is
+// relayed to Salaam byte for byte, on the work-read path, with its binding.
+func TestWorkReadRelaysTheFixtureAnswersByteForByte(t *testing.T) {
+	raw, err := os.ReadFile("../../../../packages/contract/src/fixtures/salaam-board-read-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fx struct {
+		Answers []json.RawMessage `json:"answers"`
+	}
+	if err := json.Unmarshal(raw, &fx); err != nil || len(fx.Answers) == 0 {
+		t.Fatal("no fixture answers", err)
+	}
+	b := Binding{Version: 1, OrganizationID: "org_00000000000000000000", PrincipalID: "prn_00000000000000000000", NodeID: "node", StationID: "station", StationKey: StationKey("/work"), Workspace: "/work", OccupancyEpoch: 1, HubSessionID: "hub", Run: Run{Source: "superpipeline", ID: "run_abcdef", Epoch: 1}}
+	owner := Status{Binding: b, SessionID: "session"}
+	var got struct {
+		Binding Binding         `json:"binding"`
+		Answer  json.RawMessage `json:"answer"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/agentpod/work-read" {
+			t.Fatal(r.URL.Path)
+		}
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		w.Write([]byte(`{"state":"answered"}`))
+	}))
+	defer server.Close()
+	client := Client{NodeID: "node", Workspace: "/work", HTTP: &http.Client{Transport: roundTripWork{server.URL}}}
+	for _, a := range fx.Answers {
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, a); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := client.WorkControl(context.Background(), "work-read", b, compact.Bytes(), owner); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got.Answer, compact.Bytes()) || got.Binding != b {
+			t.Fatalf("relay changed the answer: %s != %s", got.Answer, compact.Bytes())
+		}
 	}
 }

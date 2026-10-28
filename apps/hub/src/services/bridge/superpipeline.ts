@@ -433,6 +433,17 @@ export class SuperpipelineClient {
     return (await this.send("GET", `/v1/boards/${this.boardId}/runs/${runId}`)) as RunContext;
   }
 
+  /** The runs of the card this run holds (superpipeline GET runs/:runId/attempts): the run's own
+   * card only, never another; read-only. */
+  async attempts(runId: string): Promise<unknown> {
+    return await this.send("GET", `/v1/boards/${this.boardId}/runs/${encodeURIComponent(runId)}/attempts`);
+  }
+
+  /** The board this client works; read by the board-read scope guard. */
+  get board(): string {
+    return this.boardId;
+  }
+
   /** Original live run reference only; the Pipeline hint remains unverified. */
   /** Idempotent reference on the run's own card (superpipeline POST runs/:runId/references).
    * The card route is a human route; an agent links what it produced through its run. */

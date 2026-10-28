@@ -235,7 +235,7 @@ func (h *salaamHandler) Handle(ctx context.Context, verb string, params json.Raw
 		result, err := h.client.WorkCheckpoints(ctx, input.Binding, input.CheckpointID, owner)
 		return result, false, err
 	}
-	if verb == "salaam.work-evidence" || verb == "salaam.work-decisions" || verb == "salaam.work-decision" || verb == "salaam.work-completion" || verb == "salaam.work-status" {
+	if verb == "salaam.work-evidence" || verb == "salaam.work-decisions" || verb == "salaam.work-decision" || verb == "salaam.work-completion" || verb == "salaam.work-status" || verb == "salaam.work-read" {
 		var work struct {
 			Binding salaam.Binding  `json:"binding"`
 			Answer  json.RawMessage `json:"answer"`
