@@ -257,3 +257,23 @@ next admission. The operator ruled on 2026-10-28 (option a):
 
 The proof crosses the boundary: the real authority's renewal feeds the real station write check
 from one journal (Salaam `approval-rule-renewal-e2e`).
+
+## 9. Addendum 2026-10-28: board reads served by the hub (operator ruling, option iii)
+
+Parity with Hermes: an agent reads its own card and run, and searches the library, while it works.
+The operator ruled on 2026-10-28 that no SuperPipeline or SuperLibrary credential goes to the
+station. The hub serves the reads.
+
+- **Tool.** Salaam gains one read-only tool, `salaam_board`, with actions `card` (this run's card
+  and its handoff), `attempts` (this card's runs), `library_search {query}` and
+  `library_get {item_id}`. Read-only, so it never asks for approval; its description says so.
+- **Path.** The tool records a pending read in Salaam's journal and waits (bounded). The hub sees it
+  in work status, serves it with its own board client and the agent's SuperLibrary token (both
+  stay in the hub), and answers with `salaam.work-read`. The node relays that verb like
+  `salaam.work-decision`; the answer is bounded in size.
+- **Scope, enforced by the hub.** A read names no board or card: the hub uses the run's own card
+  and board. Any card or board other than the run's is refused. Library search is filtered to the
+  run's board; a library item whose provenance is another board is refused.
+- **No credential on the station.** No token is sent to the station or written into `mcp.json`.
+- **Failure.** If the hub is unreachable or a read is refused, the tool returns a plain-words
+  error to the agent; the work goes on.
