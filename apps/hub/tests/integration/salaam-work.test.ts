@@ -479,8 +479,15 @@ test("always allow: labelled for the station, refused for a member, set and forw
     activity: async (_l: unknown, a: any) => (notes.push(a.body), { accepted: true }),
   };
   const verbs: string[] = [];
+  const renewedRules: unknown[] = [];
   const mock = spyOn(broker, "request").mockImplementation(async (_n, verb, params: any) => {
     verbs.push(String(verb));
+    if (verb === "salaam.renew") {
+      renewedRules.push(params.approval_rules);
+      const [row] = await db.select().from(acpSessions).where(eq(acpSessions.id, session));
+      const a = row!.executionAuthority!;
+      return { ok: true, data: { ...(a.receipt as object), binding: a.binding, authorized: true, session_id: a.sessionId, admission_id: a.admissionId } } as never;
+    }
     const a = params.answer;
     return { ok: true, data: { version: 1, request_id: a.request_id, decision_digest: a.decision_digest, approval_id: decision.approval_id, decision: a.option_id } } as never;
   });
@@ -508,6 +515,10 @@ test("always allow: labelled for the station, refused for a member, set and forw
     const receipt = await answerSalaamDecision(session, user, decision.request_id, read);
     expect((receipt as any).decision).toBe("always");
     expect(verbs).toContain("salaam.work-decision");
+    // The run holds the rule before its next write: a renewal carrying it reaches Salaam first.
+    expect(verbs.indexOf("salaam.renew")).toBeGreaterThan(-1);
+    expect(verbs.indexOf("salaam.renew")).toBeLessThan(verbs.indexOf("salaam.work-decision"));
+    expect(JSON.stringify(renewedRules.at(-1))).toContain("workspace-write");
     expect((await rules()).filter((r) => !r.revokedAt).map((r) => r.scope)).toEqual(["workspace-write"]);
   } finally {
     mock.mockRestore();
