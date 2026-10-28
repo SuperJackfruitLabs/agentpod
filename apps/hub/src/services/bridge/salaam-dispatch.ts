@@ -682,6 +682,17 @@ export async function settleStoppedSalaamWork(deps: DispatchDeps, runId: string)
     );
   if (!owner) throw Error("No strict work owner");
   if (owner.settlement) throw Error("A settlement is already in progress for this run");
+  // An expired, unanswered approval is its own terminal protocol (salaam.work-expire). Its first
+  // settlement can race the session's stop receipt and park the run; settle it here on re-offer.
+  const expired = (
+    await db.select().from(salaamWorkDecisions).where(eq(salaamWorkDecisions.workRequestId, owner.requestId))
+  ).filter(
+    (d) => !d.answer && !d.daemonReceipt && Number((d.decision as { expires_at: number }).expires_at) <= Date.now(),
+  );
+  if (expired.length === 1) {
+    await settleNeverDispatchedSalaamWork(deps, runId, expired[0]!.requestId, expired[0]!.requestId);
+    return;
+  }
   const binding = SalaamWorkPayload.parse(owner.payload).admission.binding;
   const status = await broker.request(binding.node_id, "salaam.work-status", { binding }, { timeoutMs: 125_000 });
   const ready = z
