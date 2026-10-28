@@ -83,6 +83,12 @@ func (c *Client) WorkControl(ctx context.Context, action string, binding Binding
 			return nil, fmt.Errorf("salaam: invalid bounded decision answer")
 		}
 		body["answer"] = answer
+	case "work-read":
+		// A board read the hub served (operator ruling 2026-10-28): relayed as is, bounded.
+		if !json.Valid(answer) || len(answer) > 300*1024 {
+			return nil, fmt.Errorf("salaam: invalid bounded board read answer")
+		}
+		body["answer"] = answer
 	default:
 		return nil, fmt.Errorf("salaam: unsupported work decision action")
 	}
