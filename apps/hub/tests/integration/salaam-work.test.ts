@@ -2633,6 +2633,113 @@ describe("a stopped strict run is settled automatically when Salaam proves its e
       mock.mockRestore();
     }
   });
+  // Staging run_60cd40e7: the expiry settled before the session's stop receipt landed, so it was
+  // refused ("Exact stopped work owner required") and the run parked. The re-offer must settle it
+  // through the expiry protocol, not only the known-effects one.
+  test("a parked run with an expired unanswered approval settles through the expiry protocol", async () => {
+    const { work, completion } = await reportFixture();
+    const payload = work.payload as (typeof corpus.cases)[0]["payload"];
+    const decision = SalaamWorkDecision.parse({
+      ...decisionFixture.decision,
+      request_id: crypto.randomUUID(),
+      work_request_id: work.requestId,
+      task_id: completion.task_id,
+      binding_digest: workDigest(payload.admission.binding),
+      expires_at: Date.now() - 1000,
+    });
+    const question = {
+      id: "elc_parkedexpiry",
+      runId: run,
+      cardId: card,
+      stageKey: "build",
+      question: decision.question,
+      signal: "select",
+      options: decision.options.map((v) => ({ name: v.id, title: v.title })),
+      strictDecision: {
+        version: 1 as const,
+        request_id: decision.request_id,
+        decision_digest: workDigest(decision),
+        expires_at: decision.expires_at,
+      },
+      status: "pending" as const,
+      answer: null,
+      createdAt: new Date().toISOString(),
+    };
+    let live = { ...context, elicitations: [question] };
+    const client = {
+      activity: async () => ({ accepted: true }),
+      context: async () => live,
+      // The board ends the run as the producer's non-success, as SuperPipeline does on fail.
+      fail: async () => {
+        live = {
+          ...live,
+          run: { ...live.run, status: "ended", outcome: "crashed", endedAt: new Date().toISOString() },
+        };
+        return {};
+      },
+      heartbeat: async () => ({}),
+    };
+    await publishSalaamDecision(session, user, decision, client);
+    const restore = await revokeStopped();
+    // The daemon's own admission and session ids (uuids), as a real stop receipt carries them.
+    const [ended] = await db.select().from(acpSessions).where(eq(acpSessions.id, session));
+    const authority = structuredClone(ended!.executionAuthority!);
+    authority.sessionId = crypto.randomUUID();
+    authority.admissionId = crypto.randomUUID();
+    (authority as any).receipt = {
+      ...(authority as any).receipt,
+      session_id: authority.sessionId,
+      admission_id: authority.admissionId,
+    };
+    await db.update(acpSessions).set({ executionAuthority: authority }).where(eq(acpSessions.id, session));
+    const verbs: string[] = [];
+    const mock = spyOn(broker, "request").mockImplementation(async (_n, verb, body: any) => {
+      verbs.push(String(verb));
+      if (verb !== "salaam.work-expire")
+        return { ok: true, data: { version: 1, state: "cancelled", work_request_id: work.requestId } } as never;
+      const [s] = await db.select().from(acpSessions).where(eq(acpSessions.id, session));
+      return {
+        ok: true,
+        data: {
+          version: 1,
+          state: "cancelled",
+          effects: "expired_approval_unapplied",
+          request_id: decision.request_id,
+          work_request_id: work.requestId,
+          decision_request_id: decision.request_id,
+          approval_id: decision.approval_id,
+          operation_digest: decision.operation_digest,
+          session_id: s!.executionAuthority!.sessionId,
+          task_id: completion.task_id,
+          plan_revision: 1,
+          binding_digest: workDigest(s!.executionAuthority!.binding),
+          producer_terminal_digest: body.producer_terminal_digest,
+        },
+      } as never;
+    });
+    try {
+      await settleStoppedSalaamWork(
+        {
+          tenantId,
+          source: "superpipeline",
+          salaamPublish: async () => publication,
+          agent: { key: "proof", boardId: board, stationId: station, hubUserId: user },
+          client,
+        } as unknown as DispatchDeps,
+        run,
+      );
+      expect(verbs).toContain("salaam.work-expire");
+      const [saved] = await db
+        .select()
+        .from(salaamWorkDecisions)
+        .where(eq(salaamWorkDecisions.requestId, decision.request_id));
+      expect(saved?.answer).toBeNull();
+    } finally {
+      mock.mockRestore();
+      await restore();
+      await db.delete(salaamWorkDecisions).where(eq(salaamWorkDecisions.requestId, decision.request_id));
+    }
+  });
   test("a run whose settlement an operator already started is left to that settlement", async () => {
     await reportFixture();
     const [owner] = await db.select().from(salaamWorkOwners).where(eq(salaamWorkOwners.sessionId, session));
