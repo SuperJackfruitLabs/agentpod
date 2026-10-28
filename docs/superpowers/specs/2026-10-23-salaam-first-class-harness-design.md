@@ -240,3 +240,20 @@ only. The operator ruled on 2026-10-28 that the approval itself offers it too:
 
 Implemented by Salaam #(always-allow option), AgentPod #817 (contract + hub) and SuperPipeline
 forge #55 (board).
+
+## 8. Addendum 2026-10-28: a renewal adds a newly listed rule (operator ruling)
+
+Live proof (card D) showed the write right after "Always allow" still asked: Salaam pinned a run's
+rules at admission and a renewal could only revoke, so a rule set mid-run reached only the run's
+next admission. The operator ruled on 2026-10-28 (option a):
+
+- **Add at renewal.** A rule the hub lists at renewal that the run does not hold joins the run at
+  once, with an `approval_rule.added` event. The hub renews right after setting the rule (AgentPod
+  #820), so the run holds it before its next write.
+- **Keyed by rule id.** A rule the run held and lost to revocation does not come back; turning
+  "Always allow" on again creates a new rule id, which joins.
+- **Revocation unchanged.** A rule the hub no longer lists ends at that renewal, for good.
+- **The hub stays the only source of rules**; Salaam never creates one from an answer.
+
+The proof crosses the boundary: the real authority's renewal feeds the real station write check
+from one journal (Salaam `approval-rule-renewal-e2e`).
