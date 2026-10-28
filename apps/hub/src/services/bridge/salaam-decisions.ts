@@ -18,7 +18,7 @@ import {
 } from "../../../../../packages/contract/src/salaam-work-payload";
 import { workDigest } from "../salaam-work";
 import { stations } from "../../db/schema/stations";
-import { alwaysAllowFromAnswer } from "../agent-approval-rules";
+import { AlwaysAllowRefused, alwaysAllowFromAnswer } from "../agent-approval-rules";
 import { validateSalaamAuthority } from "../salaam-authority";
 import * as broker from "../broker";
 import type { SuperpipelineClient } from "./superpipeline";
@@ -260,11 +260,14 @@ export async function publishSalaamDecision(
 }
 /** Resolve ONLY the producer-returned question ID. Reverse order, missing strict
  * fields, expired replies, and another operation's answer never select a grant. */
+/** Refusals of "Always allow" already told on the card (request id + message), so each is told once. */
+const toldRefusals = new Set<string>();
+
 export async function answerSalaamDecision(
   sessionId: string,
   userId: string,
   requestId: string,
-  client: Pick<SuperpipelineClient, "context">,
+  client: Pick<SuperpipelineClient, "context"> & Partial<Pick<SuperpipelineClient, "activity">>,
 ) {
   const o = await owner(sessionId, userId);
   const [saved] = await db
@@ -364,12 +367,41 @@ export async function answerSalaamDecision(
   }
   await fresh(await owner(sessionId, userId), decision);
   // "Always allow": the hub's guard sets the standing rule first; any refusal stops the answer here.
+  // The board names the answerer by its own user id; the org plane knows only principals, so the
+  // board's mapping is read fresh for this very answer, and role is still read from the plane.
   if (answer.option_id === "always")
-    await alwaysAllowFromAnswer({
-      tenantId: o.work.tenantId,
-      stationId: o.execution.binding.station_id,
-      answeredBy: answer.answered_by,
-    });
+    try {
+      const context = await client.context(o.execution.binding.run.id);
+      const said = context.elicitations?.find((v) => v.id === producer.elicitationId)?.answer;
+      const principal =
+        said && said.option === "always" && said.answeredBy === answer.answered_by
+          ? (said.answeredByPrincipal ?? null)
+          : null;
+      if (!principal)
+        throw new AlwaysAllowRefused("Always allow could not check who answered; nothing was approved.");
+      await alwaysAllowFromAnswer({
+        tenantId: o.work.tenantId,
+        stationId: o.execution.binding.station_id,
+        answeredBy: principal,
+      });
+    } catch (error) {
+      if (!(error instanceof AlwaysAllowRefused)) throw error;
+      // Told once on the card, in plain words; the approval stays open until it expires and is
+      // offered again. Nothing is forwarded, and the run carries on waiting.
+      const key = requestId + "\n" + error.message;
+      if (!toldRefusals.has(key)) {
+        toldRefusals.add(key);
+        try {
+          await client.activity?.(
+            { runId: o.execution.binding.run.id, leaseEpoch: o.execution.binding.run.epoch },
+            { type: "thought", body: error.message },
+          );
+        } catch {
+          /* the note is best effort; nothing was approved either way */
+        }
+      }
+      return { state: "pending" as const };
+    }
   const result = await broker.request(
     o.execution.binding.node_id,
     "salaam.work-decision",

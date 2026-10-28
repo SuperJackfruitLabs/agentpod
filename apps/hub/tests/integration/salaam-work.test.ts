@@ -467,9 +467,17 @@ test("always allow: labelled for the station, refused for a member, set and forw
     strictDecision: strict,
     status: "answered" as const,
     createdAt: new Date().toISOString(),
-    answer: { option: "always", text: null, answeredBy: user, answeredAt: new Date().toISOString() },
+    // The board names the answerer by its own user id; the org plane knows only principals. The run
+    // read carries the board's mapping (answeredByPrincipal), and the hub reads role by that principal.
+    answer: { option: "always", text: null, answeredBy: "usr_board_local", answeredByPrincipal: user as string | null, answeredAt: new Date().toISOString() },
   };
-  const read = { context: async () => ({ ...context, elicitations: [question] }) };
+  // A refusal is told on the card in plain words, once, and the approval stays open (it expires
+  // and is offered again); it never fails the run.
+  const notes: string[] = [];
+  const read = {
+    context: async () => ({ ...context, elicitations: [question] }),
+    activity: async (_l: unknown, a: any) => (notes.push(a.body), { accepted: true }),
+  };
   const verbs: string[] = [];
   const mock = spyOn(broker, "request").mockImplementation(async (_n, verb, params: any) => {
     verbs.push(String(verb));
@@ -480,12 +488,23 @@ test("always allow: labelled for the station, refused for a member, set and forw
     db.select().from(agentApprovalRules).where(eq(agentApprovalRules.stationId, payload.admission.binding.station_id));
   try {
     fakePlane.principals.get(user)!.role = "member";
-    await expect(answerSalaamDecision(session, user, decision.request_id, read)).rejects.toThrow(
-      "workspace owner or admin",
-    );
+    expect(await answerSalaamDecision(session, user, decision.request_id, read)).toEqual({ state: "pending" });
+    expect(await answerSalaamDecision(session, user, decision.request_id, read)).toEqual({ state: "pending" });
+    expect(notes).toEqual(["Always allow needs a workspace owner or admin; nothing was approved."]);
     expect(verbs).not.toContain("salaam.work-decision");
     expect((await rules()).filter((r) => !r.revokedAt)).toHaveLength(0);
     fakePlane.principals.get(user)!.role = "admin";
+    // No mapping: the board user is not a principal, so nobody can be checked and nothing is set.
+    question.answer.answeredByPrincipal = null;
+    expect(await answerSalaamDecision(session, user, decision.request_id, read)).toEqual({ state: "pending" });
+    expect(notes.at(-1)).toBe("Always allow could not check who answered; nothing was approved.");
+    expect((await rules()).filter((r) => !r.revokedAt)).toHaveLength(0);
+    // The mapping must be for this very answer: another answerer on the board is not this one.
+    question.answer.answeredByPrincipal = user;
+    question.answer.answeredBy = "usr_someone_else";
+    expect(await answerSalaamDecision(session, user, decision.request_id, read)).toEqual({ state: "pending" });
+    expect((await rules()).filter((r) => !r.revokedAt)).toHaveLength(0);
+    question.answer.answeredBy = "usr_board_local";
     const receipt = await answerSalaamDecision(session, user, decision.request_id, read);
     expect((receipt as any).decision).toBe("always");
     expect(verbs).toContain("salaam.work-decision");

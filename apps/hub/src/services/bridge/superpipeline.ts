@@ -156,7 +156,15 @@ export interface RunElicitation {
   signal?: string | null;
   options?: Array<{ name: string; title: string }>;
   status: "pending" | "answered" | "cancelled";
-  answer: { option?: string | null; text?: string | null; answeredBy: string; answeredAt: string } | null;
+  answer: {
+    option?: string | null;
+    text?: string | null;
+    /** The board's own user id for the person who answered. */
+    answeredBy: string;
+    /** That person's suite principal, as the board maps it (users.external_id); null when unlinked. */
+    answeredByPrincipal?: string | null;
+    answeredAt: string;
+  } | null;
   createdAt: string;
 }
 
