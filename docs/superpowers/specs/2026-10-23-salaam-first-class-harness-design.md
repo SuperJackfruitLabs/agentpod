@@ -215,3 +215,28 @@ The test was not validated against a second harness. staging has no non-Salaam s
 4. Which credential should the conformance test use for `/api/evidence/*` (SuperWitness reader)?
 5. The staging hub sends `Access-Control-Allow-Origin: http://localhost:5173`. Should it be the staging console origin?
 6. Should lifecycle (C14) be mandatory for first-class status, or optional as in the descriptor interface?
+
+## 7. Addendum 2026-10-28: "Always allow" on the approval itself (operator ruling)
+
+The goal's approvals offer every choice a person needs at the moment of asking. Until now the
+per-agent standing rule ("Always allow workspace writes", AgentPod #566409c4) was a console switch
+only. The operator ruled on 2026-10-28 that the approval itself offers it too:
+
+- **Where.** A strict workspace-write approval that the standing rule would cover (a workspace
+  write anywhere in the workspace, never a delete or a hidden path) offers, in this order:
+  Approve once · Approve for this run (when run-grantable) · **Always allow** · Deny.
+- **Words.** "Always allow <station display name> to write in its workspace" (the hub fills in the
+  name; Salaam's "this agent" is the fallback).
+- **Who.** Workspace owners and admins only. The board hides the button from everyone else and
+  refuses their answer (`WORKSPACE_ADMIN_REQUIRED`). The hub is the real guard: it re-reads the
+  answerer's role from the organization plane by their own principal, never trusting the board.
+- **Effect.** The hub sets the same per-agent rule as the console switch (scope
+  `workspace-write`, audited `via: approval`) and only then forwards the answer, which approves
+  this write. Later writes are answered by the rule from the run's next lease renewal. If the rule
+  cannot be set, or the answerer is not an owner/admin, the answer is refused in plain words and
+  nothing is approved: nobody is told a rule exists when it does not.
+- **Revocation** is unchanged: revoking the rule in the console reaches a run in flight at its next
+  renewal.
+
+Implemented by Salaam #(always-allow option), AgentPod #817 (contract + hub) and SuperPipeline
+forge #55 (board).
