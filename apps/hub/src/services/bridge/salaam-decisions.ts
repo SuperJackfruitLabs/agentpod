@@ -19,7 +19,7 @@ import {
 import { workDigest } from "../salaam-work";
 import { stations } from "../../db/schema/stations";
 import { AlwaysAllowRefused, alwaysAllowFromAnswer } from "../agent-approval-rules";
-import { validateSalaamAuthority } from "../salaam-authority";
+import { renewSalaamExecution, validateSalaamAuthority } from "../salaam-authority";
 import * as broker from "../broker";
 import type { SuperpipelineClient } from "./superpipeline";
 const strictSchema = SuperpipelineStrictDecision;
@@ -386,6 +386,19 @@ export async function answerSalaamDecision(
       });
     } catch (error) {
       if (!(error instanceof AlwaysAllowRefused)) throw error;
+      return await tellRefusal(error);
+    }
+  if (answer.option_id === "always")
+    // The run holds the rule before its next write: renewal restates the live rules to Salaam now,
+    // instead of at the next scheduled renewal (the person said "always"; they are not asked again).
+    // Revocation still reaches the run at renewal, as before. If this early renewal fails, the rule is
+    // still set and this write is still approved; the run learns the rule at its scheduled renewal.
+    try {
+      await renewSalaamExecution(sessionId, userId);
+    } catch {
+      /* best effort: the scheduled renewal restates the rule */
+    }
+  async function tellRefusal(error: AlwaysAllowRefused) {
       // Told once on the card, in plain words; the approval stays open until it expires and is
       // offered again. Nothing is forwarded, and the run carries on waiting.
       const key = requestId + "\n" + error.message;
