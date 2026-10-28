@@ -17,7 +17,7 @@ import { stations } from "../db/schema/stations";
 import { agentApprovalRules as rules, type AgentApprovalRule } from "../db/schema/agent-approval-rules";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 import { recordAudit } from "../services/audit";
-import { APPROVAL_RULE_SCOPES } from "../services/agent-approval-rules";
+import { APPROVAL_RULE_SCOPES, NoOccupant, setApprovalRule } from "../services/agent-approval-rules";
 import type { AuthUser } from "../auth/middleware";
 
 const SetBody = z.object({ scope: z.enum(APPROVAL_RULE_SCOPES) }).strict();
@@ -66,37 +66,15 @@ export function createAgentApprovalRuleRoutes() {
       return c.json({ error: "bad-request", message: "Body must be JSON." }, 400);
     }
     if (!parsed.success) return c.json({ error: "bad-request", message: "Unknown scope or field." }, 400);
-    if (!s.row.principalId)
-      return c.json({ error: "no-occupant", message: "This station has no agent to set a rule for." }, 409);
-    const [existing] = await db
-      .select()
-      .from(rules)
-      .where(and(live(s.row.id, s.row.principalId), eq(rules.scope, parsed.data.scope)));
-    if (existing) return c.json({ rule: view(existing) });
-    const [created] = await db
-      .insert(rules)
-      .values({
-        id: crypto.randomUUID(),
-        tenantId: s.row.tenantId,
-        stationId: s.row.id,
-        principalId: s.row.principalId,
-        scope: parsed.data.scope,
-        createdBy: s.user.id,
-      })
-      .onConflictDoNothing()
-      .returning();
-    const rule =
-      created ??
-      (await db.select().from(rules).where(and(live(s.row.id, s.row.principalId), eq(rules.scope, parsed.data.scope))))[0]!;
-    const audit = await recordAudit(db, {
-      tenantId: s.row.tenantId,
-      userId: s.user.id,
-      nodeId: s.row.nodeId,
-      stationKey: s.row.stationKey,
-      verb: "approval-rule.set",
-      params: { actor: s.user.id, ruleId: rule.id, scope: rule.scope },
-    });
-    await audit.done("ok");
+    let set;
+    try {
+      set = await setApprovalRule(s.row, parsed.data.scope, s.user.id, "console");
+    } catch (e) {
+      if (e instanceof NoOccupant)
+        return c.json({ error: "no-occupant", message: "This station has no agent to set a rule for." }, 409);
+      throw e;
+    }
+    const { rule, created } = set;
     return c.json({ rule: view(rule) }, created ? 201 : 200);
   });
 

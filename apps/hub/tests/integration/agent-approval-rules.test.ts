@@ -164,3 +164,99 @@ test("a renewal carries the live rules, and none once the last is revoked", asyn
     mock.mockRestore();
   }
 });
+
+// Operator ruling 2026-10-28: "Always allow" on the approval itself. The hub re-reads the answerer's
+// role from the org plane, never the board's word, and sets the same rule as the console switch.
+import { AlwaysAllowRefused, alwaysAllowFromAnswer } from "../../src/services/agent-approval-rules";
+import * as orgPlane from "../../src/services/org-plane/client";
+
+const person = (role: "owner" | "admin" | "member", o: { suspended?: boolean; org?: string } = {}) => {
+  const id = fakePlane.addHuman({ role, suspended: o.suspended });
+  fakePlane.principals.get(id)!.organizationId = o.org ?? org;
+  return id;
+};
+const liveRules = () =>
+  db.select().from(agentApprovalRules).where(eq(agentApprovalRules.stationId, station)).then((r) => r.filter((x) => !x.revokedAt));
+const clear = () => db.delete(agentApprovalRules).where(eq(agentApprovalRules.stationId, station));
+
+test("an owner's or admin's Always allow sets the occupant's workspace-write rule, once", async () => {
+  await clear();
+  for (const role of ["owner", "admin"] as const) {
+    const who = person(role);
+    const rule = await alwaysAllowFromAnswer({ tenantId: tenant, stationId: station, answeredBy: who });
+    expect(rule).toMatchObject({ scope: "workspace-write", principalId: agent, stationId: station });
+  }
+  const rules = await liveRules();
+  expect(rules).toHaveLength(1);
+  expect(rules[0]!.scope).toBe("workspace-write");
+  await clear();
+});
+
+test("Always allow is refused for a member, a suspended or foreign person, or nobody, and sets nothing", async () => {
+  await clear();
+  for (const answeredBy of [
+    person("member"),
+    person("admin", { suspended: true }),
+    person("owner", { org: "org_" + hex() }),
+    "prn_" + hex(),
+  ]) {
+    const refused = await alwaysAllowFromAnswer({ tenantId: tenant, stationId: station, answeredBy }).then(
+      () => null,
+      (e) => e,
+    );
+    expect(refused).toBeInstanceOf(AlwaysAllowRefused);
+    expect(String(refused.message)).toContain("nothing was approved");
+  }
+  expect(await liveRules()).toHaveLength(0);
+});
+
+test("Always allow trusts only the org plane: an unreachable plane refuses it", async () => {
+  await clear();
+  const who = person("owner");
+  const spy = spyOn(orgPlane, "orgPlaneClient").mockImplementation(
+    () => ({ getPrincipal: async () => { throw new orgPlane.OrgPlaneError(503, "down"); } }) as never,
+  );
+  try {
+    await expect(alwaysAllowFromAnswer({ tenantId: tenant, stationId: station, answeredBy: who })).rejects.toThrow(
+      "could not check who answered",
+    );
+  } finally {
+    spy.mockRestore();
+  }
+  expect(await liveRules()).toHaveLength(0);
+});
+
+test("a station with no agent cannot take Always allow; the answer is refused, not forwarded", async () => {
+  const who = person("owner");
+  await expect(alwaysAllowFromAnswer({ tenantId: tenant, stationId: foreign, answeredBy: who })).rejects.toThrow(
+    "nothing was approved",
+  );
+});
+
+test("an agent principal is never an answerer, whatever role it claims", async () => {
+  await clear();
+  const bot = fakePlane.addAgent({});
+  const p = fakePlane.principals.get(bot)! as any;
+  p.organizationId = org;
+  p.role = "owner";
+  await expect(alwaysAllowFromAnswer({ tenantId: tenant, stationId: station, answeredBy: bot })).rejects.toThrow(
+    "workspace owner or admin",
+  );
+  expect(await liveRules()).toHaveLength(0);
+});
+
+test("when the rule cannot be set, the answer is refused in plain words", async () => {
+  const empty = "station_" + hex();
+  await db.insert(stations).values({
+    id: empty, tenantId: tenant, userId: owner, nodeId: node, harness: "salaam",
+    stationKey: "salaam:" + hex().slice(0, 16), kind: "leaf", displayName: empty,
+    workspacePath: "/workspace", capabilities: ["acp"], principalId: null,
+  });
+  try {
+    await expect(
+      alwaysAllowFromAnswer({ tenantId: tenant, stationId: empty, answeredBy: person("owner") }),
+    ).rejects.toThrow("Always allow could not be set; nothing was approved.");
+  } finally {
+    await db.delete(stations).where(eq(stations.id, empty));
+  }
+});

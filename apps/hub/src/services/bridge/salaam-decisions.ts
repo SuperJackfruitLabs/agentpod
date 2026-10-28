@@ -17,6 +17,8 @@ import {
   canonicalSalaamWork,
 } from "../../../../../packages/contract/src/salaam-work-payload";
 import { workDigest } from "../salaam-work";
+import { stations } from "../../db/schema/stations";
+import { alwaysAllowFromAnswer } from "../agent-approval-rules";
 import { validateSalaamAuthority } from "../salaam-authority";
 import * as broker from "../broker";
 import type { SuperpipelineClient } from "./superpipeline";
@@ -41,7 +43,7 @@ function checkedDaemonReceipt(
       request_id: z.string().uuid(),
       decision_digest: z.string(),
       approval_id: z.string().uuid(),
-      decision: z.enum(["approve", "approve-run", "deny"]),
+      decision: z.enum(["approve", "approve-run", "always", "deny"]),
       // "Approve for this run": the grant Salaam recorded with the decision.
       grant_id: z.string().uuid().optional(),
     })
@@ -102,6 +104,27 @@ function bound(o: Awaited<ReturnType<typeof owner>>, value: unknown) {
   )
     throw Error("Strict decision does not match admitted task/plan/root");
   return decision;
+}
+/** The board's options. "Always allow" names the station's agent when the hub knows it, Salaam's
+ * own words otherwise; the same function builds every comparison, so the binding stays exact. */
+async function boardOptions(o: Awaited<ReturnType<typeof owner>>, decision: SalaamWorkDecision) {
+  let name: string | null = null;
+  if (decision.options.some((v) => v.id === "always")) {
+    const [s] = await db
+      .select({ displayName: stations.displayName })
+      .from(stations)
+      .where(eq(stations.id, o.execution.binding.station_id));
+    name = s?.displayName?.trim() || null;
+  }
+  return decision.options.map((v) =>
+    v.id === "always"
+      ? {
+          name: v.id,
+          title: name ? `Always allow ${name} to write in its workspace` : v.title,
+          requires: v.requires,
+        }
+      : { name: v.id, title: v.title },
+  );
 }
 const correlation = (decision: SalaamWorkDecision) => ({
   version: 1 as const,
@@ -182,7 +205,7 @@ export async function publishSalaamDecision(
       question.signal !== "select" ||
       !same(
         question.options,
-        decision.options.map((v) => ({ name: v.id, title: v.title })),
+        await boardOptions(o, decision),
       )
     )
       throw Error("Expired strict question historical binding mismatch");
@@ -205,10 +228,7 @@ export async function publishSalaamDecision(
           signal: "select",
           body: decision.question,
           parameter: {
-            options: decision.options.map((v) => ({
-              name: v.id,
-              title: v.title,
-            })),
+            options: await boardOptions(o, decision),
             // Readable approvals: the producer shows what is being approved from these fields.
             ...(decision.detail ? { detail: decision.detail } : {}),
           },
@@ -295,7 +315,7 @@ export async function answerSalaamDecision(
       question.question !== decision.question ||
       !same(
         question.options,
-        decision.options.map((v) => ({ name: v.id, title: v.title })),
+        await boardOptions(o, decision),
       )
     )
       throw Error("Strict question binding differs from original offer");
@@ -343,6 +363,13 @@ export async function answerSalaamDecision(
     });
   }
   await fresh(await owner(sessionId, userId), decision);
+  // "Always allow": the hub's guard sets the standing rule first; any refusal stops the answer here.
+  if (answer.option_id === "always")
+    await alwaysAllowFromAnswer({
+      tenantId: o.work.tenantId,
+      stationId: o.execution.binding.station_id,
+      answeredBy: answer.answered_by,
+    });
   const result = await broker.request(
     o.execution.binding.node_id,
     "salaam.work-decision",

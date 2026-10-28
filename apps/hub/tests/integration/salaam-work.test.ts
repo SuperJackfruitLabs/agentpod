@@ -5,6 +5,8 @@ import { db } from "../../src/db/drizzle";
 import { tenants } from "../../src/db/schema/tenants";
 import { nodes } from "../../src/db/schema/nodes";
 import { stations } from "../../src/db/schema/stations";
+import { agentApprovalRules } from "../../src/db/schema/agent-approval-rules";
+import { stationAudit } from "../../src/db/schema/audit";
 import { acpSessions } from "../../src/db/schema/acp";
 import { bridgeDispatches } from "../../src/db/schema/bridge";
 import {
@@ -420,6 +422,79 @@ test("strict question pins producer ID, tolerates response loss and never select
       .where(eq(salaamWorkDecisions.requestId, decision.request_id));
   } finally {
     mock.mockRestore();
+  }
+});
+
+// Operator ruling 2026-10-28: "Always allow" on the approval. The board shows it with the station's
+// name and marked for workspace admins; answering it sets the rule before the answer is forwarded,
+// and a non-admin's answer is refused at the hub, never forwarded.
+test("always allow: labelled for the station, refused for a member, set and forwarded for an admin", async () => {
+  const [work] = await db.select().from(salaamWorkOwners).where(eq(salaamWorkOwners.sessionId, session));
+  const payload = work!.payload as (typeof corpus.cases)[0]["payload"];
+  const decision = SalaamWorkDecision.parse({
+    ...decisionFixture.decision,
+    request_id: crypto.randomUUID(),
+    work_request_id: work!.requestId,
+    binding_digest: workDigest(payload.admission.binding),
+    task_id: "99999999-9999-4999-8999-999999999999",
+    expires_at: Date.now() + 60000,
+    options: [
+      { id: "approve", title: "Approve once" },
+      { id: "always", title: "Always allow this agent to write in its workspace", requires: "workspace-admin" },
+      { id: "deny", title: "Deny" },
+    ],
+  });
+  const strict = { version: 1 as const, request_id: decision.request_id, decision_digest: workDigest(decision), expires_at: decision.expires_at };
+  const producer = { accepted: true as const, cardState: "input-required" as const, elicitationId: "elc_alwaysx", strictDecision: strict };
+  const offers: any[] = [];
+  await publishSalaamDecision(session, user, decision, {
+    activity: async (_l: unknown, a: unknown) => (offers.push(a), producer),
+  });
+  const [st] = await db.select().from(stations).where(eq(stations.id, payload.admission.binding.station_id));
+  const always = offers[0].parameter.options.find((o: any) => o.name === "always");
+  expect(always).toEqual({
+    name: "always",
+    title: `Always allow ${st!.displayName} to write in its workspace`,
+    requires: "workspace-admin",
+  });
+  const question = {
+    id: producer.elicitationId,
+    runId: run,
+    cardId: card,
+    stageKey: "build",
+    question: decision.question,
+    options: offers[0].parameter.options,
+    strictDecision: strict,
+    status: "answered" as const,
+    createdAt: new Date().toISOString(),
+    answer: { option: "always", text: null, answeredBy: user, answeredAt: new Date().toISOString() },
+  };
+  const read = { context: async () => ({ ...context, elicitations: [question] }) };
+  const verbs: string[] = [];
+  const mock = spyOn(broker, "request").mockImplementation(async (_n, verb, params: any) => {
+    verbs.push(String(verb));
+    const a = params.answer;
+    return { ok: true, data: { version: 1, request_id: a.request_id, decision_digest: a.decision_digest, approval_id: decision.approval_id, decision: a.option_id } } as never;
+  });
+  const rules = () =>
+    db.select().from(agentApprovalRules).where(eq(agentApprovalRules.stationId, payload.admission.binding.station_id));
+  try {
+    fakePlane.principals.get(user)!.role = "member";
+    await expect(answerSalaamDecision(session, user, decision.request_id, read)).rejects.toThrow(
+      "workspace owner or admin",
+    );
+    expect(verbs).not.toContain("salaam.work-decision");
+    expect((await rules()).filter((r) => !r.revokedAt)).toHaveLength(0);
+    fakePlane.principals.get(user)!.role = "admin";
+    const receipt = await answerSalaamDecision(session, user, decision.request_id, read);
+    expect((receipt as any).decision).toBe("always");
+    expect(verbs).toContain("salaam.work-decision");
+    expect((await rules()).filter((r) => !r.revokedAt).map((r) => r.scope)).toEqual(["workspace-write"]);
+  } finally {
+    mock.mockRestore();
+    fakePlane.principals.get(user)!.role = "member";
+    await db.delete(agentApprovalRules).where(eq(agentApprovalRules.stationId, payload.admission.binding.station_id));
+    await db.delete(stationAudit).where(eq(stationAudit.tenantId, work!.tenantId));
   }
 });
 test("unsupported producer, mismatched question, expiry and revoked authority never grant", async () => {

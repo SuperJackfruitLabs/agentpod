@@ -26,6 +26,12 @@ export const SalaamApprovalDetail = z
 export type SalaamApprovalDetail = z.infer<typeof SalaamApprovalDetail>;
 const option = <T extends string>(id: T) =>
   z.object({ id: z.literal(id), title: z.string().min(1).max(256) }).strict();
+/** Operator ruling 2026-10-28: "Always allow" sets the agent's standing workspace-write rule. Only a
+ * workspace owner or admin may choose it: the board hides it from others, and the hub re-reads the
+ * answerer's role from the org plane before it sets the rule and forwards the answer. */
+const alwaysOption = z
+  .object({ id: z.literal("always"), title: z.string().min(1).max(256), requires: z.literal("workspace-admin") })
+  .strict();
 /** A protected daemon offers one exact existing ManagedWork approval. This is
  * correlation metadata, never an independent grant or a model-generated policy. */
 export const SalaamWorkDecision = z
@@ -48,6 +54,8 @@ export const SalaamWorkDecision = z
     options: z.union([
       z.tuple([option("approve"), option("deny")]),
       z.tuple([option("approve"), option("approve-run"), option("deny")]),
+      z.tuple([option("approve"), alwaysOption, option("deny")]),
+      z.tuple([option("approve"), option("approve-run"), alwaysOption, option("deny")]),
     ]),
   })
   .strict();
@@ -64,7 +72,7 @@ export const SalaamWorkDecisionAnswer = z
       .string()
       .regex(/^elc_[A-Za-z0-9]{6,}$/)
       .max(128),
-    option_id: z.enum(["approve", "approve-run", "deny"]),
+    option_id: z.enum(["approve", "approve-run", "always", "deny"]),
     answered_by: z.string().min(1).max(128),
     answered_at: z.string().datetime(),
   })
