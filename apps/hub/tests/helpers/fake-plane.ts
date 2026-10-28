@@ -37,7 +37,7 @@ export const newPrincipalId = () => `prn_${hex20()}`;
 
 export interface FakePlane extends OrgPlaneClient {
   /** Add (or replace) a human. Returns its id. */
-  addHuman(input?: { id?: string; handle?: string; displayName?: string | null; grant?: Partial<PlaneGrant>; matrixId?: string; suspended?: boolean }): string;
+  addHuman(input?: { id?: string; handle?: string; displayName?: string | null; grant?: Partial<PlaneGrant>; matrixId?: string; suspended?: boolean; role?: "owner" | "admin" | "member" }): string;
   /** Add an agent directly, as the plane's pages would. Returns its id. */
   addAgent(input?: { id?: string; handle?: string; displayName?: string | null; matrixId?: string; suspended?: boolean }): string;
   /** Forget a principal and its identities. */
@@ -53,7 +53,7 @@ export function createFakePlane(): FakePlane {
   const identities = new Map<string, string>();
   const key = (system: string, externalId: string) => `${system}\u0000${externalId}`;
 
-  function add(kind: PlaneKind, input: { id?: string; handle?: string; displayName?: string | null; grant?: Partial<PlaneGrant>; matrixId?: string; suspended?: boolean }): string {
+  function add(kind: PlaneKind, input: { id?: string; handle?: string; displayName?: string | null; grant?: Partial<PlaneGrant>; matrixId?: string; suspended?: boolean; role?: "owner" | "admin" | "member" }): string {
     const id = input.id ?? newPrincipalId();
     const existing = principals.get(id);
     principals.set(id, {
@@ -66,6 +66,7 @@ export function createFakePlane(): FakePlane {
       grant: input.grant
         ? { mayDispatch: input.grant.mayDispatch ?? [], mayGrantReach: input.grant.mayGrantReach ?? false, scopes: input.grant.scopes ?? [] }
         : (existing?.grant ?? null),
+      ...(kind === "human" ? { role: input.role ?? existing?.role ?? "member" } : {}),
     });
     if (input.matrixId) link(id, "matrix", input.matrixId);
     return id;

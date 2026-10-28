@@ -61,6 +61,32 @@ for (const sample of producerCorpus)
       sample.valid,
     ));
 
+// Operator ruling 2026-10-28: "Always allow" on a workspace-write approval, owners and admins only.
+const always = { id: "always", title: "Always allow this agent to write in its workspace", requires: "workspace-admin" };
+test("a decision may offer always allow, in its place and marked for workspace admins", () => {
+  const four = { ...corpus.decision, options: [corpus.decision.options[0], { id: "approve-run", title: "Approve for this run" }, always, corpus.decision.options.at(-1)] };
+  const three = { ...corpus.decision, options: [corpus.decision.options[0], always, corpus.decision.options.at(-1)] };
+  expect(SalaamWorkDecision.safeParse(four).success).toBe(true);
+  expect(SalaamWorkDecision.safeParse(three).success).toBe(true);
+  for (const bad of [
+    { ...three, options: [always, corpus.decision.options[0], corpus.decision.options.at(-1)] },
+    { ...three, options: [corpus.decision.options[0], { id: "always", title: always.title }, corpus.decision.options.at(-1)] },
+    { ...three, options: [corpus.decision.options[0], { ...always, requires: "anyone" }, corpus.decision.options.at(-1)] },
+  ])
+    expect(SalaamWorkDecision.safeParse(bad).success).toBe(false);
+  const answer = {
+    version: 1,
+    request_id: crypto.randomUUID(),
+    decision: three,
+    decision_digest: "a".repeat(64),
+    elicitation_id: "elc_abcdef",
+    option_id: "always",
+    answered_by: "prn_human",
+    answered_at: new Date().toISOString(),
+  };
+  expect(SalaamWorkDecisionAnswer.safeParse(answer).success).toBe(true);
+});
+
 // Readable approvals: an optional structured detail of what is being approved.
 const detail = {
     version: 1,

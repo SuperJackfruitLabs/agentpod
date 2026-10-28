@@ -35,6 +35,8 @@ export interface PlanePrincipal {
   organizationId: string | null;
   suspended: boolean;
   grant: PlaneGrant | null;
+  /** A human's role in the plane's workspace (contract §3.5); absent for agents and services. */
+  role?: "owner" | "admin" | "member";
 }
 export interface PlaneIdentity {
   principalId: string;
