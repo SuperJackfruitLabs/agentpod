@@ -71,6 +71,46 @@ test("each step is posted once across polls, a failure is posted, and a bad tail
   ]);
 });
 
+test("a finished step's output reaches the card as its result, as a live ACP rawOutput does", () => {
+  const feed = new SalaamActivityFeed();
+  const out = feed.next([step(1, "started", "a"), step(2, "finished", "a", { output: "HTTP/1.1 200 OK" })]);
+  const live = new ActivityCoalescer();
+  const expected = [
+    ...live.push({
+      sessionId: "s",
+      seq: 1,
+      type: "agent-update",
+      createdAt: "",
+      payload: {
+        sessionUpdate: "tool_call",
+        toolCallId: "a",
+        title: "fetch · fetch",
+        kind: "fetch",
+        status: "in_progress",
+        rawInput: { action: "call", tool: "fetch" },
+      },
+    }),
+    ...live.push({
+      sessionId: "s",
+      seq: 2,
+      type: "agent-update",
+      createdAt: "",
+      payload: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "a",
+        title: "fetch · fetch",
+        status: "completed",
+        rawOutput: "HTTP/1.1 200 OK",
+      },
+    }),
+    ...live.flush(),
+  ];
+  expect(out).toEqual(expected);
+  expect(out).toContainEqual({ type: "action", action: "fetch · fetch", result: "HTTP/1.1 200 OK" });
+  // The output is bounded like the input; a longer one is not this tail.
+  expect(feed.next([step(3, "finished", "b", { output: "x".repeat(2049) })])).toEqual([]);
+});
+
 test("a feed restored after a restart starts after the last posted step", () => {
   const feed = new SalaamActivityFeed(2);
   expect(feed.next([step(1, "started", "a"), step(2, "finished", "a"), step(3, "started", "b")])).toHaveLength(1);

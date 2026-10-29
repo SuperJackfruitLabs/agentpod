@@ -14,6 +14,8 @@ const SalaamActivityTail = z
         kind: z.string().max(64).nullable(),
         input: z.string().max(2048).nullable(),
         failed: z.boolean(),
+        /** A finished step's text output, redacted and clipped by Salaam (salaam #92). */
+        output: z.string().max(2048).optional(),
       })
       .strict(),
   )
@@ -110,6 +112,7 @@ export class SalaamActivityFeed {
                   toolCallId: step.tool_call_id,
                   title: step.title,
                   status: step.failed ? "failed" : "completed",
+                  ...(step.output !== undefined ? { rawOutput: step.output } : {}),
                 },
       };
       try {
