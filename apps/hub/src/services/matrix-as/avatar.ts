@@ -36,6 +36,8 @@ export interface AvatarDeps {
    */
   harness?: string;
   stationKey?: string;
+  /** A workspace path to try first: the persona's declared avatar (item 9). */
+  prefer?: string | null;
 }
 
 export interface FoundAvatar {
@@ -45,7 +47,7 @@ export interface FoundAvatar {
 }
 
 export async function pickAvatar(deps: AvatarDeps): Promise<FoundAvatar | null> {
-  for (const path of AVATAR_CANDIDATES) {
+  for (const path of deps.prefer ? [deps.prefer, ...AVATAR_CANDIDATES] : AVATAR_CANDIDATES) {
     let found: { bytes: Uint8Array; contentType: string } | null = null;
     try {
       found = await deps.read(path);

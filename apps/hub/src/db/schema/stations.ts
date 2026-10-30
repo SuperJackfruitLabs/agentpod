@@ -28,6 +28,12 @@ export const stations = pgTable("stations", {
    */
   matrixIdentityMode: text("matrix_identity_mode").notNull().default("bridge"),
   /**
+   * A digest of the Matrix profile the bridge last applied (display name and persona digest).
+   * When it changes the face is picked and uploaded again; when it does not, an identity that
+   * already has a face is left alone (item 9, step 3).
+   */
+  matrixProfileKey: text("matrix_profile_key"),
+  /**
    * What this station is FOR — `personal`, `work`, an ad-hoc name of the
    * operator's choosing. Not where it runs: a node's name carries its purpose
    * only by accident of how this fleet was built, and coming use cases span

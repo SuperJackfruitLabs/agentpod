@@ -251,6 +251,35 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
   };
 
   /**
+   * The persona a Salaam host pinned, read live through its node (item 9). Never cached — an
+   * observation is a claim about a machine that may have changed — and null for every other
+   * harness, for a node that cannot answer, and for anything that is not `{digest, text}` strings.
+   */
+  const readPersona = async (
+    stationId: string
+  ): Promise<{ digest: string; text: string } | null> => {
+    const [station] = await db
+      .select({ nodeId: stations.nodeId, stationKey: stations.stationKey, harness: stations.harness })
+      .from(stations)
+      .where(eq(stations.id, stationId));
+    if (!station || station.harness !== "salaam") return null;
+    const res = await broker.request(
+      station.nodeId,
+      "config.observe",
+      { stationKey: station.stationKey, settings: ["salaam.persona"] },
+      { timeoutMs: 5_000 }
+    );
+    if (!res.ok) return null;
+    const value = (res.data as { values?: Array<{ settingId?: string; observed?: unknown }> } | undefined)
+      ?.values?.find((v) => v.settingId === "salaam.persona")?.observed as
+      | { digest?: unknown; text?: unknown }
+      | undefined;
+    return typeof value?.digest === "string" && typeof value?.text === "string"
+      ? { digest: value.digest, text: value.text }
+      : null;
+  };
+
+  /**
    * The crypto, or null for a plaintext bridge.
    *
    * Built once here rather than per transaction: an `OlmMachine` generates
@@ -357,7 +386,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     return board?.speakerMxid ?? (await roomAgentUser(roomId, domain));
   };
 
-  const provisionDeps = { domain: cfg.domain, client, readWorkspaceFile };
+  const provisionDeps = { domain: cfg.domain, client, readWorkspaceFile, readPersona };
 
   /**
    * Answering a gate, wired only when a board is configured.
