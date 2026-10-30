@@ -16,6 +16,7 @@ agents, who have names of their own and mostly carry their own faces.
 | `codex.svg` | `codex` | OpenAI |
 | `opencode.svg` | `opencode` | OpenCode |
 | `pi.svg` | `pi` | pi |
+| `salaam.svg` | `salaam` | Salaam |
 
 The `.svg` files are the **sources**, kept byte-identical to what upstream
 publishes so re-fetching one is a clean diff. The white fill the renderer needs
@@ -29,6 +30,10 @@ is applied by the build script, not baked into the source.
   simple-icons' `pi`, which is Pi Network — a cryptocurrency unrelated to
   `@earendil-works/pi-coding-agent`, and using it here would have put the wrong
   company's mark on an agent.
+
+- `salaam` is Salaam's own mark, `brand/mark.svg` in the Salaam repo, byte-identical. Salaam is
+  ours, so the mark is used with permission. A Salaam station is named by its persona but rarely
+  carries a picture, so it gets the drawn fallback like the coding harnesses.
 
 Each mark remains the trademark of its owner and is used here only to identify
 the tool that is running.
