@@ -25,6 +25,8 @@ describe("the harness mark", () => {
     expect(MARKED_HARNESSES).toContain("codex");
     expect(MARKED_HARNESSES).toContain("opencode");
     expect(MARKED_HARNESSES).toContain("pi");
+    // A Salaam station is named by its persona but rarely carries a picture (item 9).
+    expect(MARKED_HARNESSES).toContain("salaam");
     expect(await harnessMark("hermes", "hermes:coder-kai")).toBeNull();
   });
 
