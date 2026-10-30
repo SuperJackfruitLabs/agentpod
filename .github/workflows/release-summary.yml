@@ -1,0 +1,75 @@
+# Adds a Claude summary to an existing GitHub release, after the tag. It is a stepping stone to
+# the shared release workflow (estate release/), which writes the summary at tag time.
+# The release itself is never changed except for its notes, and a failed summary leaves it as is.
+name: release-summary
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to summarise, e.g. v0.0.4
+        required: true
+      previous_tag:
+        description: The tag before it (exact, not detected)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+      PREV: ${{ inputs.previous_tag }}
+      PRODUCT: AgentPod
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Gather the release material
+        run: |
+          set -eu
+          git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null || { echo "no tag $TAG"; exit 1; }
+          git rev-parse --verify --quiet "refs/tags/$PREV" >/dev/null || { echo "no tag $PREV"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/rs"
+          git log --no-merges --format='%s' "$PREV..$TAG" > "$RUNNER_TEMP/rs/log.txt"
+          git diff --stat "$PREV..$TAG" | tail -1 > "$RUNNER_TEMP/rs/stat.txt"
+          v="${TAG#v}"
+          if [ -f CHANGELOG.md ]; then
+            git show "$TAG:CHANGELOG.md" 2>/dev/null | awk -v v="$v" '
+              /^## / { if (on) exit; if (index($0, v)) { on = 1; next } }
+              on { print }' > "$RUNNER_TEMP/rs/changelog.txt" || true
+          fi
+          touch "$RUNNER_TEMP/rs/changelog.txt"
+          wc -l "$RUNNER_TEMP"/rs/*.txt
+      - name: Write the summary
+        env:
+          RELEASE_SUMMARY_API_KEY: ${{ secrets.RELEASE_SUMMARY_API_KEY }}
+        run: |
+          node .github/release/summarise.mjs --product "$PRODUCT" --version "$TAG" \
+            --changelog "$RUNNER_TEMP/rs/changelog.txt" --log "$RUNNER_TEMP/rs/log.txt" \
+            --stat "$RUNNER_TEMP/rs/stat.txt" --out "$RUNNER_TEMP/rs/summary.md" || true
+      - name: Put it on the release
+        run: |
+          set -eu
+          s="$RUNNER_TEMP/rs/summary.md"
+          if [ ! -s "$s" ]; then
+            echo "No summary was written; the release notes are left as they are."
+            exit 0
+          fi
+          gh release view "$TAG" --json body -q .body > "$RUNNER_TEMP/rs/body.md"
+          # Idempotent: a body that already starts with a summary has that section replaced.
+          awk 'NR == 1 && /^## Summary/ { skip = 1; next }
+               skip && /^---$/ { skip = 0; drop = 1; next }
+               skip { next }
+               drop && /^$/ && !seen { seen = 1; next }
+               { print }' "$RUNNER_TEMP/rs/body.md" > "$RUNNER_TEMP/rs/rest.md"
+          { printf '## Summary\n\n'; cat "$s"; printf '\n\n---\n\n'; cat "$RUNNER_TEMP/rs/rest.md"; } \
+            > "$RUNNER_TEMP/rs/notes.md"
+          gh release edit "$TAG" --notes-file "$RUNNER_TEMP/rs/notes.md"
+          echo "Summary added to $TAG."
