@@ -178,3 +178,21 @@ export function isBridgeUser(mxid: string, domain: string): boolean {
   if (!mxid.endsWith(`:${domain}`)) return false;
   return mxid.startsWith("@agent_") || mxid === `@ai-bridge:${domain}`;
 }
+
+/**
+ * Harnesses the bridge always speaks for (item 9, operator approval 2026-10-30).
+ *
+ * A Salaam daemon holds the model key and runs agent tools; giving it a Matrix access token as
+ * well would put a second credential where an agent can reach it. So a Salaam station is never
+ * switched to `harness` mode and is never issued Matrix credentials: the Application Service is
+ * its voice. Enforced at both credential routes and by the `stations_salaam_bridge_only` check.
+ */
+export const BRIDGE_ONLY_HARNESSES: ReadonlySet<string> = new Set(["salaam"]);
+
+export function isBridgeOnly(harness: string): boolean {
+  return BRIDGE_ONLY_HARNESSES.has(harness);
+}
+
+export const BRIDGE_ONLY_REFUSAL =
+  "This station's harness is bridge-only: the hub speaks for it on Matrix, and no Matrix " +
+  "credential is ever issued to the station itself.";

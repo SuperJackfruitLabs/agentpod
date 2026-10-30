@@ -265,6 +265,24 @@ describe("POST /api/stations/:id/matrix/credentials", () => {
     expect(row!.matrix_identity_mode).toBe("harness");
   });
 
+  test("refuses a Salaam station before minting anything: it is bridge-only", async () => {
+    // Item 9 (operator approval 2026-10-30): Matrix credentials must never reach a Salaam daemon.
+    // The bridge speaks for it; nothing hands the station a token, whatever the caller's grant.
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
+    await rawSql`UPDATE stations SET harness = 'salaam' WHERE id = ${STATION}`;
+    try {
+      const res = await post(`/stations/${STATION}/matrix/credentials`);
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error: string }).error).toContain("bridge");
+      expect(issued).toHaveLength(0);
+      expect(rotated).toHaveLength(0);
+      const [row] = await rawSql`SELECT matrix_identity_mode FROM stations WHERE id = ${STATION}`;
+      expect(row!.matrix_identity_mode).toBe("bridge");
+    } finally {
+      await rawSql`UPDATE stations SET harness = 'hermes' WHERE id = ${STATION}`;
+    }
+  });
+
   test("never writes the token it just issued into a log", async () => {
     await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
 
@@ -382,6 +400,19 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
     } finally {
       await rawSql`UPDATE stations SET principal_id = ${AGENT_PRINCIPAL} WHERE id = ${STATION}`;
       process.env.ENFORCE_CONTROL_PAIR = "true";
+    }
+  });
+
+  test("409 for a Salaam station, named as bridge-only", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
+    await rawSql`UPDATE stations SET harness = 'salaam' WHERE id = ${STATION}`;
+    try {
+      const res = await post(`/stations/${STATION}/matrix/authorize-move`);
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error: string }).error).toContain("bridge");
+      expect(preJoinCalls).toHaveLength(0);
+    } finally {
+      await rawSql`UPDATE stations SET harness = 'hermes' WHERE id = ${STATION}`;
     }
   });
 
