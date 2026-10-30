@@ -88,6 +88,30 @@ describe("matrix_identity_mode", () => {
     });
   });
 
+  test("a Salaam station can never be in harness mode, whatever writes it", async () => {
+    // Item 9: the database holds the line too, so a raw write cannot hand a Salaam station its own
+    // Matrix identity. Hermes may still move to harness mode.
+    await rawSql`UPDATE stations SET harness = 'salaam' WHERE id = ${BRIDGED}`;
+    let refused: unknown = null;
+    try {
+      await rawSql`UPDATE stations SET matrix_identity_mode = 'harness' WHERE id = ${BRIDGED}`;
+    } catch (e) {
+      refused = e;
+    } finally {
+      await rawSql`UPDATE stations SET harness = 'hermes', matrix_identity_mode = 'bridge' WHERE id = ${BRIDGED}`;
+    }
+    expect(refused).not.toBeNull();
+    // And a harness-mode station cannot become a Salaam one.
+    await rawSql`UPDATE stations SET matrix_identity_mode = 'harness' WHERE id = ${HARNESS}`;
+    let refusedSwap: unknown = null;
+    try {
+      await rawSql`UPDATE stations SET harness = 'salaam' WHERE id = ${HARNESS}`;
+    } catch (e) {
+      refusedSwap = e;
+    }
+    expect(refusedSwap).not.toBeNull();
+  });
+
   test("refuses a mode that is neither", async () => {
     let refused: unknown = null;
     try {

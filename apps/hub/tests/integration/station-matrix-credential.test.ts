@@ -326,6 +326,23 @@ describe("a node redeems a Matrix credential authorization for one of its statio
     expect(replay.status).toBe(403);
   });
 
+  test("refuses a Salaam station even with a live authorization: it is bridge-only", async () => {
+    // A record minted before the station became Salaam, or by any path, still yields no token.
+    await rawSql`UPDATE stations SET harness = 'salaam' WHERE id = ${stationId}`;
+    try {
+      await mintCredentialAuthorization(stationId);
+      const res = await app().request(URL(), { method: "POST", headers: nodeAuth() });
+      expect(res.status).toBe(409);
+      expect(issued).toHaveLength(0);
+      expect(rotated).toHaveLength(0);
+      const [row] = await rawSql`SELECT matrix_identity_mode FROM stations WHERE id = ${stationId}`;
+      expect(row!.matrix_identity_mode).toBe("bridge");
+    } finally {
+      await rawSql`UPDATE stations SET harness = 'hermes' WHERE id = ${stationId}`;
+      await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${stationId}`;
+    }
+  });
+
   test("rotates rather than failing when the identity already exists", async () => {
     identityExists = true;
     await mintCredentialAuthorization(stationId);

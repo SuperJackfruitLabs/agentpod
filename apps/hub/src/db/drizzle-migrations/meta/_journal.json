@@ -827,6 +827,20 @@
       "when": 1792580400007,
       "tag": "0117_agent_approval_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1792580400008,
+      "tag": "0118_salaam_bridge_only",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1792580400009,
+      "tag": "0119_matrix_profile_key",
+      "breakpoints": true
     }
   ]
 }

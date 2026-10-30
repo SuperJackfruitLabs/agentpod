@@ -46,7 +46,7 @@ import { stations } from "../db/schema/stations";
 import { verifyNodeCredential } from "../services/enrollment";
 import { principalHandle } from "../services/principals";
 import { redeemCredentialAuthorization } from "../services/matrix-credential";
-import { bridgeLocalpart } from "../services/matrix-as/names";
+import { bridgeLocalpart, isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix-as/names";
 import { isMatrixUserInUse } from "../services/matrix-as/client";
 import type { IssuedCredentials } from "./station-matrix";
 import type { MatrixBridge } from "../services/matrix-as/index";
@@ -107,6 +107,7 @@ export function createStationMatrixCredentialRoutes(deps: StationMatrixCredentia
       if (!station || station.nodeId !== nodeId) {
         return c.json({ error: "station not hosted by this node" }, 403);
       }
+      if (isBridgeOnly(station.harness)) return c.json({ error: BRIDGE_ONLY_REFUSAL }, 409);
 
       const handle = station.principalId ? await principalHandle(station.principalId) : null;
       if (!handle) {

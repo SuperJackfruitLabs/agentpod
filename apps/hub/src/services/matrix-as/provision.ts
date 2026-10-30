@@ -11,6 +11,8 @@
  * the failure the mode exists to prevent.
  */
 
+import { createHash } from "node:crypto";
+import { personaIdentity } from "./persona-identity";
 import { eq } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
@@ -60,6 +62,11 @@ export interface ProvisionDeps {
     getAvatar?(userId: string): Promise<string | null>;
   };
   /**
+   * The persona a Salaam host pinned, `{digest, text}`, or null (item 9). Read live from the node,
+   * like every other observation; absent in tests that do not care.
+   */
+  readPersona?(stationId: string): Promise<{ digest: string; text: string } | null>;
+  /**
    * Read a file from the station's workspace, or null when it is not there.
    *
    * Absent in deployments that cannot reach the node — an agent's face is never
@@ -94,6 +101,7 @@ async function context(stationId: string) {
       displayName: stations.displayName,
       identityMode: stations.matrixIdentityMode,
       harnessMxid: stations.matrixId,
+      profileKey: stations.matrixProfileKey,
       purpose: stations.purpose,
       principalId: stations.principalId,
       nodeName: nodes.name,
@@ -165,7 +173,14 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
 
   // A name a person can read. The mxid is derived and unlovely; this is what a
   // member list shows, and it is set on every run so a rename lands.
-  const displayName = `${s.displayName} (${s.harness} @ ${s.nodeName})`;
+  // A Salaam station is named by its persona when the persona names it (item 9). Reading it is
+  // best-effort: a node that cannot answer costs the agent its persona name, not its room.
+  const persona = deps.readPersona ? await deps.readPersona(s.stationId).catch(() => null) : null;
+  const fromPersona = persona ? personaIdentity(persona.text) : { name: null, avatarPath: null };
+  const displayName = `${fromPersona.name ?? s.displayName} (${s.harness} @ ${s.nodeName})`;
+  // What this run applies to the profile. A face is picked again when this changes, so a new
+  // persona shows, and otherwise only when the identity has none (the self-healing case).
+  const profileKey = digestHex({ displayName, persona: persona?.digest ?? null });
 
   if (bridged) {
     await deps.client.ensureUser(bridgeLocalpart(handle!), displayName);
@@ -184,7 +199,8 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
   const hasFace = deps.client.getAvatar
     ? await deps.client.getAvatar(speaker).catch(() => null)
     : s.roomId; // no way to ask: fall back to "only on first provision"
-  if (bridged && !hasFace && deps.readWorkspaceFile && deps.client.uploadImage) {
+  const profileChanged = s.profileKey !== profileKey;
+  if (bridged && (!hasFace || profileChanged) && deps.readWorkspaceFile && deps.client.uploadImage) {
     const found = await pickAvatar({
       read: (path) => deps.readWorkspaceFile!(s.stationId, path),
       // Most coding-harness stations will never have a workspace picture —
@@ -192,6 +208,7 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
       // without a drawn fallback they stay letters forever.
       harness: s.harness,
       stationKey: s.stationKey,
+      prefer: fromPersona.avatarPath,
     }).catch(() => null);
 
     if (found) {
@@ -203,6 +220,10 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
         log.info("gave an agent its face", { stationId, path: found.path });
       }
     }
+  }
+
+  if (bridged && profileChanged) {
+    await db.update(stations).set({ matrixProfileKey: profileKey }).where(eq(stations.id, s.stationId));
   }
 
   // The room is created once. A second one for the same station would split its
@@ -374,4 +395,8 @@ export async function provisionAll(
 
   log.info("matrix provisioning complete", { provisioned, failed });
   return { provisioned, failed };
+}
+
+function digestHex(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }

@@ -28,6 +28,7 @@ import { roomAliasForStation } from "../services/matrix-as/station-room";
 import { isMatrixUserInUse } from "../services/matrix-as/client";
 import { principalHandle } from "../services/principals";
 import { mintCredentialAuthorization, UnknownStationError } from "../services/matrix-credential";
+import { isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix-as/names";
 import {
   preJoinRefusal,
   type MoveState,
@@ -205,6 +206,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
       if (notAdmin) return notAdmin;
       const station = await ownedStation(user.tenantId, c.req.param("id"));
       if (!station) return c.json({ error: "Not Found" }, 404);
+      if (isBridgeOnly(station.harness)) return c.json({ error: BRIDGE_ONLY_REFUSAL }, 409);
 
       try {
         await requireIssueCredentials(user, {
@@ -322,6 +324,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
       if (notAdmin) return notAdmin;
       const station = await ownedStation(user.tenantId, c.req.param("id"));
       if (!station) return c.json({ error: "Not Found" }, 404);
+      if (isBridgeOnly(station.harness)) return c.json({ error: BRIDGE_ONLY_REFUSAL }, 409);
 
       try {
         await requireIssueCredentials(user, {
