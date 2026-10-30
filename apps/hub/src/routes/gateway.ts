@@ -26,6 +26,9 @@ import { reportTurnError } from "../services/acp-sessions";
 import { reportAgentTurn } from "../services/push/fleet/agent-reports";
 
 // Node connects with `Authorization: Bearer <nodeId>:<nodeSecret>`.
+/** When, after a node dials in, its stations are announced to the Matrix bridge (ms). */
+export const CONNECT_ANNOUNCE_DELAYS_MS = [3_000, 20_000] as const;
+
 export const gatewayRoutes = new Hono().get(
   "/gateway",
   upgradeWebSocket((c) => {
@@ -130,12 +133,19 @@ export const gatewayRoutes = new Hono().get(
         // — reading an agent's picture out of its workspace — never succeeds
         // there. 32 agents had rooms and none had a face because of it.
         // Fire-and-forget, like its neighbours, and idempotent downstream.
+        // Twice: a node that has just dialled in may not answer for its stations yet (a Salaam
+        // persona read three seconds in failed on staging), and the later pass is what lets them
+        // converge. Idempotent downstream, so the second pass costs one read per station.
         void (async () => {
-          if (!(await sleep(3000))) return;
-          try {
-            await announceStationsForNode(nodeId);
-          } catch {
-            // announceStationsForNode never throws, but guard anyway.
+          let waited = 0;
+          for (const at of CONNECT_ANNOUNCE_DELAYS_MS) {
+            if (!(await sleep(at - waited))) return;
+            waited = at;
+            try {
+              await announceStationsForNode(nodeId);
+            } catch {
+              // announceStationsForNode never throws, but guard anyway.
+            }
           }
         })();
 

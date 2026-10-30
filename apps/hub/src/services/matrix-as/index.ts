@@ -253,7 +253,8 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
   /**
    * The persona a Salaam host pinned, read live through its node (item 9). Never cached — an
    * observation is a claim about a machine that may have changed — and null for every other
-   * harness, for a node that cannot answer, and for anything that is not `{digest, text}` strings.
+   * harness and for anything that is not `{digest, text}` strings. Throws when the node cannot
+   * answer, which is not the same as having no persona.
    */
   const readPersona = async (
     stationId: string
@@ -269,7 +270,10 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       { stationKey: station.stationKey, settings: ["salaam.persona"] },
       { timeoutMs: 5_000 }
     );
-    if (!res.ok) return null;
+    // A node that cannot answer yet (it dialled in seconds ago) is not a node with no persona:
+    // throwing lets provisioning keep the station due for a refresh instead of recording the
+    // fallback as the answer (staging, hub 34aac256).
+    if (!res.ok) throw new Error(res.error ?? "the node could not read the persona");
     const value = (res.data as { values?: Array<{ settingId?: string; observed?: unknown }> } | undefined)
       ?.values?.find((v) => v.settingId === "salaam.persona")?.observed as
       | { digest?: unknown; text?: unknown }

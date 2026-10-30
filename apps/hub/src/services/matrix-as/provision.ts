@@ -175,7 +175,13 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
   // member list shows, and it is set on every run so a rename lands.
   // A Salaam station is named by its persona when the persona names it (item 9). Reading it is
   // best-effort: a node that cannot answer costs the agent its persona name, not its room.
-  const persona = deps.readPersona ? await deps.readPersona(s.stationId).catch(() => null) : null;
+  let personaUnread = false;
+  const persona = deps.readPersona
+    ? await deps.readPersona(s.stationId).catch(() => {
+        personaUnread = true;
+        return null;
+      })
+    : null;
   const fromPersona = persona ? personaIdentity(persona.text) : { name: null, avatarPath: null };
   const displayName = `${fromPersona.name ?? s.displayName} (${s.harness} @ ${s.nodeName})`;
   // What this run applies to the profile. A face is picked again when this changes, so a new
@@ -199,7 +205,9 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
   const hasFace = deps.client.getAvatar
     ? await deps.client.getAvatar(speaker).catch(() => null)
     : s.roomId; // no way to ask: fall back to "only on first provision"
-  const profileChanged = s.profileKey !== profileKey;
+  // An unread persona settles nothing: the face is not re-picked and the key is not recorded, so
+  // the next pass, with the node answering, still sees the profile as due.
+  const profileChanged = !personaUnread && s.profileKey !== profileKey;
   if (bridged && (!hasFace || profileChanged) && deps.readWorkspaceFile && deps.client.uploadImage) {
     const found = await pickAvatar({
       read: (path) => deps.readWorkspaceFile!(s.stationId, path),
