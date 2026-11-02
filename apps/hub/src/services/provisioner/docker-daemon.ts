@@ -43,28 +43,12 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-
-/** Docker's socket path, and the value every deployment today runs on. */
-export const DEFAULT_DOCKER_SOCKET = "/var/run/docker.sock";
+import { DEFAULT_DOCKER_SOCKET, type DockerDaemonSettings } from "../../config";
 
 /** The three filenames the docker CLI and docker-modem both expect in DOCKER_CERT_PATH. */
 const CERT_FILES = { ca: "ca.pem", cert: "cert.pem", key: "key.pem" } as const;
 
-/** Raw settings, exactly as config.ts exposes them. */
-export interface DockerDaemonSettings {
-  /** DOCKER_HOST — `unix:///path` or `tcp://host[:port]`. Empty means "the socket". */
-  host: string;
-  /** DOCKER_SOCKET — the socket path used when DOCKER_HOST is unset. */
-  socketPath: string;
-  /** DOCKER_PORT — fallback port for a plaintext tcp:// URL that carries none. */
-  port: number;
-  /** DOCKER_CERT_PATH — directory holding ca.pem, cert.pem and key.pem. */
-  certPath: string;
-  /** DOCKER_ALLOW_INSECURE_TCP — permits unauthenticated tcp:// off-box. */
-  allowInsecureTcp: boolean;
-}
-
-/** Structurally a `ValidationError`; kept local so this file imports nothing. */
+/** Structurally a `ValidationError`; kept local so this file imports nothing but the settings it resolves. */
 export interface DockerDaemonProblem {
   field: string;
   message: string;
@@ -350,44 +334,5 @@ export function resolveDockerDaemon(
             `access-controlled.`,
         ]
       : [],
-  };
-}
-
-/** Read a variable, treating present-but-blank as unset (see config.ts). */
-function str(
-  env: Partial<Record<string, string>>,
-  key: string,
-  fallback: string
-): string {
-  const value = env[key]?.trim();
-  return value ? value : fallback;
-}
-
-/**
- * The env contract, in one place.
- *
- * config.ts spreads this so boot validation and the driver cannot read
- * different variables — the failure mode being a hub that validates the
- * daemon it is not going to use.
- */
-export function dockerDaemonSettingsFromEnv(
-  env: Partial<Record<string, string>> = process.env
-): DockerDaemonSettings {
-  // Blank is unset; a non-empty non-integer is a refusal, in the exact words
-  // getEnvInt uses — this variable was read through it until now, and quietly
-  // becoming lenient about a value an operator got wrong would be a regression
-  // in loudness, not a simplification.
-  const rawPort = env.DOCKER_PORT?.trim();
-  if (rawPort && !/^\d+$/.test(rawPort)) {
-    throw new Error("Invalid integer for environment variable: DOCKER_PORT");
-  }
-  return {
-    host: str(env, "DOCKER_HOST", ""),
-    socketPath: str(env, "DOCKER_SOCKET", DEFAULT_DOCKER_SOCKET),
-    port: rawPort ? Number(rawPort) : 2375,
-    certPath: str(env, "DOCKER_CERT_PATH", ""),
-    allowInsecureTcp:
-      env.DOCKER_ALLOW_INSECURE_TCP?.toLowerCase() === "true" ||
-      env.DOCKER_ALLOW_INSECURE_TCP === "1",
   };
 }

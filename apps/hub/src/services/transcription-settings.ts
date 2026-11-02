@@ -36,7 +36,7 @@ import {
   transcriptionFromEnv,
   type Transcriber,
   type TranscriptionEndpoint,
-} from "./matrix-as/voice";
+} from "./transcription-client";
 
 const log = createLogger("transcription-settings");
 

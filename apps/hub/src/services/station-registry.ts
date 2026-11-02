@@ -10,9 +10,9 @@
  */
 
 import { and, eq, sql } from "drizzle-orm";
-import { notifyStationsAdopted, stationReportedMatrixId } from "./matrix-as/hooks";
+import { notifyStationsAdopted, stationReportedMatrixId } from "./station-hooks";
 import { db, type DbExecutor } from "../db/drizzle";
-import { stations } from "../db/schema/stations";
+import { stations, type StationRow } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
 import { VERB_RESULTS, unknownCapabilitiesByStation } from "@agentpod/contract";
@@ -24,7 +24,17 @@ import { createLogger } from "../utils/logger";
 
 const log = createLogger("station-registry");
 
-export type StationRow = typeof stations.$inferSelect;
+export type { StationRow };
+
+/**
+ * Returns true if the station's capabilities array includes the given cap.
+ *
+ * Called gateCapability because it is used as a gate: the caller returns 403
+ * immediately if this returns false.
+ */
+export function gateCapability(station: StationRow, cap: string): boolean {
+  return Array.isArray(station.capabilities) && station.capabilities.includes(cap);
+}
 
 // ─── reportUnknownCapabilities ────────────────────────────────────────────────
 

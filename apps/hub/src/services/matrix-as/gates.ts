@@ -46,7 +46,7 @@ import { legacyRequestEvents } from "./legacy-events";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix-identity";
 import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plane/assertion";
 import { stationSpeaker } from "./names";
-import { principalHandle } from "../principals";
+import { principalHandle } from "../../auth/org-plane/principals";
 import { roomForStation } from "./station-room";
 import { moveInProgress } from "./identity-move";
 

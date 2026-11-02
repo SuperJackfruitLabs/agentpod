@@ -23,12 +23,12 @@ import { acpSessions } from "../../db/schema/acp";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { IDENTITY_UNAVAILABLE_TEXT, resolveMatrixId } from "../matrix-identity";
-import { OrgPlaneError } from "../org-plane/client";
-import { getGrant, grantAllowsPrincipal } from "../grants";
+import { OrgPlaneError } from "../../auth/org-plane/client";
+import { getGrant, grantAllowsPrincipal } from "../../auth/org-plane/grants";
 import { isControlPairEnforced } from "../control-pair";
 import { bridgeUserId } from "./names";
 import { boardRoomFor } from "./board-room";
-import { principalHandle } from "../principals";
+import { principalHandle } from "../../auth/org-plane/principals";
 import {
   clearPendingPermission,
   matchPermissionAnswer,
@@ -43,13 +43,12 @@ import {
   isVoiceRefusal,
   loadVoice,
   transcriptContent,
-  MAX_VOICE_SECONDS,
   transcriptNotice,
   voiceNote,
   voicePrompt,
-  type Transcriber,
   type VoiceResult,
 } from "./voice";
+import { MAX_VOICE_SECONDS, type Transcriber } from "../transcription-client";
 import { RoomQueue, type DispatchOutcome, type FreeOutcome, type QueuedPrompt } from "./room-queue";
 import { SESSION_BUSY_MESSAGE } from "../acp-sessions";
 

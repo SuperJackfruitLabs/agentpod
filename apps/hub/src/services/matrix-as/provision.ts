@@ -22,7 +22,7 @@ import { matrixIdForPrincipal } from "../principal-matrix-id";
 import { bridgeLocalpart, roomAliasFor, stationSpeaker } from "./names";
 import { ensureNodeSpace, fileRoomUnderSpace } from "./spaces";
 import { pickAvatar } from "./avatar";
-import { principalHandle, principalForUser } from "../principals";
+import { principalHandle, principalForUser } from "../../auth/org-plane/principals";
 import { roomForStation } from "./station-room";
 import { stationForAlias } from "./stations";
 import { createLogger } from "../../utils/logger";

@@ -8,6 +8,8 @@
  * never go stale and let the next regression in unnoticed.
  *
  *  - the largest file-level import cycle in each tree;
+ *  - the hub's layer order (HUB_LAYERS): every import between its top-level folders points down,
+ *    except the back-edges KNOWN_BACK_EDGES still lists (none since Phase 1);
  *  - the folder-level cycles: the hub's top-level folders, and the folders inside services/;
  *  - shipped files over SIZE_LIMIT lines, each held at its current size by OVERSIZE.
  *
@@ -42,7 +44,7 @@ const TREES: Tree[] = [
     root: "apps/hub/src",
     largestCycle: 3,
     oversize: {
-      "services/acp-sessions.ts": 3515,
+      "services/acp-sessions.ts": 3514,
       "services/bridge/dispatch.ts": 1338,
       "services/bridge/salaam-dispatch.ts": 1583,
       "services/matrix-as/gates.ts": 1168,
@@ -67,35 +69,36 @@ const TREES: Tree[] = [
  *  lists the members of every cycle there, largest first. A cycle may lose members or vanish;
  *  it may not gain one, and no new cycle may appear. */
 const FOLDER_CYCLES: { root: string; cycles: string[][] }[] = [
-  {
-    root: "apps/hub/src",
-    cycles: [["auth", "config", "db", "models", "routes", "services", "telemetry", "utils"]],
-  },
-  {
-    root: "apps/hub/src/services",
-    cycles: [
-      [
-        "acp-sessions",
-        "agent-approval-rules",
-        "bridge",
-        "evidence",
-        "grants",
-        "harness-config-apply",
-        "matrix-as",
-        "matrix-identity",
-        "org-plane",
-        "principal-matrix-id",
-        "principals",
-        "push",
-        "salaam-authority",
-        "station-forge-api",
-        "station-registry",
-        "superlibrary",
-        "transcription-settings",
-      ],
-    ],
-  },
+  { root: "apps/hub/src", cycles: [] },
+  { root: "apps/hub/src/services", cycles: [["acp-sessions", "bridge", "matrix-as", "org-plane"]] },
 ];
+
+/**
+ * The hub's top-level folders (and top-level files, by name without `.ts`), lowest layer first.
+ * An import may point at its own entry or at one earlier in the list, never at a later one. A new
+ * folder or top-level file must be placed here; docs/contributor/code-quality.md says why each
+ * sits where it does.
+ */
+const HUB_LAYERS = [
+  "config", //          env → settings; imports nothing
+  "ws", //              the one shared Bun WebSocket helper; imports nothing
+  "telemetry", //       OpenTelemetry setup, spans and propagation
+  "utils", //           logger, ids, encryption: no domain
+  "db", //              Drizzle client, schema, migrations
+  "models", //          a table's own reads and writes
+  "auth", //            token verification, caller authority, and the org plane it reads
+  "services", //        the domain
+  "mcp", //             the hub's MCP server, over services
+  "middleware", //      HTTP middleware
+  "routes", //          HTTP and WebSocket routes
+  "validate-config", // boot validation: reads every subsystem's settings
+  "index", //           the composition root: wires everything and serves
+];
+
+/** Imports that point UP the layer order, as "from -> to". May only shrink; Phase 1 emptied it.
+ *  Fix a back-edge rather than adding one: move a pure helper or type down, move a misplaced file
+ *  to its layer, or declare a narrow interface below and inject it from index.ts. */
+const KNOWN_BACK_EDGES: string[] = [];
 
 const lineCount = (path: string): number => readFileSync(path, "utf8").split("\n").length - 1;
 
@@ -135,6 +138,25 @@ describe("architecture ratchets", () => {
       expect(found, "a folder cycle shrank; record the smaller one to lock it in").toEqual(recorded);
     });
   }
+
+  test("apps/hub/src: every top-level entry has a place in the layer order", () => {
+    const entries = [...folderGraph(importGraph(join(REPO, "apps/hub/src"))).keys()].toSorted();
+    expect(entries, "place a new folder or top-level file in HUB_LAYERS, or drop a gone one").toEqual(
+      HUB_LAYERS.toSorted(),
+    );
+  });
+
+  test("apps/hub/src: imports between top-level entries point down the layer order", () => {
+    const rank = new Map(HUB_LAYERS.map((name, i) => [name, i] as const));
+    const up: string[] = [];
+    for (const [from, targets] of folderGraph(importGraph(join(REPO, "apps/hub/src"))))
+      for (const to of targets)
+        if ((rank.get(to) ?? -1) > (rank.get(from) ?? -1)) up.push(`${from} -> ${to}`);
+    const added = up.filter((e) => !KNOWN_BACK_EDGES.includes(e));
+    expect(added, "these imports point up the layer order (see HUB_LAYERS for how to fix one)").toEqual([]);
+    const gone = KNOWN_BACK_EDGES.filter((e) => !up.includes(e));
+    expect(gone, "these back-edges are gone; remove them from KNOWN_BACK_EDGES").toEqual([]);
+  });
 
   test("the cycle finder sees a cycle and nothing else", () => {
     const graph = new Map([

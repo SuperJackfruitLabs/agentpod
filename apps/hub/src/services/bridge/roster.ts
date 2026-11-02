@@ -36,7 +36,7 @@ import { BridgeCredentialSource } from "../../../../../packages/contract/src/bri
 import { tenants } from "../../db/schema/tenants";
 import { orgPlane } from "../../auth/org-plane/config";
 import { createPlaneVerifier } from "../../auth/org-plane/verify";
-import { orgPlaneClient } from "../org-plane/client";
+import { orgPlaneClient } from "../../auth/org-plane/client";
 import {
   createBridgePlaneCredential,
   type BridgeCredentialSnapshot,

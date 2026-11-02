@@ -19,14 +19,14 @@ import { acpSessions } from "../db/schema/acp";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { endAttempt, openDispatch, startAttempt } from "../services/bridge/ledger";
 import { makeFingerprint } from "../services/evidence/fingerprint";
-import { setGrant } from "../services/grants";
+import { setGrant } from "../auth/org-plane/grants";
 
 import { createPrincipal, forgetPrincipals } from "../../tests/helpers/principals";
 import { createEvidenceRoutes } from "./evidence";
 import { setOrgPlaneForTests, TEST_PLANE } from "../auth/org-plane/config";
 import type { PlaneBearerResult } from "../auth/hub-token";
-import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../services/org-plane/directory";
-import { OrgPlaneError } from "../services/org-plane/client";
+import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../auth/org-plane/directory";
+import { OrgPlaneError } from "../auth/org-plane/client";
 import { suspendPrincipal } from "../../tests/helpers/principals";
 
 const RUN = crypto.randomUUID().replaceAll("-", "").slice(0, 8);

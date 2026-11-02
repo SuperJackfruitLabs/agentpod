@@ -8,8 +8,8 @@
  * and a suspended agent cannot be used half-placed.
  */
 import { bridgeUserId } from "../matrix-as/names";
-import { orgPlaneClient, type OrgPlaneClient } from "./client";
-import { principalDirectory, type PrincipalDirectory } from "./directory";
+import { orgPlaneClient, type OrgPlaneClient } from "../../auth/org-plane/client";
+import { principalDirectory, type PrincipalDirectory } from "../../auth/org-plane/directory";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("agent-placement");

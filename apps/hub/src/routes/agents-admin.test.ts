@@ -48,10 +48,10 @@ import { workspaceAdminMiddleware as adminMiddleware } from "../auth/workspace-a
 import { isUserAdmin } from "../models/admin-users";
 import { agentsAdminRouter } from "./agents-admin";
 import { hubOperators } from "../db/schema/operators";
-import { onProvisionStation } from "../services/matrix-as/hooks";
+import { onProvisionStation } from "../services/station-hooks";
 import { setOrgPlaneForTests, TEST_PLANE } from "../auth/org-plane/config";
-import { OrgPlaneError, setOrgPlaneClientForTests, type OrgPlaneClient, type PlanePrincipal } from "../services/org-plane/client";
-import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../services/org-plane/directory";
+import { OrgPlaneError, setOrgPlaneClientForTests, type OrgPlaneClient, type PlanePrincipal } from "../auth/org-plane/client";
+import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../auth/org-plane/directory";
 import { forgetPrincipals } from "../../tests/helpers/principals";
 import { suspendPrincipal } from "../../tests/helpers/principals";
 

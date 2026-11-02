@@ -27,7 +27,7 @@ import { createTestUser, deleteTestUser } from "../helpers/database";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { installFakePlane } from "../helpers/fake-plane";
-import { setGrant } from "../../src/services/grants";
+import { setGrant } from "../../src/auth/org-plane/grants";
 import { connectionManager } from "../../src/services/connection-manager";
 import * as broker from "../../src/services/broker";
 import {

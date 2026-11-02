@@ -14,7 +14,7 @@ import { fakePlane, signPlaneToken } from "../../tests/helpers/fake-plane";
 import { db, rawSql } from "../db/drizzle";
 import { acpEvents, acpSessions } from "../db/schema/acp";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
-import { setGrant } from "../services/grants";
+import { setGrant } from "../auth/org-plane/grants";
 import { createPrincipal, forgetPrincipals } from "../../tests/helpers/principals";
 import { createEvidenceRoutes } from "./evidence";
 

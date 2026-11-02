@@ -40,7 +40,7 @@ import { stations } from "../db/schema/stations";
 import { verifyNodeCredential } from "../services/enrollment";
 import { HUB_AUDIENCE, STATION_TOKEN_AUDIENCES } from "../config";
 import { orgPlane, type OrgPlaneConfig } from "../auth/org-plane/config";
-import { orgPlaneClient, OrgPlaneError, type OrgPlaneClient } from "../services/org-plane/client";
+import { orgPlaneClient, OrgPlaneError, type OrgPlaneClient } from "../auth/org-plane/client";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("station-token");

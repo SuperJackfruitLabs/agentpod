@@ -15,9 +15,9 @@
  */
 import { decodeJwt } from "jose";
 
-import { orgPlane } from "../auth/org-plane/config";
-import { createLogger } from "../utils/logger";
-import { orgPlaneClient, type OrgPlaneClient } from "./org-plane/client";
+import { orgPlane } from "./config";
+import { createLogger } from "../../utils/logger";
+import { orgPlaneClient, type OrgPlaneClient } from "./client";
 
 const log = createLogger("hub-home-org");
 const ORG_ID = /^org_[0-9a-f]{20}$/;

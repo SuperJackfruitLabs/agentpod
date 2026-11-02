@@ -168,7 +168,7 @@ test("a renewal carries the live rules, and none once the last is revoked", asyn
 // Operator ruling 2026-10-28: "Always allow" on the approval itself. The hub re-reads the answerer's
 // role from the org plane, never the board's word, and sets the same rule as the console switch.
 import { AlwaysAllowRefused, alwaysAllowFromAnswer } from "../../src/services/agent-approval-rules";
-import * as orgPlane from "../../src/services/org-plane/client";
+import * as orgPlane from "../../src/auth/org-plane/client";
 
 const person = (role: "owner" | "admin" | "member", o: { suspended?: boolean; org?: string } = {}) => {
   const id = fakePlane.addHuman({ role, suspended: o.suspended });

@@ -34,23 +34,11 @@ import { requireGrantReach } from "../services/grant-reach";
 import type { Caller } from "../auth/caller-authority";
 import { isGrantReachDenied } from "../services/control-pair";
 import * as broker from "../services/broker";
-import { getStation } from "../services/station-registry";
+import { gateCapability, getStation } from "../services/station-registry";
 import { recordAudit } from "../services/audit";
 import type { AuthUser } from "../auth/middleware";
 import type { StationRow } from "../services/station-registry";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
-
-// ─── Capability helper ────────────────────────────────────────────────────────
-
-/**
- * Returns true if the station's capabilities array includes the given cap.
- *
- * Called gateCapability because it is used as a gate: the caller returns 403
- * immediately if this returns false.
- */
-export function gateCapability(station: StationRow, cap: string): boolean {
-  return Array.isArray(station.capabilities) && station.capabilities.includes(cap);
-}
 
 // ─── Reach gate ───────────────────────────────────────────────────────────────
 

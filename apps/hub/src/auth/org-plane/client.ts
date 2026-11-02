@@ -8,7 +8,7 @@
  * "unreachable")`; the underlying error is dropped on purpose, because a fetch error can quote
  * its request.
  */
-import { orgPlane, type OrgPlaneConfig, type ServiceCredential } from "../../auth/org-plane/config";
+import { orgPlane, type OrgPlaneConfig, type ServiceCredential } from "./config";
 
 export class OrgPlaneError extends Error {
   constructor(

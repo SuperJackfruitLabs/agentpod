@@ -32,7 +32,7 @@
 #
 # The pushed tag becomes NODE_AGENT_MODAL_OPENCODE_IMAGE, and the hub now
 # REFUSES TO BOOT with ENABLE_MODAL_PROVISIONING=true and no registry reference
-# for it (apps/hub/src/utils/validate-config.ts) — the console offers OpenCode
+# for it (apps/hub/src/validate-config.ts) — the console offers OpenCode
 # for every provider, so an unset variable is a promise the hub cannot keep.
 #
 # The repository must be PUBLIC: `images.fromRegistry(tag)` is called with no

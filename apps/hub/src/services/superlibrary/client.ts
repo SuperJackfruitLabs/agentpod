@@ -1,4 +1,4 @@
-import { orgPlaneClient, type OrgPlaneClient } from "../org-plane/client";
+import { orgPlaneClient, type OrgPlaneClient } from "../../auth/org-plane/client";
 import { superlibraryConfig } from "./config";
 import { createLogger } from "../../utils/logger";
 

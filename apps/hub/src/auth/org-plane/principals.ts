@@ -3,13 +3,13 @@
  *
  * The hub kept its own `principals`, `principal_identities` and `principal_grants` until the
  * rollback window after P4 closed; they were dropped in P3 plan Task 17. Every read here goes
- * through the directory (`./org-plane/directory.ts`): cached 60 s, last-good while the plane is
+ * through the directory (`./directory.ts`): cached 60 s, last-good while the plane is
  * unreachable, and an `OrgPlaneError` when there is nothing to serve — callers fail closed.
  */
 import { PrincipalId } from "@agentpod/contract";
-import type { PrincipalKind } from "../db/schema/organization";
-import { principalDirectory } from "./org-plane/directory";
-import { orgPlaneClient, type PlanePrincipal } from "./org-plane/client";
+import type { PrincipalKind } from "../../db/schema/organization";
+import { principalDirectory } from "./directory";
+import { orgPlaneClient, type PlanePrincipal } from "./client";
 
 /**
  * What `suspendedAt` reads as for a principal the org plane reports suspended. The plane gives a

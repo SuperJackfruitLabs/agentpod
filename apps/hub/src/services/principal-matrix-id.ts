@@ -9,7 +9,7 @@
  *
  * Null is an ordinary answer: a person who has never linked a Matrix account.
  */
-import { principalDirectory } from "./org-plane/directory";
+import { principalDirectory } from "../auth/org-plane/directory";
 
 export async function matrixIdForPrincipal(principalId: string): Promise<string | null> {
   const ids = await principalDirectory().identitiesOf(principalId, "matrix");

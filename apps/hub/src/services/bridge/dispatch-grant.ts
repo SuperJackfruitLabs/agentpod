@@ -18,7 +18,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
-import { principalDirectory, type PrincipalDirectory } from "../org-plane/directory";
+import { principalDirectory, type PrincipalDirectory } from "../../auth/org-plane/directory";
 import { grantDispatchTo } from "../org-plane/agent-placement";
 import { createLogger } from "../../utils/logger";
 

@@ -969,7 +969,7 @@ for line in open("/etc/agentpod/hub.env"):
         v = v[1:-1]
     env[k.strip()] = v
 script = '''
-  const { collectConfigErrors } = await import("./src/utils/validate-config.ts");
+  const { collectConfigErrors } = await import("./src/validate-config.ts");
   console.log(JSON.stringify(collectConfigErrors(undefined, () => {}).map(e => e.field)));
 '''
 r = subprocess.run(["/root/.bun/bin/bun", "--env-file=/dev/null", "-e", script],

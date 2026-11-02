@@ -56,7 +56,7 @@ import { isConfiguredForge } from "./forge-api/instance";
 import { nextGeneration } from "./forge-api/generation";
 import { tokenName } from "./forge-api/forgejo";
 import { splitRepo, type ForgeGrantRef, type ForgeProvider } from "./forge-api/providers";
-import { principalHandle } from "./principals";
+import { principalHandle } from "../auth/org-plane/principals";
 
 export { ForgeApiGrantError } from "./forge-api/errors";
 

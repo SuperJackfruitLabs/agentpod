@@ -18,7 +18,7 @@ import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
 import { workspaceAdminMiddleware as adminMiddleware } from "../auth/workspace-authority";
 import { isUserAdmin } from "../models/admin-users";
 import { agentsAdminRouter } from "./agents-admin";
-import { onProvisionStation } from "../services/matrix-as/hooks";
+import { onProvisionStation } from "../services/station-hooks";
 import { setOrgPlaneForTests, TEST_PLANE } from "../auth/org-plane/config";
 import {
   OrgPlaneError,
@@ -26,13 +26,13 @@ import {
   type OrgPlaneClient,
   type PlaneGrant,
   type PlanePrincipal,
-} from "../services/org-plane/client";
+} from "../auth/org-plane/client";
 import {
   setPrincipalDirectoryForTests,
   type PrincipalDirectory,
-} from "../services/org-plane/directory";
+} from "../auth/org-plane/directory";
 import { hubOperators } from "../db/schema/operators";
-import { setGrant } from "../services/grants";
+import { setGrant } from "../auth/org-plane/grants";
 import { fakePlane as runPlane } from "../../tests/helpers/fake-plane";
 import { forgetPrincipals } from "../../tests/helpers/principals";
 const run = crypto.randomUUID().slice(0, 8);

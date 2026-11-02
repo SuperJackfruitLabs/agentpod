@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { config } from "../config";
-import { collectConfigErrors } from "../utils/validate-config";
+import { collectConfigErrors } from "../validate-config";
 import {
   HUB_SECRET_ENV,
   RedactionRulesError,

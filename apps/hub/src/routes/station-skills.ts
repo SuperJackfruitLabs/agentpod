@@ -4,7 +4,7 @@ import { z } from "zod";
 import { SkillInventory } from "@agentpod/contract";
 import * as broker from "../services/broker";
 import { getStation } from "../services/station-registry";
-import { gateCapability } from "./station-writes";
+import { gateCapability } from "../services/station-registry";
 import type { AuthUser } from "../auth/middleware";
 
 /** Read-only metadata. No caller-selected root, source body or mutation. */

@@ -25,7 +25,8 @@ import { db } from "../db/drizzle";
 import * as broker from "../services/broker";
 import { getStation } from "../services/station-registry";
 import { recordAudit } from "../services/audit";
-import { gateCapability, refuseWithoutReach } from "./station-writes";
+import { refuseWithoutReach } from "./station-writes";
+import { gateCapability } from "../services/station-registry";
 import type { AuthUser } from "../auth/middleware";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 

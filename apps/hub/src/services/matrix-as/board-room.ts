@@ -350,7 +350,7 @@ export async function matrixIdsForBoardHumans(boardId: string): Promise<string[]
     return [];
   }
 
-  const { principalForUser } = await import("../principals");
+  const { principalForUser } = await import("../../auth/org-plane/principals");
   const { matrixIdForPrincipal } = await import("../principal-matrix-id");
   const mxids: string[] = [];
   for (const userId of hubUserIds) {

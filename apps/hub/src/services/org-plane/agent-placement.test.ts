@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { abandonPlaneAgent, checkPlaneAgent, createPlaneAgent, grantDispatchTo } from "./agent-placement";
-import { OrgPlaneError, type PlanePrincipal } from "./client";
+import { OrgPlaneError, type PlanePrincipal } from "../../auth/org-plane/client";
 
 function fakes(principals: Record<string, PlanePrincipal> = {}, o: { linkFails?: boolean; suspendFails?: boolean } = {}) {
   const calls: string[] = [];

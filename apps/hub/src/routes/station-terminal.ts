@@ -31,7 +31,7 @@ import { Hono } from "hono";
 import { upgradeWebSocket } from "../ws";
 import * as broker from "../services/broker";
 import { getStation } from "../services/station-registry";
-import { gateCapability } from "./station-writes";
+import { gateCapability } from "../services/station-registry";
 import { requireGrantReach } from "../services/grant-reach";
 import { isOrgPlaneUnavailable } from "../auth/caller-authority";
 import { isGrantReachDenied } from "../services/control-pair";

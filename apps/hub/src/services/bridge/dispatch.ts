@@ -71,7 +71,7 @@ import { CARD_PROMPT_VERSION, CardPrompt, CardPromptComment, renderCardPrompt, t
 
 import { ActivityCoalescer, type BoardActivity } from "./coalesce";
 import type { AgentSpanRecorder } from "../../telemetry/agent-spans";
-import { attemptSpanFacts } from "../../telemetry/attempt-facts";
+import { attemptSpanFacts } from "./attempt-facts";
 import { inDispatchSpan } from "../../telemetry/dispatch-span";
 import { isControlPairDenied } from "../control-pair";
 import type { Fingerprint } from "../evidence/fingerprint";

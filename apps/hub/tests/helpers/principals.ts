@@ -12,7 +12,7 @@
  * - `linkMatrixId` is a Matrix identity linked at the plane.
  * - `forgetPrincipals` is the cleanup `DELETE FROM principals …` used to be.
  */
-import { createPrincipal as createAtPlane } from "../../src/services/principals";
+import { createPrincipal as createAtPlane } from "../../src/auth/org-plane/principals";
 import { fakePlane } from "./fake-plane";
 import type { PrincipalKind } from "../../src/db/schema/organization";
 

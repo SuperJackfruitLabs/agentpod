@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createOrgPlaneClient, OrgPlaneError, orgPlaneClient, setOrgPlaneClientForTests, type OrgPlaneClient } from "./client";
-import { setOrgPlaneForTests, TEST_PLANE } from "../../auth/org-plane/config";
+import { setOrgPlaneForTests, TEST_PLANE } from "./config";
 
 type Seen = { url: string; method: string; auth: string | null; body: unknown };
 

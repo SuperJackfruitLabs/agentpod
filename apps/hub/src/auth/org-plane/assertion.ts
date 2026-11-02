@@ -11,7 +11,7 @@
  * deleted after the rollback window (P3 plan, Task 17).
  */
 import { decodeJwt } from "jose";
-import { OrgPlaneError, orgPlaneClient, type OrgPlaneClient } from "../../services/org-plane/client";
+import { OrgPlaneError, orgPlaneClient, type OrgPlaneClient } from "./client";
 
 /**
  * Who a human's approval from chat is asserted as: the principal the hub resolved from the

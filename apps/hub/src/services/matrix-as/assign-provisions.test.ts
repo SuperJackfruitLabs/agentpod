@@ -52,7 +52,7 @@ import { adoptStations } from "../station-registry";
 import { workspaceAdminMiddleware as adminMiddleware } from "../../auth/workspace-authority";
 import { isUserAdmin } from "../../models/admin-users";
 import { agentsAdminRouter } from "../../routes/agents-admin";
-import { onProvisionStation, onStationsAdopted } from "./hooks";
+import { onProvisionStation, onStationsAdopted } from "../station-hooks";
 import { provisionStation } from "./provision";
 import { roomForStation } from "./station-room";
 import { projectGate } from "./gates";

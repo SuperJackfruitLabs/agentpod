@@ -110,3 +110,6 @@ export const stations = pgTable("stations", {
     name: "stations_node_tenant_fk",
   }).onDelete("cascade"),
 ]);
+
+/** A row of `stations`. Re-exported by services/station-registry.ts, where most callers take it. */
+export type StationRow = typeof stations.$inferSelect;

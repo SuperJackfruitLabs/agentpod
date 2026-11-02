@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
-import { getGrant, setGrant, grantAllowsPrincipal, NO_GRANT } from "../../src/services/grants";
+import { getGrant, setGrant, grantAllowsPrincipal, NO_GRANT } from "../../src/auth/org-plane/grants";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { fakePlane } from "../helpers/fake-plane";
 

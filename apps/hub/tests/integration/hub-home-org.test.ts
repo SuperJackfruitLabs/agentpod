@@ -8,7 +8,7 @@ import { authMiddleware } from "../../src/auth/middleware";
 import { adminRouter } from "../../src/routes/admin";
 import { meRoutes } from "../../src/routes/me";
 import { TEST_PLANE } from "../../src/auth/org-plane/config";
-import type { OrgPlaneClient } from "../../src/services/org-plane/client";
+import type { OrgPlaneClient } from "../../src/auth/org-plane/client";
 import {
   credentialOrg,
   hubHomeOrg,
@@ -17,8 +17,8 @@ import {
   learnHubHomeOrg,
   parseHubHomeOrg,
   setHubHomeOrgForTests,
-} from "../../src/services/hub-home-org";
-import { collectConfigErrors } from "../../src/utils/validate-config";
+} from "../../src/auth/org-plane/hub-home-org";
+import { collectConfigErrors } from "../../src/validate-config";
 import { config } from "../../src/config";
 
 /**

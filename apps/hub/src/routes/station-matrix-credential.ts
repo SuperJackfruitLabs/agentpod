@@ -44,7 +44,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { verifyNodeCredential } from "../services/enrollment";
-import { principalHandle } from "../services/principals";
+import { principalHandle } from "../auth/org-plane/principals";
 import { redeemCredentialAuthorization } from "../services/matrix-credential";
 import { bridgeLocalpart, isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix-as/names";
 import { isMatrixUserInUse } from "../services/matrix-as/client";

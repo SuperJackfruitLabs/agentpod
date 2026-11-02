@@ -6,7 +6,6 @@
  * `dispatch.status`. `reason` is never recorded, because it can carry harness text.
  */
 import { context, ROOT_CONTEXT, SpanStatusCode, trace, type Context, type Span } from "@opentelemetry/api";
-import type { DispatchResult } from "../services/bridge/dispatch";
 import { AgentSpanRecorder } from "./agent-spans";
 import { instruments, tracer } from "./otel";
 
@@ -25,7 +24,14 @@ export interface DispatchSpanInput {
   countClaim?: boolean;
 }
 
-type Status = DispatchResult["status"] | "threw";
+/** What a dispatch returns, as far as its span is concerned: the bridge's `DispatchResult` is one.
+ *  Declared here so telemetry does not import the bridge it observes. */
+export interface DispatchOutcome {
+  status: string;
+}
+
+/** A dispatch's outcome status, or "threw" when `work` did. */
+type Status = DispatchOutcome["status"];
 
 const COMPLETED: ReadonlySet<Status> = new Set(["reported", "self-reported", "unreported", "replayed"]);
 const ERRORED: ReadonlySet<Status> = new Set(["failed", "foreign-run", "threw"]);
@@ -62,10 +68,10 @@ function startDispatch(input: DispatchSpanInput): { span: Span; ctx: Context; sp
   return { span, ctx, spans };
 }
 
-export async function inDispatchSpan(
+export async function inDispatchSpan<R extends DispatchOutcome>(
   input: DispatchSpanInput,
-  work: (spans: AgentSpanRecorder) => Promise<DispatchResult>,
-): Promise<DispatchResult> {
+  work: (spans: AgentSpanRecorder) => Promise<R>,
+): Promise<R> {
   let started: { span: Span; ctx: Context; spans: AgentSpanRecorder } | null = null;
   try {
     started = startDispatch(input);

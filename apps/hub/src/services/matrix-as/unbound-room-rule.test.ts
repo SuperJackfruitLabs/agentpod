@@ -48,7 +48,7 @@ import { workspaceAdminMiddleware as adminMiddleware } from "../../auth/workspac
 import { isUserAdmin } from "../../models/admin-users";
 import { agentsAdminRouter } from "../../routes/agents-admin";
 import { createPrincipal } from "../../../tests/helpers/principals";
-import { onProvisionStation } from "./hooks";
+import { onProvisionStation } from "../station-hooks";
 import { provisionStation } from "./provision";
 import { roomForStation, roomAliasForStation } from "./station-room";
 import { forgetPrincipals } from "../../../tests/helpers/principals";

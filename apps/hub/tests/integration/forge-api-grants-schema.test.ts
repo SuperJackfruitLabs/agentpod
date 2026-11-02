@@ -16,7 +16,7 @@ import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
  * generation never resets. Ruling 2026-10-17: stationId is nullable/set null, not restrict.
  */
 
-// The ForgeGrantRef structural assertion lives in src/db/schema/forge-api-grants.typecheck.ts (tsc covers src only).
+// The ForgeGrantRef structural assertion lives in src/services/forge-api/grant-row.typecheck.ts (tsc covers src only).
 
 const OWNER = "test-user-fga-owner";
 const NODE = "node_fga_schema";

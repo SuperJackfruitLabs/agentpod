@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SignJWT } from "jose";
-import { OrgPlaneError } from "../../services/org-plane/client";
+import { OrgPlaneError } from "./client";
 import { AssertionMismatch, assertPrincipal, assertionFailureCode } from "./assertion";
 
 /**

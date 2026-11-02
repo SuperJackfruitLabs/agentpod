@@ -24,9 +24,9 @@ import {
   type PlaneGrant,
   type PlaneKind,
   type PlanePrincipal,
-} from "../../src/services/org-plane/client";
+} from "../../src/auth/org-plane/client";
 import { setOrgPlaneForTests, TEST_PLANE } from "../../src/auth/org-plane/config";
-import { createPrincipalDirectory, setPrincipalDirectoryForTests } from "../../src/services/org-plane/directory";
+import { createPrincipalDirectory, setPrincipalDirectoryForTests } from "../../src/auth/org-plane/directory";
 import { createPlaneVerifier, setPlaneVerifierForTests } from "../../src/auth/org-plane/verify";
 
 /** The org every test token names unless it says otherwise. */

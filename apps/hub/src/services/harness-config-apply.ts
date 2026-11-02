@@ -27,12 +27,11 @@ import { eq } from "drizzle-orm";
 import { ConfigPlan, ConfigReceipt, VERB_RESULTS, type ConfigRefusalCode, type ConfigSetting, type ConfigValue } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { appliedHarnessConfig } from "../db/schema/harness-config-ops";
-import { stations } from "../db/schema/stations";
+import { stations, type StationRow } from "../db/schema/stations";
 import { tenantScope } from "../db/tenant-scope";
 import { prefixedId } from "../utils/ids";
 import * as broker from "./broker";
 import { resolveFor, fetchRegistry, compare, resolveOptOuts, type Resolved, type AppliedWrite } from "./harness-config";
-import type { StationRow } from "./station-registry";
 
 /** A minimal station shape — everything `planFor`/`applyFor` need to reach a node. */
 export type ConfigStation = Pick<StationRow, "id" | "nodeId" | "stationKey">;

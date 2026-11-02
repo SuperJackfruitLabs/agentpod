@@ -34,7 +34,7 @@ import { db } from "../db/drizzle";
 import { stationGitIdentities } from "../db/schema/git-identities";
 import * as broker from "../services/broker";
 import { getStation } from "../services/station-registry";
-import { principalHandle, principalNames } from "../services/principals";
+import { principalHandle, principalNames } from "../auth/org-plane/principals";
 import { recordAudit } from "../services/audit";
 import {
   deliverCommitAuthor,
