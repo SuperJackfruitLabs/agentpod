@@ -4,7 +4,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { purposeRoutes } from "../../src/routes/purpose";
-import { onStationsAdopted } from "../../src/services/matrix-as/hooks";
+import { onStationsAdopted } from "../../src/services/station-hooks";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**

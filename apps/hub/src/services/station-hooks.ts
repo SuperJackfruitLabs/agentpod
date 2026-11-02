@@ -9,10 +9,12 @@
  *
  * A hook rather than a direct call, so `station-registry` keeps knowing nothing
  * about Matrix: adoption announces what happened, and whoever cares listens.
- * Nobody listens when the bridge is off.
+ * Nobody listens when the bridge is off. That is why this file sits beside
+ * `station-registry.ts` rather than in `matrix-as/`: the announcer owns the hook,
+ * and the Matrix bridge registers its listeners here at boot (`index.ts`).
  */
 
-import { createLogger } from "../../utils/logger";
+import { createLogger } from "../utils/logger";
 
 const log = createLogger("matrix-hooks");
 
@@ -107,9 +109,9 @@ export async function stationReportedMatrixId(
  * `stations.principal_id`, conditionally bound an EXISTING unbound room,
  * and never provisioned. The console reaches no other provisioning trigger
  * — `onStationsAdopted` fires before there is an occupant, and
- * `provision.ts` returns early for a bridge-mode station with none — so a
+ * `matrix-as/provision.ts` returns early for a bridge-mode station with none — so a
  * console-created agent had no room, its gates resolved to `no-room`, and
- * `gate-sweep.ts` does not count that status. Silent, and permanent until
+ * `matrix-as/gate-sweep.ts` does not count that status. Silent, and permanent until
  * somebody restarted the hub.
  */
 type Provisioner = (stationId: string) => Promise<void>;

@@ -44,7 +44,7 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { matrixRooms } from "../db/schema/matrix";
 import { stations } from "../db/schema/stations";
-import { provisionStationNow, stationSetupMatrixDomain } from "../services/matrix-as/hooks";
+import { provisionStationNow, stationSetupMatrixDomain } from "../services/station-hooks";
 import { OrgPlaneError } from "../auth/org-plane/client";
 import { principalDirectory } from "../auth/org-plane/directory";
 import { createPlaneAgent } from "../services/org-plane/agent-placement";

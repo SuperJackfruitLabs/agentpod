@@ -30,7 +30,7 @@ import { eq, isNull } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
-import { notifyStationsAdopted } from "../services/matrix-as/hooks";
+import { notifyStationsAdopted } from "../services/station-hooks";
 import { createLogger } from "../utils/logger";
 import { tenantScope } from "../db/tenant-scope";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";

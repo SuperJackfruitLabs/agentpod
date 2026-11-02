@@ -12,7 +12,7 @@ import { stationSetups } from "../db/schema/station-setup";
 import {
   provisionStationNow,
   stationSetupMatrixDomain,
-} from "../services/matrix-as/hooks";
+} from "../services/station-hooks";
 import { bridgeUserId } from "../services/matrix-as/names";
 import { roomForStation } from "../services/matrix-as/station-room";
 import { OrgPlaneError } from "../auth/org-plane/client";

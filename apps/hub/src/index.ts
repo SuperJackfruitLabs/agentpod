@@ -103,7 +103,7 @@ import { mcpUnauthorized, resolveMcpCaller } from './mcp/auth.ts';
 import { handleMcpRequest } from './mcp/server.ts';
 import { createBridgeRosterRoute } from './routes/bridge-roster.ts';
 import { createMatrixBridge, matrixBridgeConfig, startMatrixBridge } from './services/matrix-as/index.ts';
-import { onStationsAdopted, onProvisionStation } from './services/matrix-as/hooks.ts';
+import { onStationsAdopted, onProvisionStation } from './services/station-hooks.ts';
 import { preJoinNewIdentity, moveState, wireConvergenceListener } from './services/matrix-as/identity-move.ts';
 import { signalNodeToAdopt } from './services/matrix-as/adopt-signal.ts';
 import { createMatrixAsRoutes } from './routes/matrix-as.ts';

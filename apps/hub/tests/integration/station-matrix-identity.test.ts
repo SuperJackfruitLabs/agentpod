@@ -10,7 +10,7 @@ import { MatrixUserInUse } from "../../src/services/matrix-as/client";
 import type { PreJoinOutcome } from "../../src/services/matrix-as/identity-move";
 import { moveState, wireConvergenceListener } from "../../src/services/matrix-as/identity-move";
 import { signalNodeToAdopt } from "../../src/services/matrix-as/adopt-signal";
-import { onStationMatrixIdReported } from "../../src/services/matrix-as/hooks";
+import { onStationMatrixIdReported } from "../../src/services/station-hooks";
 import { connectionManager } from "../../src/services/connection-manager";
 import { handleNodeMessage } from "../../src/services/broker";
 import type { GatewayServerMessage } from "@agentpod/contract";

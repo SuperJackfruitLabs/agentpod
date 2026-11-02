@@ -10,7 +10,7 @@
  */
 
 import { and, eq, sql } from "drizzle-orm";
-import { notifyStationsAdopted, stationReportedMatrixId } from "./matrix-as/hooks";
+import { notifyStationsAdopted, stationReportedMatrixId } from "./station-hooks";
 import { db, type DbExecutor } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";

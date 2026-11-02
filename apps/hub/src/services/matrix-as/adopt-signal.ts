@@ -32,7 +32,7 @@
 
 import { VERB_RESULTS } from "@agentpod/contract";
 import * as broker from "../broker";
-import { stationReportedMatrixId } from "./hooks";
+import { stationReportedMatrixId } from "../station-hooks";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("adopt-signal");

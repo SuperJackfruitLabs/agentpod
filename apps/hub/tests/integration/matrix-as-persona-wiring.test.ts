@@ -8,7 +8,7 @@ import { connectionManager } from "../../src/services/connection-manager";
 import { handleNodeMessage } from "../../src/services/broker";
 import { createMatrixBridge, matrixBridgeConfig } from "../../src/services/matrix-as";
 import { provisionStation } from "../../src/services/matrix-as/provision";
-import { onStationsAdopted } from "../../src/services/matrix-as/hooks";
+import { onStationsAdopted } from "../../src/services/station-hooks";
 import { announceStationsForNode } from "../../src/services/station-registry";
 
 /**

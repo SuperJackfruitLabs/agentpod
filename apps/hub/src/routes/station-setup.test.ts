@@ -18,7 +18,7 @@ import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
 import { workspaceAdminMiddleware as adminMiddleware } from "../auth/workspace-authority";
 import { isUserAdmin } from "../models/admin-users";
 import { agentsAdminRouter } from "./agents-admin";
-import { onProvisionStation } from "../services/matrix-as/hooks";
+import { onProvisionStation } from "../services/station-hooks";
 import { setOrgPlaneForTests, TEST_PLANE } from "../auth/org-plane/config";
 import {
   OrgPlaneError,
