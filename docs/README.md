@@ -37,6 +37,7 @@ an executable corpus that caught four real cross-repo disagreements on its first
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Branch flow (trunk-based on `main`), commit style, release tagging |
 | [../TESTING.md](../TESTING.md) | Running and writing tests per tier, the test-postgres requirement, conventions |
 | [contributor/code-quality.md](./contributor/code-quality.md) | The lint ratchets (oxlint, golangci-lint) and the architecture ratchets (import cycles, file and package sizes), and how to lower them |
+| [contributor/modularity-plan.md](./contributor/modularity-plan.md) | The modularity and code-quality plan (Phases 2–8): starting measurements, target structure, rules, phases and their status |
 | [../CLAUDE.md](../CLAUDE.md) | Orientation for agents; per-area notes in `apps/hub/CLAUDE.md` |
 | [../CHANGELOG.md](../CHANGELOG.md) | Release history (`v0.1.x`) |
 

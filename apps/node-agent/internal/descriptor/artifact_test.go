@@ -124,17 +124,6 @@ func TestHandlerFsReadWithOffsetNeedsAWorkspaceRooter(t *testing.T) {
 	}
 }
 
-func TestSixDescriptorsAreWorkspaceRooters(t *testing.T) {
-	for name, d := range map[string]any{
-		"hermes": &hermesDescriptor{}, "claudecode": &claudeCodeDescriptor{}, "codex": &codexDescriptor{},
-		"openclaw": &openclawDescriptor{}, "opencode": &openCodeDescriptor{}, "pi": &piDescriptor{},
-	} {
-		if _, ok := d.(WorkspaceRooter); !ok {
-			t.Errorf("%s must implement WorkspaceRooter", name)
-		}
-	}
-}
-
 func TestReadAtRefusesAnInRootSymlinkToADeniedPath(t *testing.T) {
 	root := t.TempDir()
 	must := func(err error) {

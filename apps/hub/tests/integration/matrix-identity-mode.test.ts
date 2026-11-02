@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { refreshAdoptedCapabilities } from "../../src/services/station-registry";
+import { refreshAdoptedCapabilities } from "../../src/services/stations/registry";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**

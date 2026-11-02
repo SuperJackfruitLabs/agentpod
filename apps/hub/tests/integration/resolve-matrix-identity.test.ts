@@ -2,14 +2,14 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
-import { adoptStations, listAdopted } from "../../src/services/station-registry";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/nodes/enrollment";
+import { adoptStations, listAdopted } from "../../src/services/stations/registry";
 import { fakePlane } from "../helpers/fake-plane";
 
 /** An identity linked at the organization plane (contract §3.5), which owns people's identities. */
 const linkIdentity = (id: string, system: string, externalId: string) => fakePlane.linkIdentity(id, system, externalId);
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
-import { resolveMatrixId } from "../../src/services/matrix-identity";
+import { resolveMatrixId } from "../../src/services/matrix/identity";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**

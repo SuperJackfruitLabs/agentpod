@@ -14,7 +14,7 @@
  *   DELETE /stations/:stationId             → unadopt
  */
 
-import { stationFailure } from "../services/station-failure";
+import { stationFailure } from "../services/stations";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { zValidator } from "@hono/zod-validator";
@@ -25,7 +25,7 @@ import { nodes } from "../db/schema/nodes";
 import { resolveTenantId } from "../auth/tenant";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 import * as broker from "../services/broker";
-import { connectionManager } from "../services/connection-manager";
+import { connectionManager } from "../services/broker";
 import { VERB_RESULTS } from "@agentpod/contract";
 import { sniffImage } from "../utils/sniff-image";
 import {
@@ -34,7 +34,7 @@ import {
   unadopt,
   getStation,
   reportUnknownCapabilities,
-} from "../services/station-registry";
+} from "../services/stations";
 
 /** The most a console file read may ask for: an image preview, not a download. */
 const FILE_READ_MAX_BYTES = 8 * 1024 * 1024;
@@ -337,15 +337,18 @@ export const stationRoutes = new Hono()
         station.nodeId,
         "logs.tail",
         { key: station.stationKey, follow: true },
-        async (_seq, chunk, eof) => {
-          if (cancelled) return;
-          if (chunk !== null) {
-            await stream.writeSSE({ data: chunk });
-          }
-          if (eof) {
-            cancelled = true;
-            resolveKeepAlive();
-          }
+        // The broker ignores what a handler returns; the write runs on its own.
+        (_seq, chunk, eof) => {
+          void (async () => {
+            if (cancelled) return;
+            if (chunk !== null) {
+              await stream.writeSSE({ data: chunk });
+            }
+            if (eof) {
+              cancelled = true;
+              resolveKeepAlive();
+            }
+          })();
         }
       );
 

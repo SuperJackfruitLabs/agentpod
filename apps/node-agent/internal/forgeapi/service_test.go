@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi/stkpolicy"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
 
@@ -158,7 +159,7 @@ func (h *harness) seedOtherStation(grant, host, station string) {
 	h.t.Helper()
 	e := baseEntry()
 	e.Service, e.Grant, e.Station, e.Instance = "forge-forgejo-"+strings.TrimPrefix(grant, "fag_"), grant, station, "https://"+host
-	out, err := MergePolicy(h.policy(), e)
+	out, err := stkpolicy.MergePolicy(h.policy(), e)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -171,7 +172,7 @@ func deliverParams(grant, host string) DeliverParams {
 	return DeliverParams{
 		StationID: "stn_1", StationKey: "hermes:press", GrantID: grant, Provider: "forgejo",
 		Instance: "https://" + host, Mode: "minted", ServiceName: "forge-forgejo-" + strings.TrimPrefix(grant, "fag_"),
-		Repositories: []string{"acme/widgets"}, Preset: "read", Rules: []Rule{},
+		Repositories: []string{"acme/widgets"}, Preset: "read", Rules: []stkpolicy.Rule{},
 		AllowGraphql: false, Sealed: Sealed(realSecret), ExpectLogin: "agent-press",
 	}
 }
@@ -509,7 +510,7 @@ func TestPolicyReplacesRulesAndReloads(t *testing.T) {
 	h.stub.calls = nil
 	ack, err := h.svc.Policy(t.Context(), PolicyParams{
 		StationID: "stn_1", GrantID: "fag_aaa111", Preset: "issues", AllowGraphql: true,
-		Rules: []Rule{{Deny: "DELETE /repos/{owner}/{repo}/issues/*"}, {Allow: "POST /x", When: map[string]any{"state": "closed"}}},
+		Rules: []stkpolicy.Rule{{Deny: "DELETE /repos/{owner}/{repo}/issues/*"}, {Allow: "POST /x", When: map[string]any{"state": "closed"}}},
 	})
 	if err != nil || !ack.OK {
 		t.Fatalf("Policy = %+v, %v", ack, err)
@@ -555,7 +556,7 @@ func TestPolicyRejectedReloadRollsBack(t *testing.T) {
 		}
 		return nil
 	}
-	ack, err := h.svc.Policy(t.Context(), PolicyParams{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "read", Rules: []Rule{{Allow: "BADPATTERN"}}})
+	ack, err := h.svc.Policy(t.Context(), PolicyParams{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "read", Rules: []stkpolicy.Rule{{Allow: "BADPATTERN"}}})
 	if err != nil || ack.OK || !strings.HasPrefix(ack.Error, "reload-rejected:") {
 		t.Fatalf("Policy = %+v, %v; want ok:false reload-rejected", ack, err)
 	}
@@ -571,8 +572,8 @@ func TestPolicyRejectsABadPresetOrRule(t *testing.T) {
 	}
 	for _, p := range []PolicyParams{
 		{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "admin"},
-		{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "read", Rules: []Rule{{Allow: "a", Deny: "b"}}},
-		{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "read", Rules: []Rule{{}}},
+		{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "read", Rules: []stkpolicy.Rule{{Allow: "a", Deny: "b"}}},
+		{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "read", Rules: []stkpolicy.Rule{{}}},
 	} {
 		if ack, _ := h.svc.Policy(t.Context(), p); ack.OK {
 			t.Errorf("Policy %+v succeeded", p)
@@ -744,7 +745,7 @@ func TestConcurrentDeliverAndRevokeLeaveAConsistentFile(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	all, err := ManagedEntries(h.policy())
+	all, err := stkpolicy.ManagedEntries(h.policy())
 	if err != nil {
 		t.Fatalf("file is not valid: %v", err)
 	}
@@ -837,7 +838,7 @@ func TestPolicyAnswersTheReasonCodeWhenStkIsGone(t *testing.T) {
 		}
 		h.stub.reloadErr = fmt.Errorf("stk reload: %w", cause)
 		start := time.Now()
-		ack, err := h.svc.Policy(t.Context(), PolicyParams{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "none", Rules: []Rule{}})
+		ack, err := h.svc.Policy(t.Context(), PolicyParams{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "none", Rules: []stkpolicy.Rule{}})
 		if time.Since(start) > time.Second {
 			t.Errorf("%s: policy was slow", code)
 		}
@@ -903,7 +904,7 @@ func TestPolicyUpdateRefreshesSharedEntriesAndKeepsGrantEntries(t *testing.T) {
 	if err := os.WriteFile(sp, []byte(strings.Replace(sharedBase, "hooks.example.com", "hooks9.example.com", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ack, err := h.svc.Policy(t.Context(), PolicyParams{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "issues", Rules: []Rule{}})
+	ack, err := h.svc.Policy(t.Context(), PolicyParams{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "issues", Rules: []stkpolicy.Rule{}})
 	if err != nil || !ack.OK {
 		t.Fatalf("%+v %v", ack, err)
 	}
@@ -939,7 +940,7 @@ func TestRevokeStillWorksWithAnUnreadableSharedFile(t *testing.T) {
 	if err != nil || !ack.Removed {
 		t.Fatalf("%+v %v", ack, err)
 	}
-	if m, _ := ManagedEntries(h.policy()); len(m) != 0 {
+	if m, _ := stkpolicy.ManagedEntries(h.policy()); len(m) != 0 {
 		t.Errorf("grant left: %v", m)
 	}
 }
@@ -950,7 +951,7 @@ func TestMissingSharedFileIsNoSharedEntries(t *testing.T) {
 	if _, err := h.svc.Deliver(t.Context(), deliverParams("fag_aaa111", "forge.example.com")); err != nil {
 		t.Fatal(err)
 	}
-	if len(SharedServices(h.policy())) != 0 {
+	if len(stkpolicy.SharedServices(h.policy())) != 0 {
 		t.Errorf("shared entries from nowhere:\n%s", h.policy())
 	}
 }

@@ -20,7 +20,7 @@
  * and *Allow always* is exactly the ambiguity that would cause it.
  */
 
-import { clearFleetDecision, permissionDecisionKey } from "../push/fleet/sink";
+import { clearFleetDecision, permissionDecisionKey } from "../push";
 
 export interface PermissionOption {
   optionId: string;

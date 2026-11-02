@@ -36,7 +36,7 @@ import { Hono } from "hono";
 import { rawSql } from "../../src/db/drizzle";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/nodes/enrollment";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
 import { pollUntil } from "../helpers/wait";

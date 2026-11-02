@@ -28,13 +28,13 @@ import {
   waitForNodeOnline,
   waitForNodeUnregistered,
 } from "../../tests/helpers/wait";
-import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
+import { mintEnrollmentToken, enrollNode } from "../services/nodes/enrollment";
 import { gatewayRoutes } from "./gateway";
 import { stationRoutes } from "./stations";
 import { stationActivityRoutes } from "./station-activity";
 import { websocket } from "../ws";
 import type { AuthUser } from "../auth/middleware";
-import type { StationRow } from "../services/station-registry";
+import type { StationRow } from "../services/stations/registry";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

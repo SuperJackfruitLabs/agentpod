@@ -13,7 +13,7 @@
    *
    * `ConfigObservation.level` carries which level won a station's
    * declaration (station beats node beats fleet, `resolveFor` in
-   * `apps/hub/src/services/harness-config.ts`) straight from the hub — it is
+   * `apps/hub/src/services/harness-config/harness-config.ts`) straight from the hub — it is
    * a REQUIRED field on the contract type (phase 3b), so this panel reads it
    * directly off each observation. It used to derive this itself, by
    * fetching `GET /api/fleet/config/declared` twice (once filtered to this
@@ -119,7 +119,7 @@
    *
    * The source itself is read straight off `ConfigObservation.optedOutByHarness`
    * (D11) — a typed field `compare()` sets in both `opted-out` branches
-   * (`apps/hub/src/services/harness-config.ts`), not re-derived by matching
+   * (`apps/hub/src/services/harness-config/harness-config.ts`), not re-derived by matching
    * the `reason` text for a fixed sentence suffix. The register-vs-harness
    * distinction used to live only in that prose; a reworded sentence would
    * have silently broken this panel's read of it.

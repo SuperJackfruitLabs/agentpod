@@ -1,12 +1,12 @@
 {
-  "bodyclose": 25,
+  "bodyclose": 23,
   "copyloopvar": 6,
-  "errcheck": 163,
-  "errorlint": 56,
-  "gosec": 73,
+  "errcheck": 106,
+  "errorlint": 31,
+  "gosec": 70,
   "misspell": 2,
   "nilerr": 28,
-  "noctx": 89,
+  "noctx": 50,
   "staticcheck": 31,
   "unconvert": 1,
   "unused": 6

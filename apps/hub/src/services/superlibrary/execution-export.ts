@@ -212,7 +212,7 @@ export async function runExecutionExport(
   };
   const fail = async () => {
     await store.change(
-      record!.requestId,
+      record.requestId,
       "commit_unconfirmed",
       "integrity_failed",
     );

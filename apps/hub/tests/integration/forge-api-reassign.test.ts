@@ -19,9 +19,9 @@ import { eq } from "drizzle-orm";
 import { db, rawSql } from "../../src/db/drizzle";
 import { stationForgeApiGrants as g } from "../../src/db/schema/forge-api-grants";
 import { agentsAdminRouter } from "../../src/routes/agents-admin";
-import { unadopt } from "../../src/services/station-registry";
-import { removeNode } from "../../src/services/node-removal";
-import { destroyRuntime } from "../../src/services/runtimes";
+import { unadopt } from "../../src/services/stations/registry";
+import { removeNode } from "../../src/services/nodes/removal";
+import { destroyRuntime } from "../../src/services/runtimes/runtimes";
 import {
   createForgeApiGrant,
   deliverFaults,
@@ -30,12 +30,12 @@ import {
   rotateGrant,
   withGrantClaim,
   REVOKED_STATION_GONE,
-} from "../../src/services/station-forge-api";
+} from "../../src/services/forge-api/station-forge-api";
 import {
   configureForgeApiReconcile,
   kickForgeApiRevoke,
   runForgeApiReconcile,
-} from "../../src/services/forge-api-reconcile";
+} from "../../src/services/forge-api/reconcile";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
 import { forgetPrincipals } from "../helpers/principals";

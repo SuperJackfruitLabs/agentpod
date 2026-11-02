@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { prepareSalaamWork, workDigest } from "../../src/services/salaam-work";
+import { prepareSalaamWork, workDigest } from "../../src/services/salaam/work";
 import corpus from "../../../../packages/contract/src/fixtures/salaam-work-v1.json";
 import {
   SalaamWorkPlan,

@@ -63,6 +63,7 @@ func Dial(ctx context.Context, hub, token, station, session string) (*websocket.
 		return nil, errors.New("no token: set AGENTPOD_TOKEN or pass --token")
 	}
 
+	//nolint:bodyclose // websocket.Dial owns resp.Body: "you never need to close resp.Body yourself"
 	c, resp, err := websocket.Dial(ctx, ProxyURL(hub, station, session), &websocket.DialOptions{
 		HTTPHeader: map[string][]string{"Authorization": {"Bearer " + token}},
 	})

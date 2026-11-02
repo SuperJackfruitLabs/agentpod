@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import sodium from "libsodium-wrappers";
 import vector from "../../../../packages/contract/fixtures/handover-v1.json";
-import { parseHandoverPublicKey, sealHandover } from "../../src/services/handover-seal";
+import { parseHandoverPublicKey, sealHandover } from "../../src/services/forge-api/handover-seal";
 
 const PREFIX = "stk-handover-v1:";
 

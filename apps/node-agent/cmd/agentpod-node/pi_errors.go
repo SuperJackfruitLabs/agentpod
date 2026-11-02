@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/pi"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/pierrors"
 )
 
 // piErrorsVersion probes the Pi this node would run; tests replace it.
-var piErrorsVersion = descriptor.PiVersion
+var piErrorsVersion = pi.PiVersion
 
 // apn pi-errors installs the agentpod-errors Pi extension, which reports why a
 // Pi turn failed to this node (pi-acp drops it over ACP). One file in Pi's

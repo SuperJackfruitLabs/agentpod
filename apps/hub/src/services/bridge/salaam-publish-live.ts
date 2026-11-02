@@ -1,8 +1,9 @@
-import { readExecutionArtifactBundle } from "../evidence/execution";
-import { superlibraryClient } from "../superlibrary/client";
-import { superlibraryConfig } from "../superlibrary/config";
-import { executionExportStore } from "../superlibrary/execution-export-store";
-import { readLibraryContent } from "../superlibrary/read-content";
+import { readExecutionArtifactBundle } from "../evidence";
+import { superlibraryClient } from "../superlibrary";
+import { superlibraryConfig } from "../superlibrary";
+import { executionExportStore } from "../superlibrary";
+import { readLibraryContent } from "../superlibrary";
+import type { infer as Infer } from "zod";
 import type { SalaamWorkCompletion } from "../../../../../packages/contract/src/salaam-work-completion";
 import { publishSalaamWork } from "./salaam-publish";
 import type { SuperpipelineClient } from "./superpipeline";
@@ -26,7 +27,7 @@ export function livePublisher(input: {
   leaseEpoch: number;
   client: Pick<SuperpipelineClient, "context" | "addRunReference">;
 }) {
-  return async (completion: import("zod").infer<typeof SalaamWorkCompletion>) => {
+  return async (completion: Infer<typeof SalaamWorkCompletion>) => {
     const title = (await input.client.context(input.runId)).card.title || input.cardId;
     return publishSalaamWork(
       {

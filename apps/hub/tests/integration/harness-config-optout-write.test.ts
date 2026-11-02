@@ -5,11 +5,11 @@
  * The design decision is explicit: "An explicit operator opt-out wins.
  * Declared state does not override it. Such a station reports `opted-out`,
  * not `drifted`." Before this file, the opt-out register
- * (`harness_config_opt_out`, `src/services/harness-config.ts`) was honoured
+ * (`harness_config_opt_out`, `src/services/harness-config/harness-config.ts`) was honoured
  * in exactly two places — `reconcileStation` (adopt-time) and `compare()`
  * (the read-only observation state) — and nowhere on the path a human drives
  * by hand: `POST .../config/plan` and `POST .../config/apply`
- * (`src/services/harness-config-apply.ts`). An operator could opt a station
+ * (`src/services/harness-config/apply.ts`). An operator could opt a station
  * out and have `fleet config plan` / `fleet config apply` write the setting
  * anyway.
  *
@@ -57,9 +57,9 @@ import { rawSql } from "../../src/db/drizzle";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { waitForNodeOnline } from "../helpers/wait";
-import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
-import { adoptStations } from "../../src/services/station-registry";
-import { declare, setOptOut, clearOptOut } from "../../src/services/harness-config";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/nodes/enrollment";
+import { adoptStations } from "../../src/services/stations/registry";
+import { declare, setOptOut, clearOptOut } from "../../src/services/harness-config/harness-config";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/tenant-scope";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { harnessConfigRoutes } from "../../src/routes/harness-config";
@@ -199,7 +199,7 @@ type FakePlan = {
  *
  * `config.inspect` answers for an operation that was only PLANNED, not yet
  * applied — phase `"planned"`, mirroring the real node's journal (see
- * `apps/node-agent/internal/descriptor/hermes_config.go`'s comment: "A plan
+ * `apps/node-agent/internal/descriptor/hermes/hermes_config.go`'s comment: "A plan
  * with no refusal IS recorded — phase 'planned' — in the station's own
  * journal"). `applyFor`'s opt-out check needs exactly this: it inspects the
  * plan BEFORE ever calling `config.apply`, so inspect must answer for a plan

@@ -14,7 +14,7 @@ import {
   getFleetStats as defaultGetFleetStats,
   type FleetDeps,
   createFleetService,
-} from "../services/fleet";
+} from "../services/nodes";
 import type { FleetAgent, FleetStats } from "@agentpod/contract";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ export function createFleetRoutes(deps?: FleetDeps) {
       .get("/agents", async (c) => {
         const agents = await service.listFleetAgents(c.get("user").tenantId);
         // Compute stats from the same agent list to avoid a second DB query.
-        const { computeFleetStats } = await import("../services/fleet");
+        const { computeFleetStats } = await import("../services/nodes/fleet");
         const stats = computeFleetStats(agents);
         return c.json({ stats, agents });
       })

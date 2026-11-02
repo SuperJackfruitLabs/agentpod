@@ -35,13 +35,13 @@ import { waitForNodeOnline } from "../helpers/wait";
 import {
   mintEnrollmentToken,
   enrollNode,
-} from "../../src/services/enrollment";
+} from "../../src/services/nodes/enrollment";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { stationRoutes } from "../../src/routes/stations";
 import { websocket } from "../../src/ws";
 // Import type to activate ContextVariableMap augmentation for c.set("user", ...)
 import type { AuthUser } from "../../src/auth/middleware";
-import type { StationRow } from "../../src/services/station-registry";
+import type { StationRow } from "../../src/services/stations/registry";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 // ─── Constants ────────────────────────────────────────────────────────────────

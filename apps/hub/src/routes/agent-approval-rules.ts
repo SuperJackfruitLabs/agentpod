@@ -17,7 +17,7 @@ import { stations } from "../db/schema/stations";
 import { agentApprovalRules as rules, type AgentApprovalRule } from "../db/schema/agent-approval-rules";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 import { recordAudit } from "../services/audit";
-import { APPROVAL_RULE_SCOPES, NoOccupant, setApprovalRule } from "../services/agent-approval-rules";
+import { APPROVAL_RULE_SCOPES, NoOccupant, setApprovalRule } from "../services/salaam";
 import type { AuthUser } from "../auth/middleware";
 
 const SetBody = z.object({ scope: z.enum(APPROVAL_RULE_SCOPES) }).strict();
@@ -86,7 +86,7 @@ export function createAgentApprovalRuleRoutes() {
     const [revoked] = await db
       .update(rules)
       .set({ revokedAt: new Date(), revokedBy: s.user.id })
-      .where(and(eq(rules.id, c.req.param("ruleId")!), eq(rules.stationId, s.row.id), isNull(rules.revokedAt)))
+      .where(and(eq(rules.id, c.req.param("ruleId")), eq(rules.stationId, s.row.id), isNull(rules.revokedAt)))
       .returning();
     if (!revoked) return c.json({ error: "not-found", message: "No such live rule on this station." }, 404);
     const audit = await recordAudit(db, {

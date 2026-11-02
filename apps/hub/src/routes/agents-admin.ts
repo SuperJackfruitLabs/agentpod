@@ -19,7 +19,7 @@
  * Two refusals this file exists to get right:
  *
  *   - A handle is what an agent's Matrix address is built from
- *     (`services/matrix-as/names.ts`), and it is immutable once minted. A
+ *     (`services/matrix/names.ts`), and it is immutable once minted. A
  *     handle `clean()` would alter — case, or a character outside its kept
  *     set — must be refused here, not silently registered under a different
  *     address than the one typed. The character class below is deliberately
@@ -44,14 +44,14 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { matrixRooms } from "../db/schema/matrix";
 import { stations } from "../db/schema/stations";
-import { provisionStationNow, stationSetupMatrixDomain } from "../services/station-hooks";
+import { provisionStationNow, stationSetupMatrixDomain } from "../services/stations";
 import { OrgPlaneError } from "../auth/org-plane/client";
 import { principalDirectory } from "../auth/org-plane/directory";
-import { createPlaneAgent } from "../services/org-plane/agent-placement";
-import { unboundRoomsForStation } from "../services/matrix-as/station-room";
+import { createPlaneAgent } from "../services/org-plane";
+import { unboundRoomsForStation } from "../services/matrix-as";
 import { principalById } from "../auth/org-plane/principals";
-import { markGrantsRevoking } from "../services/station-forge-api";
-import { kickForgeApiRevoke } from "../services/forge-api-reconcile";
+import { markGrantsRevoking } from "../services/forge-api";
+import { kickForgeApiRevoke } from "../services/forge-api";
 import { createLogger } from "../utils/logger";
 import { resolveTenantId } from "../auth/tenant";
 

@@ -39,7 +39,7 @@ test("TypeToConfirmDialog: wrong input keeps confirm button disabled", () => {
   });
 
   const input = getByRole("textbox");
-  fireEvent.input(input, { target: { value: "wrong-value" } });
+  void fireEvent.input(input, { target: { value: "wrong-value" } });
 
   const confirmBtn = getByRole("button", { name: "Delete station" }) as HTMLButtonElement;
   expect(confirmBtn.disabled).toBe(true);
@@ -53,14 +53,14 @@ test("TypeToConfirmDialog: matching input enables button and fires onConfirm on 
   });
 
   const input = getByRole("textbox");
-  fireEvent.input(input, { target: { value: "my-station" } });
+  void fireEvent.input(input, { target: { value: "my-station" } });
 
   await waitFor(() => {
     const btn = getByRole("button", { name: "Delete station" }) as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
   });
 
-  fireEvent.click(getByRole("button", { name: "Delete station" }));
+  void fireEvent.click(getByRole("button", { name: "Delete station" }));
   expect(onConfirm).toHaveBeenCalledOnce();
 });
 
@@ -71,7 +71,7 @@ test("TypeToConfirmDialog: Cancel button fires onCancel", () => {
     props: { ...baseProps, onConfirm: vi.fn(), onCancel },
   });
 
-  fireEvent.click(getByRole("button", { name: /cancel/i }));
+  void fireEvent.click(getByRole("button", { name: /cancel/i }));
   expect(onCancel).toHaveBeenCalledOnce();
 });
 

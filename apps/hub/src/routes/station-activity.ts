@@ -16,7 +16,7 @@ import { Hono } from "hono";
 import { desc, eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stationAudit } from "../db/schema/audit";
-import { getStation } from "../services/station-registry";
+import { getStation } from "../services/stations";
 import type { AuthUser } from "../auth/middleware";
 import { tenantScope } from "../db/tenant-scope";
 

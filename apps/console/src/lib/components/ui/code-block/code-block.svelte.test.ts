@@ -1,8 +1,9 @@
 import { afterEach, expect, test, vi } from "vitest";
+import type * as Shiki from "shiki";
 import { cleanup, render, waitFor } from "@testing-library/svelte";
 
 const codeToHtml = vi.hoisted(() => vi.fn(async (_code: string, _opts: unknown) => '<pre class="shiki"><code>x</code></pre>'));
-vi.mock("shiki", async (orig) => ({ ...(await orig<typeof import("shiki")>()), codeToHtml }));
+vi.mock("shiki", async (orig) => ({ ...(await orig<typeof Shiki>()), codeToHtml }));
 
 import CodeBlock from "./code-block.svelte";
 import { VIBE_SHIKI_THEME } from "$lib/utils/shiki-theme";

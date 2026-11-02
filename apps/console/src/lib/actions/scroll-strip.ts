@@ -16,7 +16,7 @@
  * `block: "nearest"` is load-bearing: the strip sits in a page that scrolls
  * vertically, and the default (`start`) would yank that page to the strip.
  */
-export function scrollStrip(node: HTMLElement, active?: unknown) {
+export function scrollStrip(node: HTMLElement, _active?: unknown) {
   function measure() {
     const max = node.scrollWidth - node.clientWidth;
     // 1px of slack: fractional widths leave a sub-pixel "overflow" at rest.
@@ -36,8 +36,8 @@ export function scrollStrip(node: HTMLElement, active?: unknown) {
   reveal();
 
   return {
-    update(next?: unknown) {
-      active = next;
+    // The parameter is only a change signal: Svelte calls update when it changes.
+    update(_next?: unknown) {
       reveal();
     },
     destroy() {

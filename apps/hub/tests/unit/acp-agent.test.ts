@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { client, AGENT_METHODS, CLIENT_METHODS, type RequestPermissionResponse } from "@agentclientprotocol/sdk";
-import { buildAcpAgent, type AcpSessionService } from "../../src/services/acp-agent";
+import { buildAcpAgent, type AcpSessionService } from "../../src/services/acp/agent";
 
 /**
  * A stand-in for the session service. The ACP agent's job is protocol mapping;

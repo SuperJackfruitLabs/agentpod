@@ -14,6 +14,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi/stkpolicy"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
 
@@ -81,7 +82,7 @@ func (s *instStk) Env(context.Context) (stkclient.Env, error) {
 		"SSL_CERT_FILE": ca, "CURL_CA_BUNDLE": ca, "REQUESTS_CA_BUNDLE": ca, "NODE_EXTRA_CA_CERTS": ca,
 		"NODE_USE_ENV_PROXY": "1", "STK_BROKERED": "1",
 	}
-	data, _, _ := readPolicyFile(s.inst.ConfigPath)
+	data, _, _ := stkpolicy.ReadPolicyFile(s.inst.ConfigPath)
 	var doc struct {
 		Services map[string]struct {
 			EnvVar string `yaml:"env_var"`

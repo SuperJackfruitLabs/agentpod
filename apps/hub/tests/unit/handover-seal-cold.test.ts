@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import sodium from "libsodium-wrappers";
 import vector from "../../../../packages/contract/fixtures/handover-v1.json";
-import { sealHandover } from "../../src/services/handover-seal";
+import { sealHandover } from "../../src/services/forge-api/handover-seal";
 
 // Own file on purpose: bun runs each test file in a fresh module graph, so
 // sodium.ready has not resolved from another test. Do NOT await sodium.ready

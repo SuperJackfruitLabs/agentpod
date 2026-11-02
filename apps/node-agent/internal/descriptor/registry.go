@@ -65,7 +65,7 @@ func (r *Registry) DetectAll() []Station {
 				if r.pluginManagement && d.Harness() == PluginManagementHarness && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
 					station.Capabilities = append(append([]string(nil), station.Capabilities...), "plugins.manage")
 				}
-				if r.configManagement && configurable && !isCompositeRoot(station) && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
+				if r.configManagement && configurable && !IsCompositeRoot(station) && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
 					station.Capabilities = append(append([]string(nil), station.Capabilities...), "config.manage")
 				}
 				if forgeAPI {
@@ -78,7 +78,7 @@ func (r *Registry) DetectAll() []Station {
 	return all
 }
 
-// isCompositeRoot reports whether station stands for a GROUP of stations rather
+// IsCompositeRoot reports whether station stands for a GROUP of stations rather
 // than for a configuration document of its own.
 //
 // A composite root (Hermes's "hermes", OpenClaw's equivalent) carries the
@@ -92,7 +92,7 @@ func (r *Registry) DetectAll() []Station {
 // Parentless AND composite, not composite alone: Hermes and OpenClaw give their
 // PROFILE stations Kind "composite" as well, and those profiles are exactly the
 // stations whose document this feature reads. Only the root has no parent.
-func isCompositeRoot(s Station) bool {
+func IsCompositeRoot(s Station) bool {
 	return s.Kind == "composite" && s.ParentKey == nil
 }
 

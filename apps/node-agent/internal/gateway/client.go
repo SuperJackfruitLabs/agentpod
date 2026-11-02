@@ -217,6 +217,7 @@ func connectOnce(parent context.Context, cfg config.Config, h Handler, onConnect
 		extras.Prepare(ctx)
 	}
 
+	//nolint:bodyclose // websocket.Dial owns resp.Body: "you never need to close resp.Body yourself"
 	c, _, err := websocket.Dial(ctx, wsURL(cfg.Hub), &websocket.DialOptions{
 		HTTPHeader: map[string][]string{"Authorization": {"Bearer " + cfg.NodeID + ":" + cfg.NodeSecret}},
 	})

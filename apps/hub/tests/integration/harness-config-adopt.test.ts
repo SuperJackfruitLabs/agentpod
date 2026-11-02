@@ -7,8 +7,8 @@
  * adoption — a station that is adopted with one setting unwritten is better
  * than one not adopted."
  *
- * Exercises `reconcileOnAdopt` (`src/services/harness-config-apply.ts`),
- * called from `adoptStations` (`src/services/station-registry.ts`) after its
+ * Exercises `reconcileOnAdopt` (`src/services/harness-config/apply.ts`),
+ * called from `adoptStations` (`src/services/stations/registry.ts`) after its
  * rows are written. Every test below calls the real `adoptStations` — never
  * `reconcileOnAdopt` directly — so a regression in the wiring (reconcile
  * running before the station row exists, or not being called at all) shows
@@ -39,10 +39,10 @@ import { rawSql } from "../../src/db/drizzle";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { waitForNodeOnline } from "../helpers/wait";
-import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
-import { adoptStations, unadopt } from "../../src/services/station-registry";
-import { reconcileOnAdopt } from "../../src/services/harness-config-apply";
-import { declare } from "../../src/services/harness-config";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/nodes/enrollment";
+import { adoptStations, unadopt } from "../../src/services/stations/registry";
+import { reconcileOnAdopt } from "../../src/services/harness-config/apply";
+import { declare } from "../../src/services/harness-config/harness-config";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/tenant-scope";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
@@ -53,7 +53,7 @@ const TEST_USER = "test-user-cfgadopt-001";
 const TIMEOUT_SETTING = "hermes.approvals.timeout"; // policy: reconcilable
 const MODE_SETTING = "hermes.approvals.mode"; // policy: report-only, for this fixture
 
-/** Mirrors the real node's registry shape (apps/node-agent/internal/descriptor/hermes_config.go). */
+/** Mirrors the real node's registry shape (apps/node-agent/internal/descriptor/hermes/hermes_config.go). */
 const REGISTRY = [
   { id: TIMEOUT_SETTING, harness: "hermes", scope: "profile", policy: "reconcilable", restartToTakeEffect: true },
   { id: MODE_SETTING, harness: "hermes", scope: "profile", policy: "report-only", restartToTakeEffect: false },

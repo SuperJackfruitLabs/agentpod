@@ -157,7 +157,7 @@ func walkManaged(ctx context.Context, root *os.Root, visit func(string, fs.DirEn
 			for _, entry := range entries {
 				name := path.Join(relative, entry.Name())
 				if err := visit(name, entry, nil); err != nil {
-					if err == fs.SkipDir && entry.IsDir() {
+					if errors.Is(err, fs.SkipDir) && entry.IsDir() {
 						continue
 					}
 					return err

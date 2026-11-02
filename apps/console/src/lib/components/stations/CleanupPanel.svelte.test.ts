@@ -29,7 +29,7 @@ test("CleanupPanel renders Scan button initially; Apply is disabled (nothing sel
   expect(getByRole("button", { name: /scan/i })).toBeTruthy();
 
   // Click Scan → renders plan items
-  fireEvent.click(getByRole("button", { name: /scan/i }));
+  void fireEvent.click(getByRole("button", { name: /scan/i }));
 
   await waitFor(() => {
     expect(api.cleanupPlan).toHaveBeenCalledWith("station_1");
@@ -55,7 +55,7 @@ test("CleanupPanel: selecting an item enables Apply; confirming calls cleanupApp
   });
 
   // Scan
-  fireEvent.click(getByRole("button", { name: /scan/i }));
+  void fireEvent.click(getByRole("button", { name: /scan/i }));
 
   await waitFor(() => {
     expect(getByRole("checkbox", { name: /\.cache\/pip/i })).toBeTruthy();
@@ -63,7 +63,7 @@ test("CleanupPanel: selecting an item enables Apply; confirming calls cleanupApp
 
   // Select the first item
   const firstCheckbox = getByRole("checkbox", { name: /\.cache\/pip/i }) as HTMLInputElement;
-  fireEvent.click(firstCheckbox);
+  void fireEvent.click(firstCheckbox);
 
   // Apply button should now be enabled
   await waitFor(() => {
@@ -72,7 +72,7 @@ test("CleanupPanel: selecting an item enables Apply; confirming calls cleanupApp
   });
 
   // Click Apply → TypeToConfirmDialog appears
-  fireEvent.click(getByRole("button", { name: /apply/i }));
+  void fireEvent.click(getByRole("button", { name: /apply/i }));
 
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
   // The type-to-confirm keeps its words.
@@ -88,7 +88,7 @@ test("CleanupPanel: selecting an item enables Apply; confirming calls cleanupApp
 
   // Type the confirm phrase (= stationId)
   const input = within(getByRole("dialog")).getByRole("textbox");
-  fireEvent.input(input, { target: { value: "station_1" } });
+  void fireEvent.input(input, { target: { value: "station_1" } });
 
   // Confirm button unlocks — labeled with the action, never a bare "Confirm"
   await waitFor(() => {
@@ -96,7 +96,7 @@ test("CleanupPanel: selecting an item enables Apply; confirming calls cleanupApp
     expect(confirmBtn.disabled).toBe(false);
   });
 
-  fireEvent.click(getByRole("button", { name: "Delete items" }));
+  void fireEvent.click(getByRole("button", { name: "Delete items" }));
 
   await waitFor(() => {
     expect(api.cleanupApply).toHaveBeenCalledWith("station_1", ["/workspace/.cache/pip"]);
@@ -110,7 +110,7 @@ test("CleanupPanel: empty plan shows 'Nothing to clean'", async () => {
     props: { stationId: "station_2" },
   });
 
-  fireEvent.click(getByRole("button", { name: /scan/i }));
+  void fireEvent.click(getByRole("button", { name: /scan/i }));
 
   await waitFor(() => {
     expect(getByText(/nothing to clean/i)).toBeTruthy();
@@ -124,7 +124,7 @@ test("CleanupPanel: empty plan renders the Empty component (dashed placeholder, 
     props: { stationId: "station_2b" },
   });
 
-  fireEvent.click(getByRole("button", { name: /scan/i }));
+  void fireEvent.click(getByRole("button", { name: /scan/i }));
 
   await waitFor(() => {
     const title = getByText("Nothing to clean");
@@ -143,29 +143,29 @@ test("CleanupPanel: shows removedBytes feedback after successful apply", async (
   });
 
   // Scan
-  fireEvent.click(getByRole("button", { name: /scan/i }));
+  void fireEvent.click(getByRole("button", { name: /scan/i }));
   await waitFor(() => expect(getByRole("checkbox", { name: /\.cache\/pip/i })).toBeTruthy());
 
   // Select first item
-  fireEvent.click(getByRole("checkbox", { name: /\.cache\/pip/i }));
+  void fireEvent.click(getByRole("checkbox", { name: /\.cache\/pip/i }));
 
   // Apply
   await waitFor(() => {
     const btn = getByRole("button", { name: /apply/i }) as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
   });
-  fireEvent.click(getByRole("button", { name: /apply/i }));
+  void fireEvent.click(getByRole("button", { name: /apply/i }));
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
 
   // Type confirm phrase and confirm
-  fireEvent.input(within(getByRole("dialog")).getByRole("textbox"), {
+  void fireEvent.input(within(getByRole("dialog")).getByRole("textbox"), {
     target: { value: "station_3" },
   });
   await waitFor(() => {
     const btn = getByRole("button", { name: "Delete items" }) as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
   });
-  fireEvent.click(getByRole("button", { name: "Delete items" }));
+  void fireEvent.click(getByRole("button", { name: "Delete items" }));
 
   // Freed bytes feedback should appear
   await waitFor(() => {

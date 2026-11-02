@@ -7,6 +7,8 @@
  * debugging and console logs.
  */
 
+import type { StationBusyHolder } from "@agentpod/contract";
+
 export class ApiError extends Error {
   /** HTTP status, or null when the request never reached the hub. */
   readonly status: number | null;
@@ -44,7 +46,7 @@ export class ApiError extends Error {
 
 /** The hub's 424 when a Salaam station already runs someone's session (one at a time). */
 export const STATION_BUSY = "station_busy";
-export type StationBusyHolder = import("@agentpod/contract").StationBusyHolder;
+export type { StationBusyHolder };
 
 /** "14:02", or "23 Oct, 14:02" when it was not today. Local time: it is read by a person. */
 function sinceTime(iso: string, now = new Date()): string {

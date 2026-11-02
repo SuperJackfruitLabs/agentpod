@@ -41,19 +41,19 @@ const removed = {
 };
 
 async function confirm(getByRole: (r: string, o?: object) => HTMLElement, getAllByRole: (r: string, o?: object) => HTMLElement[], phrase: string) {
-  fireEvent.click(getByRole("button", { name: /remove node/i }));
+  void fireEvent.click(getByRole("button", { name: /remove node/i }));
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
-  fireEvent.input(within(getByRole("dialog")).getByRole("textbox"), { target: { value: phrase } });
+  void fireEvent.input(within(getByRole("dialog")).getByRole("textbox"), { target: { value: phrase } });
   const buttons = () => getAllByRole("button", { name: /remove node/i }) as HTMLButtonElement[];
   await waitFor(() => expect(buttons()[buttons().length - 1].disabled).toBe(false));
-  fireEvent.click(buttons()[buttons().length - 1]);
+  void fireEvent.click(buttons()[buttons().length - 1]);
 }
 
 test("the confirm stays disabled until the node's name is typed", async () => {
   const { getByRole, getAllByRole } = render(RemoveNode, { props: { node: offline } });
-  fireEvent.click(getByRole("button", { name: /remove node/i }));
+  void fireEvent.click(getByRole("button", { name: /remove node/i }));
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
-  fireEvent.input(within(getByRole("dialog")).getByRole("textbox"), { target: { value: "build-0" } });
+  void fireEvent.input(within(getByRole("dialog")).getByRole("textbox"), { target: { value: "build-0" } });
   const btns = getAllByRole("button", { name: /remove node/i }) as HTMLButtonElement[];
   expect(btns[btns.length - 1].disabled).toBe(true);
 });
@@ -76,10 +76,10 @@ test("a connected node is warned about, and removed with force", async () => {
   vi.spyOn(nav, "goto").mockResolvedValue(undefined);
   const { getByRole, getAllByRole } = render(RemoveNode, { props: { node: online } });
 
-  fireEvent.click(getByRole("button", { name: /remove node/i }));
+  void fireEvent.click(getByRole("button", { name: /remove node/i }));
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
   expect(within(getByRole("dialog")).getByText(/disconnected.*re-enrol/i)).toBeTruthy();
-  fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: /cancel/i }));
+  void fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: /cancel/i }));
   await waitFor(() => expect(getAllByRole("button", { name: /remove node/i })).toHaveLength(1));
 
   await confirm(getByRole, getAllByRole, "build-01");

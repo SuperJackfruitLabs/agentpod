@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
 )
 
 // version is the binary's build version. Overridden at link time via:
@@ -24,12 +26,12 @@ var version = "dev"
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println(helpText(version))
+		fmt.Println(fleetcli.HelpText(version))
 		os.Exit(0)
 	}
 	switch os.Args[1] {
 	case "help", "-h", "--help":
-		fmt.Println(helpText(version))
+		fmt.Println(fleetcli.HelpText(version))
 	case "version":
 		fmt.Printf("agentpod-fleet %s %s/%s\n", version, runtime.GOOS, runtime.GOARCH)
 	default:

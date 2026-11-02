@@ -1,4 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
+import type * as VkColors from "$lib/utils/vk-colors";
 import { cleanup, render, waitFor } from "@testing-library/svelte";
 
 const m = vi.hoisted(() => ({
@@ -27,7 +28,7 @@ vi.mock("monaco-editor", () => ({
 }));
 
 vi.mock("$lib/utils/vk-colors", async (orig) => ({
-  ...(await orig<typeof import("$lib/utils/vk-colors")>()),
+  ...(await orig<typeof VkColors>()),
   monacoTheme: () => ({ base: "vs", inherit: true, rules: [], colors: { tag: document.documentElement.dataset.theme } }),
 }));
 

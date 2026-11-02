@@ -1,4 +1,4 @@
-import type { SuperlibraryClient } from "../superlibrary/client";
+import type { SuperlibraryClient } from "../superlibrary";
 import type { SuperpipelineClient } from "./superpipeline";
 
 /**

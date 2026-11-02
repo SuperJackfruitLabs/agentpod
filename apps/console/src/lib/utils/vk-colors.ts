@@ -280,6 +280,7 @@ export function monacoTheme(r: TokenReader = tokenHex) {
   const s = syntaxPalette(r, p.surface);
   const fg = (c: string) => c.replace("#", "");
   return {
+    // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- svelte-check needs it: without it the literal widens to string
     base: (p.dark ? "vs-dark" : "vs") as "vs" | "vs-dark",
     inherit: true,
     rules: [

@@ -2,13 +2,13 @@ import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import type { ExecutionArtifactBundleV1 } from "../../../../../packages/contract/src/execution-evidence";
 import type { SalaamWorkCompletion } from "../../../../../packages/contract/src/salaam-work-completion";
-import type { SuperlibraryCaller } from "../superlibrary/client";
+import type { SuperlibraryCaller } from "../superlibrary";
 import {
   exportReceipt,
   reserveExecutionExport,
   runExecutionExport,
   type ExportStore,
-} from "../superlibrary/execution-export";
+} from "../superlibrary";
 import { HANDOFF_FILE, runDirectory } from "./salaam-run-scope";
 
 /** One deliverable as the handoff reports it: verified bytes, and where they were published. */

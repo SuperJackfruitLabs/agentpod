@@ -20,7 +20,7 @@ import { nodes } from "../../src/db/schema/nodes";
 import { stations } from "../../src/db/schema/stations";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { handleMcpRequest } from "../../src/mcp/server";
-import { stationForPrincipal } from "../../src/services/self-station";
+import { stationForPrincipal } from "../../src/services/stations/self-station";
 import { setSuperlibraryClientForTests } from "../../src/services/superlibrary/client";
 import { createTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";

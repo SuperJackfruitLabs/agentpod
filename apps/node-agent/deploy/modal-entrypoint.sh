@@ -23,7 +23,7 @@
 #                 and the hub rotates them before it does. Anything written
 #                 elsewhere is written in sand. Unlike the Fly image this needs
 #                 no symlink — Modal mounts the Volume AT the hardcoded path
-#                 (/workspace is fixed in internal/descriptor/opencode.go), so
+#                 (/workspace is fixed in internal/descriptor/opencode/opencode.go), so
 #                 the workspace is a real directory here and the node-agent's
 #                 filepath.WalkDir disk-usage probe reports a true size rather
 #                 than the near-zero a symlinked workspace reports on Fly.

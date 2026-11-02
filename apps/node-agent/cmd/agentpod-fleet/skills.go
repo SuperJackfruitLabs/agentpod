@@ -1,13 +1,7 @@
 package main
 
-// fleet skills — the operator CLI for the same reviewed catalog and canary
-// protocol exposed by the Console.  It deliberately prints the hub's complete
-// JSON replies: plans and receipts are review evidence, not data to summarize
-// away in a convenience client.
-
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -16,36 +10,13 @@ import (
 	"net/url"
 	"os"
 	"time"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
 )
-
-const skillsUsage = `Usage: fleet skills <verb>
-
-  fleet skills artifacts
-  fleet skills artifact delete --id ARTIFACT_ID
-  fleet skills releases
-  fleet skills cohorts
-  fleet skills upload --harness H --profile P ARCHIVE.tgz
-  fleet skills release import RELEASE.json
-  fleet skills cohort create --release ID --digest SHA256 --station ID
-  fleet skills canary plan --cohort ID --release ID --digest SHA256 --station ID
-  fleet skills canary inspect --cohort ID --release ID --digest SHA256 --station ID --operation ID
-  fleet skills canary apply --cohort ID --release ID --digest SHA256 --station ID --operation ID --plan-digest SHA256
-  fleet skills station plan --station ID --artifact ARTIFACT_ID
-  fleet skills station verify --station ID --profile PROFILE
-  fleet skills station rollback-plan --station ID --profile PROFILE
-  fleet skills station inspect --station ID --operation ID
-  fleet skills station apply --station ID --operation ID --plan-digest SHA256
-  fleet skills native plan --station ID --profile PROFILE --action activate|deactivate|rollback
-  fleet skills native inspect --station ID --operation ID
-  fleet skills native apply --station ID --operation ID --plan-digest SHA256
-  fleet skills native verify --station ID --profile PROFILE
-
-Every mutation returns the hub's reviewed record. Read that response before an
-apply command; this CLI never turns a plan into an implicit apply.`
 
 func fleetSkills(args []string) {
 	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(skillsUsage)
+		fmt.Println(fleetcli.SkillsUsage)
 		return
 	}
 	switch args[0] {
@@ -86,7 +57,7 @@ func fleetSkillNative(args []string) {
 	action := fs.String("action", "", "native placement action")
 	operation := fs.String("operation", "", "operation ID")
 	planDigest := fs.String("plan-digest", "", "reviewed plan digest")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if *station == "" || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "native commands require --station ID")
 		os.Exit(2)
@@ -98,7 +69,7 @@ func fleetSkillNative(args []string) {
 			fmt.Fprintln(os.Stderr, "plan requires --profile PROFILE --action activate|deactivate|rollback")
 			os.Exit(2)
 		}
-		fleetSkillJSON(http.MethodPost, base+"/plan", map[string]string{"requestId": randomUUID(), "profile": *profile, "action": *action})
+		fleetSkillJSON(http.MethodPost, base+"/plan", map[string]string{"requestId": fleetcli.RandomUUID(), "profile": *profile, "action": *action})
 	case "inspect":
 		if *operation == "" {
 			fmt.Fprintln(os.Stderr, "inspect requires --operation ID")
@@ -131,7 +102,7 @@ func fleetSkillStation(args []string) {
 	fs := flag.NewFlagSet("fleet skills station", flag.ExitOnError)
 	station, profile, operation, planDigest := fs.String("station", "", "station ID"), fs.String("profile", "", "profile"), fs.String("operation", "", "operation ID"), fs.String("plan-digest", "", "reviewed plan digest")
 	artifact := fs.String("artifact", "", "uploaded artifact ID")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if *station == "" || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "station commands require --station ID")
 		os.Exit(2)
@@ -146,7 +117,7 @@ func fleetSkillStation(args []string) {
 			fmt.Fprintln(os.Stderr, "plan requires --artifact ID")
 			os.Exit(2)
 		}
-		fleetSkillJSON(http.MethodPost, base+"/plan", map[string]string{"requestId": randomUUID(), "artifactId": *artifact})
+		fleetSkillJSON(http.MethodPost, base+"/plan", map[string]string{"requestId": fleetcli.RandomUUID(), "artifactId": *artifact})
 	case "verify":
 		if *profile == "" {
 			fmt.Fprintln(os.Stderr, "verify requires --profile PROFILE")
@@ -158,7 +129,7 @@ func fleetSkillStation(args []string) {
 			fmt.Fprintln(os.Stderr, "rollback-plan requires --profile PROFILE")
 			os.Exit(2)
 		}
-		fleetSkillJSON(http.MethodPost, base+"/rollback", map[string]string{"requestId": randomUUID(), "profile": *profile})
+		fleetSkillJSON(http.MethodPost, base+"/rollback", map[string]string{"requestId": fleetcli.RandomUUID(), "profile": *profile})
 	case "inspect":
 		if *operation == "" {
 			fmt.Fprintln(os.Stderr, "inspect requires --operation ID")
@@ -184,7 +155,7 @@ func fleetSkillArtifact(args []string) {
 	}
 	fs := flag.NewFlagSet("fleet skills artifact delete", flag.ExitOnError)
 	id := fs.String("id", "", "artifact ID")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if *id == "" || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: fleet skills artifact delete --id ARTIFACT_ID")
 		os.Exit(2)
@@ -196,7 +167,7 @@ func fleetSkillUpload(args []string) {
 	fs := flag.NewFlagSet("fleet skills upload", flag.ExitOnError)
 	harness := fs.String("harness", "", "target harness")
 	profile := fs.String("profile", "", "skill profile")
-	fs.Parse(args)
+	_ = fs.Parse(args) // the FlagSet reports a bad flag itself
 	if *harness == "" || *profile == "" || fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: fleet skills upload --harness H --profile P ARCHIVE.tgz")
 		os.Exit(2)
@@ -218,6 +189,7 @@ type fleetReleaseRecord struct {
 		ArchiveSHA256 string `json:"archive_sha256"`
 	} `json:"artifacts"`
 }
+
 type fleetArtifact struct {
 	ID            string `json:"id"`
 	Harness       string `json:"harness"`
@@ -276,7 +248,7 @@ func fleetSkillCohort(args []string) {
 	}
 	fs := flag.NewFlagSet("fleet skills cohort create", flag.ExitOnError)
 	release, digest, station := fs.String("release", "", "release ID"), fs.String("digest", "", "release digest"), fs.String("station", "", "canary station ID")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if *release == "" || *digest == "" || *station == "" || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: fleet skills cohort create --release ID --digest SHA256 --station ID")
 		os.Exit(2)
@@ -291,7 +263,7 @@ func fleetSkillCanary(args []string) {
 	}
 	fs := flag.NewFlagSet("fleet skills canary", flag.ExitOnError)
 	cohort, release, digest, station, operation, planDigest := fs.String("cohort", "", "cohort ID"), fs.String("release", "", "release ID"), fs.String("digest", "", "release digest"), fs.String("station", "", "station ID"), fs.String("operation", "", "operation ID"), fs.String("plan-digest", "", "reviewed plan digest")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if *cohort == "" || *release == "" || *digest == "" || *station == "" || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "canary requires --cohort, --release, --digest and --station")
 		os.Exit(2)
@@ -299,7 +271,7 @@ func fleetSkillCanary(args []string) {
 	base := "/api/skills/catalog/cohorts/" + url.PathEscape(*cohort) + "/canary"
 	switch args[0] {
 	case "plan":
-		fleetSkillJSON(http.MethodPost, base+"/plan", map[string]any{"releaseId": *release, "recordDigest": *digest, "stationId": *station, "requestId": randomHex32()})
+		fleetSkillJSON(http.MethodPost, base+"/plan", map[string]any{"releaseId": *release, "recordDigest": *digest, "stationId": *station, "requestId": fleetcli.RandomHex32()})
 	case "inspect", "apply":
 		if *operation == "" {
 			fmt.Fprintln(os.Stderr, "canary inspect/apply requires --operation")
@@ -320,24 +292,6 @@ func fleetSkillCanary(args []string) {
 	}
 }
 
-func randomHex32() string {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		panic(err)
-	}
-	return fmt.Sprintf("%x", bytes)
-}
-
-func randomUUID() string {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		panic(err)
-	}
-	bytes[6] = (bytes[6] & 0x0f) | 0x40
-	bytes[8] = (bytes[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", bytes[:4], bytes[4:6], bytes[6:8], bytes[8:10], bytes[10:])
-}
-
 func fleetSkillJSON(method, path string, payload any) {
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -345,9 +299,11 @@ func fleetSkillJSON(method, path string, payload any) {
 	}
 	fleetSkillRequest(method, path, bytes.NewReader(b), "application/json")
 }
+
 func fleetSkillRequest(method, path string, body io.Reader, contentType string) {
 	fmt.Println(string(fleetSkillRequestBytes(method, path, body, contentType)))
 }
+
 func fleetSkillRequestBytes(method, path string, body io.Reader, contentType string) []byte {
 	return fleetRequestBytes(method, path, body, contentType, 75*time.Second)
 }

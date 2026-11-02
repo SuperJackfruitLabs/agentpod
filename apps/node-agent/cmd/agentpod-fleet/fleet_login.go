@@ -1,5 +1,23 @@
 package main
 
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"runtime"
+	"strings"
+	"time"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcred"
+)
+
 // `fleet login` — authorization code with PKCE, against the door agentpod#406 built.
 //
 // No new credential type and no new issuer. The CLI is an OAuth **public client**: it holds no
@@ -16,24 +34,6 @@ package main
 //  3. the hub redirects back with a one-time code.
 //  4. exchange code + verifier for a token, over HTTP from this process — never in the browser,
 //     so the token never enters a URL, history, or a Referer.
-
-import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"net"
-	"net/http"
-	"net/url"
-	"os"
-	"os/exec"
-	"runtime"
-	"strings"
-	"time"
-
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcred"
-)
 
 // clientID is this CLI's entry in the hub's registry. A hub that has not opted in refuses every
 // authorize, which is the correct posture for a deployment that never asked for this door.
@@ -57,23 +57,9 @@ func loginTimeout() time.Duration {
 	return defaultLoginTimeout
 }
 
-func randomURLSafe(n int) (string, error) {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-type loginResult struct {
-	code  string
-	state string
-	err   error
-}
-
 func fleetLogin(args []string) {
 	if helpRequested(args) {
-		fmt.Println(helpText(version))
+		fmt.Println(fleetcli.HelpText(version))
 		return
 	}
 	hub := hubBase()
@@ -100,7 +86,7 @@ func fleetLogin(args []string) {
 	defer ln.Close()
 	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", ln.Addr().(*net.TCPAddr).Port)
 
-	verifier, err := randomURLSafe(48)
+	verifier, err := fleetcli.RandomURLSafe(48)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -108,13 +94,13 @@ func fleetLogin(args []string) {
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 
-	state, err := randomURLSafe(24)
+	state, err := fleetcli.RandomURLSafe(24)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	results := make(chan loginResult, 1)
+	results := make(chan fleetcli.LoginResult, 1)
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/callback" {
 			http.NotFound(w, r)
@@ -124,12 +110,12 @@ func fleetLogin(args []string) {
 		if e := q.Get("error"); e != "" {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			fmt.Fprintf(w, "Sign-in refused: %s\n\nYou can close this tab.", e)
-			results <- loginResult{err: fmt.Errorf("the hub refused: %s", e)}
+			results <- fleetcli.LoginResult{Err: fmt.Errorf("the hub refused: %s", e)}
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprintln(w, "Signed in. You can close this tab and return to the terminal.")
-		results <- loginResult{code: q.Get("code"), state: q.Get("state")}
+		results <- fleetcli.LoginResult{Code: q.Get("code"), State: q.Get("state")}
 	})}
 	go func() { _ = srv.Serve(ln) }()
 	defer srv.Close()
@@ -150,29 +136,29 @@ func fleetLogin(args []string) {
 	fmt.Printf("Opening %s\n\nIf a browser does not open, visit:\n  %s\n\n", hub, authorize)
 	openBrowser(authorize)
 
-	var got loginResult
+	var got fleetcli.LoginResult
 	select {
 	case got = <-results:
 	case <-time.After(loginTimeout()):
 		fmt.Fprintf(os.Stderr, "Timed out after %s waiting for the browser.\n", loginTimeout())
 		os.Exit(1)
 	}
-	if got.err != nil {
-		fmt.Fprintln(os.Stderr, got.err)
+	if got.Err != nil {
+		fmt.Fprintln(os.Stderr, got.Err)
 		os.Exit(1)
 	}
 	// Checked before the code is spent. `state` is what ties this callback to the request this
 	// process made; without it another page could feed us a code obtained for someone else.
-	if got.state != state {
+	if got.State != state {
 		fmt.Fprintln(os.Stderr, "The callback did not carry the state this login sent. Nothing was exchanged.")
 		os.Exit(1)
 	}
-	if got.code == "" {
+	if got.Code == "" {
 		fmt.Fprintln(os.Stderr, "The callback carried no code.")
 		os.Exit(1)
 	}
 
-	token, err := exchange(hub, got.code, verifier, redirectURI)
+	token, err := fleetcli.Exchange(hub, got.Code, verifier, redirectURI)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -228,56 +214,6 @@ func deviceName() string {
 	return "unnamed device"
 }
 
-// exchange trades the code and verifier for a token, from this process rather than the browser.
-func exchange(hub, code, verifier, redirectURI string) (string, error) {
-	// No client id: the exchange identifies the client by which registered redirect URI the
-	// code was issued for. Sending one anyway would be a field the endpoint ignores, which is
-	// how a reader later concludes it matters.
-	body, err := json.Marshal(map[string]string{
-		"code":          code,
-		"code_verifier": verifier,
-		"redirect_uri":  redirectURI,
-	})
-	if err != nil {
-		return "", err
-	}
-	req, err := http.NewRequest("POST", hub+"/api/auth/token/exchange", strings.NewReader(string(body)))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	// Deliberately no Origin header: the exchange refuses any request carrying one, because a
-	// browser that can reach it is a browser that can spend somebody's code.
-	res, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		return "", fmt.Errorf("could not reach %s: %w", hub, err)
-	}
-	defer res.Body.Close()
-	var out struct {
-		Token            string `json:"token"`
-		AccessToken      string `json:"access_token"`
-		Error            string `json:"error"`
-		ErrorDescription string `json:"error_description"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return "", fmt.Errorf("the hub's answer was not JSON (%d)", res.StatusCode)
-	}
-	if res.StatusCode != 200 {
-		if out.ErrorDescription != "" {
-			return "", fmt.Errorf("the hub refused the exchange: %s", out.ErrorDescription)
-		}
-		return "", fmt.Errorf("the hub refused the exchange (%d): %s", res.StatusCode, out.Error)
-	}
-	token := out.Token
-	if token == "" {
-		token = out.AccessToken
-	}
-	if token == "" {
-		return "", fmt.Errorf("the hub returned no token")
-	}
-	return token, nil
-}
-
 // openBrowser is best effort. A failure is not fatal: the URL was printed above, and a headless
 // host — a server, a container, CI — is a normal place to run this.
 //
@@ -306,7 +242,7 @@ func openBrowser(u string) {
 	default:
 		cmd = "xdg-open"
 	}
-	_ = exec.Command(cmd, append(args, u)...).Start()
+	_ = exec.CommandContext(context.Background(), cmd, append(args, u)...).Start()
 }
 
 // browsable is true only for an absolute http(s) URL with a host: `open` and `xdg-open` would

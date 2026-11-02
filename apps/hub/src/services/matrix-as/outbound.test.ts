@@ -7,7 +7,7 @@ import {
 import { _resetHubEventsForTest, hubEventKind, hubEventTurn, quietSendsInFlight } from "../push/hub-events";
 import { clearPendingPermission, matchPermissionAnswer, pendingPermissionFor } from "./permissions";
 import { setFleetSink } from "../push/fleet/sink";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   attachRoomToSession,
   detachRoom,
@@ -125,6 +125,11 @@ beforeEach(() => {
   detachRoom(SESSION);
   unsubscribed = 0;
 });
+
+// The last test's attachment is module state too, and bun runs every file in one process: left
+// attached, it is counted by the next file that reads the attachment map
+// (outbound.characterization.test.ts, wherever the filesystem lists it after this one).
+afterAll(() => detachRoom(SESSION));
 
 describe("streaming an answer into a room", () => {
   test("sends the agent's text as the agent", async () => {

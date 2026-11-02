@@ -1,0 +1,3216 @@
+/**
+ * Service Test: ACP session service (hub-owned sessions over the ACP wire)
+ *
+ * Verifies src/services/acp/sessions.ts against a fake node speaking scripted
+ * ACP (tests/helpers/acp-fake-node.ts):
+ *
+ *   1. createSession → row idle + state event persisted;
+ *      capability/ownership/online gates; open-failure marks the row ended
+ *      with an error event.
+ *   2. promptSession → user-prompt / state working / agent-update / state idle
+ *      ordering by seq; audit row (chars only, never text); subscribe fan-out.
+ *   3. ask mode parks the permission (status waiting); answerPermission
+ *      resolves it and restores working; events persisted.
+ *   4. full-auto auto-answers with the first allow option (auto flag).
+ *   5. accept-edits auto-allows edit toolCalls, parks the rest; setMode flips
+ *      enforcement mid-session.
+ *   6. cancelTurn sends session/cancel; prompt resolves cancelled → idle.
+ *   7. wrong-user access → null / empty / throws.
+ *   8. endSession closes the wire (node sees acp.close) + row ended + event.
+ *   9. node offline mid-session → waiting + grace end.
+ *  10. reconcileOnBoot marks stale rows ended and best-effort closes orphans,
+ *      each row's OWN node_session_id, never one a live session holds.
+ *  11. Slice 4b: several live sessions per station — distinct instances and
+ *      node processes, independent transcripts, independent teardown; a node
+ *      that doesn't echo the instance keeps the one-at-a-time behaviour.
+ *  12. Slice 4c (history): the first prompt titles the session (and nothing
+ *      later renames it), the 80-char cut is code-point safe through Postgres,
+ *      last_seq tracks the transcript's highest seq, and listSessions pages on
+ *      the (lastEventAt, id) keyset — including inside a same-millisecond tie
+ *      group, where a timestamp-only cursor would lose rows for good.
+ *
+ * Uses the local Docker test-postgres (localhost:5434).
+ * DATABASE_URL must be set before any src/ modules are imported.
+ */
+
+// ─── Set env vars BEFORE any src/ imports ─────────────────────────────────────
+process.env.DATABASE_URL =
+  process.env.DATABASE_URL ||
+  "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
+process.env.NODE_ENV = "test";
+
+import { test, expect, beforeAll, afterAll } from "bun:test";
+import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
+import { Hono } from "hono";
+import { asc, eq } from "drizzle-orm";
+import type { AcpEvent, DetectedStation } from "@agentpod/contract";
+
+// src/ imports — DB URL is already set above
+import { db, rawSql } from "../../db/drizzle";
+import { acpSessions, acpEvents } from "../../db/schema/acp";
+import { nodes } from "../../db/schema/nodes";
+import { createTestUser, deleteTestUsers } from "../../../tests/helpers/database";
+import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
+import { waitForNodeUnregistered } from "../../../tests/helpers/wait";
+import {
+  connectFakeAcpNode,
+  parsedNodeMsgs,
+  pollUntil,
+  type FakeAcpNodeOpts,
+} from "../../../tests/helpers/acp-fake-node";
+import { context, trace } from "@opentelemetry/api";
+import { tracer } from "../../telemetry/otel";
+import { useTestTelemetry } from "../../../tests/helpers/telemetry";
+import { mintEnrollmentToken, enrollNode } from "../nodes/enrollment";
+import { adoptStations } from "../stations/registry";
+import { gatewayRoutes } from "../../routes/gateway";
+import { websocket } from "../../ws";
+import {
+  createSession,
+  sessionHasLibraryTools,
+  listSessions,
+  getSession,
+  promptSession,
+  cancelTurn,
+  answerPermission,
+  setMode,
+  endSession,
+  subscribe,
+  reconcileOnBoot,
+  stationReadiness,
+  closeOrphanedProcesses,
+  clampSessionLimit,
+  deriveSessionTitle,
+  _setOfflineGraceMsForTest,
+  _setTurnErrorGraceMsForTest,
+  _setOpenDbTimeoutMsForTest,
+  _setHandshakeTimeoutMsForTest,
+} from "./sessions";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+useTestTelemetry();
+
+const TEST_USER = "test-user-acpsess-001";
+const OTHER_USER = "test-user-acpsess-002";
+
+test("partial output followed by max-output, refusal or cancellation is never a successful turn", async () => {
+  for (const reason of ["max_tokens", "refusal", "cancelled"]) {
+    const { server, fake, station } = await setupRig("acpsess-partial-" + reason, {
+      stationKey: "acp-partial-" + reason,
+      hangPrompt: true,
+      quietHang: true,
+      harnessSessionKey: "agent:partial:" + reason,
+    });
+    let sessionId: string | undefined;
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+      sessionId = row.id;
+      await promptSession(TEST_USER, row.id, "A fixture partial turn");
+      await pollForEvent(row.id, sawSessionKey);
+      fake.agentSays("Partial output does not establish success");
+      fake.releasePrompt(reason);
+      const { hit } = await pollForEvent(row.id, e => e.type === "error", 3000);
+      expect(hit.payload).toMatchObject({ kind: reason, source: "acp-stop-reason" });
+      const audits = await rawSql`SELECT result FROM station_audit
+        WHERE user_id=${TEST_USER} AND node_id=${station.nodeId}
+        AND station_key=${station.stationKey} AND verb='acp.prompt'
+        ORDER BY created_at DESC LIMIT 1`;
+      expect(audits[0]?.result).toBe("error");
+    } finally {
+      if (sessionId) await endSession(TEST_USER, sessionId, "cleanup").catch(() => {});
+      fake.close();
+      server.stop(true);
+    }
+  }
+}, 20000);
+
+// ─── Minimal test app ─────────────────────────────────────────────────────────
+
+const testApp = new Hono().route("/public/nodes", gatewayRoutes);
+
+// ─── Setup & Teardown ─────────────────────────────────────────────────────────
+
+beforeAll(async () => {
+  await ensurePgMigrations();
+  await createTestUser({
+    id: TEST_USER,
+    email: "acpsess-test@example.com",
+    name: "ACP Session Test User",
+  });
+  await createTestUser({
+    id: OTHER_USER,
+    email: "acpsess-other@example.com",
+    name: "ACP Session Other User",
+  });
+});
+
+afterAll(async () => {
+  try {
+    await rawSql`DELETE FROM acp_sessions      WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
+    await rawSql`DELETE FROM station_audit     WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
+    await rawSql`DELETE FROM stations          WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
+    await rawSql`DELETE FROM nodes             WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
+    await rawSql`DELETE FROM enrollment_tokens WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
+    await deleteTestUsers([TEST_USER, OTHER_USER]);
+  } catch {
+    // Ignore cleanup errors
+  }
+});
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function enrollTestNode(hostname: string) {
+  const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
+  return enrollNode(token, {
+    hostname,
+    os: "linux",
+    arch: "amd64",
+    cpuCount: 2,
+  });
+}
+
+/** Boot a gateway server + fake ACP node + adopted station for TEST_USER. */
+async function setupRig(hostname: string, opts: FakeAcpNodeOpts = {}) {
+  const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+  const { nodeId, nodeSecret } = await enrollTestNode(hostname);
+  const fake = await connectFakeAcpNode(server.port!, nodeId, nodeSecret, opts);
+  const stationKey = opts.stationKey ?? "acp-sess-station";
+  const detected: DetectedStation[] = [
+    {
+      key: stationKey,
+      harness: "opencode",
+      kind: "leaf",
+      displayName: "ACP Session Test",
+      parentKey: null,
+      workspacePath: opts.workspacePath ?? "/workspace/acptest",
+      capabilities: ["health", "acp"],
+      matrixId: null,
+      adopted: false,
+    },
+  ];
+  const [station] = await adoptStations(TEST_USER, nodeId, [stationKey], detected);
+  if (!station) throw new Error("station adoption failed");
+  return { server, nodeId, fake, station };
+}
+
+async function eventsFor(sessionId: string) {
+  return db
+    .select()
+    .from(acpEvents)
+    .where(eq(acpEvents.sessionId, sessionId))
+    .orderBy(asc(acpEvents.seq));
+}
+
+/** The shape both persisted rows and fanned-out events share. */
+type EventLike = { seq: number; type: string; payload?: unknown };
+
+async function pollForEvent(
+  sessionId: string,
+  match: (e: EventLike) => boolean,
+  timeoutMs = 8000
+) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const evts = await eventsFor(sessionId);
+    const hit = evts.find(match);
+    if (hit) return { hit, all: evts };
+    if (Date.now() > deadline) {
+      throw new Error(
+        `event not found; have: ${JSON.stringify(evts.map((e) => [e.seq, e.type, e.payload]))}`
+      );
+    }
+    await new Promise((r) => setTimeout(r, 40));
+  }
+}
+
+/**
+ * `acp_sessions.last_seq`, once it has caught up with `acp_events`.
+ *
+ * `persistEvent` writes the event row and THEN the session row, as two
+ * statements — deliberately, and in that order. `last_seq` is a **summary**,
+ * not a resume cursor: `listSessions` sizes a session's transcript from it and
+ * the console renders "12 events" out of it, while a reattaching client resumes
+ * from the highest seq it has actually received (`subscribe {sinceSeq}`), and
+ * the WS's `replay-done` reports what it really replayed. So a `last_seq` that
+ * lagged the transcript is right a few milliseconds later, and one that ran
+ * AHEAD would name a seq no reader can fetch. Lagging is the safe direction and
+ * the write order is what guarantees it.
+ *
+ * Which makes sampling both sources at one instant a race — `pollForEvent`
+ * returns the moment the event row is visible, and the row update is a separate
+ * statement still in flight. This waits for the convergence the assertion
+ * actually means.
+ *
+ * The row is read BEFORE the events so that the unsafe direction can never be
+ * mistaken for a sampling artefact: an event landing between the two reads can
+ * only make the comparison more forgiving, so `last_seq > maxSeq` is a real
+ * inversion whenever it is seen. That is opportunistic, not a guarantee — this
+ * looks once the turn has settled, by which time an inverted write order would
+ * usually have converged again — but it costs nothing and names the fault
+ * precisely instead of timing out.
+ */
+async function lastSeqCaughtUp(
+  sessionId: string,
+  timeoutMs = 4000
+): Promise<{ lastSeq: number; maxSeq: number }> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const lastSeq = (await getSession(TEST_USER, sessionId))?.lastSeq ?? 0;
+    const maxSeq = Math.max(...(await eventsFor(sessionId)).map((e) => e.seq));
+    if (lastSeq > maxSeq) {
+      throw new Error(
+        `acp_sessions.last_seq (${lastSeq}) is AHEAD of the highest persisted event (${maxSeq}) — a summary pointing at a seq nobody can read`
+      );
+    }
+    if (lastSeq === maxSeq) return { lastSeq, maxSeq };
+    if (Date.now() > deadline) {
+      throw new Error(
+        `acp_sessions.last_seq stalled at ${lastSeq}; the transcript reached ${maxSeq}`
+      );
+    }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
+const stateWith =
+  (status: string) => (e: { type: string; payload?: unknown }) =>
+    e.type === "state" && (e.payload as { status?: string }).status === status;
+
+/** The node process id recorded on a session row. */
+async function nodeSessionIdOf(sessionId: string): Promise<string | null> {
+  const rows = await db
+    .select()
+    .from(acpSessions)
+    .where(eq(acpSessions.id, sessionId));
+  return rows[0]?.nodeSessionId ?? null;
+}
+
+/** acp.open requests the node received, in order. */
+function opensSeenBy(fake: { nodeMsgs: string[] }) {
+  return parsedNodeMsgs(fake.nodeMsgs).filter(
+    (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.open"
+  ) as Array<{ params?: { instance?: string; key?: string } }>;
+}
+
+/** acp.close requests the node received, in order of sessionId. */
+function closesSeenBy(fake: { nodeMsgs: string[] }): string[] {
+  return parsedNodeMsgs(fake.nodeMsgs)
+    .filter(
+      (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.close"
+    )
+    .map(
+      (m) => (m as { params?: { sessionId?: string } }).params?.sessionId ?? ""
+    );
+}
+
+const promptTexts = (evts: Array<{ type: string; payload: unknown }>) =>
+  evts
+    .filter((e) => e.type === "user-prompt")
+    .map((e) => (e.payload as { text: string }).text);
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+test(
+  "createSession: row idle + state event; endSession closes its own wire (node sees acp.close) + row ended + event",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-create-host");
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+
+      expect(row.stationId).toBe(station.id);
+      expect(row.userId).toBe(TEST_USER);
+      expect(row.mode).toBe("ask");
+      expect(row.status).toBe("idle");
+      expect(row.endedReason).toBeNull();
+
+      // state event {status:"idle"} persisted with seq 1.
+      const evts = await eventsFor(row.id);
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.seq).toBe(1);
+      expect(evts[0]!.type).toBe("state");
+      expect((evts[0]!.payload as { status: string }).status).toBe("idle");
+
+      // A second live session is allowed on a node that echoes the instance
+      // (independence is covered by the multi-session test below).
+      const sibling = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      expect(sibling.id).not.toBe(row.id);
+      expect(sibling.status).toBe("idle");
+      await endSession(TEST_USER, sibling.id, "cleanup");
+
+      // getSession / listSessions surface the row.
+      const fetched = await getSession(TEST_USER, row.id);
+      expect(fetched?.id).toBe(row.id);
+      const listed = await listSessions(TEST_USER, station.id);
+      expect(listed.map((s) => s.id)).toContain(row.id);
+
+      // endSession → node sees acp.close for THIS session's process id, row
+      // ended, state ended event.
+      await endSession(TEST_USER, row.id, "user closed");
+      const closeReq = await pollUntil(() =>
+        parsedNodeMsgs(fake.nodeMsgs).find(
+          (m) =>
+            m.type === "req" &&
+            (m as { verb?: string }).verb === "acp.close" &&
+            (m as { params?: { sessionId?: string } }).params?.sessionId ===
+              "acp-proc-1"
+        )
+      );
+      expect(closeReq).toBeTruthy();
+
+      const ended = await getSession(TEST_USER, row.id);
+      expect(ended?.status).toBe("ended");
+      expect(ended?.endedReason).toBe("user closed");
+      await pollForEvent(row.id, stateWith("ended"));
+
+      // A new session can start once the previous one ended.
+      const row2 = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+      expect(row2.status).toBe("idle");
+      await endSession(TEST_USER, row2.id, "cleanup");
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "createSession gates: missing station, missing acp capability, offline node, open failure marks row ended + error event",
+  async () => {
+    const { server, nodeId, fake, station } = await setupRig(
+      "acpsess-gates-host",
+      { stationKey: "acp-gates-station", failOpen: "harness not found" }
+    );
+    try {
+      // Unknown station.
+      await expect(
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: "station_nope", userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow();
+
+      // Another workspace (W4): a station is the workspace's, so the same id
+      // asked for in another tenant is not found.
+      await expect(
+        createSession({ tenantId: "fleet_99999999999999999999", stationId: station.id, userId: OTHER_USER, mode: "ask" })
+      ).rejects.toThrow("Station not found.");
+
+      // Station without the acp capability.
+      const [noAcp] = await adoptStations(TEST_USER, nodeId, ["no-acp-station"], [
+        {
+          key: "no-acp-station",
+          harness: "hermes",
+          kind: "leaf",
+          displayName: "No ACP",
+          parentKey: null,
+          workspacePath: null,
+          capabilities: ["health"],
+          matrixId: null,
+        },
+      ]);
+      await expect(
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: noAcp!.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow();
+
+      // acp.open failure → throws AND leaves the row ended with an error event.
+      await expect(
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow();
+      const rows = await listSessions(TEST_USER, station.id);
+      expect(rows.length).toBe(1);
+      expect(rows[0]!.status).toBe("ended");
+      expect(rows[0]!.endedReason).toContain("Couldn't start the agent process");
+      const evts = await eventsFor(rows[0]!.id);
+      expect(evts.some((e) => e.type === "error")).toBe(true);
+
+      // The failure exit cleaned the live maps: a retry hits the open failure
+      // again — NOT the single-session guard (which would wedge the station).
+      await expect(
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow("Couldn't start the agent process");
+
+      // Offline node.
+      fake.close();
+      await new Promise((r) => setTimeout(r, 200));
+      await expect(
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow();
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "handshake timeout: an agent that spawns but never responds → createSession rejects, wire closed, station not wedged (maps drained)",
+  async () => {
+    _setHandshakeTimeoutMsForTest(300);
+    const { server, fake, station } = await setupRig("acpsess-hshake-host", {
+      stationKey: "acp-hshake-station",
+      hangHandshake: "initialize",
+    });
+    try {
+      // Wedged on initialize → deadline fires with the standard copy.
+      await expect(
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow("Couldn't start the agent process");
+
+      // The spawned process is torn down: node saw the best-effort acp.close.
+      await pollUntil(() =>
+        parsedNodeMsgs(fake.nodeMsgs).find(
+          (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.close"
+        )
+      );
+
+      // Row ended with the timeout copy + error event.
+      const rows = await listSessions(TEST_USER, station.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.status).toBe("ended");
+      expect(rows[0]!.endedReason).toContain("handshake timed out");
+      const evts = await eventsFor(rows[0]!.id);
+      expect(evts.some((e) => e.type === "error")).toBe(true);
+
+      // Wedged on session/new times out the same way.
+      fake.opts.hangHandshake = "session/new";
+      await expect(
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow("Couldn't start the agent process");
+
+      // Maps drained: with a healthy agent the station accepts a fresh
+      // session — no "active session already exists" 409-lock.
+      fake.opts.hangHandshake = undefined;
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      expect(row.status).toBe("idle");
+
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      _setHandshakeTimeoutMsForTest(30_000);
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "promptSession: user-prompt → working → agent-update → idle ordering by seq; audit row records chars, never text; subscribe fan-out",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-prompt-host", {
+      stationKey: "acp-prompt-station",
+    });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+
+      const liveEvents: AcpEvent[] = [];
+      const unsub = subscribe(row.id, (e) => liveEvents.push(e));
+
+      await promptSession(TEST_USER, row.id, "please do the thing");
+
+      // Turn ends back at idle (skip seq 1 = the create-time idle event).
+      const { all } = await pollForEvent(
+        row.id,
+        (e) => stateWith("idle")(e) && e.seq > 1,
+        8000
+      );
+
+      // Ordering by seq: user-prompt < state working < agent-update < final idle.
+      const types = all.map((e) => e.type);
+      const promptIdx = types.indexOf("user-prompt");
+      const workingIdx = all.findIndex(stateWith("working"));
+      const updateIdx = types.indexOf("agent-update");
+      const idleIdx = all.findIndex(
+        (e, i) => i > promptIdx && stateWith("idle")(e)
+      );
+      expect(promptIdx).toBeGreaterThan(-1);
+      expect(workingIdx).toBeGreaterThan(promptIdx);
+      expect(updateIdx).toBeGreaterThan(workingIdx);
+      expect(idleIdx).toBeGreaterThan(updateIdx);
+
+      // seqs strictly increasing and gapless from 1.
+      expect(all.map((e) => e.seq)).toEqual(all.map((_, i) => i + 1));
+
+      // user-prompt payload carries the text (transcript, not audit).
+      expect(
+        (all[promptIdx]!.payload as { text: string }).text
+      ).toBe("please do the thing");
+
+      // agent-update carries the raw SDK update payload.
+      const update = all[updateIdx]!.payload as {
+        sessionUpdate: string;
+        content: { type: string; text: string };
+      };
+      expect(update.sessionUpdate).toBe("agent_message_chunk");
+      expect(update.content.text).toBe("Working on it");
+
+      // Session row is idle again. Poll rather than read once: the idle state
+      // event is persisted before the row update settles, so a bare read races
+      // the transition on a loaded CI runner (observed failing "working").
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "idle";
+      });
+      const after = await getSession(TEST_USER, row.id);
+      expect(after?.status).toBe("idle");
+
+      // Subscribe fan-out delivered the same events (at least prompt→idle).
+      await pollUntil(() => liveEvents.some((e) => stateWith("idle")(e)));
+      expect(liveEvents.some((e) => e.type === "user-prompt")).toBe(true);
+      expect(liveEvents.some((e) => e.type === "agent-update")).toBe(true);
+      unsub();
+
+      // Audit row: verb acp.prompt, chars only — never the prompt text.
+      const audits = await rawSql`
+        SELECT verb, params_summary FROM station_audit
+        WHERE user_id = ${TEST_USER} AND node_id = ${station.nodeId} AND station_key = ${station.stationKey} AND verb = 'acp.prompt'`;
+      expect(audits.length).toBeGreaterThan(0);
+      const summary = audits[0]!.params_summary as Record<string, unknown>;
+      expect(summary.chars).toBe("please do the thing".length);
+      expect(JSON.stringify(summary)).not.toContain("please do the thing");
+
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test("promptSession persists an ACP rejection before returning the session to idle", async () => {
+  const { server, fake, station } = await setupRig("acpsess-prompt-error", {
+    stationKey: "acp-prompt-error-station",
+    failPrompt: "Provider quota exhausted",
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const liveEvents: AcpEvent[] = [];
+    const unsub = subscribe(row.id, (event) => liveEvents.push(event));
+
+    await promptSession(TEST_USER, row.id, "hello");
+    await pollForEvent(
+      row.id,
+      (event) => event.type === "error" && (event.payload as { message?: string }).message === "Provider quota exhausted",
+      8_000,
+    );
+    const { all } = await pollForEvent(row.id, stateWith("idle"));
+    const errorIndex = all.findIndex((event) => event.type === "error");
+    const idleIndex = all.findIndex((event, index) => index > errorIndex && stateWith("idle")(event));
+    expect(errorIndex).toBeGreaterThan(-1);
+    expect(idleIndex).toBeGreaterThan(errorIndex);
+    await pollUntil(() => liveEvents.some((event) => event.type === "error"));
+
+    const audits = await rawSql`
+      SELECT result, error FROM station_audit
+      WHERE user_id = ${TEST_USER} AND verb = 'acp.prompt'
+      ORDER BY created_at DESC LIMIT 1`;
+    expect(audits[0]!.result).toBe("error");
+    expect(audits[0]!.error).toContain("Provider quota exhausted");
+    unsub();
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("promptSession keeps the words a harness put in the error's data (Codex quota)", async () => {
+  // codex-acp rejects a quota failure with message "Internal error" and the
+  // provider's sentence in data. The room used to show "Internal error".
+  const { server, fake, station } = await setupRig("acpsess-prompt-error-data", {
+    stationKey: "acp-prompt-error-data-station",
+    failPrompt: "Internal error",
+    failPromptCode: -32603,
+    failPromptData: {
+      message: "You've hit your usage limit. Upgrade to Pro or try again later.",
+      codexErrorInfo: "usageLimitExceeded",
+    },
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { hit } = await pollForEvent(row.id, (event) => event.type === "error", 8_000);
+    expect(hit.payload).toMatchObject({
+      message: "You've hit your usage limit. Upgrade to Pro or try again later.",
+      kind: "quota",
+      harness: "opencode",
+      retryable: false,
+      source: "acp-rejection",
+    });
+
+    const audits = await rawSql`
+      SELECT error FROM station_audit
+      WHERE user_id = ${TEST_USER} AND verb = 'acp.prompt'
+      ORDER BY created_at DESC LIMIT 1`;
+    expect(audits[0]!.error).toContain("usage limit");
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+});
+
+/**
+ * A rejection that said nothing, and the node knows why.
+ *
+ * ashram, 2026-10-03: an OpenClaw agent restarted the gateway hosting its own session.
+ * The bridge stayed up holding a dead socket and rejected three prompts with a bare
+ * "Internal error". `pgrep` said the gateway was running the whole time, so nothing in
+ * the hub could tell — and the person was shown the generic three times.
+ */
+test("a rejection that said nothing, with the gateway unreachable, names the gateway", async () => {
+  const { server, fake, station } = await setupRig("acpsess-transport-down", {
+    stationKey: "acp-transport-down-station",
+    failPrompt: "Internal error",
+    failPromptCode: -32603,
+    transport: { supported: true, reachable: false, detail: "connect ECONNREFUSED 127.0.0.1:18789" },
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { hit } = await pollForEvent(row.id, (event) => event.type === "error", 8_000);
+
+    expect(hit.payload).toMatchObject({
+      kind: "harness_disconnected",
+      source: "hub",
+      retryable: true,
+    });
+    const message = (hit.payload as { message: string }).message;
+    expect(message).not.toBe("Internal error");
+    expect(message.toLowerCase()).toContain("gateway");
+    // The one thing a person cannot find out for themselves from a failed turn.
+    expect(message.toLowerCase()).toContain("conversation");
+
+    // And the session is still usable, not torn down.
+    await pollForEvent(row.id, stateWith("idle"), 8_000);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+}, 20_000);
+
+test("a rejection that said nothing, with the gateway reachable, keeps the harness's own error", async () => {
+  // The asymmetry that matters: telling somebody their gateway is down when it is not
+  // sends them to fix the wrong thing. Unhelpful beats misleading.
+  const { server, fake, station } = await setupRig("acpsess-transport-up", {
+    stationKey: "acp-transport-up-station",
+    failPrompt: "Internal error",
+    failPromptCode: -32603,
+    transport: { supported: true, reachable: true },
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { hit } = await pollForEvent(row.id, (event) => event.type === "error", 8_000);
+
+    expect(hit.payload).toMatchObject({ message: "Internal error", kind: "unknown", source: "acp-rejection" });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+}, 20_000);
+
+test("a node that does not know the transport verb keeps the harness's own error", async () => {
+  // Silence is not a no. `broker.request` never rejects, so an older node's
+  // non-answer arrives as a failed result — which must read as unknown.
+  const { server, fake, station } = await setupRig("acpsess-transport-unknown", {
+    stationKey: "acp-transport-unknown-station",
+    failPrompt: "Internal error",
+    failPromptCode: -32603,
+    // `transport` deliberately absent: the fake refuses the verb, as an old node does.
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { hit } = await pollForEvent(row.id, (event) => event.type === "error", 8_000);
+
+    expect(hit.payload).toMatchObject({ message: "Internal error", kind: "unknown", source: "acp-rejection" });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+}, 20_000);
+
+/**
+ * After the gateway comes back, the session is usable again without the person
+ * starting a new one.
+ *
+ * Reporting the failure well (above) still leaves somebody with a session whose bridge
+ * holds a dead socket: every later prompt fails the same way. The node spawns the bridge
+ * with a stable `--session agent:<agent>:<label>` key, which is why the transcript
+ * survives a gateway restart at all — so re-opening the process resumes the SAME
+ * conversation rather than starting a new one.
+ */
+test("a disconnected harness is re-attached, and the next prompt works", async () => {
+  const { server, fake, station } = await setupRig("acpsess-reattach", {
+    stationKey: "acp-reattach-station",
+    failPrompt: "Internal error",
+    failPromptCode: -32603,
+    transport: { supported: true, reachable: false, detail: "connect ECONNREFUSED" },
+  });
+  let sessionId: string | undefined;
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    sessionId = row.id;
+    expect(fake.processes).toHaveLength(1);
+
+    await promptSession(TEST_USER, row.id, "hello");
+    await pollForEvent(
+      row.id,
+      (event) => event.type === "error" && (event.payload as { kind?: string }).kind === "harness_disconnected",
+      8_000,
+    );
+
+    // Record the settled OLD turn before letting reattachment proceed. Merely
+    // observing idle later can otherwise match this earlier process's state.
+    await pollUntil(async () => {
+      const rows = await rawSql`SELECT status FROM acp_sessions WHERE id = ${row.id}`;
+      return rows[0]?.status === "idle";
+    }, 8_000);
+    const oldSeq = Math.max(...(await eventsFor(row.id)).map(event => event.seq));
+
+    // The gateway comes back, and the harness stops failing with it.
+    fake.opts.transport = { supported: true, reachable: true };
+    fake.opts.failPrompt = undefined;
+
+    // A second agent process for the SAME session: the re-attach.
+    await pollUntil(() => fake.processes.length >= 2, 10_000);
+    expect(fake.processes[1]!.instance).toBe(fake.processes[0]!.instance);
+
+    // The handshake landing on the NEW process is what "re-attached" means — the
+    // process existing only means the node was asked to spawn one.
+    await pollUntil(
+      () => fake.processes[1]!.agentReceived.some((m) => m.method === "session/new"),
+      15_000,
+    );
+
+    // …and then that the session is actually ready to take one. The handshake
+    // completing and the row reaching `idle` are two different moments, and under a
+    // full-suite load they are far enough apart that prompting between them answers
+    // "Session is busy". Waiting on the state the caller actually depends on is the
+    // fix; widening a timeout would only make the race rarer.
+    await pollUntil(async () => {
+      const rows = await rawSql`SELECT status, node_session_id FROM acp_sessions WHERE id = ${row.id}`;
+      return rows[0]?.status === "idle" && rows[0]?.node_session_id === fake.processes[1]!.sessionId;
+    }, 15_000);
+    await pollForEvent(row.id, event => event.seq > oldSeq && stateWith("idle")(event), 15_000);
+
+    // And the session answers again, with no new session created by the caller.
+    await promptSession(TEST_USER, row.id, "are you back?");
+    await pollForEvent(row.id, (event) => event.type === "agent-update", 8_000);
+
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    if (sessionId) await endSession(TEST_USER, sessionId, "cleanup").catch(() => {});
+    fake.close();
+    server.stop(true);
+  }
+}, 30_000);
+
+test("a harness that stays unreachable is not re-attached forever", async () => {
+  // A dead gateway must not become a respawn loop: the node would be asked to spawn a
+  // process every few seconds for as long as the session row exists.
+  const { server, fake, station } = await setupRig("acpsess-reattach-bounded", {
+    stationKey: "acp-reattach-bounded-station",
+    failPrompt: "Internal error",
+    failPromptCode: -32603,
+    transport: { supported: true, reachable: false, detail: "connect ECONNREFUSED" },
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    await pollForEvent(
+      row.id,
+      (event) => event.type === "error" && (event.payload as { kind?: string }).kind === "harness_disconnected",
+      8_000,
+    );
+
+    // Counting PROBES, not processes: with the gateway still down the retry loop
+    // never opens anything, so a process count would sit at one whether the loop
+    // were bounded or endless — a test that cannot fail. Each retry asks the node
+    // first, so the probes are the attempts.
+    const probes = () =>
+      fake.nodeMsgs.filter((raw) => {
+        try {
+          return (JSON.parse(raw) as { verb?: string }).verb === "acp.transport";
+        } catch {
+          return false;
+        }
+      }).length;
+
+    // Longer than the whole budget (1s + 2s + 4s) before the first reading, or the
+    // last retry lands inside the observation window and looks like an endless loop.
+    await new Promise((r) => setTimeout(r, 9_000));
+    const settled = probes();
+    await new Promise((r) => setTimeout(r, 3_000));
+    expect(probes()).toBe(settled);
+    // One from the failed turn plus the bounded retries — never an open-ended
+    // stream of them for as long as the session row exists.
+    expect(settled).toBeLessThanOrEqual(1 + 3);
+    expect(settled).toBeGreaterThan(1);
+
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+}, 30_000);
+
+test("promptSession reports an adapter that completes without any visible update", async () => {
+  // No plugin reports here; the wait for one only slows the suite.
+  _setTurnErrorGraceMsForTest(50);
+  const { server, fake, station } = await setupRig("acpsess-silent-prompt", {
+    stationKey: "acp-silent-prompt-station",
+    silentPrompt: true,
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { hit: error } = await pollForEvent(
+      row.id,
+      (event) =>
+        event.type === "error" &&
+        (event.payload as { message?: string }).message === "The agent completed without a reply.",
+      8_000,
+    );
+    // The idle state is written just after the error; wait for it rather than
+    // assume the snapshot that found the error already holds it.
+    const { all } = await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > error.seq);
+    const errorIndex = all.findIndex((event) => event.type === "error");
+    const idleIndex = all.findIndex((event, index) => index > errorIndex && stateWith("idle")(event));
+    expect(all.some((event) => event.type === "agent-update")).toBe(false);
+    expect(idleIndex).toBeGreaterThan(errorIndex);
+    expect(all[errorIndex]!.payload).toMatchObject({
+      kind: "unknown",
+      harness: "opencode",
+      source: "acp-stop-reason",
+    });
+
+    const audits = await rawSql`
+      SELECT result, error FROM station_audit
+      WHERE user_id = ${TEST_USER} AND verb = 'acp.prompt'
+      ORDER BY created_at DESC LIMIT 1`;
+    expect(audits[0]!.result).toBe("error");
+    expect(audits[0]!.error).toBe("The agent completed without a reply.");
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test(
+  "ask mode: permission parks (status waiting), answerPermission resolves it, events persisted, agent sees selected outcome",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-ask-host", {
+      stationKey: "acp-ask-station",
+      permission: { toolKind: "execute" },
+    });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+
+      await promptSession(TEST_USER, row.id, "run a command");
+
+      // permission-request persisted; session parks at waiting.
+      const { hit: permReq } = await pollForEvent(
+        row.id,
+        (e) => e.type === "permission-request"
+      );
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "waiting";
+      });
+      const reqPayload = permReq.payload as {
+        toolCall: { toolCallId: string; kind: string };
+        options: Array<{ optionId: string }>;
+      };
+      expect(reqPayload.toolCall.kind).toBe("execute");
+      expect(reqPayload.options.map((o) => o.optionId)).toContain("allow");
+
+      // The agent has NOT yet received an outcome.
+      expect(fake.permissionOutcomes).toHaveLength(0);
+
+      // Answer → agent unblocks, turn completes, back to idle.
+      const requestSeq = (permReq as { seq: number }).seq;
+      await answerPermission(TEST_USER, row.id, requestSeq, "allow");
+
+      await pollForEvent(row.id, (e) => e.type === "permission-answer");
+      await pollUntil(() => fake.permissionOutcomes.length === 1);
+      expect(fake.permissionOutcomes[0]).toEqual({
+        outcome: "selected",
+        optionId: "allow",
+      });
+
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "idle";
+      });
+      const all = await eventsFor(row.id);
+      const answer = all.find((e) => e.type === "permission-answer")!;
+      expect((answer.payload as { requestSeq: number }).requestSeq).toBe(requestSeq);
+      expect((answer.payload as { optionId: string }).optionId).toBe("allow");
+      expect((answer.payload as { auto?: boolean }).auto).toBeFalsy();
+
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "idle";
+      });
+
+      // Answering again → no pending request.
+      await expect(
+        answerPermission(TEST_USER, row.id, requestSeq, "allow")
+      ).rejects.toThrow();
+
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "full-auto: auto-answers the first allow option; request+answer events carry the auto flag",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-auto-host", {
+      stationKey: "acp-auto-station",
+      permission: { toolKind: "execute" },
+    });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+
+      await promptSession(TEST_USER, row.id, "just do it");
+
+      await pollUntil(() => fake.permissionOutcomes.length === 1);
+      expect(fake.permissionOutcomes[0]).toEqual({
+        outcome: "selected",
+        optionId: "allow",
+      });
+
+      const { hit: answer, all } = await pollForEvent(
+        row.id,
+        (e) => e.type === "permission-answer"
+      );
+      expect((answer.payload as { auto?: boolean }).auto).toBe(true);
+      expect((answer.payload as { optionId: string }).optionId).toBe("allow");
+      expect(all.some((e) => e.type === "permission-request")).toBe(true);
+
+      // Never parked: no waiting state event.
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "idle";
+      });
+      const finalEvents = await eventsFor(row.id);
+      expect(finalEvents.some(stateWith("waiting"))).toBe(false);
+
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "accept-edits: edit toolCalls auto-allowed, others park; setMode flips enforcement mid-session",
+  async () => {
+    const permission = { toolKind: "edit" };
+    const { server, fake, station } = await setupRig("acpsess-edits-host", {
+      stationKey: "acp-edits-station",
+      permission,
+    });
+    try {
+      // Start in ask, then flip to accept-edits via setMode.
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      await setMode(TEST_USER, row.id, "accept-edits");
+      const flipped = await getSession(TEST_USER, row.id);
+      expect(flipped?.mode).toBe("accept-edits");
+
+      // Edit toolCall → auto-allowed, no parking.
+      await promptSession(TEST_USER, row.id, "edit the file");
+      await pollUntil(() => fake.permissionOutcomes.length === 1);
+      expect(fake.permissionOutcomes[0]).toEqual({
+        outcome: "selected",
+        optionId: "allow",
+      });
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "idle";
+      });
+
+      // Non-edit toolCall → parks like ask.
+      permission.toolKind = "execute";
+      await promptSession(TEST_USER, row.id, "now run a command");
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "waiting";
+      });
+      const evts = await eventsFor(row.id);
+      const parked = evts.filter((e) => e.type === "permission-request").at(-1)!;
+      await answerPermission(TEST_USER, row.id, parked.seq, "allow");
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "idle";
+      });
+
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "cancelTurn: agent receives session/cancel, hanging prompt resolves cancelled, status back to idle; prompt while working refused",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-cancel-host", {
+      stationKey: "acp-cancel-station",
+      hangPrompt: true,
+    });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+
+      await promptSession(TEST_USER, row.id, "long task");
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "working";
+      });
+
+      // A second prompt while working is refused.
+      await expect(
+        promptSession(TEST_USER, row.id, "another")
+      ).rejects.toThrow();
+
+      await cancelTurn(TEST_USER, row.id);
+
+      // Agent saw the cancel notification.
+      await pollUntil(() =>
+        fake.agentReceived.find((m) => m.method === "session/cancel")
+      );
+
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "idle";
+      });
+
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "wrong-user access: getSession null, listSessions empty, prompt/cancel/end/setMode throw",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-authz-host", {
+      stationKey: "acp-authz-station",
+    });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+
+      expect(await getSession(OTHER_USER, row.id)).toBeNull();
+      expect(await listSessions(OTHER_USER, station.id)).toEqual([]);
+      await expect(promptSession(OTHER_USER, row.id, "hi")).rejects.toThrow();
+      await expect(cancelTurn(OTHER_USER, row.id)).rejects.toThrow();
+      await expect(setMode(OTHER_USER, row.id, "full-auto")).rejects.toThrow();
+      await expect(endSession(OTHER_USER, row.id, "nope")).rejects.toThrow();
+
+      // Still intact for the owner.
+      const mine = await getSession(TEST_USER, row.id);
+      expect(mine?.status).toBe("idle");
+
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "stale-turn epoch: a cancelled turn's late completion cannot clobber the next turn's status",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-epoch-host", {
+      stationKey: "acp-epoch-station",
+      hangPrompt: true,
+      ignoreCancel: true, // prompts stay pending until releasePrompt()
+    });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+
+      // Turn #1 hangs; cancel it (the fake ignores the cancel, so the SDK
+      // request for turn #1 stays pending).
+      await promptSession(TEST_USER, row.id, "task one");
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "working";
+      });
+      await cancelTurn(TEST_USER, row.id);
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "idle";
+      });
+
+      // Turn #2 starts. Wait for its "working" state EVENT, not just the row:
+      // the row update and the event insert land in separate statements, so a
+      // poll on the row can win the race and `before` would miss an event that
+      // shows up a beat later — the count below then reads 8 instead of 7. That
+      // flaked on CI (run 31370830538) before this poll watched the events.
+      await promptSession(TEST_USER, row.id, "task two");
+      await pollUntil(async () => {
+        const working = (await eventsFor(row.id)).filter(
+          (e) =>
+            e.type === "state" &&
+            (e.payload as { status?: string } | null)?.status === "working"
+        );
+        return working.length === 2; // turn #1's and turn #2's
+      });
+      // Count only STATE events. A stale completion's symptom is a spurious
+      // `state` transition, and turn #2 is legitimately live — it may emit its
+      // own agent-updates inside the window below, so counting every event
+      // makes this assertion a race (it flaked on CI twice: 7 vs 8).
+      const stateEvents = async () =>
+        (await eventsFor(row.id)).filter((e) => e.type === "state");
+      const idleCount = (evs: Awaited<ReturnType<typeof stateEvents>>) =>
+        evs.filter(
+          (e) => (e.payload as { status?: string } | null)?.status === "idle"
+        ).length;
+      const before = await stateEvents();
+      const statesBefore = before.length;
+      const idlesBefore = idleCount(before); // create's idle + turn #1's cancel
+
+      // NOW turn #1's late response arrives (oldest pending prompt).
+      fake.releasePrompt("end_turn");
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Status must stay working and no spurious state event may appear.
+      const mid = await getSession(TEST_USER, row.id);
+      expect(mid?.status).toBe("working");
+      const statesAfter = await stateEvents();
+      expect(statesAfter.length).toBe(statesBefore);
+      // …and no NEW idle in particular: that is what clobbering looks like.
+      expect(idleCount(statesAfter)).toBe(idlesBefore);
+
+      // Turn #2's own completion still lands normally.
+      fake.releasePrompt("end_turn");
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "idle";
+      });
+
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "concurrent createSession for the same station: a node that echoes instances hosts both; a legacy node lets exactly one win",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-race-host", {
+      stationKey: "acp-race-station",
+    });
+    try {
+      const results = await Promise.allSettled([
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" }),
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" }),
+      ]);
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(2);
+      const both = results.map(
+        (r) => (r as PromiseFulfilledResult<{ id: string }>).value
+      );
+      expect(new Set(both.map((s) => s.id)).size).toBe(2);
+      // Distinct agent processes on the node — never one shared process.
+      const procIds = await Promise.all(
+        both.map(async (s) => (await nodeSessionIdOf(s.id))!)
+      );
+      expect(new Set(procIds).size).toBe(2);
+
+      for (const s of both) await endSession(TEST_USER, s.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "concurrent createSession against a legacy node: exactly one wins, the loser gets the active-session error",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-race-legacy-host", {
+      stationKey: "acp-race-legacy-station",
+      legacyOpen: true,
+    });
+    try {
+      const results = await Promise.allSettled([
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" }),
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" }),
+      ]);
+      const won = results.filter((r) => r.status === "fulfilled");
+      const lost = results.filter((r) => r.status === "rejected");
+      expect(won).toHaveLength(1);
+      expect(lost).toHaveLength(1);
+      expect(String((lost[0] as PromiseRejectedResult).reason)).toContain(
+        "An active session already exists for this agent."
+      );
+
+      // Only ONE process was ever opened: the loser never reached the node.
+      expect(
+        parsedNodeMsgs(fake.nodeMsgs).filter(
+          (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.open"
+        )
+      ).toHaveLength(1);
+
+      const winner = (won[0] as PromiseFulfilledResult<{ id: string }>).value;
+      await endSession(TEST_USER, winner.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "endSession mid-parked-ask: parked permission resolves with the cancelled outcome; permission-answer {cancelled:true} persisted",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-endpark-host", {
+      stationKey: "acp-endpark-station",
+      permission: { toolKind: "execute" },
+    });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+
+      await promptSession(TEST_USER, row.id, "risky operation");
+      const { hit: permReq } = await pollForEvent(
+        row.id,
+        (e) => e.type === "permission-request"
+      );
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "waiting";
+      });
+
+      await endSession(TEST_USER, row.id, "user closed mid-permission");
+
+      // The agent received the SDK's cancelled outcome for the parked request.
+      await pollUntil(() => fake.permissionOutcomes.length === 1);
+      expect(fake.permissionOutcomes[0]).toEqual({ outcome: "cancelled" });
+
+      // permission-answer {cancelled:true} persisted with the request's seq.
+      const evts = await eventsFor(row.id);
+      const answer = evts.find((e) => e.type === "permission-answer")!;
+      expect((answer.payload as { cancelled?: boolean }).cancelled).toBe(true);
+      expect((answer.payload as { requestSeq: number }).requestSeq).toBe(
+        (permReq as { seq: number }).seq
+      );
+
+      const ended = await getSession(TEST_USER, row.id);
+      expect(ended?.status).toBe("ended");
+      expect(ended?.endedReason).toBe("user closed mid-permission");
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "boot orphan cleanup: node offline at reconcile keeps the marker; the node's next connect triggers acp.close exactly once",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("acpsess-orphan-host");
+      // Adopt the station WITHOUT connecting the node (DB-only).
+      const [station] = await adoptStations(TEST_USER, nodeId, ["acp-orphan-station"], [
+        {
+          key: "acp-orphan-station",
+          harness: "opencode",
+          kind: "leaf",
+          displayName: "Orphan Station",
+          parentKey: null,
+          workspacePath: "/workspace/orphan",
+          capabilities: ["health", "acp"],
+          matrixId: null,
+        },
+      ]);
+      const staleId = `acps_${crypto.randomUUID()}`;
+      await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
+        id: staleId,
+        stationId: station!.id,
+        userId: TEST_USER,
+        mode: "ask",
+        status: "working",
+        endedReason: null,
+        nodeSessionId: "acp-proc-orphan-9",
+        createdAt: new Date(),
+        lastEventAt: new Date(),
+      });
+
+      // Boot reconcile with the node offline: row ends, marker survives.
+      await reconcileOnBoot();
+      const afterBoot = await db
+        .select()
+        .from(acpSessions)
+        .where(eq(acpSessions.id, staleId));
+      expect(afterBoot[0]!.status).toBe("ended");
+      expect(afterBoot[0]!.nodeSessionId).toBe("acp-proc-orphan-9");
+
+      // Node connects → hook fires the best-effort acp.close…
+      const fake = await connectFakeAcpNode(server.port!, nodeId, nodeSecret, {
+        stationKey: "acp-orphan-station",
+      });
+      await pollUntil(() =>
+        parsedNodeMsgs(fake.nodeMsgs).find(
+          (m) =>
+            m.type === "req" &&
+            (m as { verb?: string }).verb === "acp.close" &&
+            (m as { params?: { sessionId?: string } }).params?.sessionId ===
+              "acp-proc-orphan-9"
+        )
+      );
+      // …and clears the marker so it's once-only.
+      await pollUntil(async () => {
+        const r = await db
+          .select()
+          .from(acpSessions)
+          .where(eq(acpSessions.id, staleId));
+        return r[0]?.nodeSessionId === null;
+      });
+
+      // Reconnect: no second acp.close for the already-cleared orphan.
+      // The old socket must be OUT of the connection manager first, or the
+      // reconnect's own "is it online yet" barrier is satisfied by the corpse
+      // of this one and fake2 gets asserted against before it has registered.
+      fake.close();
+      await waitForNodeUnregistered(nodeId);
+      const fake2 = await connectFakeAcpNode(server.port!, nodeId, nodeSecret, {
+        stationKey: "acp-orphan-station",
+      });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(
+        parsedNodeMsgs(fake2.nodeMsgs).filter(
+          (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.close"
+        )
+      ).toHaveLength(0);
+
+      fake2.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "node offline mid-session: status waiting with reason, then grace timer ends the session",
+  async () => {
+    _setOfflineGraceMsForTest(300);
+    const { server, fake, station } = await setupRig("acpsess-offline-host", {
+      stationKey: "acp-offline-station",
+    });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+
+      // Node drops: wire ends without an exit frame.
+      fake.close();
+
+      const { hit: waiting } = await pollForEvent(row.id, stateWith("waiting"));
+      expect((waiting.payload as { reason?: string }).reason).toBe("node offline");
+
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "ended";
+      });
+      const ended = await getSession(TEST_USER, row.id);
+      expect(ended?.endedReason).toBe("Couldn't reach the node.");
+      await pollForEvent(row.id, stateWith("ended"));
+
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      _setOfflineGraceMsForTest(60_000);
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "reconcileOnBoot: stale non-ended rows marked ended('hub restarted') with a state event; orphaned nodeSessionId best-effort closed on online nodes",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-boot-host", {
+      stationKey: "acp-boot-station",
+    });
+    try {
+      // A stale row as if the hub crashed mid-session.
+      const staleId = `acps_${crypto.randomUUID()}`;
+      await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
+        id: staleId,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+        status: "working",
+        endedReason: null,
+        nodeSessionId: "acp-proc-stale-42",
+        createdAt: new Date(),
+        lastEventAt: new Date(),
+      });
+      await db.insert(acpEvents).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
+        sessionId: staleId,
+        seq: 1,
+        type: "state",
+        payload: { status: "idle" },
+        createdAt: new Date(),
+      });
+
+      // A SECOND stale row on the SAME station with its own process id (two
+      // concurrent sessions before the restart) — each must be closed by id.
+      const staleId2 = `acps_${crypto.randomUUID()}`;
+      await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
+        id: staleId2,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+        status: "idle",
+        endedReason: null,
+        nodeSessionId: "acp-proc-stale-43",
+        createdAt: new Date(),
+        lastEventAt: new Date(),
+      });
+
+      // A stale row whose station is gone (transcript survives; no close possible).
+      const orphanId = `acps_${crypto.randomUUID()}`;
+      await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
+        id: orphanId,
+        stationId: "station_deleted_long_ago",
+        userId: TEST_USER,
+        mode: "ask",
+        status: "waiting",
+        endedReason: null,
+        nodeSessionId: "acp-proc-gone-7",
+        createdAt: new Date(),
+        lastEventAt: new Date(),
+      });
+
+      await reconcileOnBoot();
+
+      for (const id of [staleId, staleId2, orphanId]) {
+        const s = await getSession(TEST_USER, id);
+        expect(s?.status).toBe("ended");
+        expect(s?.endedReason).toBe("hub restarted");
+      }
+      // State event appended after the existing seq.
+      const staleEvts = await eventsFor(staleId);
+      expect(staleEvts.at(-1)!.type).toBe("state");
+      expect((staleEvts.at(-1)!.payload as { status: string }).status).toBe("ended");
+      expect(staleEvts.at(-1)!.seq).toBe(2);
+
+      // Online node got a best-effort acp.close for EACH row's own process id.
+      await pollUntil(() =>
+        closesSeenBy(fake).includes("acp-proc-stale-42") &&
+        closesSeenBy(fake).includes("acp-proc-stale-43")
+      );
+
+      // Boot-time close clears the marker (once-only); the station-less
+      // orphan keeps its marker (transcript row survives, nothing to close).
+      await pollUntil(async () => {
+        const r = await db
+          .select()
+          .from(acpSessions)
+          .where(eq(acpSessions.id, staleId));
+        return r[0]?.nodeSessionId === null;
+      });
+      await pollUntil(async () => {
+        const r = await db
+          .select()
+          .from(acpSessions)
+          .where(eq(acpSessions.id, staleId2));
+        return r[0]?.nodeSessionId === null;
+      });
+      const orphanRow = await db
+        .select()
+        .from(acpSessions)
+        .where(eq(acpSessions.id, orphanId));
+      expect(orphanRow[0]!.nodeSessionId).toBe("acp-proc-gone-7");
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+// ─── Slice 4b: several live sessions per station ───────────────────────────────
+
+test(
+  "two concurrent sessions on one station: each acp.open carries its own instance, transcripts stream independently, ending one leaves the other live",
+  async () => {
+    // exitOnClose: ending one session really kills its agent process, so
+    // "the sibling survives" is a claim about the code, not about the fake.
+    const { server, fake, station } = await setupRig("acpsess-multi-host", {
+      stationKey: "acp-multi-station",
+      exitOnClose: true,
+    });
+    try {
+      const a = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+      const b = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+      expect(a.id).not.toBe(b.id);
+      expect(a.status).toBe("idle");
+      expect(b.status).toBe("idle");
+
+      // Each open carried the hub session id as its instance — two distinct ones.
+      const opens = opensSeenBy(fake);
+      expect(opens).toHaveLength(2);
+      expect(opens.map((o) => o.params?.instance)).toEqual([a.id, b.id]);
+
+      // …and the node spawned a distinct process per session, recorded per row.
+      const procA = (await nodeSessionIdOf(a.id))!;
+      const procB = (await nodeSessionIdOf(b.id))!;
+      expect(procA).toBeTruthy();
+      expect(procB).toBeTruthy();
+      expect(procA).not.toBe(procB);
+      expect(fake.processFor(a.id)!.sessionId).toBe(procA);
+      expect(fake.processFor(b.id)!.sessionId).toBe(procB);
+
+      // A prompt in A never appears in B's transcript.
+      await promptSession(TEST_USER, a.id, "hello from A");
+      await pollForEvent(
+        a.id,
+        (e) => stateWith("idle")(e) && e.seq > 1
+      );
+      const aEvents = await eventsFor(a.id);
+      expect(promptTexts(aEvents)).toEqual(["hello from A"]);
+      expect(aEvents.some((e) => e.type === "agent-update")).toBe(true);
+
+      const bEvents = await eventsFor(b.id);
+      expect(bEvents).toHaveLength(1); // only its own create-time idle state
+      expect(promptTexts(bEvents)).toEqual([]);
+      expect(bEvents.some((e) => e.type === "agent-update")).toBe(false);
+
+      // B's own prompt runs on B's process and stays out of A's transcript.
+      await promptSession(TEST_USER, b.id, "hello from B");
+      await pollForEvent(
+        b.id,
+        (e) => stateWith("idle")(e) && e.seq > 1
+      );
+      const bAfter = await eventsFor(b.id);
+      expect(promptTexts(bAfter)).toEqual(["hello from B"]);
+      expect(bAfter.some((e) => e.type === "agent-update")).toBe(true);
+      expect(promptTexts(await eventsFor(a.id))).toEqual(["hello from A"]);
+      expect(
+        fake
+          .processFor(b.id)!
+          .agentReceived.some((m) => m.method === "session/prompt")
+      ).toBe(true);
+
+      // Ending A closes A's process only; B stays live and usable.
+      await endSession(TEST_USER, a.id, "done with A");
+      await pollUntil(() => closesSeenBy(fake).includes(procA));
+      expect(closesSeenBy(fake)).not.toContain(procB);
+      expect((await getSession(TEST_USER, a.id))?.status).toBe("ended");
+      expect((await getSession(TEST_USER, b.id))?.status).toBe("idle");
+
+      await promptSession(TEST_USER, b.id, "still alive");
+      await pollForEvent(
+        b.id,
+        (e) =>
+          e.type === "user-prompt" &&
+          (e.payload as { text: string }).text === "still alive"
+      );
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, b.id);
+        return s?.status === "idle";
+      });
+      expect(closesSeenBy(fake)).not.toContain(procB);
+
+      await endSession(TEST_USER, b.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "legacy node (no instance echo): the second createSession is refused with the pinned error before any second open, leaving no stray row, live entry or wire",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-legacy-host", {
+      stationKey: "acp-legacy-station",
+      legacyOpen: true,
+    });
+    try {
+      const a = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+      expect(a.status).toBe("idle");
+
+      await expect(
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow("An active session already exists for this agent.");
+
+      // Refused BEFORE touching the node: no second acp.open, no leaked wire.
+      expect(opensSeenBy(fake)).toHaveLength(1);
+      // …and no stray session row for the refused attempt.
+      const rows = await listSessions(TEST_USER, station.id);
+      expect(rows.map((r) => r.id)).toEqual([a.id]);
+
+      // The live session is untouched and still usable.
+      await promptSession(TEST_USER, a.id, "still mine");
+      await pollForEvent(
+        a.id,
+        (e) => stateWith("idle")(e) && e.seq > 1
+      );
+      expect(promptTexts(await eventsFor(a.id))).toEqual(["still mine"]);
+
+      // Ending it releases the station — no 409 lock.
+      await endSession(TEST_USER, a.id, "cleanup");
+      const next = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      expect(next.status).toBe("idle");
+      await endSession(TEST_USER, next.id, "cleanup");
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "a node that stops echoing the instance mid-life: the post-open layer tears the new wire down and refuses, leaving no live entry",
+  async () => {
+    // exitOnClose: closing an agent process really kills it here, so the
+    // teardown's effect on the session sharing that process is not hidden.
+    const { server, fake, station } = await setupRig("acpsess-noecho-host", {
+      stationKey: "acp-noecho-station",
+      exitOnClose: true,
+    });
+    try {
+      const a = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+      expect(a.status).toBe("idle");
+
+      // The node degrades: it still accepts acp.open but stops echoing, so the
+      // process it hands back may be the one session A is already using. Only
+      // the post-open layer can catch that.
+      fake.opts.legacyOpen = true;
+      await expect(
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow("An active session already exists for this agent.");
+
+      // The refused attempt did reach the node, and its row is ended with the
+      // pinned reason + an error event (the standard failure exit).
+      expect(opensSeenBy(fake)).toHaveLength(2);
+      const rows = await listSessions(TEST_USER, station.id);
+      const refused = rows.find((r) => r.id !== a.id)!;
+      expect(refused.status).toBe("ended");
+      expect(refused.endedReason).toBe(
+        "An active session already exists for this agent."
+      );
+      const refusedEvents = await eventsFor(refused.id);
+      expect(refusedEvents.some((e) => e.type === "error")).toBe(true);
+
+      // KNOWN RESIDUAL HAZARD, pinned rather than hidden: the node handed back
+      // A's process, so tearing the refused wire down closes it and takes A with
+      // it. This costs one session instead of bleeding two conversations into one
+      // process, and layer 1 keeps it unreachable for any node that never echoes
+      // (only a node that echoed and then stopped can get here).
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, a.id);
+        return s?.status === "ended";
+      });
+      // …and it ended from the process exit, not from anything the hub decided.
+      expect((await getSession(TEST_USER, a.id))?.endedReason).toBe("closed");
+
+      // No live entry leaked either: a fresh session starts (the node still
+      // can't echo, so one at a time).
+      const next = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      expect(next.status).toBe("idle");
+      await endSession(TEST_USER, next.id, "cleanup");
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "a queued open re-reads the station: the node going offline while it waits is refused, not dialled",
+  async () => {
+    // The first open wedges on the handshake, so the second create sits in the
+    // station's open queue long enough for the fleet to change under it.
+    _setHandshakeTimeoutMsForTest(1500);
+    const { server, fake, station } = await setupRig("acpsess-requeue-host", {
+      stationKey: "acp-requeue-station",
+      hangHandshake: "initialize",
+    });
+    try {
+      // Settle both outcomes as values so neither can become an unhandled
+      // rejection while the other is being asserted.
+      const outcome = (p: Promise<unknown>) =>
+        p.then(
+          () => "resolved",
+          (err) => String(err)
+        );
+      const first = outcome(
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
+      );
+      await new Promise((r) => setTimeout(r, 100));
+      // Passes the fail-fast gates while the node is still online, then queues.
+      const queued = outcome(
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
+      );
+      await new Promise((r) => setTimeout(r, 100));
+      fake.close();
+
+      // The wedged open fails (dropped connection or handshake deadline)…
+      expect(await first).not.toBe("resolved");
+      // …and the queued one re-read the station instead of dialling a node that
+      // is no longer there.
+      expect(await queued).toContain("Node is offline.");
+
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      _setHandshakeTimeoutMsForTest(30_000);
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "a stalled DB write inside the open phase rejects with the database copy and still drains the live map (no 409 lock on the station)",
+  async () => {
+    // The station's transcript table is locked for the duration, so the open
+    // phase's idle state-event insert BLOCKS — a real stalled query, not a mock.
+    _setHandshakeTimeoutMsForTest(2000);
+    _setOpenDbTimeoutMsForTest(300);
+    const { server, fake, station } = await setupRig("acpsess-dbstall-host", {
+      stationKey: "acp-dbstall-station",
+    });
+    let releaseLock!: () => void;
+    const lockHeld = new Promise<void>((r) => {
+      releaseLock = r;
+    });
+    let signalLocked!: () => void;
+    const locked = new Promise<void>((r) => {
+      signalLocked = r;
+    });
+    // EXCLUSIVE conflicts with the INSERT's ROW EXCLUSIVE but not with reads.
+    const lockTx = rawSql.begin(async (tx) => {
+      await tx`LOCK TABLE acp_events IN EXCLUSIVE MODE`;
+      signalLocked();
+      await lockHeld;
+    });
+    try {
+      await locked;
+
+      const attempt = createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      }).then(
+        () => "resolved",
+        (err) => String(err)
+      );
+      // Long enough for the bounded DB step to trip while the table is locked.
+      await new Promise((r) => setTimeout(r, 900));
+      releaseLock();
+      await lockTx;
+
+      // The per-step DB deadline is what fired — not the open-phase backstop.
+      expect(await attempt).toContain("the database didn't respond");
+
+      // The failure exit still ran once the DB freed up: the row is ended and
+      // nothing is left in the live map, so the station is NOT 409-locked.
+      const rows = await listSessions(TEST_USER, station.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.status).toBe("ended");
+      expect(rows[0]!.endedReason).toContain("the database didn't respond");
+
+      const next = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      expect(next.status).toBe("idle");
+
+      await endSession(TEST_USER, next.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      releaseLock();
+      _setOpenDbTimeoutMsForTest(10_000);
+      _setHandshakeTimeoutMsForTest(30_000);
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "closeOrphanedProcesses: closes each ended row's own node session id, never one a live session is holding",
+  async () => {
+    const { server, nodeId, fake, station } = await setupRig(
+      "acpsess-orphan-multi-host",
+      { stationKey: "acp-orphan-multi-station" }
+    );
+    try {
+      const live = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      const liveProc = (await nodeSessionIdOf(live.id))!;
+      expect(liveProc).toBeTruthy();
+
+      // Two orphan markers with their own process ids (two sessions that ended
+      // while the node was away) …
+      const orphanProcs = ["acp-proc-multi-a", "acp-proc-multi-b"];
+      const orphanIds: string[] = [];
+      for (const proc of orphanProcs) {
+        const id = `acps_${crypto.randomUUID()}`;
+        orphanIds.push(id);
+        await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
+          id,
+          stationId: station.id,
+          userId: TEST_USER,
+          mode: "ask",
+          status: "ended",
+          endedReason: "node went away",
+          nodeSessionId: proc,
+          createdAt: new Date(),
+          lastEventAt: new Date(),
+        });
+      }
+      // … and a poisoned marker pointing at the process the LIVE session holds.
+      const poisonedId = `acps_${crypto.randomUUID()}`;
+      await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
+        id: poisonedId,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+        status: "ended",
+        endedReason: "node went away",
+        nodeSessionId: liveProc,
+        createdAt: new Date(),
+        lastEventAt: new Date(),
+      });
+
+      await closeOrphanedProcesses(nodeId);
+
+      // Each orphan closed by its own id, markers cleared.
+      await pollUntil(() =>
+        orphanProcs.every((proc) => closesSeenBy(fake).includes(proc))
+      );
+      for (const id of orphanIds) {
+        const r = await db
+          .select()
+          .from(acpSessions)
+          .where(eq(acpSessions.id, id));
+        expect(r[0]!.nodeSessionId).toBeNull();
+      }
+
+      // The live session's process was never closed and keeps its marker.
+      expect(closesSeenBy(fake)).not.toContain(liveProc);
+      const poisoned = await db
+        .select()
+        .from(acpSessions)
+        .where(eq(acpSessions.id, poisonedId));
+      expect(poisoned[0]!.nodeSessionId).toBe(liveProc);
+      expect((await getSession(TEST_USER, live.id))?.status).toBe("idle");
+
+      await endSession(TEST_USER, live.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+// ─── Slice 4c: titles, lastSeq, paginated history ─────────────────────────────
+
+test("clampSessionLimit: defaults to 20, floors, and clamps into [1, 100]", () => {
+  expect(clampSessionLimit(undefined)).toBe(20);
+  expect(clampSessionLimit(7)).toBe(7);
+  expect(clampSessionLimit(100)).toBe(100);
+  // Out-of-range values are CLAMPED, never rejected — the route 400s only on
+  // input that isn't a number at all.
+  expect(clampSessionLimit(0)).toBe(1);
+  expect(clampSessionLimit(-5)).toBe(1);
+  expect(clampSessionLimit(500)).toBe(100);
+  expect(clampSessionLimit(2.9)).toBe(2);
+  expect(clampSessionLimit(Number.NaN)).toBe(20);
+});
+
+test(
+  "title + lastSeq: the first real prompt names the session (trimmed, 80 chars, no ellipsis), later prompts never rename it, whitespace leaves it null; lastSeq tracks the highest seq and still does after the end",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-title-host", {
+      stationKey: "acp-title-station",
+    });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+      // Fresh session: unnamed, and lastSeq is the create-time idle event.
+      expect(row.title).toBeNull();
+      expect(row.lastSeq).toBe(1);
+
+      /** Prompt, then wait for that turn to land back at idle. */
+      const promptAndSettle = async (text: string) => {
+        const before = (await eventsFor(row.id)).length;
+        await promptSession(TEST_USER, row.id, text);
+        // before+1 is the user-prompt and before+2 the `working` state, so any
+        // idle beyond before+1 is this turn's completion.
+        await pollForEvent(
+          row.id,
+          (e) => stateWith("idle")(e) && e.seq > before + 1
+        );
+      };
+
+      // A whitespace-only prompt is no title at all.
+      await promptAndSettle("   \n\t ");
+      expect((await getSession(TEST_USER, row.id))?.title).toBeNull();
+
+      // The first real prompt names it: trimmed, truncated to 80 chars, stored
+      // truncated with NO ellipsis (presentation is the console's job).
+      const long = `  ${"a".repeat(60)} ${"b".repeat(60)}  `;
+      await promptAndSettle(long);
+      const titled = await getSession(TEST_USER, row.id);
+      expect(titled?.title).toBe(long.trim().slice(0, 80));
+      expect(titled?.title).toHaveLength(80);
+      expect(titled!.title!.includes("…")).toBe(false);
+
+      // A long conversation keeps the label the user recognises.
+      await promptAndSettle("a completely different question");
+      expect((await getSession(TEST_USER, row.id))?.title).toBe(titled!.title);
+
+      // lastSeq === the highest persisted seq across prompts, agent updates and
+      // state events — once the row has caught up. See `lastSeqCaughtUp`: the
+      // event and the row are two statements, and the transcript is the one
+      // that lands first, on purpose.
+      const { lastSeq: settled, maxSeq } = await lastSeqCaughtUp(row.id);
+      expect(maxSeq).toBeGreaterThan(1);
+      expect(settled).toBe(maxSeq);
+
+      // … and it still reflects the FINAL event once the session has ended.
+      // No convergence poll here, deliberately: `finalizeEnd` awaits the ended
+      // event's own write before it resolves, so a caller that saw `endSession`
+      // return is guaranteed the row. A poll would hide that if it regressed.
+      await endSession(TEST_USER, row.id, "cleanup");
+      const ended = await getSession(TEST_USER, row.id);
+      const finalMax = Math.max(
+        ...(await eventsFor(row.id)).map((e) => e.seq)
+      );
+      expect(finalMax).toBe(maxSeq + 1); // the state-ended event
+      expect(ended?.lastSeq).toBe(finalMax);
+      expect(ended?.title).toBe(titled!.title);
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "deriveSessionTitle: the 80-char cut is code-point safe — an emoji on the boundary is kept whole or dropped whole, never left as a lone surrogate",
+  () => {
+    // A string survives a UTF-8 round trip iff it holds no lone surrogate —
+    // exactly the check postgres.js applies on the way into the DB.
+    const wellFormed = (s: string) =>
+      new TextDecoder().decode(new TextEncoder().encode(s)) === s;
+
+    expect(deriveSessionTitle("  hello  ")).toBe("hello");
+    expect(deriveSessionTitle("   \n\t ")).toBeNull();
+
+    // 80 code points whose last is astral: 81 UTF-16 code units, so a
+    // slice(0, 80) would keep the high surrogate alone and postgres would then
+    // silently swallow the emoji. Kept whole instead.
+    const exactly80 = `${"a".repeat(79)}😀`;
+    expect(Array.from(exactly80)).toHaveLength(80);
+    const kept = deriveSessionTitle(exactly80)!;
+    expect(kept).toBe(exactly80);
+    expect(Array.from(kept)).toHaveLength(80);
+    expect(wellFormed(kept)).toBe(true);
+
+    // 81 code points: the emoji is past the budget and is dropped WHOLE.
+    const past = `${"a".repeat(80)}😀`;
+    const cut = deriveSessionTitle(past)!;
+    expect(cut).toBe("a".repeat(80));
+    expect(cut.includes("\uD83D")).toBe(false); // no orphaned high surrogate
+    expect(wellFormed(cut)).toBe(true);
+
+    // An emoji sitting on the boundary of a longer prompt is kept intact and
+    // the code-point budget still holds.
+    const straddling = `${"a".repeat(79)}😀${"b".repeat(20)}`;
+    const clipped = deriveSessionTitle(straddling)!;
+    expect(clipped).toBe(exactly80);
+    expect(Array.from(clipped)).toHaveLength(80);
+    expect(wellFormed(clipped)).toBe(true);
+  }
+);
+
+test(
+  "session titles round-trip through Postgres unchanged: an emoji on the 80-char boundary is stored whole (never a lone surrogate), and one past it is dropped whole",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-title-utf8-host", {
+      stationKey: "acp-title-utf8-station",
+    });
+    const wellFormed = (s: string) =>
+      new TextDecoder().decode(new TextEncoder().encode(s)) === s;
+    try {
+      /** Title a fresh session with `text` and read back what Postgres stored. */
+      const titleFromPrompt = async (text: string) => {
+        const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+          stationId: station.id,
+          userId: TEST_USER,
+          mode: "full-auto",
+        });
+        await promptSession(TEST_USER, row.id, text);
+        const stored = await pollUntil(async () => {
+          const s = await getSession(TEST_USER, row.id);
+          return s?.title ?? false;
+        });
+        await endSession(TEST_USER, row.id, "cleanup");
+        return stored;
+      };
+
+      // Exactly 80 code points ending in an emoji (81 UTF-16 code units): the
+      // emoji is intact, not swallowed by a broken surrogate pair.
+      const onBoundary = `${"a".repeat(79)}😀`;
+      const stored = await titleFromPrompt(onBoundary);
+      expect(stored).toBe(onBoundary);
+      expect(stored.endsWith("😀")).toBe(true);
+      expect(Array.from(stored)).toHaveLength(80);
+      expect(wellFormed(stored)).toBe(true);
+
+      // One code point past the budget: dropped whole, nothing corrupt stored.
+      const pastBoundary = `${"a".repeat(80)}😀`;
+      const clipped = await titleFromPrompt(pastBoundary);
+      expect(clipped).toBe("a".repeat(80));
+      expect(wellFormed(clipped)).toBe(true);
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "listSessions pagination: limit caps and clamps; the (before, beforeId) keyset pages strictly older rows and resumes INSIDE a same-millisecond tie group without losing or repeating a session",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-page-host", {
+      stationKey: "acp-page-station",
+    });
+    try {
+      // Five ended sessions. Their lastEventAt is stamped explicitly below, so
+      // ordering is deterministic — and so the same-millisecond tie case (which
+      // wall-clock gaps would only hide) can be tested head-on.
+      const ids: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const s = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+          stationId: station.id,
+          userId: TEST_USER,
+          mode: "ask",
+        });
+        await endSession(TEST_USER, s.id, "cleanup");
+        ids.push(s.id);
+      }
+
+      const stamp = async (at: (i: number) => Date) => {
+        for (const [i, id] of ids.entries()) {
+          await db
+            .update(acpSessions)
+            .set({ lastEventAt: at(i) })
+            .where(eq(acpSessions.id, id));
+        }
+      };
+      /** Walk the whole history `limit` rows at a time with the full keyset. */
+      const walk = async (limit: number) => {
+        const seen: string[] = [];
+        let cursor: { lastEventAt: string; id: string } | null = null;
+        for (let guard = 0; guard <= ids.length; guard++) {
+          const p = await listSessions(TEST_USER, station.id, {
+            limit,
+            ...(cursor
+              ? { before: cursor.lastEventAt, beforeId: cursor.id }
+              : {}),
+          });
+          if (p.length === 0) break;
+          seen.push(...p.map((s) => s.id));
+          const last = p[p.length - 1]!;
+          cursor = { lastEventAt: last.lastEventAt, id: last.id };
+        }
+        return seen;
+      };
+
+      // ── Distinct timestamps ────────────────────────────────────────────────
+      const base = new Date("2026-08-10T00:00:00.000Z");
+      await stamp((i) => new Date(base.getTime() + i * 1000));
+      const newestFirst = [...ids].reverse();
+
+      // Default limit (20) covers all five, newest activity first.
+      expect((await listSessions(TEST_USER, station.id)).map((s) => s.id)).toEqual(
+        newestFirst
+      );
+
+      // limit caps the page.
+      const page1 = await listSessions(TEST_USER, station.id, { limit: 2 });
+      expect(page1.map((s) => s.id)).toEqual(newestFirst.slice(0, 2));
+
+      // Out-of-range limits clamp instead of throwing.
+      expect(
+        (await listSessions(TEST_USER, station.id, { limit: 500 })).map((s) => s.id)
+      ).toEqual(newestFirst);
+      expect(
+        (await listSessions(TEST_USER, station.id, { limit: 0 })).map((s) => s.id)
+      ).toEqual([newestFirst[0]!]);
+
+      // before + beforeId = the last row of page 1 → strictly older rows.
+      const cursorRow = page1[page1.length - 1]!;
+      const page2 = await listSessions(TEST_USER, station.id, {
+        limit: 2,
+        before: cursorRow.lastEventAt,
+        beforeId: cursorRow.id,
+      });
+      expect(page2.map((s) => s.id)).toEqual(newestFirst.slice(2, 4));
+      for (const s of page2) {
+        expect(new Date(s.lastEventAt).getTime()).toBeLessThan(
+          new Date(cursorRow.lastEventAt).getTime()
+        );
+      }
+      // The two pages tile the history: no duplicates, no gaps.
+      expect([...page1, ...page2].map((s) => s.id)).toEqual(
+        newestFirst.slice(0, 4)
+      );
+      // Paging the whole history two at a time reproduces it exactly.
+      expect(await walk(2)).toEqual(newestFirst);
+
+      // A console still sending `before` alone (no beforeId) keeps working while
+      // timestamps differ — the compatibility path.
+      expect(
+        (
+          await listSessions(TEST_USER, station.id, {
+            limit: 2,
+            before: cursorRow.lastEventAt,
+          })
+        ).map((s) => s.id)
+      ).toEqual(newestFirst.slice(2, 4));
+
+      // ── All five tied on ONE millisecond ──────────────────────────────────
+      await stamp(() => base);
+      // The unpaged read is the reference ordering (lastEventAt equal → id desc).
+      const tiedOrder = (await listSessions(TEST_USER, station.id)).map(
+        (s) => s.id
+      );
+      expect([...tiedOrder].sort()).toEqual([...ids].sort());
+
+      // Every session exactly once, in order: the keyset resumes inside the tie
+      // group instead of skipping past it.
+      expect(await walk(2)).toEqual(tiedOrder);
+      expect(await walk(1)).toEqual(tiedOrder);
+
+      // Why beforeId exists: the timestamp-only cursor excludes the ENTIRE tie
+      // group — those three sessions would be missing from every later page,
+      // gone from history with no error at all.
+      const tiedPage1 = await listSessions(TEST_USER, station.id, { limit: 2 });
+      const lossy = await listSessions(TEST_USER, station.id, {
+        limit: 2,
+        before: tiedPage1[tiedPage1.length - 1]!.lastEventAt,
+      });
+      expect(lossy).toHaveLength(0);
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+// ─── Readiness: can a session be opened on this station at all? ──────────────
+//
+// The bridge asks this BEFORE it claims work from a board. It exists because a
+// hub restart put a claim loop in front of node-agents that had not reconnected
+// yet: the claim succeeded, the session open threw "Node is offline.", and the
+// card sat held by a run that never ran. The probe must be exactly as strict as
+// createSession's fail-fast gates and no stricter — a healthy station that reads
+// as not-ready claims nothing at all, which is the same outage with no logs.
+test(
+  "stationReadiness answers the same three gates createSession fails fast on",
+  async () => {
+    const { server, nodeId, fake, station } = await setupRig(
+      "acpsess-readiness-host",
+      { stationKey: "acp-readiness-station" }
+    );
+    try {
+      // A healthy, online, acp-capable station: ready, with nothing to explain.
+      expect(await stationReadiness({ tenantId: BOOTSTRAP_TENANT_ID }, station.id)).toEqual({
+        ready: true,
+      });
+
+      expect(await stationReadiness({ tenantId: BOOTSTRAP_TENANT_ID }, "stn_nope")).toEqual({
+        ready: false,
+        reason: "Station not found.",
+      });
+      // Another workspace's station is not visible, so it is not ready either (W4).
+      expect(await stationReadiness({ tenantId: "fleet_99999999999999999999" }, station.id)).toEqual({
+        ready: false,
+        reason: "Station not found.",
+      });
+
+      fake.close();
+      await waitForNodeUnregistered(nodeId);
+      expect(await stationReadiness({ tenantId: BOOTSTRAP_TENANT_ID }, station.id)).toEqual({
+        ready: false,
+        reason: "Node is offline.",
+      });
+
+      // And the gate is load-bearing: the open it stands in front of throws the
+      // same sentence.
+      await expect(
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow("Node is offline.");
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+// ─── Images from a bridged room ─────────────────────────────────────────────
+//
+// 2026-09-24: an image sent to Krishna reached it as its file name. The room
+// side now fetches the picture; these pin the session side — the picture goes
+// as an ACP image block only to an agent that said, at `initialize`, that it
+// takes one, and the transcript never holds the bytes.
+
+const IMAGE = { mimeType: "image/png", data: "iVBORw0KGgo=", name: "map.png", bytes: 8 };
+
+/** Give a rig's node the capability a real node advertises in its hello. */
+async function nodeReadsLargeFrames(nodeId: string) {
+  await db.update(nodes).set({ capabilities: ["posture", "frames.large"] }).where(eq(nodes.id, nodeId));
+}
+
+function lastPrompt(fake: { agentReceived: Array<Record<string, unknown>> }) {
+  const prompts = fake.agentReceived.filter((m) => m.method === "session/prompt");
+  return (prompts.at(-1)?.params as { prompt: Array<Record<string, unknown>> } | undefined)?.prompt;
+}
+
+test(
+  "promptSession: an agent that accepts images gets the image as a block, before the words",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-image-yes", {
+      stationKey: "acp-image-yes",
+      promptCapabilities: { image: true },
+    });
+    try {
+      await nodeReadsLargeFrames(station.nodeId);
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      await promptSession(TEST_USER, row.id, "What region is this?", [IMAGE]);
+
+      await pollUntil(() => lastPrompt(fake) !== undefined);
+      expect(lastPrompt(fake)).toEqual([
+        { type: "image", mimeType: "image/png", data: IMAGE.data },
+        { type: "text", text: "What region is this?" },
+      ]);
+
+      // The transcript names the image; it does not keep it.
+      const { all } = await pollForEvent(row.id, (e) => e.type === "user-prompt", 8000);
+      const payload = all.find((e) => e.type === "user-prompt")!.payload as Record<string, unknown>;
+      expect(payload.images).toEqual([{ name: "map.png", mimeType: "image/png", bytes: 8 }]);
+      expect(JSON.stringify(payload)).not.toContain(IMAGE.data);
+
+      await pollUntil(async () => (await getSession(TEST_USER, row.id))?.status === "idle");
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "promptSession: an agent that never said it takes images gets a note, not a block it would refuse",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-image-no", {
+      stationKey: "acp-image-no",
+    });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      await promptSession(TEST_USER, row.id, "What region is this?", [IMAGE]);
+
+      await pollUntil(() => lastPrompt(fake) !== undefined);
+      const prompt = lastPrompt(fake)!;
+      expect(prompt).toHaveLength(1);
+      expect(prompt[0]!.type).toBe("text");
+      expect(prompt[0]!.text).toContain("What region is this?");
+      expect(prompt[0]!.text).toContain("map.png");
+      expect(prompt[0]!.text).toContain("cannot view images");
+
+      await pollUntil(async () => (await getSession(TEST_USER, row.id))?.status === "idle");
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "promptSession: a node that never said it reads large frames gets a note — an image would close its connection",
+  async () => {
+    // The adapter takes images; the node does not advertise "frames.large",
+    // as no node did before this fix. Sending the image anyway is what
+    // dropped ashram's whole hub connection on 2026-09-24.
+    const { server, fake, station } = await setupRig("acpsess-image-oldnode", {
+      stationKey: "acp-image-oldnode",
+      promptCapabilities: { image: true },
+    });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      await promptSession(TEST_USER, row.id, "What region is this?", [IMAGE]);
+
+      await pollUntil(() => lastPrompt(fake) !== undefined);
+      const prompt = lastPrompt(fake)!;
+      expect(prompt).toHaveLength(1);
+      expect(prompt[0]!.type).toBe("text");
+      expect(prompt[0]!.text).toContain("needs an AgentPod update");
+      expect(JSON.stringify(prompt)).not.toContain(IMAGE.data);
+
+      await pollUntil(async () => (await getSession(TEST_USER, row.id))?.status === "idle");
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+
+
+// ─── Turn errors a harness plugin reports (spec §2–3) ──────────────────────────
+
+/** What krishna's plugin would have sent at 2026-09-25 05:47. */
+function krishnaReport(key: { harnessSessionKey?: string; acpSessionId?: string }) {
+  return {
+    type: "turn.error",
+    report: {
+      ...key,
+      error: {
+        message: "⚠️ You've reached your weekly (7-day) usage limit.",
+        kind: "quota",
+        provider: "kimi-coding",
+        model: "k2p6",
+      },
+    },
+  };
+}
+
+const errorEvents = (all: EventLike[]) => all.filter((e) => e.type === "error");
+const sawSessionKey = (e: EventLike) =>
+  e.type === "agent-update" &&
+  (e.payload as { sessionUpdate?: string }).sessionUpdate === "session_info_update";
+
+test("a plugin's report becomes a silent turn's error, arriving after the prompt resolved", async () => {
+  // OpenClaw's bridge resolves end_turn before its agent_end hook has run, so
+  // the report lands after the hub has seen the turn end with nothing.
+  _setTurnErrorGraceMsForTest(3_000);
+  const { server, fake, station } = await setupRig("acpsess-plugin-late", {
+    stationKey: "acp-plugin-late-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Are you here?");
+    await pollForEvent(row.id, sawSessionKey);
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(krishnaReport({ harnessSessionKey: "agent:krishna:main" })));
+
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 8_000);
+    await new Promise((r) => setTimeout(r, 200)); // a second error would land here
+    const errors = errorEvents(all);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.payload).toMatchObject({
+      message: "⚠️ You've reached your weekly (7-day) usage limit.",
+      kind: "quota",
+      provider: "kimi-coding",
+      model: "k2p6",
+      harness: "opencode",
+      source: "plugin",
+      retryable: false,
+    });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a report during the turn is used as soon as the turn ends, with no wait", async () => {
+  _setTurnErrorGraceMsForTest(10_000);
+  const { server, fake, station } = await setupRig("acpsess-plugin-early", {
+    stationKey: "acp-plugin-early-station",
+    hangPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Are you here?");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(krishnaReport({ harnessSessionKey: "agent:krishna:main" })));
+    await new Promise((r) => setTimeout(r, 150));
+    const releasedAt = Date.now();
+    fake.releasePrompt("end_turn");
+
+    const { hit } = await pollForEvent(row.id, (e) => e.type === "error", 3_000);
+    expect(Date.now() - releasedAt).toBeLessThan(3_000);
+    expect(hit.payload).toMatchObject({ kind: "quota", source: "plugin" });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a report keyed by the hub session id matches that session (Pi's way)", async () => {
+  _setTurnErrorGraceMsForTest(3_000);
+  const { server, fake, station } = await setupRig("acpsess-plugin-acpid", {
+    stationKey: "acp-plugin-acpid-station",
+    silentPrompt: true,
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(krishnaReport({ acpSessionId: row.id })));
+
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 8_000);
+    await new Promise((r) => setTimeout(r, 200)); // a second error would land here
+    expect(errorEvents(all).map((e) => (e.payload as { source?: string }).source)).toEqual(["plugin"]);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a node cannot report into a session on another node", async () => {
+  // Anyone who can write a turn.error can put words in a room. A node speaks
+  // only for its own sessions.
+  _setTurnErrorGraceMsForTest(400);
+  const { server, fake, station } = await setupRig("acpsess-plugin-owner", {
+    stationKey: "acp-plugin-owner-station",
+    silentPrompt: true,
+  });
+  const intruderEnrol = await enrollTestNode("acpsess-plugin-intruder");
+  const intruder = await connectFakeAcpNode(server.port!, intruderEnrol.nodeId, intruderEnrol.nodeSecret, {});
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    intruder.ws.send(JSON.stringify(krishnaReport({ acpSessionId: row.id })));
+
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 8_000);
+    await new Promise((r) => setTimeout(r, 200)); // a second error would land here
+    const errors = errorEvents(all);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.payload).toMatchObject({ message: "The agent completed without a reply." });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+    intruder.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("with no report, the wait ends in the error the hub already had", async () => {
+  _setTurnErrorGraceMsForTest(300);
+  const { server, fake, station } = await setupRig("acpsess-plugin-none", {
+    stationKey: "acp-plugin-none-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 8_000);
+    expect(errorEvents(all)[0]!.payload).toMatchObject({
+      message: "The agent completed without a reply.",
+      source: "acp-stop-reason",
+    });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a node lost mid-turn records why the turn failed, before the session ends", async () => {
+  // The #565 review: "Couldn't reach the node." was only an ended-state reason,
+  // so no error event carried it and the node_offline kind was never produced.
+  _setOfflineGraceMsForTest(300);
+  const { server, fake, station } = await setupRig("acpsess-lost-midturn", {
+    stationKey: "acp-lost-midturn-station",
+    hangPrompt: true,
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    await pollForEvent(row.id, stateWith("working"));
+    fake.close();
+
+    const { all } = await pollForEvent(row.id, stateWith("ended"), 8_000);
+    const errorIndex = all.findIndex((e) => e.type === "error");
+    const endedIndex = all.findIndex(stateWith("ended"));
+    expect(errorIndex).toBeGreaterThan(-1);
+    expect(errorIndex).toBeLessThan(endedIndex);
+    expect(all[errorIndex]!.payload).toMatchObject({
+      message: "Couldn't reach the node.",
+      kind: "node_offline",
+      source: "session-state",
+    });
+  } finally {
+    _setOfflineGraceMsForTest(60_000);
+    server.stop(true);
+  }
+});
+
+test("a node lost between turns is not a failed turn", async () => {
+  _setOfflineGraceMsForTest(300);
+  const { server, fake, station } = await setupRig("acpsess-lost-idle", {
+    stationKey: "acp-lost-idle-station",
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    fake.close();
+    const { all } = await pollForEvent(row.id, stateWith("ended"), 8_000);
+    expect(errorEvents(all)).toHaveLength(0);
+  } finally {
+    _setOfflineGraceMsForTest(60_000);
+    server.stop(true);
+  }
+});
+
+// ─── One turn, one error (krishna, ashram, 2026-09-26 05:05) ───────────────────
+
+function report(key: string, provider: string, model: string, message: string) {
+  return {
+    type: "turn.error",
+    report: { harnessSessionKey: key, error: { message, provider, model, attempts: [{ provider, model, message }] } },
+  };
+}
+
+test("two reports during one turn become one error, led by the first, with every attempt", async () => {
+  // The plugin sent after nearly every attempt; the hub kept only the last, so
+  // the room showed opencode-go's 400 and never Kimi's used-up quota.
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-merge-reports", {
+    stationKey: "acp-merge-reports-station",
+    hangPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "All good?");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "opencode-go", "qwen3.7-plus", "Request is missing x-opencode-session")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 3_000);
+    await new Promise((r) => setTimeout(r, 300));
+    const errors = errorEvents(await eventsFor(row.id));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.payload).toMatchObject({ provider: "kimi-coding", kind: "quota" });
+    expect((errors[0]!.payload as { attempts: Array<{ provider: string }> }).attempts.map((a) => a.provider)).toEqual([
+      "kimi-coding",
+      "opencode-go",
+    ]);
+    void all;
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a second report after the turn already shows the plugin's error is not posted again", async () => {
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-dup-report", {
+    stationKey: "acp-dup-report-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "All good?");
+    await pollForEvent(row.id, sawSessionKey);
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "opencode-go", "qwen3.7-plus", "Request is missing x-opencode-session")));
+    await pollForEvent(row.id, (e) => e.type === "error", 5_000);
+    await new Promise((r) => setTimeout(r, 300));
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "opencode-go", "qwen3.7-plus", "Request is missing x-opencode-session")));
+    await new Promise((r) => setTimeout(r, 500));
+
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(1);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a report after the generic error still follows it: it says why", async () => {
+  _setTurnErrorGraceMsForTest(100);
+  const { server, fake, station } = await setupRig("acpsess-late-after-generic", {
+    stationKey: "acp-late-after-generic-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "All good?");
+    await pollForEvent(row.id, (e) => e.type === "error", 5_000);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
+    await new Promise((r) => setTimeout(r, 500));
+
+    const errors = errorEvents(await eventsFor(row.id));
+    expect(errors.map((e) => (e.payload as { source: string }).source)).toEqual(["acp-stop-reason", "plugin"]);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+// ─── A fallback that answered after the plugin reported (krishna, 2026-09-26 08:09) ───
+
+test("an answer after the plugin's report means the fallback recovered: no error", async () => {
+  // Kimi failed; the OpenClaw plugin reported after its quiet window while the
+  // next model was still thinking; that model then answered. The hub put the
+  // stale report up as the turn's error, under a turn that had answered.
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-recovered-after-report", {
+    stationKey: "acp-recovered-after-report-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Hi");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.agentSays("Hey Rakesh. I'm here. What is it?");
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+
+    await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > 3, 5_000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(0);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a report after the agent's last words is still the turn's error", async () => {
+  // A partial answer, then the failure: Pi's report lands at agent_settled,
+  // after pi-acp's "Retrying (attempt 1/2)…" lines. That is a failed turn.
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-report-after-words", {
+    stationKey: "acp-report-after-words-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Hi");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.agentSays("Retrying (attempt 1/2, waiting 1s)...");
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "fakeq", "flaky", "Overloaded")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+
+    const { hit } = await pollForEvent(row.id, (e) => e.type === "error", 5_000);
+    expect(hit.payload).toMatchObject({ source: "plugin", message: "Overloaded" });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+// ─── A run that ended well after its failure was reported (2026-09-26 08:56) ───
+
+function resolution(key: string, r: "answered" | "silent") {
+  return { type: "turn.error", report: { harnessSessionKey: key, resolution: r } };
+}
+
+test("a failure the plugin then says ended in deliberate silence is no error, and the turn is silent", async () => {
+  // Kimi failed and was reported; the slower fallback then answered NO_REPLY.
+  // Nothing reached the room, and the room showed Kimi's failure.
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-resolved-silent", {
+    stationKey: "acp-resolved-silent-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Okay.");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(resolution("agent:krishna:main", "silent")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+
+    const { hit } = await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > 3, 5_000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(0);
+    expect(hit.payload).toMatchObject({ status: "idle", silent: true });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a silence that arrives while the hub waits for a report ends the wait at once", async () => {
+  // The prompt resolved empty before the plugin's word arrived.
+  _setTurnErrorGraceMsForTest(10_000);
+  const { server, fake, station } = await setupRig("acpsess-silent-during-wait", {
+    stationKey: "acp-silent-during-wait-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Nothing.");
+    await pollForEvent(row.id, sawSessionKey);
+    await new Promise((r) => setTimeout(r, 150));
+    const sentAt = Date.now();
+    fake.ws.send(JSON.stringify(resolution("agent:krishna:main", "silent")));
+    const { hit } = await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > 3, 5_000);
+    expect(Date.now() - sentAt).toBeLessThan(3_000);
+    expect(hit.payload).toMatchObject({ silent: true });
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(0);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("'answered' clears a reported failure too", async () => {
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-resolved-answered", {
+    stationKey: "acp-resolved-answered-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Hi");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "quota")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(resolution("agent:krishna:main", "answered")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+    await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > 3, 5_000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(0);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+// ─── MCP servers on the session ─────────────────────────────────────────────
+//
+// ACP's `session/new` carries them, and hermes registers what it is given per
+// session — so a board credential reaches the harness for exactly the run it
+// was minted for, and nothing is written to the station's disk.
+
+function sessionNewParams(fake: { agentReceived: Array<Record<string, unknown>> }) {
+  const news = fake.agentReceived.filter((m) => m.method === "session/new");
+  return news.at(-1)?.params as { cwd?: string; mcpServers?: unknown } | undefined;
+}
+
+test(
+  "createSession: the MCP servers it is given reach the harness at session/new",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-mcp", { stationKey: "acp-mcp" });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+        mcpServers: [
+          {
+            type: "http",
+            name: "superpipeline",
+            url: "https://board.test/mcp",
+            headers: [{ name: "Authorization", value: "Bearer spa_run_scoped" }],
+          },
+        ],
+      });
+
+      expect(sessionNewParams(fake)?.mcpServers).toEqual([
+        {
+          type: "http",
+          name: "superpipeline",
+          url: "https://board.test/mcp",
+          headers: [{ name: "Authorization", value: "Bearer spa_run_scoped" }],
+        },
+      ]);
+
+      // The credential is not in the session row, and never in the transcript:
+      // the console reads both.
+      expect(JSON.stringify(row)).not.toContain("spa_run_scoped");
+      const evts = await eventsFor(row.id);
+      expect(JSON.stringify(evts)).not.toContain("spa_run_scoped");
+
+      await endSession(TEST_USER, row.id, "cleanup");
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "createSession: a session given none still sends the empty list ACP requires",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-mcp-none", { stationKey: "acp-mcp-none" });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      expect(sessionNewParams(fake)?.mcpServers).toEqual([]);
+      await endSession(TEST_USER, row.id, "cleanup");
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+// ─── Trace context to the harness (superwitness C2) ─────────────────────────
+
+type WithMeta = { _meta?: { traceparent?: string } };
+
+test(
+  "session/new and session/prompt carry the active trace in params._meta",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-trace", { stationKey: "acp-trace" });
+    try {
+      const parent = tracer().startSpan("dispatch");
+      const ctx = trace.setSpan(context.active(), parent);
+      const want = new RegExp(`^00-${parent.spanContext().traceId}-[0-9a-f]{16}-01$`);
+
+      const row = await context.with(ctx, () => createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" }));
+      expect((sessionNewParams(fake) as WithMeta | undefined)?._meta?.traceparent).toMatch(want);
+
+      await context.with(ctx, () => promptSession(TEST_USER, row.id, "hello"));
+      const prompt = await pollUntil(() => fake.agentReceived.find((m) => m.method === "session/prompt"));
+      expect((prompt.params as WithMeta | undefined)?._meta?.traceparent).toMatch(want);
+
+      parent.end();
+      await endSession(TEST_USER, row.id, "cleanup");
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "AGENTPOD_ACP_TRACE_META=false sends no _meta, for a harness that refuses it",
+  async () => {
+    const saved = process.env.AGENTPOD_ACP_TRACE_META;
+    process.env.AGENTPOD_ACP_TRACE_META = "false";
+    const { server, fake, station } = await setupRig("acpsess-trace-off", { stationKey: "acp-trace-off" });
+    try {
+      const parent = tracer().startSpan("dispatch");
+      const row = await context.with(trace.setSpan(context.active(), parent), () =>
+        createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" })
+      );
+      expect("_meta" in ((sessionNewParams(fake) ?? {}) as object)).toBe(false);
+      parent.end();
+      await endSession(TEST_USER, row.id, "cleanup");
+    } finally {
+      if (saved === undefined) delete process.env.AGENTPOD_ACP_TRACE_META;
+      else process.env.AGENTPOD_ACP_TRACE_META = saved;
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "outside any trace, session/new carries no _meta",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-trace-none", { stationKey: "acp-trace-none" });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      expect("_meta" in ((sessionNewParams(fake) ?? {}) as object)).toBe(false);
+      await endSession(TEST_USER, row.id, "cleanup");
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+// ─── The node's MCP proxy ───────────────────────────────────────────────────
+//
+// Superlibrary S3-R11 (a): the node injects the hub's and Superlibrary's MCP servers into the
+// harness's session/new through its loopback proxy. The hub asks only a node that advertises
+// `mcp.proxy`, never learns the proxy's secret, and believes the tools are there only when the
+// node says it injected both.
+
+async function nodeRunsMcpProxy(nodeId: string) {
+  await db.update(nodes).set({ capabilities: ["posture", "mcp.proxy"] }).where(eq(nodes.id, nodeId));
+}
+
+test("a node running the proxy is asked for it, and a session with both servers has the library tools", async () => {
+  const { server, nodeId, fake, station } = await setupRig("acpsess-mcpproxy-host", {
+    stationKey: "acp-mcpproxy-station",
+    mcpProxyEcho: ["agentpod", "superlibrary"],
+  });
+  try {
+    await nodeRunsMcpProxy(nodeId);
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask", mcpProxy: true });
+    const open = opensSeenBy(fake).at(-1) as { params?: { mcpProxy?: { stationId: string } } };
+    expect(open.params?.mcpProxy).toEqual({ stationId: station.id });
+    expect(sessionHasLibraryTools(row.id)).toBe(true);
+    await endSession(TEST_USER, row.id, "done");
+  } finally {
+    fake.close();
+    server.stop(true);
+  }
+}, 30_000);
+
+test("a node without the proxy is not asked, and its session has no library tools", async () => {
+  const { server, fake, station } = await setupRig("acpsess-noproxy-host", {
+    stationKey: "acp-noproxy-station",
+    mcpProxyEcho: ["agentpod", "superlibrary"],
+  });
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask", mcpProxy: true });
+    const open = opensSeenBy(fake).at(-1) as { params?: { mcpProxy?: unknown } };
+    expect(open.params?.mcpProxy).toBeUndefined();
+    expect(sessionHasLibraryTools(row.id)).toBe(false);
+    await endSession(TEST_USER, row.id, "done");
+  } finally {
+    fake.close();
+    server.stop(true);
+  }
+}, 30_000);
+
+test("the library tools need BOTH servers, and a session that did not ask has none", async () => {
+  const { server, nodeId, fake, station } = await setupRig("acpsess-halfproxy-host", {
+    stationKey: "acp-halfproxy-station",
+    mcpProxyEcho: ["agentpod"],
+  });
+  try {
+    await nodeRunsMcpProxy(nodeId);
+    const half = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask", mcpProxy: true });
+    expect(sessionHasLibraryTools(half.id)).toBe(false);
+    await endSession(TEST_USER, half.id, "done");
+    const unasked = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    expect((opensSeenBy(fake).at(-1) as { params?: { mcpProxy?: unknown } }).params?.mcpProxy).toBeUndefined();
+    expect(sessionHasLibraryTools(unasked.id)).toBe(false);
+    await endSession(TEST_USER, unasked.id, "done");
+  } finally {
+    fake.close();
+    server.stop(true);
+  }
+}, 30_000);
+
+test("concurrent end waits for the same settled teardown before replacement", async () => {
+  const { server, fake, station } = await setupRig("acpsess-concurrent-stop", {
+    stationKey: "acp-concurrent-stop", permission: { toolKind: "execute" },
+  });
+  let sessionId: string | undefined;
+  let stopping: Promise<void> | undefined;
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,stationId: station.id,userId: TEST_USER,mode: "ask"});
+    sessionId = row.id;
+    await promptSession(TEST_USER,row.id,"ask before running");
+    await pollForEvent(row.id,event=>event.type==="permission-request");
+    stopping = endSession(TEST_USER,row.id,"first stop");
+    await endSession(TEST_USER,row.id,"concurrent stop");
+    const rows = await rawSql`SELECT status FROM acp_sessions WHERE id = ${row.id}`;
+    expect(rows[0]?.status).toBe("ended");
+    const replacement = await createSession({ tenantId: BOOTSTRAP_TENANT_ID,stationId:station.id,userId:TEST_USER,mode:"ask"});
+    await endSession(TEST_USER,replacement.id,"cleanup");
+    await stopping;
+  } finally {
+    await stopping?.catch(()=>{});
+    if(sessionId)await endSession(TEST_USER,sessionId,"cleanup").catch(()=>{});
+    fake.close();server.stop(true);
+  }
+},20_000);

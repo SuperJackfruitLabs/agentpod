@@ -33,7 +33,7 @@ import { db, rawSql } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { matrixRooms } from "../db/schema/matrix";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
-import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
+import { mintEnrollmentToken, enrollNode } from "../services/nodes/enrollment";
 import { createPrincipal } from "../../tests/helpers/principals";
 // Workspace authority spec: these routes are a workspace admin's. This file's "admin" fixture
 // (createTestUser role: "admin", a hub_operators seat) stands for one here; the real token path
@@ -42,7 +42,7 @@ import { workspaceAdminMiddleware as adminMiddleware } from "../auth/workspace-a
 import { isUserAdmin } from "../models/admin-users";
 import { agentsAdminRouter } from "./agents-admin";
 import { createStationSayRoutes } from "./station-say";
-import { bridgeUserId } from "../services/matrix-as/names";
+import { bridgeUserId } from "../services/matrix/names";
 import type { AuthUser } from "../auth/middleware";
 import { forgetPrincipals } from "../../tests/helpers/principals";
 

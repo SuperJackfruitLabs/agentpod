@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -15,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/nodecli"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/service"
 )
@@ -38,7 +40,7 @@ func parseStatusFlags(args []string, out io.Writer) (jsonOut, done bool, code in
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.Usage = func() {
-		fmt.Fprintln(out, commandHelp("status"))
+		fmt.Fprintln(out, nodecli.CommandHelp("status"))
 		fs.PrintDefaults()
 	}
 	j := fs.Bool("json", false, "machine-readable JSON output")
@@ -353,7 +355,7 @@ func runServiceVerb(verb string, args []string, mgr service.Manager, out io.Writ
 	case "uninstall":
 		return serviceUninstallCmd(mgr, out)
 	case "-h", "--help":
-		fmt.Fprintln(out, commandHelp("service"))
+		fmt.Fprintln(out, nodecli.CommandHelp("service"))
 		return 0
 	default:
 		fmt.Fprintln(out, "usage: apn service <install|uninstall>")
@@ -499,7 +501,7 @@ func buildLogsCmd(goos, home, unitPath string, opts logsOptions) *exec.Cmd {
 			args = append(args, "-f")
 		}
 		args = append(args, darwinLogPath(home))
-		return exec.Command("tail", args...)
+		return exec.CommandContext(context.Background(), "tail", args...)
 	}
 
 	args := []string{}
@@ -512,7 +514,7 @@ func buildLogsCmd(goos, home, unitPath string, opts logsOptions) *exec.Cmd {
 	} else {
 		args = append(args, "-u", serviceUnitName)
 	}
-	return exec.Command("journalctl", args...)
+	return exec.CommandContext(context.Background(), "journalctl", args...)
 }
 
 // resolveLogsCmd builds the log-viewing command, or returns a friendly error
@@ -593,7 +595,7 @@ func prepareLogsCmdScoped(goos string, mgr, sys service.Manager, homeDir func() 
 	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.Usage = func() {
-		fmt.Fprintln(out, commandHelp("logs"))
+		fmt.Fprintln(out, nodecli.CommandHelp("logs"))
 		fs.PrintDefaults()
 	}
 	follow := fs.Bool("f", false, "follow log output")

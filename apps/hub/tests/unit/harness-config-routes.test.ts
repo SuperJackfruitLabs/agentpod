@@ -44,10 +44,10 @@ import { rawSql } from "../../src/db/drizzle";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { pollUntil, waitForNodeOnline } from "../helpers/wait";
-import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
-import { adoptStations } from "../../src/services/station-registry";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/nodes/enrollment";
+import { adoptStations } from "../../src/services/stations/registry";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
-import { declare } from "../../src/services/harness-config";
+import { declare } from "../../src/services/harness-config/harness-config";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/tenant-scope";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { harnessConfigRoutes } from "../../src/routes/harness-config";
@@ -62,7 +62,7 @@ const SERVICE_USER = "test-user-cfgroute-service-001";
 const SETTING_ID = "hermes.approvals.timeout";
 
 /** What a fake Hermes-harness node answers `config.settings` with — mirrors
- *  the real node's registry (apps/node-agent/internal/descriptor/hermes_config.go)
+ *  the real node's registry (apps/node-agent/internal/descriptor/hermes/hermes_config.go)
  *  closely enough for these tests, which only exercise `hermes.approvals.*`. */
 const HERMES_REGISTRY = [
   { id: "hermes.approvals.timeout", harness: "hermes", scope: "profile", policy: "reconcilable", restartToTakeEffect: true },

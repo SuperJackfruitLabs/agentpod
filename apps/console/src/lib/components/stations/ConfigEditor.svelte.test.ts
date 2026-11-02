@@ -47,7 +47,7 @@ test("ConfigEditor: editing buffer shows a diff and enables Save", async () => {
   await waitFor(() => expect((getByRole("textbox") as HTMLTextAreaElement).value).toBe("line1\nline2\n"));
 
   const textarea = getByRole("textbox") as HTMLTextAreaElement;
-  fireEvent.input(textarea, { target: { value: "line1\nCHANGED\n" } });
+  void fireEvent.input(textarea, { target: { value: "line1\nCHANGED\n" } });
 
   await waitFor(() => {
     // The diff view renders the changed line — check it appears in the rendered diff section.
@@ -71,7 +71,7 @@ test("ConfigEditor: Save opens ConfirmDialog and writeFile is called with backup
 
   // Edit the buffer
   const textarea = getByRole("textbox") as HTMLTextAreaElement;
-  fireEvent.input(textarea, { target: { value: "line1\nCHANGED\n" } });
+  void fireEvent.input(textarea, { target: { value: "line1\nCHANGED\n" } });
 
   await waitFor(() => {
     const saveBtn = getByRole("button", { name: /save/i }) as HTMLButtonElement;
@@ -79,12 +79,12 @@ test("ConfigEditor: Save opens ConfirmDialog and writeFile is called with backup
   });
 
   // Click Save → ConfirmDialog opens
-  fireEvent.click(getByRole("button", { name: /save/i }));
+  void fireEvent.click(getByRole("button", { name: /save/i }));
 
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
 
   // Confirm the save
-  fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "Save changes" }));
+  void fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "Save changes" }));
 
   await waitFor(() => {
     expect(api.writeFile).toHaveBeenCalledWith(
@@ -106,15 +106,15 @@ test("ConfigEditor: after save, original is updated and Save becomes disabled ag
 
   await waitFor(() => expect((getByRole("textbox") as HTMLTextAreaElement).value).toBe("line1\nline2\n"));
 
-  fireEvent.input(getByRole("textbox"), { target: { value: "line1\nNEW\n" } });
+  void fireEvent.input(getByRole("textbox"), { target: { value: "line1\nNEW\n" } });
 
   await waitFor(() => {
     expect((getByRole("button", { name: /save/i }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  fireEvent.click(getByRole("button", { name: /save/i }));
+  void fireEvent.click(getByRole("button", { name: /save/i }));
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
-  fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "Save changes" }));
+  void fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "Save changes" }));
 
   // After save, buffer === original → Save disabled again
   await waitFor(() => {

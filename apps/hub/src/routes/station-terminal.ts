@@ -30,12 +30,12 @@
 import { Hono } from "hono";
 import { upgradeWebSocket } from "../ws";
 import * as broker from "../services/broker";
-import { getStation } from "../services/station-registry";
-import { gateCapability } from "../services/station-registry";
-import { requireGrantReach } from "../services/grant-reach";
+import { getStation } from "../services/stations";
+import { gateCapability } from "../services/stations";
+import { requireGrantReach } from "../services/control";
 import { isOrgPlaneUnavailable } from "../auth/caller-authority";
-import { isGrantReachDenied } from "../services/control-pair";
-import { connectionManager } from "../services/connection-manager";
+import { isGrantReachDenied } from "../services/control";
+import { connectionManager } from "../services/broker";
 import { recordAudit } from "../services/audit";
 import { db } from "../db/drizzle";
 import { isAllowedOrigin } from "../config";

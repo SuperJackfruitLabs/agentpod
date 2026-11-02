@@ -13,7 +13,7 @@ import { probeSalaamWork } from "./salaam-dispatch";
  * constructs nothing here and behaves exactly as it does today.
  */
 
-import * as acpSessions from "../acp-sessions";
+import * as acpSessions from "../acp";
 import { BRIDGE_SOURCE, isBridgeEnabled, type BridgeAgentConfig } from "./config";
 import { loopKey, reconcileRoster, type LoopRegistry, type ReconcileState } from "./reconcile";
 import { bridgePlaneCredential, readEveryBridgeRoster, type BridgeAgentSecrets } from "./roster";

@@ -84,7 +84,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
 # they all ran with a developer's PATH. The NodeSource nodejs package uses /usr
 # as its npm prefix, so these two `npm install -g` shims are linked into
 # /usr/bin — on every default PATH there is, and in the well-known directories
-# internal/descriptor/pi.go probes when PATH misses them. Anything that moved
+# internal/descriptor/pi/pi.go probes when PATH misses them. Anything that moved
 # the prefix (--prefix, NPM_CONFIG_PREFIX, a user-local install) would hide them
 # from exactly the process that has to find them, which is why the publish
 # workflow resolves `pi` under an explicit minimal PATH instead of trusting this

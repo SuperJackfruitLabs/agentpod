@@ -13,7 +13,7 @@ import type { SuperlibraryCaller, SuperlibraryClient } from "./client";
 export interface LinkProvenanceOk { board: string; card?: string; run?: string }
 export type LinkProvenance = LinkProvenanceOk | { refused: string };
 
-/** The real broker's shape (`services/broker.ts`), so the module itself is passed as it is. */
+/** The real broker's shape (`services/broker/broker.ts`), so the module itself is passed as it is. */
 export interface LinkBroker {
   request(nodeId: string, verb: string, params: unknown, opts?: { timeoutMs?: number }): Promise<{ ok: boolean; data?: unknown; error?: string }>;
 }

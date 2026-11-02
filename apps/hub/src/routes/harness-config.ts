@@ -1,6 +1,6 @@
 /**
  * Declared harness configuration — the HTTP surface for Tasks 5-6's store and
- * comparison (`services/harness-config.ts`).
+ * comparison (`services/harness-config/harness-config.ts`).
  *
  *   GET    /api/fleet/config/settings      → { settings, unreachableNodes }
  *   GET    /api/fleet/config/declared      → DeclaredHarnessConfigRow[] (?station=, ?node=)
@@ -68,7 +68,7 @@ import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
 import * as broker from "../services/broker";
-import { getStation, type StationRow } from "../services/station-registry";
+import { getStation, type StationRow } from "../services/stations";
 import {
   declare,
   undeclare,
@@ -80,7 +80,7 @@ import {
   clearOptOut,
   listOptOuts,
 } from "../services/harness-config";
-import { planFor, applyFor, ConfigApplyError, getAppliedWrites, readConfigurationHealth } from "../services/harness-config-apply";
+import { planFor, applyFor, ConfigApplyError, getAppliedWrites, readConfigurationHealth } from "../services/harness-config";
 import { callerPrincipal } from "../auth/caller-authority";
 import type { AuthUser } from "../auth/middleware";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
@@ -119,7 +119,7 @@ async function onlineNodeIds(tenantId: string): Promise<Set<string>> {
  * `hint.stationKey` is the opt-out routes' way in: an exemption names a
  * station by its stable key (`harness_config_opt_out.station_key`), never
  * its row id, so it survives unadopt/re-adopt — see
- * `services/harness-config.ts`'s own doc comment on `setOptOut`. Checked
+ * `services/harness-config/harness-config.ts`'s own doc comment on `setOptOut`. Checked
  * before `stationId` would be meaningless (a caller never has both), and
  * a cross-tenant `stationKey` narrows `pool` to nothing for the same
  * reason an unknown `stationId` does: `manageableStations` is already
@@ -703,7 +703,7 @@ export const harnessConfigRoutes = new Hono()
    *
    * Body: `{settings: [{settingId, value?}]}`. Resolves a station the same
    * way every route in this file does (`getStation` + tenant check), then
-   * hands off to `planFor` (`services/harness-config-apply.ts`), which
+   * hands off to `planFor` (`services/harness-config/apply.ts`), which
    * checks every id against the LIVE registry before the node is ever asked
    * to plan anything, resolves an omitted `value` from what is declared, and
    * returns the node's `ConfigPlan` unchanged — never an empty one standing

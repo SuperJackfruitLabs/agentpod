@@ -6,13 +6,15 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
 )
 
 // registryVerbs is every top-level verb the CLI's own registry (reference.go, which renders
 // `fleet help`) lists, minus the empty root entry.
 func registryVerbs() []string {
 	var out []string
-	for _, c := range reference.Commands {
+	for _, c := range fleetcli.Reference.Commands {
 		if c.Path != "" && !strings.Contains(c.Path, " ") {
 			out = append(out, c.Path)
 		}

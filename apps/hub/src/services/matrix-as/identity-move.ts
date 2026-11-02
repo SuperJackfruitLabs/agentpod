@@ -65,10 +65,10 @@ import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { matrixCredentialAuthorizations } from "../../db/schema/matrix-credentials";
 import { createLogger } from "../../utils/logger";
-import { bridgeUserId } from "./names";
+import { bridgeUserId } from "../matrix";
 import { roomForStation, unboundRoomsForStation } from "./station-room";
 import { principalHandle } from "../../auth/org-plane/principals";
-import { onStationMatrixIdReported } from "../station-hooks";
+import { onStationMatrixIdReported } from "../stations";
 
 const log = createLogger("identity-move");
 
@@ -574,7 +574,7 @@ export async function onNodeReportedMatrixId(
 }
 
 /**
- * Points the hook every detect announces through (`services/station-hooks.ts`'s
+ * Points the hook every detect announces through (`services/stations/hooks.ts`'s
  * `onStationMatrixIdReported`) at this file's own convergence listener.
  *
  * `index.ts` calls this once, at boot, in place of inlining the

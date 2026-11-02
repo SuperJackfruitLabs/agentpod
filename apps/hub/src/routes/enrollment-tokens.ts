@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { mintEnrollmentToken } from "../services/enrollment";
-import { requireFleetGrantReach } from "../services/grant-reach";
-import { isControlPairEnforced, isGrantReachDenied, GrantReachDenied } from "../services/control-pair";
+import { mintEnrollmentToken } from "../services/nodes";
+import { requireFleetGrantReach } from "../services/control";
+import { isControlPairEnforced, isGrantReachDenied, GrantReachDenied } from "../services/control";
 import { callerPrincipal } from "../auth/caller-authority";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 import { createLogger } from "../utils/logger";

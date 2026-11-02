@@ -24,10 +24,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import * as acpSessions from "../services/acp-sessions.ts";
-import * as broker from "../services/broker.ts";
-import type { LinkInput, LinkResult } from "../services/superlibrary/link.ts";
-import { stationForPrincipal, type SelfStation } from "../services/self-station.ts";
+import * as acpSessions from "../services/acp/index.ts";
+import * as broker from "../services/broker/index.ts";
+import type { LinkInput, LinkResult } from "../services/superlibrary/index.ts";
+import { stationForPrincipal, type SelfStation } from "../services/stations/index.ts";
 import type { McpCaller } from "./auth.ts";
 
 const ok = (value: unknown): CallToolResult => ({

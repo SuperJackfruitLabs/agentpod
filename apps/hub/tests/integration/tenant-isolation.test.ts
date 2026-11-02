@@ -34,7 +34,7 @@ import { getTableName } from "drizzle-orm";
 
 import { rawSql } from "../../src/db/drizzle";
 import { BOOTSTRAP_TENANT_ID, TENANT_SCOPED_TABLES } from "../../src/db/tenant-scope";
-import { listNodes } from "../../src/services/node-registry";
+import { listNodes } from "../../src/services/nodes/registry";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { deleteTestUser, createTestUser } from "../helpers/database";
 

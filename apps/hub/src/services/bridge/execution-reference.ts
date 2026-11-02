@@ -1,8 +1,8 @@
 import type {
   ExportRecord,
   ExportStore,
-} from "../superlibrary/execution-export";
-import { exportReceipt } from "../superlibrary/execution-export";
+} from "../superlibrary";
+import { exportReceipt } from "../superlibrary";
 import { readBridgeRoster, bridgePlaneCredential } from "./roster";
 import { isBridgeEnabled } from "./config";
 import { fetchAdapter, SuperpipelineClient } from "./superpipeline";

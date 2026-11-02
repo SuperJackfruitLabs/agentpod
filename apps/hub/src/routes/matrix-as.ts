@@ -13,12 +13,11 @@
  */
 
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { matrixAsTransactions } from "../db/schema/matrix";
-import { isBridgeUser } from "../services/matrix-as/names";
-import { stationForAgentUserId, stationForAlias } from "../services/matrix-as/stations";
-import { recordTransaction } from "../services/matrix-as/health";
+import { isBridgeUser } from "../services/matrix";
+import { stationForAgentUserId, stationForAlias } from "../services/matrix-as";
+import { recordTransaction } from "../services/matrix-as";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("matrix-as");

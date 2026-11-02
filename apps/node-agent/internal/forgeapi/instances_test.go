@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi/stkpolicy"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
 
@@ -441,7 +442,7 @@ func TestOneStationsFileNeverHoldsAnotherStationsEntriesOrCredentials(t *testing
 				t.Errorf("%s's stk received %s's credential", c.station, c.other)
 			}
 		}
-		m, _ := ManagedEntries([]byte(pol))
+		m, _ := stkpolicy.ManagedEntries([]byte(pol))
 		if len(m) != 1 || m[0].Station != c.station {
 			t.Errorf("%s entries = %v", c.station, m)
 		}
@@ -458,7 +459,7 @@ func TestRevokeAndPolicyForOneStationLeaveTheOtherUntouched(t *testing.T) {
 	before := fx.policyOf("stn_2")
 	b := fx.stub("stn_2")
 	callsBefore := len(b.callList())
-	ack, err := fx.m.Policy(context.Background(), PolicyParams{StationID: "stn_1", GrantID: "fag_stn_1", Preset: "issues", Rules: []Rule{}})
+	ack, err := fx.m.Policy(context.Background(), PolicyParams{StationID: "stn_1", GrantID: "fag_stn_1", Preset: "issues", Rules: []stkpolicy.Rule{}})
 	if err != nil || !ack.OK {
 		t.Fatalf("policy: %+v %v", ack, err)
 	}
@@ -474,7 +475,7 @@ func TestRevokeAndPolicyForOneStationLeaveTheOtherUntouched(t *testing.T) {
 	if err != nil || rv.Removed || !bytes.Equal(before, fx.policyOf("stn_2")) {
 		t.Fatalf("cross-station revoke: %+v %v", rv, err)
 	}
-	if st, _ := ManagedEntries(fx.policyOf("stn_2")); len(st) != 1 {
+	if st, _ := stkpolicy.ManagedEntries(fx.policyOf("stn_2")); len(st) != 1 {
 		t.Fatalf("station 2 entries = %v", st)
 	}
 }
@@ -832,14 +833,14 @@ func TestSharedEntriesAreSeededBeforeTheUnitStartsAndRefreshedOnWrites(t *testin
 	if err := os.WriteFile(fx.cfg.SharedPolicyPath, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fx.m.Policy(context.Background(), PolicyParams{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "issues", Rules: []Rule{}}); err != nil {
+	if _, err := fx.m.Policy(context.Background(), PolicyParams{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "issues", Rules: []stkpolicy.Rule{}}); err != nil {
 		t.Fatal(err)
 	}
 	pol := fx.policyOf("stn_1")
-	if len(SharedServices(pol)) != 0 {
+	if len(stkpolicy.SharedServices(pol)) != 0 {
 		t.Errorf("shared entries remain:\n%s", pol)
 	}
-	if m, _ := ManagedEntries(pol); len(m) != 1 {
+	if m, _ := stkpolicy.ManagedEntries(pol); len(m) != 1 {
 		t.Errorf("grant entries = %v", m)
 	}
 }

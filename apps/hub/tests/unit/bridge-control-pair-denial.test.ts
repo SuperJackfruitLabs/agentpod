@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ControlPairDenied, isControlPairDenied } from "../../src/services/control-pair";
+import { ControlPairDenied, isControlPairDenied } from "../../src/services/control/control-pair";
 
 /**
  * A control-pair refusal is permanent, and the bridge must treat it that way.

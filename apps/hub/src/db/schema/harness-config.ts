@@ -8,7 +8,7 @@ import { tenants } from "./tenants";
  * and exactly one of `stationId`/`nodeId` is set, or neither for the fleet.
  * Two set is not a level, which the contract's `DeclaredSetting` refuses and
  * the unique indexes below cannot express, so the service checks it
- * (`assertOneLevel` in `services/harness-config.ts`).
+ * (`assertOneLevel` in `services/harness-config/harness-config.ts`).
  *
  * This table says nothing about what any station HAS. Observations are read
  * live from the node and never cached here: a cached observation is a claim

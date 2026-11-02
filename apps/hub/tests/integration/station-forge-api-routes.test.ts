@@ -27,7 +27,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { getProvider, type ForgeProvider } from "../../src/services/forge-api/providers";
-import type { ForgeApiDeps } from "../../src/services/station-forge-api";
+import type { ForgeApiDeps } from "../../src/services/forge-api/station-forge-api";
 import { createStationForgeApiRoutes } from "../../src/routes/station-forge-api";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
@@ -116,7 +116,9 @@ async function call(a: Hono, method: string, path: string, body?: unknown, raw?:
   let json: unknown = undefined;
   try {
     json = JSON.parse(text);
-  } catch {}
+  } catch {
+    // Not JSON: the caller reads `text`.
+  }
   return { status: res.status, json: json as Record<string, any>, text, headers: res.headers };
 }
 

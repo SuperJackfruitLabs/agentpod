@@ -152,7 +152,9 @@ export function decodeExternalId(externalId: string): {
   volumeName: string;
   sandboxId: string;
 } {
-  const [volumeName, sandboxId, ...rest] = String(externalId).split(
+  // Coerced: an id read back from a substrate or an old row is not proven a string at runtime.
+  const raw: unknown = externalId;
+  const [volumeName, sandboxId, ...rest] = String(raw).split(
     EXTERNAL_ID_SEPARATOR
   );
   if (!volumeName || !sandboxId || rest.length > 0) {
@@ -221,7 +223,7 @@ export class ModalRuntimeProvisioner implements RuntimeProvisioner {
       // requirement carries, and Modal's own field is memoryMiB.
       tierMemoryMb: Object.fromEntries(
         Object.entries(MODAL_RESOURCE_TIERS).map(([tier, res]) => [tier, res.memoryMiB])
-      ) as Record<ResourceTier, number>,
+      ),
       // idleTimeoutMs is opt-in and we never set it, so nothing here mistakes an
       // outbound-only node-agent for an idle one.
       idleBehaviour: "never",

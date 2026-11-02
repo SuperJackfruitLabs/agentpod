@@ -63,7 +63,7 @@ func acpCmd(args []string) {
 		fmt.Fprintf(os.Stderr, "apn acp: %v\n", err)
 		os.Exit(1)
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }() // best effort: the process is exiting
 
 	// NetConn turns the message-oriented socket into an io.ReadWriter, which is
 	// all the pipe wants. MessageText because ACP is newline-delimited JSON.

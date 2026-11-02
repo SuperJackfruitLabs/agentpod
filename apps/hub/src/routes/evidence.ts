@@ -1,4 +1,4 @@
-import { readLibraryContent } from "../services/superlibrary/read-content";
+import { readLibraryContent } from "../services/superlibrary";
 /**
  * The hub's evidence routes: runs, attempts and principals (superwitness contract C5; charter
  * decisions/2026-10-04-superwitness-owns-observability-and-evaluation.md, decision 3).
@@ -10,21 +10,21 @@ import { readLibraryContent } from "../services/superlibrary/read-content";
  * Self-authenticating (a plane token, aud = this hub), so mounted ahead of `authMiddleware`
  * beside `dispatchableRoutes` in `index.ts`.
  */
-import { traceDeliveryEvidence } from "../services/bridge/salaam-trace";
+import { traceDeliveryEvidence } from "../services/bridge";
 import { salaamWorkOwners } from "../db/schema/salaam-work";
-import { attachExecutionReference } from "../services/bridge/execution-reference";
+import { attachExecutionReference } from "../services/bridge";
 import { z } from "zod";
-import { executionExportStore } from "../services/superlibrary/execution-export-store";
+import { executionExportStore } from "../services/superlibrary";
 import {
   reserveExecutionExport,
   runExecutionExport,
   exportReceipt,
-} from "../services/superlibrary/execution-export";
-import { superlibraryClient } from "../services/superlibrary/client";
+} from "../services/superlibrary";
+import { superlibraryClient } from "../services/superlibrary";
 import {
   readExecutionEvidence,
   readExecutionArtifactBundle,
-} from "../services/evidence/execution";
+} from "../services/evidence";
 import { executionExports } from "../db/schema/execution-evidence";
 import { Hono } from "hono";
 import { asc, eq } from "drizzle-orm";
@@ -54,10 +54,10 @@ import {
   truncateItem,
   type SessionRef,
   type WireItem,
-} from "../services/evidence/transcript";
+} from "../services/evidence";
 import { recordAudit } from "../services/audit";
 import { EVIDENCE_READ, TRANSCRIPTS_READ, type GrantScope } from "../auth/org-plane/grants";
-import { contentRedactor } from "../services/redact-content";
+import { contentRedactor } from "../services/evidence";
 
 export interface EvidenceDeps {
   now?: () => Date;
@@ -136,7 +136,7 @@ function onBehalfOf(header: string | undefined): string | null {
 
 /**
  * One `station_audit` row per transcript read. Ids and counts only — `sanitizeParams` in
- * `services/audit.ts` drops any key it does not list, so content cannot ride along by accident.
+ * `services/audit/audit.ts` drops any key it does not list, so content cannot ride along by accident.
  * A session outlives its station, so a deleted station's row names the session's station id.
  */
 async function auditTranscriptRead(args: {

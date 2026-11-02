@@ -1,5 +1,5 @@
 /**
- * Unit test: `statusForRefusal` (src/services/harness-config-apply.ts).
+ * Unit test: `statusForRefusal` (src/services/harness-config/apply.ts).
  *
  * Minor 4. The function is exported, decides the status of every refusal a
  * NODE names, and had no test of its own: only 2 of the contract's 8 codes
@@ -15,7 +15,7 @@
  */
 import { describe, test, expect } from "bun:test";
 import { ConfigRefusalCode } from "@agentpod/contract";
-import { statusForRefusal } from "../../src/services/harness-config-apply";
+import { statusForRefusal } from "../../src/services/harness-config/apply";
 
 /** Every code, with the status the documented rule gives it. */
 const EXPECTED: Record<string, 400 | 409> = {

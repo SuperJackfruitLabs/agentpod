@@ -28,9 +28,9 @@ import { stations } from "../../src/db/schema/stations";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
-import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/nodes/enrollment";
 import { createNodeTranscriptionRoutes } from "../../src/routes/station-transcription-node";
-import type { ResolvedTranscription } from "../../src/services/transcription-settings";
+import type { ResolvedTranscription } from "../../src/services/speech/transcription-settings";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const TEST_USER = `test-user-station-transcription-node-${RUN}`;

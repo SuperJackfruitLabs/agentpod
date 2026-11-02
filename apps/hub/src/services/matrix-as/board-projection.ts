@@ -19,7 +19,7 @@ import {
 import { sweepElicitationBoardNow } from "./elicitation-sweep";
 import { noteGatePosted } from "./fleet-gates";
 import { sweepBoardNow } from "./gate-sweep";
-import type { MatrixBridge } from "./index";
+import type { MatrixBridge } from "./service";
 
 const log = createLogger("matrix-board-projection");
 

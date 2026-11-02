@@ -1,7 +1,7 @@
 # Salaam execution authority
 
 **Description.** Opt-in node configuration and recovery behavior, checked against
-`apps/node-agent/internal/salaam`, `apps/hub/src/services/salaam-authority.ts` and
+`apps/node-agent/internal/salaam`, `apps/hub/src/services/salaam/authority.ts` and
 `apps/hub/tests/integration/salaam-node-e2e.ts`. This integration is unreleased.
 
 Salaam runs as a dedicated daemon on the enrolled node. The Hub binds an execution

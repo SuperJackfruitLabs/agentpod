@@ -7,13 +7,13 @@
  *   GET  /api/stations/:id/mcp-proxy      one station, for the console
  *
  * Behind `authMiddleware` like every operator route: a person acting on stations they own. The
- * rules live in `services/mcp-proxy.ts`.
+ * rules live in `services/stations/mcp-proxy.ts`.
  */
 
 import { Hono } from "hono";
 import { McpProxyChangeRequest, McpProxyRotateRequest } from "@agentpod/contract";
 
-import { changeProxy, fleetView, oneStation, rotateProxy } from "../services/mcp-proxy";
+import { changeProxy, fleetView, oneStation, rotateProxy } from "../services/stations";
 import type { AuthUser } from "../auth/middleware";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 

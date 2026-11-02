@@ -10,8 +10,8 @@
  * brings a still-pending gate back after a hub restart.
  */
 
-import { fleetSink, gateDecisionKey, noteFleet } from "../push/fleet/sink";
-import { inlineGateOptions, type DecisionRecord } from "../push/fleet/state";
+import { fleetSink, gateDecisionKey, noteFleet } from "../push";
+import { inlineGateOptions, type DecisionRecord } from "../push";
 import type { GatePendingDelivery } from "./gates";
 
 export interface PostedGate {

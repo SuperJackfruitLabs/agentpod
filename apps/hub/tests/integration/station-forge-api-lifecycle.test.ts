@@ -22,7 +22,7 @@ import { createTestUser } from "../helpers/database";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { getProvider, type ForgeProvider } from "../../src/services/forge-api/providers";
 import { githubProvider } from "../../src/services/forge-api/github";
-import { sealHandover } from "../../src/services/handover-seal";
+import { sealHandover } from "../../src/services/forge-api/handover-seal";
 import {
   acceptSuppliedSecret,
   confirmSuppliedRevoked,
@@ -38,7 +38,7 @@ import {
   FORGE_DELIVER_TIMEOUT_MS,
   ForgeApiGrantError,
   type ForgeApiDeps,
-} from "../../src/services/station-forge-api";
+} from "../../src/services/forge-api/station-forge-api";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const RUN = crypto.randomUUID().slice(0, 8);

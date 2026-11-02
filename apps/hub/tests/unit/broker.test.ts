@@ -6,8 +6,8 @@
  */
 
 import { test, expect } from "bun:test";
-import * as broker from "../../src/services/broker";
-import { connectionManager } from "../../src/services/connection-manager";
+import * as broker from "../../src/services/broker/broker";
+import { connectionManager } from "../../src/services/broker/connection-manager";
 import type { GatewayServerMessage } from "@agentpod/contract";
 import { context, trace } from "@opentelemetry/api";
 import { tracer } from "../../src/telemetry/otel";

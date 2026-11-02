@@ -23,10 +23,10 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { db } from "../db/drizzle";
 import * as broker from "../services/broker";
-import { getStation } from "../services/station-registry";
+import { getStation } from "../services/stations";
 import { recordAudit } from "../services/audit";
 import { refuseWithoutReach } from "./station-writes";
-import { gateCapability } from "../services/station-registry";
+import { gateCapability } from "../services/stations";
 import type { AuthUser } from "../auth/middleware";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 

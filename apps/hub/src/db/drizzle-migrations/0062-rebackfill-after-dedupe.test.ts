@@ -45,7 +45,7 @@ import { createTestUser, deleteTestUser } from "../../../tests/helpers/database"
 import { rawSql } from "../drizzle";
 import { createPrincipal } from "../../../tests/helpers/principals";
 import { roomAgentUser } from "../../services/matrix-as/gates";
-import { bridgeUserId } from "../../services/matrix-as/names";
+import { bridgeUserId } from "../../services/matrix/names";
 import { forgetPrincipals } from "../../../tests/helpers/principals";
 import { BOOTSTRAP_TENANT_ID } from "../schema/tenants";
 

@@ -17,20 +17,19 @@ import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { matrixMissions, matrixMissionMembers } from "../db/schema/matrix";
-import { matrixIdForPrincipal } from "../services/principal-matrix-id";
+import { matrixIdForPrincipal } from "../services/matrix";
 import { grantAllowsPrincipal } from "../auth/org-plane/grants";
 import { principalHandle } from "../auth/org-plane/principals";
 import { callerGrant, callerPrincipal } from "../auth/caller-authority";
-import { isControlPairEnforced } from "../services/control-pair";
-import { bridgeUserId } from "../services/matrix-as/names";
-import { missionAlias } from "../services/matrix-as/missions";
+import { isControlPairEnforced } from "../services/control";
+import { bridgeUserId } from "../services/matrix";
+import { missionAlias } from "../services/matrix-as";
 import {
   ensureSpaceRecord,
   GENERAL_MISSIONS_KEY,
   type Space,
-} from "../services/matrix-as/spaces";
+} from "../services/matrix-as";
 import { createLogger } from "../utils/logger";
-import type { AuthUser } from "../auth/middleware";
 import { tenantScope } from "../db/tenant-scope";
 
 const log = createLogger("missions");
@@ -73,7 +72,7 @@ async function missionsSpace(
 
 export function createMissionRoutes(deps: MissionDeps) {
   return new Hono().post("/missions", async (c) => {
-    const user = c.get("user") as AuthUser;
+    const user = c.get("user");
     const body = (await c.req.json().catch(() => null)) as
       | { name?: unknown; stationIds?: unknown }
       | null;

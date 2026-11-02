@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { SignJWT, exportJWK, generateKeyPair, type JWK } from "jose";
 import { createPlaneVerifier } from "./verify";
+import { pollUntil } from "../../../tests/helpers/wait";
 
 const ISS = "https://accounts.test";
 const AUD = "https://hub.test";
@@ -191,7 +192,10 @@ describe("createPlaneVerifier", () => {
         const started = performance.now();
         expect(await v.verify(await sign(k, {}, Math.floor(now / 1000)))).not.toBeNull();
         expect(performance.now() - started).toBeLessThan(500);
-        expect(p.state.requests).toBe(2); // the refresh was attempted, just not awaited
+        // The refresh was attempted, just not awaited. It is fired before verify returns, but the
+        // server counts it only when the request reaches it, which under load can be later.
+        await pollUntil(() => p.state.requests >= 2, 2_000, 5);
+        expect(p.state.requests).toBe(2);
       } finally {
         p.stop();
       }

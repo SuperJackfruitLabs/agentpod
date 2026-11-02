@@ -25,7 +25,7 @@ import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import * as broker from "../services/broker";
 import { principalHandle } from "../auth/org-plane/principals";
-import { stationSpeaker } from "../services/matrix-as/names";
+import { stationSpeaker } from "../services/matrix";
 import { createLogger } from "../utils/logger";
 import { sniffImage } from "../utils/sniff-image";
 import { tenantScope } from "../db/tenant-scope";

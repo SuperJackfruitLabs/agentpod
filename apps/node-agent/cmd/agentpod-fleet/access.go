@@ -9,13 +9,9 @@ import (
 	"net/url"
 	"os"
 	"strings"
-)
 
-const grantsUsage = `usage:
-  fleet grants list
-  fleet grants show PRINCIPAL_ID
-  fleet grants set PRINCIPAL_ID --file PATH|-
-  fleet grants rm PRINCIPAL_ID`
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
+)
 
 // fleetGrants reads and writes dispatch authority: which principals a principal may
 // dispatch work to.
@@ -26,7 +22,7 @@ const grantsUsage = `usage:
 // `-` reads stdin, so a grant can be piped from whatever produced it.
 func fleetGrants(args []string) {
 	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(grantsUsage)
+		fmt.Println(fleetcli.GrantsUsage)
 		if len(args) == 0 {
 			os.Exit(2)
 		}
@@ -37,32 +33,24 @@ func fleetGrants(args []string) {
 	case "list":
 		fleetGet(base, args)
 	case "show":
-		fleetGet(base+"/"+url.PathEscape(needArg(args, 1, "show", grantsUsage)), args)
+		fleetGet(base+"/"+url.PathEscape(needArg(args, 1, "show", fleetcli.GrantsUsage)), args)
 	case "set":
-		id := needArg(args, 1, "set", grantsUsage)
+		id := needArg(args, 1, "set", fleetcli.GrantsUsage)
 		fs := flag.NewFlagSet("fleet grants set", flag.ExitOnError)
 		file := fs.String("file", "", "grant document, or - for stdin")
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		if *file == "" {
-			fmt.Fprintf(os.Stderr, "set requires --file PATH or --file -\n\n%s\n", grantsUsage)
+			fmt.Fprintf(os.Stderr, "set requires --file PATH or --file -\n\n%s\n", fleetcli.GrantsUsage)
 			os.Exit(2)
 		}
 		fleetSkillRequest(http.MethodPut, base+"/"+url.PathEscape(id), bytes.NewReader(readDocument(*file)), "application/json")
 	case "rm":
-		fleetSkillJSON(http.MethodDelete, base+"/"+url.PathEscape(needArg(args, 1, "rm", grantsUsage)), nil)
+		fleetSkillJSON(http.MethodDelete, base+"/"+url.PathEscape(needArg(args, 1, "rm", fleetcli.GrantsUsage)), nil)
 	default:
-		fmt.Fprintln(os.Stderr, grantsUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.GrantsUsage)
 		os.Exit(2)
 	}
 }
-
-const principalsUsage = `usage:
-  fleet principals list
-  fleet principals suspend ID
-  fleet principals restore ID
-  fleet principals add-service HANDLE --client CLIENT --scope SCOPE[,SCOPE]
-  fleet principals add-credential PRN_ID --client CLIENT
-  fleet principals revoke-credential SVC_ID`
 
 // fleetPrincipals lists the identities the hub knows, suspends or restores one, and manages a
 // service principal's credentials: create it with its first, add another, revoke one.
@@ -73,7 +61,7 @@ const principalsUsage = `usage:
 // add-credential, switch the consumer, revoke-credential the old one — never by deleting.
 func fleetPrincipals(args []string) {
 	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(principalsUsage)
+		fmt.Println(fleetcli.PrincipalsUsage)
 		if len(args) == 0 {
 			os.Exit(2)
 		}
@@ -84,18 +72,18 @@ func fleetPrincipals(args []string) {
 	case "list":
 		fleetGet(base, args)
 	case "suspend", "restore":
-		id := needArg(args, 1, args[0], principalsUsage)
+		id := needArg(args, 1, args[0], fleetcli.PrincipalsUsage)
 		fleetSkillJSON(http.MethodPost, base+"/"+url.PathEscape(id)+"/"+args[0], map[string]any{})
 	case "add-service":
 		// Prints the credential's secret ONCE, in the hub's response. Pipe it straight into the
 		// service's secret file; it is not retrievable afterwards.
-		handle := needArg(args, 1, "add-service", principalsUsage)
+		handle := needArg(args, 1, "add-service", fleetcli.PrincipalsUsage)
 		fs := flag.NewFlagSet("fleet principals add-service", flag.ExitOnError)
 		client := fs.String("client", "", "the HUB_OAUTH_CLIENTS id whose audiences its tokens carry")
 		scope := fs.String("scope", "", "comma-separated grant scopes, e.g. evidence:read")
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		if *client == "" || *scope == "" {
-			fmt.Fprintf(os.Stderr, "add-service requires --client and --scope\n\n%s\n", principalsUsage)
+			fmt.Fprintf(os.Stderr, "add-service requires --client and --scope\n\n%s\n", fleetcli.PrincipalsUsage)
 			os.Exit(2)
 		}
 		fleetSkillJSON(http.MethodPost, "/api/admin/service-principals", map[string]any{
@@ -104,32 +92,25 @@ func fleetPrincipals(args []string) {
 	case "add-credential":
 		// The first half of a rotation. Prints the new secret ONCE; the old credential keeps
 		// working until revoke-credential, so the consumer can switch with no gap.
-		id := needArg(args, 1, "add-credential", principalsUsage)
+		id := needArg(args, 1, "add-credential", fleetcli.PrincipalsUsage)
 		fs := flag.NewFlagSet("fleet principals add-credential", flag.ExitOnError)
 		client := fs.String("client", "", "the HUB_OAUTH_CLIENTS id whose audiences its tokens carry")
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		if *client == "" {
-			fmt.Fprintf(os.Stderr, "add-credential requires --client\n\n%s\n", principalsUsage)
+			fmt.Fprintf(os.Stderr, "add-credential requires --client\n\n%s\n", fleetcli.PrincipalsUsage)
 			os.Exit(2)
 		}
 		fleetSkillJSON(http.MethodPost, "/api/admin/service-principals/"+url.PathEscape(id)+"/credentials", map[string]any{
 			"oauthClient": *client,
 		})
 	case "revoke-credential":
-		id := needArg(args, 1, "revoke-credential", principalsUsage)
+		id := needArg(args, 1, "revoke-credential", fleetcli.PrincipalsUsage)
 		fleetSkillJSON(http.MethodPost, "/api/admin/service-principals/credentials/"+url.PathEscape(id)+"/revoke", map[string]any{})
 	default:
-		fmt.Fprintln(os.Stderr, principalsUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.PrincipalsUsage)
 		os.Exit(2)
 	}
 }
-
-const usersUsage = `usage:
-  fleet users list
-  fleet users show ID
-  fleet users ban ID --reason "why" [--expires RFC3339]
-  fleet users unban ID
-  fleet users role ID --role ROLE`
 
 // fleetUsers is people, not agents — the hub's own accounts.
 //
@@ -138,7 +119,7 @@ const usersUsage = `usage:
 // who lifts it will not be the person who applied it.
 func fleetUsers(args []string) {
 	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(usersUsage)
+		fmt.Println(fleetcli.UsersUsage)
 		if len(args) == 0 {
 			os.Exit(2)
 		}
@@ -149,15 +130,15 @@ func fleetUsers(args []string) {
 	case "list":
 		fleetGet(base, args)
 	case "show":
-		fleetGet(base+"/"+url.PathEscape(needArg(args, 1, "show", usersUsage)), args)
+		fleetGet(base+"/"+url.PathEscape(needArg(args, 1, "show", fleetcli.UsersUsage)), args)
 	case "ban":
-		id := needArg(args, 1, "ban", usersUsage)
+		id := needArg(args, 1, "ban", fleetcli.UsersUsage)
 		fs := flag.NewFlagSet("fleet users ban", flag.ExitOnError)
 		reason := fs.String("reason", "", "why, recorded with the ban")
 		expires := fs.String("expires", "", "RFC3339 instant the ban lifts itself")
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		if *reason == "" {
-			fmt.Fprintf(os.Stderr, "ban requires --reason\n\n%s\n", usersUsage)
+			fmt.Fprintf(os.Stderr, "ban requires --reason\n\n%s\n", fleetcli.UsersUsage)
 			os.Exit(2)
 		}
 		body := map[string]any{"reason": *reason}
@@ -166,20 +147,20 @@ func fleetUsers(args []string) {
 		}
 		fleetSkillJSON(http.MethodPost, base+"/"+url.PathEscape(id)+"/ban", body)
 	case "unban":
-		id := needArg(args, 1, "unban", usersUsage)
+		id := needArg(args, 1, "unban", fleetcli.UsersUsage)
 		fleetSkillJSON(http.MethodPost, base+"/"+url.PathEscape(id)+"/unban", map[string]any{})
 	case "role":
-		id := needArg(args, 1, "role", usersUsage)
+		id := needArg(args, 1, "role", fleetcli.UsersUsage)
 		fs := flag.NewFlagSet("fleet users role", flag.ExitOnError)
 		role := fs.String("role", "", "the role to set")
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		if *role == "" {
-			fmt.Fprintf(os.Stderr, "role requires --role ROLE\n\n%s\n", usersUsage)
+			fmt.Fprintf(os.Stderr, "role requires --role ROLE\n\n%s\n", fleetcli.UsersUsage)
 			os.Exit(2)
 		}
 		fleetSkillJSON(http.MethodPut, base+"/"+url.PathEscape(id)+"/role", map[string]any{"role": *role})
 	default:
-		fmt.Fprintln(os.Stderr, usersUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.UsersUsage)
 		os.Exit(2)
 	}
 }

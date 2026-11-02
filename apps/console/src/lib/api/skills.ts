@@ -9,8 +9,8 @@ import {
   TrustedSkillReleaseMetadata,
   SkillReleaseCohortMetadata,
   SkillReleaseCanaryOperation,
-  TrustedSkillReleaseRecord,
 } from "@agentpod/contract";
+import type { TrustedSkillReleaseRecord } from "@agentpod/contract";
 import { http } from "./client";
 
 const stationPath = (id: string) =>

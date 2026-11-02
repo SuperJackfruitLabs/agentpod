@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { webSocketStream } from "../../src/services/acp-ws-stream";
+import { webSocketStream } from "../../src/services/acp/ws-stream";
 
 const dec = new TextDecoder();
 

@@ -15,23 +15,15 @@
    * same props they always had.
    */
   import { onMount } from "svelte";
-  import type { Component, Snippet } from "svelte";
+  import type { Snippet } from "svelte";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
-  import { scrollStrip } from "$lib/actions/scroll-strip";
   import HealthPanel from "$lib/components/stations/HealthPanel.svelte";
   import LogTail from "$lib/components/stations/LogTail.svelte";
   import FileBrowser from "$lib/components/stations/FileBrowser.svelte";
-  import ConfigEditor from "$lib/components/stations/ConfigEditor.svelte";
   import Terminal from "$lib/components/stations/Terminal.svelte";
   import ChatPanel from "$lib/components/stations/chat/ChatPanel.svelte";
   import CleanupPanel from "$lib/components/stations/CleanupPanel.svelte";
-  import SkillsPanel from "$lib/components/stations/SkillsPanel.svelte";
-  import SkillManagementPanel from "$lib/components/stations/SkillManagementPanel.svelte";
-  import PluginManagementPanel from "$lib/components/stations/PluginManagementPanel.svelte";
-  import HarnessConfigPanel from "$lib/components/stations/HarnessConfigPanel.svelte";
-  import McpProxyStatus from "$lib/components/stations/McpProxyStatus.svelte";
-  import ApprovalRulesPanel from "$lib/components/stations/ApprovalRulesPanel.svelte";
   import ChangesetPanel from "$lib/components/stations/ChangesetPanel.svelte";
   import TimelinePanel from "$lib/components/stations/TimelinePanel.svelte";
   import PostureBanner from "$lib/components/stations/PostureBanner.svelte";
@@ -39,10 +31,8 @@
   import { lifecycle, listStations, setStationPurpose } from "$lib/api/client";
   import { myReach } from "$lib/api/my-grant";
   import { auth } from "$lib/stores/auth.svelte";
-  import { workspaceAdminsCan } from "$lib/workspace-authority";
   import type { StationRow } from "$lib/api/client";
   import ContextRail from "$lib/components/shell/ContextRail.svelte";
-  import StateDot from "$lib/components/shell/StateDot.svelte";
   import { stationState } from "$lib/fleet/state";
   import { fleet, refreshFleet } from "$lib/stores/fleet.svelte";
   import { setContextRail } from "$lib/stores/context-rail.svelte";
@@ -50,103 +40,37 @@
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";
-  import * as Dialog from "$lib/components/ui/dialog";
-  import { cn } from "$lib/utils";
-  import HeartPulseIcon from "@lucide/svelte/icons/heart-pulse";
-  import ScrollTextIcon from "@lucide/svelte/icons/scroll-text";
-  import SlidersHorizontalIcon from "@lucide/svelte/icons/sliders-horizontal";
-  import FolderIcon from "@lucide/svelte/icons/folder";
-  import TerminalIcon from "@lucide/svelte/icons/terminal";
-  import GitCompareIcon from "@lucide/svelte/icons/git-compare";
-  import HistoryIcon from "@lucide/svelte/icons/history";
-  import Trash2Icon from "@lucide/svelte/icons/trash-2";
-  import ActivityIcon from "@lucide/svelte/icons/activity";
-  import MessageSquareIcon from "@lucide/svelte/icons/message-square";
-  import IdCardIcon from "@lucide/svelte/icons/id-card";
-  import LockIcon from "@lucide/svelte/icons/lock";
-  import * as Sheet from "$lib/components/ui/sheet";
-  import { Face } from "@superjackfruit/vibekit";
+  import StationHeader from "$lib/components/stations/station-page/StationHeader.svelte";
+  import StationTabBar from "$lib/components/stations/station-page/StationTabBar.svelte";
+  import StationConfigTab from "$lib/components/stations/station-page/StationConfigTab.svelte";
+  import StationAboutSheet from "$lib/components/stations/station-page/StationAboutSheet.svelte";
+  import StationConfigEditorDialog from "$lib/components/stations/station-page/StationConfigEditorDialog.svelte";
+  import {
+    configSectionsFor,
+    isHeavyTab,
+    resolveConfigSection,
+    resolveTab,
+    stationTabs,
+    type ConfigSection,
+    type Tab,
+  } from "$lib/components/stations/station-page/tabs";
 
   const nodeId = $derived($page.params.id as string);
   const stationId = $derived($page.params.stationId as string);
 
-  type Tab =
-    | "chat"
-    | "health"
-    | "logs"
-    | "files"
-    | "terminal"
-    | "config"
-    | "changes"
-    | "timeline"
-    | "cleanup"
-    | "activity"
-    | "identity";
-  const VALID_TABS: readonly Tab[] = [
-    "chat",
-    "health",
-    "logs",
-    "files",
-    "terminal",
-    "config",
-    "changes",
-    "timeline",
-    "cleanup",
-    "activity",
-    "identity",
-  ];
-
-  /**
-   * Retired tab ids, mapped to what replaced them.
-   *
-   * Tab ids live in the URL, so links to them sit in bookmarks, in chat history
-   * and in docs. An unknown ?tab= value falls back to the default tab SILENTLY
-   * (below), which would land a two-week-old link on Health with no
-   * explanation — so a retired id is aliased, never dropped. `skills` became
-   * `config` when plugins, skills and declared configuration were gathered into
-   * one tab, because on a Hermes station all three write the same file.
-   */
-  const TAB_ALIASES: Readonly<Record<string, Tab>> = { skills: "config" };
-
   // The active tab lives in the URL (?tab=logs) so station views are
   // deep-linkable, survive refresh, and participate in back/forward.
-  // An absent or unknown param falls back to the station's default tab: talking
-  // to the agent is the point of an ACP-capable station, so chat leads there and
-  // health leads everywhere else.
-  const activeTab = $derived.by<Tab>(() => {
-    const raw = $page.url.searchParams?.get("tab");
-    const t = raw === null || raw === undefined ? raw : (TAB_ALIASES[raw] ?? raw);
-    const wanted = VALID_TABS.includes(t as Tab) ? (t as Tab) : defaultTab;
-    // The active tab must be one the tab bar actually renders. The tablist has
-    // a roving tabindex keyed on it, so a tab that isn't there (a ?tab=chat
-    // deep link while capabilities load, ?tab=identity after a resize past
-    // 1240px) would leave the WHOLE tablist untabbable.
-    return tabs.some((tab) => tab.id === wanted) ? wanted : defaultTab;
-  });
+  const activeTab = $derived.by<Tab>(() => resolveTab($page.url.searchParams?.get("tab"), tabs, defaultTab));
 
   /** Base id the tab buttons and the tabpanels build their ids from — kept in
    *  one place so aria-controls and aria-labelledby can't drift apart. */
   const tabsId = "page-tabs";
 
-  /** Heavy tabs (SSE stream / file tree / terminal session) the user has
-   *  switched to at least once — kept mounted after that so tab switches no
-   *  longer drop the log stream, tree state, or terminal scrollback. Health/
-   *  cleanup/activity intentionally stay plain if-mounted below: they fetch
-   *  fresh data on every mount (e.g. Activity's onMount fetch), and keeping
-   *  them alive would make that data go stale while the tab is hidden. */
+  /** Heavy tabs (isHeavyTab) the user has switched to at least once — kept
+   *  mounted after that. */
   let visitedHeavyTabs = $state(new Set<Tab>());
   $effect(() => {
-    if (
-      (activeTab === "chat" ||
-        activeTab === "logs" ||
-        activeTab === "files" ||
-        activeTab === "terminal" ||
-        // Declared configuration captures a plan and its digest once and never
-        // re-fetches them: remounting would destroy a review in progress, so
-        // this tab is kept alive and refreshes its rows on re-entry.
-        activeTab === "config") &&
-      !visitedHeavyTabs.has(activeTab)
-    ) {
+    if (isHeavyTab(activeTab) && !visitedHeavyTabs.has(activeTab)) {
       visitedHeavyTabs = new Set(visitedHeavyTabs).add(activeTab);
     }
   });
@@ -161,7 +85,6 @@
   /** Instance ref so ConfigEditor's onSaved can evict FileBrowser's stale
    *  content cache for the saved path (see FileBrowser.invalidate). */
   let fileBrowser: FileBrowser | undefined = $state();
-  let configEditor: ConfigEditor | undefined = $state();
 
   const hasAcp = $derived(
     Array.isArray(station?.capabilities) && station!.capabilities.includes("acp")
@@ -223,31 +146,13 @@
         (station?.capabilities?.includes("matrix.avatar") ?? false))
   );
   const hasSkills = $derived(hasSkillInventory || hasSkillManagement || hasNativeSkillManagement || hasPluginManagement);
-  /**
-   * The Configuration tab shows ONE section at a time.
-   *
-   * Measured on a live station before this existed: the tab was 6174px of
-   * content in a 753px pane — 8.2 screens — of which the skill inventory was
-   * 4960px and the declared-configuration panel, the thing the tab is named
-   * for, was 133px. Stacking everything made the rare thing bury the common
-   * one.
-   *
-   * Settings is always offered, even where the node has not enabled
-   * configuration management: a tab called Configuration that contains no
-   * configuration, and no word about why, is the worse answer.
-   */
-  type ConfigSection = "settings" | "plugins" | "skills";
-  const configSections = $derived.by<{ id: ConfigSection; label: string }[]>(() => [
-    { id: "settings", label: "Settings" },
-    ...(hasPluginManagement ? [{ id: "plugins" as const, label: "Plugins" }] : []),
-    ...(hasSkillInventory || hasSkillManagement || hasNativeSkillManagement
-      ? [{ id: "skills" as const, label: "Skills" }]
-      : []),
-  ]);
-  const configSection = $derived.by<ConfigSection>(() => {
-    const raw = $page.url.searchParams?.get("section");
-    return configSections.some((s) => s.id === raw) ? (raw as ConfigSection) : "settings";
-  });
+  /** The Configuration tab shows ONE section at a time (configSectionsFor says why). */
+  const configSections = $derived(
+    configSectionsFor(hasPluginManagement, hasSkillInventory || hasSkillManagement || hasNativeSkillManagement),
+  );
+  const configSection = $derived<ConfigSection>(
+    resolveConfigSection($page.url.searchParams?.get("section"), configSections),
+  );
   function setConfigSection(id: ConfigSection) {
     const url = new URL($page.url);
     if (id === "settings") url.searchParams.delete("section");
@@ -411,51 +316,19 @@
 
   // ─── Tabs ─────────────────────────────────────────────────────────────────
 
-  interface TabDef {
-    id: Tab;
-    label: string;
-    icon: Component;
-    disabled?: boolean;
-    disabledReason?: string;
-  }
-
-  const tabs = $derived.by<TabDef[]>(() => [
-    ...(hasAcp ? [{ id: "chat" as const, label: "Chat", icon: MessageSquareIcon }] : []),
-    // Second, not last.
-    //
-    // On a wide screen this is not a tab at all — it is the context rail, on
-    // screen permanently beside whatever else you are doing. Its importance
-    // does not change when the viewport narrows; only the room does. Appending
-    // it after Activity put "which agent is this, and who may dispatch it"
-    // behind a horizontal scroll past seven other tabs, which is the opposite
-    // of what the rail does for free. It is the frame for the rest, so it sits
-    // where you reach it without hunting: immediately after the conversation.
-    ...(narrow && !phone ? [{ id: "identity" as const, label: "Identity", icon: IdCardIcon }] : []),
-    { id: "health" as const, label: "Health", icon: HeartPulseIcon },
-    { id: "logs" as const, label: "Logs", icon: ScrollTextIcon },
-    { id: "files" as const, label: "Files", icon: FolderIcon },
-    ...(hasTerminal
-      ? [
-          {
-            id: "terminal" as const,
-            label: "Terminal",
-            icon: TerminalIcon,
-            // A shell changes what an agent is, so it sits behind mayGrantReach.
-            // Shown-and-locked rather than hidden: a missing tab reads as "this
-            // agent has no terminal", which is a different and wrong answer.
-            disabled: !mayChange,
-            disabledReason: wsAdmin ? "You may dispatch this agent but not change it" : workspaceAdminsCan("open a terminal"),
-          },
-        ]
-      : []),
-    ...(hasConfiguration
-      ? [{ id: "config" as const, label: "Configuration", icon: SlidersHorizontalIcon }]
-      : []),
-    ...(hasChangeset ? [{ id: "changes" as const, label: "Changes", icon: GitCompareIcon }] : []),
-    ...(station?.harness === "salaam" ? [{ id: "timeline" as const, label: "Timeline", icon: HistoryIcon }] : []),
-    ...(hasCleanup ? [{ id: "cleanup" as const, label: "Cleanup", icon: Trash2Icon }] : []),
-    { id: "activity" as const, label: "Activity", icon: ActivityIcon },
-  ]);
+  const tabs = $derived(
+    stationTabs({
+      hasAcp,
+      identityTab: narrow && !phone,
+      hasTerminal,
+      mayChange,
+      wsAdmin,
+      hasConfiguration,
+      hasChangeset,
+      harness: station?.harness,
+      hasCleanup,
+    }),
+  );
 
   function handleTabChange(tabId: string) {
     const url = new URL($page.url);
@@ -468,50 +341,6 @@
       url.searchParams.set("tab", tabId);
     }
     void goto(url, { noScroll: true, keepFocus: true });
-  }
-
-  /** Roving tabindex: only the selected tab is in the tab order, arrows move
-   *  focus between them (WAI-ARIA tabs pattern). */
-  let tabRefs = $state<(HTMLButtonElement | null)[]>([]);
-
-  function focusTabAt(index: number) {
-    const count = tabs.length;
-    if (count === 0) return;
-    tabRefs[((index % count) + count) % count]?.focus();
-  }
-
-  function handleTablistKeydown(event: KeyboardEvent) {
-    const currentIndex = tabs.findIndex((tab) => tab.id === activeTab);
-    const focusedIndex = tabRefs.findIndex((el) => el === document.activeElement);
-    const fromIndex = focusedIndex >= 0 ? focusedIndex : Math.max(currentIndex, 0);
-
-    switch (event.key) {
-      case "ArrowRight":
-        event.preventDefault();
-        focusTabAt(fromIndex + 1);
-        break;
-      case "ArrowLeft":
-        event.preventDefault();
-        focusTabAt(fromIndex - 1);
-        break;
-      case "Home":
-        event.preventDefault();
-        focusTabAt(0);
-        break;
-      case "End":
-        event.preventDefault();
-        focusTabAt(tabs.length - 1);
-        break;
-      case "Enter":
-      case " ": {
-        const index = tabRefs.findIndex((el) => el === (event.target as HTMLElement));
-        if (index >= 0 && !tabs[index].disabled) {
-          event.preventDefault();
-          handleTabChange(tabs[index].id);
-        }
-        break;
-      }
-    }
   }
 
   // ─── The context rail ─────────────────────────────────────────────────────
@@ -580,116 +409,25 @@
   and the tab bar off screen with it and put the composer below the fold.
 -->
 <div class="ap-station flex min-h-0 flex-1 flex-col" data-testid="station-page">
-  <!-- `relative`: StateDot's sr-only word is position:absolute, and with no
-       positioned ancestor inside the stage's scroller it escapes every
-       overflow-hidden between here and the document. -->
-  <header class="ap-st-head relative shrink-0 border-b border-border bg-background" data-testid="station-header">
-    <div class="flex flex-wrap items-start justify-between gap-3 px-4 pt-4 pb-3 sm:px-6">
-      <div class="min-w-0 flex-1">
-        <div class="ap-st-title flex min-w-0 items-center gap-2">
-          <span aria-hidden="true" class="ap-st-face"
-            ><Face id={stationId} label={station?.displayName ?? stationId} mood={liveState.id === "running" ? "working" : "resting"} size={44} /></span
-          >
-          <StateDot state={liveState} />
-          <h1
-            class="ap-st-name truncate font-mono text-[21px] leading-tight font-medium"
-            data-testid="station-handle"
-            title={station?.displayName ?? stationId}
-          >
-            {station?.displayName ??
-              (stationLoad === "loaded" || stationLoad === "loading" ? stationId : "Agent")}
-          </h1>
-        </div>
-        <p class="ap-st-sub mt-1 truncate text-sm text-muted-foreground" data-testid="station-summary">
-          {#if station}
-            <!-- Mono for the machine-issued halves only; the joins are prose. -->
-            <span class="font-mono" data-testid="station-key">{station.stationKey}</span>
-            on <a class="font-mono underline-offset-2 hover:underline" href="/nodes/{nodeId}"
-              >{nodeName}</a
-            >
-            · {liveState.label} · last spoke {lastSpoke === "—" ? "unknown" : lastSpoke}
-          {:else if stationLoad === "loading"}
-            Loading this agent…
-          {/if}
-        </p>
-      </div>
-
-      {#if canLifecycle}
-        <div class="ap-st-actions flex shrink-0 items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={actionInFlight !== null}
-            onclick={() => askFor("restart")}
-          >
-            {actionInFlight === "restart" ? "Restarting…" : "Restart"}
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={actionInFlight !== null}
-            onclick={() => askFor("stop")}
-          >
-            {actionInFlight === "stop" ? "Stopping…" : "Stop"}
-          </Button>
-        </div>
-      {/if}
-    </div>
-
-    {#if phone && station}
-      <div class="px-4 pb-3">
-        <button type="button" class="ap-st-about" onclick={() => (aboutOpen = true)}>
-          <IdCardIcon class="size-4" aria-hidden="true" />About {station.displayName}
-        </button>
-      </div>
-    {/if}
-
-    {#if actionError}
-      <p class="px-4 pb-2 text-sm text-status-error sm:px-6" role="alert">{actionError}</p>
-    {/if}
-
+  <StationHeader
+    {station}
+    {stationId}
+    {nodeId}
+    {stationLoad}
+    {liveState}
+    {nodeName}
+    {lastSpoke}
+    {canLifecycle}
+    {actionInFlight}
+    {actionError}
+    {phone}
+    onAsk={askFor}
+    onAbout={() => (aboutOpen = true)}
+  >
     {#if stationLoad !== "notFound" && stationLoad !== "error"}
-      <!-- svelte-ignore a11y_interactive_supports_focus -- the roving tabindex lives on the tab buttons, not the tablist -->
-      <div
-        class="ap-st-tabs scroll-strip flex min-w-0 gap-1 px-4 sm:px-6"
-        role="tablist"
-        onkeydown={handleTablistKeydown}
-        use:scrollStrip={`${activeTab}:${tabs.length}`}
-      >
-        {#each tabs as tab, i (tab.id)}
-          {@const TabIcon = tab.icon}
-          <button
-            bind:this={tabRefs[i]}
-            type="button"
-            role="tab"
-            id="{tabsId}-tab-{tab.id}"
-            aria-controls="{tabsId}-panel-{tab.id}"
-            aria-selected={activeTab === tab.id}
-            aria-disabled={tab.disabled ? "true" : undefined}
-            aria-label={tab.label}
-            title={tab.disabled ? tab.disabledReason : tab.label}
-            tabindex={activeTab === tab.id ? 0 : -1}
-            class={cn(
-              "flex shrink-0 items-center gap-2 border-b-2 px-2.5 py-2 text-sm whitespace-nowrap transition-colors touch:min-h-11",
-              tab.disabled
-                ? "cursor-not-allowed border-transparent text-muted-foreground/50"
-                : activeTab === tab.id
-                  ? "border-foreground font-medium text-foreground"
-                  : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
-            )}
-            onclick={() => !tab.disabled && handleTabChange(tab.id)}
-          >
-            {#if tab.disabled}
-              <LockIcon class="h-3.5 w-3.5" aria-hidden="true" />
-            {:else}
-              <TabIcon class="h-4 w-4" aria-hidden="true" />
-            {/if}
-            {tab.label}
-          </button>
-        {/each}
-      </div>
+      <StationTabBar {tabs} {activeTab} {tabsId} onSelect={handleTabChange} />
     {/if}
-  </header>
+  </StationHeader>
 
   <!-- The panel region is the page's one scroller: panels with a scroller of
        their own (chat, logs, files, terminal) fill it exactly and never
@@ -799,98 +537,26 @@
   {/if}
 
   {#if hasConfiguration}
-    <!--
-      One tab for how this agent is configured.
-
-      Declared configuration, plugin enablement and skill registration are not
-      three unrelated things: on a Hermes station they all write the SAME
-      configuration document, and declared configuration reaches the other two
-      by calling the very writers their own verbs call. Splitting them across a
-      "Skills" tab and the "Files" tab told the operator a story the node does
-      not tell. Order is how often a setting is touched, not alphabetical.
-
-      keepAlivePanel, not mountedPanel: the declared-configuration panel
-      captures a plan and its digest once and never re-fetches them, so
-      remounting it would throw away a review in progress.
-    -->
+    <!-- keepAlivePanel, not mountedPanel: StationConfigTab says why. -->
     {@render keepAlivePanel("config", configContent)}
     {#snippet configContent()}
-      <div class="ap-cfg flex flex-col">
-        {#if configSections.length > 1}
-          <nav aria-label="Configuration sections" class="ap-cfg-nav flex gap-1 border-b px-4 pt-4">
-            {#each configSections as section (section.id)}
-              <button
-                type="button"
-                aria-current={configSection === section.id ? "page" : undefined}
-                class="min-h-11 rounded-t-md border-b-2 px-3 py-1.5 text-sm {configSection === section.id
-                  ? 'border-foreground font-medium text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'}"
-                onclick={() => setConfigSection(section.id)}
-              >
-                {section.label}
-              </button>
-            {/each}
-          </nav>
-        {/if}
-
-        <!-- Hidden, never unmounted. The declared-configuration panel captures
-             a plan and its digest once and never re-fetches them, so a section
-             switch must not be able to tear it down mid-review. -->
-        <div data-config-section="settings" class={configSection === "settings" ? "contents" : "hidden"}>
-          <McpProxyStatus {stationId} />
-          {#if station?.harness === "salaam"}
-            <ApprovalRulesPanel {stationId} canChange={wsAdmin} />
-          {/if}
-          {#if hasConfigManagement && !wsAdmin}
-            <div class="ap-cfg-placeholder space-y-2 p-4" data-testid="config-member">
-              <h2 class="font-semibold">Declared configuration</h2>
-              <p class="text-sm text-muted-foreground">{workspaceAdminsCan("change this agent's configuration")}</p>
-            </div>
-          {:else if hasConfigManagement}
-            <HarnessConfigPanel
-              {stationId}
-              {nodeId}
-              stationKey={station?.stationKey}
-              active={activeTab === "config" && configSection === "settings"}
-              onRestart={canLifecycle ? () => askFor("restart") : undefined}
-            />
-          {:else}
-            <div class="ap-cfg-placeholder space-y-2 p-4">
-              <h2 class="font-semibold">Declared configuration</h2>
-              <p class="text-sm text-muted-foreground">
-                This station's node has not enabled configuration management, so nothing can be declared for
-                it here. A node advertises <code>config.manage</code> once its agent's configuration sets
-                <code>configManagement</code>; until then the harness's own settings are reachable only on the
-                host.
-              </p>
-            </div>
-          {/if}
-        </div>
-
-        {#if hasPluginManagement}
-          <div data-config-section="plugins" class={configSection === "plugins" ? "contents" : "hidden"}>
-            <PluginManagementPanel
-              {stationId}
-              canManage={mayChange}
-              onRestart={canLifecycle ? () => askFor("restart") : undefined}
-            />
-          </div>
-        {/if}
-
-        {#if hasSkillInventory || hasSkillManagement || hasNativeSkillManagement}
-          <div data-config-section="skills" class={configSection === "skills" ? "contents" : "hidden"}>
-            {#if hasSkillInventory}<SkillsPanel {stationId} />{/if}
-            {#if hasSkillManagement || hasNativeSkillManagement}
-              <SkillManagementPanel
-                {stationId}
-                harness={station?.harness ?? ""}
-                canManage={hasSkillManagement && mayChange}
-                canNative={hasNativeSkillManagement && mayChange}
-              />
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <StationConfigTab
+        {stationId}
+        {nodeId}
+        {station}
+        {wsAdmin}
+        {mayChange}
+        {hasConfigManagement}
+        {hasPluginManagement}
+        {hasSkillInventory}
+        {hasSkillManagement}
+        {hasNativeSkillManagement}
+        sections={configSections}
+        section={configSection}
+        active={activeTab === "config"}
+        onSection={setConfigSection}
+        onRestart={canLifecycle ? () => askFor("restart") : undefined}
+      />
     {/snippet}
   {/if}
 
@@ -940,23 +606,7 @@
 {/snippet}
 
 {#if phone && station}
-  <!-- The phone's rail: everything the context column holds, plus Restart and
-       Stop (which also stay in the header). Both still go through the confirm. -->
-  <Sheet.Root bind:open={aboutOpen}>
-    <Sheet.Content side="bottom" class="ap-about" data-testid="station-about">
-      <Sheet.Title class="ap-about__title">About {station.displayName}</Sheet.Title>
-      <Sheet.Description class="sr-only">Identity, placement, voice and who may dispatch this agent</Sheet.Description>
-      <div class="ap-about__body">
-        {@render stationRail()}
-        {#if canLifecycle}
-          <div class="ap-about__actions">
-            <Button variant="outline" disabled={actionInFlight !== null} onclick={() => askFor("restart")}>Restart</Button>
-            <Button variant="destructive" disabled={actionInFlight !== null} onclick={() => askFor("stop")}>Stop</Button>
-          </div>
-        {/if}
-      </div>
-    </Sheet.Content>
-  </Sheet.Root>
+  <StationAboutSheet bind:open={aboutOpen} {station} {canLifecycle} {actionInFlight} onAsk={askFor} rail={stationRail} />
 {/if}
 
 <ConfirmDialog
@@ -977,33 +627,9 @@
   }}
 />
 
-<!-- ── ConfigEditor dialog (opened via "Edit (diff)" in the FileBrowser) ── -->
-<Dialog.Root
-  open={configEditorPath !== null && canWrite}
-  onOpenChange={(open) => {
-    // Escape/overlay-close must go through the editor's unsaved-changes guard;
-    // the editor calls onClose (below) once closing is actually safe.
-    if (!open) {
-      if (configEditor) {
-        configEditor.requestClose();
-      } else {
-        configEditorPath = null;
-      }
-    }
-  }}
->
-  <Dialog.Content
-    class="flex h-[80vh] max-w-4xl sm:max-w-4xl flex-col overflow-hidden p-0"
-    showCloseButton={false}
-  >
-    {#if configEditorPath !== null && canWrite}
-      <ConfigEditor
-        bind:this={configEditor}
-        {stationId}
-        path={configEditorPath}
-        onClose={() => (configEditorPath = null)}
-        onSaved={(p) => fileBrowser?.invalidate(p)}
-      />
-    {/if}
-  </Dialog.Content>
-</Dialog.Root>
+<StationConfigEditorDialog
+  {stationId}
+  bind:path={configEditorPath}
+  {canWrite}
+  onSaved={(p) => fileBrowser?.invalidate(p)}
+/>

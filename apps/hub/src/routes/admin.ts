@@ -35,7 +35,7 @@ import { adminTranscriptionRoutes } from "./transcription-settings";
 import { adminSpeechRoutes } from "./speech-settings";
 
 // Models
-import { getAdminStats } from "../services/admin-stats";
+import { getAdminStats } from "../services/hub";
 import { getAuditLogs } from "../models/admin-audit-log";
 
 // =============================================================================
@@ -141,7 +141,7 @@ adminRouter.get("/audit-log", zValidator("query", auditLogSchema), async (c) => 
     ...(c.get("auditLogAllTenants") ? {} : { tenantId: resolveTenantId(c) }),
     adminUserId: query.adminUserId,
     targetUserId: query.targetUserId,
-    action: query.action as any,
+    action: query.action,
     startDate: query.startDate,
     endDate: query.endDate,
     limit: query.limit,

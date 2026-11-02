@@ -155,7 +155,7 @@ func initializeNamespace(parent *os.Root, namespace string, binding InstallBindi
 	}
 	entries, err := container.ReadDir(513)
 	container.Close()
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	if len(entries) > 512 {
@@ -169,7 +169,7 @@ func initializeNamespace(parent *os.Root, namespace string, binding InstallBindi
 	if err := parent.Mkdir(temporary, 0700); err != nil {
 		return err
 	}
-	defer parent.RemoveAll(temporary)
+	defer func() { _ = parent.RemoveAll(temporary) }() // best effort: a scratch directory
 	root, err := parent.OpenRoot(temporary)
 	if err != nil {
 		return err
@@ -363,7 +363,7 @@ func (s *InstallStore) atomicWrite(relative string, data []byte, mode fs.FileMod
 	}
 	entries, err := directory.ReadDir(17)
 	directory.Close()
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	if len(entries) >= 16 {
@@ -378,7 +378,7 @@ func (s *InstallStore) atomicWrite(relative string, data []byte, mode fs.FileMod
 	if err != nil {
 		return err
 	}
-	defer s.root.Remove(temporary)
+	defer func() { _ = s.root.Remove(temporary) }() // best effort: a scratch file
 	defer file.Close()
 	if checkpoints {
 		if err := s.checkpoint("file-open"); err != nil {
@@ -449,11 +449,11 @@ func (s *InstallStore) lock(ctx context.Context) (func(), error) {
 		err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
 			if err := s.checkIdentity(); err != nil {
-				syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+				_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN) // closing the file releases it anyway
 				file.Close()
 				return nil, err
 			}
-			return func() { syscall.Flock(int(file.Fd()), syscall.LOCK_UN); file.Close() }, nil
+			return func() { _ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN); file.Close() }, nil
 		}
 		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
 			file.Close()

@@ -27,6 +27,7 @@
  */
 
 import { sql } from "drizzle-orm";
+import type { BridgeCredentialSource } from "../../../../../packages/contract/src/bridge-credential";
 import { pgTable, text, integer, timestamp, jsonb, primaryKey, index, check, boolean, foreignKey } from "drizzle-orm/pg-core";
 
 import { acpRuns } from "./acp";
@@ -172,7 +173,7 @@ export const bridgeAgents = pgTable(
      * to a client — the read surface answers `hasToken`, not the token.
      */
     tokenEncrypted: text("token_encrypted").notNull(),
-    credentialSource: jsonb("credential_source").$type<import("../../../../../packages/contract/src/bridge-credential").BridgeCredentialSource>(),
+    credentialSource: jsonb("credential_source").$type<BridgeCredentialSource>(),
     /**
      * The second, `run`-scoped credential the HARNESS spends over MCP, so a dispatched agent can
      * complete or block its own card. Deliberately not `token`: that one can claim, and an agent

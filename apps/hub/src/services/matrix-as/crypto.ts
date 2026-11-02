@@ -132,6 +132,7 @@ export interface ShareReport {
 export function noOlmRecipients(requests: Array<{ eventType?: string; body?: string }>): string[] {
   const users = new Set<string>();
   for (const request of requests) {
+    // oxlint-disable-next-line typescript/no-unnecessary-type-conversion -- a Rust binding's body: `eventType` is not proven a string
     if (!String(request.eventType ?? "").includes("withheld")) continue;
     let parsed: { messages?: Record<string, Record<string, { code?: string } | null>> };
     try {
@@ -267,7 +268,7 @@ export interface AgentCrypto {
   decrypt(
     userId: string,
     roomId: string,
-    event: Record<string, unknown>,
+    event: object,
   ): Promise<Record<string, unknown> | null>;
   /** Tell the machine which users share a room, so it can target keys. */
   trackUsers(userId: string, members: string[]): Promise<void>;
@@ -380,7 +381,7 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
     // Then the device's own keys, so the signature below has something on the
     // server to attach to.
     if (reqs.uploadKeysReq) {
-      const body = await deps.send(userId, reqs.uploadKeysReq as CryptoRequest);
+      const body = await deps.send(userId, reqs.uploadKeysReq);
       await machine.markRequestAsSent(
         (reqs.uploadKeysReq as CryptoRequest).id ?? '',
         0,
@@ -518,7 +519,7 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
        * else will ever come to correct it.
        */
       const stale = noOlmRecipients(
-        shares as unknown as Array<{ eventType?: string; body?: string }>,
+        shares,
       );
       // A device that answers `m.no_olm` after a fresh identity is not stale, it is
       // broken — and it will answer the same way on every message. Retrying each time
@@ -547,7 +548,7 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
         // Whoever stopped refusing is forgotten, so a later failure is treated as new
         // rather than sitting out a cooldown it did not earn.
         const stillRefusing = new Set(
-          noOlmRecipients(shares as unknown as Array<{ eventType?: string; body?: string }>),
+          noOlmRecipients(shares),
         );
         staleRetries.clear(
           roomId,
@@ -566,12 +567,12 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
           id: req.id,
           // `shareRoomKey` returns ToDeviceRequests, which carry no `type`
           // field of their own — the request type is implied by the class.
-          type: 3 as unknown as RequestType,
+          type: 3,
           body: req.body,
           eventType: req.eventType,
           txnId: req.txnId,
         });
-        await machine.markRequestAsSent(req.id, 3 as unknown as RequestType, response);
+        await machine.markRequestAsSent(req.id, 3, response);
       }
 
       deps.onShare?.({

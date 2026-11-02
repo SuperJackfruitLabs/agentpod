@@ -16,7 +16,7 @@ import { test, expect, describe } from "bun:test";
 import { Hono } from "hono";
 import { createFleetRoutes } from "../../src/routes/fleet";
 import type { AuthUser } from "../../src/auth/middleware";
-import type { RawFleetRow } from "../../src/services/fleet";
+import type { RawFleetRow } from "../../src/services/nodes/fleet";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

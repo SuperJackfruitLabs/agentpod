@@ -21,6 +21,7 @@ package fleetcred
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -188,7 +189,7 @@ func ExchangeDevice(hub string, d Device) (string, error) {
 	// Not `client_id` — the hub reads `client`, and `auth-authorize.ts` records that the other
 	// spelling is refused as "unknown client": a message that reads like a registry problem and is
 	// a spelling one.
-	req, err := http.NewRequest(
+	req, err := http.NewRequestWithContext(context.Background(),
 		"POST",
 		strings.TrimRight(hub, "/")+"/api/auth/devices/token?client="+url.QueryEscape(ClientID),
 		nil,
@@ -228,7 +229,7 @@ func CreateDevice(hub, token, name string) (Device, error) {
 	if err != nil {
 		return Device{}, err
 	}
-	req, err := http.NewRequest("POST", strings.TrimRight(hub, "/")+"/api/auth/devices", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(context.Background(), "POST", strings.TrimRight(hub, "/")+"/api/auth/devices", bytes.NewReader(body))
 	if err != nil {
 		return Device{}, err
 	}
@@ -315,7 +316,7 @@ func Resolve(hub string) (Credential, error) {
 // belonging to somebody else and one that does not exist are the same 404 — this cannot be used
 // to enumerate.
 func RevokeDeviceByID(hub, token, deviceID string) error {
-	req, err := http.NewRequest("DELETE", strings.TrimRight(hub, "/")+"/api/auth/devices/"+deviceID, nil)
+	req, err := http.NewRequestWithContext(context.Background(), "DELETE", strings.TrimRight(hub, "/")+"/api/auth/devices/"+deviceID, nil)
 	if err != nil {
 		return err
 	}

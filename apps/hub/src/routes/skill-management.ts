@@ -1,4 +1,4 @@
-import { nodeRefusal } from "../services/skill-operation-diagnostics";
+import { nodeRefusal } from "../services/skills";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { and, eq, gt, inArray } from "drizzle-orm";
@@ -25,12 +25,12 @@ import { db } from "../db/drizzle";
 import { skillOperations } from "../db/schema/skills";
 import { stations } from "../db/schema/stations";
 import { principalForUser } from "../auth/org-plane/principals";
-import { verifyNodeCredential } from "../services/enrollment";
-import { requireGrantReach } from "../services/grant-reach";
+import { verifyNodeCredential } from "../services/nodes";
+import { requireGrantReach } from "../services/control";
 import { isOrgPlaneUnavailable, orgPlaneOutageBody } from "../auth/caller-authority";
-import { getStation } from "../services/station-registry";
+import { getStation } from "../services/stations";
 import { refuseWithoutReach } from "./station-writes";
-import { gateCapability } from "../services/station-registry";
+import { gateCapability } from "../services/stations";
 import {
   SkillRequestError,
   MAX_SKILL_ARTIFACT_BYTES,
@@ -39,13 +39,13 @@ import {
   getSkillArtifact,
   deleteSkillArtifact,
   type SkillOwner,
-} from "../services/skill-artifacts";
+} from "../services/skills";
 import {
   importTrustedSkillRelease,
   listTrustedSkillReleases,
-} from "../services/trusted-skill-catalog";
-import { createSkillReleaseCohort, listSkillReleaseCohorts } from "../services/skill-release-cohorts";
-import { createSkillReleaseCanaryOperation, getSkillReleaseCanaryOperation } from "../services/skill-release-canary";
+} from "../services/skills";
+import { createSkillReleaseCohort, listSkillReleaseCohorts } from "../services/skills";
+import { createSkillReleaseCanaryOperation, getSkillReleaseCanaryOperation } from "../services/skills";
 import { SkillReleaseCohortCreateRequest } from "@agentpod/contract";
 import {
   createSkillOperation,
@@ -54,7 +54,7 @@ import {
   listSkillOperations,
   operationResult,
   MANAGED_PLUGIN,
-} from "../services/skill-operations";
+} from "../services/skills";
 import * as broker from "../services/broker";
 import { canaryOperationIdentity } from "./canary-operation";
 import { isWorkspaceAdminUser, WORKSPACE_ADMIN_REQUIRED } from "../auth/workspace-authority";
@@ -62,7 +62,7 @@ import { isWorkspaceAdminUser, WORKSPACE_ADMIN_REQUIRED } from "../auth/workspac
 /** The console caller with its org-plane token authority, for the reach checks (design §5.7). */
 function callerOf(c: Context): AuthUser {
   owner(c);
-  return c.get("user") as AuthUser;
+  return c.get("user");
 }
 
 function owner(c: Context): SkillOwner {
@@ -79,7 +79,7 @@ function owner(c: Context): SkillOwner {
  */
 function adminOwner(c: Context): SkillOwner {
   const o = owner(c);
-  if (!isWorkspaceAdminUser(c.get("user") as AuthUser))
+  if (!isWorkspaceAdminUser(c.get("user")))
     throw new SkillRequestError(403, WORKSPACE_ADMIN_REQUIRED.error);
   return o;
 }
@@ -555,7 +555,7 @@ export const skillArtifactDownloadRoutes = routesBase().post(
     if (
       !credential ||
       credential[1] !== nodeId ||
-      !(await verifyNodeCredential(nodeId!, credential[2]!).catch(() => false))
+      !(await verifyNodeCredential(nodeId, credential[2]!).catch(() => false))
     )
       throw new SkillRequestError(401, "Invalid node credential");
     const [record] = await db
@@ -570,10 +570,10 @@ export const skillArtifactDownloadRoutes = routesBase().post(
       )
       .where(
         and(
-          eq(skillOperations.id, operationId!),
-          eq(skillOperations.nodeId, nodeId!),
-          eq(skillOperations.stationId, stationId!),
-          eq(stations.nodeId, nodeId!),
+          eq(skillOperations.id, operationId),
+          eq(skillOperations.nodeId, nodeId),
+          eq(skillOperations.stationId, stationId),
+          eq(stations.nodeId, nodeId),
           eq(stations.stationKey, c.req.header("X-AgentPod-Station-Key") ?? ""),
           eq(skillOperations.stationKey, stations.stationKey),
           eq(skillOperations.harness, stations.harness),

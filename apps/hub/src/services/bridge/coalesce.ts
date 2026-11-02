@@ -347,6 +347,7 @@ function textOf(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) return content.map(textOf).join("");
   const c = content as { type?: string; text?: string } | null;
+  // oxlint-disable-next-line typescript/no-unnecessary-type-conversion -- wire content: `text` is not proven a string
   if (c && c.type === "text") return String(c.text ?? "");
   return content === undefined || content === null ? "" : JSON.stringify(content);
 }

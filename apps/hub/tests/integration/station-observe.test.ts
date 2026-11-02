@@ -32,12 +32,12 @@ import { waitForNodeOnline } from "../helpers/wait";
 import {
   mintEnrollmentToken,
   enrollNode,
-} from "../../src/services/enrollment";
+} from "../../src/services/nodes/enrollment";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { stationRoutes } from "../../src/routes/stations";
 import { websocket } from "../../src/ws";
 import type { AuthUser } from "../../src/auth/middleware";
-import type { StationRow } from "../../src/services/station-registry";
+import type { StationRow } from "../../src/services/stations/registry";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -392,7 +392,7 @@ test(
         // Break early once we have both expected lines
         if (rawText.includes("log line 2")) break;
       }
-      reader.cancel();
+      void reader.cancel();
 
       const dataLines = rawText
         .split("\n")

@@ -135,13 +135,16 @@ export const SalaamMcpAssignment = z
           s.url !== u.origin + u.pathname ||
           parts.length !== 6 ||
           parts[1] !== "stations" ||
+          // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- needed where the hub compiles this file (noUncheckedIndexedAccess)
           decodeURIComponent(parts[2]!) !== a.binding.station_id ||
           parts[3] !== "mcp-managed-v1" ||
+          // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- needed where the hub compiles this file (noUncheckedIndexedAccess)
           !/^[a-f0-9]{64}$/.test(parts[4]!) ||
           parts[5] !== (s.name === "agentpod" ? "hub" : "superlibrary")
         )
           return false;
         origins.add(u.origin);
+        // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- needed where the hub compiles this file (noUncheckedIndexedAccess)
         keys.add(s.headers[0]!.value);
       } catch {
         return false;

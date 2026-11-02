@@ -34,7 +34,7 @@ import { db } from "../../db/drizzle";
 import { matrixRooms } from "../../db/schema/matrix";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
-import { roomAliasFor } from "./names";
+import { roomAliasFor } from "../matrix";
 import { principalHandle } from "../../auth/org-plane/principals";
 import { createLogger } from "../../utils/logger";
 

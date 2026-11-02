@@ -17,9 +17,9 @@ import { agentApprovalRules } from "../../src/db/schema/agent-approval-rules";
 import { stationAudit } from "../../src/db/schema/audit";
 import type { AuthUser } from "../../src/auth/middleware";
 import { createAgentApprovalRuleRoutes } from "../../src/routes/agent-approval-rules";
-import { approvalRulesFor } from "../../src/services/agent-approval-rules";
-import { renewSalaamExecution } from "../../src/services/salaam-authority";
-import * as broker from "../../src/services/broker";
+import { approvalRulesFor } from "../../src/services/salaam/approval-rules";
+import { renewSalaamExecution } from "../../src/services/salaam/authority";
+import * as broker from "../../src/services/broker/broker";
 import { fakePlane } from "../helpers/fake-plane";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
@@ -167,7 +167,7 @@ test("a renewal carries the live rules, and none once the last is revoked", asyn
 
 // Operator ruling 2026-10-28: "Always allow" on the approval itself. The hub re-reads the answerer's
 // role from the org plane, never the board's word, and sets the same rule as the console switch.
-import { AlwaysAllowRefused, alwaysAllowFromAnswer } from "../../src/services/agent-approval-rules";
+import { AlwaysAllowRefused, alwaysAllowFromAnswer } from "../../src/services/salaam/approval-rules";
 import * as orgPlane from "../../src/auth/org-plane/client";
 
 const person = (role: "owner" | "admin" | "member", o: { suspended?: boolean; org?: string } = {}) => {

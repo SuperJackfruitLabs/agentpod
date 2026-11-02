@@ -23,7 +23,7 @@ import { stations } from "../../db/schema/stations";
 import { matrixRooms } from "../../db/schema/matrix";
 import { bridgeDispatches } from "../../db/schema/bridge";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
-import { mintEnrollmentToken, enrollNode } from "../enrollment";
+import { mintEnrollmentToken, enrollNode } from "../nodes/enrollment";
 import { createPrincipal } from "../../../tests/helpers/principals";
 import { _resetHubEventsForTest, hubEventKind } from "../push/hub-events";
 import {

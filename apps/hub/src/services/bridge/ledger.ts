@@ -29,7 +29,7 @@ import { acpRuns } from "../../db/schema/acp";
 import { bridgeDispatches, type DispatchOutcome } from "../../db/schema/bridge";
 import { salaamWorkOwners } from "../../db/schema/salaam-work";
 import { tenantScope } from "../../db/tenant-scope";
-import { makeFingerprint, toStored, type Fingerprint } from "../evidence/fingerprint";
+import { makeFingerprint, toStored, type Fingerprint } from "../evidence";
 
 /** Everything that identifies one dispatched work run. */
 export interface DispatchKey {

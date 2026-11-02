@@ -64,7 +64,7 @@ export const SuperpipelineRunId = superpipelineId("run");
  *
  * `<prefix>_<20 lowercase hex>` — a UUID with its hyphens stripped, truncated to
  * 20 — comes from a helper duplicated verbatim in two services
- * (apps/hub/src/services/enrollment.ts:11-12 and .../runtimes.ts:54-55).
+ * (apps/hub/src/services/nodes/enrollment.ts:11-12 and .../runtimes.ts:54-55).
  *
  * Note the length disagreement with superpipeline, which slices the same source to 16.
  * Neither repo records a reason. Pinning both here is what makes the difference

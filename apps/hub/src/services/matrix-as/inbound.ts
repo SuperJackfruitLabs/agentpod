@@ -22,11 +22,11 @@ import { matrixRooms } from "../../db/schema/matrix";
 import { acpSessions } from "../../db/schema/acp";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
-import { IDENTITY_UNAVAILABLE_TEXT, resolveMatrixId } from "../matrix-identity";
+import { IDENTITY_UNAVAILABLE_TEXT, resolveMatrixId } from "../matrix";
 import { OrgPlaneError } from "../../auth/org-plane/client";
 import { getGrant, grantAllowsPrincipal } from "../../auth/org-plane/grants";
-import { isControlPairEnforced } from "../control-pair";
-import { bridgeUserId } from "./names";
+import { isControlPairEnforced } from "../control";
+import { bridgeUserId } from "../matrix";
 import { boardRoomFor } from "./board-room";
 import { principalHandle } from "../../auth/org-plane/principals";
 import {
@@ -37,7 +37,7 @@ import {
 } from "./permissions";
 import { createLogger } from "../../utils/logger";
 import { parseGateDecision } from "./gates";
-import { imageNote, imageSource, isRefusal, loadImage, type PromptImage } from "./attachments";
+import { imageNote, imageSource, isRefusal, loadImage, type PromptImage } from "../matrix";
 import {
   audioSource,
   isVoiceRefusal,
@@ -48,9 +48,9 @@ import {
   voicePrompt,
   type VoiceResult,
 } from "./voice";
-import { MAX_VOICE_SECONDS, type Transcriber } from "../transcription-client";
+import { MAX_VOICE_SECONDS, type Transcriber } from "../speech";
 import { RoomQueue, type DispatchOutcome, type FreeOutcome, type QueuedPrompt } from "./room-queue";
-import { SESSION_BUSY_MESSAGE } from "../acp-sessions";
+import { SESSION_BUSY_MESSAGE } from "../acp";
 
 const log = createLogger("matrix-inbound");
 
@@ -73,7 +73,7 @@ export interface InboundDeps {
    * everything sent before this agent joined, and for anything sent while it
    * was offline that the sender has since forgotten.
    */
-  decrypt?(roomId: string, asUserId: string, event: InboundEvent): Promise<InboundEvent | null>;
+  decrypt?(roomId: string, asUserId: string, event: InboundEvent): Promise<Record<string, unknown> | null>;
   /**
    * Answering a superpipeline approval gate.
    *
@@ -125,7 +125,7 @@ export interface InboundDeps {
   /**
    * Speech to text for voice notes, asked per voice note for the room's
    * station — the console's station and hub settings, then TRANSCRIBE_* env
-   * (`services/transcription-settings.ts`). Null: none for that station.
+   * (`services/speech/transcription-settings.ts`). Null: none for that station.
    */
   transcriberFor?(stationId: string): Promise<{ transcriber: Transcriber; maxSeconds: number } | null>;
   /**
@@ -250,7 +250,7 @@ async function asPlaintext(
     // Same shape as the station path below, and for the same reason: the envelope
     // is kept because a megolm plaintext need not carry `room_id` or `sender`, and
     // everything downstream reads them.
-    return { ...event, ...plainBoard } as InboundEvent;
+    return { ...event, ...plainBoard };
   }
 
   const room = await roomContext(event.room_id);
@@ -282,7 +282,7 @@ async function asPlaintext(
   // belong to the event that wrapped it, and everything below this line reads
   // them. Returning the payload alone would bail one line later on a missing
   // `room_id`, which looks exactly like a message nobody sent.
-  return { ...event, ...plain } as InboundEvent;
+  return { ...event, ...plain };
 }
 
 /**

@@ -8,18 +8,9 @@ import (
 	"net/url"
 	"os"
 	"strings"
-)
 
-const stationOpsUsage = `usage:
-  fleet station lifecycle --station ID --action start|stop|restart
-  fleet station cleanup plan --station ID
-  fleet station cleanup apply --station ID --path P [--path P …]
-  fleet station changeset status --station ID [--base REF]
-  fleet station changeset diff --station ID --side uncommitted|committed [--path P] [--base REF]
-  fleet station fs write  --station ID --path P --from FILE|- [--base64] [--backup]
-  fleet station fs mkdir  --station ID --path P
-  fleet station fs move   --station ID --from P --to P
-  fleet station fs delete --station ID --path P [--recursive]`
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
+)
 
 // fleetStationOps is the operational half of a station: lifecycle, disk, diffs, files.
 //
@@ -32,7 +23,7 @@ const stationOpsUsage = `usage:
 // landed is the one thing a caller must decide about itself.
 func fleetStationOps(args []string) {
 	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(stationOpsUsage)
+		fmt.Println(fleetcli.StationOpsUsage)
 		if len(args) == 0 {
 			os.Exit(2)
 		}
@@ -42,10 +33,10 @@ func fleetStationOps(args []string) {
 	case "lifecycle":
 		fs, station := stationFlags("lifecycle")
 		action := fs.String("action", "", "start, stop or restart")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		id := stationOpID(*station)
 		if *action != "start" && *action != "stop" && *action != "restart" {
-			fmt.Fprintf(os.Stderr, "lifecycle requires --action start|stop|restart\n\n%s\n", stationOpsUsage)
+			fmt.Fprintf(os.Stderr, "lifecycle requires --action start|stop|restart\n\n%s\n", fleetcli.StationOpsUsage)
 			os.Exit(2)
 		}
 		fleetSkillJSON(http.MethodPost, stationPath(id)+"/lifecycle", map[string]any{"action": *action})
@@ -56,20 +47,20 @@ func fleetStationOps(args []string) {
 	case "fs":
 		fleetStationFS(args[1:])
 	default:
-		fmt.Fprintln(os.Stderr, stationOpsUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.StationOpsUsage)
 		os.Exit(2)
 	}
 }
 
 func fleetStationCleanup(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, stationOpsUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.StationOpsUsage)
 		os.Exit(2)
 	}
 	fs, station := stationFlags("cleanup")
 	var paths repeatable
 	fs.Var(&paths, "path", "a path to reclaim (repeatable)")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	id := stationOpID(*station)
 	switch args[0] {
 	case "plan":
@@ -78,26 +69,26 @@ func fleetStationCleanup(args []string) {
 		if len(paths) == 0 {
 			// The hub requires at least one path. Enforced here too, because an empty apply is
 			// far more likely to be a shell glob that matched nothing than a deliberate no-op.
-			fmt.Fprintf(os.Stderr, "apply requires at least one --path\n\n%s\n", stationOpsUsage)
+			fmt.Fprintf(os.Stderr, "apply requires at least one --path\n\n%s\n", fleetcli.StationOpsUsage)
 			os.Exit(2)
 		}
 		fleetSkillJSON(http.MethodPost, stationPath(id)+"/cleanup/apply", map[string]any{"paths": []string(paths)})
 	default:
-		fmt.Fprintln(os.Stderr, stationOpsUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.StationOpsUsage)
 		os.Exit(2)
 	}
 }
 
 func fleetStationChangeset(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, stationOpsUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.StationOpsUsage)
 		os.Exit(2)
 	}
 	fs, station := stationFlags("changeset")
 	base := fs.String("base", "", "ref to compare against")
 	side := fs.String("side", "", "uncommitted or committed")
 	path := fs.String("path", "", "limit the diff to one path")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	id := stationOpID(*station)
 	body := map[string]any{}
 	if *base != "" {
@@ -108,7 +99,7 @@ func fleetStationChangeset(args []string) {
 		fleetSkillJSON(http.MethodPost, stationPath(id)+"/changeset/status", body)
 	case "diff":
 		if *side != "uncommitted" && *side != "committed" {
-			fmt.Fprintf(os.Stderr, "diff requires --side uncommitted|committed\n\n%s\n", stationOpsUsage)
+			fmt.Fprintf(os.Stderr, "diff requires --side uncommitted|committed\n\n%s\n", fleetcli.StationOpsUsage)
 			os.Exit(2)
 		}
 		body["side"] = *side
@@ -117,14 +108,14 @@ func fleetStationChangeset(args []string) {
 		}
 		fleetSkillJSON(http.MethodPost, stationPath(id)+"/changeset/diff", body)
 	default:
-		fmt.Fprintln(os.Stderr, stationOpsUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.StationOpsUsage)
 		os.Exit(2)
 	}
 }
 
 func fleetStationFS(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, stationOpsUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.StationOpsUsage)
 		os.Exit(2)
 	}
 	fs, station := stationFlags("fs")
@@ -134,14 +125,14 @@ func fleetStationFS(args []string) {
 	asBase64 := fs.Bool("base64", false, "send the file as base64 rather than utf8")
 	backup := fs.Bool("backup", false, "keep a backup of what was overwritten")
 	recursive := fs.Bool("recursive", false, "delete a directory and its contents")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	id := stationOpID(*station)
 	base := stationPath(id) + "/fs/"
 
 	switch args[0] {
 	case "write":
 		if *path == "" || *from == "" {
-			fmt.Fprintf(os.Stderr, "write requires --path and --from\n\n%s\n", stationOpsUsage)
+			fmt.Fprintf(os.Stderr, "write requires --path and --from\n\n%s\n", fleetcli.StationOpsUsage)
 			os.Exit(2)
 		}
 		raw := readDocument(*from)
@@ -162,24 +153,24 @@ func fleetStationFS(args []string) {
 		fleetSkillJSON(http.MethodPost, base+"write", body)
 	case "mkdir":
 		if *path == "" {
-			fmt.Fprintf(os.Stderr, "mkdir requires --path\n\n%s\n", stationOpsUsage)
+			fmt.Fprintf(os.Stderr, "mkdir requires --path\n\n%s\n", fleetcli.StationOpsUsage)
 			os.Exit(2)
 		}
 		fleetSkillJSON(http.MethodPost, base+"mkdir", map[string]any{"path": *path})
 	case "move":
 		if *from == "" || *to == "" {
-			fmt.Fprintf(os.Stderr, "move requires --from and --to\n\n%s\n", stationOpsUsage)
+			fmt.Fprintf(os.Stderr, "move requires --from and --to\n\n%s\n", fleetcli.StationOpsUsage)
 			os.Exit(2)
 		}
 		fleetSkillJSON(http.MethodPost, base+"move", map[string]any{"from": *from, "to": *to})
 	case "delete":
 		if *path == "" {
-			fmt.Fprintf(os.Stderr, "delete requires --path\n\n%s\n", stationOpsUsage)
+			fmt.Fprintf(os.Stderr, "delete requires --path\n\n%s\n", fleetcli.StationOpsUsage)
 			os.Exit(2)
 		}
 		fleetSkillJSON(http.MethodPost, base+"delete", map[string]any{"path": *path, "recursive": *recursive})
 	default:
-		fmt.Fprintln(os.Stderr, stationOpsUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.StationOpsUsage)
 		os.Exit(2)
 	}
 }
@@ -201,7 +192,8 @@ func stationPath(id string) string { return "/api/stations/" + url.PathEscape(id
 // repeatable collects a flag given more than once.
 type repeatable []string
 
-func (r *repeatable) String() string     { return strings.Join(*r, ",") }
+func (r *repeatable) String() string { return strings.Join(*r, ",") }
+
 func (r *repeatable) Set(v string) error { *r = append(*r, v); return nil }
 
 func utf8Clean(b []byte) bool { return strings.ToValidUTF8(string(b), "�") == string(b) }

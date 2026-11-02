@@ -11,7 +11,7 @@ import { acpSessions } from "../../src/db/schema/acp";
 import { stationAudit } from "../../src/db/schema/audit";
 import type { AuthUser } from "../../src/auth/middleware";
 import { stationTimelineRoutes } from "../../src/routes/station-timeline";
-import * as broker from "../../src/services/broker";
+import * as broker from "../../src/services/broker/broker";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
 const hex = () => crypto.randomUUID().replaceAll("-", "").slice(0, 20);

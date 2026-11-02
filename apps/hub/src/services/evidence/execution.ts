@@ -1,7 +1,7 @@
 import {
   verifyArtifactBundle,
   verifyExecutionEvidence,
-} from "../superlibrary/execution-export";
+} from "../superlibrary";
 import { and, eq } from "drizzle-orm";
 import {
   ExecutionEvidenceBinding,

@@ -6,7 +6,7 @@ import {
   type HubTranscriptionRecord,
   type StationTranscriptionRecord,
   type TranscriptionStore,
-} from "../../src/services/transcription-settings";
+} from "../../src/services/speech/transcription-settings";
 import {
   adminTranscriptionRoutes,
   stationTranscriptionRoutes,

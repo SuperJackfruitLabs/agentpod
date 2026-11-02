@@ -8,9 +8,9 @@ import {
   type SpokenTurn,
   type VoiceReplyDeps,
 } from "./voice-reply";
-import { decryptAttachment } from "./attachments";
-import type { ResolvedSpeech } from "../speech-settings";
-import { SpeechHttpError } from "../speech-client";
+import { decryptAttachment } from "../matrix/attachments";
+import type { ResolvedSpeech } from "../speech/speech-settings";
+import { SpeechHttpError } from "../speech/speech-client";
 
 const OGG = new Uint8Array([0x4f, 0x67, 0x67, 0x53, 9, 8, 7, 6, 5]);
 

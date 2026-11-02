@@ -17,7 +17,7 @@ import { bodyLimit } from "hono/body-limit";
 import { LiveActivityTokenRegistration, LiveActivityTokenRemoval } from "@agentpod/contract";
 
 import { createLogger } from "../utils/logger";
-import type { FleetService } from "../services/push/fleet/service";
+import type { FleetService } from "../services/push";
 
 const log = createLogger("live-activity-tokens");
 

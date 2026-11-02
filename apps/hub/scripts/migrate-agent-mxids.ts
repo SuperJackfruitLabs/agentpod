@@ -89,7 +89,7 @@
  * derived address, because doing so would silently keep the very identity
  * this migration exists to retire.
  */
-import { bridgeUserId } from "../src/services/matrix-as/names";
+import { bridgeUserId } from "../src/services/matrix/names";
 
 export interface MxidMigrationDeps {
   /** Every room still needing this, or already done — see the skip rule above. */

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/profilewriter"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 )
 
@@ -58,7 +59,7 @@ func TestAdoptReportsTheIdentityTheProfileNowReadsAs(t *testing.T) {
 		CapabilitiesFor: func(string) ([]string, error) { return []string{"lifecycle"}, nil },
 		// The production lookup, not a stub: descriptor.WriterFor("hermes").
 		WriterFor: func(harness string) (gateway.ProfileWriteFunc, bool) {
-			w, ok := descriptor.WriterFor(harness)
+			w, ok := profilewriter.WriterFor(harness)
 			if !ok {
 				return nil, false
 			}

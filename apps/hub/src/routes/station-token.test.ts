@@ -36,7 +36,7 @@ import { stations } from "../db/schema/stations";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { createTestUser } from "../../tests/helpers/database";
-import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
+import { mintEnrollmentToken, enrollNode } from "../services/nodes/enrollment";
 import { createPrincipal } from "../../tests/helpers/principals";
 import { fakePlane } from "../../tests/helpers/fake-plane";
 import { createStationTokenRoutes, stationAudiences, stationTokenRoutes } from "./station-token";

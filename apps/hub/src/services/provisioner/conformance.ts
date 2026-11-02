@@ -110,6 +110,7 @@ async function attempt<T>(fn: () => Promise<T>): Promise<Attempt<T>> {
   }
 }
 
+// oxlint-disable-next-line typescript/no-unnecessary-type-conversion -- a driver may throw a non-Error
 const messageOf = (err: Error): string => String(err?.message ?? err);
 
 // ─── The suite ────────────────────────────────────────────────────────────────
@@ -126,8 +127,10 @@ export async function assertConforms(
 ): Promise<void> {
   const manifest = driver.manifest;
   if (!manifest) {
+    // oxlint-disable-next-line typescript/no-unnecessary-type-conversion -- a driver written outside TypeScript need not name its provider
     harness(String(driver.provider ?? "<unnamed>"), "the driver declares no manifest");
   }
+  // oxlint-disable-next-line typescript/no-unnecessary-type-conversion -- as above
   const provider = manifest.provider || String(driver.provider ?? "<unnamed>");
   if (!manifest.provider) {
     violation(provider, "provider", "the manifest declares no provider name");
@@ -638,7 +641,7 @@ async function assertStatusAnswers(
         `is the answer for "I do not know".`
     );
   }
-  if (!VALID_STATES.has(answered.value as string)) {
+  if (!VALID_STATES.has(answered.value)) {
     violation(
       provider,
       "status",

@@ -110,7 +110,7 @@ test("clicking a file fetches that file's patch", async () => {
   });
 
   await waitFor(() => expect(getByText("src/a.ts")).toBeTruthy());
-  fireEvent.click(getByTestId("changeset-file-src/a.ts"));
+  void fireEvent.click(getByTestId("changeset-file-src/a.ts"));
 
   await waitFor(() =>
     expect(diff).toHaveBeenCalledWith("station_1", "uncommitted", "src/a.ts")
@@ -131,7 +131,7 @@ test("a committed file is fetched from the committed side", async () => {
   });
 
   await waitFor(() => expect(getByText("src/b.ts")).toBeTruthy());
-  fireEvent.click(getByTestId("changeset-file-src/b.ts"));
+  void fireEvent.click(getByTestId("changeset-file-src/b.ts"));
 
   await waitFor(() =>
     expect(diff).toHaveBeenCalledWith("station_1", "committed", "src/b.ts")
@@ -151,7 +151,7 @@ test("a truncated patch says so", async () => {
   });
 
   await waitFor(() => expect(getByText("src/a.ts")).toBeTruthy());
-  fireEvent.click(getByTestId("changeset-file-src/a.ts"));
+  void fireEvent.click(getByTestId("changeset-file-src/a.ts"));
 
   await waitFor(() => expect(container.textContent).toMatch(/truncated/i));
 });
@@ -182,7 +182,7 @@ test("a failed diff does not blank the file list", async () => {
   });
 
   await waitFor(() => expect(getByText("src/a.ts")).toBeTruthy());
-  fireEvent.click(getByTestId("changeset-file-src/a.ts"));
+  void fireEvent.click(getByTestId("changeset-file-src/a.ts"));
 
   await waitFor(() => expect(container.textContent).toMatch(/git exploded/));
   // The row itself must survive — getByText would now match twice, because the
@@ -196,7 +196,7 @@ test("the patch uses the one shared diff style (DiffLines), not a second code-bl
   vi.spyOn(api, "changesetDiff").mockResolvedValue({ content: "@@ -1 +1 @@\n-one\n+two\n", truncated: false, binary: false });
   const { getByTestId, container } = render(ChangesetPanel, { props: { stationId: "station_1" } });
   await waitFor(() => getByTestId("changeset-file-src/a.ts"));
-  fireEvent.click(getByTestId("changeset-file-src/a.ts"));
+  void fireEvent.click(getByTestId("changeset-file-src/a.ts"));
   await waitFor(() => expect(container.querySelector("[data-diff='added']")?.textContent).toContain("+two"));
   expect(container.querySelector("[data-diff='removed']")?.textContent).toContain("-one");
 });

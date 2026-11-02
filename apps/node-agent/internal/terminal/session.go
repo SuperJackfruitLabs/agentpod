@@ -3,6 +3,7 @@
 package terminal
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"sync"
@@ -47,7 +48,7 @@ func newSession(id, shell, cwd string, cols, rows uint16, env []string) (*Sessio
 		shell = "/bin/sh"
 	}
 
-	cmd := exec.Command(shell)
+	cmd := exec.CommandContext(context.Background(), shell)
 	cmd.Dir = cwd
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)

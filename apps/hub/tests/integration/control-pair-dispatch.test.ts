@@ -2,10 +2,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
-import { adoptStations, listAdopted } from "../../src/services/station-registry";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/nodes/enrollment";
+import { adoptStations, listAdopted } from "../../src/services/stations/registry";
 import { Hono } from "hono";
-import { createSession } from "../../src/services/acp-sessions";
+import { createSession } from "../../src/services/acp/sessions";
 import { stationAcpRoutes } from "../../src/routes/station-acp";
 import { setGrant } from "../../src/auth/org-plane/grants";
 import { createPrincipal, forgetPrincipals, clearGrant } from "../helpers/principals";

@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -109,7 +110,7 @@ func ReadArtifact(ctx context.Context, input io.Reader, pin, harness string) (*A
 	bundleName := ""
 	for {
 		header, err := archive.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -427,7 +428,7 @@ func libraryJSON(value any) ([]byte, error) {
 				if i > 0 {
 					compact.WriteByte(',')
 				}
-				write(key)
+				_ = write(key) // a key is a string, which write never refuses
 				compact.WriteByte(':')
 				if err := write(x[key]); err != nil {
 					return err

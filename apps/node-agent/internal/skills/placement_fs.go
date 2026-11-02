@@ -156,7 +156,7 @@ func (s *InstallStore) placementLock(ctx context.Context) (string, string, func(
 		case <-timer.C:
 		}
 	}
-	release := func() { syscall.Flock(int(file.Fd()), syscall.LOCK_UN); file.Close() }
+	release := func() { _ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN); file.Close() }
 	again, identityAgain, err := s.placementRepository()
 	if err != nil || again != repo || identityAgain != identity {
 		release()

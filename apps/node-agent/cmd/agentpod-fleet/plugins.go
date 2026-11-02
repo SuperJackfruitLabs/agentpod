@@ -6,26 +6,20 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-)
 
-const pluginsUsage = `usage:
-  fleet plugins plan --station ID --action enable|disable
-  fleet plugins show --station ID --operation ID
-  fleet plugins inspect --station ID --operation ID
-  fleet plugins apply --station ID --operation ID --plan-digest SHA256
-  fleet plugins history --station ID
-  fleet plugins inventory --station ID`
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
+)
 
 // fleetPlugins drives the Console's plugin management (#553) from a shell: the
 // node plans, you read the plan, and apply sends only the digest you reviewed.
 // Nothing here restarts a station.
 func fleetPlugins(args []string) {
 	if helpRequested(args) {
-		fmt.Println(pluginsUsage)
+		fmt.Println(fleetcli.PluginsUsage)
 		return
 	}
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, pluginsUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.PluginsUsage)
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet("fleet plugins", flag.ExitOnError)
@@ -33,7 +27,7 @@ func fleetPlugins(args []string) {
 	action := fs.String("action", "", "enable or disable")
 	operation := fs.String("operation", "", "operation ID")
 	planDigest := fs.String("plan-digest", "", "reviewed plan digest")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if *station == "" || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "plugin commands require --station ID")
 		os.Exit(2)
@@ -53,7 +47,7 @@ func fleetPlugins(args []string) {
 			fmt.Fprintln(os.Stderr, "plan requires --action enable|disable")
 			os.Exit(2)
 		}
-		fleetSkillJSON(http.MethodPost, base+"/plan", map[string]string{"requestId": randomUUID(), "action": *action})
+		fleetSkillJSON(http.MethodPost, base+"/plan", map[string]string{"requestId": fleetcli.RandomUUID(), "action": *action})
 	case "show":
 		fleetGet(needOperation(), nil)
 	case "inspect":
@@ -70,7 +64,7 @@ func fleetPlugins(args []string) {
 	case "inventory":
 		fleetSkillJSON(http.MethodPost, stationPath+"/skills/inventory", map[string]string{})
 	default:
-		fmt.Fprintln(os.Stderr, pluginsUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.PluginsUsage)
 		os.Exit(2)
 	}
 }

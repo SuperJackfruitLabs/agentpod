@@ -13,6 +13,7 @@ package fleetcred
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,7 +55,7 @@ var devCredential = regexp.MustCompile(`^(dev_[0-9a-f]{20}):([A-Za-z0-9_-]{43})$
 
 func postJSON(url string, body any, bearer string) (*http.Response, error) {
 	b, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", url, bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(context.Background(), "POST", url, bytes.NewReader(b))
 	if err != nil {
 		return nil, err
 	}

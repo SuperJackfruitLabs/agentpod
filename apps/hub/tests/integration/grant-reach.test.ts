@@ -10,8 +10,8 @@ import {
   isReachBearing,
   requireGrantReach,
   requireFleetGrantReach,
-} from "../../src/services/grant-reach";
-import { isGrantReachDenied } from "../../src/services/control-pair";
+} from "../../src/services/control/grant-reach";
+import { isGrantReachDenied } from "../../src/services/control/control-pair";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**

@@ -347,7 +347,7 @@ export class DockerOrchestrator {
         PidsLimit: resources.pidsLimit,
       },
       NetworkingConfig: { EndpointsConfig: { [network]: {} } },
-    } as ContainerCreateOptions;
+    };
   }
 
   private parseMemoryLimit(limit?: string): number | undefined {

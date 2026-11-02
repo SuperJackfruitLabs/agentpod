@@ -331,7 +331,7 @@ func writeAtomic(path string, data []byte) (err error) {
 		return err
 	}
 	if d, derr := os.Open(dir); derr == nil { // best effort: persist the rename
-		d.Sync()
+		_ = d.Sync()
 		d.Close()
 	}
 	return nil

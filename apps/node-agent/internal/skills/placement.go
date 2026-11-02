@@ -193,7 +193,7 @@ func (s *InstallStore) PlanPlacement(ctx context.Context, id, action string) (Pl
 	}
 	entries, err := directory.ReadDir(257)
 	directory.Close()
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return PlacementPlan{}, err
 	}
 	limit := 256

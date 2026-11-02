@@ -13,7 +13,7 @@ import {
   createTranscriptionSettings,
   dbTranscriptionStore,
   TRANSCRIPTION_SETTING_KEY,
-} from "../../src/services/transcription-settings";
+} from "../../src/services/speech/transcription-settings";
 import { encrypt, decrypt } from "../../src/utils/encryption";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 

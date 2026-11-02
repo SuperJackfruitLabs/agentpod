@@ -138,7 +138,7 @@ test("the prefetch and the related call share one occupant lookup, and one switc
   const switches: Array<(() => Promise<boolean>) | undefined> = [];
   await assemblePrompt(
     deps({
-      prefetchRelated: async (i) => { switches.push(i.enabled); await principalOf(i.principal); },
+      prefetchRelated: (i) => { switches.push(i.enabled); void principalOf(i.principal); },
       relatedWork: async (i) => { switches.push(i.enabled); await principalOf(i.principal); return undefined; },
     }),
     work,

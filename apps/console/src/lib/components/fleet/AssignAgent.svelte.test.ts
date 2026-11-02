@@ -9,6 +9,7 @@
  */
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
+import type * as AgentsModule from "$lib/api/agents";
 import { render, fireEvent, waitFor, cleanup } from "@testing-library/svelte";
 
 // bits-ui's Select opens on `pointerdown` (not `click`) and picks an item on
@@ -42,7 +43,7 @@ vi.mock("svelte-sonner", () => ({
 }));
 
 vi.mock("$lib/api/agents", async () => {
-  const actual = await vi.importActual<typeof import("$lib/api/agents")>("$lib/api/agents");
+  const actual = await vi.importActual<typeof AgentsModule>("$lib/api/agents");
   return {
     ...actual,
     assignStationAgent: vi.fn(),

@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi/stkpolicy"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
 
@@ -41,28 +42,28 @@ const (
 
 // DeliverParams is the forge.api.deliver frame (packages/contract/src/forge-api.ts).
 type DeliverParams struct {
-	StationID    string   `json:"stationId"`
-	StationKey   string   `json:"stationKey"`
-	GrantID      string   `json:"grantId"`
-	Provider     string   `json:"provider"`
-	Instance     string   `json:"instance"`
-	Mode         string   `json:"mode"`
-	ServiceName  string   `json:"serviceName"`
-	Repositories []string `json:"repositories"`
-	Preset       string   `json:"preset"`
-	Rules        []Rule   `json:"rules"`
-	AllowGraphql bool     `json:"allowGraphql"`
-	Sealed       Sealed   `json:"sealed"`
-	ExpectLogin  string   `json:"expectLogin"`
+	StationID    string           `json:"stationId"`
+	StationKey   string           `json:"stationKey"`
+	GrantID      string           `json:"grantId"`
+	Provider     string           `json:"provider"`
+	Instance     string           `json:"instance"`
+	Mode         string           `json:"mode"`
+	ServiceName  string           `json:"serviceName"`
+	Repositories []string         `json:"repositories"`
+	Preset       string           `json:"preset"`
+	Rules        []stkpolicy.Rule `json:"rules"`
+	AllowGraphql bool             `json:"allowGraphql"`
+	Sealed       Sealed           `json:"sealed"`
+	ExpectLogin  string           `json:"expectLogin"`
 }
 
 // PolicyParams is the forge.api.policy frame.
 type PolicyParams struct {
-	StationID    string `json:"stationId"`
-	GrantID      string `json:"grantId"`
-	Preset       string `json:"preset"`
-	Rules        []Rule `json:"rules"`
-	AllowGraphql bool   `json:"allowGraphql"`
+	StationID    string           `json:"stationId"`
+	GrantID      string           `json:"grantId"`
+	Preset       string           `json:"preset"`
+	Rules        []stkpolicy.Rule `json:"rules"`
+	AllowGraphql bool             `json:"allowGraphql"`
 }
 
 // VerifyParams is the forge.api.verify frame.
@@ -194,7 +195,7 @@ func (s *Service) path() string {
 	if s.PolicyPath != "" {
 		return s.PolicyPath
 	}
-	return DefaultPolicyPath
+	return stkpolicy.DefaultPolicyPath
 }
 
 // isolationOf maps what setup learned to the contract's two words. Anything short of a
@@ -268,7 +269,7 @@ func (s *Service) sharedBytes() ([]byte, error) {
 	if s.SharedPolicyPath == "" {
 		return nil, nil
 	}
-	b, _, err := readPolicyFile(s.SharedPolicyPath)
+	b, _, err := stkpolicy.ReadPolicyFile(s.SharedPolicyPath)
 	return b, err
 }
 
@@ -277,10 +278,10 @@ func (s *Service) sharedBytes() ([]byte, error) {
 // the entry is gone the forget could not find it.
 func (s *Service) forgetDropped(ctx context.Context, client stkclient.Client, prev, next []byte) error {
 	still := map[string]bool{}
-	for _, n := range SharedServices(next) {
+	for _, n := range stkpolicy.SharedServices(next) {
 		still[n] = true
 	}
-	for _, n := range SharedServices(prev) {
+	for _, n := range stkpolicy.SharedServices(prev) {
 		if still[n] {
 			continue
 		}
@@ -298,7 +299,7 @@ func (s *Service) RefreshShared(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	path := s.path()
-	prev, existed, err := readPolicyFile(path)
+	prev, existed, err := stkpolicy.ReadPolicyFile(path)
 	if err != nil {
 		return coded("policy-read-failed", err)
 	}
@@ -319,7 +320,7 @@ func (s *Service) RefreshShared(ctx context.Context) error {
 	if err := s.forgetDropped(ctx, client, prev, next); err != nil {
 		return err
 	}
-	if err := writePolicyFile(path, next); err != nil {
+	if err := stkpolicy.WritePolicyFile(path, next); err != nil {
 		return coded("policy-write-failed", err)
 	}
 	if _, err := client.Reload(ctx); err != nil {
@@ -327,7 +328,7 @@ func (s *Service) RefreshShared(ctx context.Context) error {
 		if errors.Is(err, stkclient.ErrReloadRejected) {
 			code = "reload-rejected"
 		}
-		if rbErr := restorePolicyFile(path, prev, existed); rbErr != nil {
+		if rbErr := stkpolicy.RestorePolicyFile(path, prev, existed); rbErr != nil {
 			return codedf(code, "%v; ROLLBACK FAILED: %v", clean(err.Error()), clean(rbErr.Error()))
 		}
 		return coded(code, err)
@@ -343,7 +344,7 @@ func (s *Service) withShared(prev []byte, station string, strict bool) ([]byte, 
 	var out []byte
 	if err == nil {
 		var skipped []string
-		out, skipped, err = ApplyShared(prev, shared, station)
+		out, skipped, err = stkpolicy.ApplyShared(prev, shared, station)
 		for _, sk := range skipped {
 			logf("forgeapi: shared base policy entry skipped for the station: %s", sk)
 		}
@@ -367,28 +368,28 @@ func (s *Service) withShared(prev []byte, station string, strict bool) ([]byte, 
 // previous credential is already gone. Re-delivering heals it; nothing is exposed.
 // validateDeliver checks a deliver frame before anything is installed, read or written, and
 // returns the policy entry it describes.
-func validateDeliver(p DeliverParams) (PolicyEntry, error) {
+func validateDeliver(p DeliverParams) (stkpolicy.PolicyEntry, error) {
 	if err := checkNonEmpty(map[string]string{
 		"stationId": p.StationID, "stationKey": p.StationKey, "grantId": p.GrantID, "provider": p.Provider,
 		"instance": p.Instance, "mode": p.Mode, "serviceName": p.ServiceName, "preset": p.Preset,
 		"expectLogin": p.ExpectLogin,
 	}); err != nil {
-		return PolicyEntry{}, err
+		return stkpolicy.PolicyEntry{}, err
 	}
 	if !strings.HasPrefix(string(p.Sealed), HandoverPrefix) || len(p.Sealed) == len(HandoverPrefix) {
-		return PolicyEntry{}, codedf("invalid-params", "sealed is not an stk handover envelope")
+		return stkpolicy.PolicyEntry{}, codedf("invalid-params", "sealed is not an stk handover envelope")
 	}
 	if len(p.Sealed) > SealedMax {
-		return PolicyEntry{}, codedf("invalid-params", "sealed is larger than %d characters", SealedMax)
+		return stkpolicy.PolicyEntry{}, codedf("invalid-params", "sealed is larger than %d characters", SealedMax)
 	}
-	entry := PolicyEntry{
+	entry := stkpolicy.PolicyEntry{
 		Service: p.ServiceName, Provider: p.Provider, Instance: p.Instance, Mode: p.Mode,
 		Repositories: p.Repositories, Preset: p.Preset, Rules: p.Rules, AllowGraphQL: p.AllowGraphql,
 		Station: p.StationID, Grant: p.GrantID,
 	}
 	// Checked before anything is installed or written: a bad frame must not cost an install.
-	if _, err := MergePolicy(nil, entry); err != nil {
-		return PolicyEntry{}, coded(entryCode(err), err)
+	if _, err := stkpolicy.MergePolicy(nil, entry); err != nil {
+		return stkpolicy.PolicyEntry{}, coded(entryCode(err), err)
 	}
 	return entry, nil
 }
@@ -414,7 +415,7 @@ func (s *Service) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, err
 	defer s.mu.Unlock()
 
 	path := s.path()
-	prev, existed, err := readPolicyFile(path)
+	prev, existed, err := stkpolicy.ReadPolicyFile(path)
 	if err != nil {
 		return DeliverAck{}, coded("policy-read-failed", err)
 	}
@@ -422,21 +423,21 @@ func (s *Service) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, err
 	if err != nil {
 		return DeliverAck{}, err
 	}
-	merged, err := MergePolicy(base, entry)
+	merged, err := stkpolicy.MergePolicy(base, entry)
 	if err != nil {
 		return DeliverAck{}, coded(entryCode(err), err)
 	}
 	if err := s.forgetDropped(ctx, client, prev, merged); err != nil {
 		return DeliverAck{}, err
 	}
-	_, hadEntry, err := FindGrant(prev, "", p.GrantID)
+	_, hadEntry, err := stkpolicy.FindGrant(prev, "", p.GrantID)
 	if err != nil {
 		return DeliverAck{}, coded("policy-invalid", err)
 	}
 
 	changed := !bytes.Equal(prev, merged)
 	if changed {
-		if err := writePolicyFile(path, merged); err != nil {
+		if err := stkpolicy.WritePolicyFile(path, merged); err != nil {
 			return DeliverAck{}, coded("policy-write-failed", err)
 		}
 	}
@@ -444,7 +445,7 @@ func (s *Service) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, err
 		if !changed {
 			return nil
 		}
-		return restorePolicyFile(path, prev, existed)
+		return stkpolicy.RestorePolicyFile(path, prev, existed)
 	}
 	fail := func(code string, cause error) (DeliverAck, error) {
 		if rbErr := rollback(); rbErr != nil {
@@ -482,11 +483,11 @@ func (s *Service) Deliver(ctx context.Context, p DeliverParams) (DeliverAck, err
 
 func entryCode(err error) string {
 	switch {
-	case errors.Is(err, ErrReservedName):
+	case errors.Is(err, stkpolicy.ErrReservedName):
 		return "reserved-service-name"
-	case errors.Is(err, ErrConflict):
+	case errors.Is(err, stkpolicy.ErrConflict):
 		return "policy-conflict"
-	case errors.Is(err, ErrBadPolicyFile):
+	case errors.Is(err, stkpolicy.ErrBadPolicyFile):
 		return "policy-invalid"
 	}
 	return "invalid-entry"
@@ -505,7 +506,7 @@ func (s *Service) Policy(ctx context.Context, p PolicyParams) (PolicyAck, error)
 	defer s.mu.Unlock()
 
 	path := s.path()
-	prev, existed, err := readPolicyFile(path)
+	prev, existed, err := stkpolicy.ReadPolicyFile(path)
 	if err != nil {
 		return PolicyAck{OK: false, Error: coded("policy-read-failed", err).Error()}, nil
 	}
@@ -513,7 +514,7 @@ func (s *Service) Policy(ctx context.Context, p PolicyParams) (PolicyAck, error)
 	if err != nil {
 		return PolicyAck{OK: false, Error: err.Error()}, nil
 	}
-	updated, found, err := UpdatePolicy(base, p.StationID, p.GrantID, p.Preset, p.Rules, p.AllowGraphql)
+	updated, found, err := stkpolicy.UpdatePolicy(base, p.StationID, p.GrantID, p.Preset, p.Rules, p.AllowGraphql)
 	if err != nil {
 		return PolicyAck{OK: false, Error: coded("invalid-policy", err).Error()}, nil
 	}
@@ -527,7 +528,7 @@ func (s *Service) Policy(ctx context.Context, p PolicyParams) (PolicyAck, error)
 		}
 	}
 	if changed {
-		if err := writePolicyFile(path, updated); err != nil {
+		if err := stkpolicy.WritePolicyFile(path, updated); err != nil {
 			return PolicyAck{OK: false, Error: coded("policy-write-failed", err).Error()}, nil
 		}
 	}
@@ -555,7 +556,7 @@ func restoreIf(changed bool, path string, prev []byte, existed bool) error {
 	if !changed {
 		return nil
 	}
-	return restorePolicyFile(path, prev, existed)
+	return stkpolicy.RestorePolicyFile(path, prev, existed)
 }
 
 // Verify asks stk to make a real read call as the grant's credential. stk's reason codes pass
@@ -572,11 +573,11 @@ func (s *Service) Verify(ctx context.Context, p VerifyParams) (VerifyAck, error)
 	if err != nil {
 		return VerifyAck{}, err
 	}
-	data, _, err := readPolicyFile(s.path())
+	data, _, err := stkpolicy.ReadPolicyFile(s.path())
 	if err != nil {
 		return VerifyAck{}, coded("policy-read-failed", err)
 	}
-	m, found, err := FindGrant(data, p.StationID, p.GrantID)
+	m, found, err := stkpolicy.FindGrant(data, p.StationID, p.GrantID)
 	if err != nil {
 		return VerifyAck{}, coded("policy-invalid", err)
 	}
@@ -616,11 +617,11 @@ func (s *Service) Revoke(ctx context.Context, p RevokeParams) (RevokeAck, error)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data, _, err := readPolicyFile(s.path())
+	data, _, err := stkpolicy.ReadPolicyFile(s.path())
 	if err != nil {
 		return RevokeAck{}, coded("policy-read-failed", err)
 	}
-	m, found, err := FindGrant(data, p.StationID, p.GrantID)
+	m, found, err := stkpolicy.FindGrant(data, p.StationID, p.GrantID)
 	if err != nil {
 		return RevokeAck{}, coded("policy-invalid", err)
 	}
@@ -629,7 +630,7 @@ func (s *Service) Revoke(ctx context.Context, p RevokeParams) (RevokeAck, error)
 			return RevokeAck{}, codedf("stk-unavailable", "forge API access is not configured on this node")
 		}
 		// removeLocked unwires too.
-		if err := s.removeLocked(ctx, s.NewClient(), []ManagedEntry{m}); err != nil {
+		if err := s.removeLocked(ctx, s.NewClient(), []stkpolicy.ManagedEntry{m}); err != nil {
 			return RevokeAck{}, err
 		}
 		return RevokeAck{Removed: true}, nil
@@ -649,11 +650,11 @@ func (s *Service) Revoke(ctx context.Context, p RevokeParams) (RevokeAck, error)
 func (s *Service) RollbackGrant(ctx context.Context, station, grantID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	data, _, err := readPolicyFile(s.path())
+	data, _, err := stkpolicy.ReadPolicyFile(s.path())
 	if err != nil {
 		return coded("policy-read-failed", err)
 	}
-	m, found, err := FindGrant(data, station, grantID)
+	m, found, err := stkpolicy.FindGrant(data, station, grantID)
 	if err != nil {
 		return coded("policy-invalid", err)
 	}
@@ -663,7 +664,7 @@ func (s *Service) RollbackGrant(ctx context.Context, station, grantID string) er
 	if s.NewClient == nil {
 		return codedf("stk-unavailable", "forge API access is not configured on this node")
 	}
-	return s.removeLocked(ctx, s.NewClient(), []ManagedEntry{m})
+	return s.removeLocked(ctx, s.NewClient(), []stkpolicy.ManagedEntry{m})
 }
 
 // nothingToWithdraw is stk's answer when the credential is already gone.
@@ -673,7 +674,7 @@ func nothingToWithdraw(err error) bool {
 }
 
 // removeLocked forgets the credentials, removes the entries, reloads and unwires. mu is held.
-func (s *Service) removeLocked(ctx context.Context, client stkclient.Client, entries []ManagedEntry) error {
+func (s *Service) removeLocked(ctx context.Context, client stkclient.Client, entries []stkpolicy.ManagedEntry) error {
 	station := ""
 	if len(entries) > 0 {
 		station = entries[0].Station
@@ -686,11 +687,11 @@ func (s *Service) removeLocked(ctx context.Context, client stkclient.Client, ent
 		grants[m.Grant] = true
 	}
 	path := s.path()
-	prev, existed, err := readPolicyFile(path)
+	prev, existed, err := stkpolicy.ReadPolicyFile(path)
 	if err != nil {
 		return coded("policy-read-failed", err)
 	}
-	updated, removed, err := RemoveEntries(prev, grants)
+	updated, removed, err := stkpolicy.RemoveEntries(prev, grants)
 	if err != nil {
 		return coded("policy-invalid", err)
 	}
@@ -698,12 +699,12 @@ func (s *Service) removeLocked(ctx context.Context, client stkclient.Client, ent
 		if station != "" {
 			updated, _ = s.withShared(updated, station, false)
 		}
-		if err := writePolicyFile(path, updated); err != nil {
+		if err := stkpolicy.WritePolicyFile(path, updated); err != nil {
 			return coded("policy-write-failed", err)
 		}
 		if _, err := client.Reload(ctx); err != nil {
 			msg := err
-			if rbErr := restorePolicyFile(path, prev, existed); rbErr != nil {
+			if rbErr := stkpolicy.RestorePolicyFile(path, prev, existed); rbErr != nil {
 				msg = fmt.Errorf("%v; ROLLBACK FAILED: %v", clean(err.Error()), clean(rbErr.Error()))
 			}
 			// The credential is already gone; the entry stays until a retry gets a reload through.
@@ -738,11 +739,11 @@ func (s *Service) Status(ctx context.Context, p StatusParams) (StatusAck, error)
 	if err != nil {
 		return StatusAck{}, coded("handover-key-failed", err)
 	}
-	data, _, err := readPolicyFile(s.path())
+	data, _, err := stkpolicy.ReadPolicyFile(s.path())
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return StatusAck{}, coded("policy-read-failed", err)
 	}
-	all, err := ManagedEntries(data)
+	all, err := stkpolicy.ManagedEntries(data)
 	if err != nil {
 		return StatusAck{}, coded("policy-invalid", err)
 	}

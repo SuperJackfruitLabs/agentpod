@@ -20,6 +20,7 @@
  */
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
+import type * as GrantsModule from "$lib/api/grants";
 import { render, fireEvent, waitFor, cleanup } from "@testing-library/svelte";
 
 vi.mock("$app/navigation", () => ({ goto: vi.fn() }));
@@ -33,7 +34,7 @@ vi.mock("$lib/api/admin", () => ({
 }));
 
 vi.mock("$lib/api/grants", async () => {
-  const actual = await vi.importActual<typeof import("$lib/api/grants")>("$lib/api/grants");
+  const actual = await vi.importActual<typeof GrantsModule>("$lib/api/grants");
   return {
     grantValueProblem: actual.grantValueProblem,
     listGrants: vi.fn(),

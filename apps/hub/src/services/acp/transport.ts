@@ -1,0 +1,267 @@
+/**
+ * ACP transport adapter — wraps a broker stream to a node into the WHATWG
+ * byte streams the official ACP TypeScript SDK consumes.
+ *
+ * The SDK's `client(...).connect(stream)` wants a `Stream` of parsed JSON-RPC
+ * messages; `ndJsonStream(output, input)` builds one from exactly the pair of
+ * Uint8Array streams exposed here:
+ *
+ *   const wire = await openAcpWire(nodeId, stationKey, hubSessionId);
+ *   const stream = ndJsonStream(wire.writable, wire.readable);
+ *
+ * Wire protocol (node-agent acpHandler):
+ *   - `acp.open {key, instance}` starts (or reuses) the agent process for that
+ *     (key, instance) pair → `{sessionId, instance?}`. A result without the
+ *     echoed instance is an OLDER node that keys processes on the key alone —
+ *     reported as `instanceEchoed: false`, never an error.
+ *   - `acp.attach {sessionId}` streams the agent's stdout as base64 chunks.
+ *   - Input frames to the node are keyed by the ACP SESSION id — NOT the
+ *     attach stream id (that is the terminal PTY convention).
+ *   - The node signals process exit IN-BAND: a dedicated chunk whose decoded
+ *     bytes are JSON `{"event":"exit","reason":...}`. That chunk is not
+ *     JSON-RPC and must never be forwarded to the SDK.
+ */
+
+import { z } from "zod";
+import { VERB_RESULTS } from "@agentpod/contract";
+import type { SalaamAuthority } from "@agentpod/contract";
+import * as broker from "../broker";
+import { createLogger } from "../../utils/logger";
+
+const log = createLogger("acp-transport");
+
+// The contract shape (sessionId + optional echoed instance), tightened so an
+// empty sessionId is still treated as a malformed open response.
+const OpenResponseSchema = VERB_RESULTS["acp.open"].extend({
+  sessionId: z.string().min(1),
+});
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface AcpWire {
+  /** WHATWG streams carrying raw JSON-RPC bytes, in the shape the SDK's
+   *  connection constructor/fluent client() expects. */
+  readable: ReadableStream<Uint8Array>; // node → hub (acp.attach chunks, base64-decoded)
+  writable: WritableStream<Uint8Array>; // hub → node (sent as input frames keyed by nodeSessionId)
+  /** Resolves when the node stream ends; carries the exit reason parsed from
+   *  the in-band {"event":"exit","reason":...} frame, or "eof". */
+  closed: Promise<string>;
+  /** Detach + best-effort acp.close on the node. Idempotent. */
+  close(): Promise<void>;
+  nodeSessionId: string;
+  /** The instance discriminator sent on acp.open (the hub session id). */
+  instance: string;
+  /** True only when the node echoed the instance back — i.e. it keys its ACP
+   *  processes on (key, instance) and can host concurrent sessions. False means
+   *  an older node: one process per station key, whatever instance we asked for. */
+  instanceEchoed: boolean;
+  /**
+   * The MCP servers the node said it injected into this process's `session/new` — its loopback
+   * proxy (contract `acp.open`). Empty when not asked, not served, or an older node.
+   */
+  mcpProxy: string[];
+}
+
+export interface OpenAcpWireOptions {
+  salaamAuthority?: SalaamAuthority;
+  /** Ask the node to add its loopback MCP proxy for this station. */
+  mcpProxy?: { stationId: string };
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const decoder = new TextDecoder();
+
+/**
+ * If the chunk is the node's in-band exit marker, return the exit reason;
+ * otherwise null. The node emits the exit frame as its own dedicated chunk
+ * after draining output, so any complete chunk that parses as
+ * {"event":"exit",...} is the marker (real JSON-RPC never carries "event").
+ */
+function parseExitReason(bytes: Uint8Array): string | null {
+  try {
+    const parsed: unknown = JSON.parse(decoder.decode(bytes));
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      (parsed as { event?: unknown }).event === "exit"
+    ) {
+      const reason = (parsed as { reason?: unknown }).reason;
+      return typeof reason === "string" ? reason : String(reason ?? "exit");
+    }
+  } catch {
+    // Not JSON (or a partial/multi-line protocol chunk) — regular bytes.
+  }
+  return null;
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Open an ACP wire to the station's agent process on a node.
+ *
+ * `instance` is the caller's discriminator for which process it wants under the
+ * station key; the caller passes its own hub session id, which makes the value
+ * stable across a re-open of the same session and lets node-side logs be
+ * correlated back to a hub session. The transport never invents one.
+ *
+ * Throws Error("Couldn't start the agent process — <broker error>.") when
+ * acp.open fails or the node is offline.
+ */
+export async function openAcpWire(
+  nodeId: string,
+  stationKey: string,
+  instance: string,
+  options: OpenAcpWireOptions = {}
+): Promise<AcpWire> {
+  const opened = await broker.request(nodeId, "acp.open", {
+    key: stationKey,
+    instance,
+    ...(options.mcpProxy ? { mcpProxy: options.mcpProxy } : {}),
+    ...(options.salaamAuthority ? { salaamAuthority: options.salaamAuthority } : {}),
+  });
+  if (!opened.ok) {
+    throw new Error(
+      `Couldn't start the agent process — ${opened.error ?? "unknown error"}.`
+    );
+  }
+  const parsedOpen = OpenResponseSchema.safeParse(opened.data);
+  if (!parsedOpen.success) {
+    throw new Error(
+      "Couldn't start the agent process — malformed open response."
+    );
+  }
+  const { sessionId } = parsedOpen.data;
+  // A missing (or, defensively, mismatched) echo means the node did not honour
+  // the instance — valid, and the caller degrades to one session per station.
+  const instanceEchoed = parsedOpen.data.instance === instance;
+  // Believed only when it was asked for: a node never injects unasked, so an unasked echo is noise.
+  const mcpProxy = options.mcpProxy ? (parsedOpen.data.mcpProxy ?? []) : [];
+
+  let resolveClosed!: (reason: string) => void;
+  const closed = new Promise<string>((resolve) => {
+    resolveClosed = resolve;
+  });
+
+  let controller: ReadableStreamDefaultController<Uint8Array>;
+  let writableController: WritableStreamDefaultController;
+  let done = false;
+  // The node starts each acp.attach stream at zero. Retaining this evidence is
+  // essential: a missing frame permanently corrupts the hub transcript and
+  // Matrix reply, but the bytes we did receive remain useful to the caller.
+  let expectedChunkSeq = 0;
+
+  /** Terminate readable, error writable, and settle closed exactly once. */
+  const finish = (reason: string) => {
+    if (done) return;
+    done = true;
+    try {
+      controller.close();
+    } catch {
+      // Controller already closed/errored (e.g. consumer cancelled) — fine.
+    }
+    try {
+      // Fail SDK writes fast after the wire ends instead of dropping them.
+      writableController.error(new Error(`ACP wire closed (${reason})`));
+    } catch {
+      // Writable already errored/closed — fine.
+    }
+    resolveClosed(reason);
+  };
+
+  const readable = new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c;
+    },
+    cancel() {
+      // Consumer tore down the read side (SDK connection closed) — run the
+      // same teardown as close() so the agent process is not leaked on the node.
+      void close();
+    },
+  });
+
+  const writable = new WritableStream<Uint8Array>({
+    start(c) {
+      writableController = c;
+    },
+    write(bytes) {
+      // CRITICAL: input frames are keyed by the ACP SESSION id from acp.open,
+      // not the attach stream id. After finish() the stream is errored, so
+      // write() is never called on a dead wire.
+      broker.sendFrame(nodeId, {
+        type: "input",
+        id: sessionId,
+        data: Buffer.from(bytes).toString("base64"),
+      });
+    },
+  });
+
+  const attach = broker.stream(
+    nodeId,
+    "acp.attach",
+    { sessionId },
+    (seq, chunk, eof) => {
+      if (!done) {
+        if (seq > expectedChunkSeq) {
+          log.error("ACP stream sequence gap", {
+            nodeId,
+            stationKey,
+            sessionId,
+            instance,
+            expectedSeq: expectedChunkSeq,
+            receivedSeq: seq,
+          });
+          expectedChunkSeq = seq + 1;
+        } else if (seq < expectedChunkSeq) {
+          log.error("ACP stream sequence out of order", {
+            nodeId,
+            stationKey,
+            sessionId,
+            instance,
+            expectedSeq: expectedChunkSeq,
+            receivedSeq: seq,
+          });
+        } else {
+          expectedChunkSeq += 1;
+        }
+      }
+      if (chunk !== null && !done) {
+        const bytes = new Uint8Array(Buffer.from(chunk, "base64"));
+        const exitReason = parseExitReason(bytes);
+        if (exitReason !== null) {
+          // In-band exit marker: resolve closed, never forward as protocol bytes.
+          finish(exitReason);
+          return;
+        }
+        try {
+          controller.enqueue(bytes);
+        } catch {
+          // Consumer already gone — drop the chunk.
+        }
+      }
+      if (eof) finish("eof");
+    }
+  );
+
+  let closeStarted = false;
+  const close = async (): Promise<void> => {
+    if (closeStarted) return;
+    closeStarted = true;
+    attach.cancel();
+    finish("eof");
+    // Best-effort: broker.request never rejects; result is ignored.
+    if (options.salaamAuthority) await broker.request(nodeId, "acp.close", { sessionId });
+    else void broker.request(nodeId, "acp.close", { sessionId });
+  };
+
+  return {
+    readable,
+    writable,
+    closed,
+    close,
+    nodeSessionId: sessionId,
+    instance,
+    instanceEchoed,
+    mcpProxy,
+  };
+}

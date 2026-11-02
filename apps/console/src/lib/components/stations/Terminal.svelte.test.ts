@@ -4,6 +4,7 @@
  * xterm is stubbed; the socket wrapper's own behaviour is covered in api/terminal.test.ts.
  */
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type * as VkColors from "$lib/utils/vk-colors";
 import { cleanup, render, waitFor } from "@testing-library/svelte";
 
 const xterm = vi.hoisted(() => ({ last: null as null | { options: Record<string, unknown> } }));
@@ -32,7 +33,7 @@ vi.mock("@xterm/addon-webgl", () => ({ WebglAddon: class { onContextLoss() {} di
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 vi.mock("$lib/api/terminal", () => ({ createTerminalClient: vi.fn() }));
 vi.mock("$lib/utils/vk-colors", async (orig) => ({
-  ...(await orig<typeof import("$lib/utils/vk-colors")>()),
+  ...(await orig<typeof VkColors>()),
   // The real builder is covered in vk-colors.test.ts; here it only has to follow <html>.
   terminalTheme: () => ({ background: `bg-${document.documentElement.dataset.vibe}-${document.documentElement.dataset.theme}` }),
 }));

@@ -19,7 +19,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { principalDirectory, type PrincipalDirectory } from "../../auth/org-plane/directory";
-import { grantDispatchTo } from "../org-plane/agent-placement";
+import { grantDispatchTo } from "../org-plane";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("bridge-dispatch-grant");

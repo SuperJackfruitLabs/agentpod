@@ -11,13 +11,13 @@ import { test, expect, beforeAll, afterAll } from "bun:test";
 import { rawSql } from "../../src/db/drizzle";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/nodes/enrollment";
 import {
   listNodes,
   setNodeStatus,
   resetOrphanedOnlineNodes,
-} from "../../src/services/node-registry";
-import { sweepStaleNodes, OFFLINE_THRESHOLD_MS } from "../../src/services/node-sweeper";
+} from "../../src/services/nodes/registry";
+import { sweepStaleNodes, OFFLINE_THRESHOLD_MS } from "../../src/services/sweeper/node-sweeper";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const TEST_USER_ID = "test-user-reconcile-001";

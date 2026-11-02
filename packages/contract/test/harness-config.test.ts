@@ -170,7 +170,7 @@ describe("a config plan is reviewable before it is applied", () => {
   });
 
   test("a plan carrying the hub's per-setting opt-out refusals round-trips with the field intact", () => {
-    // The real shape `planFor` sends (apps/hub/src/services/harness-config-apply.ts):
+    // The real shape `planFor` sends (apps/hub/src/services/harness-config/apply.ts):
     // settingId, code ("OPTED_OUT" today — the only code that route produces),
     // and a message naming why. The route spreads it onto the node's own
     // ConfigPlan only when at least one requested setting was opted out

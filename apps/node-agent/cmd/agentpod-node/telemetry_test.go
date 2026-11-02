@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/nodecli"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 )
 
@@ -278,10 +279,10 @@ func TestApplyEnrollOTLPMacOSWarnsAndContinues(t *testing.T) {
 }
 
 func TestHelpRegistersTelemetry(t *testing.T) {
-	if !isCommand("telemetry") {
+	if !nodecli.IsCommand("telemetry") {
 		t.Error("telemetry not registered")
 	}
-	if !strings.Contains(commandHelp("enroll"), "--otlp-endpoint") {
+	if !strings.Contains(nodecli.CommandHelp("enroll"), "--otlp-endpoint") {
 		t.Error("enroll help missing --otlp-endpoint")
 	}
 }

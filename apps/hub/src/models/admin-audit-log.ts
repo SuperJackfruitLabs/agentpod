@@ -58,7 +58,8 @@ export interface AuditLogQueryOptions {
   tenantId?: string;
   adminUserId?: string;
   targetUserId?: string;
-  action?: AdminAction;
+  /** Any string: the filter matches rows by text, and an action no row has matches none. */
+  action?: string;
   startDate?: Date;
   endDate?: Date;
   limit?: number;

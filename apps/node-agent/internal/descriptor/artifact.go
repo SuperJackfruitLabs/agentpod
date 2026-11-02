@@ -151,9 +151,9 @@ func privateOf(d Descriptor, key string) []string {
 	return nil
 }
 
-// privateHit reports whether the root-relative path p is one of the private names or lies
+// PrivateHit reports whether the root-relative path p is one of the private names or lies
 // beneath one. Matching is by whole segments, ignoring case and trailing dots and spaces.
-func privateHit(p string, private []string) bool {
+func PrivateHit(p string, private []string) bool {
 	segs := func(x string) []string {
 		var out []string
 		for _, s := range strings.Split(strings.ReplaceAll(x, "\\", "/"), "/") {
@@ -204,7 +204,7 @@ var ErrDenied = errors.New("path denied")
 func ReadAt(root, rel string, offset, max int64, private ...string) ([]byte, int64, bool, error) {
 	b, size, eof, err := readAt(root, rel, offset, max, private)
 	if err != nil {
-		return nil, 0, false, pathErr(rel, "read", err)
+		return nil, 0, false, PathErr(rel, "read", err)
 	}
 	return b, size, eof, nil
 }
@@ -213,7 +213,7 @@ func readAt(root, rel string, offset, max int64, private []string) ([]byte, int6
 	if rule, ok := Denied(rel); ok {
 		return nil, 0, false, fmt.Errorf("%w: %s (%s)", ErrDenied, rel, rule)
 	}
-	if privateHit(rel, private) {
+	if PrivateHit(rel, private) {
 		return nil, 0, false, fmt.Errorf("%w: %s (harness-private)", ErrDenied, rel)
 	}
 	if offset < 0 {
@@ -243,7 +243,7 @@ func readAt(root, rel string, offset, max int64, private []string) ([]byte, int6
 	if rule, ok := Denied(filepath.ToSlash(real)); ok {
 		return nil, 0, false, fmt.Errorf("%w: %s resolves to %s (%s)", ErrDenied, rel, real, rule)
 	}
-	if privateHit(real, private) {
+	if PrivateHit(real, private) {
 		return nil, 0, false, fmt.Errorf("%w: %s resolves to %s (harness-private)", ErrDenied, rel, real)
 	}
 	// Open through os.Root so a directory swapped for a symlink between the checks above and
@@ -268,7 +268,7 @@ func readAt(root, rel string, offset, max int64, private []string) ([]byte, int6
 	}
 	buf := make([]byte, max)
 	n, err := f.ReadAt(buf, offset)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, 0, false, err
 	}
 	return buf[:n], info.Size(), offset+int64(n) >= info.Size(), nil
@@ -276,8 +276,8 @@ func readAt(root, rel string, offset, max int64, private []string) ([]byte, int6
 
 var errNotRegular = errors.New("not a regular file")
 
-// pathErr keeps host paths out of errors the hub sees: callers get the requested relative path.
-func pathErr(rel, verb string, err error) error {
+// PathErr keeps host paths out of errors the hub sees: callers get the requested relative path.
+func PathErr(rel, verb string, err error) error {
 	switch {
 	case errors.Is(err, fsops.ErrEscape), errors.Is(err, ErrDenied), errors.Is(err, errNotRegular):
 		return err
@@ -335,20 +335,20 @@ func Walk(root, rel string, maxFiles int, maxBytes int64, private ...string) (Wa
 	if rule, ok := Denied(rel); ok {
 		return WalkResult{}, fmt.Errorf("%w: %s (%s)", ErrDenied, rel, rule)
 	}
-	if privateHit(rel, private) {
+	if PrivateHit(rel, private) {
 		return WalkResult{}, fmt.Errorf("%w: %s (harness-private)", ErrDenied, rel)
 	}
 	target, err := fsops.Jail(root, rel)
 	if err != nil {
-		return WalkResult{}, pathErr(rel, "walk", err)
+		return WalkResult{}, PathErr(rel, "walk", err)
 	}
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return WalkResult{}, pathErr(rel, "walk", err)
+		return WalkResult{}, PathErr(rel, "walk", err)
 	}
 	base, err := filepath.EvalSymlinks(target)
 	if err != nil {
-		return WalkResult{}, pathErr(rel, "walk", err)
+		return WalkResult{}, PathErr(rel, "walk", err)
 	}
 	real, err := filepath.Rel(resolvedRoot, base)
 	if err != nil || real == ".." || strings.HasPrefix(real, ".."+string(filepath.Separator)) {
@@ -358,7 +358,7 @@ func Walk(root, rel string, maxFiles int, maxBytes int64, private ...string) (Wa
 	if rule, ok := Denied(real); ok {
 		return WalkResult{}, fmt.Errorf("%w: %s resolves to %s (%s)", ErrDenied, rel, real, rule)
 	}
-	if privateHit(real, private) {
+	if PrivateHit(real, private) {
 		return WalkResult{}, fmt.Errorf("%w: %s resolves to %s (harness-private)", ErrDenied, rel, real)
 	}
 	res := WalkResult{Root: rel, Files: []WalkFile{}, Skipped: []WalkSkip{}}
@@ -378,7 +378,7 @@ func Walk(root, rel string, maxFiles int, maxBytes int64, private ...string) (Wa
 	}
 	st, err := os.Stat(base)
 	if err != nil {
-		return WalkResult{}, pathErr(rel, "walk", err)
+		return WalkResult{}, PathErr(rel, "walk", err)
 	}
 	if st.IsDir() {
 		// A folder is judged by what it would contain: ".ssh" and ".git" are denied as
@@ -444,7 +444,7 @@ func Walk(root, rel string, maxFiles int, maxBytes int64, private ...string) (Wa
 			_, r2 := Denied(path.Join(realP, "x"))
 			deniedFull, deniedReal = deniedFull || f2, deniedReal || r2
 		}
-		if deniedFull || deniedReal || privateHit(fullP, private) || privateHit(realP, private) {
+		if deniedFull || deniedReal || PrivateHit(fullP, private) || PrivateHit(realP, private) {
 			if serr := skip(r, "denied"); serr != nil {
 				return serr
 			}
@@ -469,7 +469,7 @@ func Walk(root, rel string, maxFiles int, maxBytes int64, private ...string) (Wa
 		return nil
 	})
 	if err != nil {
-		return WalkResult{}, pathErr(rel, "walk", err)
+		return WalkResult{}, PathErr(rel, "walk", err)
 	}
 	sort.Slice(res.Files, func(i, j int) bool { return res.Files[i].Path < res.Files[j].Path })
 	return res, nil

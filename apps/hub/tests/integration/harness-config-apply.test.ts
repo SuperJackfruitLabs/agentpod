@@ -3,7 +3,7 @@
  *
  * Verifies the three new routes in `src/routes/harness-config.ts`
  * (`POST .../config/plan`, `GET .../config/operations/:operationId`,
- * `POST .../config/apply`) and `src/services/harness-config-apply.ts`
+ * `POST .../config/apply`) and `src/services/harness-config/apply.ts`
  * (`planFor`, `applyFor`, `recordApplied`):
  *
  *   1. `plan` proxies to the node and returns the node's plan unchanged.
@@ -49,8 +49,8 @@ import { rawSql } from "../../src/db/drizzle";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { waitForNodeOnline } from "../helpers/wait";
-import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
-import { adoptStations } from "../../src/services/station-registry";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/nodes/enrollment";
+import { adoptStations } from "../../src/services/stations/registry";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/tenant-scope";
 import { gatewayRoutes } from "../../src/routes/gateway";
@@ -71,7 +71,7 @@ const OTHER_TENANT = "fleet_cfa0000000000000002";
 const FAKE_GATEWAY_PID = 44321;
 const FAKE_GATEWAY_UPTIME_SEC = 777;
 
-/** Mirrors the real node's registry (apps/node-agent/internal/descriptor/hermes_config.go). */
+/** Mirrors the real node's registry (apps/node-agent/internal/descriptor/hermes/hermes_config.go). */
 const HERMES_REGISTRY = [
   { id: "hermes.approvals.timeout", harness: "hermes", scope: "profile", policy: "reconcilable", restartToTakeEffect: true },
   { id: "hermes.approvals.mode", harness: "hermes", scope: "profile", policy: "reconcilable", restartToTakeEffect: true },

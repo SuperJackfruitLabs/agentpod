@@ -21,7 +21,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { acpSessions } from "../db/schema/acp";
 import * as broker from "../services/broker";
-import { getStation } from "../services/station-registry";
+import { getStation } from "../services/stations";
 import { recordAudit } from "../services/audit";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 import { z } from "zod";

@@ -5,7 +5,7 @@
  * principal. The tool input carries a path and nothing that names a station, and the actor is the
  * calling agent (R-H1: the hub never acts for a person).
  */
-import type { SelfStation } from "../self-station";
+import type { SelfStation } from "../stations";
 import type { LinkInput, LinkResult } from "./link";
 
 export interface OwnLinkDeps {

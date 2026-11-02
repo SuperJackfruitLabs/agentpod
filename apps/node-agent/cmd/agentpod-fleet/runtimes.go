@@ -7,15 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-)
 
-const runtimesUsage = `usage:
-  fleet runtimes list
-  fleet runtimes providers
-  fleet runtimes create --file PATH|-
-  fleet runtimes start ID
-  fleet runtimes stop ID
-  fleet runtimes rm ID`
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
+)
 
 // fleetRuntimes drives the substrate a node can run on.
 //
@@ -30,7 +24,7 @@ const runtimesUsage = `usage:
 // with the hub the first time it changes.
 func fleetRuntimes(args []string) {
 	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(runtimesUsage)
+		fmt.Println(fleetcli.RuntimesUsage)
 		if len(args) == 0 {
 			os.Exit(2)
 		}
@@ -45,20 +39,20 @@ func fleetRuntimes(args []string) {
 	case "create":
 		fs := flag.NewFlagSet("fleet runtimes create", flag.ExitOnError)
 		file := fs.String("file", "", "provision request, or - for stdin")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		if *file == "" {
-			fmt.Fprintf(os.Stderr, "create requires --file PATH or --file -\n\n%s\n", runtimesUsage)
+			fmt.Fprintf(os.Stderr, "create requires --file PATH or --file -\n\n%s\n", fleetcli.RuntimesUsage)
 			os.Exit(2)
 		}
 		fleetSkillRequest(http.MethodPost, base, bytes.NewReader(readDocument(*file)), "application/json")
 	case "start", "stop":
-		id := needArg(args, 1, args[0], runtimesUsage)
+		id := needArg(args, 1, args[0], fleetcli.RuntimesUsage)
 		fleetSkillJSON(http.MethodPost, base+"/"+url.PathEscape(id)+"/"+args[0], map[string]any{})
 	case "rm":
-		id := needArg(args, 1, "rm", runtimesUsage)
+		id := needArg(args, 1, "rm", fleetcli.RuntimesUsage)
 		fleetSkillJSON(http.MethodDelete, base+"/"+url.PathEscape(id), nil)
 	default:
-		fmt.Fprintln(os.Stderr, runtimesUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.RuntimesUsage)
 		os.Exit(2)
 	}
 }

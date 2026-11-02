@@ -23,9 +23,9 @@ import { runOnce, type DispatchDeps } from "../../src/services/bridge/dispatch";
 import {
   makeSalaamExecution,
   renewSalaamExecution,
-} from "../../src/services/salaam-authority";
-import { workDigest } from "../../src/services/salaam-work";
-import * as broker from "../../src/services/broker";
+} from "../../src/services/salaam/authority";
+import { workDigest } from "../../src/services/salaam/work";
+import * as broker from "../../src/services/broker/broker";
 import { fakePlane } from "../helpers/fake-plane";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import planCorpus from "../../../../packages/contract/src/fixtures/salaam-work-payload-v1.json";

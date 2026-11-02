@@ -11,8 +11,8 @@ import {
   bindSalaamPrompt,
   updateSalaamPrompt,
   getSalaamPrompt,
-} from "../../src/services/salaam-prompts";
-import { readEvents, getSession } from "../../src/services/acp-sessions";
+} from "../../src/services/salaam/prompts";
+import { readEvents, getSession } from "../../src/services/acp/sessions";
 import binding from "../../../../packages/contract/src/fixtures/salaam-authority-v1.json";
 const sessionId = "acps_" + crypto.randomUUID(),
   userId = "prn_" + crypto.randomUUID().replaceAll("-", "").slice(0, 20);

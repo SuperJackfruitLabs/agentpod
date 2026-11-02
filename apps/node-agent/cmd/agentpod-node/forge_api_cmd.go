@@ -16,8 +16,10 @@ import (
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hermes"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/nodecli"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
 
@@ -158,11 +160,11 @@ func newInstanceClient(inst forgeapi.Instance) stkclient.Client {
 // The env files themselves are written by forgeapi, owned by the station's agent uid.
 func nodeHarnessWiring() *forgeapi.HarnessWiring {
 	return &forgeapi.HarnessWiring{
-		Units:        descriptor.HarnessSystemdUnits,
-		DropInDir:    descriptor.UserUnitDropInDir,
-		Running:      func(_ context.Context, unit string) bool { return descriptor.UserUnitActive(unit) },
-		DaemonReload: func(context.Context) error { return descriptor.UserDaemonReload() },
-		UnitEnv:      func(_ context.Context, unit string) []string { return descriptor.UserUnitEnvironment(unit) },
+		Units:        hermes.HarnessSystemdUnits,
+		DropInDir:    hermes.UserUnitDropInDir,
+		Running:      func(_ context.Context, unit string) bool { return hermes.UserUnitActive(unit) },
+		DaemonReload: func(context.Context) error { return hermes.UserDaemonReload() },
+		UnitEnv:      func(_ context.Context, unit string) []string { return hermes.UserUnitEnvironment(unit) },
 	}
 }
 
@@ -311,7 +313,7 @@ func forgeAPICmd(args []string, out, errw io.Writer) int {
 
 func forgeAPICmdWith(args []string, out, errw io.Writer, d forgeAPIDeps) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		fmt.Fprintln(out, commandHelp("forge-api"))
+		fmt.Fprintln(out, nodecli.CommandHelp("forge-api"))
 		return 0
 	}
 	if args[0] == "prune" {
@@ -324,7 +326,7 @@ func forgeAPICmdWith(args []string, out, errw io.Writer, d forgeAPIDeps) int {
 	fs := flag.NewFlagSet("forge-api setup", flag.ContinueOnError)
 	fs.SetOutput(errw)
 	fs.Usage = func() {
-		fmt.Fprintln(errw, commandHelp("forge-api"))
+		fmt.Fprintln(errw, nodecli.CommandHelp("forge-api"))
 		fs.PrintDefaults()
 	}
 	svcUser := fs.String("user", "stk", "OS user stk runs as")

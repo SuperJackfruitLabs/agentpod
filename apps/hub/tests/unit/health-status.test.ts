@@ -14,7 +14,7 @@
  */
 
 import { test, expect, describe } from "bun:test";
-import { deriveStatus } from "../../src/services/fleet";
+import { deriveStatus } from "../../src/services/nodes/fleet";
 import type { StationHealthReport } from "@agentpod/contract";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

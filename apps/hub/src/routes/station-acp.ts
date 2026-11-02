@@ -38,6 +38,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { and, asc, eq, gt } from "drizzle-orm";
+import type { StationBusyHolder } from "@agentpod/contract";
 import {
   AcpClientMsg,
   CreateAcpSessionBody,
@@ -50,14 +51,14 @@ import { upgradeWebSocket } from "../ws";
 import { db } from "../db/drizzle";
 import { acpEvents } from "../db/schema/acp";
 import { isAllowedOrigin } from "../config";
-import { getStation } from "../services/station-registry";
-import { bridgeReadiness } from "../services/bridge/station-readiness";
-import { probeSalaamWork } from "../services/bridge/salaam-dispatch";
-import * as acp from "../services/acp-sessions";
-import { isControlPairDenied, isControlPairEnforced } from "../services/control-pair";
-import { checkBridgeDispatchGrant } from "../services/bridge/dispatch-grant";
-import { isSalaamAuthorityDenied } from "../services/salaam-authority";
-import { stationFailure } from "../services/station-failure";
+import { getStation } from "../services/stations";
+import { bridgeReadiness } from "../services/bridge";
+import { probeSalaamWork } from "../services/bridge";
+import * as acp from "../services/acp";
+import { isControlPairDenied, isControlPairEnforced } from "../services/control";
+import { checkBridgeDispatchGrant } from "../services/bridge";
+import { isSalaamAuthorityDenied } from "../services/salaam";
+import { stationFailure } from "../services/stations";
 import type { AuthUser } from "../auth/middleware";
 import { roleOf, isWorkspaceAdminUser } from "../auth/workspace-authority";
 import { logAdminAction } from "../models/admin-audit-log";
@@ -67,7 +68,7 @@ import { isOrgPlaneUnavailable, ORG_PLANE_UNAVAILABLE_BODY } from "../auth/calle
 
 /**
  * Maps createSession error messages to HTTP statuses. The service throws
- * plain Errors with stable, user-facing messages (see acp-sessions.ts);
+ * plain Errors with stable, user-facing messages (see services/acp/open.ts);
  * anything unrecognised is an upstream failure (node offline, acp.open
  * failed, agent handshake broke) → "node", answered by stationFailure (424/503, never 502).
  */
@@ -88,7 +89,7 @@ function createErrorStatus(message: string): 403 | 404 | 409 | "node" {
 export function createSessionFailure(err: unknown): {
   status: 403 | 404 | 409 | 424 | 503;
   body:
-    | { error: string; code?: string; holder?: import("@agentpod/contract").StationBusyHolder }
+    | { error: string; code?: string; holder?: StationBusyHolder }
     | typeof ORG_PLANE_UNAVAILABLE_BODY;
 } {
   // The station's one live execution is someone's (spec 2026-10-23, session lifecycle): say whose
@@ -549,7 +550,7 @@ export const stationAcpRoutes = new Hono()
                   await handleSubscribe(ws, msg.sinceSeq);
                   break;
                 case "prompt":
-                  { const receipt=await acp.promptSession(userId, sessionId, msg.text,[],undefined,msg.requestId) as void|import("@agentpod/contract").SalaamPromptReceipt;
+                  { const receipt=await acp.promptSession(userId, sessionId, msg.text,[],undefined,msg.requestId);
                     if(receipt)send(ws,{t:"prompt-receipt",receipt}); }
                   break;
                 case "cancel":

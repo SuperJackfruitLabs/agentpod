@@ -6,7 +6,7 @@ import {
   SalaamStationBusy,
   SessionNotResumable,
   type IdleCandidate,
-} from "../../src/services/acp-sessions";
+} from "../../src/services/acp/sessions";
 import { createSessionFailure } from "../../src/routes/station-acp";
 
 // Session lifecycle (operator, 2026-10-23): an idle Salaam session ends on its own, but never

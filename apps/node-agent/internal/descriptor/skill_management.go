@@ -12,7 +12,7 @@ type SkillManagementProvider interface {
 	ManagedSkillWorkspace(context.Context, string) (string, error)
 }
 
-func localManagedSkillWorkspace(ctx context.Context, d Descriptor, key string) (string, error) {
+func LocalManagedSkillWorkspace(ctx context.Context, d Descriptor, key string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -46,23 +46,4 @@ func (r *Registry) ManagedSkillWorkspace(ctx context.Context, key string) (strin
 	}
 	workspace, err := provider.ManagedSkillWorkspace(ctx, key)
 	return workspace, d.Harness(), err
-}
-
-func (d *codexDescriptor) ManagedSkillWorkspace(ctx context.Context, key string) (string, error) {
-	return localManagedSkillWorkspace(ctx, d, key)
-}
-func (d *claudeCodeDescriptor) ManagedSkillWorkspace(ctx context.Context, key string) (string, error) {
-	return localManagedSkillWorkspace(ctx, d, key)
-}
-func (d *openCodeDescriptor) ManagedSkillWorkspace(ctx context.Context, key string) (string, error) {
-	return localManagedSkillWorkspace(ctx, d, key)
-}
-func (d *piDescriptor) ManagedSkillWorkspace(ctx context.Context, key string) (string, error) {
-	return localManagedSkillWorkspace(ctx, d, key)
-}
-func (d *hermesDescriptor) ManagedSkillWorkspace(ctx context.Context, key string) (string, error) {
-	return localManagedSkillWorkspace(ctx, d, key)
-}
-func (d *openclawDescriptor) ManagedSkillWorkspace(ctx context.Context, key string) (string, error) {
-	return localManagedSkillWorkspace(ctx, d, key)
 }

@@ -30,8 +30,8 @@ import {
   MIN_MAX_SECONDS,
   transcriptionSettings,
   type TranscriptionSettings,
-} from "../services/transcription-settings";
-import { testTranscription } from "../services/transcription-client";
+} from "../services/speech";
+import { testTranscription } from "../services/speech";
 import { VERB_RESULTS } from "@agentpod/contract";
 import * as broker from "../services/broker";
 import { createLogger } from "../utils/logger";

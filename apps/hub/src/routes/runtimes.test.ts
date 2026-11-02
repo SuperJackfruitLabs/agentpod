@@ -54,8 +54,8 @@ import {
   sweepExpiringRuntimes,
   ROTATION_MARGIN_MS,
   sweepUnobservedRuntimes,
-} from "../services/runtimes";
-import { enrollNode } from "../services/enrollment";
+} from "../services/runtimes/runtimes";
+import { enrollNode } from "../services/nodes/enrollment";
 import type { AuthUser } from "../auth/middleware";
 
 // ─── Constants ────────────────────────────────────────────────────────────────

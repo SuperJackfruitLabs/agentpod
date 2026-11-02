@@ -43,8 +43,7 @@
  */
 
 import type { BoardActivity } from "./coalesce";
-import type { GatePendingDelivery } from "../matrix-as/gates";
-import type { ElicitationPendingDelivery } from "../matrix-as/elicitation-card";
+import type { ElicitationPendingDelivery, GatePendingDelivery } from "./deliveries";
 import { context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import { tracer } from "../../telemetry/otel";
 import { injectTraceHeaders } from "../../telemetry/propagation";
@@ -82,7 +81,7 @@ export const SUPERPIPELINE_REQUEST_TIMEOUT_MS = 30_000;
  */
 export const fetchAdapter: Fetcher = async (url, init) => {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(SUPERPIPELINE_REQUEST_TIMEOUT_MS) });
-  return { status: res.status, ok: res.ok, json: () => res.json() as Promise<unknown> };
+  return { status: res.status, ok: res.ok, json: () => res.json() };
 };
 
 export interface SuperpipelineClientOptions {

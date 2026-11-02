@@ -219,7 +219,7 @@ export const ConfigRefusal = z.object({
  * One setting the HUB excluded from a plan before ever asking the node to
  * derive one — distinct from `ConfigRefusal`, which is the NODE refusing a
  * whole plan. Mirrors `PlanRefusal` in
- * `apps/hub/src/services/harness-config-apply.ts`'s `planFor`: a requested
+ * `apps/hub/src/services/harness-config/apply.ts`'s `planFor`: a requested
  * setting an operator has opted out of reconciliation for this station is
  * excluded from `want` and reported back here, named, rather than being
  * silently dropped or blocking the rest of the request.

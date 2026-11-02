@@ -14,12 +14,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 
 import type { McpCaller } from "./auth.ts";
-import * as broker from "../services/broker.ts";
-import { stationForPrincipal } from "../services/self-station.ts";
-import { superlibraryClient } from "../services/superlibrary/client.ts";
-import { linkArtifact } from "../services/superlibrary/link.ts";
-import { linkFromOwnStation } from "../services/superlibrary/link-own.ts";
-import { stationProvenance } from "../services/superlibrary/provenance.ts";
+import * as broker from "../services/broker/index.ts";
+import { stationForPrincipal } from "../services/stations/index.ts";
+import { superlibraryClient } from "../services/superlibrary/index.ts";
+import { linkArtifact } from "../services/superlibrary/index.ts";
+import { linkFromOwnStation } from "../services/superlibrary/index.ts";
+import { stationProvenance } from "../services/superlibrary/index.ts";
 import { registerHubTools, type ToolDeps } from "./tools.ts";
 
 const SERVER_INFO = { name: "agentpod-hub", version: "0.1.0" };

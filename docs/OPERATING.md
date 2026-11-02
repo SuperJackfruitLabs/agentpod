@@ -397,7 +397,7 @@ appear at all.
 
 | Harness | Lifecycle mechanism |
 |---------|-------------------|
-| Hermes | Per-profile process, started **detached** as `hermes -p <name> gateway run --replace` — via `systemd-run --collect --quiet` where available, precisely so it escapes the node-agent's own cgroup and survives `apn restart` (`internal/descriptor/hermes.go`) |
+| Hermes | Per-profile process, started **detached** as `hermes -p <name> gateway run --replace` — via `systemd-run --collect --quiet` where available, precisely so it escapes the node-agent's own cgroup and survives `apn restart` (`internal/descriptor/hermes/hermes.go`) |
 | OpenClaw | User systemd unit (`openclaw-gateway.service`) |
 | Claude Code / Codex / OpenCode / Pi | No persistent process — `lifecycle` is never advertised, so there is no panel |
 
@@ -540,7 +540,7 @@ updating: existing sessions retain their running engine. Health reports the
 resolved adapter package and bundled engine versions when package metadata is
 available, or the configured override path; standalone binaries are marked
 unknown. These are next-session diagnostics, not proof of an existing session's
-process version. Source: `internal/descriptor/codex_runtime.go`.
+process version. Source: `internal/descriptor/codex/codex_runtime.go`.
 
 
 ### Cleanup
@@ -1123,7 +1123,7 @@ after its text. The speech service is anything with OpenAI's
   again, and kept out of the generic settings dump.
 - **Which voice**: the station's, else the hub's default voice, else one
   **assigned from the station's id** — FNV-1a of the id over fifteen curated
-  voices (`CURATED_VOICES` in `services/speech-settings.ts`; append only, since
+  voices (`CURATED_VOICES` in `services/speech/speech-settings.ts`; append only, since
   reordering re-voices every unassigned agent). Stable across restarts, and
   different agents mostly sound different. The station page shows it as
   *Assigned: …* and the owner may pick another, or type a blend
@@ -2164,7 +2164,7 @@ new occupant starts with nothing.
 **Verifying a grant.** After `grant`, `list` should reach `verified`; run `verify` after any node
 change. Implementation: `apps/hub/src/routes/station-forge-api.ts` (routes, including
 `GET …/forge-api/key`, which returns only the station's handover public key for the CLI to seal
-to), `apps/hub/src/services/station-forge-api.ts` (lifecycle), and
+to), `apps/hub/src/services/forge-api/station-forge-api.ts` (lifecycle), and
 `apps/node-agent/cmd/agentpod-fleet/forge_api.go` (the CLI).
 
 **Needs a node that supports it.** A station's node must advertise the `forge.api` capability;

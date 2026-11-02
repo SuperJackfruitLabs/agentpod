@@ -14,7 +14,7 @@ import { test, expect, beforeEach } from "bun:test";
 import {
   getLatestAgentVersion,
   _resetCache,
-} from "../../src/services/agent-version";
+} from "../../src/services/nodes/agent-version";
 
 // Reset the module-level cache before every test so tests are independent.
 beforeEach(() => {

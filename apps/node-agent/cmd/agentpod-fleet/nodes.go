@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 )
 
@@ -20,35 +22,6 @@ import (
 // the per-verb 75 seconds would cut a healthy rollout off mid-way and leave the
 // operator guessing which nodes moved.
 const rolloutTimeout = 15 * time.Minute
-
-const nodesUsage = `Usage: fleet nodes [update|telemetry|rm]
-
-  fleet nodes                               the fleet's nodes, with versions
-  fleet nodes update [--node NAME|ID …] [--force]
-  fleet nodes rm NAME|ID [--force]          remove a retired machine from the fleet
-  fleet nodes telemetry                     each node's OpenTelemetry setting
-  fleet nodes telemetry [--node NAME|ID …] --endpoint <url> | --off
-
-update asks the hub to roll the newest release to your nodes, one at a time,
-and prints what happened to each. With --node it touches only those nodes
-(repeatable; a name or an ID from ` + "`fleet nodes`" + `). --force re-applies the current
-release to a node that already has it — the escape hatch for a corrupt binary.
-
-rm removes an enrolled node: its stations are unregistered and its credential is
-revoked, so the machine cannot reconnect; to rejoin it needs a fresh
-` + "`fleet invite`" + ` token. A connected node is refused unless --force, which
-disconnects it. A provisioned runtime's node is removed with ` + "`fleet runtimes rm`" + `.
-
-Only the node-agent restarts; the harnesses it serves keep running. The exit
-status is 1 if any node was asked and did not update.
-
-telemetry (admin role required) reads or sets the OTLP endpoint each node-agent
-exports traces to, with no SSH. Without flags it lists the setting per node
-(offline nodes are shown and do not fail the exit status). --endpoint takes an
-http or https URL; --off disables export. A node restarts itself only if its
-setting changed. A node too old to know the verb says "unsupported" until
-` + "`fleet nodes update`" + `. The exit status is 1 if any node failed, was
-unsupported, or (when setting) was offline and so did not apply the change.`
 
 // fleet nodes — list the fleet, or roll a release across it.
 //
@@ -71,7 +44,7 @@ func fleetNodes(args []string) {
 		return
 	}
 	if helpRequested(args) || args[0] != "update" {
-		fmt.Println(nodesUsage)
+		fmt.Println(fleetcli.NodesUsage)
 		if !helpRequested(args) {
 			os.Exit(2)
 		}
@@ -82,7 +55,7 @@ func fleetNodes(args []string) {
 	force := fs.Bool("force", false, "re-apply the current release")
 	var named stringList
 	fs.Var(&named, "node", "node name or ID (repeatable)")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "unexpected argument:", fs.Arg(0))
 		os.Exit(2)
@@ -147,92 +120,11 @@ func resolveNodeIDs(named []string) []string {
 	return ids
 }
 
-// telemetryRow is one node's answer from GET/POST /api/nodes/telemetry.
-type telemetryRow struct {
-	Name       string `json:"name"`
-	NodeID     string `json:"nodeId"`
-	Status     string `json:"status"`
-	Endpoint   string `json:"endpoint"`
-	Enabled    *bool  `json:"enabled"`
-	Restarting bool   `json:"restarting"`
-	Error      string `json:"error"`
-	// Effective is the endpoint the node process started with (status only; absent
-	// on older nodes). It differs from Endpoint until the node restarts.
-	Effective *string `json:"effective"`
-	// Unit is the state of the node's systemd unit (current, stale, reconciled,
-	// drifted, error, n/a); nil on older nodes. UnitDetail explains an error.
-	Unit       *string `json:"unit"`
-	UnitDetail string  `json:"unitDetail"`
-}
-
-// unitBlocksRestart reports whether the node's unit is in a state where a restart
-// would not pick up the configured endpoint.
-func (r telemetryRow) unitBlocksRestart() bool {
-	return r.Unit != nil && (*r.Unit == "drifted" || *r.Unit == "error")
-}
-
-func (r telemetryRow) detail() string {
-	var parts []string
-	if r.Enabled != nil {
-		if *r.Enabled {
-			parts = append(parts, "enabled "+r.Endpoint)
-		} else {
-			parts = append(parts, "disabled")
-		}
-	}
-	if r.Effective != nil && r.Enabled != nil {
-		configured := ""
-		if *r.Enabled {
-			configured = r.Endpoint
-		}
-		if *r.Effective != configured {
-			running := *r.Effective
-			if running == "" {
-				running = "off"
-			}
-			// A restart only applies the configured endpoint when the unit is
-			// healthy; with a drifted or errored unit the hint would be a lie.
-			if !r.unitBlocksRestart() {
-				parts = append(parts, "(running "+running+" until restart)")
-			}
-		}
-	}
-	if r.Unit != nil {
-		switch *r.Unit {
-		case "drifted":
-			parts = append(parts, "unit: drifted (manual edits)")
-		case "error":
-			if r.UnitDetail != "" {
-				parts = append(parts, "unit: error: "+r.UnitDetail)
-			} else {
-				parts = append(parts, "unit: error")
-			}
-		case "stale":
-			parts = append(parts, "unit: stale (re-rendered on next set or restart)")
-		default:
-			parts = append(parts, "unit: "+*r.Unit)
-		}
-	}
-	if r.Restarting {
-		parts = append(parts, "(restarting)")
-	}
-	if r.Error != "" {
-		parts = append(parts, r.Error)
-	}
-	return strings.Join(parts, " ")
-}
-
-const nodesTelemetryUsage = `Usage: fleet nodes telemetry [--node NAME|ID …] [--endpoint <url> | --off]
-
-With no flags, lists each node's telemetry setting. With --endpoint <url> (http
-or https) or --off, sets it on every node, or only the --node ones. Admin role
-required. Exit 1 if any node failed, was unsupported, or (when setting) offline.`
-
 // fleetNodesTelemetry lists (no flags) or sets (--endpoint | --off) the
 // OpenTelemetry endpoint on nodes, through the admin-only hub routes.
 func fleetNodesTelemetry(args []string) {
 	if helpRequested(args) {
-		fmt.Println(nodesTelemetryUsage)
+		fmt.Println(fleetcli.NodesTelemetryUsage)
 		return
 	}
 	fs := flag.NewFlagSet("fleet nodes telemetry", flag.ExitOnError)
@@ -240,7 +132,7 @@ func fleetNodesTelemetry(args []string) {
 	off := fs.Bool("off", false, "disable telemetry export")
 	var named stringList
 	fs.Var(&named, "node", "node name or ID (repeatable)")
-	fs.Parse(args)
+	_ = fs.Parse(args) // the FlagSet reports a bad flag itself
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "unexpected argument:", fs.Arg(0))
 		os.Exit(2)
@@ -283,7 +175,7 @@ func fleetNodesTelemetry(args []string) {
 	response := telemetryRequest(method, payload)
 
 	var answer struct {
-		Results []telemetryRow `json:"results"`
+		Results []fleetcli.TelemetryRow `json:"results"`
 	}
 	if err := json.Unmarshal(response, &answer); err != nil {
 		fmt.Fprintln(os.Stderr, "the hub's answer did not decode:", err)
@@ -291,7 +183,7 @@ func fleetNodesTelemetry(args []string) {
 	}
 	bad := 0
 	for _, r := range answer.Results {
-		fmt.Printf("%-24s %-12s %s\n", r.Name, r.Status, r.detail())
+		fmt.Printf("%-24s %-12s %s\n", r.Name, r.Status, r.Detail())
 		switch r.Status {
 		case "failed", "unsupported":
 			bad++
@@ -312,7 +204,7 @@ func fleetNodesTelemetry(args []string) {
 // not say what to do about it.
 func telemetryRequest(method string, body io.Reader) []byte {
 	c := requireCredential()
-	req, err := http.NewRequest(method, hubBase()+"/api/nodes/telemetry", body)
+	req, err := http.NewRequestWithContext(context.Background(), method, hubBase()+"/api/nodes/telemetry", body)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -339,17 +231,6 @@ func telemetryRequest(method string, body io.Reader) []byte {
 	return response
 }
 
-const nodesRmUsage = `Usage: fleet nodes rm NAME|ID [--force]
-
-Removes an enrolled node from the fleet. Its stations are unregistered (as
-` + "`fleet stations unadopt`" + ` would), and its credential is revoked, so the machine
-cannot reconnect; to rejoin it must be enrolled again with a fresh
-` + "`fleet invite`" + ` token. Workspace files on the machine are not touched, and the
-node-agent keeps running until it is uninstalled there.
-
-A connected node is refused unless --force, which disconnects it. A provisioned
-runtime's node is refused: ` + "`fleet runtimes rm`" + ` removes the runtime and its node.`
-
 // fleet nodes rm — DELETE /api/nodes/:id.
 //
 // A name is resolved to an id from the node list; anything the list does not
@@ -357,22 +238,22 @@ runtime's node is refused: ` + "`fleet runtimes rm`" + ` removes the runtime and
 // for a node that is not there or not theirs.
 func fleetNodesRemove(args []string) {
 	if helpRequested(args) {
-		fmt.Println(nodesRmUsage)
+		fmt.Println(fleetcli.NodesRmUsage)
 		return
 	}
 	fs := flag.NewFlagSet("fleet nodes rm", flag.ExitOnError)
 	force := fs.Bool("force", false, "disconnect and remove a node that is connected")
-	fs.Usage = func() { fmt.Fprintln(fs.Output(), nodesRmUsage) }
+	fs.Usage = func() { fmt.Fprintln(fs.Output(), fleetcli.NodesRmUsage) }
 	// The flag may come before or after the node: parse, take the node, parse
 	// what follows it.
-	fs.Parse(args)
+	_ = fs.Parse(args) // the FlagSet reports a bad flag itself
 	var positional []string
 	for fs.NArg() > 0 {
 		positional = append(positional, fs.Arg(0))
-		fs.Parse(fs.Args()[1:])
+		_ = fs.Parse(fs.Args()[1:]) // the FlagSet reports a bad flag itself
 	}
 	if len(positional) != 1 {
-		fmt.Fprintln(os.Stderr, nodesRmUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.NodesRmUsage)
 		os.Exit(2)
 	}
 	id := nodeIDFor(positional[0])
@@ -382,7 +263,7 @@ func fleetNodesRemove(args []string) {
 		path += "?force=1"
 	}
 	c := requireCredential()
-	req, err := http.NewRequest(http.MethodDelete, hubBase()+path, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, hubBase()+path, nil)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

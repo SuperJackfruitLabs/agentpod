@@ -57,7 +57,7 @@ const planeMatrixIds = (principalId: string) =>
     .filter(([k, v]) => v === principalId && k.startsWith("matrix\u0000"))
     .map(([k]) => k.slice("matrix\u0000".length));
 import { createMatrixClient, type MatrixClient } from "../../src/services/matrix-as/client";
-import { bridgeLocalpart, bridgeUserId, stationSpeaker } from "../../src/services/matrix-as/names";
+import { bridgeLocalpart, bridgeUserId, stationSpeaker } from "../../src/services/matrix/names";
 import { projectGate, type GatePendingDelivery } from "../../src/services/matrix-as/gates";
 import {
   moveInProgress,
@@ -70,7 +70,7 @@ import {
 import {
   mintCredentialAuthorization,
   redeemCredentialAuthorization,
-} from "../../src/services/matrix-credential";
+} from "../../src/services/matrix/credential";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const RUN = Math.random().toString(36).slice(2, 8);

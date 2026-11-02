@@ -21,20 +21,19 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
-import { requireIssueCredentials } from "../services/grant-reach";
-import { isGrantReachDenied } from "../services/control-pair";
-import { bridgeUserId, bridgeLocalpart } from "../services/matrix-as/names";
-import { roomAliasForStation } from "../services/matrix-as/station-room";
-import { isMatrixUserInUse } from "../services/matrix-as/client";
+import { requireIssueCredentials } from "../services/control";
+import { isGrantReachDenied } from "../services/control";
+import { bridgeUserId, bridgeLocalpart } from "../services/matrix";
+import { roomAliasForStation } from "../services/matrix-as";
+import { isMatrixUserInUse } from "../services/matrix-as";
 import { principalHandle } from "../auth/org-plane/principals";
-import { mintCredentialAuthorization, UnknownStationError } from "../services/matrix-credential";
-import { isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix-as/names";
+import { mintCredentialAuthorization, UnknownStationError } from "../services/matrix";
+import { isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix";
 import {
   preJoinRefusal,
   type MoveState,
   type PreJoinOutcome,
-} from "../services/matrix-as/identity-move";
-import type { AuthUser } from "../auth/middleware";
+} from "../services/matrix-as";
 import { tenantScope } from "../db/tenant-scope";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
@@ -153,7 +152,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      * that harness learning to talk to a homeserver.
      */
     .post("/stations/:id/matrix/identity", async (c) => {
-      const user = c.get("user") as AuthUser;
+      const user = c.get("user");
       // The station's Matrix presence is the workspace's: a workspace admin's (W1).
       const notAdmin = requireWorkspaceAdmin(c);
       if (notAdmin) return notAdmin;
@@ -200,7 +199,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      * failure the mode exists to prevent.
      */
     .post("/stations/:id/matrix/credentials", async (c) => {
-      const user = c.get("user") as AuthUser;
+      const user = c.get("user");
       // The station's Matrix presence is the workspace's: a workspace admin's (W1).
       const notAdmin = requireWorkspaceAdmin(c);
       if (notAdmin) return notAdmin;
@@ -318,7 +317,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      * again). A failed signal is only logged.
      */
     .post("/stations/:id/matrix/authorize-move", async (c) => {
-      const user = c.get("user") as AuthUser;
+      const user = c.get("user");
       // The station's Matrix presence is the workspace's: a workspace admin's (W1).
       const notAdmin = requireWorkspaceAdmin(c);
       if (notAdmin) return notAdmin;
@@ -437,7 +436,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      * a Matrix fact in neither column, and the gate sweep is what checks it.
      */
     .get("/stations/:id/matrix/move-state", async (c) => {
-      const user = c.get("user") as AuthUser;
+      const user = c.get("user");
       const station = await ownedStation(user.tenantId, c.req.param("id"));
       if (!station) return c.json({ error: "Not Found" }, 404);
       return c.json(await deps.moveState(station.id));

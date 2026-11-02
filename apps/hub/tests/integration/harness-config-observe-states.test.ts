@@ -2,7 +2,7 @@
  * Integration Test: `awaiting-restart` and `opted-out` arrive through the API
  * (Task 9b)
  *
- * `compare()` (`src/services/harness-config.ts`) has emitted all seven
+ * `compare()` (`src/services/harness-config/harness-config.ts`) has emitted all seven
  * observation states since Task 9, proven by unit tests
  * (`tests/unit/harness-config-compare.test.ts`). But `awaiting-restart` and
  * `opted-out` depend on three optional arguments — `appliedWrites`,
@@ -38,10 +38,10 @@ import { rawSql } from "../../src/db/drizzle";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { waitForNodeOnline } from "../helpers/wait";
-import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
-import { adoptStations } from "../../src/services/station-registry";
-import { declare, setOptOut } from "../../src/services/harness-config";
-import { recordApplied } from "../../src/services/harness-config-apply";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/nodes/enrollment";
+import { adoptStations } from "../../src/services/stations/registry";
+import { declare, setOptOut } from "../../src/services/harness-config/harness-config";
+import { recordApplied } from "../../src/services/harness-config/apply";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/tenant-scope";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { harnessConfigRoutes } from "../../src/routes/harness-config";

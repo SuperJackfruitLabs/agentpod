@@ -17,7 +17,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 
 import { db, rawSql } from "../../src/db/drizzle";
 import { viewOf } from "../../src/routes/station-forge-api";
-import { connectionManager } from "../../src/services/connection-manager";
+import { connectionManager } from "../../src/services/broker/connection-manager";
 import {
   createForgeApiGrant,
   createForgeApiGrant as create,
@@ -27,14 +27,14 @@ import {
   updateGrantPolicy,
   verifyGrant,
   withGrantClaim,
-} from "../../src/services/station-forge-api";
+} from "../../src/services/forge-api/station-forge-api";
 import {
   configureForgeApiReconcile,
   createFailureTracker,
   forgeApiReconcileTimerActive,
   runForgeApiReconcile,
   tickForgeApiReconcile,
-} from "../../src/services/forge-api-reconcile";
+} from "../../src/services/forge-api/reconcile";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
 import { forgetPrincipals } from "../helpers/principals";

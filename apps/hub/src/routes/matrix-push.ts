@@ -15,7 +15,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 
-import { NotifyRequest, type PushGateway } from "../services/push/gateway";
+import { NotifyRequest, type PushGateway } from "../services/push";
 
 /** A notify for twenty devices with every optional field is a few KB. */
 export const NOTIFY_BODY_MAX = 64 * 1024;

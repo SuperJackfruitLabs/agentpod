@@ -17,7 +17,7 @@ import { adminAuditLog } from "../../src/db/schema/admin";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { stationAcpRoutes, createSessionFailure } from "../../src/routes/station-acp";
 import { websocket } from "../../src/ws";
-import * as acp from "../../src/services/acp-sessions";
+import * as acp from "../../src/services/acp/sessions";
 import { connectFakeAcpNode, type FakeAcpNode } from "../helpers/acp-fake-node";
 import { fakePlane } from "../helpers/fake-plane";
 import { ensurePgMigrations } from "../helpers/pg-migrations";

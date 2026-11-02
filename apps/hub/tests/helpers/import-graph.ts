@@ -21,9 +21,17 @@ export function sourceFiles(dir: string): string[] {
 
 const SPECIFIER = /(?:\bfrom|\bimport\(?)\s*["']([^"']+)["']/g;
 
-/** File-level import graph of a tree, as paths relative to its root. Edges leaving the tree
- *  (packages, other apps) are dropped. */
-export function importGraph(rootDir: string, aliases: Record<string, string> = {}): Map<string, string[]> {
+/** One import between two files of a tree, as paths relative to its root. */
+export interface Import {
+  from: string;
+  to: string;
+  /** An `import("…")` expression, which loads its file only when that code runs. */
+  dynamic: boolean;
+}
+
+/** Every import inside a tree, one per file pair and kind. Imports leaving the tree (packages,
+ *  other apps) are dropped. */
+export function imports(rootDir: string, aliases: Record<string, string> = {}): Import[] {
   const all = sourceFiles(rootDir);
   const known = new Set(all);
   const resolveSpecifier = (from: string, spec: string): string | undefined => {
@@ -37,14 +45,26 @@ export function importGraph(rootDir: string, aliases: Record<string, string> = {
       if (known.has(candidate)) return candidate;
     return undefined;
   };
-  const graph = new Map<string, string[]>();
+  const found = new Map<string, Import>();
   for (const file of all) {
-    const targets = new Set<string>();
     for (const m of readFileSync(file, "utf8").matchAll(SPECIFIER)) {
       const to = m[1] === undefined ? undefined : resolveSpecifier(file, m[1]);
-      if (to !== undefined && to !== file) targets.add(relative(rootDir, to));
+      if (to === undefined || to === file) continue;
+      const edge = { from: relative(rootDir, file), to: relative(rootDir, to), dynamic: m[0].includes("(") };
+      found.set(`${edge.from} ${edge.to} ${edge.dynamic}`, edge);
     }
-    graph.set(relative(rootDir, file), [...targets]);
+  }
+  return [...found.values()];
+}
+
+/** File-level import graph of a tree, as paths relative to its root. Edges leaving the tree
+ *  (packages, other apps) are dropped. */
+export function importGraph(rootDir: string, aliases: Record<string, string> = {}): Map<string, string[]> {
+  const graph = new Map<string, string[]>(sourceFiles(rootDir).map((f) => [relative(rootDir, f), []] as const));
+  for (const { from, to } of imports(rootDir, aliases)) {
+    const targets = graph.get(from) ?? [];
+    if (!targets.includes(to)) targets.push(to);
+    graph.set(from, targets);
   }
   return graph;
 }

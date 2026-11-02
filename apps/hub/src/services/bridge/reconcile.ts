@@ -3,7 +3,7 @@
  *
  * The roster used to be an environment variable read once at boot, so changing it meant root on
  * the hub host and a restart. It is a table now, and this is what makes an edit take effect: a
- * tick, a desired state, and a diff — the shape `services/node-sweeper.ts` already establishes.
+ * tick, a desired state, and a diff — the shape `services/sweeper/node-sweeper.ts` already establishes.
  *
  * Deliberately knows nothing about Postgres or about `startAgentLoop`. It is handed the roster and
  * a registry, so what it does — start, stop, rebuild — is testable without either.

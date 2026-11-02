@@ -30,14 +30,14 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import type { Capability } from "@agentpod/contract";
 import { db } from "../db/drizzle";
-import { requireGrantReach } from "../services/grant-reach";
+import { requireGrantReach } from "../services/control";
 import type { Caller } from "../auth/caller-authority";
-import { isGrantReachDenied } from "../services/control-pair";
+import { isGrantReachDenied } from "../services/control";
 import * as broker from "../services/broker";
-import { gateCapability, getStation } from "../services/station-registry";
+import { gateCapability, getStation } from "../services/stations";
 import { recordAudit } from "../services/audit";
 import type { AuthUser } from "../auth/middleware";
-import type { StationRow } from "../services/station-registry";
+import type { StationRow } from "../services/stations";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
 // ─── Reach gate ───────────────────────────────────────────────────────────────
@@ -96,9 +96,6 @@ function brokerErrorStatus(error: string | undefined): 409 | 502 {
 
 // ─── Shared auth + ownership guard ───────────────────────────────────────────
 
-type RouteContext = {
-  user: AuthUser | undefined;
-};
 
 // ─── Route schemas ────────────────────────────────────────────────────────────
 

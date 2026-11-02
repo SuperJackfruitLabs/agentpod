@@ -9,6 +9,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 ## Unreleased
 
 ### Changed
+- **The code is restructured into modules, with no change in behaviour** (the modularity work,
+  PR #836). The hub's `services/` is 23 modules, each imported through its `index.ts` and
+  layered so none imports up; its seven files over 1,000 lines are split (the largest,
+  `acp-sessions.ts`, 3,514 lines, is now 21 files); the node agent's harness descriptors are
+  one package per harness, and `apn`'s and `fleet`'s command tables and references live in
+  `internal/`; the console's station page is split into components. Every split was pinned
+  first by characterization tests against the old code. Routes, responses, database queries,
+  Matrix, forge and bridge traffic, log lines and CLI output are unchanged.
+- **Type-check and lint gates.** CI's `hub` job holds `bun run typecheck` at zero and the tests'
+  type errors to a listed file; `pnpm lint:ts` (oxlint, type-aware) and `pnpm lint:go`
+  (golangci-lint) are ratchets whose counts may only fall, and shipped TypeScript is clean of
+  `any`, empty blocks without a reason, floating and misused promises, unused code and
+  unnecessary assertions; the node agent's shipped Go code drops no error without saying so.
+  Nothing for operators to do: no configuration, environment, schema or wire change. The hub's
+  plain stdout lines (boot, migrations, the sweepers) are deliberately unchanged.
 - **The console installs to a phone's home screen**: a web app manifest, the iOS home-screen
   tags, and the AgentPod mark on the dark plate as its icon.
 

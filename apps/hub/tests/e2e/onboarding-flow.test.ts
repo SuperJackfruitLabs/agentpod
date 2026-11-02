@@ -20,8 +20,8 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import type { E2EDockerClient } from "./helpers/docker";
 import {
-  E2EDockerClient,
   getE2EDockerClient,
   canRunE2ETests,
   httpFromContainer,

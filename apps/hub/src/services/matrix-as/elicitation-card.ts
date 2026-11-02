@@ -22,30 +22,11 @@ import {
   type ElicitationRequestCard,
 } from "@agentpod/contract";
 
+import type { ElicitationPendingDelivery } from "../bridge";
+
 export { ELICITATION_REQUEST_CONTENT_KEY };
 
-/** The body the board pushes on `elicitation.pending`. */
-export interface ElicitationPendingDelivery {
-  event: "elicitation.pending";
-  boardId: string;
-  /**
-   * What the board is called. Optional because a board that has not shipped the field
-   * sends none, and the room must keep the name it has rather than be renamed to
-   * nothing — see `renameIfNeeded`.
-   */
-  boardName?: string | null;
-  cardId: string;
-  cardTitle: string;
-  elicitationId: string;
-  runId: string;
-  stageKey: string;
-  /** The agent that is waiting, and the one identity the board will not let answer. */
-  agentId: string;
-  /** The question. May be empty: an agent can stop on options alone. */
-  question: string;
-  options: Array<{ id: string; label: string }>;
-  ts: string;
-}
+export type { ElicitationPendingDelivery };
 
 /**
  * How many options a client will draw as buttons.
