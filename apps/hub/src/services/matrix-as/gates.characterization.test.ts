@@ -1191,12 +1191,22 @@ describe("the reads", () => {
       startedAt: new Date(),
       updatedAt: new Date(),
     });
+    // The projection this test reads is its own, so the test passes run alone with `-t`.
+    await db.insert(matrixGateEvents).values({
+      gateId: `gate_${RUN}_8`,
+      tenantId: BOOTSTRAP_TENANT_ID,
+      boardId: BOARD,
+      cardId: "crd_8",
+      roomId: BOARD_ROOM,
+      eventId: `$gate-gate_${RUN}_8-2`,
+      proseEventId: `$prose-gate_${RUN}_8-1`,
+    });
 
     expect(
       normalize({
         tenant: await tenantForBoard(BOARD),
         noTenant: await tenantForBoard(`brd_none_${RUN}`),
-        projection: await projectionForGate(`gate_${RUN}_1`),
+        projection: await projectionForGate(`gate_${RUN}_8`),
         noProjection: await projectionForGate("gate_never"),
         bridgeSpeaker: await roomAgentUser(`!gchar-b-${RUN}:x`, "id.agentpod.dev"),
         harnessSpeaker: await roomAgentUser(`!gchar-h-${RUN}:x`, "id.agentpod.dev"),
@@ -1211,8 +1221,8 @@ describe("the reads", () => {
         "noTenant": null,
         "projection": {
           "boardId": "brd_gchar_<run>",
-          "eventId": "$gate-gate_<run>_1-2",
-          "proseEventId": "$prose-gate_<run>_1-1",
+          "eventId": "$gate-gate_<run>_8-2",
+          "proseEventId": "$prose-gate_<run>_8-1",
           "roomId": "!gchar-board-<run>:id.agentpod.dev",
           "tenantId": "fleet_00000000000000000000",
         },
