@@ -53,7 +53,7 @@ const TEST_USER = "test-user-cfgadopt-001";
 const TIMEOUT_SETTING = "hermes.approvals.timeout"; // policy: reconcilable
 const MODE_SETTING = "hermes.approvals.mode"; // policy: report-only, for this fixture
 
-/** Mirrors the real node's registry shape (apps/node-agent/internal/descriptor/hermes_config.go). */
+/** Mirrors the real node's registry shape (apps/node-agent/internal/descriptor/hermes/hermes_config.go). */
 const REGISTRY = [
   { id: TIMEOUT_SETTING, harness: "hermes", scope: "profile", policy: "reconcilable", restartToTakeEffect: true },
   { id: MODE_SETTING, harness: "hermes", scope: "profile", policy: "report-only", restartToTakeEffect: false },

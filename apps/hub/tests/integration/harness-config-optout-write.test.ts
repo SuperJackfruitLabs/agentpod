@@ -199,7 +199,7 @@ type FakePlan = {
  *
  * `config.inspect` answers for an operation that was only PLANNED, not yet
  * applied — phase `"planned"`, mirroring the real node's journal (see
- * `apps/node-agent/internal/descriptor/hermes_config.go`'s comment: "A plan
+ * `apps/node-agent/internal/descriptor/hermes/hermes_config.go`'s comment: "A plan
  * with no refusal IS recorded — phase 'planned' — in the station's own
  * journal"). `applyFor`'s opt-out check needs exactly this: it inspects the
  * plan BEFORE ever calling `config.apply`, so inspect must answer for a plan

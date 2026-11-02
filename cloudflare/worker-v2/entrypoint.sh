@@ -6,7 +6,7 @@ mkdir -p /workspace
 
 # Register /workspace as an OpenCode project so agentpod-node detect lists it.
 #
-# The node-agent descriptor (internal/descriptor/opencode.go) discovers projects
+# The node-agent descriptor (internal/descriptor/opencode/opencode.go) discovers projects
 # via TWO mechanisms (primary first, fallback second):
 #
 #   PRIMARY:  SELECT worktree FROM project WHERE id != 'global' AND worktree != ''
@@ -38,7 +38,7 @@ mkdir -p "${OPENCODE_DATA}/project/workspace"
 #
 # Lifecycle coordination: without the sentinel check below, this loop would
 # immediately resurrect `opencode serve` after the node-agent's opencode
-# descriptor (internal/descriptor/opencode.go) runs a lifecycle Stop on it,
+# descriptor (internal/descriptor/opencode/opencode.go) runs a lifecycle Stop on it,
 # making Stop a no-op. The descriptor's Stop kills the process THEN touches
 # /var/run/opencode-serve.stop (kill-before-touch is intentional and safe:
 # the loop's `sleep 2` after every exit means it can't re-check the sentinel

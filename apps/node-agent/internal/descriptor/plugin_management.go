@@ -27,5 +27,5 @@ func (r *Registry) PluginProfileDir(ctx context.Context, key string) (string, er
 	if d.Harness() != PluginManagementHarness {
 		return "", fmt.Errorf("plugins: management is unavailable for this harness")
 	}
-	return localManagedSkillWorkspace(ctx, d, key)
+	return LocalManagedSkillWorkspace(ctx, d, key)
 }

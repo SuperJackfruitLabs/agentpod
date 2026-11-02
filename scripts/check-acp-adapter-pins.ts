@@ -76,7 +76,11 @@ function splitPinned(spec: string): { pkg: string; version: string } | null {
 
 function findPins(): Pin[] {
   const pins: Pin[] = [];
-  for (const name of readdirSync(DESCRIPTOR_DIR).sort()) {
+  // The descriptor package and its per-harness subpackages (internal/descriptor/<harness>).
+  const files = readdirSync(DESCRIPTOR_DIR, { recursive: true, encoding: "utf8" })
+    .filter((name) => !name.split("/").includes("testdata"))
+    .sort();
+  for (const name of files) {
     if (!name.endsWith(".go") || name.endsWith("_test.go")) continue;
     const src = readFileSync(join(DESCRIPTOR_DIR, name), "utf8");
     for (const m of src.matchAll(/(\w*ACPPackage)\s*=\s*"([^"]+)"/g)) {

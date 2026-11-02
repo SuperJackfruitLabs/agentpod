@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hermes"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 )
 
@@ -38,7 +38,7 @@ func TestTranscriptionApplyWritesARealHermesProfile(t *testing.T) {
 		Fetch: func(context.Context, string) (gateway.TranscriptionConfig, error) {
 			return gateway.TranscriptionConfig{Enabled: true, URL: "http://100.78.52.87:8840", APIKey: "sk-real", Model: "large-v3-turbo"}, nil
 		},
-		Write:   descriptor.WriteHermesTranscription,
+		Write:   hermes.WriteHermesTranscription,
 		Restart: func(string) error { restarted = true; return nil },
 	})
 

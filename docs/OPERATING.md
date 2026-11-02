@@ -397,7 +397,7 @@ appear at all.
 
 | Harness | Lifecycle mechanism |
 |---------|-------------------|
-| Hermes | Per-profile process, started **detached** as `hermes -p <name> gateway run --replace` — via `systemd-run --collect --quiet` where available, precisely so it escapes the node-agent's own cgroup and survives `apn restart` (`internal/descriptor/hermes.go`) |
+| Hermes | Per-profile process, started **detached** as `hermes -p <name> gateway run --replace` — via `systemd-run --collect --quiet` where available, precisely so it escapes the node-agent's own cgroup and survives `apn restart` (`internal/descriptor/hermes/hermes.go`) |
 | OpenClaw | User systemd unit (`openclaw-gateway.service`) |
 | Claude Code / Codex / OpenCode / Pi | No persistent process — `lifecycle` is never advertised, so there is no panel |
 
@@ -540,7 +540,7 @@ updating: existing sessions retain their running engine. Health reports the
 resolved adapter package and bundled engine versions when package metadata is
 available, or the configured override path; standalone binaries are marked
 unknown. These are next-session diagnostics, not proof of an existing session's
-process version. Source: `internal/descriptor/codex_runtime.go`.
+process version. Source: `internal/descriptor/codex/codex_runtime.go`.
 
 
 ### Cleanup

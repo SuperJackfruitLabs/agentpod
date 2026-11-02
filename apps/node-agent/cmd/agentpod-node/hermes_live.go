@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hermes"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 )
 
 // hermesLiveVersion probes the Hermes this node would run; tests replace it.
-var hermesLiveVersion = descriptor.HermesVersion
+var hermesLiveVersion = hermes.HermesVersion
 
 // hermesLiveNow is the clock an apply records; tests replace it.
 var hermesLiveNow = time.Now

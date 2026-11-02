@@ -1,0 +1,2 @@
+# Allow log fixture files used in tests.
+!**/*.log

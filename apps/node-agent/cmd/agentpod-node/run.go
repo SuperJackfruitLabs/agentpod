@@ -14,6 +14,8 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hermes"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/profilewriter"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetreport"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
@@ -153,7 +155,7 @@ func runCmd() {
 		h = gateway.NewPluginManagementHandler(h, gateway.PluginManagementDeps{
 			NodeID: cfg.NodeID, ProfileDir: reg.PluginProfileDir,
 			Gate: func(ctx context.Context) hermeslive.Gate {
-				probe := descriptor.HermesVersion(ctx)
+				probe := hermes.HermesVersion(ctx)
 				return hermeslive.CheckHermes(probe.Status, probe.Version, probe.Reason)
 			},
 		})
@@ -193,7 +195,7 @@ func runCmd() {
 		HarnessFor:      harnessFor,
 		CapabilitiesFor: capabilitiesFor,
 		WriterFor: gateway.WriterLookupFunc(func(harness string) (gateway.ProfileWriteFunc, bool) {
-			w, ok := descriptor.WriterFor(harness)
+			w, ok := profilewriter.WriterFor(harness)
 			if !ok {
 				return nil, false
 			}
@@ -219,7 +221,7 @@ func runCmd() {
 		HarnessFor:      harnessFor,
 		CapabilitiesFor: capabilitiesFor,
 		Fetch:           gateway.NewHTTPTranscriptionFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret),
-		Write:           descriptor.WriteHermesTranscription,
+		Write:           hermes.WriteHermesTranscription,
 		Restart:         func(key string) error { return lifecycleFn(key, "restart") },
 	})
 	// speech.apply: the hub's resolved spoken-reply setting (speech service,
@@ -232,7 +234,7 @@ func runCmd() {
 		HarnessFor:      harnessFor,
 		CapabilitiesFor: capabilitiesFor,
 		Fetch:           gateway.NewHTTPSpeechFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret),
-		Write:           descriptor.WriteHermesSpeech,
+		Write:           hermes.WriteHermesSpeech,
 		Restart:         func(key string) error { return lifecycleFn(key, "restart") },
 	})
 	// matrix.avatar.set: a workspace image as a harness-mode station's Matrix

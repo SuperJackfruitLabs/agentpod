@@ -62,7 +62,7 @@ const SERVICE_USER = "test-user-cfgroute-service-001";
 const SETTING_ID = "hermes.approvals.timeout";
 
 /** What a fake Hermes-harness node answers `config.settings` with — mirrors
- *  the real node's registry (apps/node-agent/internal/descriptor/hermes_config.go)
+ *  the real node's registry (apps/node-agent/internal/descriptor/hermes/hermes_config.go)
  *  closely enough for these tests, which only exercise `hermes.approvals.*`. */
 const HERMES_REGISTRY = [
   { id: "hermes.approvals.timeout", harness: "hermes", scope: "profile", policy: "reconcilable", restartToTakeEffect: true },

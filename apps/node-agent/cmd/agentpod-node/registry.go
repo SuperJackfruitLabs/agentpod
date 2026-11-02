@@ -6,6 +6,15 @@ import (
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/claudecode"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/codex"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hermes"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/kilo"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/muse"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/openclaw"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/opencode"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/pi"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/salaamharness"
 )
 
 // buildRegistry constructs the descriptor registry from the node config.
@@ -16,32 +25,32 @@ import (
 func buildRegistry(cfg config.Config) *descriptor.Registry {
 	reg := descriptor.NewRegistry()
 	home, _ := os.UserHomeDir()
-	reg.Register(descriptor.NewSalaamFrom(descriptor.DiscoverSalaam(descriptor.SalaamConfig{Binary: cfg.SalaamBinary, StateDir: cfg.SalaamStateDir, Workspace: cfg.SalaamWorkspace, NodeBinary: cfg.SalaamNodeBinary, Manifest: cfg.SalaamManifest, NodeID: cfg.NodeID}, home, exec.LookPath)))
-	reg.Register(descriptor.NewHermes("", cfg.HermesStartCmd))
-	reg.Register(descriptor.NewOpenClawFrom(descriptor.OpenClawConfig{
+	reg.Register(salaamharness.NewSalaamFrom(salaamharness.DiscoverSalaam(salaamharness.SalaamConfig{Binary: cfg.SalaamBinary, StateDir: cfg.SalaamStateDir, Workspace: cfg.SalaamWorkspace, NodeBinary: cfg.SalaamNodeBinary, Manifest: cfg.SalaamManifest, NodeID: cfg.NodeID}, home, exec.LookPath)))
+	reg.Register(hermes.NewHermes("", cfg.HermesStartCmd))
+	reg.Register(openclaw.NewOpenClawFrom(openclaw.OpenClawConfig{
 		StartCmd:     cfg.OpenClawStartCmd,
 		Binary:       cfg.OpenClawBinary,
 		GatewayURL:   cfg.OpenClawGatewayURL,
 		TokenFile:    cfg.OpenClawTokenFile,
 		SessionLabel: cfg.OpenClawSessionLabel,
 	}))
-	reg.Register(descriptor.NewClaudeCodeFrom(descriptor.ClaudeCodeConfig{
+	reg.Register(claudecode.NewClaudeCodeFrom(claudecode.ClaudeCodeConfig{
 		AcpBinary:    cfg.ClaudeCodeAcpBinary,
 		ClaudeBinary: cfg.ClaudeCodeBinary,
 		NodeBinary:   cfg.NodeBinary,
 	}))
-	reg.Register(descriptor.NewOpenCode(""))
-	reg.Register(descriptor.NewPi(""))
-	reg.Register(descriptor.NewCodexFrom(descriptor.CodexConfig{
+	reg.Register(opencode.NewOpenCode(""))
+	reg.Register(pi.NewPi(""))
+	reg.Register(codex.NewCodexFrom(codex.CodexConfig{
 		AcpBinary:   cfg.CodexAcpBinary,
 		CodexBinary: cfg.CodexBinary,
 		NodeBinary:  cfg.NodeBinary,
 	}))
-	reg.Register(descriptor.NewMuseFrom(descriptor.MuseConfig{
+	reg.Register(muse.NewMuseFrom(muse.MuseConfig{
 		AcpBinary:  cfg.MuseAcpBinary,
 		MuseBinary: cfg.MuseBinary,
 	}))
-	reg.Register(descriptor.NewKiloFrom(descriptor.KiloConfig{
+	reg.Register(kilo.NewKiloFrom(kilo.KiloConfig{
 		DataDir: cfg.KiloDataDir,
 		Binary:  cfg.KiloBinary,
 	}))

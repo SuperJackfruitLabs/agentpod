@@ -16,6 +16,7 @@ import (
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hermes"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/nodecli"
@@ -159,11 +160,11 @@ func newInstanceClient(inst forgeapi.Instance) stkclient.Client {
 // The env files themselves are written by forgeapi, owned by the station's agent uid.
 func nodeHarnessWiring() *forgeapi.HarnessWiring {
 	return &forgeapi.HarnessWiring{
-		Units:        descriptor.HarnessSystemdUnits,
-		DropInDir:    descriptor.UserUnitDropInDir,
-		Running:      func(_ context.Context, unit string) bool { return descriptor.UserUnitActive(unit) },
-		DaemonReload: func(context.Context) error { return descriptor.UserDaemonReload() },
-		UnitEnv:      func(_ context.Context, unit string) []string { return descriptor.UserUnitEnvironment(unit) },
+		Units:        hermes.HarnessSystemdUnits,
+		DropInDir:    hermes.UserUnitDropInDir,
+		Running:      func(_ context.Context, unit string) bool { return hermes.UserUnitActive(unit) },
+		DaemonReload: func(context.Context) error { return hermes.UserDaemonReload() },
+		UnitEnv:      func(_ context.Context, unit string) []string { return hermes.UserUnitEnvironment(unit) },
 	}
 }
 

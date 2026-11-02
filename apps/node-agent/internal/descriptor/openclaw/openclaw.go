@@ -1,0 +1,727 @@
+package openclaw
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"io/fs"
+	"net"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hostfs"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hostproc"
+)
+
+// Descriptor implements Descriptor for the OpenClaw agent harness.
+// The OpenClaw home directory layout is:
+//
+//	~/.openclaw/
+//	  openclaw.json          ← main config
+//	  agents/
+//	    <name>/              ← one dir per subagent (deity names: hanuman, kubera, …)
+//	  workspace/             ← main workspace
+//	    agent-workspaces/
+//	      <name>/            ← per-subagent workspace (nested inside main workspace)
+//	  logs/                  ← log files
+//
+// A single gateway process (`node … openclaw/dist/index.js gateway`) serves all
+// subagents; per-subagent process state is not separable.
+type Descriptor struct {
+	home     string // absolute path to the .openclaw home directory
+	startCmd string
+
+	// ACP bridge settings — see OpenClawConfig. All optional.
+	GatewayURL   string
+	tokenFile    string
+	sessionLabel string
+
+	// acpHelp reads the installed build's acp help text, so the node can ask
+	// what the binary accepts instead of guessing from a version. A field so
+	// no test needs OpenClaw installed.
+	acpHelp func(binary string) (string, error)
+
+	// gatewayUp probes whether a local OpenClaw Gateway is running. It is a
+	// field so tests can declare the answer without spawning or pgrep-ing a
+	// process; production wiring in NewOpenClawFrom uses openclawGatewayPID.
+	gatewayUp func() bool
+
+	// dial opens a TCP connection to the gateway. Injected for the same reason
+	// gatewayUp and resolveBinary are: a test must never touch the host's
+	// network, and a probe is only useful if its failure path can be exercised.
+	dial func(network, addr string, timeout time.Duration) (net.Conn, error)
+
+	// resolveBinary returns the openclaw executable to spawn. Like gatewayUp it
+	// is a field so tests never depend on the host's PATH or filesystem;
+	// production wiring in NewOpenClawFrom uses resolveOpenClawBinary.
+	ResolveBinary func() (string, error)
+}
+
+// OpenClawConfig carries everything the descriptor needs. Zero values are valid:
+// an empty GatewayURL/TokenFile means "let openclaw resolve it from its own
+// config", which is what a default local install wants.
+type OpenClawConfig struct {
+	Home         string // default: <user home>/.openclaw
+	StartCmd     string // lifecycle Start (existing behaviour)
+	Binary       string // openclaw executable; empty = resolve (see resolveOpenClawBinary)
+	GatewayURL   string // → --url
+	TokenFile    string // → --token-file  (never --token)
+	SessionLabel string // session component of agent:<name>:<label>; default "main"
+}
+
+// NewOpenClawFrom returns a Descriptor for the OpenClaw harness configured by cfg.
+func NewOpenClawFrom(cfg OpenClawConfig) descriptor.Descriptor {
+	// userHome is "" when it can't be determined, which resolveOpenClawBinary
+	// reads as "skip the home-relative candidates".
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		userHome = ""
+	}
+	home := cfg.Home
+	if home == "" {
+		home = filepath.Join(userHome, ".openclaw")
+	}
+	label := cfg.SessionLabel
+	if label == "" {
+		label = "main"
+	}
+	binary := cfg.Binary
+	return &Descriptor{
+		home:         home,
+		startCmd:     cfg.StartCmd,
+		GatewayURL:   cfg.GatewayURL,
+		tokenFile:    cfg.TokenFile,
+		sessionLabel: label,
+		acpHelp:      openclawACPHelp,
+		gatewayUp:    func() bool { _, err := openclawGatewayPID(); return err == nil },
+		dial:         net.DialTimeout,
+		ResolveBinary: func() (string, error) {
+			return resolveOpenClawBinary(binary, userHome, exec.LookPath, hostproc.IsExecutableFile)
+		},
+	}
+}
+
+// openclawBinaryName is the executable that hosts the ACP bridge.
+const openclawBinaryName = "openclaw"
+
+// resolveOpenClawBinary picks the openclaw executable to spawn via the shared
+// resolution order (config override → PATH → well-known install dirs; see
+// binaryLocator). lookPath and isExecutable are parameters so tests never touch
+// the host's PATH or files.
+//
+// The failure is an actionable lowercase fragment: it composes into the console's
+// "Couldn't start the agent process — <err>".
+func resolveOpenClawBinary(override, userHome string, lookPath func(string) (string, error), isExecutable func(string) bool) (string, error) {
+	locator := hostproc.BinaryLocator{UserHome: userHome, LookPath: lookPath, IsExecutable: isExecutable}
+	if binary, ok := locator.Locate(openclawBinaryName, override); ok {
+		return binary, nil
+	}
+	return "", fmt.Errorf("openclaw: couldn't find the openclaw binary on this node — set openclawBinary in the node config")
+}
+
+// NewOpenClaw returns a Descriptor for the OpenClaw harness.
+// home is the path to the OpenClaw home directory (e.g. "~/.openclaw").
+// If home is empty it defaults to $HOME/.openclaw.
+func NewOpenClaw(home string, startCmd ...string) descriptor.Descriptor {
+	var cmd string
+	if len(startCmd) > 0 {
+		cmd = startCmd[0]
+	}
+	return NewOpenClawFrom(OpenClawConfig{Home: home, StartCmd: cmd})
+}
+
+// Harness returns the harness identifier.
+func (o *Descriptor) Harness() string { return "openclaw" }
+
+// Detect discovers all OpenClaw stations. It returns empty (nil-safe) if the
+// home directory does not exist.
+func (o *Descriptor) Detect() ([]descriptor.Station, error) {
+	if _, err := os.Stat(o.home); os.IsNotExist(err) {
+		return []descriptor.Station{}, nil
+	}
+
+	// "acp" is advertised because *openclawDescriptor implements ACPCommander.
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.walk", "fs.write", "terminal", "lifecycle", "cleanup", "acp"}
+
+	// Root workspace: prefer <home>/workspace if it exists, else fall back to <home>.
+	rootWs := o.resolveRootWorkspace()
+	rootWsCopy := rootWs
+
+	stations := []descriptor.Station{
+		{
+			Key:           "openclaw",
+			Harness:       "openclaw",
+			Kind:          "composite",
+			DisplayName:   "OpenClaw",
+			ParentKey:     nil,
+			WorkspacePath: &rootWsCopy,
+			Capabilities:  hostfs.AppendChangesetCap(caps, &rootWsCopy),
+		},
+	}
+
+	agentsDir := filepath.Join(o.home, "agents")
+	entries, err := os.ReadDir(agentsDir)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("openclaw: reading agents dir: %w", err)
+	}
+
+	parentKey := "openclaw"
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		key := "openclaw:" + name
+		wsPath := o.resolveAgentWorkspace(name)
+		wsCopy := wsPath
+		agentConfigDir := filepath.Join(agentsDir, name)
+		stations = append(stations, descriptor.Station{
+			Key:           key,
+			Harness:       "openclaw",
+			Kind:          "composite",
+			DisplayName:   name,
+			ParentKey:     &parentKey,
+			WorkspacePath: &wsCopy,
+			Capabilities:  hostfs.AppendChangesetCap(caps, &wsCopy),
+			MatrixId:      descriptor.MatrixIDFromProfile(agentConfigDir, "id.agentpod.dev"),
+		})
+	}
+
+	return stations, nil
+}
+
+// resolveRootWorkspace returns <home>/workspace if it exists, else <home>.
+func (o *Descriptor) resolveRootWorkspace() string {
+	ws := filepath.Join(o.home, "workspace")
+	if _, err := os.Stat(ws); err == nil {
+		return ws
+	}
+	return o.home
+}
+
+// resolveAgentWorkspace returns the workspace for a named subagent.
+// Prefers <home>/workspace/agent-workspaces/<name>; falls back to
+// <home>/agents/<name> if the nested workspace dir is absent.
+func (o *Descriptor) resolveAgentWorkspace(name string) string {
+	nested := filepath.Join(o.home, "workspace", "agent-workspaces", name)
+	if _, err := os.Stat(nested); err == nil {
+		return nested
+	}
+	return filepath.Join(o.home, "agents", name)
+}
+
+// workspaceFor maps a station key to its workspace root path.
+func (o *Descriptor) workspaceFor(key string) (string, error) {
+	if key == "openclaw" {
+		return o.resolveRootWorkspace(), nil
+	}
+	if strings.HasPrefix(key, "openclaw:") {
+		name := strings.TrimPrefix(key, "openclaw:")
+		if name == "" {
+			return "", fmt.Errorf("openclaw: empty agent name in key %q", key)
+		}
+		return o.resolveAgentWorkspace(name), nil
+	}
+	return "", fmt.Errorf("openclaw: unrecognized key %q", key)
+}
+
+// ACPCommand implements ACPCommander. OpenClaw speaks ACP natively via
+// `openclaw acp` (OpenClaw ≥ 2026.1.20), which is a bridge to the OpenClaw
+// Gateway rather than a self-contained runtime: it dials the Gateway over
+// WebSocket and addresses work by session key agent:<name>:<session>.
+// Everything except --session is optional so a default local install (Gateway
+// running, openclaw's own config) needs no node configuration at all.
+func (o *Descriptor) ACPCommand(key string) ([]string, string, []string, error) {
+	workspace, err := o.workspaceFor(key)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	// Resolve the binary before the gateway probe: a bare "openclaw" argv[0] dies
+	// later inside exec with "executable file not found in $PATH", and a node
+	// missing the CLI can't open a session however healthy its gateway is — so
+	// when both are wrong this is the failure worth reporting.
+	binary, err := o.ResolveBinary()
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	// A configured URL points at a remote Gateway, so the local probe says
+	// nothing; without one, a dead local Gateway means the bridge would start,
+	// fail to dial, and leave the user waiting on the hub's handshake deadline.
+	// Failing here turns that into an immediate, actionable message.
+	if o.GatewayURL == "" && !o.gatewayUp() {
+		return nil, "", nil, fmt.Errorf("openclaw: the OpenClaw gateway isn't running on this node — start it before opening a session")
+	}
+
+	agent := "main"
+	if name := strings.TrimPrefix(key, "openclaw:"); name != key && name != "" {
+		agent = name
+	}
+	label := o.sessionLabel
+	if label == "" {
+		label = "main"
+	}
+
+	// --no-prefix-cwd: the bridge otherwise prefixes every prompt with the
+	// working directory, which is redundant here — the station IS its workspace
+	// and we already set cmd.Dir — and it pollutes the transcript.
+	argv := []string{binary, "acp", "--no-prefix-cwd"}
+	if o.GatewayURL != "" {
+		argv = append(argv, "--url", o.GatewayURL)
+	}
+	if o.tokenFile != "" {
+		// --token-file only, never --token: argv is world-readable via ps.
+		// A build that does not accept it is refused rather than downgraded:
+		// putting the token in argv to make the session start would trade a
+		// secret for convenience, silently. OpenClaw 2026.2.12 is such a
+		// build, and an unknown option there closes the stream with an error
+		// that says nothing about tokens.
+		if supported, err := o.acpAcceptsTokenFile(binary); err != nil {
+			return nil, "", nil, fmt.Errorf("openclaw: could not determine whether this build accepts --token-file: %w", err)
+		} else if !supported {
+			return nil, "", nil, fmt.Errorf("openclaw: this build does not accept --token-file, and this node will not pass a gateway token on the command line where any process can read it — upgrade OpenClaw or run the gateway without token auth")
+		}
+		argv = append(argv, "--token-file", o.tokenFile)
+	}
+	argv = append(argv, "--session", fmt.Sprintf("agent:%s:%s", agent, label))
+
+	return argv, workspace, nil, nil
+}
+
+// Health returns a best-effort liveness/resource snapshot for a station.
+//
+// Process liveness is checked against the gateway process or the user systemd
+// unit openclaw-gateway.service. Because all subagents share a single gateway
+// process, per-subagent process state is not separable; Health.Note is always
+// set for subagent keys to communicate this.
+func (o *Descriptor) Health(key string) (descriptor.Health, error) {
+	workspace, err := o.workspaceFor(key)
+	if err != nil {
+		return descriptor.Health{}, err
+	}
+
+	health := descriptor.Health{}
+
+	// Disk usage from the shared async cache — never walk on the request path.
+	health.DiskBytes = hostfs.DiskUsage(workspace)
+
+	// Best-effort process check against the gateway.
+	running, note := openclawGatewayRunning()
+	health.Running = running
+
+	// Gateway metrics: best-effort — populate PID/CPU/memory/uptime when the
+	// gateway is running. Any failure (pid lookup, ps, parse) is silently
+	// swallowed so Health() never crashes.
+	if running {
+		if pid, pidErr := openclawGatewayPID(); pidErr == nil {
+			if cpuPct, memBytes, uptimeSec := hostproc.GatherPidMetrics(pid); cpuPct != nil {
+				health.PID = &pid
+				health.CpuPct = cpuPct
+				health.MemBytes = memBytes
+				health.UptimeSec = uptimeSec
+				note = fmt.Sprintf("shared gateway (PID %d)", pid)
+			}
+		}
+	}
+
+	if key != "openclaw" {
+		// Per-subagent: the gateway serves all agents; state is not separable.
+		subNote := "gateway process shared across all subagents"
+		if note != "" {
+			subNote = note
+		}
+		health.Note = &subNote
+	} else if note != "" {
+		health.Note = &note
+	}
+
+	return health, nil
+}
+
+// openclawGatewayRunning checks whether the OpenClaw gateway process is running.
+// It tries (in order):
+//  1. systemctl --user is-active openclaw-gateway.service
+//  2. pgrep -f "openclaw.*gateway"
+//
+// Returns running=false and a non-empty note when neither check can be performed.
+func openclawGatewayRunning() (running bool, note string) {
+	// Try systemctl --user first (Linux with user systemd units).
+	cmd := hostproc.UserSystemctl("is-active", "openclaw-gateway.service")
+	if out, err := cmd.Output(); err == nil {
+		state := strings.TrimSpace(string(out))
+		return state == "active", ""
+	}
+
+	// Fall back to pgrep -f for the gateway process pattern.
+	pgrepCmd := exec.Command("pgrep", "-f", "openclaw.*gateway")
+	if err := pgrepCmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == 1 {
+				// pgrep exit 1 = no match (process not found), not an error.
+				return false, ""
+			}
+		}
+		// pgrep not available or unexpected error.
+		return false, "process check unavailable"
+	}
+	return true, ""
+}
+
+// openclawGatewayPID returns the PID of the OpenClaw gateway process, or an
+// error if no matching process is found.
+func openclawGatewayPID() (int, error) {
+	out, err := exec.Command("pgrep", "-f", "openclaw.*gateway").Output()
+	if err != nil {
+		return 0, fmt.Errorf("no openclaw gateway process found")
+	}
+	lines := strings.Fields(strings.TrimSpace(string(out)))
+	if len(lines) == 0 {
+		return 0, fmt.Errorf("no openclaw gateway process found")
+	}
+	return strconv.Atoi(lines[0])
+}
+
+// Stop implements Lifecycle. It first tries systemctl --user stop; if that
+// fails it falls back to finding the gateway PID via pgrep and sending
+// SIGTERM (escalating to SIGKILL after LifecycleGracePeriod).
+func (o *Descriptor) Stop(key string) error {
+	// Prefer systemctl stop (no-ops gracefully if service not configured).
+	if err := hostproc.UserSystemctl("stop", "openclaw-gateway.service").Run(); err == nil {
+		return nil
+	}
+	pid, err := openclawGatewayPID()
+	if err != nil {
+		return fmt.Errorf("openclaw: stop %q: %w", key, err)
+	}
+	return hostproc.StopProcess(pid, descriptor.LifecycleGracePeriod)
+}
+
+// Start implements Lifecycle. It runs the configured start command in a new
+// session (detached). If no start command is set it returns a descriptive error.
+//
+// Configure the start command by passing it to NewOpenClaw or by setting
+// openclawStartCmd in the node config file.
+func (o *Descriptor) Start(key string) error {
+	if o.startCmd == "" {
+		return fmt.Errorf("no start command configured for openclaw (set openclawStartCmd in node config)")
+	}
+	cmd := exec.Command("sh", "-c", o.startCmd)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	return cmd.Start()
+}
+
+// ListDir lists the directory at rel (relative to the station's workspace).
+func (o *Descriptor) ListDir(key, rel string) ([]descriptor.FsEntry, error) {
+	workspace, err := o.workspaceFor(key)
+	if err != nil {
+		return nil, err
+	}
+
+	target, err := hostfs.SafeJoin(workspace, rel)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		return nil, fmt.Errorf("openclaw: ListDir %q: %w", target, err)
+	}
+
+	result := make([]descriptor.FsEntry, 0, len(entries))
+	for _, entry := range entries {
+		fsEntry := descriptor.FsEntry{
+			Name: entry.Name(),
+			Path: filepath.Join(rel, entry.Name()),
+		}
+		switch {
+		case entry.Type()&fs.ModeSymlink != 0:
+			fsEntry.Type = "symlink"
+		case entry.IsDir():
+			fsEntry.Type = "dir"
+		default:
+			fsEntry.Type = "file"
+			info, err := entry.Info()
+			if err == nil {
+				sz := info.Size()
+				fsEntry.Size = &sz
+				mod := info.ModTime().UTC().Format(time.RFC3339)
+				fsEntry.Modified = &mod
+			}
+		}
+		result = append(result, fsEntry)
+	}
+	return result, nil
+}
+
+// ReadFile reads up to maxBytes from path within the station's workspace.
+// It returns the raw bytes, encoding hint ("" means auto-detect in handler),
+// whether the file was truncated, and any error.
+func (o *Descriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, string, bool, error) {
+	workspace, err := o.workspaceFor(key)
+	if err != nil {
+		return nil, "", false, err
+	}
+
+	target, err := hostfs.SafeJoin(workspace, rel)
+	if err != nil {
+		return nil, "", false, err
+	}
+
+	if maxBytes <= 0 {
+		maxBytes = hostfs.DefaultMaxBytes
+	}
+
+	f, err := os.Open(target)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("openclaw: ReadFile %q: %w", target, err)
+	}
+	defer f.Close()
+
+	// Read up to maxBytes+1 so we can detect truncation.
+	buf := make([]byte, maxBytes+1)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return nil, "", false, fmt.Errorf("openclaw: ReadFile read %q: %w", target, err)
+	}
+
+	truncated := int64(n) > maxBytes
+	if truncated {
+		n = int(maxBytes)
+	}
+
+	return buf[:n], "", truncated, nil
+}
+
+// TailLogs emits existing log content from <home>/logs and, if follow is true,
+// polls for appends until ctx is cancelled.
+//
+// Only files with log-ish extensions (.log, .txt) are emitted; other files
+// (e.g. binary or config files that may appear in the logs dir) are skipped.
+func (o *Descriptor) TailLogs(ctx context.Context, key string, follow bool, emit func([]byte) error) error {
+	logsDir := filepath.Join(o.home, "logs")
+	collect := func() []string { return collectOpenClawLogFiles(logsDir) }
+	logFiles := collect()
+
+	if !follow {
+		// One-shot: emit the last N lines of existing content.
+		return hostfs.EmitLastNLines(logFiles, hostfs.TailDefaultN, hostfs.TailMaxBytes, emit)
+	}
+
+	// Follow mode: wait for a log file to exist (a harness that hasn't
+	// written logs yet must not close the stream immediately), then emit the
+	// last N lines and poll for appends.
+	logFiles = hostfs.WaitForLogFiles(ctx, collect)
+	if err := hostfs.EmitLastNLines(logFiles, hostfs.TailDefaultN, hostfs.TailMaxBytes, emit); err != nil {
+		return err
+	}
+
+	// Track offsets per file for incremental reads.
+	offsets := make(map[string]int64, len(logFiles))
+	for _, f := range logFiles {
+		info, err := os.Stat(f)
+		if err == nil {
+			offsets[f] = info.Size()
+		}
+	}
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			logFiles = collectOpenClawLogFiles(logsDir)
+			for _, path := range logFiles {
+				off := offsets[path]
+				n, err := hostfs.EmitLogFileFrom(path, off, emit)
+				if err != nil {
+					continue // best effort
+				}
+				offsets[path] = off + n
+			}
+		}
+	}
+}
+
+// CleanPlan returns the cleanable items for the OpenClaw station.
+// Cleanable: "logs" subdirectory within the workspace + *.log files at root.
+func (o *Descriptor) CleanPlan(key string) ([]descriptor.CleanItem, error) {
+	workspace, err := o.workspaceFor(key)
+	if err != nil {
+		return nil, err
+	}
+	return hostfs.CleanPlanCommon(workspace, []string{"logs"})
+}
+
+// CleanApply removes selected cleanable paths from the OpenClaw workspace.
+func (o *Descriptor) CleanApply(key string, paths []string) (int64, error) {
+	workspace, err := o.workspaceFor(key)
+	if err != nil {
+		return 0, err
+	}
+	plan, err := o.CleanPlan(key)
+	if err != nil {
+		return 0, err
+	}
+	return hostfs.CleanApplyCommon(workspace, paths, plan)
+}
+
+// isLogFile reports whether name has a log-ish extension (.log or .txt).
+func isLogFile(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return ext == ".log" || ext == ".txt"
+}
+
+// collectOpenClawLogFiles walks logsDir and returns paths of log-ish files.
+// Missing directory is silently skipped.
+func collectOpenClawLogFiles(logsDir string) []string {
+	var files []string
+	_ = filepath.WalkDir(logsDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() && isLogFile(d.Name()) {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files
+}
+
+// acpAcceptsTokenFile asks the installed build what its acp subcommand takes.
+// The flag was added after 2026.2.12, and the node has no way to know from a
+// version string alone which builds carry it, so it reads the help rather than
+// maintaining a version table that would drift.
+func (o *Descriptor) acpAcceptsTokenFile(binary string) (bool, error) {
+	if o.acpHelp == nil {
+		return false, fmt.Errorf("no help reader configured")
+	}
+	help, err := o.acpHelp(binary)
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(help, "--token-file"), nil
+}
+
+func openclawACPHelp(binary string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, binary, "acp", "--help").CombinedOutput()
+	if err != nil && len(out) == 0 {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// openclawDefaultGatewayPort is OpenClaw's own default, used when its config
+// names none.
+const openclawDefaultGatewayPort = 18789
+
+// openclawProbeTimeout bounds a reachability dial.
+//
+// Short on purpose: this runs while somebody is waiting to be told why their
+// turn failed. A probe that takes longer than the explanation is worth has
+// already failed at its job, and an unreachable gateway refuses immediately
+// anyway — the timeout only matters for a host that blackholes packets.
+const openclawProbeTimeout = 2 * time.Second
+
+// openclawConfigPort reads gateway.port from OpenClaw's own config.
+//
+// Zero means "the config said nothing", which the caller turns into OpenClaw's
+// default. A missing or malformed config must not stop the probe from
+// happening: the most likely reason to be probing at all is that something
+// about this installation is already wrong.
+func openclawConfigPort(home string) int {
+	raw, err := os.ReadFile(filepath.Join(home, "openclaw.json"))
+	if err != nil {
+		return 0
+	}
+	var cfg struct {
+		Gateway struct {
+			Port int `json:"port"`
+		} `json:"gateway"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return 0
+	}
+	return cfg.Gateway.Port
+}
+
+// openclawGatewayAddress resolves the host:port an ACP bridge would dial.
+//
+// A configured URL wins, because it names a gateway that may not be on this
+// host at all — probing loopback in that case would answer about the wrong
+// machine. Without one the bridge dials the local gateway, which is loopback by
+// OpenClaw's own default bind.
+//
+// An unparseable URL is an ERROR rather than a fallback to loopback. Falling
+// back would probe a gateway nobody asked about and very possibly report it
+// healthy, which is the confident-wrong-answer failure this whole probe exists
+// to prevent.
+func openclawGatewayAddress(gatewayURL string, configPort int) (string, error) {
+	if strings.TrimSpace(gatewayURL) != "" {
+		u, err := url.Parse(gatewayURL)
+		if err != nil {
+			return "", fmt.Errorf("openclaw: gateway URL %q is not a URL: %w", gatewayURL, err)
+		}
+		host := u.Hostname()
+		if host == "" {
+			return "", fmt.Errorf("openclaw: gateway URL %q names no host", gatewayURL)
+		}
+		port := u.Port()
+		if port == "" {
+			// Scheme defaults, as any URL parser would apply them.
+			port = "80"
+			if u.Scheme == "wss" || u.Scheme == "https" {
+				port = "443"
+			}
+		}
+		return net.JoinHostPort(host, port), nil
+	}
+
+	port := configPort
+	if port == 0 {
+		port = openclawDefaultGatewayPort
+	}
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), nil
+}
+
+// ProbeTransport implements TransportProber: can an ACP bridge actually reach
+// the gateway right now?
+//
+// `key` is accepted and unused — one gateway serves every agent on the host, so
+// there is nothing per-station to probe. It stays in the signature because the
+// interface is about harnesses in general, and the next one may well differ.
+func (o *Descriptor) ProbeTransport(_ string) descriptor.TransportProbe {
+	addr, err := openclawGatewayAddress(o.GatewayURL, openclawConfigPort(o.home))
+	if err != nil {
+		return descriptor.TransportProbe{Reachable: false, Detail: err.Error()}
+	}
+
+	dial := o.dial
+	if dial == nil {
+		dial = net.DialTimeout
+	}
+	conn, err := dial("tcp", addr, openclawProbeTimeout)
+	if err != nil {
+		return descriptor.TransportProbe{Reachable: false, Address: addr, Detail: err.Error()}
+	}
+	if conn != nil {
+		_ = conn.Close()
+	}
+	return descriptor.TransportProbe{Reachable: true, Address: addr}
+}
+
+// WorkspaceRoot is the root ReadFile jails reads to (WorkspaceRooter).
+func (o *Descriptor) WorkspaceRoot(key string) (string, error) { return o.workspaceFor(key) }

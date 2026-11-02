@@ -1,0 +1,579 @@
+package claudecode
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"io"
+	"io/fs"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hostfs"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hostproc"
+)
+
+// Descriptor implements Descriptor for the Claude Code leaf harness.
+//
+// Claude Code is a project-workspace harness with no persistent process: each
+// project directory is a leaf station. The home layout is:
+//
+//	~/.claude.json        ← per-user config; "projects" object keys are
+//	                         absolute project directory paths
+//	~/.claude/
+//	  projects/
+//	    <sanitised-cwd>/  ← cwd with '/' replaced by '-'
+//	      *.jsonl         ← session transcripts
+//
+// Key format: "claude-code:<8-hex-char SHA256 prefix of the project path>"
+type Descriptor struct {
+	home    string // absolute path to ~/.claude
+	jsonDir string // absolute path to ~/ (parent of home; .claude.json lives here)
+
+	// ACP adapter settings — see ClaudeCodeConfig. All optional.
+	acpBinary    string
+	claudeBinary string
+	nodeBinary   string
+
+	// Host seams. These are fields so no test needs node, npx or claude
+	// installed and none touches the host's PATH or filesystem; production
+	// wiring in NewClaudeCodeFrom uses the real host.
+	userHome     string                                // OS user home; "" omits home-relative candidates
+	lookPath     func(string) (string, error)          // exec.LookPath
+	isExecutable func(string) bool                     // isExecutableFile
+	nodeVersion  func(nodePath string) (string, error) // `node --version`
+	getenv       func(string) string                   // os.Getenv
+
+	// nativeSkillDiscovery starts a disposable ACP session and returns the
+	// command names it advertises. A field so a test needs no adapter.
+	nativeSkillDiscovery func(ctx context.Context, adapter, workspace, nodePath string) ([]string, error)
+}
+
+// ClaudeCodeConfig carries everything the descriptor needs. Zero values are
+// valid: an unconfigured host still detects stations, and an ACP session still
+// starts as long as the adapter (or npx) is reachable on PATH.
+type ClaudeCodeConfig struct {
+	Home         string // path to the ~/.claude directory; default <user home>/.claude
+	AcpBinary    string // a claude-agent-acp executable; empty = resolve it
+	ClaudeBinary string // the claude CLI, for CLAUDE_CODE_EXECUTABLE; empty = resolve it
+	NodeBinary   string // the node runtime, when it isn't on the service's PATH
+}
+
+// NewClaudeCode returns a Descriptor for the Claude Code harness.
+// home is the path to the ~/.claude directory. If empty it defaults to
+// $HOME/.claude. The .claude.json file is read from filepath.Dir(home).
+func NewClaudeCode(home string) descriptor.Descriptor {
+	return NewClaudeCodeFrom(ClaudeCodeConfig{Home: home})
+}
+
+// NewClaudeCodeFrom returns a Descriptor for the Claude Code harness configured
+// by cfg.
+func NewClaudeCodeFrom(cfg ClaudeCodeConfig) descriptor.Descriptor {
+	// userHome is "" when it can't be determined, which the binary locator
+	// reads as "skip the home-relative candidates".
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		userHome = ""
+	}
+	home := cfg.Home
+	if home == "" {
+		base := userHome
+		if base == "" {
+			base = "."
+		}
+		home = filepath.Join(base, ".claude")
+	}
+	return &Descriptor{
+		home:         home,
+		jsonDir:      filepath.Dir(home),
+		acpBinary:    cfg.AcpBinary,
+		claudeBinary: cfg.ClaudeBinary,
+		nodeBinary:   cfg.NodeBinary,
+		userHome:     userHome,
+		lookPath:     exec.LookPath,
+		isExecutable: hostproc.IsExecutableFile,
+		nodeVersion:  hostproc.NodeVersionOutput,
+		getenv:       os.Getenv,
+
+		nativeSkillDiscovery: claudeACPDiscoverSkills,
+	}
+}
+
+// Harness returns the harness identifier.
+func (c *Descriptor) Harness() string { return "claude-code" }
+
+// claudeProjectKey derives a stable station key from a project directory path.
+// Uses the first 4 bytes (8 hex chars) of SHA256(path) for brevity.
+func claudeProjectKey(projPath string) string {
+	h := sha256.Sum256([]byte(projPath))
+	return fmt.Sprintf("claude-code:%x", h[:4])
+}
+
+// sanitiseClaudePath converts a project directory path to the sanitised
+// directory name Claude Code uses under ~/.claude/projects/:  '/' → '-'.
+func sanitiseClaudePath(p string) string {
+	return strings.ReplaceAll(p, "/", "-")
+}
+
+// Detect discovers leaf stations by reading ~/.claude.json (or falling back
+// to listing ~/.claude/projects/*). Only project directories that still exist
+// on disk are returned.
+func (c *Descriptor) Detect() ([]descriptor.Station, error) {
+	// Both the home and the json dir must be reachable.
+	if _, err := os.Stat(c.home); os.IsNotExist(err) {
+		if _, err2 := os.Stat(filepath.Join(c.jsonDir, ".claude.json")); os.IsNotExist(err2) {
+			return []descriptor.Station{}, nil
+		}
+	}
+
+	paths, err := c.loadProjectPaths()
+	if err != nil {
+		return nil, err
+	}
+
+	// "acp" is advertised because *claudeCodeDescriptor implements ACPCommander
+	// (via the external claude-agent-acp adapter — see ACPCommand).
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.walk", "fs.write", "terminal", "cleanup", "acp"}
+	var stations []descriptor.Station
+
+	for _, projPath := range paths {
+		if _, err := os.Stat(projPath); os.IsNotExist(err) {
+			continue // project directory was deleted
+		}
+		key := claudeProjectKey(projPath)
+		wsCopy := projPath
+		stations = append(stations, descriptor.Station{
+			Key:           key,
+			Harness:       "claude-code",
+			Kind:          "leaf",
+			DisplayName:   filepath.Base(projPath),
+			ParentKey:     nil,
+			WorkspacePath: &wsCopy,
+			Capabilities:  hostfs.AppendChangesetCap(caps, &wsCopy),
+		})
+	}
+
+	if stations == nil {
+		stations = []descriptor.Station{}
+	}
+	return stations, nil
+}
+
+// loadProjectPaths returns project directory paths by parsing ~/.claude.json.
+// Falls back to listing ~/.claude/projects/* and decoding the sanitised names
+// if the JSON file is absent (and logs the fact clearly).
+func (c *Descriptor) loadProjectPaths() ([]string, error) {
+	jsonPath := filepath.Join(c.jsonDir, ".claude.json")
+
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("claude-code: .claude.json not found at %s; "+
+				"falling back to ~/.claude/projects/ directory enumeration "+
+				"(note: decoded paths may be ambiguous when project names contain '-')", jsonPath)
+			return c.projectPathsFromSessionDirs()
+		}
+		return nil, fmt.Errorf("claude-code: reading .claude.json: %w", err)
+	}
+
+	// ~/.claude.json has the shape:
+	//   { "projects": { "/abs/path": { ... }, ... }, ... }
+	var doc struct {
+		Projects map[string]json.RawMessage `json:"projects"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("claude-code: parsing .claude.json: %w", err)
+	}
+
+	paths := make([]string, 0, len(doc.Projects))
+	for k := range doc.Projects {
+		paths = append(paths, k)
+	}
+	return paths, nil
+}
+
+// projectPathsFromSessionDirs lists ~/.claude/projects/ and decodes each
+// sanitised directory name back to an absolute path by replacing '-' with '/'.
+// This is a best-effort fallback; path components that contain '-' will be
+// decoded incorrectly.
+func (c *Descriptor) projectPathsFromSessionDirs() ([]string, error) {
+	projsDir := filepath.Join(c.home, "projects")
+	entries, err := os.ReadDir(projsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("claude-code: listing %s: %w", projsDir, err)
+	}
+
+	var paths []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		// Decode: '-' → '/' (the leading '-' gives back the leading '/').
+		decoded := strings.ReplaceAll(e.Name(), "-", "/")
+		paths = append(paths, decoded)
+	}
+	return paths, nil
+}
+
+// sessionDirFor returns the session directory path for projPath under
+// ~/.claude/projects/<sanitised-path>/.
+func (c *Descriptor) sessionDirFor(projPath string) string {
+	return filepath.Join(c.home, "projects", sanitiseClaudePath(projPath))
+}
+
+// projectPathForKey resolves a station key back to its project directory path
+// by re-running Detect and filtering by key.
+func (c *Descriptor) projectPathForKey(key string) (string, error) {
+	stations, err := c.Detect()
+	if err != nil {
+		return "", err
+	}
+	for _, s := range stations {
+		if s.Key == key && s.WorkspacePath != nil {
+			return *s.WorkspacePath, nil
+		}
+	}
+	return "", fmt.Errorf("claude-code: station not found: %q", key)
+}
+
+// Claude Code has no ACP mode of its own: sessions run through the external
+// claude-agent-acp adapter, a Node program that speaks ACP on stdio and drives
+// Claude Code underneath.
+const (
+	// claudeACPBinaryName is the adapter's executable name once installed.
+	claudeACPBinaryName = "claude-agent-acp"
+	// claudeACPPackage is the npx fallback, VERSION-PINNED on purpose: an
+	// unpinned `npx -y <pkg>` would silently change every node's adapter the
+	// moment a new version is published, mid-flight, with no way to tell which
+	// version a session actually ran.
+	claudeACPPackage = "@agentclientprotocol/claude-agent-acp@0.66.0"
+	// claudeACPMinNodeMajor is the adapter's minimum Node major version.
+	claudeACPMinNodeMajor = 22
+)
+
+// locator returns the executable resolver for this node. preferDirs (when any)
+// are probed ahead of PATH — see nodeRuntimeDir.
+func (c *Descriptor) locator(preferDirs ...string) hostproc.BinaryLocator {
+	return hostproc.BinaryLocator{
+		UserHome:     c.userHome,
+		PreferDirs:   preferDirs,
+		LookPath:     c.lookPath,
+		IsExecutable: c.isExecutable,
+	}
+}
+
+// nodeRuntimeDir decides which node the adapter will run under (see
+// selectNodeRuntimeDir) and refuses the session when the only node available is
+// too old for claude-agent-acp, which documents Node 22 as its minimum.
+func (c *Descriptor) nodeRuntimeDir() (string, error) {
+	dir, tooOld := hostproc.SelectNodeRuntimeDir(c.nodeBinary, claudeACPMinNodeMajor, c.locator(), c.nodeVersion)
+	if tooOld != "" {
+		return "", fmt.Errorf("claude-code: node %d+ is required by claude-agent-acp (found %s)",
+			claudeACPMinNodeMajor, tooOld)
+	}
+	return dir, nil
+}
+
+// ACPCommand implements ACPCommander. Unlike the other harnesses there is no
+// `claude acp`: the command spawned is the claude-agent-acp adapter, resolved
+// in order — the claudeCodeAcpBinary override, an installed adapter (PATH then
+// the well-known install dirs), then a version-pinned `npx -y`.
+//
+// No credential is ever put in argv (world-readable via ps) or env: the adapter
+// drives the host's own Claude Code install, which is already authenticated.
+// Only two variables are set: CLAUDE_CODE_EXECUTABLE — without it the adapter
+// uses the Claude Code build bundled with its SDK, so a chat session and the
+// station's Health tab would be reporting two different installs — and, when a
+// configured node runtime is in play, PATH.
+func (c *Descriptor) ACPCommand(key string) ([]string, string, []string, error) {
+	// The station must exist before anything is probed on the host: an unknown
+	// key has no project directory to run in.
+	projPath, err := c.projectPathForKey(key)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	// Node is settled up front: a too-old runtime otherwise fails cryptically
+	// inside the adapter, after the hub opened a session. The refusal is skipped
+	// for an explicit claudeCodeAcpBinary — that adapter may be a wrapper that
+	// execs a runtime of its own, and naming it is the operator taking
+	// responsibility for it. Its outcome is still used for PATH below, and the
+	// check runs before adapter resolution, so on a host with neither a new
+	// enough node nor an adapter the runtime is what gets reported: it is the
+	// more fundamental problem, and installing an adapter wouldn't fix it.
+	nodeDir, nodeErr := c.nodeRuntimeDir()
+	if nodeErr != nil && c.acpBinary == "" {
+		return nil, "", nil, nodeErr
+	}
+
+	var env []string
+	// A configured node only genuinely wins if the adapter's own child processes
+	// see it first — npx resolves `node` through PATH, so gating on one runtime
+	// and spawning under another is exactly the crash the gate exists to
+	// prevent. Prepending makes the gate's verdict the truth at spawn time.
+	if nodeDir != "" {
+		env = append(env, "PATH="+hostproc.PathWithDirFirst(nodeDir, c.getenv("PATH")))
+	}
+	if claudePath, ok := c.locator().Locate("claude", c.claudeBinary); ok {
+		env = append(env, "CLAUDE_CODE_EXECUTABLE="+claudePath)
+	}
+
+	// An installed adapter beats npx: it starts immediately and can't change
+	// under us between two sessions.
+	if adapter, ok := c.locator().Locate(claudeACPBinaryName, c.acpBinary); ok {
+		return []string{adapter}, projPath, env, nil
+	}
+
+	// npx is resolved from the configured runtime's directory first: PATH's npx
+	// belongs to PATH's node, which is the one we just stepped over.
+	var preferDirs []string
+	if nodeDir != "" {
+		preferDirs = append(preferDirs, nodeDir)
+	}
+	npx, ok := c.locator(preferDirs...).Locate("npx", "")
+	if !ok {
+		return nil, "", nil, fmt.Errorf("claude-code: couldn't find claude-agent-acp or npx on this node — set claudeCodeAcpBinary in the node config")
+	}
+	return []string{npx, "-y", claudeACPPackage}, projPath, env, nil
+}
+
+// Health returns a best-effort liveness/resource snapshot for a leaf station.
+//
+// Running is set via a best-effort check for a claude process whose cwd
+// matches projPath; false is returned if the check is undeterminable (see
+// Note). DiskBytes walks the project workspace. LastActivity reflects the
+// newest mtime in the session transcript directory.
+func (c *Descriptor) Health(key string) (descriptor.Health, error) {
+	projPath, err := c.projectPathForKey(key)
+	if err != nil {
+		return descriptor.Health{}, err
+	}
+	return c.healthAt(projPath), nil
+}
+
+// HealthFor implements HealthForStation: it reads the workspace off the station
+// the caller already detected instead of re-running Detect to find it again,
+// which is what turns a health sweep from O(N²) host scans into O(N).
+func (c *Descriptor) HealthFor(s descriptor.Station) (descriptor.Health, error) {
+	if s.WorkspacePath == nil || *s.WorkspacePath == "" {
+		return c.Health(s.Key)
+	}
+	return c.healthAt(*s.WorkspacePath), nil
+}
+
+// healthAt is the shared body of Health and HealthFor, keyed on a workspace
+// path the caller has already resolved.
+func (c *Descriptor) healthAt(projPath string) descriptor.Health {
+	health := descriptor.Health{}
+
+	// Disk usage from the shared async cache — never walk on the request path
+	// (a node_modules-laden workspace walk can exceed the hub's timeout).
+	health.DiskBytes = hostfs.DiskUsage(projPath)
+
+	// Best-effort: detect a running claude process.
+	running, note := claudeProcessRunning(projPath)
+	health.Running = running
+	if note != "" {
+		health.Note = &note
+	}
+
+	// LastActivity: newest mtime across all files in the session dir.
+	sessDir := c.sessionDirFor(projPath)
+	if newest := hostfs.NewestMtime(sessDir); !newest.IsZero() {
+		s := newest.UTC().Format(time.RFC3339)
+		health.LastActivity = &s
+	}
+
+	return health
+}
+
+// claudeProcessRunning reports whether a claude CLI session is running with
+// its working directory inside projPath.
+func claudeProcessRunning(projPath string) (running bool, note string) {
+	return hostproc.ProcessRunningInWorkspace("^claude", projPath)
+}
+
+// ListDir lists the directory at rel within the project workspace.
+// Paths that escape the workspace via ".." are rejected.
+func (c *Descriptor) ListDir(key, rel string) ([]descriptor.FsEntry, error) {
+	projPath, err := c.projectPathForKey(key)
+	if err != nil {
+		return nil, err
+	}
+
+	target, err := hostfs.SafeJoin(projPath, rel)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		return nil, fmt.Errorf("claude-code: ListDir %q: %w", target, err)
+	}
+
+	result := make([]descriptor.FsEntry, 0, len(entries))
+	for _, entry := range entries {
+		fsEntry := descriptor.FsEntry{
+			Name: entry.Name(),
+			Path: filepath.Join(rel, entry.Name()),
+		}
+		switch {
+		case entry.Type()&fs.ModeSymlink != 0:
+			fsEntry.Type = "symlink"
+		case entry.IsDir():
+			fsEntry.Type = "dir"
+		default:
+			fsEntry.Type = "file"
+			info, err := entry.Info()
+			if err == nil {
+				sz := info.Size()
+				fsEntry.Size = &sz
+				mod := info.ModTime().UTC().Format(time.RFC3339)
+				fsEntry.Modified = &mod
+			}
+		}
+		result = append(result, fsEntry)
+	}
+	return result, nil
+}
+
+// ReadFile reads up to maxBytes from rel within the project workspace.
+func (c *Descriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, string, bool, error) {
+	projPath, err := c.projectPathForKey(key)
+	if err != nil {
+		return nil, "", false, err
+	}
+
+	target, err := hostfs.SafeJoin(projPath, rel)
+	if err != nil {
+		return nil, "", false, err
+	}
+
+	if maxBytes <= 0 {
+		maxBytes = hostfs.DefaultMaxBytes
+	}
+
+	f, err := os.Open(target)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("claude-code: ReadFile %q: %w", target, err)
+	}
+	defer f.Close()
+
+	buf := make([]byte, maxBytes+1)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return nil, "", false, fmt.Errorf("claude-code: ReadFile read %q: %w", target, err)
+	}
+
+	truncated := int64(n) > maxBytes
+	if truncated {
+		n = int(maxBytes)
+	}
+	return buf[:n], "", truncated, nil
+}
+
+// TailLogs emits session transcript (.jsonl) files from the project's session
+// directory. If follow is true it polls for new content until ctx is done.
+func (c *Descriptor) TailLogs(ctx context.Context, key string, follow bool, emit func([]byte) error) error {
+	projPath, err := c.projectPathForKey(key)
+	if err != nil {
+		return err
+	}
+
+	sessDir := c.sessionDirFor(projPath)
+	collect := func() []string { return collectJsonlFiles(sessDir) }
+	logFiles := collect()
+
+	if !follow {
+		// One-shot: emit the last N lines of existing content.
+		return hostfs.EmitLastNLines(logFiles, hostfs.TailDefaultN, hostfs.TailMaxBytes, emit)
+	}
+
+	// Follow mode: wait for a log file to exist (a harness that hasn't
+	// written logs yet must not close the stream immediately), then emit the
+	// last N lines and poll for appends.
+	logFiles = hostfs.WaitForLogFiles(ctx, collect)
+	if err := hostfs.EmitLastNLines(logFiles, hostfs.TailDefaultN, hostfs.TailMaxBytes, emit); err != nil {
+		return err
+	}
+
+	offsets := make(map[string]int64, len(logFiles))
+	for _, f := range logFiles {
+		if info, err := os.Stat(f); err == nil {
+			offsets[f] = info.Size()
+		}
+	}
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			logFiles = collectJsonlFiles(sessDir)
+			for _, path := range logFiles {
+				off := offsets[path]
+				n, err := hostfs.EmitLogFileFrom(path, off, emit)
+				if err != nil {
+					continue
+				}
+				offsets[path] = off + n
+			}
+		}
+	}
+}
+
+// CleanPlan returns the cleanable items for the Claude Code station.
+// Cleanable: ".cache" and "tmp" subdirectories + *.log files at workspace root.
+func (c *Descriptor) CleanPlan(key string) ([]descriptor.CleanItem, error) {
+	projPath, err := c.projectPathForKey(key)
+	if err != nil {
+		return nil, err
+	}
+	return hostfs.CleanPlanCommon(projPath, []string{".cache", "tmp"})
+}
+
+// CleanApply removes selected cleanable paths from the Claude Code workspace.
+func (c *Descriptor) CleanApply(key string, paths []string) (int64, error) {
+	projPath, err := c.projectPathForKey(key)
+	if err != nil {
+		return 0, err
+	}
+	plan, err := c.CleanPlan(key)
+	if err != nil {
+		return 0, err
+	}
+	return hostfs.CleanApplyCommon(projPath, paths, plan)
+}
+
+// collectJsonlFiles walks dir and returns paths of all .jsonl files.
+// Missing directories are silently skipped.
+func collectJsonlFiles(dir string) []string {
+	var files []string
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() && strings.ToLower(filepath.Ext(d.Name())) == ".jsonl" {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files
+}
+
+// WorkspaceRoot is the root ReadFile jails reads to (WorkspaceRooter).
+func (c *Descriptor) WorkspaceRoot(key string) (string, error) {
+	return c.projectPathForKey(key)
+}

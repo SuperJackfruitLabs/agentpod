@@ -36,9 +36,8 @@ var oversizeFiles = map[string]int{
 // oversizePackages lists the packages over packageLimit and the most lines each may have.
 // Lower these; never raise them.
 var oversizePackages = map[string]int{
-	"cmd/agentpod-fleet":  5103,
-	"internal/descriptor": 14200,
-	"internal/forgeapi":   5344,
+	"cmd/agentpod-fleet": 5103,
+	"internal/forgeapi":  5344,
 }
 
 // shippedSizes returns the line count of every shipped .go file under root, keyed by its

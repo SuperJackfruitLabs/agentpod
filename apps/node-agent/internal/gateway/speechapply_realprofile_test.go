@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hermes"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 )
 
@@ -52,7 +52,7 @@ func TestSpeechApplyWritesARealHermesProfile(t *testing.T) {
 				Voice: "af_heart:60+af_bella:40", SpeakMode: "always",
 			}, nil
 		},
-		Write:   descriptor.WriteHermesSpeech,
+		Write:   hermes.WriteHermesSpeech,
 		Restart: func(string) error { restarted = true; return nil },
 	})
 

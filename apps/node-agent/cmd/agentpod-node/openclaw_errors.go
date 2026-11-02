@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/openclaw"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/openclawerrors"
 )
 
 // openclawErrorsVersion probes the OpenClaw this node would run; tests replace it.
-var openclawErrorsVersion = descriptor.OpenClawVersion
+var openclawErrorsVersion = openclaw.OpenClawVersion
 
 // openclawErrorsNow is the clock an apply records; tests replace it.
 var openclawErrorsNow = time.Now

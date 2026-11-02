@@ -71,7 +71,7 @@ const OTHER_TENANT = "fleet_cfa0000000000000002";
 const FAKE_GATEWAY_PID = 44321;
 const FAKE_GATEWAY_UPTIME_SEC = 777;
 
-/** Mirrors the real node's registry (apps/node-agent/internal/descriptor/hermes_config.go). */
+/** Mirrors the real node's registry (apps/node-agent/internal/descriptor/hermes/hermes_config.go). */
 const HERMES_REGISTRY = [
   { id: "hermes.approvals.timeout", harness: "hermes", scope: "profile", policy: "reconcilable", restartToTakeEffect: true },
   { id: "hermes.approvals.mode", harness: "hermes", scope: "profile", policy: "reconcilable", restartToTakeEffect: true },

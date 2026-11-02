@@ -44,7 +44,7 @@ FROM ${BASE_IMAGE}
 # macOS node spawned pi-acp with env=nil, the adapter could not see
 # /opt/homebrew/bin/pi, and the session died; 21 unit tests, a container gate
 # and four green CI checks all missed it, because every one of them ran with a
-# developer's PATH. internal/descriptor/pi.go now prepends the resolved `pi`
+# developer's PATH. internal/descriptor/pi/pi.go now prepends the resolved `pi`
 # directory to the child's PATH and falls back to the well-known dirs
 # (/usr/local/bin, /usr/bin, ...) when PATH misses it — but that only works if
 # the binaries are actually in one of them.

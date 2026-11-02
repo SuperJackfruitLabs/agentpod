@@ -9,7 +9,7 @@ import (
 type managedSkillDescriptor struct{ fakeDescriptor }
 
 func (d *managedSkillDescriptor) ManagedSkillWorkspace(ctx context.Context, key string) (string, error) {
-	return localManagedSkillWorkspace(ctx, d, key)
+	return LocalManagedSkillWorkspace(ctx, d, key)
 }
 
 type nativeManagedSkillDescriptor struct{ managedSkillDescriptor }

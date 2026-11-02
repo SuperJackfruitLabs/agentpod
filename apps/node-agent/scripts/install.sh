@@ -135,7 +135,7 @@ detect_count() {
 # count_harness_paths <home> — how many harnesses are installed under <home>,
 # by home dir or binary. `detect` counts stations (Claude Code: one per
 # project), so a fresh install with no projects yet reads 0 there; this sees
-# it. The list mirrors the descriptors in internal/descriptor/*.go: home dirs
+# it. The list mirrors the descriptors in internal/descriptor/*/ (one package per harness): home dirs
 # (claudecode .claude, codex .codex, hermes .hermes, openclaw .openclaw,
 # opencode/kilo/muse .local/share/<name>, pi .pi/agent) and the binaries the
 # shared locator finds in the user's bin dirs (~/.local/bin, ~/.npm-global/bin,

@@ -1,0 +1,844 @@
+package hermes
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/configdoc"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hostfs"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hostproc"
+)
+
+// Descriptor implements Descriptor for the Hermes agent harness.
+// The Hermes home directory layout is:
+//
+//	~/.hermes/
+//	  config.yaml
+//	  auth.json
+//	  sessions/
+//	  kanban.db
+//	  logs/          ← global log files
+//	  profiles/
+//	    <name>/      ← one workspace per profile
+type Descriptor struct {
+	home     string // absolute path to the .hermes home directory
+	startCmd string // optional; set by NewHermes; used by Start
+
+	// afterApplyWriteForTest, when non-nil, is called with the config path
+	// right after ApplyConfig's own atomic write has landed and BEFORE it
+	// reads the document back to verify containment (D10). Production code
+	// never sets this; it exists so a test can land a second, concurrent
+	// write into that exact gap — the one place this algorithm actually has
+	// a race — rather than faking the race with sleeps and goroutines. See
+	// hermes_config.go's writeAndReadBack.
+	afterApplyWriteForTest func(path string)
+}
+
+// NewHermes returns a Descriptor for the Hermes harness.
+// home is the path to the Hermes home directory (e.g. "~/.hermes").
+// If home is empty it defaults to $HOME/.hermes.
+// startCmd (optional) is the shell command used by Start to launch Hermes.
+// Hermes always advertises the "lifecycle" capability; if startCmd is empty,
+// Start returns a descriptive error.
+func NewHermes(home string, startCmd ...string) descriptor.Descriptor {
+	if home == "" {
+		userHome, err := os.UserHomeDir()
+		if err != nil {
+			userHome = "."
+		}
+		home = filepath.Join(userHome, ".hermes")
+	}
+	var cmd string
+	if len(startCmd) > 0 {
+		cmd = startCmd[0]
+	}
+	return &Descriptor{home: home, startCmd: cmd}
+}
+
+// Harness returns the harness identifier.
+func (h *Descriptor) Harness() string { return "hermes" }
+
+// Detect discovers all Hermes stations. It returns empty (nil-safe) if the
+// home directory does not exist.
+func (h *Descriptor) Detect() ([]descriptor.Station, error) {
+	if _, err := os.Stat(h.home); os.IsNotExist(err) {
+		return []descriptor.Station{}, nil
+	}
+
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.walk", "fs.write", "terminal", "lifecycle", "cleanup", "acp"}
+	homeCopy := h.home
+
+	// The root gateway's messaging identity. It is also the value a profile is
+	// compared against to decide whether that profile IS the root gateway
+	// (see servesRootGateway).
+	rootMxid := h.matrixIDOf(h.home)
+
+	// Read once, not per profile: on a multiplexed host NO profile has a gateway of
+	// its own, so none of them can offer "lifecycle".
+	multiplexed := h.multiplexProfiles()
+
+	stations := []descriptor.Station{
+		{
+			Key:           "hermes",
+			Harness:       "hermes",
+			Kind:          "composite",
+			DisplayName:   h.rootDisplayName(),
+			ParentKey:     nil,
+			WorkspacePath: &homeCopy,
+			Capabilities:  withMatrixAvatarCap(hostfs.AppendChangesetCap(caps, &homeCopy), rootMxid),
+			MatrixId:      rootMxid,
+		},
+	}
+
+	profilesDir := filepath.Join(h.home, "profiles")
+	entries, err := os.ReadDir(profilesDir)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("hermes: reading profiles dir: %w", err)
+	}
+
+	parentKey := "hermes"
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		key := "hermes:" + name
+		wsPath := filepath.Join(profilesDir, name)
+		wsCopy := wsPath
+		profileDir := wsPath
+		mxid := h.matrixIDOf(profileDir)
+
+		// A profile with no gateway of its own is a VIEW onto the root gateway, not a
+		// separately startable station. Its files/logs/health stay available, but
+		// "lifecycle" is withheld so no surface offers a Start that would put a SECOND
+		// gateway on an agent the root gateway already serves. Two ways to get here:
+		//
+		//   - it shares the root's Matrix identity, so two gateways would double-sync
+		//     one account (issue #273); or
+		//   - this host multiplexes, so one gateway serves every profile and a
+		//     per-profile Start would duplicate the one already serving it.
+		//
+		// Either way the root "hermes" station is the control point. Note "acp" is NOT
+		// withheld: these agents remain fully dispatchable, and on the live fleet they
+		// kept working throughout — it was only the reporting that was wrong.
+		profileCaps := caps
+		if sameMatrixIdentity(rootMxid, mxid) || multiplexed {
+			profileCaps = withoutCap(caps, "lifecycle")
+		}
+
+		stations = append(stations, descriptor.Station{
+			Key:           key,
+			Harness:       "hermes",
+			Kind:          "composite",
+			DisplayName:   name,
+			ParentKey:     &parentKey,
+			WorkspacePath: &wsCopy,
+			Capabilities:  withMatrixAvatarCap(hostfs.AppendChangesetCap(profileCaps, &wsCopy), mxid),
+			MatrixId:      mxid,
+		})
+	}
+
+	return stations, nil
+}
+
+// rootDisplayName is the name shown for the root station — the agent the bare
+// `hermes gateway run` serves.
+//
+// It was the literal "Hermes" until 2026-08-29. On a host where the root gateway
+// IS the operator's primary agent that is simply the wrong name, and there was no
+// way to correct it: profile stations take their name from their directory, but
+// the root has no directory to rename, and the hub overwrites `display_name`
+// from this value on every re-adoption — so renaming it in the console does not
+// survive either.
+//
+// Hermes already has the answer. `hermes profile rename default "<name>"` is a
+// supported command whose own help reads "for 'default': a display name — the
+// canonical id stays 'default'", and it writes that name to <home>/profile.yaml.
+// Reading it here means the operator names the agent with Hermes' own tool and
+// the name reaches the console unchanged.
+//
+// Falls back to "Hermes" whenever the file is absent or unreadable, so hosts
+// that have never been renamed behave exactly as before.
+func (h *Descriptor) rootDisplayName() string {
+	const fallback = "Hermes"
+	data, err := os.ReadFile(filepath.Join(h.home, "profile.yaml"))
+	if err != nil {
+		return fallback
+	}
+	// Line-by-line, for the same reason mxidFromConfigYAML is: no YAML
+	// dependency, and only the intended field is ever read.
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "display_name:") {
+			continue
+		}
+		name := strings.TrimSpace(strings.TrimPrefix(trimmed, "display_name:"))
+		name = strings.Trim(name, `"'`)
+		if name != "" {
+			return name
+		}
+	}
+	return fallback
+}
+
+// hermesMatrixDomain is the default Matrix homeserver domain hint passed to the
+// identity reader (the reader ignores it; kept for call-site readability).
+const hermesMatrixDomain = "id.agentpod.dev"
+
+// matrixIDOf resolves the Matrix user ID that a Hermes home or profile directory
+// is configured with (auth.json → config.yaml → .env), or nil when it cannot be
+// determined. It never reads an access token.
+func (h *Descriptor) matrixIDOf(dir string) *string {
+	return descriptor.MatrixIDFromProfile(dir, hermesMatrixDomain)
+}
+
+// sameMatrixIdentity reports whether both sides resolved to the SAME mxid.
+// An unresolved side (nil) is never a match, so a host whose identity we cannot
+// read behaves exactly as it did before this rule existed.
+func sameMatrixIdentity(a, b *string) bool {
+	return a != nil && b != nil && *a == *b
+}
+
+// withMatrixAvatarCap adds "matrix.avatar" for a station that holds its own
+// Matrix identity: matrix.avatar.set can then set its profile picture with the
+// login in its .env. No identity, no capability — there is nobody to dress.
+func withMatrixAvatarCap(caps []string, mxid *string) []string {
+	if mxid == nil {
+		return caps
+	}
+	return append(append([]string(nil), caps...), "matrix.avatar")
+}
+
+// withoutCap returns a copy of caps with name removed.
+func withoutCap(caps []string, name string) []string {
+	out := make([]string, 0, len(caps))
+	for _, c := range caps {
+		if c != name {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// servesRootGateway reports whether key names the profile that the ROOT Hermes
+// gateway already serves — the profile a bare `hermes gateway run` (no `-p`)
+// runs, i.e. the host's default profile.
+//
+// HOW THE DEFAULT PROFILE IS IDENTIFIED: the root gateway takes its messaging
+// identity from the Hermes home root, and the default profile's directory
+// carries a byte-identical copy of that identity. So the profile whose resolved
+// Matrix user ID equals the home root's IS the root gateway's profile. That is
+// an exact identity comparison — no name guessing, no process inspection, no
+// killing by name — and it is precisely the condition under which a second
+// gateway would double-sync ONE Matrix account and answer every message twice
+// (issue #273).
+//
+// When either side cannot be resolved the answer is false, so hosts we cannot
+// read keep today's behaviour. Profiles with their own identity — the ordinary
+// case, and the majority on the live fleet — are never matched.
+//
+// This single predicate is what BOTH the station modelling (Detect withholds
+// "lifecycle") and the lifecycle verbs (Start refuses) consult, so the two can
+// never disagree.
+func (h *Descriptor) servesRootGateway(key string) bool {
+	if !strings.HasPrefix(key, "hermes:") {
+		return false // the root station itself is startable as usual
+	}
+	name := strings.TrimPrefix(key, "hermes:")
+	if name == "" {
+		return false
+	}
+	return sameMatrixIdentity(
+		h.matrixIDOf(h.home),
+		h.matrixIDOf(filepath.Join(h.home, "profiles", name)),
+	)
+}
+
+// multiplexProfiles reports whether this Hermes home runs ONE gateway for every
+// profile (`gateway.multiplex_profiles: true`) instead of one gateway per profile.
+//
+// Read line by line and nesting-aware, for the same reason rootDisplayName is read
+// that way: no YAML dependency, and only the intended field is ever read. Nesting
+// matters HERE in a way it does not there — `multiplex_profiles` under any other
+// top-level section is a different setting, and reading it as this one would report
+// every station through the root gateway on a host that never multiplexed anything.
+//
+// Absent or unreadable config means false, so a host we cannot read keeps the
+// per-profile behaviour it had before this existed.
+func (h *Descriptor) multiplexProfiles() bool {
+	data, err := os.ReadFile(filepath.Join(h.home, "config.yaml"))
+	if err != nil {
+		return false
+	}
+	v, found := configdoc.YamlScalar(data, "gateway", "multiplex_profiles")
+	return found && strings.EqualFold(v, "true")
+}
+
+// servedByRootGateway reports whether key's agent is run by the ROOT gateway rather
+// than by a gateway of its own. Two different hosts arrive here:
+//
+//   - the profile that IS the root gateway's profile — identical Matrix identity,
+//     the #273 case, true whether or not this host multiplexes; and
+//   - any profile on a host that multiplexes every profile into one gateway.
+//
+// Both mean the same operationally: there is no per-profile gateway to start, stop,
+// or ask about. They differ only in what to TELL someone, which is why the callers
+// that produce a message still distinguish them.
+func (h *Descriptor) servedByRootGateway(key string) bool {
+	if !strings.HasPrefix(key, "hermes:") || strings.TrimPrefix(key, "hermes:") == "" {
+		return false
+	}
+	return h.servesRootGateway(key) || h.multiplexProfiles()
+}
+
+// probeTarget decides which process Health should ask about for a station key, and
+// whether the answer describes the root gateway rather than the station itself.
+//
+// The ordering is the whole point: a profile's OWN process is the most specific
+// evidence available, so it wins even when the config says multiplex. A host
+// part-way through a migration — or one where an operator started a standalone
+// gateway by hand — then reports what is actually running rather than what the
+// config implies.
+func probeTarget(key string, perProfileRunning, servedByRoot bool) (probeKey string, rootView bool) {
+	if perProfileRunning {
+		return key, false
+	}
+	if servedByRoot {
+		return "hermes", true
+	}
+	return key, false
+}
+
+// workspaceFor maps a station key to its workspace root path.
+func (h *Descriptor) workspaceFor(key string) (string, error) {
+	if key == "hermes" {
+		return h.home, nil
+	}
+	if strings.HasPrefix(key, "hermes:") {
+		name := strings.TrimPrefix(key, "hermes:")
+		if name == "" {
+			return "", fmt.Errorf("hermes: empty profile name in key %q", key)
+		}
+		return filepath.Join(h.home, "profiles", name), nil
+	}
+	return "", fmt.Errorf("hermes: unrecognized key %q", key)
+}
+
+// ACPCommand implements ACPCommander. Hermes serves an ACP session via
+// `hermes -p <profile> acp --accept-hooks`, run from the profile's workspace.
+// The profile is derived from the station key the same way workspaceFor and
+// hermesNativeStartArgs parse it; for the root "hermes" key the profile
+// selector is omitted (mirroring hermesNativeStartArgs) and dir is the home.
+func (h *Descriptor) ACPCommand(key string) (argv []string, dir string, env []string, err error) {
+	dir, err = h.workspaceFor(key)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if key == "hermes" {
+		return []string{"hermes", "acp", "--accept-hooks"}, dir, nil, nil
+	}
+	name := strings.TrimPrefix(key, "hermes:")
+	return []string{"hermes", "-p", name, "acp", "--accept-hooks"}, dir, nil, nil
+}
+
+// Health returns a best-effort liveness/resource snapshot for a station.
+func (h *Descriptor) Health(key string) (descriptor.Health, error) {
+	workspace, err := h.workspaceFor(key)
+	if err != nil {
+		return descriptor.Health{}, err
+	}
+
+	health := descriptor.Health{}
+
+	// Disk usage from the shared async cache — never walk on the request path.
+	health.DiskBytes = hostfs.DiskUsage(workspace)
+
+	// A profile with no process of its own is reported THROUGH the root gateway —
+	// it is literally the same process — and the note says so, so no surface shows a
+	// live agent as "stopped" beside a Start button it deliberately does not offer.
+	//
+	// Two hosts land here: the profile that IS the root gateway's profile (#273), and
+	// every profile on a multiplexed host. Guild became the second kind on 2026-10-02
+	// and all fifteen stations read `stopped` with no metrics, because only the first
+	// kind was handled.
+	//
+	// The per-profile check comes FIRST and wins, so a standalone host — still the
+	// common case — and a host mid-migration both report what is really running.
+	perProfileRunning, _ := hermesProcessRunning(key)
+	probeKey, rootGatewayView := probeTarget(key, perProfileRunning, h.servedByRootGateway(key))
+
+	if probeKey == key {
+		health.Running = perProfileRunning
+	} else {
+		health.Running, _ = hermesProcessRunning(probeKey)
+	}
+
+	// Live process metrics: best-effort — resolve the PID of whichever process answered
+	// and gather CPU/memory/uptime. Any failure leaves the metric fields nil; Health()
+	// never fails on a ps hiccup.
+	//
+	// On a standalone host these are honest PER-AGENT numbers. Under multiplex they are
+	// the shared gateway's, identical across every profile it serves — which the note
+	// below is what makes legible, rather than leaving a reader to wonder why fifteen
+	// agents report the same megabytes.
+	if health.Running {
+		if pid, err := hermesPID(probeKey); err == nil {
+			health.PID = &pid
+			health.CpuPct, health.MemBytes, health.UptimeSec = hostproc.GatherPidMetrics(pid)
+		}
+	}
+
+	if rootGatewayView {
+		why := "same Matrix identity"
+		shared := ""
+		if !h.servesRootGateway(key) {
+			why = "gateway.multiplex_profiles"
+			shared = "; CPU/memory/uptime are the shared gateway's, not this agent's"
+		}
+		note := fmt.Sprintf("served by the root Hermes gateway (station \"hermes\"; %s) — not separately startable%s", why, shared)
+		if health.PID != nil {
+			note = fmt.Sprintf("served by the root Hermes gateway (station \"hermes\", PID %d; %s) — not separately startable%s", *health.PID, why, shared)
+		}
+		health.Note = &note
+	}
+
+	return health, nil
+}
+
+// hermesUnitName returns the systemd user unit name for a Hermes station key.
+//
+// For profile keys ("hermes:<name>") the unit is "hermes-gateway-<name>.service",
+// matching the naming convention used on the real fleet (e.g.
+// "hermes-gateway-analyst-echo.service").
+//
+// For the root "hermes" key (no --profile flag) the unit is
+// "hermes-gateway.service" — used when the operator runs a single Hermes
+// instance without a named profile. If no such unit is configured the
+// existence check will return false and the pgrep/SIGTERM path is taken.
+func hermesUnitName(key string) string {
+	if key == "hermes" {
+		return "hermes-gateway.service"
+	}
+	profile := strings.TrimPrefix(key, "hermes:")
+	return fmt.Sprintf("hermes-gateway-%s.service", profile)
+}
+
+// hermesUnitKnown reports whether the given systemd --user unit file exists.
+// `systemctl --user cat <unit>` exits 0 iff the unit file can be read, and
+// non-zero when absent or when systemctl/the user session is unavailable.
+func hermesUnitKnown(unit string) bool {
+	return hostproc.UserSystemctl("cat", unit).Run() == nil
+}
+
+// hermesPattern returns the pgrep -f (ERE) pattern for a Hermes station key.
+// It matches BOTH profile-gateway invocation forms:
+//
+//	hermes -p <name> gateway ...                       (direct binary, short flag)
+//	... hermes_cli.main --profile <name> gateway ...   (supervisor respawn, long flag)
+//
+// The long form is used when the Hermes main gateway restarts a profile;
+// matching only the short form reported such profiles as stopped while running.
+func hermesPattern(key string) string {
+	if key == "hermes" {
+		// Kept only for callers that build a pattern for display or for Stop; the
+		// liveness and pid paths no longer come here for the root key, because this
+		// bare pattern matches every process with "hermes" anywhere in its argv.
+		return "hermes"
+	}
+	name := strings.TrimPrefix(key, "hermes:")
+	return fmt.Sprintf("(-p|--profile)[ =]%s gateway", name)
+}
+
+// hermesPID returns the PID of the running Hermes process for key,
+// or an error if no matching process is found.
+func hermesPID(key string) (int, error) {
+	if key == "hermes" {
+		// The root gateway is resolved by filtering, not by first-match: see
+		// hermes_root_gateway.go. A loose match here reported a `hermes dashboard`
+		// process as the gateway for every multiplexed profile.
+		return rootGatewayPID()
+	}
+	out, err := exec.Command("pgrep", "-f", hermesPattern(key)).Output()
+	if err != nil {
+		return 0, fmt.Errorf("no hermes process for key %q", key)
+	}
+	lines := strings.Fields(strings.TrimSpace(string(out)))
+	if len(lines) == 0 {
+		return 0, fmt.Errorf("no hermes process for key %q", key)
+	}
+	return strconv.Atoi(lines[0])
+}
+
+// hermesProcessRunning checks the process table for a running Hermes process.
+// For a profile key "hermes:<name>" it looks for "hermes -p <name> gateway".
+// For the root key it looks for any "hermes" process.
+// Returns false (not an error) when the check cannot be performed.
+func hermesProcessRunning(key string) (bool, error) {
+	if key == "hermes" {
+		// Same resolver as hermesPID, so "running" and the metrics beside it can never
+		// describe different processes — which is precisely what went wrong: liveness
+		// was true from one process while the numbers came from another.
+		_, err := rootGatewayPID()
+		return err == nil, nil
+	}
+	cmd := exec.Command("pgrep", "-f", hermesPattern(key))
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == 1 {
+				return false, nil
+			}
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
+// Stop implements Lifecycle. It prefers "systemctl --user stop <unit>" when
+// the unit is registered in the user session, falling back to the pgrep/SIGTERM
+// path for installations that do not use systemd user units.
+//
+// Stop is deliberately NOT guarded by servesRootGateway: for a profile key it can
+// only ever reach a per-profile gateway — "hermes-gateway-<name>.service", or a
+// process whose argv carries "-p <name> gateway" — and the root gateway matches
+// neither (it runs unit "hermes-gateway.service" with no profile selector). It
+// therefore cannot stop the agent it is a view onto. Reaching it at all requires
+// the "lifecycle" capability, which Detect withholds for such a profile.
+func (h *Descriptor) Stop(key string) error {
+	unit := hermesUnitName(key)
+	if hermesUnitKnown(unit) {
+		return hostproc.UserSystemctl("stop", unit).Run()
+	}
+	// Fallback: locate the process via pgrep and send SIGTERM/SIGKILL.
+	pid, err := hermesPID(key)
+	if err != nil {
+		return fmt.Errorf("hermes: stop %q: %w", key, err)
+	}
+	return hostproc.StopProcess(pid, descriptor.LifecycleGracePeriod)
+}
+
+// Start implements Lifecycle. It prefers "systemctl --user start <unit>" when
+// the unit is registered in the user session. Otherwise it runs the configured
+// start command in a new session (detached). If neither is available it returns
+// a descriptive error.
+//
+// Configure the start command by passing it to NewHermes or by setting
+// hermesStartCmd in the node config file.
+func (h *Descriptor) Start(key string) error {
+	// A profile that IS the root gateway's profile has no gateway of its own to
+	// start: every launch path below would put a SECOND gateway on the same
+	// Matrix identity, and the two would answer every incoming message
+	// independently (issue #273). Refuse before any of them — including the
+	// systemd and startCmd paths, which duplicate just as effectively as the
+	// native fallback.
+	if h.servedByRootGateway(key) {
+		if h.servesRootGateway(key) {
+			return fmt.Errorf(
+				"hermes: %q is the profile the root gateway already runs (same Matrix identity); "+
+					"starting it would run a second gateway on that identity — use the \"hermes\" station instead",
+				key,
+			)
+		}
+		// Deliberately NOT the identity message: these profiles have their own
+		// identities, and an operator told otherwise would go hunting for a problem
+		// that does not exist.
+		return fmt.Errorf(
+			"hermes: %q is served by this host's multiplexed root gateway (gateway.multiplex_profiles); "+
+				"starting it would add a second gateway for a profile the multiplexer already serves — "+
+				"use the \"hermes\" station, or `hermes gateway migrate --standalone` for per-profile gateways",
+			key,
+		)
+	}
+	unit := hermesUnitName(key)
+	if hermesUnitKnown(unit) {
+		return hostproc.UserSystemctl("start", unit).Run()
+	}
+	// An operator-configured start command takes precedence over the native
+	// fallback (it can encode a site-specific launcher).
+	if h.startCmd != "" {
+		cmd := exec.Command("sh", "-c", h.startCmd)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		return cmd.Start()
+	}
+	// Native fallback: launch the profile gateway the way the Hermes supervisor
+	// does — `hermes -p <name> gateway run --replace` — detached so it outlives
+	// the node-agent. This covers process-tree (non-systemd, e.g. root) Hermes
+	// deployments where no unit exists and no startCmd is configured; without it
+	// a restart would Stop the profile and then fail to Start it. The `-p <name>`
+	// form keeps the launched process matchable by hermesPattern(), which
+	// Health/Stop rely on via pgrep.
+	return startDetached("hermes", hermesNativeStartArgs(key)...)
+}
+
+// startDetached launches a background process that must OUTLIVE a node-agent
+// restart. The node-agent's own systemd unit uses KillMode=control-group, so a
+// plain child we fork lives in our cgroup and is SIGKILLed when the node-agent
+// restarts (e.g. self-update). To escape that cgroup we launch via `systemd-run`,
+// which starts the command as a transient systemd service in its own cgroup,
+// reparented to PID 1. On hosts without systemd-run there is no cgroup-kill
+// concern, so we fall back to a plain detached (Setsid) child.
+//
+// The target binary is resolved to an absolute path first: a systemd-run
+// transient service does not inherit our PATH, so a bare name might not resolve.
+func startDetached(name string, args ...string) error {
+	if runner, err := exec.LookPath("systemd-run"); err == nil {
+		bin := name
+		if abs, lpErr := exec.LookPath(name); lpErr == nil {
+			bin = abs
+		}
+		// --collect reaps the transient unit when it exits; --quiet suppresses the
+		// "Running as unit: …" notice.
+		runArgs := append([]string{"--collect", "--quiet", bin}, args...)
+		return exec.Command(runner, runArgs...).Run()
+	}
+	cmd := exec.Command(name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	// Reap the child in the background so a short-lived process does not linger
+	// as a defunct (zombie) entry under the node-agent. The launched gateway is
+	// normally long-lived, so Wait simply blocks harmlessly until it exits; if it
+	// exits promptly (or in tests with a fast stub), this prevents a leaked
+	// zombie — one whose comm can otherwise be matched by pgrep.
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
+// hermesNativeStartArgs builds the argv (after the `hermes` binary) to launch a
+// profile gateway natively. For the root key it omits the profile selector.
+func hermesNativeStartArgs(key string) []string {
+	if key == "hermes" {
+		return []string{"gateway", "run", "--replace"}
+	}
+	name := strings.TrimPrefix(key, "hermes:")
+	return []string{"-p", name, "gateway", "run", "--replace"}
+}
+
+// ListDir lists the directory at rel (relative to the station's workspace).
+func (h *Descriptor) ListDir(key, rel string) ([]descriptor.FsEntry, error) {
+	workspace, err := h.workspaceFor(key)
+	if err != nil {
+		return nil, err
+	}
+
+	target, err := hostfs.SafeJoin(workspace, rel)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		return nil, fmt.Errorf("hermes: ListDir %q: %w", target, err)
+	}
+
+	result := make([]descriptor.FsEntry, 0, len(entries))
+	for _, entry := range entries {
+		fsEntry := descriptor.FsEntry{
+			Name: entry.Name(),
+			Path: filepath.Join(rel, entry.Name()),
+		}
+		switch {
+		case entry.Type()&fs.ModeSymlink != 0:
+			fsEntry.Type = "symlink"
+		case entry.IsDir():
+			fsEntry.Type = "dir"
+		default:
+			fsEntry.Type = "file"
+			info, err := entry.Info()
+			if err == nil {
+				sz := info.Size()
+				fsEntry.Size = &sz
+				mod := info.ModTime().UTC().Format(time.RFC3339)
+				fsEntry.Modified = &mod
+			}
+		}
+		result = append(result, fsEntry)
+	}
+	return result, nil
+}
+
+// 1 MiB
+
+// ReadFile reads up to maxBytes from path within the station's workspace.
+// It returns the raw bytes, encoding hint ("" means auto-detect in handler),
+// whether the file was truncated, and any error.
+func (h *Descriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, string, bool, error) {
+	workspace, err := h.workspaceFor(key)
+	if err != nil {
+		return nil, "", false, err
+	}
+
+	target, err := hostfs.SafeJoin(workspace, rel)
+	if err != nil {
+		return nil, "", false, err
+	}
+
+	if maxBytes <= 0 {
+		maxBytes = hostfs.DefaultMaxBytes
+	}
+
+	f, err := os.Open(target)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("hermes: ReadFile %q: %w", target, err)
+	}
+	defer f.Close()
+
+	// Read up to maxBytes+1 so we can detect truncation.
+	buf := make([]byte, maxBytes+1)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return nil, "", false, fmt.Errorf("hermes: ReadFile read %q: %w", target, err)
+	}
+
+	truncated := int64(n) > maxBytes
+	if truncated {
+		n = int(maxBytes)
+	}
+
+	return buf[:n], "", truncated, nil
+}
+
+// TailLogs emits existing log content and, if follow is true, polls for
+// appends until ctx is cancelled.
+//
+// Log search order:
+//  1. <home>/logs/ — always searched for any key.
+//  2. <home>/profiles/<name>/ — searched for profile keys (profile may contain
+//     its own log files).
+//
+// The Hermes CLI is preferred when on PATH, but the implementation falls back
+// to direct file reads so fixture tests pass without the CLI installed.
+func (h *Descriptor) TailLogs(ctx context.Context, key string, follow bool, emit func([]byte) error) error {
+	// Determine which directories to search for log files.
+	logDirs := []string{filepath.Join(h.home, "logs")}
+
+	if strings.HasPrefix(key, "hermes:") {
+		name := strings.TrimPrefix(key, "hermes:")
+		profileDir := filepath.Join(h.home, "profiles", name)
+		logDirs = append(logDirs, profileDir)
+	}
+
+	// Collect all log file paths from the log directories.
+	collect := func() []string { return collectLogFiles(logDirs) }
+	logFiles := collect()
+
+	if !follow {
+		// One-shot: emit the last N lines of existing content.
+		return hostfs.EmitLastNLines(logFiles, hostfs.TailDefaultN, hostfs.TailMaxBytes, emit)
+	}
+
+	// Follow mode: wait for a log file to exist (a harness that hasn't
+	// written logs yet must not close the stream immediately), then emit the
+	// last N lines and poll for appends.
+	logFiles = hostfs.WaitForLogFiles(ctx, collect)
+	if err := hostfs.EmitLastNLines(logFiles, hostfs.TailDefaultN, hostfs.TailMaxBytes, emit); err != nil {
+		return err
+	}
+
+	// Track offsets per file for incremental reads.
+	offsets := make(map[string]int64, len(logFiles))
+	for _, f := range logFiles {
+		info, err := os.Stat(f)
+		if err == nil {
+			offsets[f] = info.Size()
+		}
+	}
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			// Re-discover log files (new files may have appeared).
+			logFiles = collectLogFiles(logDirs)
+			for _, path := range logFiles {
+				off := offsets[path]
+				n, err := hostfs.EmitLogFileFrom(path, off, emit)
+				if err != nil {
+					// Best effort — skip unreadable files.
+					continue
+				}
+				offsets[path] = off + n
+			}
+		}
+	}
+}
+
+// collectLogFiles walks dirs and returns paths of all regular files found.
+// Missing directories are silently skipped.
+func collectLogFiles(dirs []string) []string {
+	var files []string
+	for _, dir := range dirs {
+		_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if !d.IsDir() {
+				files = append(files, path)
+			}
+			return nil
+		})
+	}
+	return files
+}
+
+// emitLogFiles reads and emits each file's full content.
+func emitLogFiles(paths []string, emit func([]byte) error) error {
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue // best effort
+		}
+		if len(data) == 0 {
+			continue
+		}
+		if err := emit(data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CleanPlan returns the cleanable items for the Hermes station.
+// Cleanable items: the "logs" subdirectory within the station workspace
+// (if it exists), plus any *.log files directly in the workspace root.
+// All Path values are relative to the station's workspace.
+func (h *Descriptor) CleanPlan(key string) ([]descriptor.CleanItem, error) {
+	workspace, err := h.workspaceFor(key)
+	if err != nil {
+		return nil, err
+	}
+	return hostfs.CleanPlanCommon(workspace, []string{"logs"})
+}
+
+// CleanApply removes the requested paths from the Hermes station workspace.
+// Each path is (a) re-jailed to the workspace and (b) verified against the
+// current plan set. Paths that fail either check are silently skipped.
+// Returns the total bytes removed.
+func (h *Descriptor) CleanApply(key string, paths []string) (int64, error) {
+	workspace, err := h.workspaceFor(key)
+	if err != nil {
+		return 0, err
+	}
+	plan, err := h.CleanPlan(key)
+	if err != nil {
+		return 0, err
+	}
+	return hostfs.CleanApplyCommon(workspace, paths, plan)
+}
+
+// WorkspaceRoot is the root ReadFile jails reads to (WorkspaceRooter).
+func (h *Descriptor) WorkspaceRoot(key string) (string, error) { return h.workspaceFor(key) }

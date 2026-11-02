@@ -26,7 +26,7 @@ things that must outlive a stop at the mount:
 
 | Path | Why it must persist |
 |---|---|
-| `/workspace` | the user's files. Hardcoded in the fleet OpenCode entrypoint and in `internal/descriptor/opencode.go`, so it is symlinked rather than configured. |
+| `/workspace` | the user's files. Hardcoded in the fleet OpenCode entrypoint and in `internal/descriptor/opencode/opencode.go`, so it is symlinked rather than configured. |
 | `$HOME` | `agentpod-node` keeps `nodeId`/`nodeSecret` under `os.UserConfigDir()`, and opencode keeps session state at `$HOME/.local/share/opencode`. |
 
 `persist_rootfs` is deliberately not used: Fly's own docs disclaim it for

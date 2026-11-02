@@ -53,7 +53,7 @@ func (r *Registry) NativeSkillLoading(ctx context.Context, key string, names []s
 	return result, nil
 }
 
-func observedNativeSkillLoading(value bool, reason string) skills.Observation {
+func ObservedNativeSkillLoading(value bool, reason string) skills.Observation {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	return skills.Observation{Value: &value, ObservedAt: &now, Reason: reason}
 }
