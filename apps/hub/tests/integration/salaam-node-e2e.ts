@@ -36,6 +36,11 @@ assert(
   existsSync(join(repo, "test/fixtures/agentpod-service.mjs")),
   "Set SALAAM_REPO to the source checkout under test",
 );
+/** A Salaam build file; 0.0.7 moved them into module folders (dist/src/<module>/<file>.js). */
+const salaamDist = (moved: string, flat: string) => {
+  const path = join(repo, "dist/src", moved);
+  return existsSync(path) ? path : join(repo, "dist/src", flat);
+};
 const database = new URL(process.env.DATABASE_URL ?? "http://missing");
 assert(
   ["127.0.0.1", "localhost"].includes(database.hostname) &&
@@ -535,7 +540,7 @@ const mcpFingerprint = (value: unknown) =>
   createHash("sha256").update(canonicalFixture(value)).digest("hex");
 function prepareStationConfig(): string {
   const file = join(dir, "station-config.json");
-  const script = `import{readFileSync,writeFileSync,realpathSync}from'node:fs';import{createHash}from'node:crypto';import{stationRuntimeFingerprint,stationWorkspaceIdentity}from${JSON.stringify(join(repo, "dist/src/station-config.js"))};const [file,workspace,binary,runtime,image]=process.argv.slice(1);const pin=p=>({path:realpathSync(p),sha256:createHash('sha256').update(readFileSync(realpathSync(p))).digest('hex')});writeFileSync(file,JSON.stringify({version:1,kind:'linux-systemd-station-v1',workspace,workspace_identity:stationWorkspaceIdentity(workspace),files:pin(binary),systemd_run:pin('/usr/bin/systemd-run'),systemctl:pin('/usr/bin/systemctl'),runtime_root:runtime,runtime_fingerprint:stationRuntimeFingerprint(runtime),runtime_image_digest:image}),{mode:0o600});`;
+  const script = `import{readFileSync,writeFileSync,realpathSync}from'node:fs';import{createHash}from'node:crypto';import{stationRuntimeFingerprint,stationWorkspaceIdentity}from${JSON.stringify(salaamDist("agentpod/station-config.js", "station-config.js"))};const [file,workspace,binary,runtime,image]=process.argv.slice(1);const pin=p=>({path:realpathSync(p),sha256:createHash('sha256').update(readFileSync(realpathSync(p))).digest('hex')});writeFileSync(file,JSON.stringify({version:1,kind:'linux-systemd-station-v1',workspace,workspace_identity:stationWorkspaceIdentity(workspace),files:pin(binary),systemd_run:pin('/usr/bin/systemd-run'),systemctl:pin('/usr/bin/systemctl'),runtime_root:runtime,runtime_fingerprint:stationRuntimeFingerprint(runtime),runtime_image_digest:image}),{mode:0o600});`;
   execFileSync(
     node,
     [
@@ -570,7 +575,7 @@ function stationRows(sql: string, params: unknown[] = []): any[] {
   );
 }
 function stationOperator(path: string, body?: unknown): any {
-  const script = `import{call}from${JSON.stringify(join(repo, "dist/src/transport.js"))};console.log(JSON.stringify(await call(process.argv[1],process.argv[2],JSON.parse(process.argv[3])??undefined)));`;
+  const script = `import{call}from${JSON.stringify(salaamDist("core/transport.js", "transport.js"))};console.log(JSON.stringify(await call(process.argv[1],process.argv[2],JSON.parse(process.argv[3])??undefined)));`;
   return JSON.parse(
     execFileSync(
       node,
