@@ -1,5 +1,5 @@
-import type { ForgeGrantRef } from "../../services/forge-api/providers";
-import type { StationForgeApiGrant } from "./forge-api-grants";
+import type { ForgeGrantRef } from "./providers";
+import type { StationForgeApiGrant } from "../../db/schema/forge-api-grants";
 
 /**
  * Compile-time only (under src/ so `tsc` covers it; hub tests are not type-checked): the grants
