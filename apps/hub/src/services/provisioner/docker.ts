@@ -18,7 +18,8 @@ import type {
 } from "./types";
 import { DockerOrchestrator } from "./docker-orchestrator";
 import type { ResourceLimits, Sandbox } from "./docker-orchestrator";
-import { dockerDaemonSettingsFromEnv, resolveDockerDaemon } from "./docker-daemon";
+import { dockerDaemonSettingsFromEnv } from "../../config";
+import { resolveDockerDaemon } from "./docker-daemon";
 
 // ─── Resource tier mapping ────────────────────────────────────────────────────
 

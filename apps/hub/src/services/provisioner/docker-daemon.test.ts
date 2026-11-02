@@ -13,12 +13,8 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  DEFAULT_DOCKER_SOCKET,
-  dockerDaemonSettingsFromEnv,
-  resolveDockerDaemon,
-  type DockerDaemonSettings,
-} from "./docker-daemon";
+import { DEFAULT_DOCKER_SOCKET, dockerDaemonSettingsFromEnv, type DockerDaemonSettings } from "../../config";
+import { resolveDockerDaemon } from "./docker-daemon";
 
 /** Nothing configured — the shape every current deployment has. */
 const UNSET: DockerDaemonSettings = {
