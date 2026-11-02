@@ -4,7 +4,7 @@ import { db } from "../../db/drizzle";
 import { skillReleaseCohorts } from "../../db/schema/skills";
 import { stations } from "../../db/schema/stations";
 import { tenantScope } from "../../db/tenant-scope";
-import { requireGrantReach } from "../control/grant-reach";
+import { requireGrantReach } from "../control";
 import type { CallerRef } from "../../auth/caller-authority";
 import { SkillRequestError, type SkillOwner } from "./artifacts";
 import { getTrustedSkillRelease } from "./trusted-catalog";

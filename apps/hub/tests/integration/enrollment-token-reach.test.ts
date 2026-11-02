@@ -18,7 +18,7 @@ import { enrollmentTokenRoutes } from "../../src/routes/enrollment-tokens";
  *
  * It names no station, so the composition rule the station routes use has
  * nothing to match against. The rule here is admin, full stop — see
- * `services/grant-reach.ts`'s `requireFleetGrantReach` for why a wildcard
+ * `services/control/grant-reach.ts`'s `requireFleetGrantReach` for why a wildcard
  * dispatch grant can no longer say "spans the fleet".
  */
 

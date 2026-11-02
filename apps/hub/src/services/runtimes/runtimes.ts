@@ -37,20 +37,20 @@ import { db } from "../../db/drizzle";
 import { tenantScope } from "../../db/tenant-scope";
 import { provisionedRuntimes, nodes } from "../../db/schema/nodes";
 import { stations } from "../../db/schema/stations";
-import { markStationTreeRevoking } from "../stations/registry";
-import { mintEnrollmentToken } from "../nodes/enrollment";
+import { markStationTreeRevoking } from "../stations";
+import { mintEnrollmentToken } from "../nodes";
 import {
   getProvisioner,
   getProvisionerUnguarded,
   enabledProviders,
   providerManifests,
   isProviderEnabled,
-} from "../provisioner/registry";
+} from "../provisioner";
 import { imageForHarness } from "./image";
 import { HARNESS_MIN_MEMORY_MB, tierFitsHarness } from "@agentpod/contract";
 import type { ProvisionedRuntime, ResourceTier } from "@agentpod/contract";
-import type { RuntimeProvisioner, RuntimeState } from "../provisioner/types";
-import { wasAlreadyInTargetState } from "../provisioner/types";
+import type { RuntimeProvisioner, RuntimeState } from "../provisioner";
+import { wasAlreadyInTargetState } from "../provisioner";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

@@ -12,18 +12,18 @@
 
 import { Hono } from "hono";
 import { GatewayClientMessage } from "@agentpod/contract";
-import { verifyNodeCredential } from "../services/nodes/enrollment";
-import { setNodeStatus, setNodeAgentVersion, setNodeCapabilities } from "../services/nodes/registry";
-import { connectionManager } from "../services/broker/connection-manager";
-import type { Send, Close } from "../services/broker/connection-manager";
-import { handleNodeMessage, dropNode } from "../services/broker/broker";
+import { verifyNodeCredential } from "../services/nodes";
+import { setNodeStatus, setNodeAgentVersion, setNodeCapabilities } from "../services/nodes";
+import { connectionManager } from "../services/broker";
+import type { Send, Close } from "../services/broker";
+import { handleNodeMessage, dropNode } from "../services/broker";
 import { upgradeWebSocket } from "../ws";
-import { autoAdoptProvisionedHarness } from "../services/runtimes/autoadopt";
-import { completeRuntimeStartForNode } from "../services/runtimes/runtimes";
-import { refreshAdoptedCapabilities, announceStationsForNode } from "../services/stations/registry";
-import { recordHealth, clearNode } from "../services/nodes/health-cache";
-import { reportTurnError } from "../services/acp/sessions";
-import { reportAgentTurn } from "../services/push/fleet/agent-reports";
+import { autoAdoptProvisionedHarness } from "../services/runtimes";
+import { completeRuntimeStartForNode } from "../services/runtimes";
+import { refreshAdoptedCapabilities, announceStationsForNode } from "../services/stations";
+import { recordHealth, clearNode } from "../services/nodes";
+import { reportTurnError } from "../services/acp";
+import { reportAgentTurn } from "../services/push";
 
 // Node connects with `Authorization: Bearer <nodeId>:<nodeSecret>`.
 /** When, after a node dials in, its stations are announced to the Matrix bridge (ms). */

@@ -1,0 +1,30 @@
+/**
+ * The public entry point of services/matrix-as: the names other modules import, and nothing else.
+ * Every import from outside this folder goes through here; see docs/contributor/code-quality.md.
+ */
+export { signalNodeToAdopt } from "./adopt-signal";
+export { boardProjectionDeps, withJoinWake } from "./board-projection";
+export { matrixIdsForBoardHumans } from "./board-room";
+export { isMatrixUserInUse } from "./client";
+export { isElicitationPending } from "./elicitation-card";
+export { startElicitationSweeper } from "./elicitation-sweep";
+export { postedElicitationsAwaitingOutcome, projectElicitation } from "./elicitations";
+export { reconcileBoardGates } from "./fleet-gates";
+export { startGateSweeper } from "./gate-sweep";
+export { isGatePending, projectGate, projectionForGate, tenantForBoard } from "./gates";
+export type { GatePendingDelivery, GateProjectionDeps } from "./gates";
+export { recordTransaction } from "./health";
+export {
+  moveState,
+  preJoinNewIdentity,
+  preJoinRefusal,
+  wireConvergenceListener,
+} from "./identity-move";
+export type { MoveState, PreJoinOutcome } from "./identity-move";
+export { missionAlias } from "./missions";
+export { createMatrixBridge, matrixBridgeConfig, startMatrixBridge } from "./service";
+export type { MatrixBridge } from "./service";
+export { GENERAL_MISSIONS_KEY, ensureSpaceRecord } from "./spaces";
+export type { Space } from "./spaces";
+export { roomAliasForStation, roomForStation, unboundRoomsForStation } from "./station-room";
+export { stationForAgentUserId, stationForAlias } from "./stations";

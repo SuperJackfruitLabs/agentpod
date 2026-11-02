@@ -19,7 +19,7 @@ import { declaredHarnessConfig } from "../../db/schema/harness-config";
 import { harnessConfigOptOut, type HarnessConfigOptOutRow } from "../../db/schema/harness-config-ops";
 import { tenantScope } from "../../db/tenant-scope";
 import { prefixedId } from "../../utils/ids";
-import * as broker from "../broker/broker";
+import * as broker from "../broker";
 
 /**
  * Ask one station's node for the registry its harness manages — the
@@ -31,7 +31,7 @@ import * as broker from "../broker/broker";
  * here can treat "could not verify" as one outcome rather than a try/catch.
  *
  * Lives here (not in `routes/harness-config.ts`, where it originated) so
- * `services/harness-config-apply.ts` can reuse it without importing a route
+ * `services/harness-config/apply.ts` can reuse it without importing a route
  * module — that import would run the other way too (the route imports
  * `planFor`/`applyFor` from the apply service) and form a cycle.
  */

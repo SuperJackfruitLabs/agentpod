@@ -16,14 +16,14 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { matrixGateEvents, matrixRooms } from "../../db/schema/matrix";
-import { matrixIdForPrincipal } from "../matrix/principal-id";
-import * as broker from "../broker/broker";
+import { matrixIdForPrincipal } from "../matrix";
+import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
 import { withQuietNotes } from "./push-quiet";
 import { provisionStation, provisionAll, provisionStationForAlias } from "./provision";
 import { handleRoomMessage, retryPendingDecrypts } from "./inbound";
-import { transcriberFor } from "../speech/transcription-settings";
-import { clearFleetDecision, gateDecisionKey } from "../push/fleet/sink";
+import { transcriberFor } from "../speech";
+import { clearFleetDecision, gateDecisionKey } from "../push";
 import {
   handleGateDecision,
   parseGateDecision,
@@ -34,13 +34,13 @@ import {
   settleGateOutcome,
 } from "./gates";
 import { assertPrincipal } from "../../auth/org-plane/assertion";
-import { resolveMatrixId } from "../matrix/identity";
+import { resolveMatrixId } from "../matrix";
 import { boardRoomFor } from "./board-room";
 import { answerElicitationAtSuperpipeline, claimElicitationOutcome, handleElicitationAnswer } from "./elicitations";
 import { principalById, principalForUser, principalHandle } from "../../auth/org-plane/principals";
 import { attachRoomToSession, forgetTurnTrigger, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
-  answerPermission, sessionIsBusy, whenIdle } from "../acp/sessions";
+  answerPermission, sessionIsBusy, whenIdle } from "../acp";
 import { createLogger } from "../../utils/logger";
 import { bridgeModeOnly } from "./bridge-agents";
 import { createAgentCrypto, feedAgents, type AgentCrypto } from "./crypto";
@@ -52,8 +52,8 @@ import {
 import { withEncryption } from "./crypto-send";
 import { createVoiceReplier } from "./voice-reply";
 import { stationForRoom } from "./stations";
-import { resolveSpeechFor } from "../speech/speech-settings";
-import { synthesize } from "../speech/speech-client";
+import { resolveSpeechFor } from "../speech";
+import { synthesize } from "../speech";
 
 const log = createLogger("matrix-bridge");
 

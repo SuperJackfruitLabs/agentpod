@@ -47,10 +47,10 @@ import { db as defaultDb } from "../../db/drizzle";
 import { stationForgeApiGrants as g, type StationForgeApiGrant as Grant } from "../../db/schema/forge-api-grants";
 import { stations } from "../../db/schema/stations";
 import { createLogger } from "../../utils/logger";
-import { recordAudit } from "../audit/audit";
-import { connectionManager } from "../broker/connection-manager";
-import * as broker from "../broker/broker";
-import type { ForgeConfig } from "../forge/agent-account";
+import { recordAudit } from "../audit";
+import { connectionManager } from "../broker";
+import * as broker from "../broker";
+import type { ForgeConfig } from "../forge";
 import { getProvider } from "./providers";
 import {
   blobIsLive,

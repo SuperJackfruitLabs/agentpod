@@ -27,9 +27,9 @@ import {
   projectGate,
   type GatePendingDelivery,
   type GateProjectionDeps,
-} from "../services/matrix-as/gates";
-import { isElicitationPending } from "../services/matrix-as/elicitation-card";
-import { projectElicitation } from "../services/matrix-as/elicitations";
+} from "../services/matrix-as";
+import { isElicitationPending } from "../services/matrix-as";
+import { projectElicitation } from "../services/matrix-as";
 
 const log = createLogger("superpipeline-push");
 

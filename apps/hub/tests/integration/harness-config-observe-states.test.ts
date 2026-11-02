@@ -2,7 +2,7 @@
  * Integration Test: `awaiting-restart` and `opted-out` arrive through the API
  * (Task 9b)
  *
- * `compare()` (`src/services/harness-config.ts`) has emitted all seven
+ * `compare()` (`src/services/harness-config/harness-config.ts`) has emitted all seven
  * observation states since Task 9, proven by unit tests
  * (`tests/unit/harness-config-compare.test.ts`). But `awaiting-restart` and
  * `opted-out` depend on three optional arguments — `appliedWrites`,

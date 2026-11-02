@@ -30,9 +30,9 @@ import { nodes } from "../db/schema/nodes";
 import { grantAllowsPrincipal } from "../auth/org-plane/grants";
 import { principalHandle } from "../auth/org-plane/principals";
 import { callerGrant, callerPrincipal } from "../auth/caller-authority";
-import { isControlPairEnforced } from "../services/control/control-pair";
-import { bridgeUserId } from "../services/matrix/names";
-import { roomForStation } from "../services/matrix-as/station-room";
+import { isControlPairEnforced } from "../services/control";
+import { bridgeUserId } from "../services/matrix";
+import { roomForStation } from "../services/matrix-as";
 import { createLogger } from "../utils/logger";
 import type { AuthUser } from "../auth/middleware";
 

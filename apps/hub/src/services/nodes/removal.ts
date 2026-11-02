@@ -36,9 +36,9 @@ import { stations } from "../../db/schema/stations";
 import { bridgeAgents } from "../../db/schema/bridge";
 import { declaredHarnessConfig } from "../../db/schema/harness-config";
 import { harnessConfigOptOut } from "../../db/schema/harness-config-ops";
-import { unadopt } from "../stations/registry";
-import { connectionManager } from "../broker/connection-manager";
-import { dropNode } from "../broker/broker";
+import { unadopt } from "../stations";
+import { connectionManager } from "../broker";
+import { dropNode } from "../broker";
 import { clearNode } from "./health-cache";
 
 /** The close code a removed node's socket is ended with (policy violation). */

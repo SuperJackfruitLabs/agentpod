@@ -7,7 +7,7 @@
  * the local placement then fails, suspended (`abandonPlaneAgent`): the contract has no delete,
  * and a suspended agent cannot be used half-placed.
  */
-import { bridgeUserId } from "../matrix/names";
+import { bridgeUserId } from "../matrix";
 import { orgPlaneClient, type OrgPlaneClient } from "../../auth/org-plane/client";
 import { principalDirectory, type PrincipalDirectory } from "../../auth/org-plane/directory";
 import { createLogger } from "../../utils/logger";

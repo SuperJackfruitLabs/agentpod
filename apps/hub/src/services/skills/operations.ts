@@ -22,8 +22,8 @@ import {
   SkillRequestError,
   type SkillOwner,
 } from "./artifacts";
-import type { StationRow } from "../stations/registry";
-import * as broker from "../broker/broker";
+import type { StationRow } from "../stations";
+import * as broker from "../broker";
 import { unconfirmedNodeOperationReason } from "./operation-diagnostics";
 
 type Operation = typeof skillOperations.$inferSelect;

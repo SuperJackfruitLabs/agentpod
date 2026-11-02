@@ -14,8 +14,8 @@ import { db } from "../../db/drizzle";
 import { stationGitIdentities } from "../../db/schema/git-identities";
 import { stations } from "../../db/schema/stations";
 import { createLogger } from "../../utils/logger";
-import * as broker from "../broker/broker";
-import { connectionManager } from "../broker/connection-manager";
+import * as broker from "../broker";
+import { connectionManager } from "../broker";
 import {
   addAgentKey,
   deleteAgentKey,

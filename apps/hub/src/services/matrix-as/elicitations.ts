@@ -33,7 +33,7 @@ import {
   type ElicitationPendingDelivery,
 } from "./elicitation-card";
 import { matchPermissionAnswer, unmatchedAnswerText } from "./permissions";
-import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix/identity";
+import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
 import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plane/assertion";
 
 const log = createLogger("matrix-elicitations");

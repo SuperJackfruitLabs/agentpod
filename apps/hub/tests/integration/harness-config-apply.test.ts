@@ -3,7 +3,7 @@
  *
  * Verifies the three new routes in `src/routes/harness-config.ts`
  * (`POST .../config/plan`, `GET .../config/operations/:operationId`,
- * `POST .../config/apply`) and `src/services/harness-config-apply.ts`
+ * `POST .../config/apply`) and `src/services/harness-config/apply.ts`
  * (`planFor`, `applyFor`, `recordApplied`):
  *
  *   1. `plan` proxies to the node and returns the node's plan unchanged.

@@ -14,7 +14,7 @@ import {
   getFleetStats as defaultGetFleetStats,
   type FleetDeps,
   createFleetService,
-} from "../services/nodes/fleet";
+} from "../services/nodes";
 import type { FleetAgent, FleetStats } from "@agentpod/contract";
 
 // ─── Types ────────────────────────────────────────────────────────────────────

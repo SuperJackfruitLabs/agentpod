@@ -1,22 +1,22 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { EnrollRequest } from "@agentpod/contract";
-import { enrollNode, verifyNodeCredential } from "../services/nodes/enrollment";
-import { listNodes } from "../services/nodes/registry";
-import { nodesWithFixedImage } from "../services/runtimes/runtimes";
+import { enrollNode, verifyNodeCredential } from "../services/nodes";
+import { listNodes } from "../services/nodes";
+import { nodesWithFixedImage } from "../services/runtimes";
 import {
   executeRollout,
   planRollout,
   summarise,
   type RolloutNode,
-} from "../services/nodes/rollout";
-import { request as brokerRequest } from "../services/broker/broker";
+} from "../services/nodes";
+import { request as brokerRequest } from "../services/broker";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 import { logAdminAction, type LogAdminActionInput } from "../models/admin-audit-log";
 import { createLogger } from "../utils/logger";
-import { removeNode, nodeInTenant } from "../services/nodes/removal";
-import { requireFleetGrantReach } from "../services/control/grant-reach";
-import { isControlPairEnforced, isGrantReachDenied, GrantReachDenied } from "../services/control/control-pair";
+import { removeNode, nodeInTenant } from "../services/nodes";
+import { requireFleetGrantReach } from "../services/control";
+import { isControlPairEnforced, isGrantReachDenied, GrantReachDenied } from "../services/control";
 import { callerPrincipal } from "../auth/caller-authority";
 import { resolveTenantId } from "../auth/tenant";
 
@@ -378,7 +378,7 @@ export function createNodeRoutes(deps?: {
       /**
        * DELETE /api/nodes/:id  [?force=1  |  body {"force":true}]
        *
-       * Remove a node from the fleet — `services/node-removal.ts` says what goes
+       * Remove a node from the fleet — `services/nodes/removal.ts` says what goes
        * and what stays. Who may: the node's OWNER, in the workspace the request
        * acts in, who is an admin of that workspace — and, where the control pair
        * is enforced, who may also grow the fleet. Shrinking a

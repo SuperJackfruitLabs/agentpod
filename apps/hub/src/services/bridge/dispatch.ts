@@ -73,10 +73,10 @@ import { ActivityCoalescer, type BoardActivity } from "./coalesce";
 import type { AgentSpanRecorder } from "../../telemetry/agent-spans";
 import { attemptSpanFacts } from "./attempt-facts";
 import { inDispatchSpan } from "../../telemetry/dispatch-span";
-import { isControlPairDenied } from "../control/control-pair";
-import type { Fingerprint } from "../evidence/fingerprint";
-import { fingerprintWithin, resolveStationFingerprint, resolveStationOccupant, within } from "../evidence/station-fingerprint";
-import { fetchRelatedWork, prefetchRelatedWork, relatedBasis, relatedWorkEnabled } from "../superlibrary/related";
+import { isControlPairDenied } from "../control";
+import type { Fingerprint } from "../evidence";
+import { fingerprintWithin, resolveStationFingerprint, resolveStationOccupant, within } from "../evidence";
+import { fetchRelatedWork, prefetchRelatedWork, relatedBasis, relatedWorkEnabled } from "../superlibrary";
 import { DEFAULT_PERMISSION_WAIT_MS, type BridgeAgentConfig } from "./config";
 import { isAutoAnswered, selectedOptionId } from "./permission";
 import {

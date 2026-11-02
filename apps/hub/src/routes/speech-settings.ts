@@ -34,10 +34,10 @@ import {
   SPEAK_MODES,
   speechSettings,
   type SpeechSettings,
-} from "../services/speech/speech-settings";
-import { fetchPreview, fetchVoices, testSpeech } from "../services/speech/speech-client";
+} from "../services/speech";
+import { fetchPreview, fetchVoices, testSpeech } from "../services/speech";
 import { VERB_RESULTS } from "@agentpod/contract";
-import * as broker from "../services/broker/broker";
+import * as broker from "../services/broker";
 import {
   applyTargetInDb,
   type BrokerRequest,

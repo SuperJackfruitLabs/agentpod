@@ -41,7 +41,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { acpTraceMeta } from "../../telemetry/propagation";
-import { assertSalaamManagedMcp } from "../salaam/mcp";
+import { assertSalaamManagedMcp } from "../salaam";
 import {
   SalaamAcpFeatures,
   SalaamPromptReceipt,
@@ -53,7 +53,7 @@ import {
 import {
   readSalaamCancellation,
   type SalaamCancellationState,
-} from "../salaam/cancellations";
+} from "../salaam";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import {
   client,
@@ -78,7 +78,7 @@ import type {
   TurnResolution,
 } from "@agentpod/contract";
 import { db } from "../../db/drizzle";
-import { ControlPairDenied, isControlPairEnforced } from "../control/control-pair";
+import { ControlPairDenied, isControlPairEnforced } from "../control";
 import { grantAllowsPrincipal } from "../../auth/org-plane/grants";
 import {
   callerGrant,
@@ -97,7 +97,7 @@ import {
   bindSalaamPrompt,
   getSalaamPrompt,
   updateSalaamPrompt,
-} from "../salaam/prompts";
+} from "../salaam";
 import {
   makeSalaamExecution,
   admitSalaamExecution,
@@ -107,19 +107,19 @@ import {
   salaamStationHolder,
   inspectSalaamExecution,
   type SalaamStationHolder,
-} from "../salaam/authority";
+} from "../salaam";
 import { principalDirectory } from "../../auth/org-plane/directory";
-import { gateCapability, getStation } from "../stations/registry";
-import { connectionManager } from "../broker/connection-manager";
-import { recordAudit } from "../audit/audit";
+import { gateCapability, getStation } from "../stations";
+import { connectionManager } from "../broker";
+import { recordAudit } from "../audit";
 import {
   openAcpWire,
   type AcpWire,
   type OpenAcpWireOptions,
 } from "./transport";
-import * as broker from "../broker/broker";
+import * as broker from "../broker";
 import { nodes } from "../../db/schema/nodes";
-import { promptBlocks, type PromptImage } from "../matrix/attachments";
+import { promptBlocks, type PromptImage } from "../matrix";
 import {
   gatewayUnreachable,
   rejectionSaidNothing,

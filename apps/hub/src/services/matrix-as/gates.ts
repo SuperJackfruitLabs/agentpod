@@ -41,15 +41,15 @@ import { nodes } from "../../db/schema/nodes";
 import { stations } from "../../db/schema/stations";
 import { createLogger } from "../../utils/logger";
 import { GATE_REQUEST_CONTENT_KEY, type GateRequestCard } from "@agentpod/contract";
-import { noteHubEvent } from "../push/hub-events";
+import { noteHubEvent } from "../push";
 import { legacyRequestEvents } from "./legacy-events";
-import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix/identity";
+import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
 import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plane/assertion";
-import { stationSpeaker } from "../matrix/names";
+import { stationSpeaker } from "../matrix";
 import { principalHandle } from "../../auth/org-plane/principals";
 import { roomForStation } from "./station-room";
 import { moveInProgress } from "./identity-move";
-import type { GatePendingDelivery } from "../bridge/deliveries";
+import type { GatePendingDelivery } from "../bridge";
 
 const log = createLogger("matrix-gates");
 

@@ -43,13 +43,13 @@ import { eq } from "drizzle-orm";
 
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
-import { verifyNodeCredential } from "../services/nodes/enrollment";
+import { verifyNodeCredential } from "../services/nodes";
 import { principalHandle } from "../auth/org-plane/principals";
-import { redeemCredentialAuthorization } from "../services/matrix/credential";
-import { bridgeLocalpart, isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix/names";
-import { isMatrixUserInUse } from "../services/matrix-as/client";
+import { redeemCredentialAuthorization } from "../services/matrix";
+import { bridgeLocalpart, isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix";
+import { isMatrixUserInUse } from "../services/matrix-as";
 import type { IssuedCredentials } from "./station-matrix";
-import type { MatrixBridge } from "../services/matrix-as/service";
+import type { MatrixBridge } from "../services/matrix-as";
 
 export interface StationMatrixCredentialDeps {
   credentials: {
@@ -185,7 +185,7 @@ export function createStationMatrixCredentialRoutes(deps: StationMatrixCredentia
  * the test below exercises the exact code path it runs.
  *
  * Null rather than a no-op object is what `createMatrixBridge` returns for
- * "not configured" (`services/matrix-as/index.ts`), so `null` here means the
+ * "not configured" (`services/matrix-as/service.ts`), so `null` here means the
  * same thing it means there: no homeserver to register or rotate an
  * identity on, so the route does not exist — a 404, not a 500 on every call.
  */

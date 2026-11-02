@@ -7,7 +7,7 @@ claim that M21 or live Superpipeline acceptance is complete.
 
 - AgentPod base `1393de17dd4d603dd5c3eb42beb7d0de15fa5673`:
   `services/bridge/dispatch.ts`, `ledger.ts`, `superpipeline.ts`,
-  `services/salaam-authority.ts`, and `packages/contract/src/salaam-authority.ts`.
+  `services/salaam/authority.ts`, and `packages/contract/src/salaam-authority.ts`.
 - Salaam `6d4fd50468729a3aa3037a60af417d9057028aa7`:
   `src/agentpod-protocol.ts`, `agentpod-authority.ts`, `task-work.ts`,
   `task-verification.ts`, and `acp.ts`.

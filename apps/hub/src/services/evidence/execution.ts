@@ -1,7 +1,7 @@
 import {
   verifyArtifactBundle,
   verifyExecutionEvidence,
-} from "../superlibrary/execution-export";
+} from "../superlibrary";
 import { and, eq } from "drizzle-orm";
 import {
   ExecutionEvidenceBinding,
@@ -11,7 +11,7 @@ import {
 import { db } from "../../db/drizzle";
 import { salaamWorkOwners } from "../../db/schema/salaam-work";
 import { acpSessions } from "../../db/schema/acp";
-import * as broker from "../broker/broker";
+import * as broker from "../broker";
 /** Historical reads use original durable scope, never current station occupancy or lease renewal. */
 async function readExecutionSnapshot(
   tenant: string,

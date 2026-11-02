@@ -21,19 +21,19 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
-import { requireIssueCredentials } from "../services/control/grant-reach";
-import { isGrantReachDenied } from "../services/control/control-pair";
-import { bridgeUserId, bridgeLocalpart } from "../services/matrix/names";
-import { roomAliasForStation } from "../services/matrix-as/station-room";
-import { isMatrixUserInUse } from "../services/matrix-as/client";
+import { requireIssueCredentials } from "../services/control";
+import { isGrantReachDenied } from "../services/control";
+import { bridgeUserId, bridgeLocalpart } from "../services/matrix";
+import { roomAliasForStation } from "../services/matrix-as";
+import { isMatrixUserInUse } from "../services/matrix-as";
 import { principalHandle } from "../auth/org-plane/principals";
-import { mintCredentialAuthorization, UnknownStationError } from "../services/matrix/credential";
-import { isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix/names";
+import { mintCredentialAuthorization, UnknownStationError } from "../services/matrix";
+import { isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix";
 import {
   preJoinRefusal,
   type MoveState,
   type PreJoinOutcome,
-} from "../services/matrix-as/identity-move";
+} from "../services/matrix-as";
 import type { AuthUser } from "../auth/middleware";
 import { tenantScope } from "../db/tenant-scope";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";

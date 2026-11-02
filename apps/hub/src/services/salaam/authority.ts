@@ -12,7 +12,7 @@ import { tenants } from "../../db/schema/tenants";
 import { bridgeDispatches } from "../../db/schema/bridge";
 import { orgPlaneClient } from "../../auth/org-plane/client";
 import { approvalRulesFor } from "./approval-rules";
-import * as broker from "../broker/broker";
+import * as broker from "../broker";
 
 /**
  * An authorization refusal: the caller, or the agent, may not run here. A caller answers it with

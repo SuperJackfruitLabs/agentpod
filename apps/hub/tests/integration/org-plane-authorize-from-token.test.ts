@@ -143,7 +143,7 @@ afterAll(async () => {
 
 const STATION_REF = { nodeId: NODE, stationKey: "hermes:plane-authz" };
 
-describe("services/acp-sessions createSession — the dispatch control pair", () => {
+describe("services/acp/sessions createSession — the dispatch control pair", () => {
   test("a token whose mayDispatch covers the agent passes the pair without reading the plane", async () => {
     // Past the pair, the next gate is readiness: the node is not connected in this process.
     await expect(
@@ -190,7 +190,7 @@ describe("services/acp-sessions createSession — the dispatch control pair", ()
   });
 });
 
-describe("services/grant-reach", () => {
+describe("services/control/grant-reach", () => {
   test("requireGrantReach decides from the caller's token", async () => {
     await requireGrantReach(caller(ALLOWED()), STATION_REF, "terminal", "mutate");
     expect(isGrantReachDenied(await requireGrantReach(caller(NO_REACH()), STATION_REF, "terminal", "mutate").catch((e) => e))).toBe(true);

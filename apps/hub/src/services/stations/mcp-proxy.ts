@@ -36,9 +36,9 @@ import { db } from "../../db/drizzle";
 import { nodes } from "../../db/schema/nodes";
 import { stations } from "../../db/schema/stations";
 import { tenantScope } from "../../db/tenant-scope";
-import { recordAudit } from "../audit/audit";
-import * as broker from "../broker/broker";
-import { connectionManager } from "../broker/connection-manager";
+import { recordAudit } from "../audit";
+import * as broker from "../broker";
+import { connectionManager } from "../broker";
 import type { StationRow } from "./registry";
 
 /** The node capability that says it answers `mcp.proxy.status|set|rotate`. */

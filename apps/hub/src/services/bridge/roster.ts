@@ -29,7 +29,7 @@ import { db } from "../../db/drizzle";
 import { bridgeAgents, type BridgeAgentRow } from "../../db/schema/bridge";
 import { stations } from "../../db/schema/stations";
 import { createLogger } from "../../utils/logger";
-import { superlibraryClient } from "../superlibrary/client";
+import { superlibraryClient } from "../superlibrary";
 import { decrypt, encrypt } from "../../utils/encryption";
 import type { AcpSessionMode } from "@agentpod/contract";
 import { BridgeCredentialSource } from "../../../../../packages/contract/src/bridge-credential";

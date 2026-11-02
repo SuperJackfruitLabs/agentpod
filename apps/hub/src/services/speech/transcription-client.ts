@@ -92,7 +92,7 @@ export interface TranscriptionEndpoint {
 /**
  * The service the environment names, or null. `TRANSCRIBE_URL` turns it on;
  * `TRANSCRIBE_API_KEY` and `TRANSCRIBE_MODEL` go with it. This is the fallback
- * beneath the console's settings (`services/transcription-settings.ts`).
+ * beneath the console's settings (`services/speech/transcription-settings.ts`).
  */
 export function transcriptionFromEnv(env: Record<string, string | undefined> = process.env): TranscriptionEndpoint | null {
   const url = env.TRANSCRIBE_URL?.trim();

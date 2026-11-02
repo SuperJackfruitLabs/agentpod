@@ -2,9 +2,9 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { SkillInventory } from "@agentpod/contract";
-import * as broker from "../services/broker/broker";
-import { getStation } from "../services/stations/registry";
-import { gateCapability } from "../services/stations/registry";
+import * as broker from "../services/broker";
+import { getStation } from "../services/stations";
+import { gateCapability } from "../services/stations";
 import type { AuthUser } from "../auth/middleware";
 
 /** Read-only metadata. No caller-selected root, source body or mutation. */

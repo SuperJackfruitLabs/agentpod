@@ -15,8 +15,8 @@
  * failing to read a board can never be treated as "nothing is pending": that would
  * settle every open question on a timeout.
  */
-import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge/superpipeline";
-import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig } from "../bridge/config";
+import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge";
+import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig } from "../bridge";
 import { createLogger } from "../../utils/logger";
 import type { ElicitationPendingDelivery } from "./elicitation-card";
 import type { ElicitationProjectionOutcome } from "./elicitations";

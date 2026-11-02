@@ -17,9 +17,9 @@ import { nodes } from "../../db/schema/nodes";
 import { tenantScope } from "../../db/tenant-scope";
 import { VERB_RESULTS, unknownCapabilitiesByStation } from "@agentpod/contract";
 import type { Station } from "@agentpod/contract";
-import * as broker from "../broker/broker";
-import { reconcileOnAdopt } from "../harness-config/apply";
-import { markGrantsRevoking, type RevokeCause } from "../forge-api/station-forge-api";
+import * as broker from "../broker";
+import { reconcileOnAdopt } from "../harness-config";
+import { markGrantsRevoking, type RevokeCause } from "../forge-api";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("station-registry");

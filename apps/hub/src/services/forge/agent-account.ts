@@ -26,7 +26,7 @@ const log = createLogger("forge");
 /**
  * The domain an agent's identity already lives in.
  *
- * Agents are `@agent_…:id.agentpod.dev` in Matrix (`services/matrix-as/names.ts`). Giving the
+ * Agents are `@agent_…:id.agentpod.dev` in Matrix (`services/matrix/names.ts`). Giving the
  * forge account a different domain would split one principal across two namespaces, which is the
  * thing `charter → decisions/2026-08-30-an-agent-is-a-principal.md` exists to prevent. The local
  * part is the agent's plain name rather than the MXID's full localpart, because this string's

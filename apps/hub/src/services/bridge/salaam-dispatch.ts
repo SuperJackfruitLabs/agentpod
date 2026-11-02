@@ -6,7 +6,7 @@ import { recordSalaamUsage } from "../../telemetry/salaam-usage";
 import { livePublisher } from "./salaam-publish-live";
 import { SalaamActivityFeed } from "./salaam-activity";
 import { serveSalaamBoardReads } from "./salaam-board-reads";
-import { superlibraryClient } from "../superlibrary/client";
+import { superlibraryClient } from "../superlibrary";
 import { runScopedPlan } from "./salaam-run-scope";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { inDispatchSpan } from "../../telemetry/dispatch-span";
@@ -26,7 +26,7 @@ import { stations } from "../../db/schema/stations";
 import { tenantScope } from "../../db/tenant-scope";
 import { acpSessions } from "../../db/schema/acp";
 import { SalaamAuthorityStatus } from "@agentpod/contract";
-import { workDigest } from "../salaam/work";
+import { workDigest } from "../salaam";
 import { bridgeDispatches } from "../../db/schema/bridge";
 import {
   salaamWorkOwners,
@@ -37,7 +37,7 @@ import {
   SalaamWorkPayload,
   SalaamWorkPlan,
 } from "../../../../../packages/contract/src/salaam-work-payload";
-import * as broker from "../broker/broker";
+import * as broker from "../broker";
 import { createLogger } from "../../utils/logger";
 import { openDispatch, markReleased } from "./ledger";
 import { reserveSalaamWork, deliverSalaamWork } from "./salaam-work";

@@ -5,11 +5,11 @@
  * The design decision is explicit: "An explicit operator opt-out wins.
  * Declared state does not override it. Such a station reports `opted-out`,
  * not `drifted`." Before this file, the opt-out register
- * (`harness_config_opt_out`, `src/services/harness-config.ts`) was honoured
+ * (`harness_config_opt_out`, `src/services/harness-config/harness-config.ts`) was honoured
  * in exactly two places — `reconcileStation` (adopt-time) and `compare()`
  * (the read-only observation state) — and nowhere on the path a human drives
  * by hand: `POST .../config/plan` and `POST .../config/apply`
- * (`src/services/harness-config-apply.ts`). An operator could opt a station
+ * (`src/services/harness-config/apply.ts`). An operator could opt a station
  * out and have `fleet config plan` / `fleet config apply` write the setting
  * anyway.
  *

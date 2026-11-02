@@ -5,11 +5,11 @@ import {
   imageForHarness,
   isPullableFromRegistry,
   providerImageEnvVar,
-} from "./services/runtimes/image";
-import { resolveDockerDaemon } from "./services/provisioner/docker-daemon";
-import { loadBridgeConfig } from "./services/bridge/config";
-import { loadOperatorRules } from "./services/evidence/redact-content";
-import { HubOperatorsConfigError, parseHubOperators } from "./services/hub/operators-config";
+} from "./services/runtimes";
+import { resolveDockerDaemon } from "./services/provisioner";
+import { loadBridgeConfig } from "./services/bridge";
+import { loadOperatorRules } from "./services/evidence";
+import { HubOperatorsConfigError, parseHubOperators } from "./services/hub";
 import { HubHomeOrgConfigError, parseHubHomeOrg } from "./auth/org-plane/hub-home-org";
 import { orgPlaneConfigErrors, type OrgPlaneConfigError } from "./auth/org-plane/config";
 

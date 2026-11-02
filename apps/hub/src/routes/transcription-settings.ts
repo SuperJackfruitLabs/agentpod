@@ -30,10 +30,10 @@ import {
   MIN_MAX_SECONDS,
   transcriptionSettings,
   type TranscriptionSettings,
-} from "../services/speech/transcription-settings";
-import { testTranscription } from "../services/speech/transcription-client";
+} from "../services/speech";
+import { testTranscription } from "../services/speech";
 import { VERB_RESULTS } from "@agentpod/contract";
-import * as broker from "../services/broker/broker";
+import * as broker from "../services/broker";
 import { createLogger } from "../utils/logger";
 import { tenantScope } from "../db/tenant-scope";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";

@@ -48,14 +48,14 @@ import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { stationForgeApiGrants as g, type StationForgeApiGrant } from "../db/schema/forge-api-grants";
 import { isWorkspaceAdmin } from "../auth/workspace-authority";
-import { requireIssueCredentials } from "../services/control/grant-reach";
-import { isGrantReachDenied } from "../services/control/control-pair";
-import { recordAudit } from "../services/audit/audit";
-import * as broker from "../services/broker/broker";
-import type { FetchLike, ForgeConfig } from "../services/forge/agent-account";
-import { getProvider } from "../services/forge-api/providers";
-import { ForgeApiConfigError } from "../services/forge-api/errors";
-import { instanceOrigin, isConfiguredForge, isIpLiteral } from "../services/forge-api/instance";
+import { requireIssueCredentials } from "../services/control";
+import { isGrantReachDenied } from "../services/control";
+import { recordAudit } from "../services/audit";
+import * as broker from "../services/broker";
+import type { FetchLike, ForgeConfig } from "../services/forge";
+import { getProvider } from "../services/forge-api";
+import { ForgeApiConfigError } from "../services/forge-api";
+import { instanceOrigin, isConfiguredForge, isIpLiteral } from "../services/forge-api";
 import {
   ForgeApiGrantError,
   SUPPLIED_BLOB_MAX,
@@ -69,7 +69,7 @@ import {
   updateGrantPolicy,
   verifyGrant,
   type ForgeApiDeps,
-} from "../services/forge-api/station-forge-api";
+} from "../services/forge-api";
 import { createLogger } from "../utils/logger";
 import type { AuthUser } from "../auth/middleware";
 

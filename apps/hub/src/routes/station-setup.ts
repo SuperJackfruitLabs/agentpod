@@ -1,6 +1,6 @@
 /** Explicit, owner-scoped onboarding. Existing assign/move APIs keep their semantics. */
-import { markGrantsRevoking } from "../services/forge-api/station-forge-api";
-import { kickForgeApiRevoke } from "../services/forge-api/reconcile";
+import { markGrantsRevoking } from "../services/forge-api";
+import { kickForgeApiRevoke } from "../services/forge-api";
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
@@ -12,9 +12,9 @@ import { stationSetups } from "../db/schema/station-setup";
 import {
   provisionStationNow,
   stationSetupMatrixDomain,
-} from "../services/stations/hooks";
-import { bridgeUserId } from "../services/matrix/names";
-import { roomForStation } from "../services/matrix-as/station-room";
+} from "../services/stations";
+import { bridgeUserId } from "../services/matrix";
+import { roomForStation } from "../services/matrix-as";
 import { OrgPlaneError } from "../auth/org-plane/client";
 import { principalDirectory } from "../auth/org-plane/directory";
 import {
@@ -22,7 +22,7 @@ import {
   checkPlaneAgent,
   createPlaneAgent,
   grantDispatchTo,
-} from "../services/org-plane/agent-placement";
+} from "../services/org-plane";
 import { humanPrincipalIdForUser, principalHandle } from "../auth/org-plane/principals";
 import { createLogger } from "../utils/logger";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";

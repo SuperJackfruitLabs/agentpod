@@ -50,7 +50,7 @@ import {
 } from "../../db/schema/forge-api-grants";
 import { stations } from "../../db/schema/stations";
 import { createLogger } from "../../utils/logger";
-import { recordAudit } from "../audit/audit";
+import { recordAudit } from "../audit";
 import { ForgeApiConfigError, ForgeApiGrantError, type ForgeApiGrantErrorCode } from "./errors";
 import { isConfiguredForge } from "./instance";
 import { nextGeneration } from "./generation";

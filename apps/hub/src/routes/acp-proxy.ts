@@ -18,8 +18,8 @@
 import { Hono } from "hono";
 import type { AuthUser } from "../auth/middleware";
 import { upgradeWebSocket } from "../ws";
-import { buildAcpAgent } from "../services/acp/agent";
-import { webSocketStream } from "../services/acp/ws-stream";
+import { buildAcpAgent } from "../services/acp";
+import { webSocketStream } from "../services/acp";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("acp-proxy");

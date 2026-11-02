@@ -11,7 +11,10 @@
  *  - the hub's layer order (HUB_LAYERS): every import between its top-level folders points down,
  *    except the back-edges KNOWN_BACK_EDGES still lists (none since Phase 1);
  *  - the folder-level cycles: the hub's top-level folders, and the folders inside services/;
- *  - shipped files over SIZE_LIMIT lines, each held at its current size by OVERSIZE.
+ *  - shipped files over SIZE_LIMIT lines, each held at its current size by OVERSIZE;
+ *  - the service modules (Phase 2): every folder under services/ is a module whose index.ts is its
+ *    only public entry point, holding named re-exports and nothing else, and the modules import
+ *    each other down SERVICE_LAYERS.
  *
  * Every import counts, `import type` included: a type-only edge is still a dependency a reader
  * has to follow, and it is the first thing a cycle-breaking change moves.
@@ -21,9 +24,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { cycles, folderGraph, importGraph, sourceFiles } from "../helpers/import-graph";
+import { cycles, folderGraph, importGraph, imports, sourceFiles } from "../helpers/import-graph";
 
 const REPO = join(import.meta.dir, "..", "..", "..", "..");
 const SIZE_LIMIT = 1000;
@@ -100,6 +103,32 @@ const HUB_LAYERS = [
  *  to its layer, or declare a narrow interface below and inject it from index.ts. */
 const KNOWN_BACK_EDGES: string[] = [];
 
+/**
+ * The modules under services/, in tiers, lowest first. A module imports only from a tier below its
+ * own, never from its own tier or above; within a tier the modules are independent of each other.
+ * A new module must be placed here; docs/contributor/code-quality.md says what each one holds.
+ */
+const SERVICE_LAYERS: string[][] = [
+  ["audit", "broker", "control", "hub", "matrix", "speech"],
+  ["forge", "harness-config", "provisioner", "salaam"],
+  ["forge-api"],
+  ["stations"],
+  ["nodes", "skills", "superlibrary"],
+  ["evidence", "runtimes"],
+  ["acp", "sweeper"],
+  ["org-plane", "push"],
+  ["bridge"],
+  ["matrix-as"],
+];
+
+/** Module edges ("from -> to") that do not point to a lower tier. May only shrink; Phase 2 left it
+ *  empty. Fix one the ways HUB_LAYERS describes, never by listing it. */
+const KNOWN_SERVICE_BACK_EDGES: string[] = [];
+
+/** The service module a hub file belongs to, if any: `services/acp/sessions.ts` → `acp`. */
+const serviceModuleOf = (file: string): string | undefined =>
+  file.startsWith("services/") ? file.split("/")[1]?.replace(/\.ts$/, "") : undefined;
+
 const lineCount = (path: string): number => readFileSync(path, "utf8").split("\n").length - 1;
 
 describe("architecture ratchets", () => {
@@ -156,6 +185,59 @@ describe("architecture ratchets", () => {
     expect(added, "these imports point up the layer order (see HUB_LAYERS for how to fix one)").toEqual([]);
     const gone = KNOWN_BACK_EDGES.filter((e) => !up.includes(e));
     expect(gone, "these back-edges are gone; remove them from KNOWN_BACK_EDGES").toEqual([]);
+  });
+
+  describe("services/: modules with one entry point each", () => {
+    const hub = join(REPO, "apps/hub/src");
+    const servicesDir = join(hub, "services");
+
+    test("every entry under services/ is a folder with an index.ts and a place in SERVICE_LAYERS", () => {
+      const entries = readdirSync(servicesDir).filter((n) => !/\.(test|spec)\.ts$/.test(n) && n !== "README.md");
+      const loose = entries.filter((n) => !statSync(join(servicesDir, n)).isDirectory());
+      expect(loose, "a file directly under services/ belongs in a module folder").toEqual([]);
+      const noIndex = entries.filter((n) => !sourceFiles(join(servicesDir, n)).includes(join(servicesDir, n, "index.ts")));
+      expect(noIndex, "every module needs an index.ts").toEqual([]);
+      expect(entries.toSorted(), "place a new module in SERVICE_LAYERS, or drop a gone one").toEqual(
+        SERVICE_LAYERS.flat().toSorted(),
+      );
+    });
+
+    test("a module's index.ts holds named re-exports from its own files and nothing else", () => {
+      const bad: string[] = [];
+      for (const name of readdirSync(servicesDir)) {
+        const index = join(servicesDir, name, "index.ts");
+        if (!statSync(join(servicesDir, name)).isDirectory()) continue;
+        const code = readFileSync(index, "utf8")
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/^\s*\/\/.*$/gm, "");
+        const rest = code.replace(/export\s+(type\s+)?\{[^}*]*\}\s*from\s*"\.\/[^"]+";/g, "").trim();
+        if (rest !== "") bad.push(`services/${name}/index.ts: ${rest.slice(0, 80)}`);
+      }
+      expect(bad, "an index.ts re-exports by name (export { a } from \"./file\"); code lives in the files").toEqual([]);
+    });
+
+    test("an import from outside a module goes through its index.ts", () => {
+      // A dynamic import may name a file: it is there to load that file lazily, and going through
+      // the index would load the whole module at that point instead.
+      const through = imports(hub)
+        .filter(({ from, to, dynamic }) => {
+          const target = serviceModuleOf(to);
+          return !dynamic && target !== undefined && serviceModuleOf(from) !== target && to !== `services/${target}/index.ts`;
+        })
+        .map(({ from, to }) => `${from} -> ${to}`);
+      expect(through, "import these through the module's index.ts (and export the name there)").toEqual([]);
+    });
+
+    test("modules import each other down SERVICE_LAYERS", () => {
+      const tier = new Map(SERVICE_LAYERS.flatMap((mods, n) => mods.map((m) => [m, n] as const)));
+      const up: string[] = [];
+      for (const [from, targets] of folderGraph(importGraph(hub), "services"))
+        for (const to of targets) if ((tier.get(to) ?? Infinity) >= (tier.get(from) ?? -1)) up.push(`${from} -> ${to}`);
+      const added = up.filter((e) => !KNOWN_SERVICE_BACK_EDGES.includes(e));
+      expect(added, "these module imports do not point to a lower tier (see SERVICE_LAYERS)").toEqual([]);
+      const gone = KNOWN_SERVICE_BACK_EDGES.filter((e) => !up.includes(e));
+      expect(gone, "these back-edges are gone; remove them from KNOWN_SERVICE_BACK_EDGES").toEqual([]);
+    });
   });
 
   test("the cycle finder sees a cycle and nothing else", () => {

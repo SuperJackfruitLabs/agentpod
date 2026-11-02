@@ -1,7 +1,7 @@
 /**
  * Parsing `HUB_OPERATORS` (workspace authority spec, W3). Pure — no database — so boot validation
  * (`validate-config.ts`) can refuse a malformed value before anything connects. The
- * reconcile is `services/hub-operators.ts`.
+ * reconcile is `services/hub/operators.ts`.
  */
 import { PrincipalId } from "@agentpod/contract";
 

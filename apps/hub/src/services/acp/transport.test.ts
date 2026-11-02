@@ -1,7 +1,7 @@
 /**
  * Service Test: ACP transport adapter (broker ↔ SDK byte streams)
  *
- * Verifies openAcpWire() (src/services/acp-transport.ts):
+ * Verifies openAcpWire() (src/services/acp/transport.ts):
  *   1. acp.open {key} → acp.attach {sessionId}; base64 chunks surface via
  *      `readable` in order as raw bytes.
  *   2. Bytes written to `writable` reach the node as input frames keyed by the

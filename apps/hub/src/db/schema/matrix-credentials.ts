@@ -18,7 +18,7 @@ import { stations } from "./stations";
  * redemption needs. What carries over from `enrollmentTokens` is `expires_at`
  * and `used_at` — `used_at` is what makes redemption single-use; the redeem
  * statement sets it in the same UPDATE that checks it is null (see
- * `services/matrix-credential.ts`), so two concurrent redemptions of one
+ * `services/matrix/credential.ts`), so two concurrent redemptions of one
  * authorisation cannot both succeed — a race here would mean two working
  * Matrix credentials for one human approval.
  */

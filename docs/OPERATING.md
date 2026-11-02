@@ -1123,7 +1123,7 @@ after its text. The speech service is anything with OpenAI's
   again, and kept out of the generic settings dump.
 - **Which voice**: the station's, else the hub's default voice, else one
   **assigned from the station's id** — FNV-1a of the id over fifteen curated
-  voices (`CURATED_VOICES` in `services/speech-settings.ts`; append only, since
+  voices (`CURATED_VOICES` in `services/speech/speech-settings.ts`; append only, since
   reordering re-voices every unassigned agent). Stable across restarts, and
   different agents mostly sound different. The station page shows it as
   *Assigned: …* and the owner may pick another, or type a blend
@@ -2164,7 +2164,7 @@ new occupant starts with nothing.
 **Verifying a grant.** After `grant`, `list` should reach `verified`; run `verify` after any node
 change. Implementation: `apps/hub/src/routes/station-forge-api.ts` (routes, including
 `GET …/forge-api/key`, which returns only the station's handover public key for the CLI to seal
-to), `apps/hub/src/services/station-forge-api.ts` (lifecycle), and
+to), `apps/hub/src/services/forge-api/station-forge-api.ts` (lifecycle), and
 `apps/node-agent/cmd/agentpod-fleet/forge_api.go` (the CLI).
 
 **Needs a node that supports it.** A station's node must advertise the `forge.api` capability;

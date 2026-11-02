@@ -17,7 +17,7 @@ import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
-import { localpartFor, bridgeUserId, bridgeLocalpart } from "../matrix/names";
+import { localpartFor, bridgeUserId, bridgeLocalpart } from "../matrix";
 import { principalHandle } from "../../auth/org-plane/principals";
 
 export interface BridgedStation {

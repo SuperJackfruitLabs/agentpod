@@ -1,0 +1,24 @@
+/**
+ * The public entry point of services/bridge: the names other modules import, and nothing else.
+ * Every import from outside this folder goes through here; see docs/contributor/code-quality.md.
+ */
+export { isBridgeEnabled, loadBridgeConfig } from "./config";
+export type { BridgeConfig } from "./config";
+export type { ElicitationPendingDelivery, GatePendingDelivery } from "./deliveries";
+export { checkBridgeDispatchGrant, ensureBridgeDispatchGrant } from "./dispatch-grant";
+export { attachExecutionReference } from "./execution-reference";
+export { startSuperpipelineBridge } from "./loop";
+export { subscribeBoardsToPush } from "./push-subscription";
+export {
+  bridgePlaneCredential,
+  createBridgeAgent,
+  deleteBridgeAgent,
+  listBridgeAgents,
+  readBridgeRoster,
+  updateBridgeAgent,
+} from "./roster";
+export { probeSalaamWork, settleNeverDispatchedSalaamWork } from "./salaam-dispatch";
+export { traceDeliveryEvidence } from "./salaam-trace";
+export { bridgeReadiness } from "./station-readiness";
+export { SuperpipelineClient, fetchAdapter } from "./superpipeline";
+export type { Fetcher } from "./superpipeline";

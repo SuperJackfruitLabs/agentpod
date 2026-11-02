@@ -8,8 +8,8 @@ import { validateConfig } from './validate-config.ts';
 import { describeDatabase } from './utils/describe-database.ts';
 import { connectionString, initDatabase } from './db/drizzle.ts';
 import { holdHubRunningLock } from './db/hub-running-lock.ts';
-import { resetOrphanedOnlineNodes } from './services/nodes/registry.ts';
-import { reconcileHubOperators } from './services/hub/operators.ts';
+import { resetOrphanedOnlineNodes } from './services/nodes/index.ts';
+import { reconcileHubOperators } from './services/hub/index.ts';
 import { learnHubHomeOrg } from './auth/org-plane/hub-home-org.ts';
 import { authMiddleware } from './auth/middleware.ts';
 import { orgPlaneOutageBody } from './auth/caller-authority.ts';
@@ -18,13 +18,13 @@ import { securityHeadersMiddleware } from './middleware/security-headers.ts';
 import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
 import { createSuperpipelinePushRoutes } from './routes/superpipeline-push.ts';
-import { projectGate, projectionForGate, tenantForBoard } from './services/matrix-as/gates.ts';
-import { reconcileBoardGates } from './services/matrix-as/fleet-gates.ts';
-import { matrixIdsForBoardHumans } from './services/matrix-as/board-room.ts';
-import { boardProjectionDeps, withJoinWake } from './services/matrix-as/board-projection.ts';
-import { startGateSweeper } from './services/matrix-as/gate-sweep.ts';
-import { startElicitationSweeper } from './services/matrix-as/elicitation-sweep.ts';
-import { projectElicitation, postedElicitationsAwaitingOutcome } from './services/matrix-as/elicitations.ts';
+import { projectGate, projectionForGate, tenantForBoard } from './services/matrix-as/index.ts';
+import { reconcileBoardGates } from './services/matrix-as/index.ts';
+import { matrixIdsForBoardHumans } from './services/matrix-as/index.ts';
+import { boardProjectionDeps, withJoinWake } from './services/matrix-as/index.ts';
+import { startGateSweeper } from './services/matrix-as/index.ts';
+import { startElicitationSweeper } from './services/matrix-as/index.ts';
+import { projectElicitation, postedElicitationsAwaitingOutcome } from './services/matrix-as/index.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
 // Node gateway WebSocket routes
@@ -59,8 +59,8 @@ import { createStationGitIdentityRoutes } from './routes/station-git-identity.ts
 import { createStationForgeApiRoutes } from './routes/station-forge-api.ts';
 import { createAgentApprovalRuleRoutes } from './routes/agent-approval-rules.ts';
 import { createMcpProxyRoutes } from './routes/mcp-proxy.ts';
-import { configureGitAuthorSync } from './services/forge/station-git-identity.ts';
-import { configureForgeApiReconcile, forgeApiServiceDeps } from './services/forge-api/reconcile.ts';
+import { configureGitAuthorSync } from './services/forge/index.ts';
+import { configureForgeApiReconcile, forgeApiServiceDeps } from './services/forge-api/index.ts';
 // A node reading its station's voice-note setting (transcription.apply)
 import { createNodeTranscriptionRoutes } from './routes/station-transcription-node.ts';
 // ... and its spoken-reply setting (speech.apply)
@@ -92,30 +92,30 @@ import { stationAcpRoutes } from './routes/station-acp.ts';
 import { acpProxyRouter } from './routes/acp-proxy.ts';
 // Middleware
 import { activityLoggerMiddleware } from './middleware/activity-logger.ts';
-import { registerEnabledProvisioners } from './services/provisioner/bootstrap.ts';
-import { enabledProviders } from './services/provisioner/registry.ts';
-import { startNodeSweeper } from './services/sweeper/node-sweeper.ts';
-import { startSuperpipelineBridge } from './services/bridge/loop.ts';
-import { createGracefulShutdown } from './services/hub/shutdown.ts';
+import { registerEnabledProvisioners } from './services/provisioner/index.ts';
+import { enabledProviders } from './services/provisioner/index.ts';
+import { startNodeSweeper } from './services/sweeper/index.ts';
+import { startSuperpipelineBridge } from './services/bridge/index.ts';
+import { createGracefulShutdown } from './services/hub/index.ts';
 import { httpServerSpans } from './telemetry/http-middleware.ts';
 import { initTelemetry, readTelemetryConfig, shutdownTelemetry } from './telemetry/otel.ts';
 import { mcpUnauthorized, resolveMcpCaller } from './mcp/auth.ts';
 import { handleMcpRequest } from './mcp/server.ts';
 import { createBridgeRosterRoute } from './routes/bridge-roster.ts';
-import { createMatrixBridge, matrixBridgeConfig, startMatrixBridge } from './services/matrix-as/service.ts';
-import { onStationsAdopted, onProvisionStation } from './services/stations/hooks.ts';
-import { preJoinNewIdentity, moveState, wireConvergenceListener } from './services/matrix-as/identity-move.ts';
-import { signalNodeToAdopt } from './services/matrix-as/adopt-signal.ts';
+import { createMatrixBridge, matrixBridgeConfig, startMatrixBridge } from './services/matrix-as/index.ts';
+import { onStationsAdopted, onProvisionStation } from './services/stations/index.ts';
+import { preJoinNewIdentity, moveState, wireConvergenceListener } from './services/matrix-as/index.ts';
+import { signalNodeToAdopt } from './services/matrix-as/index.ts';
 import { createMatrixAsRoutes } from './routes/matrix-as.ts';
 import { createMatrixPushRoutes } from './routes/matrix-push.ts';
-import { createPushServicesFromEnv } from './services/push/from-env.ts';
-import { setFleetSink } from './services/push/fleet/sink.ts';
+import { createPushServicesFromEnv } from './services/push/index.ts';
+import { setFleetSink } from './services/push/index.ts';
 import { createLiveActivityRoutes, createWhoami } from './routes/live-activity.ts';
 import { createStationMatrixRoutes } from './routes/station-matrix.ts';
 import { createStationSayRoutes } from './routes/station-say.ts';
 import { createMissionRoutes } from './routes/missions.ts';
 // ACP session boot reconciliation (hub-owned sessions do not survive restarts)
-import { reconcileOnBoot as reconcileAcpSessions } from './services/acp/sessions.ts';
+import { reconcileOnBoot as reconcileAcpSessions } from './services/acp/index.ts';
 
 validateConfig();
 

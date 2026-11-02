@@ -25,7 +25,7 @@
 import { z } from "zod";
 import { VERB_RESULTS } from "@agentpod/contract";
 import type { SalaamAuthority } from "@agentpod/contract";
-import * as broker from "../broker/broker";
+import * as broker from "../broker";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("acp-transport");

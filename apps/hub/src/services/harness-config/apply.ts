@@ -13,7 +13,7 @@
  * node already decided.
  *
  * `tenantId` is REQUIRED on every exported function here, never optional —
- * same rule as `services/harness-config.ts`.
+ * same rule as `services/harness-config/harness-config.ts`.
  *
  * `reconcileOnAdopt` (Task 8) is the one caller of `planFor`/`applyFor` that
  * is not a route — it runs from `adoptStations`, at the one moment the
@@ -30,7 +30,7 @@ import { appliedHarnessConfig } from "../../db/schema/harness-config-ops";
 import { stations, type StationRow } from "../../db/schema/stations";
 import { tenantScope } from "../../db/tenant-scope";
 import { prefixedId } from "../../utils/ids";
-import * as broker from "../broker/broker";
+import * as broker from "../broker";
 import { resolveFor, fetchRegistry, compare, resolveOptOuts, type Resolved, type AppliedWrite } from "./harness-config";
 
 /** A minimal station shape — everything `planFor`/`applyFor` need to reach a node. */
@@ -821,7 +821,7 @@ async function reconcileStation(tenantId: string, station: ConfigStation): Promi
 /**
  * Whether a station row is still there, in this tenant — the cheapest
  * possible "is this station still adopted?", since `unadopt` hard-deletes the
- * row (`services/station-registry.ts`). Used by the detached half of
+ * row (`services/stations/registry.ts`). Used by the detached half of
  * `reconcileOnAdopt`, which can outlive the adoption that started it.
  *
  * A failure to ask is treated as "still adopted": a Postgres hiccup must not
@@ -843,7 +843,7 @@ async function stillAdopted(tenantId: string, stationId: string): Promise<boolea
 
 /**
  * Record why reconciliation could not finish for a station — the same shape
- * as `provisionedRuntimes.statusReason` (`services/runtimes.ts`): free text,
+ * as `provisionedRuntimes.statusReason` (`services/runtimes/runtimes.ts`): free text,
  * null when there is nothing to explain. Swallows its own failure: a
  * Postgres hiccup while recording a reason must not become a second,
  * unrelated throw on top of the one it was trying to record.

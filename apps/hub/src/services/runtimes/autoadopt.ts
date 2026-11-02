@@ -20,8 +20,8 @@
 import { eq } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { provisionedRuntimes } from "../../db/schema/nodes";
-import * as broker from "../broker/broker";
-import { adoptStations, listAdopted } from "../stations/registry";
+import * as broker from "../broker";
+import { adoptStations, listAdopted } from "../stations";
 import { VERB_RESULTS } from "@agentpod/contract";
 import type { DetectedStation } from "@agentpod/contract";
 

@@ -40,9 +40,9 @@
  * room refuses the post.
  */
 
-import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge/superpipeline";
-import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig } from "../bridge/config";
-import { subscribeBoardsToPush } from "../bridge/push-subscription";
+import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge";
+import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig } from "../bridge";
+import { subscribeBoardsToPush } from "../bridge";
 import { createLogger } from "../../utils/logger";
 import { isGatePending } from "./gates";
 import type { GatePendingDelivery, ProjectionOutcome } from "./gates";

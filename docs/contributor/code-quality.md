@@ -73,9 +73,12 @@ run by the hub's `bun test` (it reads the console and the packages too). It hold
   only shrink; it has been empty since Phase 1. A new top-level folder or file fails the test
   until it is given a place in the order;
 - the folder-level cycles in the hub (`FOLDER_CYCLES`): none across its top-level folders (eight
-  of them formed one cycle until Phase 1), and one across 4 entries of `services/`
-  (`acp-sessions`, `bridge`, `matrix-as`, `org-plane`; 17 until Phase 1). A cycle may lose
-  members or vanish; it may not gain one, and no new cycle may appear;
+  of them formed one cycle until Phase 1), and none across the modules of `services/` (17
+  entries formed one until Phase 1, 4 until Phase 2). A cycle may lose members or vanish; it may
+  not gain one, and no new cycle may appear;
+- the service modules (`SERVICE_LAYERS`, below): every folder under `services/` is a module with
+  an `index.ts`, an import from outside a module goes through that `index.ts`, and the modules
+  import each other down their tiers;
 - shipped files over 1,000 lines, each held at its current size (`oversize`).
 
 ### The hub's layers
@@ -100,7 +103,7 @@ When a lower layer needs something from a higher one, do not list a back-edge. P
 each of them one of three ways, and the next one should be removed the same way:
 
 - **a pure helper, type or constant moves down** to the layer that needs it (`gateCapability`
-  went to `services/station-registry.ts`; `StationRow` to `db/schema/stations.ts`; the Docker
+  went to `services/stations/registry.ts`; `StationRow` to `db/schema/stations.ts`; the Docker
   daemon's env parser to `config.ts`; `dispatch-span.ts` declares the one field it reads);
 - **a misplaced file moves** with `git mv` to where its imports say it belongs (the org plane's
   client and reads into `auth/org-plane/`; boot validation up beside `index.ts`; a database read
@@ -109,6 +112,58 @@ each of them one of three ways, and the next one should be removed the same way:
   as a parameter where the pieces are put together (`index.ts`, or the route that builds the
   call). No service locators and no new global registries. (Phase 1 needed none: every back-edge
   it found was one of the two cases above.)
+
+### The service modules
+
+Phase 2 (2026-11-02) turned `services/` from 59 flat files and 8 folders into 23 modules. Each
+module is a folder whose `index.ts` is its public entry point:
+
+- **`index.ts` holds named re-exports and nothing else** (`export { a } from "./file"`,
+  `export type { T } from "./file"`). It exports what other code imports and no more: when a
+  file outside the module needs a new name, add it to the index; when nothing imports a name any
+  longer, take it out. Code never lives in an `index.ts`.
+- **An import from outside a module goes through its `index.ts`**, whether it comes from another
+  module, a route, the MCP server or `index.ts`. Inside a module, files import each other
+  directly and never through their own `index.ts`. Two exceptions: a dynamic `import("…")` may
+  name a file, since it is there to load that file lazily; and tests may import any file, so
+  they can reach what a module does not export.
+- **Modules import only from a tier below their own** (`SERVICE_LAYERS`, lowest first). Two
+  modules in one tier are independent of each other. Back-edges are listed in
+  `KNOWN_SERVICE_BACK_EDGES`, which is empty and may only shrink; fix one the ways listed for the
+  hub's layers below, never by listing it.
+
+| Tier | Modules | Holds |
+|---|---|---|
+| 1 | `audit` | the station audit log |
+| | `broker` | the broker (request/stream correlation) and the connection manager of the node gateway |
+| | `control` | the control pair's switch, and who may change what an agent is (grant reach) |
+| | `hub` | the hub process itself: hub operators and their config, admin counts, graceful shutdown |
+| | `matrix` | pure Matrix vocabulary shared below the appservice: station Matrix names, a principal's Matrix id, Matrix identity, Matrix credentials, attachment helpers |
+| | `speech` | speech-to-text and text-to-speech clients and per-station settings |
+| 2 | `forge` | an agent's forge account and the key a station pushes with |
+| | `harness-config` | declared harness settings and applying them to a station |
+| | `provisioner` | runtime drivers (Docker, Fly, Modal, Cloudflare) and their registry |
+| | `salaam` | what the hub tells Salaam: authority, approval rules, prompts, cancellations, work |
+| 3 | `forge-api` | forge API access: providers, the station lifecycle, the reconcile sweep, sealing |
+| 4 | `stations` | the station registry, adoption hooks, failure answers, the self-station, the MCP proxy |
+| 5 | `nodes` | enrollment, the node registry, removal, the health cache, agent versions, rollout, the fleet read |
+| | `skills` | skill artifacts, operations, release cohorts and canaries, the trusted catalog |
+| | `superlibrary` | the SuperLibrary client, links and execution exports |
+| 6 | `evidence` | execution evidence, fingerprints, transcripts, redaction |
+| | `runtimes` | runtime provisioning, images, auto-adopt |
+| 7 | `acp` | ACP sessions, the hub as an ACP agent, the transport, turn errors |
+| | `sweeper` | the node sweeper's tick (nodes, then the runtime sweeps) |
+| 8 | `org-plane` | agent placement on the organization plane |
+| | `push` | the Matrix push gateway and the fleet Live Activity |
+| 9 | `bridge` | the superpipeline bridge |
+| 10 | `matrix-as` | the Matrix appservice |
+
+The four-entry cycle Phase 1 left (`acp-sessions`, `bridge`, `matrix-as`, `org-plane`) went the
+first of the three ways listed for the hub's layers: pure code moved down. Matrix naming and the
+attachment helpers left the appservice for `matrix`, so `org-plane` and `acp` no longer reach up
+into `matrix-as`; the two wire shapes the bridge reads off a board (`GatePendingDelivery`,
+`ElicitationPendingDelivery`) moved into `bridge/deliveries.ts`, so the bridge no longer imports
+the appservice at all.
 
 **Go:** [`apps/node-agent/internal/archtest/size_test.go`](../../apps/node-agent/internal/archtest/size_test.go),
 run by `go test ./...`. It holds shipped files over 1,000 lines (`oversizeFiles`) and packages

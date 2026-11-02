@@ -3,7 +3,7 @@
  *
  * The roster used to be read once, at boot, from an environment variable. Now it is a table, and
  * this is what turns a change in that table into a loop starting, stopping or being rebuilt —
- * the same shape as `services/node-sweeper.ts`: a tick, a desired state, and a diff.
+ * the same shape as `services/sweeper/node-sweeper.ts`: a tick, a desired state, and a diff.
  *
  * No database here. The reconciler takes the roster as a function, so what is under test is the
  * diffing and the lifecycle, not Postgres.

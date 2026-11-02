@@ -35,7 +35,7 @@ import { adminTranscriptionRoutes } from "./transcription-settings";
 import { adminSpeechRoutes } from "./speech-settings";
 
 // Models
-import { getAdminStats } from "../services/hub/admin-stats";
+import { getAdminStats } from "../services/hub";
 import { getAuditLogs } from "../models/admin-audit-log";
 
 // =============================================================================

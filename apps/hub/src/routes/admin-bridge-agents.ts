@@ -34,14 +34,14 @@ import {
   deleteBridgeAgent,
   listBridgeAgents,
   updateBridgeAgent,
-} from "../services/bridge/roster";
+} from "../services/bridge";
 
-import { settleNeverDispatchedSalaamWork } from "../services/bridge/salaam-dispatch";
-import { ensureBridgeDispatchGrant } from "../services/bridge/dispatch-grant";
+import { settleNeverDispatchedSalaamWork } from "../services/bridge";
+import { ensureBridgeDispatchGrant } from "../services/bridge";
 import {
   SuperpipelineClient,
   fetchAdapter,
-} from "../services/bridge/superpipeline";
+} from "../services/bridge";
 
 const log = createLogger("admin-bridge-agents");
 

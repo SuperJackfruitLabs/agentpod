@@ -9,16 +9,16 @@
 import { and, eq, isNull, lt, or } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { nodes } from "../../db/schema/nodes";
-import { connectionManager } from "../broker/connection-manager";
-import { dropNode } from "../broker/broker";
-import { clearNode } from "../nodes/health-cache";
-import { setNodeStatus } from "../nodes/registry";
+import { connectionManager } from "../broker";
+import { dropNode } from "../broker";
+import { clearNode } from "../nodes";
+import { setNodeStatus } from "../nodes";
 import {
   sweepStalledRuntimeStarts,
   sweepStalledRuntimeStops,
   sweepExpiringRuntimes,
   sweepUnobservedRuntimes,
-} from "../runtimes/runtimes";
+} from "../runtimes";
 
 export const SWEEP_INTERVAL_MS = 15_000;
 export const OFFLINE_THRESHOLD_MS = 45_000;

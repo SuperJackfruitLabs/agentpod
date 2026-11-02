@@ -7,8 +7,8 @@
  * adoption — a station that is adopted with one setting unwritten is better
  * than one not adopted."
  *
- * Exercises `reconcileOnAdopt` (`src/services/harness-config-apply.ts`),
- * called from `adoptStations` (`src/services/station-registry.ts`) after its
+ * Exercises `reconcileOnAdopt` (`src/services/harness-config/apply.ts`),
+ * called from `adoptStations` (`src/services/stations/registry.ts`) after its
  * rows are written. Every test below calls the real `adoptStations` — never
  * `reconcileOnAdopt` directly — so a regression in the wiring (reconcile
  * running before the station row exists, or not being called at all) shows

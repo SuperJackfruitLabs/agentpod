@@ -94,8 +94,8 @@ export async function setSetting(
 /**
  * Settings that are not dumped by `getAllSettings`: they carry a secret (an
  * encrypted API key), and have their own write-only endpoints instead.
- * `transcription` — see `services/transcription-settings.ts`; `speech` — see
- * `services/speech-settings.ts`.
+ * `transcription` — see `services/speech/transcription-settings.ts`; `speech` — see
+ * `services/speech/speech-settings.ts`.
  */
 export const PRIVATE_SETTING_KEYS: ReadonlySet<string> = new Set(["transcription", "speech"]);
 

@@ -54,7 +54,7 @@ export const stations = pgTable("stations", {
    * a reconciler on a tick would race or fight it), so this reflects the
    * outcome of the LAST adopt, not a live status. A setting unwritten here
    * never fails the adoption itself — see `reconcileOnAdopt` in
-   * `services/harness-config-apply.ts`.
+   * `services/harness-config/apply.ts`.
    */
   configReason: text("config_reason"),
   /**
@@ -111,5 +111,5 @@ export const stations = pgTable("stations", {
   }).onDelete("cascade"),
 ]);
 
-/** A row of `stations`. Re-exported by services/station-registry.ts, where most callers take it. */
+/** A row of `stations`. Re-exported by services/stations/registry.ts, where most callers take it. */
 export type StationRow = typeof stations.$inferSelect;

@@ -1,7 +1,7 @@
 import type { ForgeApiPreset } from "@agentpod/contract";
 
 import { ForgeApiConfigError } from "./errors";
-import { listAgentTokens, mintAgentToken, revokeAgentToken } from "../forge/agent-account";
+import { listAgentTokens, mintAgentToken, revokeAgentToken } from "../forge";
 import type { ForgeGrantRef, ForgeProvider, ProviderDeps } from "./providers";
 
 const SCOPES: Record<Exclude<ForgeApiPreset, "none">, string[]> = {

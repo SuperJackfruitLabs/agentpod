@@ -22,7 +22,7 @@ import {
   type ElicitationRequestCard,
 } from "@agentpod/contract";
 
-import type { ElicitationPendingDelivery } from "../bridge/deliveries";
+import type { ElicitationPendingDelivery } from "../bridge";
 
 export { ELICITATION_REQUEST_CONTENT_KEY };
 

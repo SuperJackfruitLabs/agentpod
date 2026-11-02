@@ -4,7 +4,7 @@ import { db } from "../../db/drizzle";
 import { agentApprovalRules as rules, type AgentApprovalRule } from "../../db/schema/agent-approval-rules";
 import { stations } from "../../db/schema/stations";
 import { tenants } from "../../db/schema/tenants";
-import { recordAudit } from "../audit/audit";
+import { recordAudit } from "../audit";
 import { orgPlaneClient } from "../../auth/org-plane/client";
 
 export const APPROVAL_RULE_SCOPES = ["workspace-write"] as const;

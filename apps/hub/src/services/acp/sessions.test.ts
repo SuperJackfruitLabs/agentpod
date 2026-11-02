@@ -1,7 +1,7 @@
 /**
  * Service Test: ACP session service (hub-owned sessions over the ACP wire)
  *
- * Verifies src/services/acp-sessions.ts against a fake node speaking scripted
+ * Verifies src/services/acp/sessions.ts against a fake node speaking scripted
  * ACP (tests/helpers/acp-fake-node.ts):
  *
  *   1. createSession → row idle + state event persisted;

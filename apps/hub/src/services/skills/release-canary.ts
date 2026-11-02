@@ -7,7 +7,7 @@ import {
 import { db } from "../../db/drizzle";
 import { stations, trustedSkillReleaseArtifacts } from "../../db/schema";
 import { tenantScope } from "../../db/tenant-scope";
-import { requireGrantReach } from "../control/grant-reach";
+import { requireGrantReach } from "../control";
 import type { CallerRef } from "../../auth/caller-authority";
 import { createSkillOperation, getSkillOperation } from "./operations";
 import { getSkillReleaseCohort } from "./release-cohorts";

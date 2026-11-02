@@ -33,7 +33,7 @@
 
 import type { MatrixClient } from "./client";
 import { TURN_ACTIVITY_TYPE } from "./activity";
-import { beginQuietSend, noteHubEvent } from "../push/hub-events";
+import { beginQuietSend, noteHubEvent } from "../push";
 
 /** Custom event types the hub sends that must never push. */
 export const QUIET_EVENT_TYPES: ReadonlySet<string> = new Set([TURN_ACTIVITY_TYPE]);

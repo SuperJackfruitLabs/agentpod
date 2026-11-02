@@ -30,14 +30,14 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import type { Capability } from "@agentpod/contract";
 import { db } from "../db/drizzle";
-import { requireGrantReach } from "../services/control/grant-reach";
+import { requireGrantReach } from "../services/control";
 import type { Caller } from "../auth/caller-authority";
-import { isGrantReachDenied } from "../services/control/control-pair";
-import * as broker from "../services/broker/broker";
-import { gateCapability, getStation } from "../services/stations/registry";
-import { recordAudit } from "../services/audit/audit";
+import { isGrantReachDenied } from "../services/control";
+import * as broker from "../services/broker";
+import { gateCapability, getStation } from "../services/stations";
+import { recordAudit } from "../services/audit";
 import type { AuthUser } from "../auth/middleware";
-import type { StationRow } from "../services/stations/registry";
+import type { StationRow } from "../services/stations";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
 // ─── Reach gate ───────────────────────────────────────────────────────────────

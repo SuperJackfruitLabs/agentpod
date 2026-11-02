@@ -138,7 +138,7 @@ export const config = {
   },
 
   /**
-   * Transcript redaction (services/redact-content.ts). `rulesFile` is a JSON list of
+   * Transcript redaction (services/evidence/redact-content.ts). `rulesFile` is a JSON list of
    * `{"name","pattern"}` applied after the built-in rules; unset or absent means none, and a
    * file that is there but unusable refuses the boot (validate-config.ts).
    */
