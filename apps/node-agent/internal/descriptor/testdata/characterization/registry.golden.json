@@ -1,0 +1,916 @@
+{
+  "detect": [
+    {
+      "key": "claude-code:<hash of $ROOT/work/claude-proj>",
+      "harness": "claude-code",
+      "kind": "leaf",
+      "displayName": "claude-proj",
+      "parentKey": null,
+      "workspacePath": "$ROOT/work/claude-proj",
+      "capabilities": [
+        "skills.inventory",
+        "health",
+        "logs",
+        "fs.read",
+        "fs.walk",
+        "fs.write",
+        "terminal",
+        "cleanup",
+        "acp",
+        "skills.manage",
+        "skills.native",
+        "forge.api"
+      ],
+      "matrixId": null
+    },
+    {
+      "key": "codex:<hash of $ROOT/work/codex proj>",
+      "harness": "codex",
+      "kind": "leaf",
+      "displayName": "codex proj",
+      "parentKey": null,
+      "workspacePath": "$ROOT/work/codex proj",
+      "capabilities": [
+        "skills.inventory",
+        "health",
+        "logs",
+        "fs.read",
+        "fs.walk",
+        "fs.write",
+        "terminal",
+        "cleanup",
+        "acp",
+        "skills.manage",
+        "skills.native",
+        "forge.api"
+      ],
+      "matrixId": null
+    },
+    {
+      "key": "hermes",
+      "harness": "hermes",
+      "kind": "composite",
+      "displayName": "Hermes",
+      "parentKey": null,
+      "workspacePath": "$ROOT/hermes/.hermes",
+      "capabilities": [
+        "skills.inventory",
+        "health",
+        "logs",
+        "fs.read",
+        "fs.walk",
+        "fs.write",
+        "terminal",
+        "lifecycle",
+        "cleanup",
+        "acp",
+        "skills.manage",
+        "skills.native",
+        "plugins.manage",
+        "forge.api"
+      ],
+      "matrixId": null
+    },
+    {
+      "key": "hermes:coder-kai",
+      "harness": "hermes",
+      "kind": "composite",
+      "displayName": "coder-kai",
+      "parentKey": "hermes",
+      "workspacePath": "$ROOT/hermes/.hermes/profiles/coder-kai",
+      "capabilities": [
+        "skills.inventory",
+        "health",
+        "logs",
+        "fs.read",
+        "fs.walk",
+        "fs.write",
+        "terminal",
+        "lifecycle",
+        "cleanup",
+        "acp",
+        "matrix.avatar",
+        "skills.manage",
+        "skills.native",
+        "plugins.manage",
+        "config.manage",
+        "forge.api"
+      ],
+      "matrixId": "@coder-kai:id.example.dev"
+    },
+    {
+      "key": "hermes:research-ray",
+      "harness": "hermes",
+      "kind": "composite",
+      "displayName": "research-ray",
+      "parentKey": "hermes",
+      "workspacePath": "$ROOT/hermes/.hermes/profiles/research-ray",
+      "capabilities": [
+        "skills.inventory",
+        "health",
+        "logs",
+        "fs.read",
+        "fs.walk",
+        "fs.write",
+        "terminal",
+        "lifecycle",
+        "cleanup",
+        "acp",
+        "skills.manage",
+        "skills.native",
+        "plugins.manage",
+        "config.manage",
+        "forge.api"
+      ],
+      "matrixId": null
+    },
+    {
+      "key": "openclaw",
+      "harness": "openclaw",
+      "kind": "composite",
+      "displayName": "OpenClaw",
+      "parentKey": null,
+      "workspacePath": "$ROOT/openclaw/.openclaw/workspace",
+      "capabilities": [
+        "skills.inventory",
+        "health",
+        "logs",
+        "fs.read",
+        "fs.walk",
+        "fs.write",
+        "terminal",
+        "lifecycle",
+        "cleanup",
+        "acp",
+        "skills.manage",
+        "skills.native",
+        "forge.api"
+      ],
+      "matrixId": null
+    },
+    {
+      "key": "openclaw:hanuman",
+      "harness": "openclaw",
+      "kind": "composite",
+      "displayName": "hanuman",
+      "parentKey": "openclaw",
+      "workspacePath": "$ROOT/openclaw/.openclaw/workspace/agent-workspaces/hanuman",
+      "capabilities": [
+        "skills.inventory",
+        "health",
+        "logs",
+        "fs.read",
+        "fs.walk",
+        "fs.write",
+        "terminal",
+        "lifecycle",
+        "cleanup",
+        "acp",
+        "skills.manage",
+        "skills.native",
+        "config.manage",
+        "forge.api"
+      ],
+      "matrixId": null
+    },
+    {
+      "key": "openclaw:kubera",
+      "harness": "openclaw",
+      "kind": "composite",
+      "displayName": "kubera",
+      "parentKey": "openclaw",
+      "workspacePath": "$ROOT/openclaw/.openclaw/workspace/agent-workspaces/kubera",
+      "capabilities": [
+        "skills.inventory",
+        "health",
+        "logs",
+        "fs.read",
+        "fs.walk",
+        "fs.write",
+        "terminal",
+        "lifecycle",
+        "cleanup",
+        "acp",
+        "skills.manage",
+        "skills.native",
+        "config.manage",
+        "forge.api"
+      ],
+      "matrixId": null
+    },
+    {
+      "key": "opencode:<hash of $ROOT/work/ocproj>",
+      "harness": "opencode",
+      "kind": "leaf",
+      "displayName": "ocproj",
+      "parentKey": null,
+      "workspacePath": "$ROOT/work/ocproj",
+      "capabilities": [
+        "skills.inventory",
+        "health",
+        "logs",
+        "fs.read",
+        "fs.walk",
+        "fs.write",
+        "terminal",
+        "cleanup",
+        "acp",
+        "skills.manage",
+        "skills.native",
+        "forge.api"
+      ],
+      "matrixId": null
+    },
+    {
+      "key": "pi:<hash of $ROOT/work/idea-bank>",
+      "harness": "pi",
+      "kind": "leaf",
+      "displayName": "idea-bank",
+      "parentKey": null,
+      "workspacePath": "$ROOT/work/idea-bank",
+      "capabilities": [
+        "skills.inventory",
+        "health",
+        "logs",
+        "fs.read",
+        "fs.walk",
+        "fs.write",
+        "terminal",
+        "cleanup",
+        "acp",
+        "skills.manage",
+        "skills.native",
+        "forge.api"
+      ],
+      "matrixId": null
+    }
+  ],
+  "harnesses": [
+    "claude-code",
+    "codex",
+    "hermes",
+    "kilo",
+    "muse",
+    "openclaw",
+    "opencode",
+    "pi",
+    "salaam"
+  ],
+  "stations": {
+    "claude-code:<hash of $ROOT/work/claude-proj>": {
+      "acp": {
+        "argv": [
+          "$ROOT/bin/claude-agent-acp"
+        ],
+        "dir": "$ROOT/work/claude-proj",
+        "env": [
+          "PATH=$ROOT/bin:$ROOT/bin",
+          "CLAUDE_CODE_EXECUTABLE=$ROOT/bin/claude"
+        ]
+      },
+      "cleanup.plan": {
+        "result": {
+          "items": [],
+          "totalBytes": 0
+        },
+        "streamed": false
+      },
+      "config.observe": {
+        "error": "config.observe: claude-code does not manage configuration",
+        "streamed": false
+      },
+      "config.settings": {
+        "error": "config.settings: claude-code does not manage configuration",
+        "streamed": false
+      },
+      "fs.list": {
+        "result": [
+          {
+            "name": "README.md",
+            "path": "README.md",
+            "type": "file",
+            "size": 15,
+            "modified": "<mtime>"
+          },
+          {
+            "name": "node_modules",
+            "path": "node_modules",
+            "type": "dir",
+            "size": null,
+            "modified": null
+          }
+        ],
+        "streamed": false
+      },
+      "logs.tail": {
+        "chunks": [
+          "0|{\"cwd\":\"$ROOT/work/claude-proj\",\"type\":\"user\"}\n|false|"
+        ],
+        "result": null,
+        "streamed": true
+      }
+    },
+    "codex:<hash of $ROOT/work/codex proj>": {
+      "acp": {
+        "argv": [
+          "$ROOT/bin/codex-acp"
+        ],
+        "dir": "$ROOT/work/codex proj",
+        "env": [
+          "NO_BROWSER=1",
+          "INITIAL_AGENT_MODE=agent",
+          "PATH=$ROOT/bin:$ROOT/bin",
+          "CODEX_PATH=$ROOT/bin/codex"
+        ]
+      },
+      "cleanup.plan": {
+        "result": {
+          "items": [],
+          "totalBytes": 0
+        },
+        "streamed": false
+      },
+      "config.observe": {
+        "error": "config.observe: codex does not manage configuration",
+        "streamed": false
+      },
+      "config.settings": {
+        "error": "config.settings: codex does not manage configuration",
+        "streamed": false
+      },
+      "fs.list": {
+        "result": [
+          {
+            "name": "main.go",
+            "path": "main.go",
+            "type": "file",
+            "size": 13,
+            "modified": "<mtime>"
+          }
+        ],
+        "streamed": false
+      },
+      "logs.tail": {
+        "result": null,
+        "streamed": true
+      }
+    },
+    "hermes": {
+      "acp": {
+        "argv": [
+          "hermes",
+          "acp",
+          "--accept-hooks"
+        ],
+        "dir": "$ROOT/hermes/.hermes",
+        "env": null
+      },
+      "cleanup.plan": {
+        "result": {
+          "items": [
+            {
+              "path": "logs",
+              "size": 154,
+              "kind": "logs"
+            }
+          ],
+          "totalBytes": 154
+        },
+        "streamed": false
+      },
+      "config.observe": {
+        "error": "config: hermes is the composite root, which has no profile of its own — declare this per profile, or at node or fleet level",
+        "streamed": false
+      },
+      "config.settings": {
+        "result": {
+          "settings": [
+            {
+              "id": "hermes.approvals.timeout",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "reconcilable",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.approvals.mode",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "reconcilable",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.approvals.command_allowlist",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "additive-only",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.plugins.enabled",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "additive-only",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.plugins.stream_reasoning_deltas",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "reconcilable",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.skills.external_dirs",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "additive-only",
+              "restartToTakeEffect": true
+            }
+          ]
+        },
+        "streamed": false
+      },
+      "fs.list": {
+        "result": [
+          {
+            "name": "logs",
+            "path": "logs",
+            "type": "dir",
+            "size": null,
+            "modified": null
+          },
+          {
+            "name": "profiles",
+            "path": "profiles",
+            "type": "dir",
+            "size": null,
+            "modified": null
+          }
+        ],
+        "streamed": false
+      },
+      "logs.tail": {
+        "chunks": [
+          "0|2026-06-27T10:00:00Z INFO hermes gateway started\n2026-06-27T10:00:01Z INFO profile coder-kai loaded\n2026-06-27T10:00:02Z INFO profile research-ray loaded\n|false|"
+        ],
+        "result": null,
+        "streamed": true
+      }
+    },
+    "hermes:coder-kai": {
+      "acp": {
+        "argv": [
+          "hermes",
+          "-p",
+          "coder-kai",
+          "acp",
+          "--accept-hooks"
+        ],
+        "dir": "$ROOT/hermes/.hermes/profiles/coder-kai",
+        "env": null
+      },
+      "cleanup.plan": {
+        "result": {
+          "items": [],
+          "totalBytes": 0
+        },
+        "streamed": false
+      },
+      "config.observe": {
+        "result": {
+          "values": []
+        },
+        "streamed": false
+      },
+      "config.settings": {
+        "result": {
+          "settings": [
+            {
+              "id": "hermes.approvals.timeout",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "reconcilable",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.approvals.mode",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "reconcilable",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.approvals.command_allowlist",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "additive-only",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.plugins.enabled",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "additive-only",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.plugins.stream_reasoning_deltas",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "reconcilable",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.skills.external_dirs",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "additive-only",
+              "restartToTakeEffect": true
+            }
+          ]
+        },
+        "streamed": false
+      },
+      "fs.list": {
+        "result": [
+          {
+            "name": ".env",
+            "path": ".env",
+            "type": "file",
+            "size": 41,
+            "modified": "<mtime>"
+          },
+          {
+            "name": "config.yaml",
+            "path": "config.yaml",
+            "type": "file",
+            "size": 50,
+            "modified": "<mtime>"
+          },
+          {
+            "name": "session.md",
+            "path": "session.md",
+            "type": "file",
+            "size": 59,
+            "modified": "<mtime>"
+          }
+        ],
+        "streamed": false
+      },
+      "logs.tail": {
+        "chunks": [
+          "0|2026-06-27T10:00:00Z INFO hermes gateway started\n2026-06-27T10:00:01Z INFO profile coder-kai loaded\n2026-06-27T10:00:02Z INFO profile research-ray loaded\n|false|",
+          "1|MATRIX_USER_ID=@coder-kai:id.example.dev\n|false|",
+          "2|model:\n  default: gpt-5\napprovals:\n  mode: manual\n|false|",
+          "3|# coder-kai session\nActive coding session for kai profile.\n|false|"
+        ],
+        "result": null,
+        "streamed": true
+      }
+    },
+    "hermes:research-ray": {
+      "acp": {
+        "argv": [
+          "hermes",
+          "-p",
+          "research-ray",
+          "acp",
+          "--accept-hooks"
+        ],
+        "dir": "$ROOT/hermes/.hermes/profiles/research-ray",
+        "env": null
+      },
+      "cleanup.plan": {
+        "result": {
+          "items": [],
+          "totalBytes": 0
+        },
+        "streamed": false
+      },
+      "config.observe": {
+        "result": {
+          "values": []
+        },
+        "streamed": false
+      },
+      "config.settings": {
+        "result": {
+          "settings": [
+            {
+              "id": "hermes.approvals.timeout",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "reconcilable",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.approvals.mode",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "reconcilable",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.approvals.command_allowlist",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "additive-only",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.plugins.enabled",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "additive-only",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.plugins.stream_reasoning_deltas",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "reconcilable",
+              "restartToTakeEffect": true
+            },
+            {
+              "id": "hermes.skills.external_dirs",
+              "harness": "hermes",
+              "scope": "profile",
+              "policy": "additive-only",
+              "restartToTakeEffect": true
+            }
+          ]
+        },
+        "streamed": false
+      },
+      "fs.list": {
+        "result": [
+          {
+            "name": "notes.txt",
+            "path": "notes.txt",
+            "type": "file",
+            "size": 59,
+            "modified": "<mtime>"
+          }
+        ],
+        "streamed": false
+      },
+      "logs.tail": {
+        "chunks": [
+          "0|2026-06-27T10:00:00Z INFO hermes gateway started\n2026-06-27T10:00:01Z INFO profile coder-kai loaded\n2026-06-27T10:00:02Z INFO profile research-ray loaded\n|false|",
+          "1|Research notes for ray profile.\nTopic: distributed systems\n|false|"
+        ],
+        "result": null,
+        "streamed": true
+      }
+    },
+    "openclaw": {
+      "acp": {
+        "error": "openclaw: the OpenClaw gateway isn't running on this node — start it before opening a session"
+      },
+      "cleanup.plan": {
+        "result": {
+          "items": [],
+          "totalBytes": 0
+        },
+        "streamed": false
+      },
+      "config.observe": {
+        "result": {
+          "values": []
+        },
+        "streamed": false
+      },
+      "config.settings": {
+        "result": {
+          "settings": [
+            {
+              "id": "openclaw.hooks.allowConversationAccess",
+              "harness": "openclaw",
+              "scope": "user",
+              "policy": "reconcilable",
+              "restartToTakeEffect": true
+            }
+          ]
+        },
+        "streamed": false
+      },
+      "fs.list": {
+        "result": [
+          {
+            "name": "agent-workspaces",
+            "path": "agent-workspaces",
+            "type": "dir",
+            "size": null,
+            "modified": null
+          }
+        ],
+        "streamed": false
+      },
+      "logs.tail": {
+        "chunks": [
+          "0|2026-06-27T00:00:01Z openclaw gateway started port=18789\n2026-06-27T00:00:02Z openclaw gateway ready\n|false|"
+        ],
+        "result": null,
+        "streamed": true
+      }
+    },
+    "openclaw:hanuman": {
+      "acp": {
+        "error": "openclaw: the OpenClaw gateway isn't running on this node — start it before opening a session"
+      },
+      "cleanup.plan": {
+        "result": {
+          "items": [],
+          "totalBytes": 0
+        },
+        "streamed": false
+      },
+      "config.observe": {
+        "result": {
+          "values": []
+        },
+        "streamed": false
+      },
+      "config.settings": {
+        "result": {
+          "settings": [
+            {
+              "id": "openclaw.hooks.allowConversationAccess",
+              "harness": "openclaw",
+              "scope": "user",
+              "policy": "reconcilable",
+              "restartToTakeEffect": true
+            }
+          ]
+        },
+        "streamed": false
+      },
+      "fs.list": {
+        "result": [
+          {
+            "name": "workspace.md",
+            "path": "workspace.md",
+            "type": "file",
+            "size": 74,
+            "modified": "<mtime>"
+          }
+        ],
+        "streamed": false
+      },
+      "logs.tail": {
+        "chunks": [
+          "0|2026-06-27T00:00:01Z openclaw gateway started port=18789\n2026-06-27T00:00:02Z openclaw gateway ready\n|false|"
+        ],
+        "result": null,
+        "streamed": true
+      }
+    },
+    "openclaw:kubera": {
+      "acp": {
+        "error": "openclaw: the OpenClaw gateway isn't running on this node — start it before opening a session"
+      },
+      "cleanup.plan": {
+        "result": {
+          "items": [],
+          "totalBytes": 0
+        },
+        "streamed": false
+      },
+      "config.observe": {
+        "result": {
+          "values": []
+        },
+        "streamed": false
+      },
+      "config.settings": {
+        "result": {
+          "settings": [
+            {
+              "id": "openclaw.hooks.allowConversationAccess",
+              "harness": "openclaw",
+              "scope": "user",
+              "policy": "reconcilable",
+              "restartToTakeEffect": true
+            }
+          ]
+        },
+        "streamed": false
+      },
+      "fs.list": {
+        "result": [
+          {
+            "name": "workspace.md",
+            "path": "workspace.md",
+            "type": "file",
+            "size": 72,
+            "modified": "<mtime>"
+          }
+        ],
+        "streamed": false
+      },
+      "logs.tail": {
+        "chunks": [
+          "0|2026-06-27T00:00:01Z openclaw gateway started port=18789\n2026-06-27T00:00:02Z openclaw gateway ready\n|false|"
+        ],
+        "result": null,
+        "streamed": true
+      }
+    },
+    "opencode:<hash of $ROOT/work/ocproj>": {
+      "acp": {
+        "argv": [
+          "opencode",
+          "acp"
+        ],
+        "dir": "$ROOT/work/ocproj",
+        "env": null
+      },
+      "cleanup.plan": {
+        "result": {
+          "items": [],
+          "totalBytes": 0
+        },
+        "streamed": false
+      },
+      "config.observe": {
+        "error": "config.observe: opencode does not manage configuration",
+        "streamed": false
+      },
+      "config.settings": {
+        "error": "config.settings: opencode does not manage configuration",
+        "streamed": false
+      },
+      "fs.list": {
+        "result": [
+          {
+            "name": "app.ts",
+            "path": "app.ts",
+            "type": "file",
+            "size": 10,
+            "modified": "<mtime>"
+          }
+        ],
+        "streamed": false
+      },
+      "logs.tail": {
+        "chunks": [
+          "0|oc 1\noc 2\n|false|"
+        ],
+        "result": null,
+        "streamed": true
+      }
+    },
+    "pi:<hash of $ROOT/work/idea-bank>": {
+      "acp": {
+        "argv": [
+          "$ROOT/bin/pi-acp"
+        ],
+        "dir": "$ROOT/work/idea-bank",
+        "env": [
+          "PATH=$ROOT/bin:$ROOT/bin",
+          "PI_ACP_PI_COMMAND=$ROOT/bin/pi"
+        ]
+      },
+      "cleanup.plan": {
+        "result": {
+          "items": [],
+          "totalBytes": 0
+        },
+        "streamed": false
+      },
+      "config.observe": {
+        "error": "config.observe: pi does not manage configuration",
+        "streamed": false
+      },
+      "config.settings": {
+        "error": "config.settings: pi does not manage configuration",
+        "streamed": false
+      },
+      "fs.list": {
+        "result": [
+          {
+            "name": "notes.md",
+            "path": "notes.md",
+            "type": "file",
+            "size": 3,
+            "modified": "<mtime>"
+          }
+        ],
+        "streamed": false
+      },
+      "logs.tail": {
+        "result": null,
+        "streamed": true
+      }
+    }
+  },
+  "unknownHarness": {
+    "error": "descriptor: no harness registered for \"nope\" (key=\"nope:x\")",
+    "streamed": false
+  },
+  "unknownVerb": {
+    "error": "descriptor: unknown verb \"no.such.verb\"",
+    "streamed": false
+  }
+}
