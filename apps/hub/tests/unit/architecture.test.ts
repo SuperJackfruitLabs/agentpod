@@ -52,7 +52,7 @@ const TREES: Tree[] = [
     root: "apps/console/src",
     aliases: { $lib: "lib" },
     largestCycle: 3,
-    oversize: { "routes/nodes/[id]/stations/[stationId]/+page.svelte": 1009 },
+    oversize: {},
   },
   { root: "packages/contract/src", largestCycle: 0, oversize: {} },
   { root: "packages/agents/src", largestCycle: 0, oversize: {} },
