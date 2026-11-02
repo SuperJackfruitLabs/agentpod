@@ -269,3 +269,28 @@ func TestSkillManagementMissingWorkspaceIsNotVerifiedAbsence(t *testing.T) {
 		t.Fatal("missing station workspace treated as verified empty profile")
 	}
 }
+
+// A plan whose install store cannot be opened answers with that error. The
+// artifact check used to declare its own `err` inside the plan branch, so the
+// store's error landed in that inner variable and was dropped: the handler went
+// on with a nil store (found by ineffassign).
+func TestSkillPlanReportsAnInstallStoreThatCannotOpen(t *testing.T) {
+	archive, err := os.ReadFile("../skills/testdata/export-codex.tar.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := fmt.Sprintf("%x", sha256.Sum256(archive))
+	h := NewSkillManagementHandler(changesetPassthrough(), SkillManagementDeps{
+		NodeID: "fixture-node",
+		// Not absolute, so OpenInstallStore refuses the binding after the
+		// artifact itself has been accepted.
+		Resolve: func(ctx context.Context, key string) (string, string, error) {
+			return "relative-workspace", "codex", ctx.Err()
+		},
+		Fetch: func(context.Context, SkillArtifactRequest) ([]byte, error) { return archive, nil },
+	})
+	_, err = skillCall(t, h, "skills.plan", map[string]string{"key": "codex:fixture", "profile": "fixture", "operationId": strings.Repeat("a", 32), "stationId": "station-fixture", "archiveSHA256": pin})
+	if err == nil || !strings.Contains(err.Error(), "invalid installation binding") {
+		t.Fatalf("plan with an unopenable store: err = %v", err)
+	}
+}
