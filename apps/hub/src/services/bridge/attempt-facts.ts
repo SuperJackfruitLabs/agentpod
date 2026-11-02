@@ -3,9 +3,9 @@
  * attempt opens (C3). It is never recomputed here. A missing value is "unknown", never empty.
  */
 import { eq } from "drizzle-orm";
-import { db } from "../db/drizzle";
-import { acpRuns } from "../db/schema/acp";
-import { stations } from "../db/schema/stations";
+import { db } from "../../db/drizzle";
+import { acpRuns } from "../../db/schema/acp";
+import { stations } from "../../db/schema/stations";
 
 export async function attemptSpanFacts(attemptId: string): Promise<{ fingerprintDigest: string; harnessName: string }> {
   const [row] = await db
