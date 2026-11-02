@@ -105,7 +105,7 @@ export function orgPlaneConfigErrors(): OrgPlaneConfigError[] {
 }
 
 /**
- * The plane's settings. Boot validation (`utils/validate-config.ts`) refuses to start a hub
+ * The plane's settings. Boot validation (`validate-config.ts`) refuses to start a hub
  * without them, so a throw here means a code path ran before validation or in a test that did not
  * set them — never a mode to handle.
  */

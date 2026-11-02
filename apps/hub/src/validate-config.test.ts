@@ -13,7 +13,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { collectConfigErrors } from "./validate-config";
-import { config } from "../config";
+import { config } from "./config";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -183,7 +183,7 @@ describe("validateConfig — modal", () => {
 
   /** Real config, loaded fresh under `overrides` (a `null` value unsets). */
   const collectInChild = (overrides: Record<string, string | null>) => {
-    const hubRoot = join(import.meta.dir, "..", "..");
+    const hubRoot = join(import.meta.dir, "..");
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) env[key] = value;
@@ -244,7 +244,7 @@ describe("validateConfig — modal", () => {
 
     const script = `
       const { collectConfigErrors } = await import(${JSON.stringify(
-        join(hubRoot, "src", "utils", "validate-config.ts")
+        join(hubRoot, "src", "validate-config.ts")
       )});
       const { config } = await import(${JSON.stringify(
         join(hubRoot, "src", "config.ts")
@@ -731,7 +731,7 @@ describe("validateConfig — ORG_PLANE_*", () => {
   });
 
   it("an environment with none of them set refuses to boot, naming all five (P3 Task 17)", () => {
-    const hubRoot = join(import.meta.dir, "..", "..");
+    const hubRoot = join(import.meta.dir, "..");
     const env: Record<string, string> = { PATH: process.env.PATH ?? "", NODE_ENV: "development" };
     const proc = Bun.spawnSync(
       [

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { config } from "../../src/config";
-import { collectConfigErrors } from "../../src/utils/validate-config";
+import { collectConfigErrors } from "../../src/validate-config";
 
 /**
  * Issue #321. The production rule that refuses a boot on the development

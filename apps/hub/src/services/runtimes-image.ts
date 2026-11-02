@@ -2,7 +2,7 @@
  * Which container image a harness runs on a given provider.
  *
  * Lifted out of runtimes.ts so it can be imported by BOOT-TIME code
- * (utils/validate-config.ts) without dragging in the database layer: the whole
+ * (validate-config.ts) without dragging in the database layer: the whole
  * point of the boot check is to run before anything else, and a config
  * validator that first opens a Postgres pool is a validator that cannot report
  * a bad config on a hub whose database is down. runtimes.ts re-exports

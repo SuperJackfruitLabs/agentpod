@@ -18,7 +18,7 @@ import {
   parseHubHomeOrg,
   setHubHomeOrgForTests,
 } from "../../src/auth/org-plane/hub-home-org";
-import { collectConfigErrors } from "../../src/utils/validate-config";
+import { collectConfigErrors } from "../../src/validate-config";
 import { config } from "../../src/config";
 
 /**

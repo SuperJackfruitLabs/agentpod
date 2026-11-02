@@ -6,7 +6,7 @@ import { newPrincipalId } from "../helpers/fake-plane";
 import { db } from "../../src/db/drizzle";
 import { hubOperators } from "../../src/db/schema/operators";
 import { HubOperatorsConfigError, parseHubOperators, reconcileHubOperators } from "../../src/services/hub-operators";
-import { collectConfigErrors } from "../../src/utils/validate-config";
+import { collectConfigErrors } from "../../src/validate-config";
 
 /**
  * Workspace authority spec, W3: the operator seat is set from configuration, never from SQL.

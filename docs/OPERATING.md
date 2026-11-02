@@ -716,7 +716,7 @@ docker run --rm --platform linux/amd64 \
 
 #### When a Modal runtime does not come up
 
-- **Hub exits at startup naming a `MODAL_*` variable** — working as designed. Set the variable it names; the check is in `apps/hub/src/utils/validate-config.ts`.
+- **Hub exits at startup naming a `MODAL_*` variable** — working as designed. Set the variable it names; the check is in `apps/hub/src/validate-config.ts`.
 - **Provision fails with "not a registry reference Modal can pull"** — the resolved image had no registry host. This used to be the OpenCode/Pi case, and the hub now refuses to boot rather than letting a user find it; reaching it today means an image variable holds a registry-shaped tag that Modal still cannot pull (a private repository, or a typo in the host).
 - **Stuck in `provisioning`, then `error` after two minutes** — the sandbox booted but never enrolled. Read the sandbox's logs in the Modal dashboard. The usual causes are an image without python, an arm64 image, and a `PROVISIONING_HUB_URL` the sandbox cannot reach.
 - **`[modal] WARNING: /workspace does not look like a mounted Volume`** in the sandbox log — work written there will be lost at the next rotation. Do not use that station.
