@@ -64,3 +64,6 @@ docs/reference/agentic-space/
 
 # Console screenshot harness output
 apps/console/e2e/shots/
+
+# Pinned lint binaries (scripts/lint-go.mjs)
+/.bin/
