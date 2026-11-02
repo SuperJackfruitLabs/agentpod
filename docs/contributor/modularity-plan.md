@@ -17,7 +17,7 @@ split only behind characterization tests committed first, against the old code.
 | Folder cycles in `services/` | 1, across 4 entries (`acp-sessions`, `bridge`, `matrix-as`, `org-plane`) | none (Phase 2) |
 | Module rules in `services/` | none | one entry point per module; modules import down 10 tiers; no back-edge (Phase 2) |
 | Largest hub file cycle | 3 (`forge-api/{forgejo,github,providers}.ts`) | 3 |
-| Hub files over 1,000 lines | 7 (largest `acp-sessions.ts` 3,514) | 7 (`matrix-as/gates.ts` 1,168 → 1,139) |
+| Hub files over 1,000 lines | 7 (largest `acp-sessions.ts` 3,514) | 6 (`matrix-as/gates.ts` 1,168 → 1,139; `acp/sessions.ts` 3,514 → 21 files under `acp/`, largest `turn.ts` 574, Phase 3) |
 
 The rows for Phases 3–8 are added as each one lands.
 
@@ -93,7 +93,7 @@ All in one PR, one or more commits per phase, each commit message starting `Phas
 | Phase | What | Done when |
 |---|---|---|
 | 2 | **Hub service modules.** `services/` into feature folders, each with an `index.ts` of named re-exports computed from what other modules import; every import from outside a module through its index; `SERVICE_LAYERS` and the entry-point rule in the architecture test; the 4-entry folder cycle broken by moving Matrix naming and the attachment helpers down to `matrix`, and the bridge's wire types into `bridge/deliveries.ts`. | **Done.** No folder cycle in `services/`; the four module checks green and each seen to fail on a planted violation |
-| 3 | **`acp/sessions.ts`** (3,514 lines) splits by concern (session store and rows, the wire and its streams, turns and permissions, Salaam liveness, boot reconciliation) behind characterization tests: session create/resume/end, the event log, permission answers, busy and idle, boot reconcile. | No file in `acp/` over 1,000 lines; `oversize` entry removed |
+| 3 | **`acp/sessions.ts`** (3,514 lines) splits by concern (session store and rows, the wire and its streams, turns and permissions, Salaam liveness, boot reconciliation) behind characterization tests: session create/resume/end, the event log, permission answers, busy and idle, boot reconcile. | **Done.** 21 files, none over 600 lines; `sessions.ts` re-exports and registers the node-online hook; `oversize` entry removed; pinned first by `sessions.characterization.test.ts` |
 | 4 | **The other hub files over 1,000 lines**: `forge-api/station-forge-api.ts` (2,082), `bridge/salaam-dispatch.ts` (1,583), `bridge/dispatch.ts` (1,338), `runtimes/runtimes.ts` (1,317), `matrix-as/gates.ts` (1,139), `matrix-as/outbound.ts` (1,147). Each behind its own characterization tests. | No hub file over 1,000 lines; the hub's `oversize` record is empty |
 | 5 | **Go node agent.** `internal/descriptor` into cohesive packages; the logic in `cmd/agentpod-fleet` (5,103) and `cmd/agentpod-node` (4,101) into `internal/` packages; `forgeapi/instances.go` (1,164) and `cmd/agentpod-fleet/reference.go` (1,340) split. | `oversizeFiles` empty; `oversizePackages` has no `cmd/` entry and no `internal/descriptor` entry; `go vet` and `go test -race ./...` green |
 | 6 | **Console.** The station page (1,009 lines) splits by panel into components; route pages compose and hold no domain logic. | Console `oversize` empty; `pnpm check`, `pnpm test`, `pnpm build` green |

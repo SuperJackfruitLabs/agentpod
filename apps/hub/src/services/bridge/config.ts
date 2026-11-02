@@ -50,7 +50,7 @@ export const BRIDGE_SOURCE = "superpipeline";
  * upgraded into `ask` would start parking cards on questions nobody is awake to answer.
  *
  * **What the mode actually controls is EDITS.** The hub's policy
- * (`acp-sessions.ts` `handlePermissionRequest`) auto-allows `kind === "edit"` under
+ * (`acp/permissions.ts` `handlePermissionRequest`) auto-allows `kind === "edit"` under
  * `accept-edits` and parks everything else for a human — which is right, and which has never
  * once been reached for a command. Across every ACP session this hub has run, 254 tool calls of
  * kind `execute` produced ZERO permission requests; all 27 ever seen were edits. The harness

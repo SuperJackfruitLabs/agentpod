@@ -2,7 +2,7 @@
  * The agent's answer, arriving in the room.
  *
  * A second subscriber to the same in-process fan-out the console's WebSocket
- * already uses (`acp-sessions.ts`). What it must not do is forward that stream
+ * already uses (`acp/events.ts`). What it must not do is forward that stream
  * verbatim: a Matrix event per token would buzz a phone forty times for one
  * answer, hit the homeserver's rate limits, and make a shared room unreadable.
  *

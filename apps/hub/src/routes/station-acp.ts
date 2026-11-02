@@ -67,7 +67,7 @@ import { isOrgPlaneUnavailable, ORG_PLANE_UNAVAILABLE_BODY } from "../auth/calle
 
 /**
  * Maps createSession error messages to HTTP statuses. The service throws
- * plain Errors with stable, user-facing messages (see acp-sessions.ts);
+ * plain Errors with stable, user-facing messages (see services/acp/open.ts);
  * anything unrecognised is an upstream failure (node offline, acp.open
  * failed, agent handshake broke) → "node", answered by stationFailure (424/503, never 502).
  */
