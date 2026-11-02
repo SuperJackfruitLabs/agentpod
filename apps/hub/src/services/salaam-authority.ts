@@ -10,7 +10,7 @@ import { acpSessions, type StoredSalaamExecution } from "../db/schema/acp";
 import { stations } from "../db/schema/stations";
 import { tenants } from "../db/schema/tenants";
 import { bridgeDispatches } from "../db/schema/bridge";
-import { orgPlaneClient } from "./org-plane/client";
+import { orgPlaneClient } from "../auth/org-plane/client";
 import { approvalRulesFor } from "./agent-approval-rules";
 import * as broker from "./broker";
 

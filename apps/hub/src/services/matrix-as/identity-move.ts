@@ -67,7 +67,7 @@ import { matrixCredentialAuthorizations } from "../../db/schema/matrix-credentia
 import { createLogger } from "../../utils/logger";
 import { bridgeUserId } from "./names";
 import { roomForStation, unboundRoomsForStation } from "./station-room";
-import { principalHandle } from "../principals";
+import { principalHandle } from "../../auth/org-plane/principals";
 import { onStationMatrixIdReported } from "./hooks";
 
 const log = createLogger("identity-move");

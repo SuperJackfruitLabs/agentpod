@@ -2,14 +2,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { setGrant } from "../../src/services/grants";
+import { setGrant } from "../../src/auth/org-plane/grants";
 import { createPrincipal, forgetPrincipals, linkMatrixId, clearGrant } from "../helpers/principals";
 import { handleRoomMessage } from "../../src/services/matrix-as/inbound";
 import { SESSION_BUSY_MESSAGE } from "../../src/services/acp-sessions";
 import { pollUntil } from "../helpers/wait";
 import { setOrgPlaneForTests, TEST_PLANE } from "../../src/auth/org-plane/config";
-import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../../src/services/org-plane/directory";
-import { OrgPlaneError } from "../../src/services/org-plane/client";
+import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../../src/auth/org-plane/directory";
+import { OrgPlaneError } from "../../src/auth/org-plane/client";
 import {
   clearPendingPermission,
   notePendingPermission,

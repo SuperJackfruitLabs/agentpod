@@ -26,7 +26,7 @@ import { isGrantReachDenied } from "../services/control-pair";
 import { bridgeUserId, bridgeLocalpart } from "../services/matrix-as/names";
 import { roomAliasForStation } from "../services/matrix-as/station-room";
 import { isMatrixUserInUse } from "../services/matrix-as/client";
-import { principalHandle } from "../services/principals";
+import { principalHandle } from "../auth/org-plane/principals";
 import { mintCredentialAuthorization, UnknownStationError } from "../services/matrix-credential";
 import { isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix-as/names";
 import {

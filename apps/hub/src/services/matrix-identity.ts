@@ -24,7 +24,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
-import { principalDirectory } from "./org-plane/directory";
+import { principalDirectory } from "../auth/org-plane/directory";
 
 export type MatrixIdentity =
   | { kind: "principal"; principalId: string }

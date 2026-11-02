@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { setGrant } from "../../src/services/grants";
+import { setGrant } from "../../src/auth/org-plane/grants";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { stationCleanupRoutes } from "../../src/routes/station-cleanup";
 import { stationChangesetRoutes } from "../../src/routes/station-changeset";

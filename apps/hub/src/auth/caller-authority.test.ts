@@ -3,9 +3,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { setOrgPlaneForTests, TEST_PLANE } from "./org-plane/config";
-import { createPrincipalDirectory, setPrincipalDirectoryForTests, type PrincipalDirectory } from "../services/org-plane/directory";
-import { OrgPlaneError } from "../services/org-plane/client";
-import { setGrant } from "../services/grants";
+import { createPrincipalDirectory, setPrincipalDirectoryForTests, type PrincipalDirectory } from "./org-plane/directory";
+import { OrgPlaneError } from "./org-plane/client";
+import { setGrant } from "./org-plane/grants";
 import {
   authorityFromClaims,
   callerGrant,

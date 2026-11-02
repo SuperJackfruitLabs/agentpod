@@ -16,9 +16,9 @@
  */
 import type { OrgPlaneTokenClaims } from "@agentpod/contract";
 import type { PrincipalKind } from "../db/schema/organization";
-import { OrgPlaneError } from "../services/org-plane/client";
-import { getGrant, type Grant } from "../services/grants";
-import { principalById } from "../services/principals";
+import { OrgPlaneError } from "./org-plane/client";
+import { getGrant, type Grant } from "./org-plane/grants";
+import { principalById } from "./org-plane/principals";
 
 /** What a plane token says its bearer may do. Set by the auth middleware for a plane token. */
 export interface TokenAuthority {

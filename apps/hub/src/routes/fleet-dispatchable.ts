@@ -20,7 +20,7 @@
 import { Hono } from "hono";
 
 import { verifyPlaneBearer } from "../auth/hub-token";
-import { listPrincipals as defaultListPrincipals } from "../services/principals";
+import { listPrincipals as defaultListPrincipals } from "../auth/org-plane/principals";
 
 /**
  * What the route needs from the rest of the hub. Injectable so a test can state a principal list

@@ -6,7 +6,7 @@ import { rawSql } from "../../src/db/drizzle";
 import { adminPrincipalsRouter } from "../../src/routes/admin-principals";
 import { workspaceAdminMiddleware as adminMiddleware } from "../../src/auth/workspace-authority";
 import { isUserAdmin } from "../../src/models/admin-users";
-import { principalById } from "../../src/services/principals";
+import { principalById } from "../../src/auth/org-plane/principals";
 import { createPrincipal, forgetPrincipals, restorePrincipal, suspendPrincipal } from "../helpers/principals";
 
 /**

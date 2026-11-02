@@ -5,7 +5,7 @@ import { agentApprovalRules as rules, type AgentApprovalRule } from "../db/schem
 import { stations } from "../db/schema/stations";
 import { tenants } from "../db/schema/tenants";
 import { recordAudit } from "./audit";
-import { orgPlaneClient } from "./org-plane/client";
+import { orgPlaneClient } from "../auth/org-plane/client";
 
 export const APPROVAL_RULE_SCOPES = ["workspace-write"] as const;
 export type ApprovalRuleScope = (typeof APPROVAL_RULE_SCOPES)[number];

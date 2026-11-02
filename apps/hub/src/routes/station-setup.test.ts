@@ -26,13 +26,13 @@ import {
   type OrgPlaneClient,
   type PlaneGrant,
   type PlanePrincipal,
-} from "../services/org-plane/client";
+} from "../auth/org-plane/client";
 import {
   setPrincipalDirectoryForTests,
   type PrincipalDirectory,
-} from "../services/org-plane/directory";
+} from "../auth/org-plane/directory";
 import { hubOperators } from "../db/schema/operators";
-import { setGrant } from "../services/grants";
+import { setGrant } from "../auth/org-plane/grants";
 import { fakePlane as runPlane } from "../../tests/helpers/fake-plane";
 import { forgetPrincipals } from "../../tests/helpers/principals";
 const run = crypto.randomUUID().slice(0, 8);

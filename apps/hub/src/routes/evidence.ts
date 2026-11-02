@@ -35,8 +35,8 @@ import { db } from "../db/drizzle";
 import { acpRuns } from "../db/schema/acp";
 import { bridgeDispatches } from "../db/schema/bridge";
 import { legacyUserPrincipals } from "../db/schema/legacy-user-principals";
-import { principalDirectory } from "../services/org-plane/directory";
-import { OrgPlaneError, type PlanePrincipal } from "../services/org-plane/client";
+import { principalDirectory } from "../auth/org-plane/directory";
+import { OrgPlaneError, type PlanePrincipal } from "../auth/org-plane/client";
 import { stations } from "../db/schema/stations";
 import { tenantScope } from "../db/tenant-scope";
 import {
@@ -56,7 +56,7 @@ import {
   type WireItem,
 } from "../services/evidence/transcript";
 import { recordAudit } from "../services/audit";
-import { EVIDENCE_READ, TRANSCRIPTS_READ, type GrantScope } from "../services/grants";
+import { EVIDENCE_READ, TRANSCRIPTS_READ, type GrantScope } from "../auth/org-plane/grants";
 import { contentRedactor } from "../services/redact-content";
 
 export interface EvidenceDeps {

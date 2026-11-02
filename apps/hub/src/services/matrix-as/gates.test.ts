@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { OrgPlaneError } from "../org-plane/client";
+import { OrgPlaneError } from "../../auth/org-plane/client";
 
 import {
   GATE_EVENT_TYPE,

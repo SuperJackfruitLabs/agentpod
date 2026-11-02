@@ -37,7 +37,7 @@ import { assertPrincipal } from "../../auth/org-plane/assertion";
 import { resolveMatrixId } from "../matrix-identity";
 import { boardRoomFor } from "./board-room";
 import { answerElicitationAtSuperpipeline, claimElicitationOutcome, handleElicitationAnswer } from "./elicitations";
-import { principalById, principalForUser, principalHandle } from "../principals";
+import { principalById, principalForUser, principalHandle } from "../../auth/org-plane/principals";
 import { attachRoomToSession, forgetTurnTrigger, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission, sessionIsBusy, whenIdle } from "../acp-sessions";

@@ -14,8 +14,8 @@
  * skipped: nothing is in production, so the destination is built directly.
  */
 
-import { principalDirectory } from "./org-plane/directory";
-import { orgPlaneClient } from "./org-plane/client";
+import { principalDirectory } from "./directory";
+import { orgPlaneClient } from "./client";
 
 /**
  * Every scope a grant may hold. A writer refuses anything else; a reader ignores it.

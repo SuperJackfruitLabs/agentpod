@@ -24,7 +24,7 @@ import type { AuthUser } from "../auth/middleware";
 import { db } from "../db/drizzle";
 import { skillOperations } from "../db/schema/skills";
 import { stations } from "../db/schema/stations";
-import { principalForUser } from "../services/principals";
+import { principalForUser } from "../auth/org-plane/principals";
 import { verifyNodeCredential } from "../services/enrollment";
 import { requireGrantReach } from "../services/grant-reach";
 import { isOrgPlaneUnavailable, orgPlaneOutageBody } from "../auth/caller-authority";

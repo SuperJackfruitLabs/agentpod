@@ -11,7 +11,7 @@
  */
 
 import { Hono } from "hono";
-import { listPrincipals } from "../services/principals";
+import { listPrincipals } from "../auth/org-plane/principals";
 
 export const adminPrincipalsRouter = new Hono().get("/", async (c) => {
   return c.json({ principals: await listPrincipals() });

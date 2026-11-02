@@ -9,7 +9,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { hubOperators } from "../db/schema/operators";
-import { principalDirectory } from "../services/org-plane/directory";
+import { principalDirectory } from "../auth/org-plane/directory";
 
 export interface AdminStats {
   totalUsers: number;

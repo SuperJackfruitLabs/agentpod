@@ -16,7 +16,7 @@ import { and, eq } from "drizzle-orm";
 import { Capability } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema";
-import { grantAllowsPrincipal } from "./grants";
+import { grantAllowsPrincipal } from "../auth/org-plane/grants";
 import { callerGrant, callerPrincipal, type CallerRef } from "../auth/caller-authority";
 import { isWorkspaceAdminUser } from "../auth/workspace-authority";
 import type { AuthUser } from "../auth/middleware";

@@ -2,8 +2,8 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || "postgres://agentpod:agen
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
 import { setOrgPlaneForTests, TEST_PLANE } from "../../auth/org-plane/config";
-import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "./directory";
-import { OrgPlaneError, type PlanePrincipal } from "./client";
+import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../../auth/org-plane/directory";
+import { OrgPlaneError, type PlanePrincipal } from "../../auth/org-plane/client";
 import {
   createPrincipal,
   humanPrincipalIdForUser,
@@ -12,8 +12,8 @@ import {
   principalForUser,
   principalHandle,
   SUSPENDED_AT_UNKNOWN,
-} from "../principals";
-import { getGrant, setGrant } from "../grants";
+} from "../../auth/org-plane/principals";
+import { getGrant, setGrant } from "../../auth/org-plane/grants";
 import { resolveMatrixId } from "../matrix-identity";
 import { matrixIdForPrincipal } from "../principal-matrix-id";
 import { rawSql } from "../../db/drizzle";
@@ -91,7 +91,7 @@ describe("principal reads from the plane", () => {
     plane();
     await expect(createPrincipal({ kind: "human", handle: "nope" })).rejects.toThrow(/org plane/);
     // setGrant goes to the plane (Task 11 relies on it).
-    const { setOrgPlaneClientForTests } = await import("./client");
+    const { setOrgPlaneClientForTests } = await import("../../auth/org-plane/client");
     const put: unknown[] = [];
     restores.push(
       setOrgPlaneClientForTests({ putGrant: async (id: string, g: unknown) => void put.push({ id, g }) } as never),
@@ -102,7 +102,7 @@ describe("principal reads from the plane", () => {
 
   test("setGrant with no scopes keeps the plane's current scopes (PUT replaces)", async () => {
     plane(dir({ principal: async (id) => (id === HUMAN.id ? { ...HUMAN, grant: { ...HUMAN.grant!, scopes: ["evidence:read"] } } : null) }));
-    const { setOrgPlaneClientForTests } = await import("./client");
+    const { setOrgPlaneClientForTests } = await import("../../auth/org-plane/client");
     const put: unknown[] = [];
     restores.push(setOrgPlaneClientForTests({ putGrant: async (_id: string, g: unknown) => void put.push(g) } as never));
     await setGrant(HUMAN.id, { mayDispatch: [], mayGrantReach: true });

@@ -20,7 +20,7 @@ import {
   principalHandle,
   SUSPENDED_AT_UNKNOWN,
 } from "./principals";
-import { fakePlane } from "../../tests/helpers/fake-plane";
+import { fakePlane } from "../../../tests/helpers/fake-plane";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 

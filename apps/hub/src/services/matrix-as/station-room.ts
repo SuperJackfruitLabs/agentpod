@@ -35,7 +35,7 @@ import { matrixRooms } from "../../db/schema/matrix";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { roomAliasFor } from "./names";
-import { principalHandle } from "../principals";
+import { principalHandle } from "../../auth/org-plane/principals";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("station-room");

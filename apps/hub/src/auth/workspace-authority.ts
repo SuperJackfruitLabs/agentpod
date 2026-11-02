@@ -22,7 +22,7 @@ import { createMiddleware } from "hono/factory";
 import type { WorkspaceRole } from "@agentpod/contract";
 
 import { isUserAdmin } from "../models/admin-users";
-import { hubHomeOrg } from "../services/hub-home-org";
+import { hubHomeOrg } from "./org-plane/hub-home-org";
 import { createLogger } from "../utils/logger";
 import type { AuthUser } from "./middleware";
 
@@ -69,7 +69,7 @@ export function requireWorkspaceAdmin(c: Context): Response | null {
 
 /**
  * Is the caller a hub operator? The static API_TOKEN always is. A person is when they are an owner
- * or admin of the hub's home workspace (the org of its service credential, services/hub-home-org.ts;
+ * or admin of the hub's home workspace (the org of its service credential, auth/org-plane/hub-home-org.ts;
  * nobody while that is unknown), or hold a seat in `hub_operators` (the optional extra list).
  */
 export async function isHubOperator(c: Context): Promise<boolean> {

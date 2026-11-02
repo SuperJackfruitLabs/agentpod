@@ -10,7 +10,7 @@
  * (`CONTROL_PAIR_GRANTS`) while the Organization plane could not answer, which
  * was the interim the decision blessed *provided the config took the shape of
  * the eventual claim*. It did, so moving to `principal_grants` and issuing the
- * claim was a data move — see `services/grants.ts`, which now owns the
+ * claim was a data move — see `auth/org-plane/grants.ts`, which now owns the
  * authority, and `auth/jwt-claims.ts`, which puts it in the token.
  *
  * What is left here is the part that is neither storage nor policy: whether the

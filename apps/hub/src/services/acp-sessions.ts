@@ -79,7 +79,7 @@ import type {
 } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { ControlPairDenied, isControlPairEnforced } from "./control-pair";
-import { grantAllowsPrincipal } from "./grants";
+import { grantAllowsPrincipal } from "../auth/org-plane/grants";
 import {
   callerGrant,
   callerPrincipal,
@@ -108,7 +108,7 @@ import {
   inspectSalaamExecution,
   type SalaamStationHolder,
 } from "./salaam-authority";
-import { principalDirectory } from "./org-plane/directory";
+import { principalDirectory } from "../auth/org-plane/directory";
 import { getStation } from "./station-registry";
 import { gateCapability } from "../routes/station-writes";
 import { connectionManager } from "./connection-manager";

@@ -10,7 +10,7 @@ import { connectionString, initDatabase } from './db/drizzle.ts';
 import { holdHubRunningLock } from './db/hub-running-lock.ts';
 import { resetOrphanedOnlineNodes } from './services/node-registry.ts';
 import { reconcileHubOperators } from './services/hub-operators.ts';
-import { learnHubHomeOrg } from './services/hub-home-org.ts';
+import { learnHubHomeOrg } from './auth/org-plane/hub-home-org.ts';
 import { authMiddleware } from './auth/middleware.ts';
 import { orgPlaneOutageBody } from './auth/caller-authority.ts';
 // A human at a terminal exchanging a device credential for a short-lived token

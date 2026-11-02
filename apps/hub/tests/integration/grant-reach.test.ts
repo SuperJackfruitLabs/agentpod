@@ -3,7 +3,7 @@ import { Capability } from "@agentpod/contract";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { setGrant } from "../../src/services/grants";
+import { setGrant } from "../../src/auth/org-plane/grants";
 import { createPrincipal, forgetPrincipals, clearGrant } from "../helpers/principals";
 import {
   REACH_BEARING,

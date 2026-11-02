@@ -18,7 +18,7 @@ import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
 import { localpartFor, bridgeUserId, bridgeLocalpart } from "./names";
-import { principalHandle } from "../principals";
+import { principalHandle } from "../../auth/org-plane/principals";
 
 export interface BridgedStation {
   stationId: string;

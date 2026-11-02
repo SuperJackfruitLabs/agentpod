@@ -41,7 +41,7 @@ import { createPrincipal } from "../../tests/helpers/principals";
 import { fakePlane } from "../../tests/helpers/fake-plane";
 import { createStationTokenRoutes, stationAudiences, stationTokenRoutes } from "./station-token";
 import { TEST_PLANE } from "../auth/org-plane/config";
-import { OrgPlaneError } from "../services/org-plane/client";
+import { OrgPlaneError } from "../auth/org-plane/client";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const TEST_USER = `test-user-station-token-${RUN}`;

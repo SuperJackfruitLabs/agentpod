@@ -25,7 +25,7 @@ import {
   type ForgeConfig,
   type ForgeUser,
 } from "./forge";
-import { principalNames } from "./principals";
+import { principalNames } from "../auth/org-plane/principals";
 
 const log = createLogger("station-git-identity");
 

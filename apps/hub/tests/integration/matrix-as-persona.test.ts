@@ -3,7 +3,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
-import { createPrincipal } from "../../src/services/principals";
+import { createPrincipal } from "../../src/auth/org-plane/principals";
 import { provisionStation } from "../../src/services/matrix-as/provision";
 
 /**

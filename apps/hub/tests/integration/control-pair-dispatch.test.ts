@@ -7,7 +7,7 @@ import { adoptStations, listAdopted } from "../../src/services/station-registry"
 import { Hono } from "hono";
 import { createSession } from "../../src/services/acp-sessions";
 import { stationAcpRoutes } from "../../src/routes/station-acp";
-import { setGrant } from "../../src/services/grants";
+import { setGrant } from "../../src/auth/org-plane/grants";
 import { createPrincipal, forgetPrincipals, clearGrant } from "../helpers/principals";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 

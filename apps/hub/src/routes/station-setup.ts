@@ -15,15 +15,15 @@ import {
 } from "../services/matrix-as/hooks";
 import { bridgeUserId } from "../services/matrix-as/names";
 import { roomForStation } from "../services/matrix-as/station-room";
-import { OrgPlaneError } from "../services/org-plane/client";
-import { principalDirectory } from "../services/org-plane/directory";
+import { OrgPlaneError } from "../auth/org-plane/client";
+import { principalDirectory } from "../auth/org-plane/directory";
 import {
   abandonPlaneAgent,
   checkPlaneAgent,
   createPlaneAgent,
   grantDispatchTo,
 } from "../services/org-plane/agent-placement";
-import { humanPrincipalIdForUser, principalHandle } from "../services/principals";
+import { humanPrincipalIdForUser, principalHandle } from "../auth/org-plane/principals";
 import { createLogger } from "../utils/logger";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 

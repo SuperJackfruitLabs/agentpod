@@ -10,7 +10,7 @@ import { resolveDockerDaemon } from "../services/provisioner/docker-daemon";
 import { loadBridgeConfig } from "../services/bridge/config";
 import { loadOperatorRules } from "../services/redact-content";
 import { HubOperatorsConfigError, parseHubOperators } from "../services/hub-operators-config";
-import { HubHomeOrgConfigError, parseHubHomeOrg } from "../services/hub-home-org";
+import { HubHomeOrgConfigError, parseHubHomeOrg } from "../auth/org-plane/hub-home-org";
 import { orgPlaneConfigErrors, type OrgPlaneConfigError } from "../auth/org-plane/config";
 
 export interface ValidationError {
@@ -465,7 +465,7 @@ export function collectConfigErrors(
     errors.push({ field: "HUB_OPERATORS", message: e.message });
   }
 
-  // A malformed HUB_HOME_ORG pin refuses the boot (services/hub-home-org.ts).
+  // A malformed HUB_HOME_ORG pin refuses the boot (auth/org-plane/hub-home-org.ts).
   try {
     parseHubHomeOrg(hubHomeOrgPin);
   } catch (e) {
