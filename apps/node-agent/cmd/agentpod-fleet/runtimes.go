@@ -39,7 +39,7 @@ func fleetRuntimes(args []string) {
 	case "create":
 		fs := flag.NewFlagSet("fleet runtimes create", flag.ExitOnError)
 		file := fs.String("file", "", "provision request, or - for stdin")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		if *file == "" {
 			fmt.Fprintf(os.Stderr, "create requires --file PATH or --file -\n\n%s\n", fleetcli.RuntimesUsage)
 			os.Exit(2)

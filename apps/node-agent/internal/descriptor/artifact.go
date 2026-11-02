@@ -268,7 +268,7 @@ func readAt(root, rel string, offset, max int64, private []string) ([]byte, int6
 	}
 	buf := make([]byte, max)
 	n, err := f.ReadAt(buf, offset)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, 0, false, err
 	}
 	return buf[:n], info.Size(), offset+int64(n) >= info.Size(), nil

@@ -3,6 +3,7 @@ package openclaw
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -362,9 +363,9 @@ func openclawGatewayRunning() (running bool, note string) {
 	}
 
 	// Fall back to pgrep -f for the gateway process pattern.
-	pgrepCmd := exec.Command("pgrep", "-f", "openclaw.*gateway")
+	pgrepCmd := exec.CommandContext(context.Background(), "pgrep", "-f", "openclaw.*gateway")
 	if err := pgrepCmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitErr := (*exec.ExitError)(nil); errors.As(err, &exitErr) {
 			if exitErr.ExitCode() == 1 {
 				// pgrep exit 1 = no match (process not found), not an error.
 				return false, ""
@@ -379,7 +380,7 @@ func openclawGatewayRunning() (running bool, note string) {
 // openclawGatewayPID returns the PID of the OpenClaw gateway process, or an
 // error if no matching process is found.
 func openclawGatewayPID() (int, error) {
-	out, err := exec.Command("pgrep", "-f", "openclaw.*gateway").Output()
+	out, err := exec.CommandContext(context.Background(), "pgrep", "-f", "openclaw.*gateway").Output()
 	if err != nil {
 		return 0, fmt.Errorf("no openclaw gateway process found")
 	}
@@ -414,7 +415,7 @@ func (o *Descriptor) Start(key string) error {
 	if o.startCmd == "" {
 		return fmt.Errorf("no start command configured for openclaw (set openclawStartCmd in node config)")
 	}
-	cmd := exec.Command("sh", "-c", o.startCmd)
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", o.startCmd)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	return cmd.Start()
 }
@@ -489,7 +490,7 @@ func (o *Descriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, string, 
 	// Read up to maxBytes+1 so we can detect truncation.
 	buf := make([]byte, maxBytes+1)
 	n, err := io.ReadFull(f, buf)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return nil, "", false, fmt.Errorf("openclaw: ReadFile read %q: %w", target, err)
 	}
 

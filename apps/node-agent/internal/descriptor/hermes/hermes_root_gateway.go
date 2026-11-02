@@ -1,6 +1,7 @@
 package hermes
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -96,7 +97,7 @@ func pickRootGateway(candidates []procInfo) (int, bool) {
 // this agent also runs on, so argv comes from `ps -o args=` per pid — the same
 // portable shape gatherPidMetrics already uses.
 func rootGatewayCandidates() []procInfo {
-	out, err := exec.Command("pgrep", "-f", "gateway run").Output()
+	out, err := exec.CommandContext(context.Background(), "pgrep", "-f", "gateway run").Output()
 	if err != nil {
 		return nil
 	}
@@ -110,7 +111,7 @@ func rootGatewayCandidates() []procInfo {
 		if err != nil {
 			continue
 		}
-		args, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=").Output()
+		args, err := exec.CommandContext(context.Background(), "ps", "-p", strconv.Itoa(pid), "-o", "args=").Output()
 		if err != nil {
 			continue
 		}

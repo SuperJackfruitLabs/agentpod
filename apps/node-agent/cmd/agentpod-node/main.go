@@ -78,7 +78,7 @@ func main() {
 		flagToken := fs.String("token", "", "enrollment token")
 		flagForce := fs.Bool("force", false, "re-enroll even when a valid config exists")
 		flagOTLP := fs.String("otlp-endpoint", "", "OTLP/HTTP collector base URL to enable telemetry export")
-		fs.Parse(os.Args[2:])
+		_ = fs.Parse(os.Args[2:]) // the FlagSet reports a bad flag itself
 		// Validate before contacting the hub: a typo must not cost a one-time token.
 		if *flagOTLP != "" {
 			if err := otelenv.ValidateEndpoint(*flagOTLP); err != nil {
@@ -185,7 +185,7 @@ func main() {
 		}
 		check := fs.Bool("check", false, "resolve and report current/latest version, no changes")
 		force := fs.Bool("force", false, "update even when already on the latest version")
-		fs.Parse(os.Args[2:])
+		_ = fs.Parse(os.Args[2:]) // the FlagSet reports a bad flag itself
 		ctx := context.Background()
 		res, err := selfupdate.Update(ctx, selfupdate.Options{
 			CurrentVersion: version,

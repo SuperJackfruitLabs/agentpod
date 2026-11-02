@@ -30,7 +30,7 @@ func fleetStations(args []string) {
 	station := fs.String("station", "", "station ID")
 	var keys stringList
 	fs.Var(&keys, "key", "station key to adopt (repeatable)")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "unexpected argument")
 		os.Exit(2)

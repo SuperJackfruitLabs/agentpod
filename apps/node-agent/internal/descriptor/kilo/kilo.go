@@ -3,6 +3,7 @@ package kilo
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -230,7 +231,7 @@ func kiloWorkspacesFromDB(dbPath string) ([]string, error) {
 	const query = `SELECT worktree FROM project WHERE id != 'global' AND worktree != '' AND worktree IS NOT NULL;` +
 		`SELECT DISTINCT directory FROM session WHERE directory != '' AND directory IS NOT NULL;`
 
-	out, err := exec.Command("sqlite3", "-readonly", dbPath, query).Output()
+	out, err := exec.CommandContext(context.Background(), "sqlite3", "-readonly", dbPath, query).Output()
 	if err != nil {
 		return nil, fmt.Errorf("kilo: reading %s failed (is sqlite3 installed?): %w", dbPath, err)
 	}
@@ -373,7 +374,7 @@ func (k *kiloDescriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, stri
 	// leaves it: the hub decides how to present the bytes.
 	buf := make([]byte, maxBytes+1)
 	n, err := io.ReadFull(f, buf)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return nil, "", false, fmt.Errorf("kilo: ReadFile read %q: %w", target, err)
 	}
 	truncated := int64(n) > maxBytes

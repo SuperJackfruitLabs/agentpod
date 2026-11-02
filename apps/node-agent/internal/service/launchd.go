@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"fmt"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
@@ -79,7 +80,7 @@ func commandFor(name string, args []string, lookPath func(string) (string, error
 			}
 		}
 	}
-	cmd := exec.Command(path, args...)
+	cmd := exec.CommandContext(context.Background(), path, args...)
 	if len(args) > 0 && args[0] == "--user" && getenv("XDG_RUNTIME_DIR") == "" {
 		dir := filepath.Join(runtimeDirRoot, strconv.Itoa(uid))
 		if fi, err := stat(dir); err == nil && fi.IsDir() {

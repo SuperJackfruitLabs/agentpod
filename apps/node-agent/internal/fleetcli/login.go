@@ -1,6 +1,7 @@
 package fleetcli
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -37,7 +38,7 @@ func Exchange(hub, code, verifier, redirectURI string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequest("POST", hub+"/api/auth/token/exchange", strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(context.Background(), "POST", hub+"/api/auth/token/exchange", strings.NewReader(string(body)))
 	if err != nil {
 		return "", err
 	}

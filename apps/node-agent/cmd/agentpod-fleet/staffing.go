@@ -35,7 +35,7 @@ func fleetStaff(args []string) {
 	case "create":
 		fs := flag.NewFlagSet("fleet staff create", flag.ExitOnError)
 		file := fs.String("file", "", "agent definition, or - for stdin")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		if *file == "" {
 			fmt.Fprintf(os.Stderr, "create requires --file PATH or --file -\n\n%s\n", fleetcli.StaffUsage)
 			os.Exit(2)
@@ -45,7 +45,7 @@ func fleetStaff(args []string) {
 		fs := flag.NewFlagSet("fleet staff assign", flag.ExitOnError)
 		station := fs.String("station", "", "station ID")
 		file := fs.String("file", "", "assignment document, or - for stdin")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		id := stationOpID(*station)
 		if *file == "" {
 			fmt.Fprintf(os.Stderr, "assign requires --file PATH or --file -\n\n%s\n", fleetcli.StaffUsage)
@@ -56,7 +56,7 @@ func fleetStaff(args []string) {
 	case "unassign":
 		fs := flag.NewFlagSet("fleet staff unassign", flag.ExitOnError)
 		station := fs.String("station", "", "station ID")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		id := stationOpID(*station)
 		fleetSkillJSON(http.MethodDelete, "/api/admin/stations/"+url.PathEscape(id)+"/agent", nil)
 	default:
@@ -116,7 +116,7 @@ func settingsSubresource(base, name string, args []string) {
 	case "set":
 		fs := flag.NewFlagSet("fleet settings "+name+" set", flag.ExitOnError)
 		file := fs.String("file", "", "settings document, or - for stdin")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		if *file == "" {
 			fmt.Fprintf(os.Stderr, "set requires --file PATH or --file -\n\n%s\n", fleetcli.SettingsUsage)
 			os.Exit(2)

@@ -202,7 +202,7 @@ func (s *InstallStore) newPlan(ctx context.Context, id, action string, artifact 
 	}
 	entries, err := directory.ReadDir(257)
 	directory.Close()
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return InstallPlan{}, err
 	}
 	limit := 256

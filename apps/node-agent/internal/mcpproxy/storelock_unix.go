@@ -3,6 +3,7 @@
 package mcpproxy
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -22,7 +23,7 @@ func lockStore(path string) (func(), error) {
 	}
 	for {
 		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
-		if err != syscall.EINTR {
+		if !errors.Is(err, syscall.EINTR) {
 			break
 		}
 	}

@@ -1,6 +1,8 @@
 package hostproc
 
 import (
+	"context"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -61,9 +63,9 @@ func CwdWithinWorkspace(cwd, workspace string) bool {
 // produced output: it exits 1 on benign per-file warnings even with valid
 // matches (the old code read that as "stopped" while sessions were running).
 func ProcessRunningInWorkspace(pgrepPattern, projPath string) (running bool, note string) {
-	out, err := exec.Command("pgrep", pgrepPattern).Output()
+	out, err := exec.CommandContext(context.Background(), "pgrep", pgrepPattern).Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		if exitErr := (*exec.ExitError)(nil); errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return false, "" // no matching processes at all
 		}
 		return false, "process check unavailable (pgrep not found or failed)"
@@ -73,9 +75,9 @@ func ProcessRunningInWorkspace(pgrepPattern, projPath string) (running bool, not
 		return false, ""
 	}
 
-	lsofOut, err := exec.Command("lsof", "-a", "-p", strings.Join(pids, ","), "-d", "cwd", "-Fn").Output()
+	lsofOut, err := exec.CommandContext(context.Background(), "lsof", "-a", "-p", strings.Join(pids, ","), "-d", "cwd", "-Fn").Output()
 	if err != nil && len(lsofOut) == 0 {
-		if _, ok := err.(*exec.ExitError); ok {
+		if exitErr := (*exec.ExitError)(nil); errors.As(err, &exitErr) {
 			return false, "" // ran but matched nothing
 		}
 		return false, "process check unavailable (lsof not found or failed)"

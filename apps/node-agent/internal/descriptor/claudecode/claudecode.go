@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -470,7 +471,7 @@ func (c *Descriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, string, 
 
 	buf := make([]byte, maxBytes+1)
 	n, err := io.ReadFull(f, buf)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return nil, "", false, fmt.Errorf("claude-code: ReadFile read %q: %w", target, err)
 	}
 

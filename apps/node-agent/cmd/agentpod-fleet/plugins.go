@@ -27,7 +27,7 @@ func fleetPlugins(args []string) {
 	action := fs.String("action", "", "enable or disable")
 	operation := fs.String("operation", "", "operation ID")
 	planDigest := fs.String("plan-digest", "", "reviewed plan digest")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if *station == "" || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "plugin commands require --station ID")
 		os.Exit(2)

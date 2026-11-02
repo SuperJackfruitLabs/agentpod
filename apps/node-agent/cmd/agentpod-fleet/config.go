@@ -43,7 +43,7 @@ func fleetConfig(args []string) {
 		fs := flag.NewFlagSet("fleet config show", flag.ExitOnError)
 		station := fs.String("station", "", "station ID")
 		node := fs.String("node", "", "node ID")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		if *station != "" {
 			fleetGet("/api/stations/"+url.PathEscape(*station)+"/config", args)
 			return
@@ -61,7 +61,7 @@ func fleetConfig(args []string) {
 		raw := fs.String("json", "", "the declared value, exactly as JSON")
 		station := fs.String("station", "", "station ID")
 		node := fs.String("node", "", "node ID")
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		value, err := fleetcli.DeclaredValue(values, *raw)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%v\n\n%s\n", err, fleetcli.ConfigUsage)
@@ -77,7 +77,7 @@ func fleetConfig(args []string) {
 		fs := flag.NewFlagSet("fleet config unset", flag.ExitOnError)
 		station := fs.String("station", "", "station ID")
 		node := fs.String("node", "", "node ID")
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		body, _ := json.Marshal(map[string]any{
 			"settingId": id, "stationId": fleetcli.Nullable(*station), "nodeId": fleetcli.Nullable(*node),
 		})
@@ -89,7 +89,7 @@ func fleetConfig(args []string) {
 		fs := flag.NewFlagSet("fleet config opt-in", flag.ExitOnError)
 		station := fs.String("station", "", "station key (survives unadopt/re-adopt; not a row id)")
 		node := fs.String("node", "", "node ID")
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		if fs.NArg() != 0 {
 			fmt.Fprintf(os.Stderr, "opt-in takes no extra positional arguments\n\n%s\n", fleetcli.ConfigUsage)
 			os.Exit(2)
@@ -104,7 +104,7 @@ func fleetConfig(args []string) {
 		fs := flag.NewFlagSet("fleet config plan", flag.ExitOnError)
 		station := fs.String("station", "", "station ID")
 		setting := fs.String("setting", "", "narrow the plan to one setting")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		if *station == "" || fs.NArg() != 0 {
 			fmt.Fprintf(os.Stderr, "plan requires --station ID\n\n%s\n", fleetcli.ConfigUsage)
 			os.Exit(2)
@@ -114,7 +114,7 @@ func fleetConfig(args []string) {
 		fs := flag.NewFlagSet("fleet config inspect", flag.ExitOnError)
 		station := fs.String("station", "", "station ID")
 		operation := fs.String("operation", "", "operation ID")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		if *station == "" || *operation == "" || fs.NArg() != 0 {
 			fmt.Fprintf(os.Stderr, "inspect requires --station ID --operation ID\n\n%s\n", fleetcli.ConfigUsage)
 			os.Exit(2)
@@ -125,7 +125,7 @@ func fleetConfig(args []string) {
 		station := fs.String("station", "", "station ID")
 		operation := fs.String("operation", "", "operation ID")
 		planDigest := fs.String("plan-digest", "", "reviewed plan digest")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		if *station == "" || *operation == "" || fs.NArg() != 0 {
 			fmt.Fprintf(os.Stderr, "apply requires --station ID --operation ID --plan-digest SHA256\n\n%s\n", fleetcli.ConfigUsage)
 			os.Exit(2)
@@ -203,7 +203,7 @@ func fleetConfigOptOut(rest []string) {
 		fs := flag.NewFlagSet("fleet config opt-out", flag.ExitOnError)
 		station := fs.String("station", "", "station key")
 		node := fs.String("node", "", "node ID")
-		fs.Parse(rest)
+		_ = fs.Parse(rest) // the FlagSet reports a bad flag itself
 		if fs.NArg() != 0 {
 			fmt.Fprintf(os.Stderr, "opt-out without a SETTING_ID only lists; it takes no positional arguments\n\n%s\n", fleetcli.ConfigUsage)
 			os.Exit(2)
@@ -233,7 +233,7 @@ func fleetConfigOptOut(rest []string) {
 	node := fs.String("node", "", "node ID")
 	reason := fs.String("reason", "", "why this station or node is exempt")
 	clear := fs.Bool("clear", false, "forget the exemption row instead of recording one; the station then falls back to the node level")
-	fs.Parse(rest[1:])
+	_ = fs.Parse(rest[1:]) // the FlagSet reports a bad flag itself
 	if fs.NArg() != 0 {
 		fmt.Fprintf(os.Stderr, "opt-out takes no extra positional arguments\n\n%s\n", fleetcli.ConfigUsage)
 		os.Exit(2)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -67,7 +68,7 @@ func (s *InstallStore) placementContent(ctx context.Context, g *Generation, m *B
 		if err != nil {
 			return err
 		}
-		if _, err = decoder.Token(); err != io.EOF {
+		if _, err = decoder.Token(); !errors.Is(err, io.EOF) {
 			return fmt.Errorf("skills: trailing native manifest data")
 		}
 		manifest, ok := value.(map[string]any)

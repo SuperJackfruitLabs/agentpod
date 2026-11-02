@@ -1,6 +1,7 @@
 package hostproc
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -23,7 +24,7 @@ var UserRuntimeBase = "/run/user"
 // already running". When the variables are unset and this user's runtime dir
 // exists, they are filled in from it; values the caller already has are kept.
 func UserSystemctl(args ...string) *exec.Cmd {
-	cmd := exec.Command("systemctl", append([]string{"--user"}, args...)...)
+	cmd := exec.CommandContext(context.Background(), "systemctl", append([]string{"--user"}, args...)...)
 	cmd.Env = UserSessionEnv(os.Environ())
 	return cmd
 }

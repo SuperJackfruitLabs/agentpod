@@ -2,6 +2,7 @@ package hermes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -468,7 +469,7 @@ func hermesPID(key string) (int, error) {
 		// process as the gateway for every multiplexed profile.
 		return rootGatewayPID()
 	}
-	out, err := exec.Command("pgrep", "-f", hermesPattern(key)).Output()
+	out, err := exec.CommandContext(context.Background(), "pgrep", "-f", hermesPattern(key)).Output()
 	if err != nil {
 		return 0, fmt.Errorf("no hermes process for key %q", key)
 	}
@@ -491,9 +492,9 @@ func hermesProcessRunning(key string) (bool, error) {
 		_, err := rootGatewayPID()
 		return err == nil, nil
 	}
-	cmd := exec.Command("pgrep", "-f", hermesPattern(key))
+	cmd := exec.CommandContext(context.Background(), "pgrep", "-f", hermesPattern(key))
 	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitErr := (*exec.ExitError)(nil); errors.As(err, &exitErr) {
 			if exitErr.ExitCode() == 1 {
 				return false, nil
 			}
@@ -565,7 +566,7 @@ func (h *Descriptor) Start(key string) error {
 	// An operator-configured start command takes precedence over the native
 	// fallback (it can encode a site-specific launcher).
 	if h.startCmd != "" {
-		cmd := exec.Command("sh", "-c", h.startCmd)
+		cmd := exec.CommandContext(context.Background(), "sh", "-c", h.startCmd)
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		return cmd.Start()
 	}
@@ -598,9 +599,9 @@ func startDetached(name string, args ...string) error {
 		// --collect reaps the transient unit when it exits; --quiet suppresses the
 		// "Running as unit: …" notice.
 		runArgs := append([]string{"--collect", "--quiet", bin}, args...)
-		return exec.Command(runner, runArgs...).Run()
+		return exec.CommandContext(context.Background(), runner, runArgs...).Run()
 	}
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(context.Background(), name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return err
@@ -696,7 +697,7 @@ func (h *Descriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, string, 
 	// Read up to maxBytes+1 so we can detect truncation.
 	buf := make([]byte, maxBytes+1)
 	n, err := io.ReadFull(f, buf)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return nil, "", false, fmt.Errorf("hermes: ReadFile read %q: %w", target, err)
 	}
 

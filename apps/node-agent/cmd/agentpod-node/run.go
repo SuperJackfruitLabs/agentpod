@@ -326,7 +326,8 @@ func runCmd() {
 	if mcpProxy != nil {
 		extras.Capabilities = append(extras.Capabilities, "mcp.proxy", "mcp.proxy.manage")
 	}
-	gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
+	// RunWith returns only when ctx is done; shutdown is not an error worth reporting.
+	_ = gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
 		return gatherHealthReports(reg)
 	}, extras)
 }

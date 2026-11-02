@@ -24,7 +24,7 @@ func fleetInvite(args []string) {
 	fs := flag.NewFlagSet("fleet invite", flag.ExitOnError)
 	label := fs.String("label", "", "what this token is for, recorded with it")
 	ttl := fs.Int("ttl-minutes", 0, "minutes until it expires (hub default when unset)")
-	fs.Parse(args)
+	_ = fs.Parse(args) // the FlagSet reports a bad flag itself
 	body := map[string]any{}
 	if *label != "" {
 		body["label"] = *label

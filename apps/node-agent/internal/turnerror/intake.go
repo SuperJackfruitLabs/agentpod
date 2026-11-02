@@ -187,9 +187,9 @@ func (i *Intake) Serve(ctx context.Context) {
 
 func (i *Intake) handle(conn net.Conn) {
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(connDeadline))
+	_ = conn.SetDeadline(time.Now().Add(connDeadline)) // a socket that refuses one fails its reads instead
 
-	reply := func(s string) { conn.Write([]byte(s + "\n")) }
+	reply := func(s string) { _, _ = conn.Write([]byte(s + "\n")) } // the caller hung up: nothing to tell
 
 	reader := bufio.NewReaderSize(conn, 4096)
 	line, err := readLine(reader, i.maxLine)

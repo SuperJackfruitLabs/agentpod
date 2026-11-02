@@ -51,7 +51,7 @@ func fleetBridge(args []string) {
 	case "list":
 		fleetGet(base, args)
 	case "add":
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		missing := []string{}
 		for name, v := range map[string]string{"--key": *key, "--board": *board, "--station": *station, "--token": *token} {
 			if v == "" {
@@ -72,7 +72,7 @@ func fleetBridge(args []string) {
 			fmt.Fprintf(os.Stderr, "set requires a roster KEY\n\n%s\n", fleetcli.BridgeUsage)
 			os.Exit(2)
 		}
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		body := map[string]any{}
 		for field, v := range map[string]string{"boardId": *board, "stationId": *station, "token": *token} {
 			if v != "" {

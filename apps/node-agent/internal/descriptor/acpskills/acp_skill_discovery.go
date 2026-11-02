@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -196,7 +197,7 @@ func DiscoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 			// drained. Keep consuming those already-read frames; a command update
 			// in that buffer is still valid discovery evidence. A non-EOF reader
 			// error remains terminal because its stream may be incomplete.
-			if !ok || err == io.EOF {
+			if !ok || errors.Is(err, io.EOF) {
 				readErr = nil
 				continue
 			}

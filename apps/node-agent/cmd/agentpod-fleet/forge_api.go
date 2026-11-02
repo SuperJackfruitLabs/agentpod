@@ -58,7 +58,7 @@ func fleetForgeAPI(args []string) {
 		return
 	}
 	f := newForgeAPIFlags()
-	f.fs.Parse(args[1:])
+	_ = f.fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if f.fs.NArg() != 0 {
 		fleetcli.Refuse("unexpected argument %q", f.fs.Arg(0))
 	}

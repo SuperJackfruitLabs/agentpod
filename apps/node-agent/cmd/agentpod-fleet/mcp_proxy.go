@@ -25,7 +25,7 @@ func fleetMCPProxy(args []string) {
 	case "list":
 		fs := flag.NewFlagSet("fleet mcp-proxy list", flag.ExitOnError)
 		node := fs.String("node", "", "only this node")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		path := base
 		if *node != "" {
 			path += "?nodeId=" + url.QueryEscape(*node)
@@ -35,7 +35,7 @@ func fleetMCPProxy(args []string) {
 		fs := flag.NewFlagSet("fleet mcp-proxy enable", flag.ExitOnError)
 		all := fs.Bool("all-eligible", false, "every adopted station whose harness takes HTTP MCP servers (Hermes, Claude Code, Codex, opencode, Muse, Kilo)")
 		node := fs.String("node", "", "with --all-eligible: only this node's stations")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		body := map[string]any{"action": "enable"}
 		switch {
 		case *all && fs.NArg() > 0:
@@ -58,7 +58,7 @@ func fleetMCPProxy(args []string) {
 		fleetSkillJSON(http.MethodPost, base, body)
 	case "disable":
 		fs := flag.NewFlagSet("fleet mcp-proxy disable", flag.ExitOnError)
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		if fs.NArg() == 0 {
 			fmt.Fprintln(os.Stderr, "disable needs STATION_ID...")
 			os.Exit(2)
@@ -67,7 +67,7 @@ func fleetMCPProxy(args []string) {
 	case "rotate":
 		fs := flag.NewFlagSet("fleet mcp-proxy rotate", flag.ExitOnError)
 		node := fs.String("node", "", "every station this node's proxy serves")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		switch {
 		case *node != "" && fs.NArg() > 0, *node == "" && fs.NArg() == 0:
 			fmt.Fprintln(os.Stderr, "rotate takes STATION_ID... or --node ID")

@@ -3,6 +3,7 @@ package muse
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -246,7 +247,7 @@ func museWorkspaceRootsFromIndex(dbPath string) ([]string, error) {
 		return nil, fmt.Errorf("muse: reading %s: %w", dbPath, err)
 	}
 
-	cmd := exec.Command("sqlite3", "-readonly", dbPath,
+	cmd := exec.CommandContext(context.Background(), "sqlite3", "-readonly", dbPath,
 		"SELECT DISTINCT workspace_root FROM sessions WHERE workspace_root IS NOT NULL AND workspace_root != ''")
 	out, err := cmd.Output()
 	if err != nil {
@@ -423,7 +424,7 @@ func (m *museDescriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, stri
 	// leaves it: the hub decides how to present the bytes.
 	buf := make([]byte, maxBytes+1)
 	n, err := io.ReadFull(f, buf)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return nil, "", false, fmt.Errorf("muse: ReadFile read %q: %w", target, err)
 	}
 

@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -107,9 +108,9 @@ func (c *Descriptor) NativeSkillLoading(ctx context.Context, key string, expecte
 // adapter commonly runs under node, so checking a process name would miss it.
 func codexAdapterProcessRunning(adapterPath, workspace string) (bool, string) {
 	pattern := regexp.QuoteMeta(adapterPath)
-	out, err := exec.Command("pgrep", "-f", pattern).Output()
+	out, err := exec.CommandContext(context.Background(), "pgrep", "-f", pattern).Output()
 	if err != nil {
-		if exit, ok := err.(*exec.ExitError); ok && exit.ExitCode() == 1 {
+		if exit := (*exec.ExitError)(nil); errors.As(err, &exit) && exit.ExitCode() == 1 {
 			return false, ""
 		}
 		return false, "process check unavailable (pgrep not found or failed)"
@@ -118,7 +119,7 @@ func codexAdapterProcessRunning(adapterPath, workspace string) (bool, string) {
 	if len(pids) == 0 {
 		return false, ""
 	}
-	lsofOut, err := exec.Command("lsof", "-a", "-p", strings.Join(pids, ","), "-d", "cwd", "-Fn").Output()
+	lsofOut, err := exec.CommandContext(context.Background(), "lsof", "-a", "-p", strings.Join(pids, ","), "-d", "cwd", "-Fn").Output()
 	if err != nil {
 		return false, "process check unavailable (lsof not found or failed)"
 	}

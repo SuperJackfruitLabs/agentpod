@@ -270,7 +270,7 @@ func swapBinary(targetPath, tmpPath string) error {
 func restartService(goos string, run func(name string, args ...string) error) error {
 	if run == nil {
 		run = func(name string, args ...string) error {
-			return exec.Command(name, args...).Run()
+			return exec.CommandContext(context.Background(), name, args...).Run()
 		}
 	}
 	runner := func(name string, args ...string) (string, error) {
@@ -401,7 +401,7 @@ func Apply(ctx context.Context, opts Options) (Result, error) {
 func Update(ctx context.Context, opts Options) (Result, error) {
 	if opts.RunCommand == nil {
 		opts.RunCommand = func(name string, args ...string) error {
-			return exec.Command(name, args...).Run()
+			return exec.CommandContext(context.Background(), name, args...).Run()
 		}
 	}
 

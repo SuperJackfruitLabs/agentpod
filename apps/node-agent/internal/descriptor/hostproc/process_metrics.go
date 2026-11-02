@@ -1,6 +1,7 @@
 package hostproc
 
 import (
+	"context"
 	"os/exec"
 	"strconv"
 )
@@ -13,7 +14,7 @@ import (
 // Shared by the Hermes (per-profile process) and OpenClaw (shared gateway
 // process) descriptors so the `ps -o %cpu,rss,etime` gathering lives in one place.
 func GatherPidMetrics(pid int) (cpuPct *float64, memBytes *int64, uptimeSec *int64) {
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "%cpu=,rss=,etime=").Output()
+	out, err := exec.CommandContext(context.Background(), "ps", "-p", strconv.Itoa(pid), "-o", "%cpu=,rss=,etime=").Output()
 	if err != nil {
 		return nil, nil, nil
 	}

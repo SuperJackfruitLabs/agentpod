@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -54,7 +55,7 @@ func fleetNodes(args []string) {
 	force := fs.Bool("force", false, "re-apply the current release")
 	var named stringList
 	fs.Var(&named, "node", "node name or ID (repeatable)")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "unexpected argument:", fs.Arg(0))
 		os.Exit(2)
@@ -131,7 +132,7 @@ func fleetNodesTelemetry(args []string) {
 	off := fs.Bool("off", false, "disable telemetry export")
 	var named stringList
 	fs.Var(&named, "node", "node name or ID (repeatable)")
-	fs.Parse(args)
+	_ = fs.Parse(args) // the FlagSet reports a bad flag itself
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "unexpected argument:", fs.Arg(0))
 		os.Exit(2)
@@ -203,7 +204,7 @@ func fleetNodesTelemetry(args []string) {
 // not say what to do about it.
 func telemetryRequest(method string, body io.Reader) []byte {
 	c := requireCredential()
-	req, err := http.NewRequest(method, hubBase()+"/api/nodes/telemetry", body)
+	req, err := http.NewRequestWithContext(context.Background(), method, hubBase()+"/api/nodes/telemetry", body)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -245,11 +246,11 @@ func fleetNodesRemove(args []string) {
 	fs.Usage = func() { fmt.Fprintln(fs.Output(), fleetcli.NodesRmUsage) }
 	// The flag may come before or after the node: parse, take the node, parse
 	// what follows it.
-	fs.Parse(args)
+	_ = fs.Parse(args) // the FlagSet reports a bad flag itself
 	var positional []string
 	for fs.NArg() > 0 {
 		positional = append(positional, fs.Arg(0))
-		fs.Parse(fs.Args()[1:])
+		_ = fs.Parse(fs.Args()[1:]) // the FlagSet reports a bad flag itself
 	}
 	if len(positional) != 1 {
 		fmt.Fprintln(os.Stderr, fleetcli.NodesRmUsage)
@@ -262,7 +263,7 @@ func fleetNodesRemove(args []string) {
 		path += "?force=1"
 	}
 	c := requireCredential()
-	req, err := http.NewRequest(http.MethodDelete, hubBase()+path, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, hubBase()+path, nil)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

@@ -68,7 +68,7 @@ func refreshSkillAfterUpdate() {
 		if err != nil {
 			return err
 		}
-		return exec.Command(exe, "skill", "install", "--dir", dir).Run()
+		return exec.CommandContext(context.Background(), exe, "skill", "install", "--dir", dir).Run()
 	})
 	switch {
 	case !attempted:

@@ -3,6 +3,7 @@ package opencode
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -262,7 +263,7 @@ func (o *Descriptor) projectPathsFromDB(dbPath string) ([]string, error) {
 	}
 
 	// Use the sqlite3 CLI to extract worktree paths.
-	cmd := exec.Command("sqlite3", dbPath,
+	cmd := exec.CommandContext(context.Background(), "sqlite3", dbPath,
 		"SELECT worktree FROM project WHERE id != 'global' AND worktree != ''")
 	out, err := cmd.Output()
 	if err != nil {
@@ -422,10 +423,10 @@ func openCodeProcessArgs(supervised bool) []string {
 }
 
 func openCodeProcessRunning() (running bool, note string) {
-	cmd := exec.Command("pgrep", openCodeProcessArgs(openCodeSupervised())...)
+	cmd := exec.CommandContext(context.Background(), "pgrep", openCodeProcessArgs(openCodeSupervised())...)
 	out, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		if exitErr := (*exec.ExitError)(nil); errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			// pgrep exit 1 = no match.
 			return false, ""
 		}
@@ -494,7 +495,7 @@ func openCodeSupervised() bool {
 // openCodeServePID returns the PID of the running `opencode serve` process
 // (matched via openCodeServePattern), or an error if none is found.
 func openCodeServePID() (int, error) {
-	out, err := exec.Command("pgrep", "-f", openCodeServePattern).Output()
+	out, err := exec.CommandContext(context.Background(), "pgrep", "-f", openCodeServePattern).Output()
 	if err != nil {
 		return 0, fmt.Errorf("no running 'opencode serve' process found")
 	}
@@ -528,7 +529,7 @@ func startOpenCodeServeDetached() error {
 	}
 	defer logFile.Close()
 
-	cmd := exec.Command("opencode", "serve")
+	cmd := exec.CommandContext(context.Background(), "opencode", "serve")
 	cmd.Dir = openCodeWorkspaceDir
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -658,7 +659,7 @@ func (o *Descriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, string, 
 
 	buf := make([]byte, maxBytes+1)
 	n, err := io.ReadFull(f, buf)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return nil, "", false, fmt.Errorf("opencode: ReadFile read %q: %w", target, err)
 	}
 

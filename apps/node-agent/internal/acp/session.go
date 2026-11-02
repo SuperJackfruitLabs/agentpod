@@ -4,6 +4,7 @@
 package acp
 
 import (
+	"context"
 	"io"
 	"log"
 	"os"
@@ -71,7 +72,7 @@ type Session struct {
 // newSession spawns argv[0] with argv[1:] in dir with env appended to
 // os.Environ(), and starts the stdout/stderr pump and reaper goroutines.
 func newSession(id string, argv []string, dir string, env []string) (*Session, error) {
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd := exec.CommandContext(context.Background(), argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
 	// Put the child in its own process group so Close can signal the whole

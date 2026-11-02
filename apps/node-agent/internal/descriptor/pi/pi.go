@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -704,9 +705,9 @@ func (p *Descriptor) piProcessRunning() (running bool, note string) {
 	if !ok {
 		return false, "process check unavailable (no pi executable found; set " + PiBinaryEnv + ")"
 	}
-	out, err := exec.Command("pgrep", "-f", pattern).Output()
+	out, err := exec.CommandContext(context.Background(), "pgrep", "-f", pattern).Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		if exitErr := (*exec.ExitError)(nil); errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return false, "" // no match — normal for a daemonless harness
 		}
 		return false, "process check unavailable (pgrep not found or failed)"
@@ -783,7 +784,7 @@ func (p *Descriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, string, 
 
 	buf := make([]byte, maxBytes+1)
 	n, err := io.ReadFull(f, buf)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return nil, "", false, fmt.Errorf("pi: ReadFile read %q: %w", target, err)
 	}
 

@@ -63,7 +63,7 @@ func Version() string {
 	var pkg struct {
 		Version string `json:"version"`
 	}
-	json.Unmarshal(embeddedFile("package.json"), &pkg)
+	_ = json.Unmarshal(embeddedFile("package.json"), &pkg) // embedded at build time; a bad file reads as no version
 	return pkg.Version
 }
 

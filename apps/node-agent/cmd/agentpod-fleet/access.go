@@ -38,7 +38,7 @@ func fleetGrants(args []string) {
 		id := needArg(args, 1, "set", fleetcli.GrantsUsage)
 		fs := flag.NewFlagSet("fleet grants set", flag.ExitOnError)
 		file := fs.String("file", "", "grant document, or - for stdin")
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		if *file == "" {
 			fmt.Fprintf(os.Stderr, "set requires --file PATH or --file -\n\n%s\n", fleetcli.GrantsUsage)
 			os.Exit(2)
@@ -81,7 +81,7 @@ func fleetPrincipals(args []string) {
 		fs := flag.NewFlagSet("fleet principals add-service", flag.ExitOnError)
 		client := fs.String("client", "", "the HUB_OAUTH_CLIENTS id whose audiences its tokens carry")
 		scope := fs.String("scope", "", "comma-separated grant scopes, e.g. evidence:read")
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		if *client == "" || *scope == "" {
 			fmt.Fprintf(os.Stderr, "add-service requires --client and --scope\n\n%s\n", fleetcli.PrincipalsUsage)
 			os.Exit(2)
@@ -95,7 +95,7 @@ func fleetPrincipals(args []string) {
 		id := needArg(args, 1, "add-credential", fleetcli.PrincipalsUsage)
 		fs := flag.NewFlagSet("fleet principals add-credential", flag.ExitOnError)
 		client := fs.String("client", "", "the HUB_OAUTH_CLIENTS id whose audiences its tokens carry")
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		if *client == "" {
 			fmt.Fprintf(os.Stderr, "add-credential requires --client\n\n%s\n", fleetcli.PrincipalsUsage)
 			os.Exit(2)
@@ -136,7 +136,7 @@ func fleetUsers(args []string) {
 		fs := flag.NewFlagSet("fleet users ban", flag.ExitOnError)
 		reason := fs.String("reason", "", "why, recorded with the ban")
 		expires := fs.String("expires", "", "RFC3339 instant the ban lifts itself")
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		if *reason == "" {
 			fmt.Fprintf(os.Stderr, "ban requires --reason\n\n%s\n", fleetcli.UsersUsage)
 			os.Exit(2)
@@ -153,7 +153,7 @@ func fleetUsers(args []string) {
 		id := needArg(args, 1, "role", fleetcli.UsersUsage)
 		fs := flag.NewFlagSet("fleet users role", flag.ExitOnError)
 		role := fs.String("role", "", "the role to set")
-		fs.Parse(args[2:])
+		_ = fs.Parse(args[2:]) // the FlagSet reports a bad flag itself
 		if *role == "" {
 			fmt.Fprintf(os.Stderr, "role requires --role ROLE\n\n%s\n", fleetcli.UsersUsage)
 			os.Exit(2)

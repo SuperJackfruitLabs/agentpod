@@ -33,7 +33,7 @@ func fleetStationOps(args []string) {
 	case "lifecycle":
 		fs, station := stationFlags("lifecycle")
 		action := fs.String("action", "", "start, stop or restart")
-		fs.Parse(args[1:])
+		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 		id := stationOpID(*station)
 		if *action != "start" && *action != "stop" && *action != "restart" {
 			fmt.Fprintf(os.Stderr, "lifecycle requires --action start|stop|restart\n\n%s\n", fleetcli.StationOpsUsage)
@@ -60,7 +60,7 @@ func fleetStationCleanup(args []string) {
 	fs, station := stationFlags("cleanup")
 	var paths repeatable
 	fs.Var(&paths, "path", "a path to reclaim (repeatable)")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	id := stationOpID(*station)
 	switch args[0] {
 	case "plan":
@@ -88,7 +88,7 @@ func fleetStationChangeset(args []string) {
 	base := fs.String("base", "", "ref to compare against")
 	side := fs.String("side", "", "uncommitted or committed")
 	path := fs.String("path", "", "limit the diff to one path")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	id := stationOpID(*station)
 	body := map[string]any{}
 	if *base != "" {
@@ -125,7 +125,7 @@ func fleetStationFS(args []string) {
 	asBase64 := fs.Bool("base64", false, "send the file as base64 rather than utf8")
 	backup := fs.Bool("backup", false, "keep a backup of what was overwritten")
 	recursive := fs.Bool("recursive", false, "delete a directory and its contents")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	id := stationOpID(*station)
 	base := stationPath(id) + "/fs/"
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
@@ -241,7 +242,7 @@ func openBrowser(u string) {
 	default:
 		cmd = "xdg-open"
 	}
-	_ = exec.Command(cmd, append(args, u)...).Start()
+	_ = exec.CommandContext(context.Background(), cmd, append(args, u)...).Start()
 }
 
 // browsable is true only for an absolute http(s) URL with a host: `open` and `xdg-open` would

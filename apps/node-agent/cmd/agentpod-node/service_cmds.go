@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -500,7 +501,7 @@ func buildLogsCmd(goos, home, unitPath string, opts logsOptions) *exec.Cmd {
 			args = append(args, "-f")
 		}
 		args = append(args, darwinLogPath(home))
-		return exec.Command("tail", args...)
+		return exec.CommandContext(context.Background(), "tail", args...)
 	}
 
 	args := []string{}
@@ -513,7 +514,7 @@ func buildLogsCmd(goos, home, unitPath string, opts logsOptions) *exec.Cmd {
 	} else {
 		args = append(args, "-u", serviceUnitName)
 	}
-	return exec.Command("journalctl", args...)
+	return exec.CommandContext(context.Background(), "journalctl", args...)
 }
 
 // resolveLogsCmd builds the log-viewing command, or returns a friendly error

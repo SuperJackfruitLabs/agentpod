@@ -57,7 +57,7 @@ func fleetSkillNative(args []string) {
 	action := fs.String("action", "", "native placement action")
 	operation := fs.String("operation", "", "operation ID")
 	planDigest := fs.String("plan-digest", "", "reviewed plan digest")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if *station == "" || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "native commands require --station ID")
 		os.Exit(2)
@@ -102,7 +102,7 @@ func fleetSkillStation(args []string) {
 	fs := flag.NewFlagSet("fleet skills station", flag.ExitOnError)
 	station, profile, operation, planDigest := fs.String("station", "", "station ID"), fs.String("profile", "", "profile"), fs.String("operation", "", "operation ID"), fs.String("plan-digest", "", "reviewed plan digest")
 	artifact := fs.String("artifact", "", "uploaded artifact ID")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if *station == "" || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "station commands require --station ID")
 		os.Exit(2)
@@ -155,7 +155,7 @@ func fleetSkillArtifact(args []string) {
 	}
 	fs := flag.NewFlagSet("fleet skills artifact delete", flag.ExitOnError)
 	id := fs.String("id", "", "artifact ID")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if *id == "" || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: fleet skills artifact delete --id ARTIFACT_ID")
 		os.Exit(2)
@@ -167,7 +167,7 @@ func fleetSkillUpload(args []string) {
 	fs := flag.NewFlagSet("fleet skills upload", flag.ExitOnError)
 	harness := fs.String("harness", "", "target harness")
 	profile := fs.String("profile", "", "skill profile")
-	fs.Parse(args)
+	_ = fs.Parse(args) // the FlagSet reports a bad flag itself
 	if *harness == "" || *profile == "" || fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: fleet skills upload --harness H --profile P ARCHIVE.tgz")
 		os.Exit(2)
@@ -248,7 +248,7 @@ func fleetSkillCohort(args []string) {
 	}
 	fs := flag.NewFlagSet("fleet skills cohort create", flag.ExitOnError)
 	release, digest, station := fs.String("release", "", "release ID"), fs.String("digest", "", "release digest"), fs.String("station", "", "canary station ID")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if *release == "" || *digest == "" || *station == "" || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: fleet skills cohort create --release ID --digest SHA256 --station ID")
 		os.Exit(2)
@@ -263,7 +263,7 @@ func fleetSkillCanary(args []string) {
 	}
 	fs := flag.NewFlagSet("fleet skills canary", flag.ExitOnError)
 	cohort, release, digest, station, operation, planDigest := fs.String("cohort", "", "cohort ID"), fs.String("release", "", "release ID"), fs.String("digest", "", "release digest"), fs.String("station", "", "station ID"), fs.String("operation", "", "operation ID"), fs.String("plan-digest", "", "reviewed plan digest")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
 	if *cohort == "" || *release == "" || *digest == "" || *station == "" || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "canary requires --cohort, --release, --digest and --station")
 		os.Exit(2)
