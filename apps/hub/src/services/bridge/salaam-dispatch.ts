@@ -47,14 +47,10 @@ import {
   answerSalaamDecision,
 } from "./salaam-decisions";
 import { reportSalaamCompletion } from "./salaam-report";
-import type { DispatchDeps, DispatchResult } from "./dispatch";
+import type { DispatchDeps, DispatchResult, StrictWorkSelection } from "./dispatch-types";
 import type { ClaimedWork, RunContext } from "./superpipeline";
 
-export interface StrictWorkSelection {
-  required: boolean;
-  version: 1 | null;
-  reason?: string;
-}
+export type { StrictWorkSelection } from "./dispatch-types";
 export async function probeSalaamWork(input: {
   stationId: string;
   /** The bridge agent's workspace; the station is read only there (W4). */
