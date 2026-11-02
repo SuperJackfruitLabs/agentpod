@@ -1,7 +1,7 @@
 # Modularity and code-quality plan
 
 Status: **in progress**, one PR for Phases 2–8 (branch `refactor/modularity`). Phase 0
-(guardrails) and Phase 1 (hub layers) are merged on `main`. Phase 2 is done. The rules this work
+(guardrails) and Phase 1 (hub layers) are merged on `main`. Phases 2–4 are done. The rules this work
 leaves behind are described, and enforced, in [code-quality.md](code-quality.md); this page keeps
 the plan, the starting measurements and the outcome.
 
@@ -17,7 +17,7 @@ split only behind characterization tests committed first, against the old code.
 | Folder cycles in `services/` | 1, across 4 entries (`acp-sessions`, `bridge`, `matrix-as`, `org-plane`) | none (Phase 2) |
 | Module rules in `services/` | none | one entry point per module; modules import down 10 tiers; no back-edge (Phase 2) |
 | Largest hub file cycle | 3 (`forge-api/{forgejo,github,providers}.ts`) | 3 |
-| Hub files over 1,000 lines | 7 (largest `acp-sessions.ts` 3,514) | 6 (`matrix-as/gates.ts` 1,168 → 1,139; `acp/sessions.ts` 3,514 → 21 files under `acp/`, largest `turn.ts` 574, Phase 3) |
+| Hub files over 1,000 lines | 7 (largest `acp-sessions.ts` 3,514) | none; `oversize` empty (Phase 3: `acp/sessions.ts` 3,514 → 21 files, largest `turn.ts` 574; Phase 4: the other six → 58 new files behind six thin surfaces, largest `bridge/salaam-dispatch-drive.ts` 563); largest hub file now `matrix-as/client.ts` 985 |
 
 The rows for Phases 3–8 are added as each one lands.
 
@@ -94,7 +94,7 @@ All in one PR, one or more commits per phase, each commit message starting `Phas
 |---|---|---|
 | 2 | **Hub service modules.** `services/` into feature folders, each with an `index.ts` of named re-exports computed from what other modules import; every import from outside a module through its index; `SERVICE_LAYERS` and the entry-point rule in the architecture test; the 4-entry folder cycle broken by moving Matrix naming and the attachment helpers down to `matrix`, and the bridge's wire types into `bridge/deliveries.ts`. | **Done.** No folder cycle in `services/`; the four module checks green and each seen to fail on a planted violation |
 | 3 | **`acp/sessions.ts`** (3,514 lines) splits by concern (session store and rows, the wire and its streams, turns and permissions, Salaam liveness, boot reconciliation) behind characterization tests: session create/resume/end, the event log, permission answers, busy and idle, boot reconcile. | **Done.** 21 files, none over 600 lines; `sessions.ts` re-exports and registers the node-online hook; `oversize` entry removed; pinned first by `sessions.characterization.test.ts` |
-| 4 | **The other hub files over 1,000 lines**: `forge-api/station-forge-api.ts` (2,082), `bridge/salaam-dispatch.ts` (1,583), `bridge/dispatch.ts` (1,338), `runtimes/runtimes.ts` (1,317), `matrix-as/gates.ts` (1,139), `matrix-as/outbound.ts` (1,147). Each behind its own characterization tests. | No hub file over 1,000 lines; the hub's `oversize` record is empty |
+| 4 | **The other hub files over 1,000 lines**: `forge-api/station-forge-api.ts` (2,082), `bridge/salaam-dispatch.ts` (1,583), `bridge/dispatch.ts` (1,338), `runtimes/runtimes.ts` (1,317), `matrix-as/gates.ts` (1,139), `matrix-as/outbound.ts` (1,147). Each behind its own characterization tests. | **Done.** One pin commit and one split commit per file. Each old file is now a surface of re-exports (same export set, compared at runtime): `gates.ts` → 5 `gate-*.ts` (largest 452); `outbound.ts` → 8 `outbound-*.ts` (largest 379); `runtimes.ts` → 10 files (largest `start.ts` 252); `dispatch.ts` → 7 `dispatch-*.ts` (largest 399; the `dispatch` ↔ `salaam-dispatch` type cycle gone); `salaam-dispatch.ts` → 11 `salaam-dispatch-*.ts` (largest 563); `station-forge-api.ts` → 17 `grant-*.ts` (largest 259). Pinned first by six `*.characterization.test.ts` files (99 tests), each test seen red against a change planted in the old code. Hub `oversize` is `{}` |
 | 5 | **Go node agent.** `internal/descriptor` into cohesive packages; the logic in `cmd/agentpod-fleet` (5,103) and `cmd/agentpod-node` (4,101) into `internal/` packages; `forgeapi/instances.go` (1,164) and `cmd/agentpod-fleet/reference.go` (1,340) split. | `oversizeFiles` empty; `oversizePackages` has no `cmd/` entry and no `internal/descriptor` entry; `go vet` and `go test -race ./...` green |
 | 6 | **Console.** The station page (1,009 lines) splits by panel into components; route pages compose and hold no domain logic. | Console `oversize` empty; `pnpm check`, `pnpm test`, `pnpm build` green |
 | 7 | **Lint to targets.** No `any` in shipped source; no empty `catch` without a comment saying why; no floating or misused promises anywhere (tests included); Go `errcheck` and `errorlint` clean in shipped code. Rules that reach zero join `SRC_CLEAN` (or go to zero in the baseline). | Targets met; the baselines lowered with `--update` |
