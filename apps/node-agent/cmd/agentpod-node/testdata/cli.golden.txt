@@ -1,0 +1,850 @@
+$ apn 
+exit 0
+--- stdout
+agentpod-node (apn) — AgentPod fleet node agent  dev
+
+Usage: apn <command> [flags]
+
+Service:
+  status      Show local service + hub connection state (--json for scripts)
+  start       Enable and start the background service
+  stop        Stop and disable the service (sticky across reboots)
+  restart     Restart the running service
+  logs        Show service logs (-f to follow, -n N for last N lines)
+  service     install | uninstall the platform service (launchd/systemd)
+  telemetry   Show, enable or disable OpenTelemetry export (--endpoint URL)
+
+Node:
+  salaam-station-files-v1Private Salaam station file protocol (not an interactive command)
+  node        Explicit spelling for the machine-scoped verbs (apn node status, …)
+  enroll      Enroll this machine with a hub (--hub, --token, --force, --otlp-endpoint)
+  run         Run the agent in the foreground
+  native-skillsShow, enable or disable native skill placement on this node
+  plugin-managementShow, enable or disable Console plugin management on this node
+  mcp-proxy   Show the stations the loopback MCP proxy serves, or rotate their secrets
+  hermes-skillsRegister or remove the managed skills directory in a Hermes profile
+  hermes-live Install, enable or remove the agentpod-live streaming plugin in a Hermes profile
+  openclaw-errorsInstall, enable or remove the agentpod-errors plugin in OpenClaw
+  pi-errors   Install, enable or remove the agentpod-errors extension in Pi
+  detect      Print detected harness stations as JSON
+  forge-api   Set up stk as this station's forge credential broker (setup)
+  scan        Check this machine's agents for exposure (--json)
+  acp         Attach an ACP editor to a station (--list, --station)
+
+Maintenance:
+  update      Self-update from the latest release (--check, --force)
+  help        Show this list, or one command in detail
+  version     Print version and platform
+
+Examples:
+  apn status
+  apn logs -f
+  apn enroll --hub https://hub.example.com --token <TOKEN>
+
+Run 'apn help <command>' or 'apn <command> -h' for command details.
+--- stderr
+
+$ apn help
+exit 0
+--- stdout
+agentpod-node (apn) — AgentPod fleet node agent  dev
+
+Usage: apn <command> [flags]
+
+Service:
+  status      Show local service + hub connection state (--json for scripts)
+  start       Enable and start the background service
+  stop        Stop and disable the service (sticky across reboots)
+  restart     Restart the running service
+  logs        Show service logs (-f to follow, -n N for last N lines)
+  service     install | uninstall the platform service (launchd/systemd)
+  telemetry   Show, enable or disable OpenTelemetry export (--endpoint URL)
+
+Node:
+  salaam-station-files-v1Private Salaam station file protocol (not an interactive command)
+  node        Explicit spelling for the machine-scoped verbs (apn node status, …)
+  enroll      Enroll this machine with a hub (--hub, --token, --force, --otlp-endpoint)
+  run         Run the agent in the foreground
+  native-skillsShow, enable or disable native skill placement on this node
+  plugin-managementShow, enable or disable Console plugin management on this node
+  mcp-proxy   Show the stations the loopback MCP proxy serves, or rotate their secrets
+  hermes-skillsRegister or remove the managed skills directory in a Hermes profile
+  hermes-live Install, enable or remove the agentpod-live streaming plugin in a Hermes profile
+  openclaw-errorsInstall, enable or remove the agentpod-errors plugin in OpenClaw
+  pi-errors   Install, enable or remove the agentpod-errors extension in Pi
+  detect      Print detected harness stations as JSON
+  forge-api   Set up stk as this station's forge credential broker (setup)
+  scan        Check this machine's agents for exposure (--json)
+  acp         Attach an ACP editor to a station (--list, --station)
+
+Maintenance:
+  update      Self-update from the latest release (--check, --force)
+  help        Show this list, or one command in detail
+  version     Print version and platform
+
+Examples:
+  apn status
+  apn logs -f
+  apn enroll --hub https://hub.example.com --token <TOKEN>
+
+Run 'apn help <command>' or 'apn <command> -h' for command details.
+--- stderr
+
+$ apn -h
+exit 0
+--- stdout
+agentpod-node (apn) — AgentPod fleet node agent  dev
+
+Usage: apn <command> [flags]
+
+Service:
+  status      Show local service + hub connection state (--json for scripts)
+  start       Enable and start the background service
+  stop        Stop and disable the service (sticky across reboots)
+  restart     Restart the running service
+  logs        Show service logs (-f to follow, -n N for last N lines)
+  service     install | uninstall the platform service (launchd/systemd)
+  telemetry   Show, enable or disable OpenTelemetry export (--endpoint URL)
+
+Node:
+  salaam-station-files-v1Private Salaam station file protocol (not an interactive command)
+  node        Explicit spelling for the machine-scoped verbs (apn node status, …)
+  enroll      Enroll this machine with a hub (--hub, --token, --force, --otlp-endpoint)
+  run         Run the agent in the foreground
+  native-skillsShow, enable or disable native skill placement on this node
+  plugin-managementShow, enable or disable Console plugin management on this node
+  mcp-proxy   Show the stations the loopback MCP proxy serves, or rotate their secrets
+  hermes-skillsRegister or remove the managed skills directory in a Hermes profile
+  hermes-live Install, enable or remove the agentpod-live streaming plugin in a Hermes profile
+  openclaw-errorsInstall, enable or remove the agentpod-errors plugin in OpenClaw
+  pi-errors   Install, enable or remove the agentpod-errors extension in Pi
+  detect      Print detected harness stations as JSON
+  forge-api   Set up stk as this station's forge credential broker (setup)
+  scan        Check this machine's agents for exposure (--json)
+  acp         Attach an ACP editor to a station (--list, --station)
+
+Maintenance:
+  update      Self-update from the latest release (--check, --force)
+  help        Show this list, or one command in detail
+  version     Print version and platform
+
+Examples:
+  apn status
+  apn logs -f
+  apn enroll --hub https://hub.example.com --token <TOKEN>
+
+Run 'apn help <command>' or 'apn <command> -h' for command details.
+--- stderr
+
+$ apn --help
+exit 0
+--- stdout
+agentpod-node (apn) — AgentPod fleet node agent  dev
+
+Usage: apn <command> [flags]
+
+Service:
+  status      Show local service + hub connection state (--json for scripts)
+  start       Enable and start the background service
+  stop        Stop and disable the service (sticky across reboots)
+  restart     Restart the running service
+  logs        Show service logs (-f to follow, -n N for last N lines)
+  service     install | uninstall the platform service (launchd/systemd)
+  telemetry   Show, enable or disable OpenTelemetry export (--endpoint URL)
+
+Node:
+  salaam-station-files-v1Private Salaam station file protocol (not an interactive command)
+  node        Explicit spelling for the machine-scoped verbs (apn node status, …)
+  enroll      Enroll this machine with a hub (--hub, --token, --force, --otlp-endpoint)
+  run         Run the agent in the foreground
+  native-skillsShow, enable or disable native skill placement on this node
+  plugin-managementShow, enable or disable Console plugin management on this node
+  mcp-proxy   Show the stations the loopback MCP proxy serves, or rotate their secrets
+  hermes-skillsRegister or remove the managed skills directory in a Hermes profile
+  hermes-live Install, enable or remove the agentpod-live streaming plugin in a Hermes profile
+  openclaw-errorsInstall, enable or remove the agentpod-errors plugin in OpenClaw
+  pi-errors   Install, enable or remove the agentpod-errors extension in Pi
+  detect      Print detected harness stations as JSON
+  forge-api   Set up stk as this station's forge credential broker (setup)
+  scan        Check this machine's agents for exposure (--json)
+  acp         Attach an ACP editor to a station (--list, --station)
+
+Maintenance:
+  update      Self-update from the latest release (--check, --force)
+  help        Show this list, or one command in detail
+  version     Print version and platform
+
+Examples:
+  apn status
+  apn logs -f
+  apn enroll --hub https://hub.example.com --token <TOKEN>
+
+Run 'apn help <command>' or 'apn <command> -h' for command details.
+--- stderr
+
+$ apn version
+exit 0
+--- stdout
+agentpod-node dev $GOOS/$GOARCH
+--- stderr
+
+$ apn node
+exit 0
+--- stdout
+apn node <verb> — the explicit form of the machine-scoped verbs.
+
+Every verb apn dispatches is a node verb — this binary is machine-scoped only,
+the fleet-acting verbs live in the separate `fleet` binary — and both spellings
+work here: `apn status` and `apn node status` are the same command. The bare
+forms are kept because existing runbooks name them.
+--- stderr
+
+$ apn node status -h
+exit 0
+--- stdout
+apn status — show local service state and hub connection state.
+
+Local block: whether the service is installed / enabled / running (with
+PID), the binary version, and the config path. Hub block: reachability
+and credential validity, checked against the existing
+GET /public/nodes/credential-check endpoint (no new endpoints).
+
+Exit code is 0 iff the service is running AND the stored hub credential
+is valid — safe to use in scripts/health checks.
+  -json
+    	machine-readable JSON output
+--- stderr
+
+$ apn bogus
+exit 2
+--- stdout
+unknown command: "bogus"
+did you mean 'logs'?
+run 'apn help' for usage.
+--- stderr
+
+$ apn statsu
+exit 2
+--- stdout
+unknown command: "statsu"
+did you mean 'status'?
+run 'apn help' for usage.
+--- stderr
+
+$ apn help bogus
+exit 2
+--- stdout
+unknown command: "bogus"
+--- stderr
+
+$ apn help help
+exit 0
+--- stdout
+apn help [command] — with no argument, the commands grouped by purpose; with one,
+that command's detail. 'apn <command> -h' prints the same detail, plus the
+command's flags and their defaults where it has any.
+--- stderr
+
+$ apn help -h
+exit 2
+--- stdout
+unknown command: "-h"
+--- stderr
+
+$ apn help enroll
+exit 0
+--- stdout
+apn enroll [--hub URL] [--token TOKEN] [--force] [--otlp-endpoint URL] — enroll this
+machine with a hub.
+
+Falls back to the AGENTPOD_HUB_URL/AGENTPOD_ENROLL_TOKEN environment
+variables when the flags are omitted. Idempotent: running it again on
+an already-enrolled machine is a friendly no-op unless the stored
+credential is no longer valid, or --force is passed.
+
+--otlp-endpoint URL also enables OpenTelemetry export to that collector (validated
+before contacting the hub; applies on an already-enrolled machine too; no restart —
+same as 'apn telemetry enable'). Ignored with a warning on macOS.
+--- stderr
+
+$ apn enroll -h
+exit 0
+--- stdout
+--- stderr
+apn enroll [--hub URL] [--token TOKEN] [--force] [--otlp-endpoint URL] — enroll this
+machine with a hub.
+
+Falls back to the AGENTPOD_HUB_URL/AGENTPOD_ENROLL_TOKEN environment
+variables when the flags are omitted. Idempotent: running it again on
+an already-enrolled machine is a friendly no-op unless the stored
+credential is no longer valid, or --force is passed.
+
+--otlp-endpoint URL also enables OpenTelemetry export to that collector (validated
+before contacting the hub; applies on an already-enrolled machine too; no restart —
+same as 'apn telemetry enable'). Ignored with a warning on macOS.
+  -force
+    	re-enroll even when a valid config exists
+  -hub string
+    	hub base URL
+  -otlp-endpoint string
+    	OTLP/HTTP collector base URL to enable telemetry export
+  -token string
+    	enrollment token
+
+$ apn help run
+exit 0
+--- stdout
+apn run — run the agent in the foreground: connects to the hub and
+handles terminal sessions until interrupted (Ctrl-C).
+
+This is what the installed service runs under the hood; run it
+directly for debugging.
+--- stderr
+
+$ apn run -h
+exit 0
+--- stdout
+apn run — run the agent in the foreground: connects to the hub and
+handles terminal sessions until interrupted (Ctrl-C).
+
+This is what the installed service runs under the hood; run it
+directly for debugging.
+--- stderr
+
+$ apn help native-skills
+exit 0
+--- stdout
+apn native-skills <status|enable|disable> — control the separate native
+skill-placement gate for this node.
+
+Native placement writes into a harness-visible skill directory. It is disabled
+by default and must be deliberately enabled by the node operator. `enable` and
+`disable` update only this node's local configuration; restart the node service
+after either change before the hub can observe the new capability.
+--- stderr
+
+$ apn native-skills -h
+exit 0
+--- stdout
+apn native-skills <status|enable|disable> — control the separate native
+skill-placement gate for this node.
+
+Native placement writes into a harness-visible skill directory. It is disabled
+by default and must be deliberately enabled by the node operator. `enable` and
+`disable` update only this node's local configuration; restart the node service
+after either change before the hub can observe the new capability.
+--- stderr
+
+$ apn help hermes-skills
+exit 0
+--- stdout
+apn hermes-skills <status|register|unregister> --profile NAME [--apply] —
+a published skill is inert until skills.external_dirs names its directory.
+Without --apply the command prints the exact change and writes nothing.
+It edits one profile's own config.yaml and leaves the rest of it alone.
+--- stderr
+
+$ apn hermes-skills -h
+exit 0
+--- stdout
+apn hermes-skills <status|register|unregister> --profile NAME [--apply] —
+a published skill is inert until skills.external_dirs names its directory.
+Without --apply the command prints the exact change and writes nothing.
+It edits one profile's own config.yaml and leaves the rest of it alone.
+--- stderr
+
+$ apn help hermes-live
+exit 0
+--- stdout
+apn hermes-live <status|enable|disable> --profile NAME [--apply] [--replace-unmanaged] —
+a harness-mode Hermes profile streams into AgentPod clients only with this plugin.
+enable installs the copy shipped in this apn, on a Hermes the CI contract tested,
+and adds it to plugins.enabled with plugins.stream_reasoning_deltas: true.
+Without --apply it prints the exact change and writes nothing. disable removes it
+and undoes the configuration edit. Neither restarts the gateway; that is yours to do.
+--- stderr
+
+$ apn hermes-live -h
+exit 0
+--- stdout
+apn hermes-live <status|enable|disable> --profile NAME [--apply] [--replace-unmanaged] —
+a harness-mode Hermes profile streams into AgentPod clients only with this plugin.
+enable installs the copy shipped in this apn, on a Hermes the CI contract tested,
+and adds it to plugins.enabled with plugins.stream_reasoning_deltas: true.
+Without --apply it prints the exact change and writes nothing. disable removes it
+and undoes the configuration edit. Neither restarts the gateway; that is yours to do.
+--- stderr
+
+$ apn help openclaw-errors
+exit 0
+--- stdout
+apn openclaw-errors <status|enable|disable> [--apply] —
+OpenClaw's ACP bridge drops why a turn failed; this plugin reports it to this node.
+enable installs the copy shipped in this apn, on an OpenClaw the CI contract tested,
+into ~/.agentpod/openclaw and adds it to ~/.openclaw/openclaw.json with
+hooks.allowConversationAccess. Without --apply it prints the exact change and writes
+nothing. disable removes both. Neither restarts the gateway; that is yours to do.
+--- stderr
+
+$ apn openclaw-errors -h
+exit 0
+--- stdout
+apn openclaw-errors <status|enable|disable> [--apply] —
+OpenClaw's ACP bridge drops why a turn failed; this plugin reports it to this node.
+enable installs the copy shipped in this apn, on an OpenClaw the CI contract tested,
+into ~/.agentpod/openclaw and adds it to ~/.openclaw/openclaw.json with
+hooks.allowConversationAccess. Without --apply it prints the exact change and writes
+nothing. disable removes both. Neither restarts the gateway; that is yours to do.
+--- stderr
+
+$ apn help pi-errors
+exit 0
+--- stdout
+apn pi-errors <status|enable|disable> [--apply] —
+pi-acp drops why a turn failed; this extension reports it to this node.
+enable installs the copy shipped in this apn, on a Pi the CI contract tested,
+as ~/.pi/agent/extensions/agentpod-errors.ts. Without --apply it prints what it
+would do and writes nothing. Nothing needs restarting: each new Pi session loads it.
+--- stderr
+
+$ apn pi-errors -h
+exit 0
+--- stdout
+apn pi-errors <status|enable|disable> [--apply] —
+pi-acp drops why a turn failed; this extension reports it to this node.
+enable installs the copy shipped in this apn, on a Pi the CI contract tested,
+as ~/.pi/agent/extensions/agentpod-errors.ts. Without --apply it prints what it
+would do and writes nothing. Nothing needs restarting: each new Pi session loads it.
+--- stderr
+
+$ apn help plugin-management
+exit 0
+--- stdout
+apn plugin-management <status|enable|disable> — let the Console install and
+remove the agentpod-live plugin in this node's Hermes profiles.
+
+Each change is planned on the node, reviewed in the Console and applied only
+if the profile still matches the review; the node probes Hermes's version
+itself. It is disabled by default. `enable` and `disable` update only this
+node's local configuration; restart the node service after either change.
+Nothing here restarts a gateway.
+--- stderr
+
+$ apn plugin-management -h
+exit 0
+--- stdout
+apn plugin-management <status|enable|disable> — let the Console install and
+remove the agentpod-live plugin in this node's Hermes profiles.
+
+Each change is planned on the node, reviewed in the Console and applied only
+if the profile still matches the review; the node probes Hermes's version
+itself. It is disabled by default. `enable` and `disable` update only this
+node's local configuration; restart the node service after either change.
+Nothing here restarts a gateway.
+--- stderr
+
+$ apn help forge-api
+exit 0
+--- stdout
+apn forge-api setup [--user stk] [--agent-uid N]... [--state-dir DIR] [--stk PATH]
+apn forge-api setup --station ID [--agent-uid N]... [--allow-shared-agent-uid]
+apn forge-api prune --station ID [--dry-run] [--yes]
+
+Installs stk as its own OS user so the agent can use forge credentials
+without being able to read them. Run it once with sudo; it is safe to
+repeat (an existing separate-user install is left alone).
+
+--agent-uid defaults to the uid the node starts harnesses as (the user
+who ran sudo). Without root, nothing is installed: the command reports
+same-user isolation, marked DEGRADED, and says how to fix it.
+
+--station ID creates that station's own stk instance (its own OS user,
+state, policy file, proxy port and systemd unit, derived from the id)
+ahead of time. The node does the same on its own at a station's first
+grant when it runs as root, so this is only for preparing a station
+or for a node that does not run as root.
+
+A second station whose agents run as a uid another station already uses
+is refused (station-uid-shared): isolation between stations needs a
+distinct uid per station. --allow-shared-agent-uid acknowledges the
+risk; the station's grants then report same-user isolation.
+
+prune removes ONE station's whole stk instance (its unit, user, state,
+policy and every credential it holds, and the harness wiring) when the
+station is gone from this node. It is manual: nothing removes an instance
+for you. --dry-run says what it would remove; without it --yes is
+required. A station the node's registry does not list is left alone.
+
+Exit 0 on separate-user or on a clearly reported same-user; 1 on errors.
+--- stderr
+
+$ apn forge-api -h
+exit 0
+--- stdout
+apn forge-api setup [--user stk] [--agent-uid N]... [--state-dir DIR] [--stk PATH]
+apn forge-api setup --station ID [--agent-uid N]... [--allow-shared-agent-uid]
+apn forge-api prune --station ID [--dry-run] [--yes]
+
+Installs stk as its own OS user so the agent can use forge credentials
+without being able to read them. Run it once with sudo; it is safe to
+repeat (an existing separate-user install is left alone).
+
+--agent-uid defaults to the uid the node starts harnesses as (the user
+who ran sudo). Without root, nothing is installed: the command reports
+same-user isolation, marked DEGRADED, and says how to fix it.
+
+--station ID creates that station's own stk instance (its own OS user,
+state, policy file, proxy port and systemd unit, derived from the id)
+ahead of time. The node does the same on its own at a station's first
+grant when it runs as root, so this is only for preparing a station
+or for a node that does not run as root.
+
+A second station whose agents run as a uid another station already uses
+is refused (station-uid-shared): isolation between stations needs a
+distinct uid per station. --allow-shared-agent-uid acknowledges the
+risk; the station's grants then report same-user isolation.
+
+prune removes ONE station's whole stk instance (its unit, user, state,
+policy and every credential it holds, and the harness wiring) when the
+station is gone from this node. It is manual: nothing removes an instance
+for you. --dry-run says what it would remove; without it --yes is
+required. A station the node's registry does not list is left alone.
+
+Exit 0 on separate-user or on a clearly reported same-user; 1 on errors.
+--- stderr
+
+$ apn help mcp-proxy
+exit 0
+--- stdout
+apn mcp-proxy <status|rotate [STATION_ID...]> — the node's loopback MCP proxy
+gives a station's harness sessions the hub's and SuperLibrary's MCP tools.
+
+Each station's secret persists in mcp-proxy.json (0600) beside the node config,
+so a session kept open across a node restart keeps working. `rotate` replaces
+the named stations' secrets (every served station when none are named); the
+running node refuses the old ones from their next request, without a restart.
+Secrets are never printed. Which stations are served is changed from the hub:
+fleet mcp-proxy enable|disable.
+--- stderr
+
+$ apn mcp-proxy -h
+exit 0
+--- stdout
+apn mcp-proxy <status|rotate [STATION_ID...]> — the node's loopback MCP proxy
+gives a station's harness sessions the hub's and SuperLibrary's MCP tools.
+
+Each station's secret persists in mcp-proxy.json (0600) beside the node config,
+so a session kept open across a node restart keeps working. `rotate` replaces
+the named stations' secrets (every served station when none are named); the
+running node refuses the old ones from their next request, without a restart.
+Secrets are never printed. Which stations are served is changed from the hub:
+fleet mcp-proxy enable|disable.
+--- stderr
+
+$ apn help detect
+exit 0
+--- stdout
+apn detect — print the harness stations detected on this host as
+JSON. Debug/ops smoke test for the descriptors; no hub connection
+required.
+--- stderr
+
+$ apn detect -h
+exit 0
+--- stdout
+apn detect — print the harness stations detected on this host as
+JSON. Debug/ops smoke test for the descriptors; no hub connection
+required.
+--- stderr
+
+$ apn help scan
+exit 0
+--- stdout
+apn scan [--json] [--no-color] — check the agent runtimes on this
+host for the two ways they get taken over: a listener bound to every
+network interface, and credential files other users can read.
+
+Needs no hub, no account and no network. Prints a graded report and
+exits 0 (clean), 1 (warnings) or 2 (critical), so it works in cron.
+
+A check that cannot determine an answer says so — it is never
+reported as a pass.
+--- stderr
+
+$ apn scan -h
+exit 0
+--- stdout
+apn scan [--json] [--no-color] — check the agent runtimes on this
+host for the two ways they get taken over: a listener bound to every
+network interface, and credential files other users can read.
+
+Needs no hub, no account and no network. Prints a graded report and
+exits 0 (clean), 1 (warnings) or 2 (critical), so it works in cron.
+
+A check that cannot determine an answer says so — it is never
+reported as a pass.
+--- stderr
+
+$ apn help acp
+exit 0
+--- stdout
+apn acp --list — show the stations you can attach an editor to.
+
+apn acp --station <id> [--session <id>] [--hub <url>] [--token <t>] —
+make a station on another machine look like a local agent to any ACP
+client (Zed, JetBrains, anything that speaks the protocol).
+
+The editor spawns this and talks ACP over its stdio; the frames are
+piped to the hub, which does the protocol work. Reaches stations
+behind NAT or CGNAT, because the node dials out.
+
+Prefer the AGENTPOD_TOKEN environment variable over --token: a token
+on the command line lands in shell history.
+
+This is the one command that needs no enrolled node — a laptop can
+install apn purely as a client.
+--- stderr
+
+$ apn acp -h
+exit 0
+--- stdout
+apn acp --list — show the stations you can attach an editor to.
+
+apn acp --station <id> [--session <id>] [--hub <url>] [--token <t>] —
+make a station on another machine look like a local agent to any ACP
+client (Zed, JetBrains, anything that speaks the protocol).
+
+The editor spawns this and talks ACP over its stdio; the frames are
+piped to the hub, which does the protocol work. Reaches stations
+behind NAT or CGNAT, because the node dials out.
+
+Prefer the AGENTPOD_TOKEN environment variable over --token: a token
+on the command line lands in shell history.
+
+This is the one command that needs no enrolled node — a laptop can
+install apn purely as a client.
+--- stderr
+
+$ apn help update
+exit 0
+--- stdout
+apn update [--check] [--force] — self-update from the latest GitHub
+release.
+
+--check resolves and reports the current/latest version without
+changing anything. --force updates even when already on the latest
+version. On success the service is restarted automatically; if the
+restart fails, the binary is already swapped and this prints a
+manual-restart hint.
+--- stderr
+
+$ apn update -h
+exit 0
+--- stdout
+--- stderr
+apn update [--check] [--force] — self-update from the latest GitHub
+release.
+
+--check resolves and reports the current/latest version without
+changing anything. --force updates even when already on the latest
+version. On success the service is restarted automatically; if the
+restart fails, the binary is already swapped and this prints a
+manual-restart hint.
+  -check
+    	resolve and report current/latest version, no changes
+  -force
+    	update even when already on the latest version
+
+$ apn help version
+exit 0
+--- stdout
+apn version — print the binary version and platform (GOOS/GOARCH).
+--- stderr
+
+$ apn version -h
+exit 0
+--- stdout
+apn version — print the binary version and platform (GOOS/GOARCH).
+--- stderr
+
+$ apn help stop
+exit 0
+--- stdout
+apn stop — stop the service AND disable it (sticky across
+reboots/logins — it will not come back on its own).
+
+macOS: `launchctl bootout` + `launchctl disable`. Linux: `systemctl
+[--user] stop` + `disable`.
+
+Undo with 'apn start' — it re-enables and starts.
+--- stderr
+
+$ apn stop -h
+exit 0
+--- stdout
+apn stop — stop the service AND disable it (sticky across
+reboots/logins — it will not come back on its own).
+
+macOS: `launchctl bootout` + `launchctl disable`. Linux: `systemctl
+[--user] stop` + `disable`.
+
+Undo with 'apn start' — it re-enables and starts.
+--- stderr
+
+$ apn help start
+exit 0
+--- stdout
+apn start — enable and start the background service (the symmetric
+inverse of 'apn stop').
+
+macOS: `launchctl enable` + `launchctl bootstrap`. Linux: `systemctl
+[--user] enable --now`.
+
+If no service is installed yet, this prints a hint pointing at
+'apn service install' (or run in the foreground with 'apn run').
+--- stderr
+
+$ apn start -h
+exit 0
+--- stdout
+apn start — enable and start the background service (the symmetric
+inverse of 'apn stop').
+
+macOS: `launchctl enable` + `launchctl bootstrap`. Linux: `systemctl
+[--user] enable --now`.
+
+If no service is installed yet, this prints a hint pointing at
+'apn service install' (or run in the foreground with 'apn run').
+--- stderr
+
+$ apn help restart
+exit 0
+--- stdout
+apn restart — restart the running service in place.
+
+macOS: `launchctl kickstart -k`. Linux: `systemctl [--user] restart`.
+--- stderr
+
+$ apn restart -h
+exit 0
+--- stdout
+apn restart — restart the running service in place.
+
+macOS: `launchctl kickstart -k`. Linux: `systemctl [--user] restart`.
+--- stderr
+
+$ apn help status
+exit 0
+--- stdout
+apn status — show local service state and hub connection state.
+
+Local block: whether the service is installed / enabled / running (with
+PID), the binary version, and the config path. Hub block: reachability
+and credential validity, checked against the existing
+GET /public/nodes/credential-check endpoint (no new endpoints).
+
+Exit code is 0 iff the service is running AND the stored hub credential
+is valid — safe to use in scripts/health checks.
+--- stderr
+
+$ apn status -h
+exit 0
+--- stdout
+apn status — show local service state and hub connection state.
+
+Local block: whether the service is installed / enabled / running (with
+PID), the binary version, and the config path. Hub block: reachability
+and credential validity, checked against the existing
+GET /public/nodes/credential-check endpoint (no new endpoints).
+
+Exit code is 0 iff the service is running AND the stored hub credential
+is valid — safe to use in scripts/health checks.
+  -json
+    	machine-readable JSON output
+--- stderr
+
+$ apn help logs
+exit 0
+--- stdout
+apn logs [-f] [-n N] — show service logs.
+
+macOS: reads/tails ~/Library/Logs/agentpod-node.log.
+Linux: execs `journalctl [--user] -u agentpod-node [-f] [-n N]`.
+--- stderr
+
+$ apn logs -h
+exit 0
+--- stdout
+apn logs [-f] [-n N] — show service logs.
+
+macOS: reads/tails ~/Library/Logs/agentpod-node.log.
+Linux: execs `journalctl [--user] -u agentpod-node [-f] [-n N]`.
+  -f	follow log output
+  -n int
+    	number of lines to show (default 50)
+--- stderr
+
+$ apn help telemetry
+exit 0
+--- stdout
+apn telemetry <status|enable|disable> — control this node's OpenTelemetry
+export through its otel.env file.
+
+status [--json]: the config path, endpoint, enabled/disabled and, when
+enabled, whether the collector answers (a ~2 s GET of <endpoint>/v1/traces;
+any HTTP response counts).
+enable --endpoint URL: validate (http/https only), write, restart the service.
+disable: comment the endpoint out, restart the service.
+Nothing is restarted when the file would not change.
+
+Unsupported on macOS (launchd has no env-file hook).
+--- stderr
+
+$ apn telemetry -h
+exit 0
+--- stdout
+apn telemetry <status|enable|disable> — control this node's OpenTelemetry
+export through its otel.env file.
+
+status [--json]: the config path, endpoint, enabled/disabled and, when
+enabled, whether the collector answers (a ~2 s GET of <endpoint>/v1/traces;
+any HTTP response counts).
+enable --endpoint URL: validate (http/https only), write, restart the service.
+disable: comment the endpoint out, restart the service.
+Nothing is restarted when the file would not change.
+
+Unsupported on macOS (launchd has no env-file hook).
+--- stderr
+
+$ apn help service
+exit 0
+--- stdout
+apn service <install|uninstall> — manage the platform service
+definition.
+
+install: writes a plist (macOS LaunchAgent) or systemd unit from a
+template embedded in the binary, then enables and starts it.
+Idempotent — re-running replaces the file and restarts. Non-root
+Linux uses a --user unit; root Linux uses a system unit; macOS uses a
+LaunchAgent (refuses to run as root).
+
+uninstall: stops, disables, and removes the plist/unit. Idempotent —
+a no-op when nothing is installed. Leaves config/enrollment untouched.
+--- stderr
+
+$ apn service -h
+exit 0
+--- stdout
+apn service <install|uninstall> — manage the platform service
+definition.
+
+install: writes a plist (macOS LaunchAgent) or systemd unit from a
+template embedded in the binary, then enables and starts it.
+Idempotent — re-running replaces the file and restarts. Non-root
+Linux uses a --user unit; root Linux uses a system unit; macOS uses a
+LaunchAgent (refuses to run as root).
+
+uninstall: stops, disables, and removes the plist/unit. Idempotent —
+a no-op when nothing is installed. Leaves config/enrollment untouched.
+--- stderr
+
