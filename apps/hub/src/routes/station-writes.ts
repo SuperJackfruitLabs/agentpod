@@ -96,9 +96,6 @@ function brokerErrorStatus(error: string | undefined): 409 | 502 {
 
 // ─── Shared auth + ownership guard ───────────────────────────────────────────
 
-type RouteContext = {
-  user: AuthUser | undefined;
-};
 
 // ─── Route schemas ────────────────────────────────────────────────────────────
 

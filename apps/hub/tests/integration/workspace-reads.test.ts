@@ -101,7 +101,9 @@ async function call(headers: Record<string, string>, method: string, path: strin
   let json: any;
   try {
     json = JSON.parse(text);
-  } catch {}
+  } catch {
+    // Not JSON: the body is left undefined.
+  }
   return { status: res.status, json };
 }
 

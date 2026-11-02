@@ -115,7 +115,7 @@ test("Destroy: type hostname enables confirm button → calls destroyRuntime(run
 
   // Open the destroy dialog (first "Destroy" button is the trigger)
   const [triggerBtn] = getAllByRole("button", { name: /destroy/i });
-  fireEvent.click(triggerBtn);
+  void fireEvent.click(triggerBtn);
 
   // Wait for dialog to open and find the confirm input
   await waitFor(() => {
@@ -125,7 +125,7 @@ test("Destroy: type hostname enables confirm button → calls destroyRuntime(run
   const input = within(getByRole("dialog")).getByRole("textbox");
 
   // Wrong input: dialog confirm button still disabled (last "Destroy" button = dialog's)
-  fireEvent.input(input, { target: { value: "wrong" } });
+  void fireEvent.input(input, { target: { value: "wrong" } });
   await waitFor(() => {
     const btns = getAllByRole("button", { name: /destroy/i }) as HTMLButtonElement[];
     const dialogBtn = btns[btns.length - 1];
@@ -133,7 +133,7 @@ test("Destroy: type hostname enables confirm button → calls destroyRuntime(run
   });
 
   // Correct input: confirm enabled
-  fireEvent.input(input, { target: { value: "box1.local" } });
+  void fireEvent.input(input, { target: { value: "box1.local" } });
   await waitFor(() => {
     const btns = getAllByRole("button", { name: /destroy/i }) as HTMLButtonElement[];
     const dialogBtn = btns[btns.length - 1];
@@ -142,7 +142,7 @@ test("Destroy: type hostname enables confirm button → calls destroyRuntime(run
 
   // Click confirm (last Destroy button = dialog's confirm)
   const btns = getAllByRole("button", { name: /destroy/i }) as HTMLButtonElement[];
-  fireEvent.click(btns[btns.length - 1]);
+  void fireEvent.click(btns[btns.length - 1]);
 
   await waitFor(() => {
     expect(api.destroyRuntime).toHaveBeenCalledWith("rt_docker_1");
@@ -159,11 +159,11 @@ test("Destroy failure: shows inline error, dialog closes, does NOT navigate", as
   });
 
   const [triggerBtn] = getAllByRole("button", { name: /destroy/i });
-  fireEvent.click(triggerBtn);
+  void fireEvent.click(triggerBtn);
 
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
 
-  fireEvent.input(within(getByRole("dialog")).getByRole("textbox"), {
+  void fireEvent.input(within(getByRole("dialog")).getByRole("textbox"), {
     target: { value: "box1.local" },
   });
   await waitFor(() => {
@@ -172,7 +172,7 @@ test("Destroy failure: shows inline error, dialog closes, does NOT navigate", as
   });
 
   const btns = getAllByRole("button", { name: /destroy/i }) as HTMLButtonElement[];
-  fireEvent.click(btns[btns.length - 1]);
+  void fireEvent.click(btns[btns.length - 1]);
 
   await waitFor(() => {
     // (a) error text is visible on the page
@@ -194,7 +194,7 @@ test("Stop: calls stopRuntime(runtimeId) and onRefresh", async () => {
     props: { node: dockerNode, onRefresh },
   });
 
-  fireEvent.click(getByRole("button", { name: /stop/i }));
+  void fireEvent.click(getByRole("button", { name: /stop/i }));
 
   await waitFor(() => {
     expect(api.stopRuntime).toHaveBeenCalledWith("rt_docker_1");
@@ -210,7 +210,7 @@ test("Start: calls startRuntime(runtimeId) and onRefresh", async () => {
     props: { node: dockerNode, onRefresh },
   });
 
-  fireEvent.click(getByRole("button", { name: /start/i }));
+  void fireEvent.click(getByRole("button", { name: /start/i }));
 
   await waitFor(() => {
     expect(api.startRuntime).toHaveBeenCalledWith("rt_docker_1");

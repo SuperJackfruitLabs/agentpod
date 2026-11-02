@@ -249,5 +249,5 @@ export async function readEvents(
     .from(acpEvents)
     .where(and(eq(acpEvents.sessionId, sessionId), gt(acpEvents.seq, sinceSeq)))
     .orderBy(asc(acpEvents.seq));
-  return rows as Array<{ seq: number; type: string; payload: unknown }>;
+  return rows;
 }

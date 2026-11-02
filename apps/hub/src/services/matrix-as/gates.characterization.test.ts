@@ -63,7 +63,6 @@ const SPEAKER = "@agent_superpipeline:id.agentpod.dev";
 const HANDLE = `gates-char-${RUN}`;
 const HARNESS_HANDLE = `gates-char-h-${RUN}`;
 let nodeId: string;
-let seq = 0;
 
 beforeAll(async () => {
   await ensurePgMigrations();
@@ -97,8 +96,9 @@ function normalize(value: unknown): unknown {
   return JSON.parse(text);
 }
 
-function gate(): GatePendingDelivery {
-  seq++;
+/** Gate number `seq` of this run. Each test names its own numbers (the ones it had when the file
+ *  ran top to bottom), so a test run alone with `-t` sees the same ids as in the full file. */
+function gate(seq: number): GatePendingDelivery {
   return {
     event: "gate.pending",
     boardId: BOARD,
@@ -189,7 +189,7 @@ function projectionRig(gateId: string, over: Partial<{
 describe("projectGate", () => {
   test("sent, legacy on: prose (carrying the card) then the custom event, the claim taken before both", async () => {
     _resetHubEventsForTest();
-    const d = gate();
+    const d = gate(1);
     const rig = projectionRig(d.gateId, { joined: true });
     const outcome = await projectGate(BOOTSTRAP_TENANT_ID, d, rig.deps);
     expect(normalize({ outcome, trace: rig.trace, row: await gateRow(d.gateId), kinds: rig.ids.map((id) => [id, hubEventKind(id)]) })).toMatchInlineSnapshot(`
@@ -354,7 +354,7 @@ describe("projectGate", () => {
   test("sent, legacy off: the prose is the only event; no link without a base url; no humanJoined dep", async () => {
     process.env.AGENTPOD_LEGACY_PERMISSION_EVENTS = "false";
     _resetHubEventsForTest();
-    const d: GatePendingDelivery = { ...gate(), boardName: null, handoffSummary: undefined };
+    const d: GatePendingDelivery = { ...gate(2), boardName: null, handoffSummary: undefined };
     const rig = projectionRig(d.gateId);
     delete rig.deps.boardBaseUrl;
     const outcome = await projectGate(BOOTSTRAP_TENANT_ID, d, rig.deps);
@@ -438,9 +438,9 @@ describe("projectGate", () => {
   });
 
   test("no board room, and a room nobody has joined: nothing claimed, nothing sent", async () => {
-    const d1 = gate();
+    const d1 = gate(3);
     const none = projectionRig(d1.gateId, { room: null, joined: true });
-    const d2 = gate();
+    const d2 = gate(4);
     const held = projectionRig(d2.gateId, { joined: false });
     expect(
       normalize({
@@ -492,7 +492,7 @@ describe("projectGate", () => {
   });
 
   test("a send that throws gives the claim back and rethrows; an unaccepted send is no-room with the claim given back", async () => {
-    const d1 = gate();
+    const d1 = gate(5);
     const throwing = projectionRig(d1.gateId, {
       custom: async () => {
         throw new Error("M_FORBIDDEN");
@@ -503,7 +503,7 @@ describe("projectGate", () => {
       (e: Error) => `rejected: ${e.message}`,
     );
 
-    const d2 = gate();
+    const d2 = gate(6);
     const refused = projectionRig(d2.gateId, { custom: async () => null });
     const refusedOutcome = await projectGate(BOOTSTRAP_TENANT_ID, d2, refused.deps);
 
@@ -539,7 +539,7 @@ describe("projectGate", () => {
   });
 
   test("an onPosted that fails costs nothing: still sent, the row still recorded", async () => {
-    const d = gate();
+    const d = gate(7);
     const rig = projectionRig(d.gateId, {
       onPosted: async () => {
         throw new Error("fleet card down");

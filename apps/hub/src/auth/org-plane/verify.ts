@@ -17,7 +17,7 @@
  *   unknown kid, or having no set at all, waits, and then for at most the timeout. A plane that
  *   accepts TCP and never answers cannot stall plane-mode requests (security review finding 2).
  */
-import { createLocalJWKSet, decodeProtectedHeader, jwtVerify, type JSONWebKeySet, type JWK } from "jose";
+import { createLocalJWKSet, decodeProtectedHeader, jwtVerify, type JWK } from "jose";
 import { OrgPlaneTokenClaims } from "@agentpod/contract";
 
 import { orgPlane } from "./config";
@@ -128,7 +128,7 @@ export function createPlaneVerifier(o: PlaneVerifierOptions): PlaneVerifier {
       if (!good) return null;
 
       try {
-        const { payload } = await jwtVerify(token, createLocalJWKSet({ keys: good.keys } as JSONWebKeySet), {
+        const { payload } = await jwtVerify(token, createLocalJWKSet({ keys: good.keys }), {
           issuer: o.issuer, // exact string compare
           audience: o.audience, // jose accepts aud equal to, or an array containing, this
           algorithms: [ALG],

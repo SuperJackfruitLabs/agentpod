@@ -13,7 +13,6 @@
  */
 
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { matrixAsTransactions } from "../db/schema/matrix";
 import { isBridgeUser } from "../services/matrix";

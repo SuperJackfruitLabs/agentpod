@@ -212,7 +212,9 @@ export async function reconnectSalaam(live: LiveSession): Promise<void> {
     try {
       live.connection?.close();
       await live.wire?.close();
-    } catch {}
+    } catch {
+      // The old wire is being replaced; a failure to close it changes nothing below.
+    }
     const wire = await openAcpWire(
       live.nodeId,
       live.stationKey,
@@ -331,7 +333,7 @@ async function restoreSalaamRowLocked(
   }
   // The transcript's own high-water mark: row.lastSeq can trail an end appended without it.
   const [agg] = await db
-    .select({ maxSeq: sql<number>`COALESCE(MAX(${acpEvents.seq}), 0)` })
+    .select({ maxSeq: sql<number | string>`COALESCE(MAX(${acpEvents.seq}), 0)` })
     .from(acpEvents)
     .where(eq(acpEvents.sessionId, row.id));
   const b = saved.binding;

@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { SkillReleaseCohortCreateRequest, SkillReleaseCohortMetadata } from "@agentpod/contract";
 import { db } from "../../db/drizzle";
 import { skillReleaseCohorts } from "../../db/schema/skills";

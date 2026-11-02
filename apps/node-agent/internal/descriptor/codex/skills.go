@@ -62,7 +62,7 @@ func (d *Descriptor) SkillInventory(ctx context.Context, key string) (skills.Inv
 
 // codexInventoryDiscoveryBound caps the fresh-session ACP probe on the
 // inventory path. It sits below the hub's 15s default broker deadline
-// (apps/hub/src/services/broker.ts) with room to spare for WebSocket
+// (apps/hub/src/services/broker/broker.ts) with room to spare for WebSocket
 // transport, broker queueing, the filesystem scan and the readiness checks
 // that run before the probe, while still leaving more than an order of
 // magnitude over the measured 0.42-0.77s steady-state probe. The verify path

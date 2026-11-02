@@ -35,7 +35,7 @@ export async function settleStoppedSalaamWork(deps: DispatchDeps, runId: string)
   const expired = (
     await db.select().from(salaamWorkDecisions).where(eq(salaamWorkDecisions.workRequestId, owner.requestId))
   ).filter(
-    (d) => !d.answer && !d.daemonReceipt && Number((d.decision as { expires_at: number }).expires_at) <= Date.now(),
+    (d) => !d.answer && !d.daemonReceipt && Number((d.decision as { expires_at: unknown }).expires_at) <= Date.now(),
   );
   if (expired.length === 1) {
     await settleNeverDispatchedSalaamWork(deps, runId, expired[0]!.requestId, expired[0]!.requestId);
@@ -58,6 +58,7 @@ export async function settleStoppedSalaamWork(deps: DispatchDeps, runId: string)
         (refused.success
           ? ` (${refused.data.settlement_refused})`
           : !status.ok
+            // oxlint-disable-next-line typescript/no-unnecessary-type-conversion -- the daemon's error is not proven a string
             ? ` (status unreadable: ${String(status.error ?? "no answer").slice(0, 300)})`
             : ` (status does not match: ${ready.error.issues.map((i) => i.path.join(".") || "status").join(", ")})`),
     );

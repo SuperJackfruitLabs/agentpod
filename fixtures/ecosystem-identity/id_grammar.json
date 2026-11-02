@@ -261,7 +261,7 @@
       "grammar": "^node_[0-9a-f]{20}$",
       "grammarSource": "NONE \u2014 AgentPod had no id validator of any kind before this corpus. Every id field in packages/contract/src is a bare z.string(). The grammar here is derived from the mint site and this corpus is its first enforcement.",
       "mintedAs": "^node_[0-9a-f]{20}$",
-      "mintSource": "agentpod apps/hub/src/services/enrollment.ts:12 prefixedId(), called at :185 \u2014 `crypto.randomUUID().replace(/-/g,'').slice(0,20)`",
+      "mintSource": "agentpod apps/hub/src/utils/ids.ts:9 prefixedId(), called at apps/hub/src/services/nodes/enrollment.ts:228 \u2014 `crypto.randomUUID().replace(/-/g,'').slice(0,20)`",
       "note": "20 lowercase hex, not superpipeline's 16. The two repos use different lengths from the same underlying source (a UUID with its hyphens stripped). Nothing forces them to agree and nothing has noticed.",
       "accept": [
         {
@@ -314,7 +314,7 @@
       "grammar": "^rt_[0-9a-f]{20}$",
       "grammarSource": "NONE before this corpus \u2014 RuntimeSummary.id is z.string() (packages/contract/src/runtime.ts:197)",
       "mintedAs": "^rt_[0-9a-f]{20}$",
-      "mintSource": "agentpod apps/hub/src/services/runtimes.ts:54-55 prefixedId(), called at :155 \u2014 prefixedId('rt')",
+      "mintSource": "agentpod apps/hub/src/services/runtimes/rows.ts:9-10 prefixedId(), called at apps/hub/src/services/runtimes/create.ts:130 \u2014 prefixedId('rt')",
       "note": "Do not confuse `rt_\u2026` (AgentPod's runtime, a provisioned container/machine) with `runtimes.externalId`, which is the SUBSTRATE's handle (e.g. a Fly app/machine pair) and has no suite-wide grammar at all.",
       "accept": [
         {
@@ -358,7 +358,7 @@
       "grammar": "^etk_[0-9a-f]{20}$",
       "grammarSource": "NONE before this corpus",
       "mintedAs": "^etk_[0-9a-f]{20}$",
-      "mintSource": "agentpod apps/hub/src/services/enrollment.ts:58 \u2014 prefixedId('etk')",
+      "mintSource": "agentpod apps/hub/src/services/nodes/enrollment.ts:58 \u2014 prefixedId('etk')",
       "note": "The enrollment token ROW id. The token itself is a different thing with a different shape \u2014 `enr_` + 20 hex + 32 hex (enrollment.ts:54) \u2014 and is a secret. They are kept apart here so a validator cannot be written that blurs them.",
       "accept": [
         {
@@ -389,7 +389,7 @@
       "grammar": "^station_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
       "grammarSource": "NONE before this corpus",
       "mintedAs": "^station_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-      "mintSource": "agentpod apps/hub/src/services/station-registry.ts:50 \u2014 `station_${crypto.randomUUID()}` (hyphens KEPT)",
+      "mintSource": "agentpod apps/hub/src/services/stations/registry.ts:144 \u2014 `station_${crypto.randomUUID()}` (hyphens KEPT)",
       "note": "A second, incompatible AgentPod grammar: prefix + a hyphenated UUID. Note what this means across the seam \u2014 superpipeline's own id schema is `^<prefix>_[A-Za-z0-9]{6,}$`, whose alphabet has no hyphen, so superpipeline's contract would REJECT every AgentPod station id it was ever handed. That is a live disagreement, not a hypothetical.",
       "accept": [
         {
@@ -434,7 +434,7 @@
       "grammar": "^acps_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
       "grammarSource": "NONE before this corpus \u2014 AcpSessionRow.id is z.string() (packages/contract/src/acp-session.ts)",
       "mintedAs": "^acps_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-      "mintSource": "agentpod apps/hub/src/services/acp-sessions.ts:641 \u2014 `acps_${crypto.randomUUID()}`",
+      "mintSource": "agentpod apps/hub/src/services/acp/open.ts:116 \u2014 `acps_${crypto.randomUUID()}`",
       "note": "The session is the ONLY identity on the ACP wire today: neither AcpClientMsg nor AcpServerMsg carries a run or correlation id. A dispatched run is therefore currently observable only as 'some session on some station'.",
       "accept": [
         {
@@ -1066,7 +1066,7 @@
         "owner": "agentpod",
         "entity": "auditEntry",
         "status": "minted-never-declared",
-        "note": "apps/hub/src/services/audit.ts:94 \u2014 `audit_${crypto.randomUUID()}`, hyphenated-UUID family"
+        "note": "apps/hub/src/services/audit/audit.ts:121 \u2014 `audit_${crypto.randomUUID()}`, hyphenated-UUID family"
       },
       {
         "prefix": "enr",

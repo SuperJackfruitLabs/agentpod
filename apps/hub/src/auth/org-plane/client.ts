@@ -75,7 +75,12 @@ export interface OrgPlaneClient {
 }
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
-type Answer = { status: number; json: any };
+type Answer = { status: number; json: unknown };
+
+/** A field of a JSON body, or undefined when the body is not an object or lacks it. */
+function field(json: unknown, key: string): unknown {
+  return typeof json === "object" && json !== null && key in json ? Reflect.get(json, key) : undefined;
+}
 
 export function createOrgPlaneClient(o: {
   url: string;
@@ -108,7 +113,7 @@ export function createOrgPlaneClient(o: {
       // Deliberately not chained: the cause can quote the request, and the request carries the secret.
       throw new OrgPlaneError(0, "unreachable");
     }
-    let json: any = null;
+    let json: unknown = null;
     try {
       json = text ? JSON.parse(text) : null;
     } catch {
@@ -117,18 +122,23 @@ export function createOrgPlaneClient(o: {
     return { status: res.status, json };
   }
 
-  function ok(r: Answer, allowNotFound = false): any {
-    if (r.status >= 200 && r.status < 300) return r.json;
-    if (allowNotFound && r.status === 404) return null;
-    throw new OrgPlaneError(r.status, typeof r.json?.error === "string" ? r.json.error : "error");
+  /** The body of a 2xx answer, typed as the plane documents it (the plane is trusted; the fields
+   *  this client reads itself are checked where it reads them). */
+  function ok<T = unknown>(r: Answer, allowNotFound = false): T {
+    if (r.status >= 200 && r.status < 300) return r.json as T;
+    if (allowNotFound && r.status === 404) return null as T;
+    const error = field(r.json, "error");
+    throw new OrgPlaneError(r.status, typeof error === "string" ? error : "error");
   }
 
   function token(r: Answer): PlaneToken {
     const j = ok(r);
-    if (typeof j?.access_token !== "string" || j.access_token === "" || typeof j?.expires_in !== "number") {
+    const accessToken = field(j, "access_token");
+    const expiresIn = field(j, "expires_in");
+    if (typeof accessToken !== "string" || accessToken === "" || typeof expiresIn !== "number") {
       throw new OrgPlaneError(r.status, "malformed_response");
     }
-    return { accessToken: j.access_token, expiresIn: j.expires_in };
+    return { accessToken, expiresIn };
   }
 
   return {
@@ -143,9 +153,9 @@ export function createOrgPlaneClient(o: {
       ),
     createAgent: async ({ handle, displayName }) => {
       const r = await call("POST", "/api/principals", { kind: "agent", handle, displayName });
-      const j = ok(r);
-      if (typeof j?.id !== "string" || j.id === "") throw new OrgPlaneError(r.status, "malformed_response");
-      return { id: j.id };
+      const id = field(ok(r), "id");
+      if (typeof id !== "string" || id === "") throw new OrgPlaneError(r.status, "malformed_response");
+      return { id };
     },
     putGrant: async (id, grant) =>
       void ok(

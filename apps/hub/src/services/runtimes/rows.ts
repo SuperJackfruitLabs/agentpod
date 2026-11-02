@@ -15,9 +15,9 @@ export function toContract(row: RuntimeRow): ProvisionedRuntime {
   return {
     id: row.id,
     ownerId: row.userId,
-    provider: row.provider as ProvisionedRuntime["provider"],
+    provider: row.provider,
     externalId: row.externalId ?? null,
-    status: row.status as ProvisionedRuntime["status"],
+    status: row.status,
     nodeId: row.nodeId ?? null,
     name: row.name,
     resourceTier: row.resourceTier as ProvisionedRuntime["resourceTier"],

@@ -54,7 +54,9 @@ export async function sessionBounds(tenant: string, sessionId: string): Promise<
     .from(acpEvents)
     .where(tenantScope(acpEvents, tenant, eq(acpEvents.sessionId, sessionId)));
   if (!row || row.first === null || row.last === null) return null;
-  return { first: Number(row.first), last: Number(row.last) };
+  // Coerced: Postgres may hand an aggregate back as a string, whatever the column's type.
+  const first: unknown = row.first, last: unknown = row.last;
+  return { first: Number(first), last: Number(last) };
 }
 
 const INT = /^\d{1,9}$/;

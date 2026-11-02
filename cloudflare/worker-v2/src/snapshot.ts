@@ -32,7 +32,7 @@ export interface SnapshotDeps {
 }
 
 const json = (body: unknown, status: number) =>
-  Response.json(body as Record<string, unknown>, { status });
+  Response.json(body, { status });
 
 /** What destroying a sandbox needs, beyond the archive storage itself. */
 export interface DestroyDeps extends SnapshotDeps {

@@ -205,7 +205,7 @@ export class NodeAgentContainer extends Container {
    * awake and billing.
    */
   private async notifyHub(state: "asleep"): Promise<void> {
-    const env = this.envVars as Record<string, string> | undefined;
+    const env = this.envVars;
     const hubUrl = env?.AGENTPOD_HUB_URL;
     const token = env?.AGENTPOD_RUNTIME_CALLBACK_TOKEN;
     const runtimeId = env?.AGENTPOD_RUNTIME_ID;
@@ -236,7 +236,7 @@ interface CreateBody {
 }
 
 const json = (body: unknown, status = 200) =>
-  Response.json(body as Record<string, unknown>, { status });
+  Response.json(body, { status });
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

@@ -196,7 +196,7 @@ test("mint failure shows inline mintError without replacing the node grid", asyn
   });
 
   const btn = getByRole("button", { name: /create enrollment token/i });
-  fireEvent.click(btn);
+  void fireEvent.click(btn);
 
   await waitFor(() => {
     // Inline mint error is shown
@@ -257,7 +257,7 @@ test("clicking 'Create enrollment token' calls createEnrollmentToken and shows t
   const { getByRole, getByText } = render(NodesOverview);
 
   const btn = getByRole("button", { name: /create enrollment token/i });
-  fireEvent.click(btn);
+  void fireEvent.click(btn);
 
   await waitFor(() => {
     expect(api.createEnrollmentToken).toHaveBeenCalledOnce();

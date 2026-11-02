@@ -28,7 +28,7 @@ const openclawAllowConversationAccessID = "openclaw.hooks.allowConversationAcces
 // (~/.openclaw/openclaw.json), shared by every subagent station, so a
 // station-scoped declaration of this setting is already refused
 // `out-of-scope` by the hub's existing, harness-agnostic scope rule
-// (apps/hub/src/services/harness-config.ts: `setting.scope !== "profile" &&
+// (apps/hub/src/services/harness-config/harness-config.ts: `setting.scope !== "profile" &&
 // level === "station"`) before it would ever reach this node. No refusal
 // needs adding here (spec §6, D7) — see
 // TestOpenClawConfigSettingsRegistry (openclaw_config_test.go) and the hub's

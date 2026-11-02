@@ -283,7 +283,7 @@ describe("a credential superpipeline will not accept", () => {
     const handle = startAgentLoop({
       run: async () => {
         calls++;
-        if (calls >= 3) handle.stop();
+        if (calls >= 3) void handle.stop();
         throw new SuperpipelineApiError(500, "/v1/boards/brd_x/claims", null, "upstream exploded");
       },
       log: () => {},
@@ -311,7 +311,7 @@ describe("a cycle is not bounded, and that is deliberate", () => {
       run: async (): Promise<DispatchResult> => {
         await new Promise((r) => setTimeout(r, 120));
         finished = true;
-        handle.stop();
+        void handle.stop();
         return { status: "idle" } as DispatchResult;
       },
       log: () => {},

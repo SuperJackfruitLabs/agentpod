@@ -87,7 +87,7 @@ test("FileBrowser clicking a directory calls listFiles again for that path", asy
   await waitFor(() => expect(getByText("src")).toBeTruthy());
 
   // Click the directory to trigger lazy load
-  fireEvent.click(getByText("src"));
+  void fireEvent.click(getByText("src"));
 
   await waitFor(() => {
     expect(api.listFiles).toHaveBeenCalledWith("station_1", "src");
@@ -103,7 +103,7 @@ test("FileBrowser clicking a file calls readFile", async () => {
 
   await waitFor(() => expect(getByText("README.md")).toBeTruthy());
 
-  fireEvent.click(getByText("README.md"));
+  void fireEvent.click(getByText("README.md"));
 
   await waitFor(() => {
     expect(api.readFile).toHaveBeenCalledWith("station_1", "README.md");
@@ -117,7 +117,7 @@ test("FileBrowser shows truncated notice when file is truncated", async () => {
   const { getByText } = render(FileBrowser, { props: { stationId: "station_1" } });
 
   await waitFor(() => expect(getByText("README.md")).toBeTruthy());
-  fireEvent.click(getByText("README.md"));
+  void fireEvent.click(getByText("README.md"));
 
   await waitFor(() => {
     expect(getByText(/truncated/i)).toBeTruthy();
@@ -137,14 +137,14 @@ test("FileBrowser: delete button opens type-to-confirm dialog and calls del on c
   await waitFor(() => expect(getByText("README.md")).toBeTruthy());
 
   // Click the delete button for README.md
-  fireEvent.click(getByRole("button", { name: "Delete README.md" }));
+  void fireEvent.click(getByRole("button", { name: "Delete README.md" }));
 
   // The type-to-confirm dialog should now be open
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
 
   // Type the confirm phrase (the file name)
   const input = within(getByRole("dialog")).getByRole("textbox");
-  fireEvent.input(input, { target: { value: "README.md" } });
+  void fireEvent.input(input, { target: { value: "README.md" } });
 
   // Confirm button should now be enabled — labeled with the action
   await waitFor(() => {
@@ -152,7 +152,7 @@ test("FileBrowser: delete button opens type-to-confirm dialog and calls del on c
     expect(btn.disabled).toBe(false);
   });
 
-  fireEvent.click(getByRole("button", { name: "Delete file" }));
+  void fireEvent.click(getByRole("button", { name: "Delete file" }));
 
   await waitFor(() => {
     expect(api.del).toHaveBeenCalledWith("station_1", "README.md", { recursive: false });
@@ -169,7 +169,7 @@ test("FileBrowser: new folder button calls mkdir", async () => {
 
   // Toolbar is rendered immediately (outside the loading state block)
   const newFolderBtn = getByRole("button", { name: /new folder/i });
-  fireEvent.click(newFolderBtn);
+  void fireEvent.click(newFolderBtn);
 
   // An inline name input should appear
   await waitFor(() => {
@@ -177,8 +177,8 @@ test("FileBrowser: new folder button calls mkdir", async () => {
   });
 
   const input = getByPlaceholderText(/folder name/i);
-  fireEvent.input(input, { target: { value: "my-new-dir" } });
-  fireEvent.keyDown(input, { key: "Enter" });
+  void fireEvent.input(input, { target: { value: "my-new-dir" } });
+  void fireEvent.keyDown(input, { key: "Enter" });
 
   await waitFor(() => {
     expect(api.mkdir).toHaveBeenCalledWith("station_1", "my-new-dir");
@@ -198,14 +198,14 @@ test("FileBrowser: 'Edit' button calls onOpenConfigEditor with the file path", a
   await waitFor(() => expect(getByText("README.md")).toBeTruthy());
 
   // Click the file to open the preview
-  fireEvent.click(getByText("README.md"));
+  void fireEvent.click(getByText("README.md"));
 
   // Wait for file content to load and "Edit" to appear
   await waitFor(() => {
     expect(getByRole("button", { name: /^edit$/i })).toBeTruthy();
   });
 
-  fireEvent.click(getByRole("button", { name: /^edit$/i }));
+  void fireEvent.click(getByRole("button", { name: /^edit$/i }));
 
   expect(onOpenConfigEditor).toHaveBeenCalledWith("README.md");
 });
@@ -240,19 +240,19 @@ test("FileBrowser: opens multiple files as tabs and switches between them withou
   const { getByText, getByRole } = render(FileBrowser, { props: { stationId: "station_1" } });
 
   await waitFor(() => expect(getByText("README.md")).toBeTruthy());
-  fireEvent.click(getByText("README.md"));
+  void fireEvent.click(getByText("README.md"));
   await waitFor(() => expect(getByRole("tab", { name: "README.md" })).toBeTruthy());
 
-  fireEvent.click(getByText("src"));
+  void fireEvent.click(getByText("src"));
   await waitFor(() => expect(getByText("index.ts")).toBeTruthy());
-  fireEvent.click(getByText("index.ts"));
+  void fireEvent.click(getByText("index.ts"));
   await waitFor(() => expect(getByRole("tab", { name: "index.ts" })).toBeTruthy());
 
   // Two files opened → two readFile calls, one per file.
   expect(api.readFile).toHaveBeenCalledTimes(2);
 
   // Switch back to the first tab: its content is shown again with no extra fetch.
-  fireEvent.click(getByRole("tab", { name: "README.md" }));
+  void fireEvent.click(getByRole("tab", { name: "README.md" }));
   await waitFor(() => {
     expect(getByRole("tab", { name: "README.md" }).getAttribute("aria-selected")).toBe("true");
   });
@@ -268,7 +268,7 @@ test("FileBrowser: renders markdown files with a Rendered/Source toggle", async 
   });
 
   await waitFor(() => expect(getByText("README.md")).toBeTruthy());
-  fireEvent.click(getByText("README.md"));
+  void fireEvent.click(getByText("README.md"));
 
   // Default view is Rendered → the mocked MarkdownViewer output is visible.
   await waitFor(() => {
@@ -277,7 +277,7 @@ test("FileBrowser: renders markdown files with a Rendered/Source toggle", async 
     expect(stub!.textContent).toContain("# Hello world");
   });
 
-  fireEvent.click(getByRole("button", { name: /^source$/i }));
+  void fireEvent.click(getByRole("button", { name: /^source$/i }));
 
   // Source view swaps in the mocked Monaco editor with the same content.
   await waitFor(() => {
@@ -302,7 +302,7 @@ test("FileBrowser: shows a metadata card instead of fetching binary files", asyn
   const { getByText } = render(FileBrowser, { props: { stationId: "station_1" } });
 
   await waitFor(() => expect(getByText("bundle.zip")).toBeTruthy());
-  fireEvent.click(getByText("bundle.zip"));
+  void fireEvent.click(getByText("bundle.zip"));
 
   await waitFor(() => {
     expect(getByText(/can’t preview this file type/i)).toBeTruthy();
@@ -331,7 +331,7 @@ test("FileBrowser: previews an image instead of calling it unpreviewable", async
 
   const { getByText, getByAltText, queryByText } = render(FileBrowser, { props: { stationId: "station_1" } });
   await waitFor(() => expect(getByText("logo.png")).toBeTruthy());
-  fireEvent.click(getByText("logo.png"));
+  void fireEvent.click(getByText("logo.png"));
 
   await waitFor(() => expect((getByAltText("logo.png") as HTMLImageElement).src).toBe("blob:preview-1"));
   expect(readImage).toHaveBeenCalledWith("station_1", "logo.png");
@@ -351,9 +351,9 @@ test("FileBrowser: an image on a station with a Matrix identity can become its p
     props: { stationId: "station_1", canSetAvatar: true },
   });
   await waitFor(() => expect(getByText("logo.png")).toBeTruthy());
-  fireEvent.click(getByText("logo.png"));
+  void fireEvent.click(getByText("logo.png"));
 
-  fireEvent.click(await findByRole("button", { name: /set as profile picture/i }));
+  void fireEvent.click(await findByRole("button", { name: /set as profile picture/i }));
   await waitFor(() => expect(setAvatar).toHaveBeenCalledWith("station_1", "logo.png"));
 });
 
@@ -364,7 +364,7 @@ test("FileBrowser: no profile-picture action without a Matrix identity to set it
 
   const { getByText, getByAltText, queryByRole } = render(FileBrowser, { props: { stationId: "station_1" } });
   await waitFor(() => expect(getByText("logo.png")).toBeTruthy());
-  fireEvent.click(getByText("logo.png"));
+  void fireEvent.click(getByText("logo.png"));
 
   await waitFor(() => expect(getByAltText("logo.png")).toBeTruthy());
   expect(queryByRole("button", { name: /set as profile picture/i })).toBeNull();
@@ -379,7 +379,7 @@ test("FileBrowser: a truncated image is not offered as a profile picture", async
     props: { stationId: "station_1", canSetAvatar: true },
   });
   await waitFor(() => expect(getByText("logo.png")).toBeTruthy());
-  fireEvent.click(getByText("logo.png"));
+  void fireEvent.click(getByText("logo.png"));
 
   await waitFor(() => expect(getByAltText("logo.png")).toBeTruthy());
   expect(queryByRole("button", { name: /set as profile picture/i })).toBeNull();
@@ -398,7 +398,7 @@ test("FileBrowser: invalidate() evicts the cache and refetches when the path is 
   });
 
   await waitFor(() => expect(getByText("README.md")).toBeTruthy());
-  fireEvent.click(getByText("README.md"));
+  void fireEvent.click(getByText("README.md"));
 
   await waitFor(() => {
     expect(getByText("# Hello")).toBeTruthy();
@@ -429,12 +429,12 @@ test("FileBrowser: invalidate() on a non-active path evicts the cache without re
   });
 
   await waitFor(() => expect(getByText("README.md")).toBeTruthy());
-  fireEvent.click(getByText("README.md"));
+  void fireEvent.click(getByText("README.md"));
   await waitFor(() => expect(getByRole("tab", { name: "README.md" })).toBeTruthy());
 
-  fireEvent.click(getByText("src"));
+  void fireEvent.click(getByText("src"));
   await waitFor(() => expect(getByText("index.ts")).toBeTruthy());
-  fireEvent.click(getByText("index.ts"));
+  void fireEvent.click(getByText("index.ts"));
   await waitFor(() => expect(getByRole("tab", { name: "index.ts" })).toBeTruthy());
 
   expect(api.readFile).toHaveBeenCalledTimes(2);
@@ -444,7 +444,7 @@ test("FileBrowser: invalidate() on a non-active path evicts the cache without re
   component.invalidate("README.md");
   expect(api.readFile).toHaveBeenCalledTimes(2);
 
-  fireEvent.click(getByRole("tab", { name: "README.md" }));
+  void fireEvent.click(getByRole("tab", { name: "README.md" }));
   await waitFor(() => expect(api.readFile).toHaveBeenCalledTimes(3));
 });
 
@@ -459,11 +459,11 @@ async function openTwoTabs() {
   const view = render(FileBrowser, { props: { stationId: "station_1" } });
   const { getByText, getByRole } = view;
   await waitFor(() => expect(getByText("README.md")).toBeTruthy());
-  fireEvent.click(getByText("README.md"));
+  void fireEvent.click(getByText("README.md"));
   await waitFor(() => expect(getByRole("tab", { name: "README.md" })).toBeTruthy());
-  fireEvent.click(getByText("src"));
+  void fireEvent.click(getByText("src"));
   await waitFor(() => expect(getByText("index.ts")).toBeTruthy());
-  fireEvent.click(getByText("index.ts"));
+  void fireEvent.click(getByText("index.ts"));
   await waitFor(() => expect(getByRole("tab", { name: "index.ts" })).toBeTruthy());
   return view;
 }
@@ -471,7 +471,7 @@ async function openTwoTabs() {
 test("FileBrowser: closes a tab with its close button", async () => {
   const { getByRole, queryByRole } = await openTwoTabs();
 
-  fireEvent.click(getByRole("button", { name: "Close README.md" }));
+  void fireEvent.click(getByRole("button", { name: "Close README.md" }));
 
   await waitFor(() => {
     expect(queryByRole("tab", { name: "README.md" })).toBeNull();
@@ -494,7 +494,7 @@ test.each(["Delete", "Backspace"])("FileBrowser: %s on a focused tab closes it a
   const { getByRole, queryByRole } = await openTwoTabs();
   const readme = getByRole("tab", { name: "README.md" });
   readme.focus();
-  fireEvent.keyDown(readme, { key });
+  void fireEvent.keyDown(readme, { key });
 
   await waitFor(() => expect(queryByRole("tab", { name: "README.md" })).toBeNull());
   await waitFor(() => expect(document.activeElement).toBe(getByRole("tab", { name: "index.ts" })));
@@ -502,10 +502,10 @@ test.each(["Delete", "Backspace"])("FileBrowser: %s on a focused tab closes it a
 
 test("FileBrowser: closing the last tab moves focus to the previous tab, then to the tree", async () => {
   const { getByRole, queryByRole, container } = await openTwoTabs();
-  fireEvent.click(getByRole("button", { name: "Close index.ts" }));
+  void fireEvent.click(getByRole("button", { name: "Close index.ts" }));
   await waitFor(() => expect(document.activeElement).toBe(getByRole("tab", { name: "README.md" })));
 
-  fireEvent.click(getByRole("button", { name: "Close README.md" }));
+  void fireEvent.click(getByRole("button", { name: "Close README.md" }));
   await waitFor(() => expect(queryByRole("tablist")).toBeNull());
   await waitFor(() => {
     expect(document.activeElement).not.toBe(document.body);
@@ -522,15 +522,15 @@ test("FileBrowser: the tab strip uses roving tabindex with Left/Right/Home/End",
   expect(readme.getAttribute("tabindex")).toBe("-1");
 
   index.focus();
-  fireEvent.keyDown(index, { key: "ArrowLeft" });
+  void fireEvent.keyDown(index, { key: "ArrowLeft" });
   await waitFor(() => expect(document.activeElement).toBe(readme));
-  fireEvent.keyDown(readme, { key: "ArrowLeft" }); // wraps
+  void fireEvent.keyDown(readme, { key: "ArrowLeft" }); // wraps
   await waitFor(() => expect(document.activeElement).toBe(index));
-  fireEvent.keyDown(index, { key: "Home" });
+  void fireEvent.keyDown(index, { key: "Home" });
   await waitFor(() => expect(document.activeElement).toBe(readme));
-  fireEvent.keyDown(readme, { key: "End" });
+  void fireEvent.keyDown(readme, { key: "End" });
   await waitFor(() => expect(document.activeElement).toBe(index));
-  fireEvent.keyDown(index, { key: "ArrowRight" }); // wraps
+  void fireEvent.keyDown(index, { key: "ArrowRight" }); // wraps
   await waitFor(() => expect(document.activeElement).toBe(readme));
   expect(readme.getAttribute("aria-selected")).toBe("true");
   expect(readme.getAttribute("tabindex")).toBe("0");
@@ -636,7 +636,7 @@ async function openReadme() {
   vi.spyOn(api, "readFile").mockResolvedValue({ content: "# Hello", truncated: false });
   const view = render(FileBrowser, { props: { stationId: "station_1" } });
   await waitFor(() => expect(view.getByText("README.md")).toBeTruthy());
-  fireEvent.click(view.getByText("README.md"));
+  void fireEvent.click(view.getByText("README.md"));
   return view;
 }
 
@@ -648,7 +648,7 @@ test("Link this file links the open file, copies the link and offers to open it"
   const link = vi.spyOn(library, "linkFileToLibrary").mockResolvedValue(LINKED);
 
   const { findByRole } = await openReadme();
-  fireEvent.click(await findByRole("button", { name: /link this file/i }));
+  void fireEvent.click(await findByRole("button", { name: /link this file/i }));
 
   await waitFor(() => expect(toast.success).toHaveBeenCalled());
   expect(link).toHaveBeenCalledWith("station_1", "README.md");
@@ -665,7 +665,7 @@ test("Link this file still says it linked when the clipboard refuses", async () 
   Object.defineProperty(navigator, "clipboard", { value: { writeText: vi.fn(async () => { throw new Error("denied"); }) }, configurable: true });
   vi.spyOn(library, "linkFileToLibrary").mockResolvedValue(LINKED);
   const { findByRole } = await openReadme();
-  fireEvent.click(await findByRole("button", { name: /link this file/i }));
+  void fireEvent.click(await findByRole("button", { name: /link this file/i }));
   await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Linked to Superlibrary", expect.anything()));
   // It does not claim a copy that did not happen (iOS refuses a clipboard write after async work):
   // the toast's action copies instead, inside the person's own tap.
@@ -683,7 +683,7 @@ test("a refused link shows Superlibrary's sentence", async () => {
   const sentence = "README.md line 2: github-token — files with secrets are never linked.";
   vi.spyOn(library, "linkFileToLibrary").mockRejectedValue(new Error(sentence));
   const { findByRole } = await openReadme();
-  fireEvent.click(await findByRole("button", { name: /link this file/i }));
+  void fireEvent.click(await findByRole("button", { name: /link this file/i }));
   await waitFor(() => expect(toast.error).toHaveBeenCalledWith(sentence));
 });
 
@@ -693,7 +693,7 @@ test("Link this file is disabled and says Linking… while it runs, and is a 44p
   const { findByRole } = await openReadme();
   const button = (await findByRole("button", { name: /link this file/i })) as HTMLButtonElement;
   expect(button.className).toContain("min-h-11");
-  fireEvent.click(button);
+  void fireEvent.click(button);
   await waitFor(() => {
     expect(button.disabled).toBe(true);
     expect(button.textContent).toContain("Linking…");
@@ -708,7 +708,7 @@ test("no Link this file for a folder, or with nothing open", async () => {
   const { getByText, queryByRole } = render(FileBrowser, { props: { stationId: "station_1" } });
   await waitFor(() => expect(getByText("src")).toBeTruthy());
   expect(queryByRole("button", { name: /link this file/i })).toBeNull();
-  fireEvent.click(getByText("src"));
+  void fireEvent.click(getByText("src"));
   await waitFor(() => expect(getByText("index.ts")).toBeTruthy());
   expect(queryByRole("button", { name: /link this file/i })).toBeNull();
   expect(link).not.toHaveBeenCalled();
@@ -722,7 +722,7 @@ test("an open path that has become a folder is not offered for linking", async (
   vi.spyOn(api, "readFile").mockResolvedValue({ content: "# Hello", truncated: false });
   const { getByText, findByRole, getByRole, queryByRole } = render(FileBrowser, { props: { stationId: "station_1" } });
   await waitFor(() => expect(getByText("README.md")).toBeTruthy());
-  fireEvent.click(getByText("README.md"));
+  void fireEvent.click(getByText("README.md"));
   expect(await findByRole("button", { name: /link this file/i })).toBeTruthy();
 
   list.mockImplementation(async (_id: string, path: string) => (path === "" ? [asDir] : []));
@@ -735,7 +735,7 @@ test("FileBrowser: the open-file tabs are a scroll strip, so many tabs never wid
   vi.spyOn(api, "readFile").mockResolvedValueOnce({ content: "# Hello", truncated: false });
   const { getByText, getByRole } = render(FileBrowser, { props: { stationId: "station_1" } });
   await waitFor(() => expect(getByText("README.md")).toBeTruthy());
-  fireEvent.click(getByText("README.md"));
+  void fireEvent.click(getByText("README.md"));
   await waitFor(() => expect(getByRole("tab", { name: "README.md" })).toBeTruthy());
   expect(getByRole("tablist").classList.contains("scroll-strip")).toBe(true);
 });

@@ -1,7 +1,6 @@
 import type {
   INode,
   IConnections,
-  INodeConnections,
   IWorkflowBase,
   ISvelteFlowNode,
   ISvelteFlowEdge,

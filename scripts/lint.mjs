@@ -52,13 +52,20 @@ const isSource = (file) =>
   /(^|\/)src\//.test(file) && !/(\.test\.|\.spec\.|(^|\/)__tests__\/)/.test(file);
 // Rules shipped source must stay clean of, whatever the baseline allows elsewhere (tests, scripts).
 const SRC_CLEAN = new Set([
+  'eslint(no-empty)',
   'eslint(no-unsafe-optional-chaining)',
+  'eslint(no-unused-vars)',
   'eslint(no-useless-concat)',
   'typescript(await-thenable)',
+  'typescript(consistent-type-imports)',
+  'typescript(no-explicit-any)',
   'typescript(no-extraneous-class)',
   'typescript(no-floating-promises)',
+  'typescript(no-misused-promises)',
   'typescript(no-non-null-asserted-optional-chain)',
   'typescript(no-unnecessary-template-expression)',
+  'typescript(no-unnecessary-type-assertion)',
+  'typescript(no-unnecessary-type-conversion)',
   'typescript(require-array-sort-compare)',
   'typescript(restrict-template-expressions)',
 ]);

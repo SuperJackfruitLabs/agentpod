@@ -91,7 +91,7 @@ function applyCancellationReceipt(live: LiveSession, receipt: SalaamCancellation
     const prompt = await getSalaamPrompt(
       live.userId,
       live.id,
-      receipt.targetRequestId!,
+      receipt.targetRequestId,
     );
     if (
       prompt.attemptId &&
@@ -106,7 +106,7 @@ function applyCancellationReceipt(live: LiveSession, receipt: SalaamCancellation
     if (receipt.state === "confirmed")
       await updateSalaamPrompt(
         live.id,
-        receipt.targetRequestId!,
+        receipt.targetRequestId,
         "interrupted",
       );
     if (applies)

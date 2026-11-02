@@ -70,7 +70,7 @@ export function persistEvent(
         tenantId: live.tenantId,
         seq,
         type,
-        payload: payload as object,
+        payload: payload,
         createdAt,
       });
       // Only exact source/request identity duplicates are harmless. A conflicting
@@ -154,7 +154,7 @@ export async function appendEndedState(
   cause?: "idle" | "admin",
 ): Promise<void> {
   const [agg] = await db
-    .select({ maxSeq: sql<number>`COALESCE(MAX(${acpEvents.seq}), 0)` })
+    .select({ maxSeq: sql<number | string>`COALESCE(MAX(${acpEvents.seq}), 0)` })
     .from(acpEvents)
     .where(eq(acpEvents.sessionId, sessionId));
   const seq = Number(agg?.maxSeq ?? 0) + 1;

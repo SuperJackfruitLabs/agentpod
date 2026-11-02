@@ -44,7 +44,7 @@ test("interactive when onSelect is provided: buttons with accessible names", () 
   const { getByRole } = render(StatusRibbon, { props: { items, size: "lg", onSelect } });
 
   const cell = getByRole("button", { name: "claw-2 (degraded)" });
-  fireEvent.click(cell);
+  void fireEvent.click(cell);
   expect(onSelect).toHaveBeenCalledWith("b");
 });
 

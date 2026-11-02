@@ -127,7 +127,7 @@ test("ActivityPanel Refresh button re-fetches activity", async () => {
 
   // Click refresh
   const refreshBtn = getByRole("button", { name: /refresh/i });
-  fireEvent.click(refreshBtn);
+  void fireEvent.click(refreshBtn);
 
   await waitFor(() => expect(api.activity).toHaveBeenCalledTimes(2));
 });

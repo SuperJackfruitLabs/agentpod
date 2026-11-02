@@ -1,7 +1,7 @@
 /** `promptSession`: a turn's prompt, bound to a Salaam request id when the session has one. */
 
 import { and, eq } from "drizzle-orm";
-import type { SalaamPromptReceipt } from "@agentpod/contract";
+import type { SalaamPromptReceipt, SalaamRunAuthority } from "@agentpod/contract";
 import { db } from "../../db/drizzle";
 import { acpSessions } from "../../db/schema/acp";
 import type { PromptImage } from "../matrix";
@@ -25,14 +25,14 @@ export function promptSession(
   sessionId: string,
   text: string,
   images?: PromptImage[],
-  executionRun?: import("@agentpod/contract").SalaamRunAuthority,
+  executionRun?: SalaamRunAuthority,
 ): Promise<void>;
 export function promptSession(
   userId: string,
   sessionId: string,
   text: string,
   images: PromptImage[],
-  executionRun: import("@agentpod/contract").SalaamRunAuthority | undefined,
+  executionRun: SalaamRunAuthority | undefined,
   requestId: string | undefined,
 ): Promise<void | SalaamPromptReceipt>;
 export async function promptSession(
@@ -40,7 +40,7 @@ export async function promptSession(
   sessionId: string,
   text: string,
   images: PromptImage[] = [],
-  executionRun?: import("@agentpod/contract").SalaamRunAuthority,
+  executionRun?: SalaamRunAuthority,
   requestId?: string,
 ): Promise<void | SalaamPromptReceipt> {
   return withStationOpenLock("prompt:" + sessionId, async () => {

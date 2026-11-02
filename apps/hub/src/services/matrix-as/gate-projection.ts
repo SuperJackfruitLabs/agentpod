@@ -6,19 +6,14 @@
  * events and why it must post once.
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { db } from "../../db/drizzle";
-import { bridgeDispatches } from "../../db/schema/bridge";
 import { matrixGateEvents } from "../../db/schema/matrix";
-import { nodes } from "../../db/schema/nodes";
-import { stations } from "../../db/schema/stations";
 import { createLogger } from "../../utils/logger";
 import { GATE_REQUEST_CONTENT_KEY } from "@agentpod/contract";
 import { noteHubEvent } from "../push";
 import { legacyRequestEvents } from "./legacy-events";
-import { roomForStation } from "./station-room";
-import { moveInProgress } from "./identity-move";
 import type { GatePendingDelivery } from "../bridge";
 import { GATE_EVENT_TYPE, boardLink, gateEventContent, gateProseBody, gateRequestCard } from "./gate-wire";
 
@@ -122,115 +117,6 @@ export type ProjectionOutcome =
    * bridge never registered, in a room it never joined.
    */
   | { status: "no-speaker"; midMove?: boolean };
-
-/**
- * Which station this fleet dispatched a card to, if any.
- *
- * Split out of `roomForCard` so the no-room path can still name a station:
- * `roomForCard` answers null for three different reasons, and only one of them
- * ("nothing here ever ran this card") means there is nobody to attribute an
- * outcome to. Without this, a gate whose station's room went missing mid-move
- * was indistinguishable from a gate on somebody else's work.
- */
-async function dispatchedStationId(
-  tenantId: string,
-  boardId: string,
-  cardId: string
-): Promise<string | null> {
-  const [dispatch] = await db
-    .select({ stationId: bridgeDispatches.stationId })
-    .from(bridgeDispatches)
-    .where(
-      and(
-        eq(bridgeDispatches.tenantId, tenantId),
-        eq(bridgeDispatches.externalSource, "superpipeline"),
-        eq(bridgeDispatches.boardId, boardId),
-        eq(bridgeDispatches.externalCardId, cardId)
-      )
-    )
-    .limit(1);
-  return dispatch?.stationId ?? null;
-}
-
-/**
- * The room a card's work happened in.
- *
- * `bridge_dispatches` already records which station claimed a card, indexed on
- * exactly this tuple, so the binding is free — the hub's own bridge wrote it
- * when it dispatched the work.
- *
- * card → dispatch → station → `roomForStation` (`station-room.ts`): the
- * dispatch names a station, and its CURRENT occupant's own room — never a
- * departed occupant's, however that occupant's assignment ended — is what a
- * gate lands in. So an agent reassigned to a brand-new station still speaks
- * in the room it has always had. This is the entire reason an agent's mxid
- * comes from its handle rather than `(nodeName, stationKey)`.
- *
- * Fix round 2 moved the actual resolution into `station-room.ts`, shared
- * with `routes/station-say.ts` and `provision.ts` — the round-1 version
- * inlined the same logic here alone, and a review found two more call
- * sites making the bug this function was written to close (P leaves a
- * station, Q takes it, and something still answers as if P were still
- * there). `gate-sweep.ts` is unaffected: it calls into this function
- * rather than querying `matrix_rooms` itself, and it is deployed in
- * production today.
- *
- * `null` when no AgentPod station ran the card. That is a real and named
- * limitation rather than a fault: a gate on work this fleet never touched has
- * no room to appear in, and inventing one would put an approval somewhere
- * nobody is looking.
- */
-async function roomForCard(
-  tenantId: string,
-  boardId: string,
-  cardId: string
-): Promise<{
-  roomId: string;
-  stationId: string;
-  nodeName: string;
-  stationKey: string;
-  principalId: string | null;
-  identityMode: string;
-  harnessMxid: string | null;
-} | null> {
-  const stationId = await dispatchedStationId(tenantId, boardId, cardId);
-  if (!stationId) return null;
-
-  const [station] = await db
-    .select({
-      stationKey: stations.stationKey,
-      nodeName: nodes.name,
-      // Who this hub may speak as here. Carried out of the same row rather
-      // than re-derived downstream — the whole-branch review's Minor was
-      // that `projectGate` assumed the bridge answered for every station
-      // and posted as `@agent_<handle>` into harness-mode rooms, where that
-      // account was never registered and never a member.
-      identityMode: stations.matrixIdentityMode,
-      harnessMxid: stations.matrixId,
-    })
-    .from(stations)
-    .innerJoin(nodes, eq(nodes.id, stations.nodeId))
-    .where(eq(stations.id, stationId))
-    .limit(1);
-  if (!station) return null;
-
-  // The one resolver every station→room lookup in this codebase routes
-  // through — see `station-room.ts`. It, not this function, decides
-  // whether an occupied station's room is real yet, or falls back to the
-  // plain `stationId` join for a station with no occupant at all.
-  const occupancy = await roomForStation(stationId);
-  if (!occupancy.room) return null;
-
-  return {
-    roomId: occupancy.room.roomId,
-    stationId,
-    nodeName: station.nodeName,
-    stationKey: station.stationKey,
-    principalId: occupancy.principalId,
-    identityMode: station.identityMode,
-    harnessMxid: station.harnessMxid,
-  };
-}
 
 /**
  * Give back a claim this delivery took and could not use.

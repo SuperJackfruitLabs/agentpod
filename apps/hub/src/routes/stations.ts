@@ -337,15 +337,18 @@ export const stationRoutes = new Hono()
         station.nodeId,
         "logs.tail",
         { key: station.stationKey, follow: true },
-        async (_seq, chunk, eof) => {
-          if (cancelled) return;
-          if (chunk !== null) {
-            await stream.writeSSE({ data: chunk });
-          }
-          if (eof) {
-            cancelled = true;
-            resolveKeepAlive();
-          }
+        // The broker ignores what a handler returns; the write runs on its own.
+        (_seq, chunk, eof) => {
+          void (async () => {
+            if (cancelled) return;
+            if (chunk !== null) {
+              await stream.writeSSE({ data: chunk });
+            }
+            if (eof) {
+              cancelled = true;
+              resolveKeepAlive();
+            }
+          })();
         }
       );
 

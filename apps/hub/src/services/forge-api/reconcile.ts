@@ -184,7 +184,7 @@ async function auditSystem(
     const a = await recordAudit(deps.db, { userId: AUDIT_ACTOR, ...where, verb, params });
     await a.done(error ? "error" : "ok", error);
   } catch (err) {
-    log.warn("forge reconcile could not write an audit row", { verb, error: untrusted(String((err as Error)?.message ?? err)) });
+    log.warn("forge reconcile could not write an audit row", { verb, error: untrusted(String((err as { message?: unknown } | null)?.message ?? err)) });
   }
 }
 
@@ -375,7 +375,7 @@ export function configureForgeApiReconcile(
   if (deps && opts.schedule !== false) {
     timer = setInterval(() => {
       tickForgeApiReconcile().catch((err) => {
-        log.warn("forge api reconcile failed", { error: untrusted(String((err as Error)?.message ?? err)) });
+        log.warn("forge api reconcile failed", { error: untrusted(String((err as { message?: unknown } | null)?.message ?? err)) });
       });
     }, opts.intervalMs ?? RECONCILE_INTERVAL_MS);
     timer.unref?.();
@@ -389,7 +389,7 @@ export function configureForgeApiReconcile(
     Promise.resolve()
       .then(() => runForgeApiReconcile({ ...deps, nodeId }))
       .catch((err) => {
-        log.warn("forge api reconcile failed", { nodeId, error: untrusted(String((err as Error)?.message ?? err)) });
+        log.warn("forge api reconcile failed", { nodeId, error: untrusted(String((err as { message?: unknown } | null)?.message ?? err)) });
       });
   });
 }

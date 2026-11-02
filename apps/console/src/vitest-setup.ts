@@ -35,7 +35,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 // test. Tests that want a narrow viewport stub matchMedia themselves.
 const TEST_VIEWPORT_WIDTH = 1280;
 if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
-  window.matchMedia = ((query: string) => {
+  window.matchMedia = (query: string) => {
     const min = /\(min-width:\s*(\d+)px\)/.exec(query);
     const max = /\(max-width:\s*(\d+)px\)/.exec(query);
     let matches = false;
@@ -51,7 +51,7 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
       removeEventListener: () => {},
       dispatchEvent: () => false,
     };
-  }) as unknown as typeof window.matchMedia;
+  };
 }
 
 // jsdom 25 installs no Storage implementation on Node 22+, so `localStorage`
@@ -70,7 +70,7 @@ if (typeof window !== "undefined" && !window.localStorage) {
     },
     key: (i: number) => Array.from(store.keys())[i] ?? null,
     getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
-    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    setItem: (k: string, v: unknown) => void store.set(k, String(v)),
     removeItem: (k: string) => void store.delete(k),
     clear: () => store.clear(),
   };

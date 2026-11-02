@@ -30,7 +30,6 @@ import {
   type Space,
 } from "../services/matrix-as";
 import { createLogger } from "../utils/logger";
-import type { AuthUser } from "../auth/middleware";
 import { tenantScope } from "../db/tenant-scope";
 
 const log = createLogger("missions");
@@ -73,7 +72,7 @@ async function missionsSpace(
 
 export function createMissionRoutes(deps: MissionDeps) {
   return new Hono().post("/missions", async (c) => {
-    const user = c.get("user") as AuthUser;
+    const user = c.get("user");
     const body = (await c.req.json().catch(() => null)) as
       | { name?: unknown; stationIds?: unknown }
       | null;

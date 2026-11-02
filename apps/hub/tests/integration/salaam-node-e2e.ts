@@ -1734,7 +1734,9 @@ try {
     );
     try {
       process.kill(own.supervisor_pid, "SIGTERM");
-    } catch {}
+    } catch {
+      // Already gone.
+    }
     await until(
       () => {
         try {

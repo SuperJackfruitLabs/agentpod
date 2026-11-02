@@ -22,6 +22,7 @@ import { createMatrixClient, type MatrixClient } from "./client";
 import { withQuietNotes } from "./push-quiet";
 import { provisionStation, provisionAll, provisionStationForAlias } from "./provision";
 import { handleRoomMessage, retryPendingDecrypts } from "./inbound";
+import type { InboundEvent } from "./inbound";
 import { transcriberFor } from "../speech";
 import { clearFleetDecision, gateDecisionKey } from "../push";
 import {
@@ -538,8 +539,8 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     // handler then treats an encrypted event as nothing to act on
     // rather than pretending to read it.
     decrypt: crypto
-      ? async (roomId: string, asUserId: string, event: any) =>
-          (await crypto.decrypt(asUserId, roomId, event)) as any
+      ? async (roomId: string, asUserId: string, event: InboundEvent) =>
+          await crypto.decrypt(asUserId, roomId, event)
       : undefined,
     gates,
     elicitations,

@@ -86,7 +86,7 @@ export function createAgentApprovalRuleRoutes() {
     const [revoked] = await db
       .update(rules)
       .set({ revokedAt: new Date(), revokedBy: s.user.id })
-      .where(and(eq(rules.id, c.req.param("ruleId")!), eq(rules.stationId, s.row.id), isNull(rules.revokedAt)))
+      .where(and(eq(rules.id, c.req.param("ruleId")), eq(rules.stationId, s.row.id), isNull(rules.revokedAt)))
       .returning();
     if (!revoked) return c.json({ error: "not-found", message: "No such live rule on this station." }, 404);
     const audit = await recordAudit(db, {

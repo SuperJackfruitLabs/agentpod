@@ -557,7 +557,9 @@ export async function driveSalaamWork(
           sessionId,
           "Strict work stopped: " + String(error),
         );
-      } catch {}
+      } catch {
+        // Best effort: an unrevoked session stays a durable owner fence (above).
+      }
     return { status: "failed", externalRunId: runId, reason: String(error) };
   }
 }

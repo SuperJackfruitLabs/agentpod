@@ -112,19 +112,21 @@ export async function learnHubHomeOrg(o: LearnOptions = {}): Promise<() => void>
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const loop = (n: number) => {
-    timer = setTimeout(async () => {
-      if (stopped) return;
-      try {
-        await attempt();
-      } catch (e) {
-        if (e instanceof HubHomeOrgMismatchError) {
-          homeOrg = null;
-          log.error(`${e.message}; no derived hub operators until this is fixed`);
-          return;
+    timer = setTimeout(() => {
+      void (async () => {
+        if (stopped) return;
+        try {
+          await attempt();
+        } catch (e) {
+          if (e instanceof HubHomeOrgMismatchError) {
+            homeOrg = null;
+            log.error(`${e.message}; no derived hub operators until this is fixed`);
+            return;
+          }
+          log.warn("hub home workspace still unknown; retrying", { error: e instanceof Error ? e.message : String(e) });
+          loop(n + 1);
         }
-        log.warn("hub home workspace still unknown; retrying", { error: e instanceof Error ? e.message : String(e) });
-        loop(n + 1);
-      }
+      })();
     }, retryMs(n));
     (timer as { unref?: () => void }).unref?.();
   };

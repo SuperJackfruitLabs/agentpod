@@ -150,7 +150,7 @@ async function settleOk(
     verifiedAt: now,
     isolation: answer.isolation,
     stateReason: revokePrev
-      ? `verified; revoking ${prev!.name}`
+      ? `verified; revoking ${prev.name}`
       : rotating
         ? "rotation-pending: new token not acknowledged"
         : (answer.note ?? null),
@@ -158,13 +158,13 @@ async function settleOk(
   if (revokePrev && handle) {
     const { previous: _p, ...rest } = handle;
     try {
-      await revokeTolerant(deps.providers(row.provider), row.account, bareHandle(prev!));
+      await revokeTolerant(deps.providers(row.provider), row.account, bareHandle(prev));
       grant = await transition(deps.db, grant, ["verified"], "verified", { now: deps.now(), tokenHandle: rest, stateReason: answer.note ?? null });
     } catch (err) {
       log.warn("forge grant verified but the previous token is not revoked yet", { grantId: row.id });
       grant = await transition(deps.db, grant, ["verified"], "verified", {
         now: deps.now(),
-        tokenHandle: { ...rest, previous: { ...prev!, disposition: "revoke" } },
+        tokenHandle: { ...rest, previous: { ...prev, disposition: "revoke" } },
         stateReason: `previous-revoke-pending: ${scrub(err)}`,
       });
     }

@@ -211,7 +211,7 @@ export function createNodeRoutes(deps?: {
 }) {
   const _nodeInTenant = deps?.nodeInTenantFn ?? nodeInTenant;
   const _request: RequestFn = deps?.request ?? brokerRequest;
-  const _listNodes = deps?.listNodesFn ?? (listNodes as (t: string) => Promise<RolloutNode[]>);
+  const _listNodes = deps?.listNodesFn ?? listNodes;
   const _fixedImageNodes = deps?.fixedImageNodesFn ?? nodesWithFixedImage;
   const _audit = deps?.auditFn ?? logAdminAction;
 
@@ -278,7 +278,7 @@ export function createNodeRoutes(deps?: {
           if (!Array.isArray(body.only) || !body.only.every((x) => typeof x === "string")) {
             return bad('"only" must be an array of node names or ids');
           }
-          only = body.only as string[];
+          only = body.only;
         }
 
         const all = await _listNodes(resolveTenantId(c));

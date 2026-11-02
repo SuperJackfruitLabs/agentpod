@@ -535,7 +535,9 @@ async function awaitDaemonOutcome(turn: Turn): Promise<boolean> {
           }
           // Absence of an active process alone is not a terminal outcome.
         }
-      } catch {}
+      } catch {
+        // The daemon could not be inspected this time; poll again until the deadline.
+      }
     }
     await new Promise((r) => setTimeout(r, 100));
   }

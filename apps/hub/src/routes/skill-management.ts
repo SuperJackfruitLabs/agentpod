@@ -62,7 +62,7 @@ import { isWorkspaceAdminUser, WORKSPACE_ADMIN_REQUIRED } from "../auth/workspac
 /** The console caller with its org-plane token authority, for the reach checks (design §5.7). */
 function callerOf(c: Context): AuthUser {
   owner(c);
-  return c.get("user") as AuthUser;
+  return c.get("user");
 }
 
 function owner(c: Context): SkillOwner {
@@ -79,7 +79,7 @@ function owner(c: Context): SkillOwner {
  */
 function adminOwner(c: Context): SkillOwner {
   const o = owner(c);
-  if (!isWorkspaceAdminUser(c.get("user") as AuthUser))
+  if (!isWorkspaceAdminUser(c.get("user")))
     throw new SkillRequestError(403, WORKSPACE_ADMIN_REQUIRED.error);
   return o;
 }
@@ -555,7 +555,7 @@ export const skillArtifactDownloadRoutes = routesBase().post(
     if (
       !credential ||
       credential[1] !== nodeId ||
-      !(await verifyNodeCredential(nodeId!, credential[2]!).catch(() => false))
+      !(await verifyNodeCredential(nodeId, credential[2]!).catch(() => false))
     )
       throw new SkillRequestError(401, "Invalid node credential");
     const [record] = await db
@@ -570,10 +570,10 @@ export const skillArtifactDownloadRoutes = routesBase().post(
       )
       .where(
         and(
-          eq(skillOperations.id, operationId!),
-          eq(skillOperations.nodeId, nodeId!),
-          eq(skillOperations.stationId, stationId!),
-          eq(stations.nodeId, nodeId!),
+          eq(skillOperations.id, operationId),
+          eq(skillOperations.nodeId, nodeId),
+          eq(skillOperations.stationId, stationId),
+          eq(stations.nodeId, nodeId),
           eq(stations.stationKey, c.req.header("X-AgentPod-Station-Key") ?? ""),
           eq(skillOperations.stationKey, stations.stationKey),
           eq(skillOperations.harness, stations.harness),

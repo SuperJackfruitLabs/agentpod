@@ -13,7 +13,7 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { Capability } from "@agentpod/contract";
+import type { Capability } from "@agentpod/contract";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema";
 import { grantAllowsPrincipal } from "../../auth/org-plane/grants";

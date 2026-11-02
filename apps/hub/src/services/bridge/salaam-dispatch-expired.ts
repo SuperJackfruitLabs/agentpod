@@ -22,7 +22,7 @@ export async function recoverExpiredSalaamDecision(
   const expired = decisions.filter(
     (d) =>
       !d.daemonReceipt &&
-      Number((d.decision as { expires_at: number }).expires_at) <= Date.now(),
+      Number((d.decision as { expires_at: unknown }).expires_at) <= Date.now(),
   );
   if (!expired.length) return null;
   if (expired.length !== 1 || expired[0]!.answer)

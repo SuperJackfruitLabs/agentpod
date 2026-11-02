@@ -3,7 +3,7 @@ import { corsMiddleware } from './middleware/cors.ts';
 import { edgeSafeStatus } from './middleware/edge-safe-status.ts';
 import { logger } from 'hono/logger';
 import { redactUrlSecrets } from './utils/redact-url-secrets.ts';
-import { config, allowedOrigins, isAllowedOrigin } from './config.ts';
+import { config } from './config.ts';
 import { validateConfig } from './validate-config.ts';
 import { describeDatabase } from './utils/describe-database.ts';
 import { connectionString, initDatabase } from './db/drizzle.ts';

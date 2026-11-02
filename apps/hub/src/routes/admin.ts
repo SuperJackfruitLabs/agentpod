@@ -141,7 +141,7 @@ adminRouter.get("/audit-log", zValidator("query", auditLogSchema), async (c) => 
     ...(c.get("auditLogAllTenants") ? {} : { tenantId: resolveTenantId(c) }),
     adminUserId: query.adminUserId,
     targetUserId: query.targetUserId,
-    action: query.action as any,
+    action: query.action,
     startDate: query.startDate,
     endDate: query.endDate,
     limit: query.limit,

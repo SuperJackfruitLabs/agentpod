@@ -175,7 +175,7 @@ function signIn(plane: PlaneDiscovery, opts: GrantOptions): Promise<string> {
   }
   if (!planeOrigin(plane.url)) return Promise.reject(new Error("The account service URL must be https."));
   // Synchronously, inside the click: an empty window now, sent to the plane once PKCE is ready.
-  const open = opts.open ?? ((url, name, features) => window.open(url, name, features) as PopupLike | null);
+  const open = opts.open ?? ((url, name, features) => window.open(url, name, features));
   const win = open("about:blank", WINDOW_NAME, WINDOW_FEATURES);
   if (!win) return Promise.reject(new Error(BLOCKED));
 

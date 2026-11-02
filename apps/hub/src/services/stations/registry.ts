@@ -164,7 +164,7 @@ export async function adoptStations(
           kind: station.kind,
           displayName: station.displayName,
           workspacePath: station.workspacePath ?? null,
-          capabilities: station.capabilities as string[],
+          capabilities: station.capabilities,
           matrixId: station.matrixId ?? null,
           // Per column, not for the row, and only when the station has none.
           // Re-adoption is routine — it is how capabilities refresh — so a node
@@ -399,7 +399,7 @@ export async function refreshAdoptedCapabilities(
       await db
         .update(stations)
         .set({
-          capabilities: s.capabilities as string[],
+          capabilities: s.capabilities,
           displayName: s.displayName,
           workspacePath: s.workspacePath ?? null,
           // The same defect as capabilities, one column over. `matrix_id` was

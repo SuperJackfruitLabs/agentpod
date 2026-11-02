@@ -119,13 +119,13 @@ test("filling name and clicking Create calls provisionRuntime with correct value
 
   // Fill in the name input
   const nameInput = getByPlaceholderText("Runtime name");
-  fireEvent.input(nameInput, { target: { value: "my-box" } });
+  void fireEvent.input(nameInput, { target: { value: "my-box" } });
 
   // Create button should be enabled now (provider defaults to "docker", tier defaults to "small")
   const createBtn = getByRole("button", { name: /^create runtime$/i }) as HTMLButtonElement;
   await waitFor(() => expect(createBtn.disabled).toBe(false));
 
-  fireEvent.click(createBtn);
+  void fireEvent.click(createBtn);
 
   await waitFor(() => {
     expect(api.provisionRuntime).toHaveBeenCalledWith({
@@ -165,12 +165,12 @@ test("provisionRuntime is called with harness field (default none) when creating
   });
 
   const nameInput = getByPlaceholderText("Runtime name");
-  fireEvent.input(nameInput, { target: { value: "test-box" } });
+  void fireEvent.input(nameInput, { target: { value: "test-box" } });
 
   const createBtn = getByRole("button", { name: /^create runtime$/i }) as HTMLButtonElement;
   await waitFor(() => expect(createBtn.disabled).toBe(false));
 
-  fireEvent.click(createBtn);
+  void fireEvent.click(createBtn);
 
   await waitFor(() => {
     const call = (api.provisionRuntime as ReturnType<typeof vi.fn>).mock.calls[0][0];
@@ -194,12 +194,12 @@ test("failed provisionRuntime shows inline error and does NOT call onClose", asy
   });
 
   const nameInput = getByPlaceholderText("Runtime name");
-  fireEvent.input(nameInput, { target: { value: "fail-box" } });
+  void fireEvent.input(nameInput, { target: { value: "fail-box" } });
 
   const createBtn = getByRole("button", { name: /^create runtime$/i }) as HTMLButtonElement;
   await waitFor(() => expect(createBtn.disabled).toBe(false));
 
-  fireEvent.click(createBtn);
+  void fireEvent.click(createBtn);
 
   await waitFor(() => {
     expect(getByText("provider quota exceeded")).toBeTruthy();

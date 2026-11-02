@@ -25,7 +25,6 @@ import { createLogger } from "../utils/logger";
 import {
   isGatePending,
   projectGate,
-  type GatePendingDelivery,
   type GateProjectionDeps,
 } from "../services/matrix-as";
 import { isElicitationPending } from "../services/matrix-as";

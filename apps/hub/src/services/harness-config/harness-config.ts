@@ -12,7 +12,8 @@
  */
 import { createHash } from "node:crypto";
 import { canonicalSalaamWork } from "@agentpod/contract";
-import { eq, isNull, or, SQL } from "drizzle-orm";
+import { eq, isNull, or } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { ConfigObservation, ConfigSetting, ConfigValue } from "@agentpod/contract";
 import { db } from "../../db/drizzle";
 import { declaredHarnessConfig } from "../../db/schema/harness-config";
@@ -487,7 +488,7 @@ export async function resolveOptOuts(
       tenantScope(
         harnessConfigOptOut,
         tenantId,
-        or(eq(harnessConfigOptOut.stationKey, stationKey), eq(harnessConfigOptOut.nodeId, nodeId))!,
+        or(eq(harnessConfigOptOut.stationKey, stationKey), eq(harnessConfigOptOut.nodeId, nodeId)),
       ),
     );
 
@@ -544,7 +545,7 @@ function sortedJson(value: unknown): string {
     Array.isArray(v)
       ? v.map(sort)
       : v !== null && typeof v === "object"
-        ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, sort((v as Record<string, unknown>)[k])]))
+        ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sort((v as Record<string, unknown>)[k])]))
         : v;
   return JSON.stringify(sort(value));
 }

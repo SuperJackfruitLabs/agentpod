@@ -34,7 +34,6 @@ import { isControlPairEnforced } from "../services/control";
 import { bridgeUserId } from "../services/matrix";
 import { roomForStation } from "../services/matrix-as";
 import { createLogger } from "../utils/logger";
-import type { AuthUser } from "../auth/middleware";
 
 const log = createLogger("station-say");
 
@@ -47,7 +46,7 @@ export interface StationSayDeps {
 
 export function createStationSayRoutes(deps: StationSayDeps) {
   return new Hono().post("/stations/:id/matrix/say", async (c) => {
-    const user = c.get("user") as AuthUser;
+    const user = c.get("user");
 
     const [station] = await db
       .select({

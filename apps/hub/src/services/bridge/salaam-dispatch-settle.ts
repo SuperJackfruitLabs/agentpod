@@ -119,7 +119,7 @@ async function expiredDecision(c: Settling, state: Owner) {
       expired.answer ||
       expired.daemonReceipt ||
       !expired.producerReceipt ||
-      Number((expired.decision as { expires_at: number }).expires_at) >
+      Number((expired.decision as { expires_at: unknown }).expires_at) >
         Date.now())
   )
     throw Error("Exact expired unanswered decision required");

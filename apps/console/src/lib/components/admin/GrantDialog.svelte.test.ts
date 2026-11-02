@@ -19,6 +19,7 @@
  */
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
+import type * as GrantsModule from "$lib/api/grants";
 import { render, fireEvent, waitFor, cleanup } from "@testing-library/svelte";
 
 vi.mock("svelte-sonner", () => ({
@@ -26,7 +27,7 @@ vi.mock("svelte-sonner", () => ({
 }));
 
 vi.mock("$lib/api/grants", async () => {
-  const actual = await vi.importActual<typeof import("$lib/api/grants")>("$lib/api/grants");
+  const actual = await vi.importActual<typeof GrantsModule>("$lib/api/grants");
   return {
     // The validator is pure and shared with the server's rule — mocking it would
     // test a stub instead of the thing that decides.

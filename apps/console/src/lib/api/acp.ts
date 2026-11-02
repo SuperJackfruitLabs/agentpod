@@ -18,11 +18,16 @@
 
 import { AcpServerMsg as AcpServerMsgSchema } from "@agentpod/contract";
 import type { AcpSessionMode, CreateAcpSessionBody } from "@agentpod/contract";
+import type {
+  AcpClientMsg as ContractAcpClientMsg,
+  AcpServerMsg as ContractAcpServerMsg,
+  AcpSessionRow as ContractAcpSessionRow,
+} from "@agentpod/contract";
 import { http, withToken } from "./client";
 
-export type AcpSessionRow = import("@agentpod/contract").AcpSessionRow;
-export type AcpServerMsg = import("@agentpod/contract").AcpServerMsg;
-export type AcpClientMsg = import("@agentpod/contract").AcpClientMsg;
+export type AcpSessionRow = ContractAcpSessionRow;
+export type AcpServerMsg = ContractAcpServerMsg;
+export type AcpClientMsg = ContractAcpClientMsg;
 
 /** Resolves the hub base URL the same way client.ts does. */
 function hubUrl(): string {

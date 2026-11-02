@@ -128,6 +128,7 @@ export function createFlyFakeSubstrate(
       422
     );
 
+  // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc needs it: an async arrow lacks fetch's `preconnect`
   const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";

@@ -172,7 +172,7 @@ func TestOpenClawConfigSettingsRegistry(t *testing.T) {
 	// declaration of it is refused `out-of-scope` by the hub's existing,
 	// harness-agnostic scope rule because the hub's `compare()` fires that
 	// refusal for ANY setting whose scope != "profile" declared at station
-	// level (apps/hub/src/services/harness-config.ts). That rule is already
+	// level (apps/hub/src/services/harness-config/harness-config.ts). That rule is already
 	// exercised against this EXACT setting id in
 	// apps/hub/tests/unit/harness-config-compare.test.ts
 	// ("a station-scoped declaration for a user-scoped setting is

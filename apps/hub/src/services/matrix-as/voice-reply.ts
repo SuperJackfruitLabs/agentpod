@@ -124,7 +124,7 @@ export function textToSpeak(text: string, maxChars: number): string {
   if (trimmed.length <= maxChars) return trimmed;
   const window = trimmed.slice(0, maxChars);
   let cut = -1;
-  for (const m of window.matchAll(/[.!?…]["'”’)\]]*(?=\s|$)/g)) cut = m.index! + m[0].length;
+  for (const m of window.matchAll(/[.!?…]["'”’)\]]*(?=\s|$)/g)) cut = m.index + m[0].length;
   const paragraph = window.lastIndexOf("\n\n");
   cut = Math.max(cut, paragraph);
   if (cut < maxChars * 0.3) {

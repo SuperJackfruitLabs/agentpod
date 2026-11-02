@@ -392,7 +392,7 @@ test(
         // Break early once we have both expected lines
         if (rawText.includes("log line 2")) break;
       }
-      reader.cancel();
+      void reader.cancel();
 
       const dataLines = rawText
         .split("\n")

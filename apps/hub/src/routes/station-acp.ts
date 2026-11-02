@@ -38,6 +38,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { and, asc, eq, gt } from "drizzle-orm";
+import type { StationBusyHolder } from "@agentpod/contract";
 import {
   AcpClientMsg,
   CreateAcpSessionBody,
@@ -88,7 +89,7 @@ function createErrorStatus(message: string): 403 | 404 | 409 | "node" {
 export function createSessionFailure(err: unknown): {
   status: 403 | 404 | 409 | 424 | 503;
   body:
-    | { error: string; code?: string; holder?: import("@agentpod/contract").StationBusyHolder }
+    | { error: string; code?: string; holder?: StationBusyHolder }
     | typeof ORG_PLANE_UNAVAILABLE_BODY;
 } {
   // The station's one live execution is someone's (spec 2026-10-23, session lifecycle): say whose
@@ -549,7 +550,7 @@ export const stationAcpRoutes = new Hono()
                   await handleSubscribe(ws, msg.sinceSeq);
                   break;
                 case "prompt":
-                  { const receipt=await acp.promptSession(userId, sessionId, msg.text,[],undefined,msg.requestId) as void|import("@agentpod/contract").SalaamPromptReceipt;
+                  { const receipt=await acp.promptSession(userId, sessionId, msg.text,[],undefined,msg.requestId);
                     if(receipt)send(ws,{t:"prompt-receipt",receipt}); }
                   break;
                 case "cancel":

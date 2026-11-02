@@ -11,6 +11,7 @@
  */
 
 import { test, expect, vi, beforeEach } from "vitest";
+import type * as ReturnToModule from "$lib/utils/return-to";
 import { render, fireEvent, waitFor } from "@testing-library/svelte";
 
 // ---------------------------------------------------------------------------
@@ -24,7 +25,7 @@ vi.mock("$app/navigation", () => ({
 // The one call that leaves this origin, stood in for. `resolveReturnTo` itself is the real one —
 // the point of these cases is that the page uses it, and uses its answer correctly.
 vi.mock("$lib/utils/return-to", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("$lib/utils/return-to")>()),
+  ...(await importOriginal<typeof ReturnToModule>()),
   hardNavigate: vi.fn(),
 }));
 

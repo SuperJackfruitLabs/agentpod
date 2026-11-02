@@ -4,7 +4,7 @@
  */
 
 import type { ClientConnection, ClientContext, McpServer, RequestPermissionResponse } from "@agentclientprotocol/sdk";
-import type { AcpSessionMode, AcpSessionStatus, TurnError, TurnResolution } from "@agentpod/contract";
+import type { AcpSessionMode, AcpSessionStatus, SalaamRunAuthority, TurnError, TurnResolution } from "@agentpod/contract";
 import type { TokenAuthority } from "../../auth/caller-authority";
 import type { StoredSalaamExecution } from "../../db/schema/acp";
 import type { SalaamCancellationState } from "../salaam";
@@ -70,7 +70,7 @@ export interface CreateSessionInput {
    */
   resumeFrom?: string;
   /** Trusted bridge fields, never copied from an HTTP/ACP request body. */
-  executionRun?: import("@agentpod/contract").SalaamRunAuthority;
+  executionRun?: SalaamRunAuthority;
   validateExecutionRun?: () => Promise<unknown>;
 }
 

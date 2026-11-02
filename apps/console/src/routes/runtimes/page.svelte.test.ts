@@ -406,7 +406,7 @@ test("waking calls startRuntime", async () => {
 
   const { getByTestId } = render(RuntimesPage);
   await waitFor(() => expect(getByTestId("wake-btn")).toBeTruthy());
-  fireEvent.click(getByTestId("wake-btn"));
+  void fireEvent.click(getByTestId("wake-btn"));
 
   await waitFor(() => expect(start).toHaveBeenCalledWith("rt-sleep"));
 });

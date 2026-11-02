@@ -67,7 +67,7 @@ export function idleEndReason(idleMs: number): string {
 export async function renewExecution(
   userId: string,
   sessionId: string,
-  run?: import("@agentpod/contract").SalaamRunAuthority,
+  run?: SalaamRunAuthority,
 ): Promise<void> {
   const live = requireLive(userId, sessionId);
   if (!live.executionAuthority) return;

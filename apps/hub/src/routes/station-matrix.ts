@@ -34,7 +34,6 @@ import {
   type MoveState,
   type PreJoinOutcome,
 } from "../services/matrix-as";
-import type { AuthUser } from "../auth/middleware";
 import { tenantScope } from "../db/tenant-scope";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 
@@ -153,7 +152,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      * that harness learning to talk to a homeserver.
      */
     .post("/stations/:id/matrix/identity", async (c) => {
-      const user = c.get("user") as AuthUser;
+      const user = c.get("user");
       // The station's Matrix presence is the workspace's: a workspace admin's (W1).
       const notAdmin = requireWorkspaceAdmin(c);
       if (notAdmin) return notAdmin;
@@ -200,7 +199,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      * failure the mode exists to prevent.
      */
     .post("/stations/:id/matrix/credentials", async (c) => {
-      const user = c.get("user") as AuthUser;
+      const user = c.get("user");
       // The station's Matrix presence is the workspace's: a workspace admin's (W1).
       const notAdmin = requireWorkspaceAdmin(c);
       if (notAdmin) return notAdmin;
@@ -318,7 +317,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      * again). A failed signal is only logged.
      */
     .post("/stations/:id/matrix/authorize-move", async (c) => {
-      const user = c.get("user") as AuthUser;
+      const user = c.get("user");
       // The station's Matrix presence is the workspace's: a workspace admin's (W1).
       const notAdmin = requireWorkspaceAdmin(c);
       if (notAdmin) return notAdmin;
@@ -437,7 +436,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      * a Matrix fact in neither column, and the gate sweep is what checks it.
      */
     .get("/stations/:id/matrix/move-state", async (c) => {
-      const user = c.get("user") as AuthUser;
+      const user = c.get("user");
       const station = await ownedStation(user.tenantId, c.req.param("id"));
       if (!station) return c.json({ error: "Not Found" }, 404);
       return c.json(await deps.moveState(station.id));

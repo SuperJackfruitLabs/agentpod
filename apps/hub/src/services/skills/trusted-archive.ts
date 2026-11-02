@@ -108,7 +108,7 @@ export function validateTrustedSkillArchive(
     if (!bundle.startsWith("sjl-") || !slug.test(bundle) || relative === ".sjl-receipt.json") fail("invalid bundle root or reserved entry");
     if (!root) root = bundle;
     if (root !== bundle) fail("multiple archive roots");
-    for (const [index, part] of relative.split("/").entries()) {
+    for (const [index] of relative.split("/").entries()) {
       const joined = relative.split("/").slice(0, index + 1).join("/");
       const folded = joined.toLowerCase(), file = index === relative.split("/").length - 1, prior = seen.get(folded);
       if (prior && (prior.name !== joined || prior.file || file)) fail("duplicate, case-colliding or overlapping path");

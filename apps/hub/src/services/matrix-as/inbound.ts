@@ -73,7 +73,7 @@ export interface InboundDeps {
    * everything sent before this agent joined, and for anything sent while it
    * was offline that the sender has since forgotten.
    */
-  decrypt?(roomId: string, asUserId: string, event: InboundEvent): Promise<InboundEvent | null>;
+  decrypt?(roomId: string, asUserId: string, event: InboundEvent): Promise<Record<string, unknown> | null>;
   /**
    * Answering a superpipeline approval gate.
    *
@@ -250,7 +250,7 @@ async function asPlaintext(
     // Same shape as the station path below, and for the same reason: the envelope
     // is kept because a megolm plaintext need not carry `room_id` or `sender`, and
     // everything downstream reads them.
-    return { ...event, ...plainBoard } as InboundEvent;
+    return { ...event, ...plainBoard };
   }
 
   const room = await roomContext(event.room_id);
@@ -282,7 +282,7 @@ async function asPlaintext(
   // belong to the event that wrapped it, and everything below this line reads
   // them. Returning the payload alone would bail one line later on a missing
   // `room_id`, which looks exactly like a message nobody sent.
-  return { ...event, ...plain } as InboundEvent;
+  return { ...event, ...plain };
 }
 
 /**

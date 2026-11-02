@@ -13,7 +13,7 @@ import { BREAKPOINTS } from "$lib/breakpoints";
 export function setViewport(width: number): () => void {
   const realMatchMedia = window.matchMedia;
   const realWidth = window.innerWidth;
-  window.matchMedia = ((query: string) => {
+  window.matchMedia = (query: string) => {
     const max = /\(max-width:\s*(\d+)px\)/.exec(query);
     const min = /\(min-width:\s*(\d+)px\)/.exec(query);
     // A fine pointer: `(pointer: coarse)` and anything else unknown is false.
@@ -23,7 +23,7 @@ export function setViewport(width: number): () => void {
       addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {},
       dispatchEvent: () => false,
     };
-  }) as unknown as typeof window.matchMedia;
+  };
   Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
   return () => {
     window.matchMedia = realMatchMedia;
@@ -75,7 +75,7 @@ export function expectCardTable(table: Element | null, rowSelector = "tbody tr")
   expect(rows.length).toBeGreaterThan(0);
   for (const row of rows) {
     const cells = Array.from(row.children);
-    if (cells.length === 1 && cells[0]!.hasAttribute("colspan")) continue;
+    if (cells.length === 1 && cells[0].hasAttribute("colspan")) continue;
     const bare = cells.filter((c) => !c.hasAttribute("data-label") && !c.hasAttribute("data-card"));
     expect(bare.map((c) => c.outerHTML.slice(0, 80))).toEqual([]);
     expect(cells.filter((c) => c.getAttribute("data-card") === "title").length).toBe(1);

@@ -3,7 +3,10 @@
  * the defaults and internal shapes the turn shares. Split out of dispatch.ts, unchanged.
  */
 
-import type { AcpEvent, AcpMcpServer, AcpSessionMode, CardPromptRelated } from "@agentpod/contract";
+import type { AcpEvent, AcpMcpServer, AcpSessionMode, CardPromptRelated, SalaamRunAuthority } from "@agentpod/contract";
+import type { infer as Infer } from "zod";
+import type { SalaamWorkCompletion } from "../../../../../packages/contract/src/salaam-work-completion";
+import type { SalaamPublication } from "./salaam-publish";
 import type { Fingerprint } from "../evidence";
 import type { BridgeAgentConfig } from "./config";
 import type { SuperpipelineClient } from "./superpipeline";
@@ -44,11 +47,11 @@ export interface AcpPort {
     mode: AcpSessionMode;
     mcpServers?: AcpMcpServer[];
     mcpProxy?: boolean;
-    executionRun?: import('@agentpod/contract').SalaamRunAuthority;
+    executionRun?: SalaamRunAuthority;
     validateExecutionRun?: () => Promise<unknown>;
   }): Promise<{ id: string; libraryTools?: boolean }>;
-  promptSession(userId: string, sessionId: string, text: string, run?: import('@agentpod/contract').SalaamRunAuthority): Promise<void>;
-  renewExecution?(userId: string, sessionId: string, run: import('@agentpod/contract').SalaamRunAuthority): Promise<void>;
+  promptSession(userId: string, sessionId: string, text: string, run?: SalaamRunAuthority): Promise<void>;
+  renewExecution?(userId: string, sessionId: string, run: SalaamRunAuthority): Promise<void>;
   /** Before a strict re-drive: restore a session a hub restart left un-held; "waiting" while its node is offline. */
   ensureStrictSession?(userId: string, sessionId: string): Promise<"live" | "waiting" | "gone">;
   subscribe(sessionId: string, fn: (e: AcpEvent) => void): () => void;
@@ -76,7 +79,7 @@ export interface DispatchDeps {
   tenantId: string;
   source: string;
   /** Strict Salaam publication; tests replace it, production uses livePublisher. */
-  salaamPublish?: (completion: import("zod").infer<typeof import("../../../../../packages/contract/src/salaam-work-completion").SalaamWorkCompletion>) => Promise<import("./salaam-publish").SalaamPublication>;
+  salaamPublish?: (completion: Infer<typeof SalaamWorkCompletion>) => Promise<SalaamPublication>;
   heartbeatMs?: number;
   turnTimeoutMs?: number;
   /** Overrides the agent's own `permissionWaitMs`. A test seam. */

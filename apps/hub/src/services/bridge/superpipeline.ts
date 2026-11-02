@@ -81,7 +81,7 @@ export const SUPERPIPELINE_REQUEST_TIMEOUT_MS = 30_000;
  */
 export const fetchAdapter: Fetcher = async (url, init) => {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(SUPERPIPELINE_REQUEST_TIMEOUT_MS) });
-  return { status: res.status, ok: res.ok, json: () => res.json() as Promise<unknown> };
+  return { status: res.status, ok: res.ok, json: () => res.json() };
 };
 
 export interface SuperpipelineClientOptions {

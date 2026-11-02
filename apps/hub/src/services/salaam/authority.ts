@@ -328,7 +328,7 @@ export async function renewSalaamExecution(
 
 export async function revokeSalaamExecution(
   id: string,
-  reason: string,
+  _reason: string,
 ): Promise<StoredSalaamExecution | null> {
   const [row] = await db
     .select()

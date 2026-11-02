@@ -16,7 +16,7 @@ import { nodes } from "../../db/schema/nodes";
 import { stations } from "../../db/schema/stations";
 import { getLatestAgentVersion } from "./agent-version";
 import { getHealth } from "./health-cache";
-import type { FleetAgent, FleetStats, StationHealthReport } from "@agentpod/contract";
+import type { FleetAgent, FleetStats } from "@agentpod/contract";
 import type { CachedHealth } from "./health-cache";
 import { tenantScope } from "../../db/tenant-scope";
 

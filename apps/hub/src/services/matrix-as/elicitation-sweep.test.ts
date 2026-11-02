@@ -2,12 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import type { ElicitationPendingDelivery } from "./elicitation-card";
 import {
-  bridgeElicitationSweepDeps,
   startElicitationSweeper,
   sweepElicitationBoardNow,
   sweepElicitations,
-  type ElicitationSweepDeps,
 } from "./elicitation-sweep";
+import type { bridgeElicitationSweepDeps, ElicitationSweepDeps } from "./elicitation-sweep";
 
 /**
  * The floor beneath push, both ways.

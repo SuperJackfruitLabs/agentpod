@@ -250,8 +250,8 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
  * Ordering is superpipeline's invariant and it costs nothing to keep: the tenant is
  * never one condition among several that a later edit might reorder away.
  */
-export function tenantScope<T extends TenantScopedTable>(
-  table: T,
+export function tenantScope(
+  table: TenantScopedTable,
   tenantId: string,
   ...extra: (SQL | undefined)[]
 ): SQL {
@@ -277,8 +277,8 @@ export function tenantScope<T extends TenantScopedTable>(
  * that has to be right, and wrapping a builder that cannot express a join would
  * only push those call sites back to a raw `db.select()`.
  */
-export function tenantScopedSelect<T extends TenantScopedTable>(
-  table: T,
+export function tenantScopedSelect(
+  table: TenantScopedTable,
   tenantId: string,
   ...extra: (SQL | undefined)[]
 ) {

@@ -33,13 +33,13 @@ function fillForm(
   values: { name?: string; email?: string; password?: string }
 ) {
   if (values.name !== undefined) {
-    fireEvent.input(getByLabelText(/name/i), { target: { value: values.name } });
+    void fireEvent.input(getByLabelText(/name/i), { target: { value: values.name } });
   }
   if (values.email !== undefined) {
-    fireEvent.input(getByLabelText(/email/i), { target: { value: values.email } });
+    void fireEvent.input(getByLabelText(/email/i), { target: { value: values.email } });
   }
   if (values.password !== undefined) {
-    fireEvent.input(getByLabelText(/password/i), { target: { value: values.password } });
+    void fireEvent.input(getByLabelText(/password/i), { target: { value: values.password } });
   }
 }
 

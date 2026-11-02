@@ -60,7 +60,7 @@ const BAD: api.PostureReportResult = {
 test("scanning shows the grade", async () => {
   vi.spyOn(api, "nodePosture").mockResolvedValue(CLEAN);
   const { getByRole, getByText } = render(PosturePanel, { props: { nodeId: "node_1" } });
-  fireEvent.click(getByRole("button", { name: /scan/i }));
+  void fireEvent.click(getByRole("button", { name: /scan/i }));
   await waitFor(() => expect(getByText("A")).toBeTruthy());
 });
 
@@ -70,7 +70,7 @@ test("failures are shown with their remedy", async () => {
   const { getByRole, getByText, container } = render(PosturePanel, {
     props: { nodeId: "node_1" },
   });
-  fireEvent.click(getByRole("button", { name: /scan/i }));
+  void fireEvent.click(getByRole("button", { name: /scan/i }));
 
   await waitFor(() => expect(getByText(/Credentials readable by other users/)).toBeTruthy());
   expect(container.textContent).toMatch(/chmod 600/);
@@ -81,7 +81,7 @@ test("unknown findings are shown separately from passes", async () => {
   // scanner quietly stops being trustworthy.
   vi.spyOn(api, "nodePosture").mockResolvedValue(BAD);
   const { getByRole, container } = render(PosturePanel, { props: { nodeId: "node_1" } });
-  fireEvent.click(getByRole("button", { name: /scan/i }));
+  void fireEvent.click(getByRole("button", { name: /scan/i }));
 
   await waitFor(() => expect(container.textContent).toMatch(/lsof not found/));
 });
@@ -89,20 +89,20 @@ test("unknown findings are shown separately from passes", async () => {
 test("a failing finding names the station it belongs to", async () => {
   vi.spyOn(api, "nodePosture").mockResolvedValue(BAD);
   const { getByRole, container } = render(PosturePanel, { props: { nodeId: "node_1" } });
-  fireEvent.click(getByRole("button", { name: /scan/i }));
+  void fireEvent.click(getByRole("button", { name: /scan/i }));
   await waitFor(() => expect(container.textContent).toMatch(/hermes:analyst-echo/));
 });
 
 test("a clean machine says so rather than showing nothing", async () => {
   vi.spyOn(api, "nodePosture").mockResolvedValue(CLEAN);
   const { getByRole, container } = render(PosturePanel, { props: { nodeId: "node_1" } });
-  fireEvent.click(getByRole("button", { name: /scan/i }));
+  void fireEvent.click(getByRole("button", { name: /scan/i }));
   await waitFor(() => expect(container.textContent).toMatch(/nothing exposed/i));
 });
 
 test("a failed scan shows the error", async () => {
   vi.spyOn(api, "nodePosture").mockRejectedValue(new Error("node offline"));
   const { getByRole, container } = render(PosturePanel, { props: { nodeId: "node_1" } });
-  fireEvent.click(getByRole("button", { name: /scan/i }));
+  void fireEvent.click(getByRole("button", { name: /scan/i }));
   await waitFor(() => expect(container.textContent).toMatch(/node offline/));
 });

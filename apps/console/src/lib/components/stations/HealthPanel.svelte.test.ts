@@ -119,7 +119,7 @@ test("HealthPanel: Start (on a stopped agent) calls lifecycle immediately withou
   expect(queryByRole("button", { name: /^stop$/i })).toBeNull();
   expect(queryByRole("button", { name: /^restart$/i })).toBeNull();
 
-  fireEvent.click(getByRole("button", { name: /^start$/i }));
+  void fireEvent.click(getByRole("button", { name: /^start$/i }));
 
   await waitFor(() =>
     expect(api.lifecycle).toHaveBeenCalledWith("station_lc", "start"),
@@ -138,7 +138,7 @@ test("HealthPanel: Stop opens confirm dialog; confirming calls lifecycle stop", 
 
   await waitFor(() => expect(getByRole("button", { name: /^stop$/i })).toBeTruthy());
 
-  fireEvent.click(getByRole("button", { name: /^stop$/i }));
+  void fireEvent.click(getByRole("button", { name: /^stop$/i }));
 
   // Dialog should open
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
@@ -149,7 +149,7 @@ test("HealthPanel: Stop opens confirm dialog; confirming calls lifecycle stop", 
   // Routine stop is a plain confirm (no type-to-confirm), labeled with the action
   const dialog = getByRole("dialog");
   expect(within(dialog).queryByRole("textbox")).toBeNull();
-  fireEvent.click(within(dialog).getByRole("button", { name: "Stop agent" }));
+  void fireEvent.click(within(dialog).getByRole("button", { name: "Stop agent" }));
 
   await waitFor(() =>
     expect(api.lifecycle).toHaveBeenCalledWith("station_lc", "stop"),
@@ -166,13 +166,13 @@ test("HealthPanel: Restart opens confirm dialog; confirming calls lifecycle rest
 
   await waitFor(() => expect(getByRole("button", { name: /^restart$/i })).toBeTruthy());
 
-  fireEvent.click(getByRole("button", { name: /^restart$/i }));
+  void fireEvent.click(getByRole("button", { name: /^restart$/i }));
 
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
 
   const dialog = getByRole("dialog");
   expect(within(dialog).queryByRole("textbox")).toBeNull();
-  fireEvent.click(within(dialog).getByRole("button", { name: "Restart agent" }));
+  void fireEvent.click(within(dialog).getByRole("button", { name: "Restart agent" }));
 
   await waitFor(() =>
     expect(api.lifecycle).toHaveBeenCalledWith("station_lc", "restart"),
@@ -246,7 +246,7 @@ test("HealthPanel: fetch failure shows inline error card with Retry; retrying re
   await waitFor(() => expect(getByText(/network down/i)).toBeTruthy());
 
   const retryBtn = getByRole("button", { name: /^retry$/i });
-  fireEvent.click(retryBtn);
+  void fireEvent.click(retryBtn);
 
   await waitFor(() => {
     expect(queryByText(/network down/i)).toBeNull();

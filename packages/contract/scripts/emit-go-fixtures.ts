@@ -17,7 +17,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { z } from "zod";
+import type { z } from "zod";
 import { HostInfo, HelloMsg, HeartbeatMsg, StationHealthReport, HealthReportMsg, TurnErrorMsg, ChangesetStatus, SkillInventory, SkillInstallPlan, SkillInstallReceipt, SkillVerifyResult, SkillOperationResult } from "../src/index";
 
 import { planFixture } from "../src/fixtures/skill-install";

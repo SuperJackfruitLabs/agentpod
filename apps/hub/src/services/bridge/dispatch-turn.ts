@@ -249,6 +249,7 @@ function onTurnEvent(t: Turn, event: AcpEvent, recording: boolean): void {
     const status = (event.payload as { status?: string } | null)?.status;
     if (status === "idle") return t.settle({ kind: "yielded" });
     if (status === "ended") {
+      // oxlint-disable-next-line typescript/no-unnecessary-type-conversion -- a payload from the wire: `reason` is not proven a string
       const reason = String((event.payload as { reason?: string } | null)?.reason ?? "session ended");
       return t.settle({ kind: "session-ended", reason });
     }
