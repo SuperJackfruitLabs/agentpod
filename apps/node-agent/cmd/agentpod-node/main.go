@@ -5,15 +5,17 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
+	"runtime"
+
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/enroll"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/host"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/nodecli"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/selfupdate"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/service"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stationfs"
-	"os"
-	"runtime"
 )
 
 // version is the agent's build version. Overridden at link time via:
@@ -32,7 +34,7 @@ func alreadyEnrolled(cfg config.Config, loadErr error) bool {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println(helpText(version))
+		fmt.Println(nodecli.HelpText(version))
 		os.Exit(0)
 	}
 	// `apn node <verb>` is the explicit spelling of the machine-scoped verbs; the bare forms
@@ -42,7 +44,7 @@ func main() {
 	// one switch, and `node` is only ever a word removed before it.
 	if os.Args[1] == "node" {
 		if len(os.Args) < 3 {
-			fmt.Println(commandHelp("node"))
+			fmt.Println(nodecli.CommandHelp("node"))
 			os.Exit(0)
 		}
 		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
@@ -57,19 +59,19 @@ func main() {
 	case "help", "-h", "--help":
 		if os.Args[1] == "help" && len(os.Args) > 2 {
 			name := os.Args[2]
-			if !isCommand(name) {
+			if !nodecli.IsCommand(name) {
 				fmt.Printf("unknown command: %q\n", name)
 				os.Exit(2)
 			}
-			fmt.Println(commandHelp(name))
+			fmt.Println(nodecli.CommandHelp(name))
 			os.Exit(0)
 		}
-		fmt.Println(helpText(version))
+		fmt.Println(nodecli.HelpText(version))
 		os.Exit(0)
 	case "enroll":
 		fs := flag.NewFlagSet("enroll", flag.ExitOnError)
 		fs.Usage = func() {
-			fmt.Fprintln(fs.Output(), commandHelp("enroll"))
+			fmt.Fprintln(fs.Output(), nodecli.CommandHelp("enroll"))
 			fs.PrintDefaults()
 		}
 		flagHub := fs.String("hub", "", "hub base URL")
@@ -178,7 +180,7 @@ func main() {
 	case "update":
 		fs := flag.NewFlagSet("update", flag.ExitOnError)
 		fs.Usage = func() {
-			fmt.Fprintln(fs.Output(), commandHelp("update"))
+			fmt.Fprintln(fs.Output(), nodecli.CommandHelp("update"))
 			fs.PrintDefaults()
 		}
 		check := fs.Bool("check", false, "resolve and report current/latest version, no changes")
@@ -293,7 +295,7 @@ func main() {
 		os.Exit(runServiceVerb(verb, rest, mgr, os.Stdout))
 	default:
 		fmt.Printf("unknown command: %q\n", os.Args[1])
-		if s := suggestCommand(os.Args[1]); s != "" {
+		if s := nodecli.SuggestCommand(os.Args[1]); s != "" {
 			fmt.Printf("did you mean '%s'?\n", s)
 		}
 		fmt.Println("run 'apn help' for usage.")

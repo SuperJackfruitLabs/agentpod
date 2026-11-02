@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/clidoc"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/nodecli"
 )
 
 // staleIssuer matches wording from before the organization plane, when the hub minted the
@@ -17,16 +18,16 @@ var staleIssuer = regexp.MustCompile(`(?i)hub-issued|hub tokens?\b|issued by the
 // reference page (which carries each flag's usage string from its FlagSet).
 func TestHelpNamesNoStaleTokenIssuer(t *testing.T) {
 	var all strings.Builder
-	all.WriteString(helpText("test"))
-	for _, c := range commands {
-		all.WriteString(commandHelp(c.name))
+	all.WriteString(nodecli.HelpText("test"))
+	for _, c := range nodecli.Commands {
+		all.WriteString(nodecli.CommandHelp(c.Name))
 		all.WriteString("\n")
 	}
 	src, err := clidoc.Load(".")
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := clidoc.Render(apnReference(), src)
+	page, err := clidoc.Render(nodecli.Reference(), src)
 	if err != nil {
 		t.Fatal(err)
 	}

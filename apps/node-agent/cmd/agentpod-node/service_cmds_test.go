@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/nodecli"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/service"
 )
@@ -361,7 +362,7 @@ func TestStopEntry(t *testing.T) {
 		if mgr.stopCalled {
 			t.Error("Stop() was called for -h — this would actually stop the real service")
 		}
-		if !strings.Contains(buf.String(), commandHelp("stop")) {
+		if !strings.Contains(buf.String(), nodecli.CommandHelp("stop")) {
 			t.Errorf("missing command help, got:\n%s", buf.String())
 		}
 	})
@@ -532,7 +533,7 @@ func TestRunServiceVerbHelp(t *testing.T) {
 			if mgr.installCalled || mgr.uninstallCalled {
 				t.Error("Install()/Uninstall() must not be called for -h/--help")
 			}
-			if !strings.Contains(buf.String(), commandHelp("service")) {
+			if !strings.Contains(buf.String(), nodecli.CommandHelp("service")) {
 				t.Errorf("missing service command help, got:\n%s", buf.String())
 			}
 		})

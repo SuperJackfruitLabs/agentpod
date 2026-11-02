@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/nodecli"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/service"
 )
@@ -51,7 +52,7 @@ func telemetryCmd(mgr service.Manager, args []string, out io.Writer, probe probe
 	verb, rest := args[0], args[1:]
 	switch verb {
 	case "-h", "--help":
-		fmt.Fprintln(out, commandHelp("telemetry"))
+		fmt.Fprintln(out, nodecli.CommandHelp("telemetry"))
 		return 0
 	case "status", "enable", "disable":
 	default:
@@ -62,7 +63,7 @@ func telemetryCmd(mgr service.Manager, args []string, out io.Writer, probe probe
 	fs := flag.NewFlagSet("telemetry "+verb, flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.Usage = func() {
-		fmt.Fprintln(out, commandHelp("telemetry"))
+		fmt.Fprintln(out, nodecli.CommandHelp("telemetry"))
 		fs.PrintDefaults()
 	}
 	var jsonOut *bool

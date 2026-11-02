@@ -18,6 +18,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/nodecli"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
 
@@ -311,7 +312,7 @@ func forgeAPICmd(args []string, out, errw io.Writer) int {
 
 func forgeAPICmdWith(args []string, out, errw io.Writer, d forgeAPIDeps) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		fmt.Fprintln(out, commandHelp("forge-api"))
+		fmt.Fprintln(out, nodecli.CommandHelp("forge-api"))
 		return 0
 	}
 	if args[0] == "prune" {
@@ -324,7 +325,7 @@ func forgeAPICmdWith(args []string, out, errw io.Writer, d forgeAPIDeps) int {
 	fs := flag.NewFlagSet("forge-api setup", flag.ContinueOnError)
 	fs.SetOutput(errw)
 	fs.Usage = func() {
-		fmt.Fprintln(errw, commandHelp("forge-api"))
+		fmt.Fprintln(errw, nodecli.CommandHelp("forge-api"))
 		fs.PrintDefaults()
 	}
 	svcUser := fs.String("user", "stk", "OS user stk runs as")

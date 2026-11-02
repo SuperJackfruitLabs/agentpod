@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/clidoc"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/nodecli"
 )
 
 var update = flag.Bool("update", false, "rewrite the generated reference page")
@@ -21,7 +22,7 @@ func TestReferencePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := clidoc.Sync(apnReference(), src, referencePage, *update); err != nil {
+	if err := clidoc.Sync(nodecli.Reference(), src, referencePage, *update); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -32,7 +33,7 @@ func TestReferenceGuardCatchesARemovedEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	full := apnReference()
+	full := nodecli.Reference()
 	for _, path := range []string{"telemetry enable", "native-skills status", "hermes-live disable", "version", "service install"} {
 		b := full
 		b.Commands = nil
@@ -54,5 +55,5 @@ func TestEveryHelpCommandHasAReferenceEntry(t *testing.T) {
 			t.Fatal(r)
 		}
 	}()
-	apnReference()
+	nodecli.Reference()
 }

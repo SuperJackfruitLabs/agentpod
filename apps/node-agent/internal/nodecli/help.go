@@ -1,0 +1,387 @@
+// Package nodecli holds apn's command table and reference: the commands `apn help` lists and
+// details, the typo suggestion, and the reference page rendered from them. Dispatch and flag
+// parsing stay in cmd/agentpod-node.
+package nodecli
+
+import (
+	"fmt"
+	"strings"
+)
+
+// command describes one top-level apn verb: its group for the top-level
+// help layout, a one-line summary for that layout, and a longer detail
+// block used both by `apn help <command>` and wired onto the command's own
+// flag.FlagSet.Usage (so `apn <command> -h` shows the same text plus flag
+// defaults). This slice is the single source of truth for all three
+// surfaces — a command missing here is a command missing from help.
+var Commands = []struct {
+	Name, group, oneline, detail string
+}{
+
+	{
+		Name: "salaam-station-files-v1", group: "Node",
+		oneline: "Private Salaam station file protocol (not an interactive command)",
+		detail: "Private versioned stdin/stdout protocol for the reviewed Salaam station controller.\n" +
+			"Linux only. It does not load node enrollment credentials or grant execution authority.\n" +
+			"Use the Salaam tools and their operation-bound approval surface, not this entry directly.",
+	},
+	{
+		Name: "node", group: "Node",
+		oneline: "Explicit spelling for the machine-scoped verbs (apn node status, …)",
+		detail: "apn node <verb> — the explicit form of the machine-scoped verbs.\n\n" +
+			"Every verb apn dispatches is a node verb — this binary is machine-scoped only,\n" +
+			"the fleet-acting verbs live in the separate `fleet` binary — and both spellings\n" +
+			"work here: `apn status` and `apn node status` are the same command. The bare\n" +
+			"forms are kept because existing runbooks name them.",
+	},
+	{
+		Name: "status", group: "Service",
+		oneline: "Show local service + hub connection state (--json for scripts)",
+		detail: "apn status — show local service state and hub connection state.\n\n" +
+			"Local block: whether the service is installed / enabled / running (with\n" +
+			"PID), the binary version, and the config path. Hub block: reachability\n" +
+			"and credential validity, checked against the existing\n" +
+			"GET /public/nodes/credential-check endpoint (no new endpoints).\n\n" +
+			"Exit code is 0 iff the service is running AND the stored hub credential\n" +
+			"is valid — safe to use in scripts/health checks.",
+	},
+	{
+		Name: "start", group: "Service",
+		oneline: "Enable and start the background service",
+		detail: "apn start — enable and start the background service (the symmetric\n" +
+			"inverse of 'apn stop').\n\n" +
+			"macOS: `launchctl enable` + `launchctl bootstrap`. Linux: `systemctl\n" +
+			"[--user] enable --now`.\n\n" +
+			"If no service is installed yet, this prints a hint pointing at\n" +
+			"'apn service install' (or run in the foreground with 'apn run').",
+	},
+	{
+		Name: "stop", group: "Service",
+		oneline: "Stop and disable the service (sticky across reboots)",
+		detail: "apn stop — stop the service AND disable it (sticky across\n" +
+			"reboots/logins — it will not come back on its own).\n\n" +
+			"macOS: `launchctl bootout` + `launchctl disable`. Linux: `systemctl\n" +
+			"[--user] stop` + `disable`.\n\n" +
+			"Undo with 'apn start' — it re-enables and starts.",
+	},
+	{
+		Name: "restart", group: "Service",
+		oneline: "Restart the running service",
+		detail: "apn restart — restart the running service in place.\n\n" +
+			"macOS: `launchctl kickstart -k`. Linux: `systemctl [--user] restart`.",
+	},
+	{
+		Name: "logs", group: "Service",
+		oneline: "Show service logs (-f to follow, -n N for last N lines)",
+		detail: "apn logs [-f] [-n N] — show service logs.\n\n" +
+			"macOS: reads/tails ~/Library/Logs/agentpod-node.log.\n" +
+			"Linux: execs `journalctl [--user] -u agentpod-node [-f] [-n N]`.",
+	},
+	{
+		Name: "service", group: "Service",
+		oneline: "install | uninstall the platform service (launchd/systemd)",
+		detail: "apn service <install|uninstall> — manage the platform service\n" +
+			"definition.\n\n" +
+			"install: writes a plist (macOS LaunchAgent) or systemd unit from a\n" +
+			"template embedded in the binary, then enables and starts it.\n" +
+			"Idempotent — re-running replaces the file and restarts. Non-root\n" +
+			"Linux uses a --user unit; root Linux uses a system unit; macOS uses a\n" +
+			"LaunchAgent (refuses to run as root).\n\n" +
+			"uninstall: stops, disables, and removes the plist/unit. Idempotent —\n" +
+			"a no-op when nothing is installed. Leaves config/enrollment untouched.",
+	},
+	{
+		Name: "telemetry", group: "Service",
+		oneline: "Show, enable or disable OpenTelemetry export (--endpoint URL)",
+		detail: "apn telemetry <status|enable|disable> — control this node's OpenTelemetry\n" +
+			"export through its otel.env file.\n\n" +
+			"status [--json]: the config path, endpoint, enabled/disabled and, when\n" +
+			"enabled, whether the collector answers (a ~2 s GET of <endpoint>/v1/traces;\n" +
+			"any HTTP response counts).\n" +
+			"enable --endpoint URL: validate (http/https only), write, restart the service.\n" +
+			"disable: comment the endpoint out, restart the service.\n" +
+			"Nothing is restarted when the file would not change.\n\n" +
+			"Unsupported on macOS (launchd has no env-file hook).",
+	},
+	{
+		Name: "enroll", group: "Node",
+		oneline: "Enroll this machine with a hub (--hub, --token, --force, --otlp-endpoint)",
+		detail: "apn enroll [--hub URL] [--token TOKEN] [--force] [--otlp-endpoint URL] — enroll this\n" +
+			"machine with a hub.\n\n" +
+			"Falls back to the AGENTPOD_HUB_URL/AGENTPOD_ENROLL_TOKEN environment\n" +
+			"variables when the flags are omitted. Idempotent: running it again on\n" +
+			"an already-enrolled machine is a friendly no-op unless the stored\n" +
+			"credential is no longer valid, or --force is passed.\n\n" +
+			"--otlp-endpoint URL also enables OpenTelemetry export to that collector (validated\n" +
+			"before contacting the hub; applies on an already-enrolled machine too; no restart —\n" +
+			"same as 'apn telemetry enable'). Ignored with a warning on macOS.",
+	},
+	{
+		Name: "run", group: "Node",
+		oneline: "Run the agent in the foreground",
+		detail: "apn run — run the agent in the foreground: connects to the hub and\n" +
+			"handles terminal sessions until interrupted (Ctrl-C).\n\n" +
+			"This is what the installed service runs under the hood; run it\n" +
+			"directly for debugging.",
+	},
+	{
+		Name: "native-skills", group: "Node",
+		oneline: "Show, enable or disable native skill placement on this node",
+		detail: "apn native-skills <status|enable|disable> — control the separate native\n" +
+			"skill-placement gate for this node.\n\n" +
+			"Native placement writes into a harness-visible skill directory. It is disabled\n" +
+			"by default and must be deliberately enabled by the node operator. `enable` and\n" +
+			"`disable` update only this node's local configuration; restart the node service\n" +
+			"after either change before the hub can observe the new capability.",
+	},
+	{
+		Name: "plugin-management", group: "Node",
+		oneline: "Show, enable or disable Console plugin management on this node",
+		detail: "apn plugin-management <status|enable|disable> — let the Console install and\n" +
+			"remove the agentpod-live plugin in this node's Hermes profiles.\n\n" +
+			"Each change is planned on the node, reviewed in the Console and applied only\n" +
+			"if the profile still matches the review; the node probes Hermes's version\n" +
+			"itself. It is disabled by default. `enable` and `disable` update only this\n" +
+			"node's local configuration; restart the node service after either change.\n" +
+			"Nothing here restarts a gateway.",
+	},
+	{
+		Name: "mcp-proxy", group: "Node",
+		oneline: "Show the stations the loopback MCP proxy serves, or rotate their secrets",
+		detail: "apn mcp-proxy <status|rotate [STATION_ID...]> — the node's loopback MCP proxy\n" +
+			"gives a station's harness sessions the hub's and SuperLibrary's MCP tools.\n\n" +
+			"Each station's secret persists in mcp-proxy.json (0600) beside the node config,\n" +
+			"so a session kept open across a node restart keeps working. `rotate` replaces\n" +
+			"the named stations' secrets (every served station when none are named); the\n" +
+			"running node refuses the old ones from their next request, without a restart.\n" +
+			"Secrets are never printed. Which stations are served is changed from the hub:\n" +
+			"fleet mcp-proxy enable|disable.",
+	},
+	{
+		Name: "hermes-skills", group: "Node",
+		oneline: "Register or remove the managed skills directory in a Hermes profile",
+		detail: "apn hermes-skills <status|register|unregister> --profile NAME [--apply] —\n" +
+			"a published skill is inert until skills.external_dirs names its directory.\n" +
+			"Without --apply the command prints the exact change and writes nothing.\n" +
+			"It edits one profile's own config.yaml and leaves the rest of it alone.",
+	},
+	{
+		Name: "hermes-live", group: "Node",
+		oneline: "Install, enable or remove the agentpod-live streaming plugin in a Hermes profile",
+		detail: "apn hermes-live <status|enable|disable> --profile NAME [--apply] [--replace-unmanaged] —\n" +
+			"a harness-mode Hermes profile streams into AgentPod clients only with this plugin.\n" +
+			"enable installs the copy shipped in this apn, on a Hermes the CI contract tested,\n" +
+			"and adds it to plugins.enabled with plugins.stream_reasoning_deltas: true.\n" +
+			"Without --apply it prints the exact change and writes nothing. disable removes it\n" +
+			"and undoes the configuration edit. Neither restarts the gateway; that is yours to do.",
+	},
+	{
+		Name: "openclaw-errors", group: "Node",
+		oneline: "Install, enable or remove the agentpod-errors plugin in OpenClaw",
+		detail: "apn openclaw-errors <status|enable|disable> [--apply] —\n" +
+			"OpenClaw's ACP bridge drops why a turn failed; this plugin reports it to this node.\n" +
+			"enable installs the copy shipped in this apn, on an OpenClaw the CI contract tested,\n" +
+			"into ~/.agentpod/openclaw and adds it to ~/.openclaw/openclaw.json with\n" +
+			"hooks.allowConversationAccess. Without --apply it prints the exact change and writes\n" +
+			"nothing. disable removes both. Neither restarts the gateway; that is yours to do.",
+	},
+	{
+		Name: "pi-errors", group: "Node",
+		oneline: "Install, enable or remove the agentpod-errors extension in Pi",
+		detail: "apn pi-errors <status|enable|disable> [--apply] —\n" +
+			"pi-acp drops why a turn failed; this extension reports it to this node.\n" +
+			"enable installs the copy shipped in this apn, on a Pi the CI contract tested,\n" +
+			"as ~/.pi/agent/extensions/agentpod-errors.ts. Without --apply it prints what it\n" +
+			"would do and writes nothing. Nothing needs restarting: each new Pi session loads it.",
+	},
+	{
+		Name: "detect", group: "Node",
+		oneline: "Print detected harness stations as JSON",
+		detail: "apn detect — print the harness stations detected on this host as\n" +
+			"JSON. Debug/ops smoke test for the descriptors; no hub connection\n" +
+			"required.",
+	},
+	{
+		Name: "forge-api", group: "Node",
+		oneline: "Set up stk as this station's forge credential broker (setup)",
+		detail: "apn forge-api setup [--user stk] [--agent-uid N]... [--state-dir DIR] [--stk PATH]\n" +
+			"apn forge-api setup --station ID [--agent-uid N]... [--allow-shared-agent-uid]\n" +
+			"apn forge-api prune --station ID [--dry-run] [--yes]\n\n" +
+			"Installs stk as its own OS user so the agent can use forge credentials\n" +
+			"without being able to read them. Run it once with sudo; it is safe to\n" +
+			"repeat (an existing separate-user install is left alone).\n\n" +
+			"--agent-uid defaults to the uid the node starts harnesses as (the user\n" +
+			"who ran sudo). Without root, nothing is installed: the command reports\n" +
+			"same-user isolation, marked DEGRADED, and says how to fix it.\n\n" +
+			"--station ID creates that station's own stk instance (its own OS user,\n" +
+			"state, policy file, proxy port and systemd unit, derived from the id)\n" +
+			"ahead of time. The node does the same on its own at a station's first\n" +
+			"grant when it runs as root, so this is only for preparing a station\n" +
+			"or for a node that does not run as root.\n\n" +
+			"A second station whose agents run as a uid another station already uses\n" +
+			"is refused (station-uid-shared): isolation between stations needs a\n" +
+			"distinct uid per station. --allow-shared-agent-uid acknowledges the\n" +
+			"risk; the station's grants then report same-user isolation.\n\n" +
+			"prune removes ONE station's whole stk instance (its unit, user, state,\n" +
+			"policy and every credential it holds, and the harness wiring) when the\n" +
+			"station is gone from this node. It is manual: nothing removes an instance\n" +
+			"for you. --dry-run says what it would remove; without it --yes is\n" +
+			"required. A station the node's registry does not list is left alone.\n\n" +
+			"Exit 0 on separate-user or on a clearly reported same-user; 1 on errors.",
+	},
+	{
+		Name: "scan", group: "Node",
+		oneline: "Check this machine's agents for exposure (--json)",
+		detail: "apn scan [--json] [--no-color] — check the agent runtimes on this\n" +
+			"host for the two ways they get taken over: a listener bound to every\n" +
+			"network interface, and credential files other users can read.\n\n" +
+			"Needs no hub, no account and no network. Prints a graded report and\n" +
+			"exits 0 (clean), 1 (warnings) or 2 (critical), so it works in cron.\n\n" +
+			"A check that cannot determine an answer says so — it is never\n" +
+			"reported as a pass.",
+	},
+	{
+		Name: "acp", group: "Node",
+		oneline: "Attach an ACP editor to a station (--list, --station)",
+		detail: "apn acp --list — show the stations you can attach an editor to.\n\n" +
+			"apn acp --station <id> [--session <id>] [--hub <url>] [--token <t>] —\n" +
+			"make a station on another machine look like a local agent to any ACP\n" +
+			"client (Zed, JetBrains, anything that speaks the protocol).\n\n" +
+			"The editor spawns this and talks ACP over its stdio; the frames are\n" +
+			"piped to the hub, which does the protocol work. Reaches stations\n" +
+			"behind NAT or CGNAT, because the node dials out.\n\n" +
+			"Prefer the AGENTPOD_TOKEN environment variable over --token: a token\n" +
+			"on the command line lands in shell history.\n\n" +
+			"This is the one command that needs no enrolled node — a laptop can\n" +
+			"install apn purely as a client.",
+	},
+	{
+		Name: "update", group: "Maintenance",
+		oneline: "Self-update from the latest release (--check, --force)",
+		detail: "apn update [--check] [--force] — self-update from the latest GitHub\n" +
+			"release.\n\n" +
+			"--check resolves and reports the current/latest version without\n" +
+			"changing anything. --force updates even when already on the latest\n" +
+			"version. On success the service is restarted automatically; if the\n" +
+			"restart fails, the binary is already swapped and this prints a\n" +
+			"manual-restart hint.",
+	},
+	{
+		Name: "help", group: "Maintenance",
+		oneline: "Show this list, or one command in detail",
+		detail: "apn help [command] — with no argument, the commands grouped by purpose; with one,\n" +
+			"that command's detail. 'apn <command> -h' prints the same detail, plus the\n" +
+			"command's flags and their defaults where it has any.",
+	},
+	{
+		Name: "version", group: "Maintenance",
+		oneline: "Print version and platform",
+		detail:  "apn version — print the binary version and platform (GOOS/GOARCH).",
+	},
+}
+
+// commandGroups lists the group names in the order they render in the
+// top-level help layout.
+var commandGroups = []string{"Service", "Node", "Maintenance"}
+
+// HelpText renders the full top-level `apn help` layout: tool one-liner and
+// version, usage line, commands grouped by purpose, an examples block, and
+// a closing hint. Matches the layout in the design spec's "Help & CLI UX"
+// section exactly, since that mock is also the acceptance bar.
+func HelpText(version string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "agentpod-node (apn) — AgentPod fleet node agent  %s\n\n", version)
+	b.WriteString("Usage: apn <command> [flags]\n\n")
+
+	for _, group := range commandGroups {
+		fmt.Fprintf(&b, "%s:\n", group)
+		for _, c := range Commands {
+			if c.group == group {
+				fmt.Fprintf(&b, "  %-12s%s\n", c.Name, c.oneline)
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("Examples:\n")
+	b.WriteString("  apn status\n")
+	b.WriteString("  apn logs -f\n")
+	b.WriteString("  apn enroll --hub https://hub.example.com --token <TOKEN>\n\n")
+	b.WriteString("Run 'apn help <command>' or 'apn <command> -h' for command details.")
+
+	return b.String()
+}
+
+// CommandHelp returns the detail text for a registered command, or "" if
+// name is not a known command. Used by `apn help <command>` and by each
+// command's own flag.FlagSet.Usage.
+func CommandHelp(name string) string {
+	for _, c := range Commands {
+		if c.Name == name {
+			return c.detail
+		}
+	}
+	return ""
+}
+
+// IsCommand reports whether name is a registered top-level command.
+func IsCommand(name string) bool {
+	for _, c := range Commands {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// SuggestCommand returns the registered command name closest to the
+// (presumably mistyped) input, or "" if nothing is within edit distance 2 —
+// close enough to be a plausible typo (like "statsu" -> "status") without
+// suggesting an unrelated command for a genuinely unknown verb.
+func SuggestCommand(input string) string {
+	const maxSuggestDistance = 2
+	best, bestDist := "", maxSuggestDistance+1
+	for _, c := range Commands {
+		if d := levenshtein(input, c.Name); d < bestDist {
+			best, bestDist = c.Name, d
+		}
+	}
+	if bestDist <= maxSuggestDistance {
+		return best
+	}
+	return ""
+}
+
+// levenshtein computes the edit distance between two strings (insert,
+// delete, substitute each cost 1) using the standard single-row
+// dynamic-programming table. Byte-based: fine for the ASCII command names
+// this is used against.
+func levenshtein(a, b string) int {
+	prevRow := make([]int, len(b)+1)
+	for j := range prevRow {
+		prevRow[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		curRow := make([]int, len(b)+1)
+		curRow[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			curRow[j] = min3(curRow[j-1]+1, prevRow[j]+1, prevRow[j-1]+cost)
+		}
+		prevRow = curRow
+	}
+	return prevRow[len(b)]
+}
+
+func min3(a, b, c int) int {
+	if b < a {
+		a = b
+	}
+	if c < a {
+		a = c
+	}
+	return a
+}

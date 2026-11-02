@@ -10,6 +10,7 @@ import (
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/nodecli"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
 
@@ -69,7 +70,7 @@ func TestForgeAPISetupErrorsExitNonZero(t *testing.T) {
 }
 
 func TestForgeAPIIsRegisteredInHelp(t *testing.T) {
-	if !isCommand("forge-api") || commandHelp("forge-api") == "" {
+	if !nodecli.IsCommand("forge-api") || nodecli.CommandHelp("forge-api") == "" {
 		t.Fatal("forge-api must be in the commands registry")
 	}
 }

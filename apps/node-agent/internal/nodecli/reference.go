@@ -1,4 +1,4 @@
-package main
+package nodecli
 
 import (
 	"fmt"
@@ -325,31 +325,31 @@ func hermesApply() clidoc.Flag {
 	return clidoc.Flag{Name: "apply", Usage: "make the change; without it, print what would change and write nothing"}
 }
 
-// apnReference merges the help table with apnRef. It panics on a mismatch between the two,
+// Reference merges the help table with apnRef. It panics on a mismatch between the two,
 // which the reference test turns into a failure before anything is rendered.
-func apnReference() clidoc.Binary {
+func Reference() clidoc.Binary {
 	byPath := map[string]clidoc.Command{}
 	for _, r := range apnRef {
 		byPath[r.Path] = r
 	}
 	out := []clidoc.Command{byPath[""]}
-	for _, c := range commands {
-		r, ok := byPath[c.name]
+	for _, c := range Commands {
+		r, ok := byPath[c.Name]
 		if !ok {
-			panic(fmt.Sprintf("apn %s is in the help table but has no entry in apnRef", c.name))
+			panic(fmt.Sprintf("apn %s is in the help table but has no entry in apnRef", c.Name))
 		}
 		r.Group = c.group
 		r.Summary = clidoc.CodeFlags(strings.ToUpper(c.oneline[:1]) + strings.TrimSuffix(c.oneline[1:], ".") + ".")
 		r.Help = c.detail
 		out = append(out, r)
 		for _, sub := range apnRef {
-			if strings.HasPrefix(sub.Path, c.name+" ") {
+			if strings.HasPrefix(sub.Path, c.Name+" ") {
 				out = append(out, sub)
 			}
 		}
 	}
 	for _, r := range apnRef {
-		if r.Path != "" && !strings.Contains(r.Path, " ") && !isCommand(r.Path) {
+		if r.Path != "" && !strings.Contains(r.Path, " ") && !IsCommand(r.Path) {
 			panic(fmt.Sprintf("apnRef has apn %s, which is not in the help table", r.Path))
 		}
 	}

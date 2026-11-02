@@ -37,7 +37,6 @@ var oversizeFiles = map[string]int{
 // Lower these; never raise them.
 var oversizePackages = map[string]int{
 	"cmd/agentpod-fleet":  5103,
-	"cmd/agentpod-node":   4101,
 	"internal/descriptor": 14200,
 	"internal/forgeapi":   5344,
 }
