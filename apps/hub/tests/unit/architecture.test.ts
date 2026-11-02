@@ -46,9 +46,7 @@ const TREES: Tree[] = [
   {
     root: "apps/hub/src",
     largestCycle: 3,
-    oversize: {
-      "services/forge-api/station-forge-api.ts": 2082,
-    },
+    oversize: {},
   },
   {
     root: "apps/console/src",
