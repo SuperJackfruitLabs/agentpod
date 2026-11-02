@@ -1,7 +1,7 @@
 {
   "eslint(no-console)": 79,
   "eslint(no-empty)": 7,
-  "eslint(no-shadow)": 95,
+  "eslint(no-shadow)": 93,
   "eslint(no-underscore-dangle)": 73,
   "eslint(no-unsafe-finally)": 1,
   "eslint(no-unsafe-optional-chaining)": 3,
@@ -22,7 +22,7 @@
   "typescript(no-misused-promises)": 3,
   "typescript(no-misused-spread)": 11,
   "typescript(no-non-null-asserted-optional-chain)": 1,
-  "typescript(no-non-null-assertion)": 2605,
+  "typescript(no-non-null-assertion)": 2602,
   "typescript(no-redundant-type-constituents)": 15,
   "typescript(no-unnecessary-boolean-literal-compare)": 11,
   "typescript(no-unnecessary-template-expression)": 1,
