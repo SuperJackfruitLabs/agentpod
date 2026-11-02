@@ -42,7 +42,7 @@ const fleet: RolloutNode[] = [
 
 /** Mounts the routes behind a stub that supplies the authenticated user. */
 function appWith(
-  request: Parameters<typeof createNodeRoutes>[0]["request"],
+  request: NonNullable<Parameters<typeof createNodeRoutes>[0]>["request"],
   fixedImage: Set<string> = new Set(),
   workspaceRole: "owner" | "admin" | "member" | null = "admin"
 ) {

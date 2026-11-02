@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, index, uniqueIndex, jsonb, foreignKey, boolean, integer, AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, index, uniqueIndex, jsonb, foreignKey, boolean, integer, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { nodes } from "./nodes";
 import { tenants } from "./tenants";

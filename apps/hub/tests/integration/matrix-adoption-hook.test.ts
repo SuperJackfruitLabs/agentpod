@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import type { Station } from "@agentpod/contract";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
@@ -46,10 +47,10 @@ afterAll(async () => {
   }
 });
 
-const detected = (key: string) => ({
+const detected = (key: string): Station => ({
   key,
   harness: "openclaw",
-  kind: "leaf" as const,
+  kind: "leaf",
   displayName: key,
   parentKey: null,
   workspacePath: null,

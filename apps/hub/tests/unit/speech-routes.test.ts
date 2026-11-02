@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { jsonObject } from "../helpers/json";
 import { Hono } from "hono";
 import {
   assignedVoiceFor,
@@ -166,7 +167,7 @@ describe("POST /api/admin/settings/speech/test", () => {
     await admin.request("/settings/speech", json("PUT", { ...HUB, apiKey: KEY }));
     const res = await admin.request("/settings/speech/test", json("POST", {}));
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await jsonObject(res);
     expect(body).toMatchObject({ ok: true, status: 200, durationMs: 2100 });
     expect(typeof body.elapsedMs).toBe("number");
     expect(body.audio).toBe(Buffer.from(OGG).toString("base64"));

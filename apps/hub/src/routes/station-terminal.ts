@@ -48,7 +48,10 @@ export const stationTerminalRoutes = new Hono().get(
     // Capture context values at upgrade time — c is available here but NOT
     // inside the async onOpen callbacks (Hono closes over it for us).
     const user = c.get("user") as AuthUser | undefined;
-    const stationId = c.req.param("id");
+    // upgradeWebSocket hands over an untyped Context, so the param reads as
+    // `string | undefined`; the router only reaches here with `:id` bound.
+    // The "" fallback exists for the type and matches no station.
+    const stationId = c.req.param("id") ?? "";
     // Capture the Origin header now for CSWSH validation inside onOpen.
     const upgradeOrigin = c.req.header("Origin") ?? null;
 

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { jsonField } from "../helpers/json";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
@@ -195,7 +196,7 @@ describe("station routes", () => {
       json("PUT", { mode: "inherit", voice: "af_nova" })
     );
     expect(res.status).toBe(200);
-    expect((await res.json()).effective).toMatchObject({ voice: "af_nova", voiceSource: "station" });
+    expect((await jsonField(res, "effective"))).toMatchObject({ voice: "af_nova", voiceSource: "station" });
   });
 
   test("removing the station removes its setting; the table is tenant-scoped", async () => {

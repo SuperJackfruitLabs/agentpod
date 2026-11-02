@@ -12,8 +12,9 @@
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface GetLatestVersionOptions {
-  /** Override the fetch implementation (for tests). */
-  fetch?: typeof globalThis.fetch;
+  /** Override the fetch implementation (for tests). Only the call is used, so a plain function
+   *  fits; `typeof fetch` would also demand Bun's `fetch.preconnect`. */
+  fetch?: (url: string, init?: RequestInit) => Promise<Response>;
   /** Override the GitHub API base URL (for tests). */
   baseUrl?: string;
   /** Override the clock (for testing TTL behavior). */

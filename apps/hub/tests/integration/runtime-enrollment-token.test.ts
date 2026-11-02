@@ -38,6 +38,21 @@ const TEST_USER = "test-user-runtime-token-001";
 
 const fakeDockerProvisioner: RuntimeProvisioner = {
   provider: "docker",
+  // Docker's own declarations, minus what this fake does not do: no lifecycle
+  // verbs, and no tier sizes (`tierMemoryMb` is Partial on purpose), so the
+  // harness-fits-tier guard stays silent exactly as it was before the fake
+  // declared anything.
+  manifest: {
+    provider: "docker",
+    workspaceStorage: "rootfs",
+    stopSemantics: "resumable",
+    maxLifetimeMs: null,
+    imageBinding: "per-instance",
+    supportedTiers: ["small", "medium", "large"],
+    tierMemoryMb: {},
+    idleBehaviour: "never",
+    lifecycle: [],
+  },
   async provision(spec) {
     return { externalId: `fake-container-${spec.runtimeId}` };
   },

@@ -16,7 +16,7 @@ import { stations, type StationRow } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
 import { VERB_RESULTS, unknownCapabilitiesByStation } from "@agentpod/contract";
-import type { DetectedStation } from "@agentpod/contract";
+import type { Station } from "@agentpod/contract";
 import * as broker from "./broker";
 import { reconcileOnAdopt } from "./harness-config-apply";
 import { markGrantsRevoking, type RevokeCause } from "./station-forge-api";
@@ -100,7 +100,7 @@ export async function adoptStations(
   userId: string,
   nodeId: string,
   keys: string[],
-  detected: DetectedStation[]
+  detected: Station[]
 ): Promise<StationRow[]> {
   const toAdopt = detected.filter((d) => keys.includes(d.key));
   if (toAdopt.length === 0) return [];

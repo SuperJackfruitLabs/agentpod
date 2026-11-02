@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { jsonField } from "../helpers/json";
 import { Hono } from "hono";
 import { acpProxyRouter } from "../../src/routes/acp-proxy";
 
@@ -32,7 +33,7 @@ describe("GET /api/acp/proxy — gates before upgrading", () => {
 
   test("the 400 says what is missing", async () => {
     const res = await appWith({ id: "usr_1" }).request("/api/acp/proxy");
-    expect((await res.json()).error).toContain("station");
+    expect((await jsonField(res, "error"))).toContain("station");
   });
 
   test("426 when authenticated and addressed but not a WebSocket upgrade", async () => {

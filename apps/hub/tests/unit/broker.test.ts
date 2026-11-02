@@ -47,8 +47,8 @@ test("request sends a {type:req} and resolves on matching res", async () => {
     // The outgoing req must be captured synchronously
     expect(msgs).toHaveLength(1);
     const sent = msgs[0];
-    expect(sent.type).toBe("req");
-    if (sent.type !== "req") throw new Error("expected req msg");
+    expect(sent?.type).toBe("req");
+    if (sent?.type !== "req") throw new Error("expected req msg");
 
     // Simulate node replying
     broker.handleNodeMessage("node-1", {
@@ -71,7 +71,7 @@ test("request resolves with {ok:false, error:'timeout'} after timeoutMs", async 
     const promise = broker.request("node-1", "detect", {}, { timeoutMs: 50 });
 
     expect(msgs).toHaveLength(1);
-    expect(msgs[0].type).toBe("req");
+    expect(msgs[0]?.type).toBe("req");
 
     // Do NOT call handleNodeMessage — let the timer fire
     const result = await promise;
@@ -116,8 +116,8 @@ test("stream delivers chunks via onChunk and auto-drops handler on eof", async (
 
     expect(msgs).toHaveLength(1);
     const sent = msgs[0];
-    expect(sent.type).toBe("req");
-    if (sent.type !== "req") throw new Error("expected req msg");
+    expect(sent?.type).toBe("req");
+    if (sent?.type !== "req") throw new Error("expected req msg");
     const id = sent.id;
 
     broker.handleNodeMessage("node-1", {
@@ -166,8 +166,8 @@ test("dropNode resolves an in-flight request with {ok:false, error:'node disconn
 
     expect(msgs).toHaveLength(1);
     const sent = msgs[0];
-    expect(sent.type).toBe("req");
-    if (sent.type !== "req") throw new Error("expected req msg");
+    expect(sent?.type).toBe("req");
+    if (sent?.type !== "req") throw new Error("expected req msg");
 
     // Drop the node before a response arrives
     broker.dropNode("node-drop");
@@ -209,7 +209,7 @@ test("dropNode signals eof to an active stream and a subsequent stream message i
 
     expect(msgs).toHaveLength(1);
     const sent = msgs[0];
-    if (sent.type !== "req") throw new Error("expected req msg");
+    if (sent?.type !== "req") throw new Error("expected req msg");
     const id = sent.id;
 
     // Drop the node — handler must be called with eof:true
@@ -275,7 +275,7 @@ test("cancel() sends {type:cancel} and drops the stream handler", async () => {
     );
 
     const sent = msgs[0];
-    if (sent.type !== "req") throw new Error("expected req msg");
+    if (sent?.type !== "req") throw new Error("expected req msg");
     const id = sent.id;
 
     cancel();
@@ -283,8 +283,8 @@ test("cancel() sends {type:cancel} and drops the stream handler", async () => {
     // Second outgoing msg should be cancel
     expect(msgs).toHaveLength(2);
     const cancelMsg = msgs[1];
-    expect(cancelMsg.type).toBe("cancel");
-    if (cancelMsg.type !== "cancel") throw new Error("expected cancel msg");
+    expect(cancelMsg?.type).toBe("cancel");
+    if (cancelMsg?.type !== "cancel") throw new Error("expected cancel msg");
     expect(cancelMsg.id).toBe(id);
 
     // Handler dropped — further stream messages are ignored

@@ -15,21 +15,21 @@ function at(value: unknown, level: "station" | "node" | "fleet") {
 describe("comparing a station against the declaration", () => {
   test("equal values match", () => {
     const [o] = compare({ ...base, declared: { [SETTING.id]: at("900", "station") }, values: [{ settingId: SETTING.id, readable: true, observed: "900" }] });
-    expect(o.state).toBe("matches");
+    expect(o?.state).toBe("matches");
   });
 
   test("different values drift, and the reason names both", () => {
     const [o] = compare({ ...base, declared: { [SETTING.id]: at("900", "station") }, values: [{ settingId: SETTING.id, readable: true, observed: "300" }] });
-    expect(o.state).toBe("drifted");
-    expect(o.reason).toContain("900");
-    expect(o.reason).toContain("300");
+    expect(o?.state).toBe("drifted");
+    expect(o?.reason).toContain("900");
+    expect(o?.reason).toContain("300");
   });
 
   test("declared values compare by value, not by type — 900 and \"900\" agree", () => {
     // The node reads YAML as text; a declaration arrives as JSON. Treating these
     // as different would report drift on every numeric setting, forever.
     const [o] = compare({ ...base, declared: { [SETTING.id]: at(900, "station") }, values: [{ settingId: SETTING.id, readable: true, observed: "900" }] });
-    expect(o.state).toBe("matches");
+    expect(o?.state).toBe("matches");
   });
 
   test("an object value matches whatever order its keys come back in", () => {
@@ -37,7 +37,7 @@ describe("comparing a station against the declaration", () => {
     // node reports them in its own; the same value must not read as drift forever.
     const declared = { text: "Warm and brief.", digest: "9f1c" };
     const o = compare({ ...base, declared: { [SETTING.id]: at(declared, "station") }, values: [{ settingId: SETTING.id, readable: true, observed: { digest: "9f1c", text: "Warm and brief." } }] })[0]!;
-    expect(o.state).toBe("matches");
+    expect(o?.state).toBe("matches");
     const nested = compare({ ...base, declared: { [SETTING.id]: at({ a: { y: 1, x: [2, { q: 1, p: 0 }] } }, "station") }, values: [{ settingId: SETTING.id, readable: true, observed: { a: { x: [2, { p: 0, q: 1 }], y: 1 } } }] })[0]!;
     expect(nested.state).toBe("matches");
     // Arrays keep their order: a reordered list is a different value.
@@ -47,13 +47,13 @@ describe("comparing a station against the declaration", () => {
 
   test("declared but absent from the document is `absent`, not `drifted`", () => {
     const [o] = compare({ ...base, declared: { [SETTING.id]: at("900", "station") }, values: [{ settingId: SETTING.id, readable: true }] });
-    expect(o.state).toBe("absent");
+    expect(o?.state).toBe("absent");
   });
 
   test("an unreadable document is `unreadable` — never `matches` and never `absent`", () => {
     const [o] = compare({ ...base, declared: { [SETTING.id]: at("900", "station") }, values: [{ settingId: SETTING.id, readable: false, reason: "no such file" }] });
-    expect(o.state).toBe("unreadable");
-    expect(o.reason).toContain("no such file");
+    expect(o?.state).toBe("unreadable");
+    expect(o?.reason).toContain("no such file");
   });
 
   test("a setting nobody declared is not reported at all", () => {
@@ -67,7 +67,7 @@ describe("comparing a station against the declaration", () => {
       declared: { [userScoped.id]: { value: true, level: "station" as const } },
       values: [{ settingId: userScoped.id, readable: true, observed: true }],
     });
-    expect(o.state).toBe("out-of-scope");
+    expect(o?.state).toBe("out-of-scope");
   });
 });
 
@@ -82,7 +82,7 @@ describe("awaiting-restart: restart evidence comes from the gateway pid, never a
       appliedWrites: { [SETTING.id]: { gatewayPid: 100 } },
       currentGatewayPid: 100,
     });
-    expect(o.state).toBe("awaiting-restart");
+    expect(o?.state).toBe("awaiting-restart");
   });
 
   test("the same setting after the gateway pid changed is matches", () => {
@@ -93,7 +93,7 @@ describe("awaiting-restart: restart evidence comes from the gateway pid, never a
       appliedWrites: { [SETTING.id]: { gatewayPid: 100 } },
       currentGatewayPid: 200,
     });
-    expect(o.state).toBe("matches");
+    expect(o?.state).toBe("matches");
   });
 
   test("a station whose health reports no pid stays awaiting-restart, never matches", () => {
@@ -104,7 +104,7 @@ describe("awaiting-restart: restart evidence comes from the gateway pid, never a
       appliedWrites: { [SETTING.id]: { gatewayPid: 100 } },
       currentGatewayPid: null,
     });
-    expect(o.state).toBe("awaiting-restart");
+    expect(o?.state).toBe("awaiting-restart");
   });
 
   test("a setting that needs no restart is `matches` immediately after a write", () => {
@@ -116,7 +116,7 @@ describe("awaiting-restart: restart evidence comes from the gateway pid, never a
       appliedWrites: { [NO_RESTART_SETTING.id]: { gatewayPid: 100 } },
       currentGatewayPid: 100,
     });
-    expect(o.state).toBe("matches");
+    expect(o?.state).toBe("matches");
   });
 
   test("a setting written when health could not be read stays awaiting-restart, never matches", () => {
@@ -133,8 +133,8 @@ describe("awaiting-restart: restart evidence comes from the gateway pid, never a
       appliedWrites: { [SETTING.id]: { gatewayPid: null } },
       currentGatewayPid: 4242,
     });
-    expect(o.state).toBe("awaiting-restart");
-    expect(o.reason).toContain("could not be confirmed");
+    expect(o?.state).toBe("awaiting-restart");
+    expect(o?.reason).toContain("could not be confirmed");
   });
 
   test("neither pid known is still awaiting-restart", () => {
@@ -145,7 +145,7 @@ describe("awaiting-restart: restart evidence comes from the gateway pid, never a
       appliedWrites: { [SETTING.id]: { gatewayPid: null } },
       currentGatewayPid: null,
     });
-    expect(o.state).toBe("awaiting-restart");
+    expect(o?.state).toBe("awaiting-restart");
   });
 });
 
@@ -170,7 +170,7 @@ describe("precedence: every adjacent pair, with both conditions true at once", (
       declared: { [USER_SCOPED.id]: at(true, "station") },
       values: [{ settingId: USER_SCOPED.id, readable: false, reason: "no such file" }],
     });
-    expect(o.state).toBe("out-of-scope");
+    expect(o?.state).toBe("out-of-scope");
   });
 
   test("unreadable beats opted-out: a document nobody could read is not an operator's choice", () => {
@@ -180,7 +180,7 @@ describe("precedence: every adjacent pair, with both conditions true at once", (
       values: [{ settingId: SETTING.id, readable: false, reason: "no such file" }],
       optedOut: new Set([SETTING.id]),
     });
-    expect(o.state).toBe("unreadable");
+    expect(o?.state).toBe("unreadable");
   });
 
   test("opted-out beats awaiting-restart: the operator's choice outranks our own write", () => {
@@ -192,7 +192,7 @@ describe("precedence: every adjacent pair, with both conditions true at once", (
       currentGatewayPid: 100,
       optedOut: new Set([SETTING.id]),
     });
-    expect(o.state).toBe("opted-out");
+    expect(o?.state).toBe("opted-out");
   });
 
   test("awaiting-restart beats the ordinary comparison, drifted included", () => {
@@ -205,7 +205,7 @@ describe("precedence: every adjacent pair, with both conditions true at once", (
       appliedWrites: { [SETTING.id]: { gatewayPid: 100 } },
       currentGatewayPid: 100,
     });
-    expect(o.state).toBe("awaiting-restart");
+    expect(o?.state).toBe("awaiting-restart");
   });
 });
 
@@ -217,7 +217,7 @@ describe("opted-out: an explicit operator choice, not a key in the harness's own
       values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
       optedOut: new Set([SETTING.id]),
     });
-    expect(o.state).toBe("opted-out");
+    expect(o?.state).toBe("opted-out");
   });
 
   test("opted-out beats drifted: the state names the operator's choice, not the diff", () => {
@@ -230,7 +230,7 @@ describe("opted-out: an explicit operator choice, not a key in the harness's own
       values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
       optedOut: new Set([SETTING.id]),
     });
-    expect(o.state).toBe("opted-out");
+    expect(o?.state).toBe("opted-out");
   });
 
   test("clearing an opt-out returns the setting to ordinary comparison", () => {
@@ -267,8 +267,8 @@ describe("a harness's own opt-out (D11) is opted-out, and distinguishable from t
       declared: { [SETTING.id]: at("900", "station") },
       values: [{ settingId: SETTING.id, readable: true, observed: "300", optedOutByHarness: true }],
     })[0]!;
-    expect(o.state).toBe("opted-out");
-    expect(o.reason).toContain("hermes");
+    expect(o?.state).toBe("opted-out");
+    expect(o?.reason).toContain("hermes");
   });
 
   test("a hub-register opt-out still reports its own reason, unrelated to the harness", () => {
@@ -278,8 +278,8 @@ describe("a harness's own opt-out (D11) is opted-out, and distinguishable from t
       values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
       optedOut: new Set([SETTING.id]),
     })[0]!;
-    expect(o.state).toBe("opted-out");
-    expect(o.reason).toContain("operator opted");
+    expect(o?.state).toBe("opted-out");
+    expect(o?.reason).toContain("operator opted");
   });
 
   test("the two reasons are textually distinguishable — an operator can tell which source fired", () => {
@@ -306,7 +306,7 @@ describe("a harness's own opt-out (D11) is opted-out, and distinguishable from t
       declared: { [SETTING.id]: at("900", "station") },
       values: [{ settingId: SETTING.id, readable: true, observed: "900", optedOutByHarness: false }],
     })[0]!;
-    expect(o.state).toBe("matches");
+    expect(o?.state).toBe("matches");
   });
 
   // D6/Task 5b gap: the tests above all exercise `harness: "hermes"` via
@@ -330,9 +330,9 @@ describe("a harness's own opt-out (D11) is opted-out, and distinguishable from t
       declared: { [openclawSetting.id]: at(true, "node") },
       values: [{ settingId: openclawSetting.id, readable: true, observed: false, optedOutByHarness: true }],
     })[0]!;
-    expect(o.state).toBe("opted-out");
-    expect(o.reason).toContain("openclaw");
-    expect(o.reason).not.toContain("hermes");
+    expect(o?.state).toBe("opted-out");
+    expect(o?.reason).toContain("openclaw");
+    expect(o?.reason).not.toContain("hermes");
   });
 
   // Task 5b: the source must be on the OBSERVATION itself, typed, not just
@@ -373,7 +373,7 @@ describe("level: the resolution level travels on every observation", () => {
       declared: { [SETTING.id]: at("900", "station") },
       values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
     })[0]!;
-    expect(o.level).toBe("station");
+    expect(o?.level).toBe("station");
   });
 
   test("a node-level declaration reports level: node", () => {
@@ -382,7 +382,7 @@ describe("level: the resolution level travels on every observation", () => {
       declared: { [SETTING.id]: at("900", "node") },
       values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
     })[0]!;
-    expect(o.level).toBe("node");
+    expect(o?.level).toBe("node");
   });
 
   test("a fleet-level declaration reports level: fleet", () => {
@@ -391,7 +391,7 @@ describe("level: the resolution level travels on every observation", () => {
       declared: { [SETTING.id]: at("900", "fleet") },
       values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
     })[0]!;
-    expect(o.level).toBe("fleet");
+    expect(o?.level).toBe("fleet");
   });
 
   test("an out-of-scope observation still reports its level — the refusal does not erase it", () => {
@@ -402,8 +402,8 @@ describe("level: the resolution level travels on every observation", () => {
       declared: { [userScoped.id]: at(true, "station") },
       values: [{ settingId: userScoped.id, readable: true, observed: true }],
     })[0]!;
-    expect(o.state).toBe("out-of-scope");
-    expect(o.level).toBe("station");
+    expect(o?.state).toBe("out-of-scope");
+    expect(o?.level).toBe("station");
   });
 
   test("an unreadable observation still reports its level", () => {
@@ -412,8 +412,8 @@ describe("level: the resolution level travels on every observation", () => {
       declared: { [SETTING.id]: at("900", "node") },
       values: [{ settingId: SETTING.id, readable: false, reason: "no such file" }],
     })[0]!;
-    expect(o.state).toBe("unreadable");
-    expect(o.level).toBe("node");
+    expect(o?.state).toBe("unreadable");
+    expect(o?.level).toBe("node");
   });
 
   test("an opted-out observation still reports its level", () => {
@@ -423,8 +423,8 @@ describe("level: the resolution level travels on every observation", () => {
       values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
       optedOut: new Set([SETTING.id]),
     })[0]!;
-    expect(o.state).toBe("opted-out");
-    expect(o.level).toBe("fleet");
+    expect(o?.state).toBe("opted-out");
+    expect(o?.level).toBe("fleet");
   });
 
   test("an awaiting-restart observation still reports its level", () => {
@@ -435,8 +435,8 @@ describe("level: the resolution level travels on every observation", () => {
       appliedWrites: { [SETTING.id]: { gatewayPid: 100 } },
       currentGatewayPid: 100,
     })[0]!;
-    expect(o.state).toBe("awaiting-restart");
-    expect(o.level).toBe("node");
+    expect(o?.state).toBe("awaiting-restart");
+    expect(o?.level).toBe("node");
   });
 });
 

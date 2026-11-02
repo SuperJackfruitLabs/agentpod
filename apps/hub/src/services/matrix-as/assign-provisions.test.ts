@@ -136,7 +136,6 @@ async function adopt(key: string, extra: { matrixId?: string } = {}) {
       parentKey: null,
       workspacePath: null,
       capabilities: ["acp"],
-      adopted: false,
       ...extra,
     },
   ]);

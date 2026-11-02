@@ -321,7 +321,10 @@ export const stationAcpRoutes = new Hono()
       // Capture context values at upgrade time — c is available here but NOT
       // inside the async callbacks (Hono closes over it for us).
       const user = c.get("user") as AuthUser | undefined;
-      const sessionId = c.req.param("sessionId");
+      // upgradeWebSocket hands over an untyped Context, so the param reads as
+      // `string | undefined`; the router only reaches here with `:sessionId`
+      // bound. The "" fallback exists for the type and matches no session.
+      const sessionId = c.req.param("sessionId") ?? "";
       // Capture the Origin header now for CSWSH validation inside onOpen.
       const upgradeOrigin = c.req.header("Origin") ?? null;
 

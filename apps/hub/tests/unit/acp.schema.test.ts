@@ -1,4 +1,5 @@
 import { test, expect } from "bun:test";
+import { assertDefined } from "../helpers/assertions";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { acpSessions, acpEvents } from "../../src/db/schema/acp";
 
@@ -41,6 +42,7 @@ test("acpEvents has composite primary key on (session_id, seq)", () => {
   const config = getTableConfig(acpEvents);
   expect(config.primaryKeys.length).toBe(1);
   const pk = config.primaryKeys[0];
+  assertDefined(pk);
   const pkColumnNames = pk.columns.map((c) => c.name).sort();
   expect(pkColumnNames).toEqual(["seq", "session_id"]);
 });

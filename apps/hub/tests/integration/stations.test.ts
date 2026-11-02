@@ -24,6 +24,7 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { test, expect, beforeAll, afterAll, spyOn } from "bun:test";
+import { assertDefined } from "../helpers/assertions";
 import { Hono } from "hono";
 
 // src/ imports — DB URL is already set
@@ -136,7 +137,8 @@ afterAll(async () => {
 // ─── Helper: connect a fake node WS that answers detect ──────────────────────
 
 async function connectFakeNode(
-  serverPort: number,
+  // Bun types `Server.port` as optional (a unix-socket server has none).
+  serverPort: number | undefined,
   nodeId: string,
   nodeSecret: string,
   // What this node answers `detect` with. Parameterised so a test can make a
@@ -372,6 +374,7 @@ test(
       );
       expect(adoptRes.status).toBe(200);
       const [leafRow] = (await adoptRes.json()) as StationRow[];
+      assertDefined(leafRow);
       expect(leafRow.stationKey).toBe(LEAF_KEY);
 
       // User B tries to delete user A's station → 404

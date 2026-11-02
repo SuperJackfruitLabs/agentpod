@@ -361,7 +361,7 @@ describe("Enrollment service", () => {
       {
         key: "opencode:workspace", harness: "opencode", kind: "leaf",
         displayName: "workspace", parentKey: null, workspacePath: "/workspace",
-        capabilities: ["health", "acp"], adopted: false,
+        capabilities: ["health", "acp"],
       },
     ]);
 

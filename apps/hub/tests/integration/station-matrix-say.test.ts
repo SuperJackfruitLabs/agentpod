@@ -7,6 +7,7 @@ import { setGrant } from "../../src/auth/org-plane/grants";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { createStationSayRoutes } from "../../src/routes/station-say";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
+import type { AuthUser } from "../../src/auth/middleware";
 
 /**
  * An agent speaking without being spoken to.
@@ -34,7 +35,7 @@ const OTHER_AGENT = "prn_ffffffffffffffffffff";
 
 let sent: Array<{ userId: string; roomId: string; body: string }> = [];
 
-function app(user = { id: OWNER, tenantId: BOOTSTRAP_TENANT_ID } as Record<string, unknown>) {
+function app(user: AuthUser = { id: OWNER, authType: "org_plane", tenantId: BOOTSTRAP_TENANT_ID }) {
   const routes = createStationSayRoutes({
     domain: "id.agentpod.dev",
     client: {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { jsonObject } from "../helpers/json";
 import { Hono } from "hono";
 import {
   createTranscriptionSettings,
@@ -171,7 +172,7 @@ describe("POST /api/admin/settings/transcription/test", () => {
 
     const res = await admin.request("/settings/transcription/test", json("POST", {}));
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await jsonObject(res);
     expect(body.ok).toBe(true);
     expect(body.status).toBe(200);
     expect(typeof body.elapsedMs).toBe("number");

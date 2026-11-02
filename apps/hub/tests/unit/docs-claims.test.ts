@@ -66,7 +66,7 @@ describe("published docs", () => {
 
     for (const page of all()) {
       for (const [, name] of page.text.matchAll(/`(agentpod_[a-z_]+)`/g)) {
-        expect(registered, `${page.file} names MCP tool ${name}`).toContain(name);
+        expect(registered, `${page.file} names MCP tool ${name}`).toContain(name ?? ""); // a match always fills group 1
       }
     }
   });
@@ -96,7 +96,7 @@ describe("published docs", () => {
 
     for (const page of all()) {
       for (const [, cmd] of page.text.matchAll(/`apn ([a-z][a-z0-9-]*)/g)) {
-        expect(known, `${page.file} names \`apn ${cmd}\``).toContain(cmd);
+        expect(known, `${page.file} names \`apn ${cmd}\``).toContain(cmd ?? ""); // a match always fills group 1
       }
     }
   });
@@ -122,7 +122,7 @@ describe("published docs", () => {
 
     for (const page of all()) {
       for (const [, cmd] of page.text.matchAll(/`fleet ([a-z][a-z-]*)/g)) {
-        expect(known, `${page.file} names \`fleet ${cmd}\``).toContain(cmd);
+        expect(known, `${page.file} names \`fleet ${cmd}\``).toContain(cmd ?? ""); // a match always fills group 1
       }
     }
   });
@@ -300,7 +300,7 @@ describe("published docs", () => {
     const panels = all().find((p) => p.file === "use/panels.md");
     expect(panels).toBeDefined();
     for (const [, cap] of panels!.text.matchAll(/^\| `([a-z.]+)` \|/gm)) {
-      expect(gated, `use/panels.md claims \`${cap}\` is gated`).toContain(cap);
+      expect(gated, `use/panels.md claims \`${cap}\` is gated`).toContain(cap ?? ""); // a match always fills group 1
     }
   });
 

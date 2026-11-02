@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { adminPrincipalsRouter } from "../../src/routes/admin-principals";
 import { workspaceAdminMiddleware as adminMiddleware } from "../../src/auth/workspace-authority";
 import { isUserAdmin } from "../../src/models/admin-users";
@@ -44,7 +45,7 @@ interface Row {
 function app() {
   const a = new Hono();
   a.use("*", async (c, next) => {
-    c.set("user", { id: "test-admin", role: "admin" });
+    c.set("user", { id: "test-admin", authType: "org_plane", tenantId: BOOTSTRAP_TENANT_ID });
     await next();
   });
   a.route("/principals", adminPrincipalsRouter);

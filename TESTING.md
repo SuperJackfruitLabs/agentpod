@@ -15,6 +15,7 @@ cd packages/contract && bun test
 cd apps/hub && bun test
 cd apps/hub && bun run test:unit          # tests/unit only
 cd apps/hub && bun run test:integration   # tests/integration only
+cd apps/hub && bun run typecheck          # src: must be 0 (a step in the hub CI job)
 
 # Node-agent (Go) — always with the race detector
 cd apps/node-agent && go test -race ./...

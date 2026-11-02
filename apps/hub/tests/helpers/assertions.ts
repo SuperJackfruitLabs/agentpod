@@ -163,14 +163,17 @@ export function assertSorted<T>(
   compareFn: (a: T, b: T) => number,
   order: 'asc' | 'desc' = 'asc'
 ): void {
-  for (let i = 1; i < arr.length; i++) {
-    const comparison = compareFn(arr[i - 1], arr[i]);
+  if (arr.length === 0) return;
+  // reduce without a seed walks adjacent pairs with both elements typed `T`.
+  arr.reduce((prev, cur, i) => {
+    const comparison = compareFn(prev, cur);
     const isOrdered = order === 'asc' ? comparison <= 0 : comparison >= 0;
     
     if (!isOrdered) {
       throw new Error(`Array is not sorted in ${order}ending order at index ${i}`);
     }
-  }
+    return cur;
+  });
 }
 
 // ============================================================================
@@ -277,5 +280,6 @@ export function assertSandbox(sandbox: Record<string, unknown>): void {
   assertHasKeys(sandbox, ['id', 'name', 'status', 'flavor']);
   expect(typeof sandbox.id).toBe('string');
   expect(typeof sandbox.name).toBe('string');
-  expect(['creating', 'running', 'stopped', 'error']).toContain(sandbox.status);
+  const statuses: unknown[] = ['creating', 'running', 'stopped', 'error'];
+  expect(statuses).toContain(sandbox.status);
 }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { jsonField } from "../helpers/json";
 import { Hono } from "hono";
 import { stationSpeechRoutes } from "../../src/routes/speech-settings";
 import type { TranscriptionApplyTarget } from "../../src/routes/transcription-settings";
@@ -96,7 +97,7 @@ describe("POST /api/stations/:id/speech/apply", () => {
     const { post, calls } = setup({ target: { ...HERMES, matrixIdentityMode: "bridge" } });
     const res = await post();
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/bridge-mode.*hub speaks/i);
+    expect((await jsonField(res, "error"))).toMatch(/bridge-mode.*hub speaks/i);
     expect(calls).toHaveLength(0);
   });
 
@@ -104,7 +105,7 @@ describe("POST /api/stations/:id/speech/apply", () => {
     const { post, calls } = setup({ target: { ...HERMES, harness: "openclaw", stationKey: "openclaw:x" } });
     const res = await post();
     expect(res.status).toBe(400);
-    const { error } = await res.json();
+    const error = await jsonField(res, "error");
     expect(error).toContain("openclaw");
     expect(error).toMatch(/not supported yet/i);
     expect(calls).toHaveLength(0);
@@ -116,14 +117,14 @@ describe("POST /api/stations/:id/speech/apply", () => {
     });
     const res = await post();
     expect(res.status).toBe(502);
-    expect((await res.json()).error).toContain("IS written");
+    expect((await jsonField(res, "error"))).toContain("IS written");
   });
 
   test("a node too old to know the verb is a 502 that says to update it", async () => {
     const { post } = setup({ answer: { ok: false, error: 'descriptor: unknown verb "speech.apply"' } });
     const res = await post();
     expect(res.status).toBe(502);
-    const { error } = await res.json();
+    const error = await jsonField(res, "error");
     expect(error).toMatch(/predates/i);
     expect(error).toMatch(/update/i);
   });
@@ -132,6 +133,6 @@ describe("POST /api/stations/:id/speech/apply", () => {
     const { post } = setup({ answer: { ok: true, data: { applied: true, mode: "on", model: "m", restarted: true } } });
     const res = await post();
     expect(res.status).toBe(502);
-    expect((await res.json()).error).toMatch(/node/i);
+    expect((await jsonField(res, "error"))).toMatch(/node/i);
   });
 });

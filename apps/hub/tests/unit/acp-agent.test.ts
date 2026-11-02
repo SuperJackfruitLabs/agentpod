@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { client, AGENT_METHODS, CLIENT_METHODS } from "@agentclientprotocol/sdk";
+import { client, AGENT_METHODS, CLIENT_METHODS, type RequestPermissionResponse } from "@agentclientprotocol/sdk";
 import { buildAcpAgent, type AcpSessionService } from "../../src/services/acp-agent";
 
 /**
@@ -7,12 +7,29 @@ import { buildAcpAgent, type AcpSessionService } from "../../src/services/acp-ag
  * whether a station is reachable is the session service's problem and is
  * covered by its own tests. Injecting it keeps these tests about ACP.
  */
+/** A test calling a method its fake did not supply is a bug in the test; say which. */
+function unsupplied(method: string): never {
+  throw new Error(`fake session service: ${method} was not supplied`);
+}
+
+/** The full service shape, every method refusing, for fakes to spread over. */
+const UNSUPPLIED: AcpSessionService = {
+  createSession: () => unsupplied("createSession"),
+  promptSession: () => unsupplied("promptSession"),
+  subscribe: () => unsupplied("subscribe"),
+  answerPermission: () => unsupplied("answerPermission"),
+  cancelTurn: () => unsupplied("cancelTurn"),
+  setMode: () => unsupplied("setMode"),
+  readEvents: () => unsupplied("readEvents"),
+};
+
 function fakeSessions(overrides: Partial<AcpSessionService> = {}): {
   service: AcpSessionService;
   calls: Array<Record<string, unknown>>;
 } {
   const calls: Array<Record<string, unknown>> = [];
   const service: AcpSessionService = {
+    ...UNSUPPLIED,
     async createSession(input) {
       calls.push({ fn: "createSession", ...input });
       return { id: "acps_test" };
@@ -115,14 +132,15 @@ describe("hub ACP agent — session/prompt", () => {
   /** A fake that records call order and lets a test drive the event stream. */
   function promptFake() {
     const order: string[] = [];
-    let emit: ((e: { type: string; payload: unknown }) => void) | undefined;
+    let emit: ((e: { type: string; seq: number; payload: unknown }) => void) | undefined;
     const service: AcpSessionService = {
+      ...UNSUPPLIED,
       async createSession() {
         return { id: "acps_test" };
       },
       subscribe(_sessionId, fn) {
         order.push("subscribe");
-        emit = fn as typeof emit;
+        emit = fn;
         return () => order.push("unsubscribe");
       },
       async promptSession() {
@@ -135,7 +153,7 @@ describe("hub ACP agent — session/prompt", () => {
         emit?.({ type: "state", seq: 2, payload: { status: "idle" } });
       },
     };
-    return { service, order, emitNow: (e: { type: string; payload: unknown }) => emit?.(e) };
+    return { service, order, emitNow: (e: { type: string; seq: number; payload: unknown }) => emit?.(e) };
   }
 
   test("subscribes BEFORE prompting, or the first update is lost", async () => {
@@ -189,6 +207,7 @@ describe("hub ACP agent — session/prompt", () => {
     let seen = "";
     let idle: (() => void) | undefined;
     const service: AcpSessionService = {
+      ...UNSUPPLIED,
       async createSession() {
         return { id: "acps_test" };
       },
@@ -428,7 +447,7 @@ describe("hub ACP agent — permissions", () => {
 
   async function connectAsking(
     service: AcpSessionService,
-    onAsk: (params: Record<string, unknown>) => Promise<{ outcome: unknown }>,
+    onAsk: (params: Record<string, unknown>) => Promise<RequestPermissionResponse>,
   ) {
     const conn = client()
       .onRequest(CLIENT_METHODS.session_request_permission, async ({ params }) => {

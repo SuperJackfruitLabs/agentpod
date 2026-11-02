@@ -91,7 +91,6 @@ async function adopt(key: string, matrixId?: string) {
       parentKey: null,
       workspacePath: null,
       capabilities: ["acp"],
-      adopted: false,
     },
   ]);
   return row!.id;

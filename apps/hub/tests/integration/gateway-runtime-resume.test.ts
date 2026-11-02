@@ -46,7 +46,8 @@ const testApp = new Hono().route("/public/nodes", gatewayRoutes);
 
 const TEST_USER_ID = "test-user-gateway-resume-001";
 
-const WS_URL = (port: number) => `ws://localhost:${port}/public/nodes/gateway`;
+// Bun types `Server.port` as optional (a unix-socket server has none).
+const WS_URL = (port: number | undefined) => `ws://localhost:${port}/public/nodes/gateway`;
 
 beforeAll(async () => {
   await ensurePgMigrations();
@@ -101,7 +102,7 @@ async function runtimeRow(runtimeId: string) {
   return rows[0]!;
 }
 
-function connect(port: number, nodeId: string, nodeSecret: string): WebSocket {
+function connect(port: number | undefined, nodeId: string, nodeSecret: string): WebSocket {
   return new WebSocket(WS_URL(port), {
     headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
   } as RequestInit & { headers: Record<string, string> });
