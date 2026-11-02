@@ -29,7 +29,8 @@ import { verifyNodeCredential } from "../services/enrollment";
 import { requireGrantReach } from "../services/grant-reach";
 import { isOrgPlaneUnavailable, orgPlaneOutageBody } from "../auth/caller-authority";
 import { getStation } from "../services/station-registry";
-import { gateCapability, refuseWithoutReach } from "./station-writes";
+import { refuseWithoutReach } from "./station-writes";
+import { gateCapability } from "../services/station-registry";
 import {
   SkillRequestError,
   MAX_SKILL_ARTIFACT_BYTES,

@@ -42,7 +42,7 @@ const TREES: Tree[] = [
     root: "apps/hub/src",
     largestCycle: 3,
     oversize: {
-      "services/acp-sessions.ts": 3515,
+      "services/acp-sessions.ts": 3514,
       "services/bridge/dispatch.ts": 1338,
       "services/bridge/salaam-dispatch.ts": 1583,
       "services/matrix-as/gates.ts": 1168,

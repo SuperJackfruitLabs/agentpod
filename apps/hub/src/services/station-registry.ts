@@ -26,6 +26,16 @@ const log = createLogger("station-registry");
 
 export type StationRow = typeof stations.$inferSelect;
 
+/**
+ * Returns true if the station's capabilities array includes the given cap.
+ *
+ * Called gateCapability because it is used as a gate: the caller returns 403
+ * immediately if this returns false.
+ */
+export function gateCapability(station: StationRow, cap: string): boolean {
+  return Array.isArray(station.capabilities) && station.capabilities.includes(cap);
+}
+
 // ─── reportUnknownCapabilities ────────────────────────────────────────────────
 
 /**

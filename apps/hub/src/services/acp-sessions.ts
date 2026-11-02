@@ -109,8 +109,7 @@ import {
   type SalaamStationHolder,
 } from "./salaam-authority";
 import { principalDirectory } from "../auth/org-plane/directory";
-import { getStation } from "./station-registry";
-import { gateCapability } from "../routes/station-writes";
+import { gateCapability, getStation } from "./station-registry";
 import { connectionManager } from "./connection-manager";
 import { recordAudit } from "./audit";
 import {
