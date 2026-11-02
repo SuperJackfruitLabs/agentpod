@@ -158,13 +158,15 @@ function atWidth(width: number) {
   });
 }
 
-/** The document as rendered, without Svelte's comment anchors and with bits-ui's counter ids
- *  numbered by first appearance (so the output does not depend on how many dialogs any earlier
- *  test opened). The context rail the page hands the shell is rendered beside it by the host. */
+/** The document as rendered, without Svelte's comment anchors, without bits-ui's transient
+ *  animation markers (`data-starting-style`/`data-ending-style` last one frame, so whether a
+ *  snapshot catches one depends on machine load), and with bits-ui's counter ids numbered by first
+ *  appearance (so the output does not depend on how many dialogs any earlier test opened). The context rail the page hands the shell is rendered beside it by the host. */
 function dom(): string {
   const ids = new Map<string, string>();
   return document.body.innerHTML
     .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/ data-(starting|ending)-style=""/g, "")
     .replace(/bits-[A-Za-z0-9]+/g, (id) => {
       const known = ids.get(id);
       if (known !== undefined) return known;
