@@ -231,7 +231,9 @@ try {
     }),
   );
   assert.equal(plan.state, "planned");
-  assert.equal(plan.plan!.binding.workspacePath, workspace);
+  const binding = plan.plan!.binding;
+  // Only a workspace binding has a path; a plugin binding reads as undefined and fails.
+  assert.equal("workspacePath" in binding ? binding.workspacePath : undefined, workspace);
   const applied = SkillHubOperation.parse(
     await request(`${prefix}/operations/${plan.id}/apply`, {
       planDigest: plan.plan!.planDigest,

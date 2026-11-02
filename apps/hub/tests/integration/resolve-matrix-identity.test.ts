@@ -72,7 +72,6 @@ beforeAll(async () => {
       workspacePath: "/root/.hermes",
       capabilities: ["health"],
       matrixId: AGENT_MXID,
-      adopted: false,
     },
   ]);
 

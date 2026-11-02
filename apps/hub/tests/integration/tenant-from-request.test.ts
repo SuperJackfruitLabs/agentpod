@@ -82,7 +82,7 @@ describe("W5: the tenant comes from the request", () => {
     await adoptStations(ME, nodeId, ["hermes:ws-b"], [
       {
         key: "hermes:ws-b", harness: "hermes", kind: "leaf", displayName: "ws-b", parentKey: null,
-        workspacePath: null, capabilities: [], adopted: false,
+        workspacePath: null, capabilities: [],
       },
     ]);
     const [station] = await rawSql`SELECT tenant_id FROM stations WHERE node_id = ${nodeId}`;

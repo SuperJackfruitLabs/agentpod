@@ -26,7 +26,7 @@ bun run start           # no reload
 
 ```bash
 DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod" bun test
-bun run typecheck       # KNOWN RED — see typecheck-known-red.txt
+bun run typecheck       # must report 0; CI runs it
 bun run db:migrate      # migrations also run automatically at boot
 ```
 

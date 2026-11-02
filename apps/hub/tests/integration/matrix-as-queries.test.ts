@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { jsonField } from "../helpers/json";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
@@ -102,7 +103,7 @@ describe("GET /_matrix/app/v1/users/:userId", () => {
     // does not exist by typing a name, and the room would then look real.
     const res = await get("/users/%40agent_nowhere__nothing%3Aid.agentpod.dev");
     expect(res.status).toBe(404);
-    expect((await res.json()).errcode).toBe("M_NOT_FOUND");
+    expect((await jsonField(res, "errcode"))).toBe("M_NOT_FOUND");
   });
 
   test("disclaims a user outside our namespace entirely", async () => {

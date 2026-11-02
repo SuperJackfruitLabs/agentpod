@@ -1,33 +1,17 @@
 /**
- * The known-red typecheck claim, as a check instead of a sentence.
+ * The hub's typecheck, held as a test.
  *
- * `apps/hub/CLAUDE.md` used to say the pre-existing `tsc --noEmit` errors were
- * "in stations.ts files". They were not: nine of the fifteen are in
- * `routes/station-acp.ts`, and exactly one is in a file called `stations.ts`.
- * The sentence was wrong the day it was written and nothing could tell anyone,
- * because no test read it — which is the failure mode this whole suite of
- * documentation fixes exists to close.
+ * `src` is green: `bun run typecheck` (`tsconfig.json`, `src/**\/*` only)
+ * reports nothing, and CI's hub job runs it as a step of its own. This file
+ * asserts it too, so a local `bun test` says so without a second command.
  *
- * `typecheck-known-red.txt` now carries the claim as data, and this runs the
- * compiler and holds the file to it. The point is not to keep the errors: it is
- * that the count can only change deliberately. Fixing one turns this red with
- * "fewer errors than the baseline — good news, update the file", which is a far
- * better prompt than a stale paragraph.
- *
- * ─── and the same for the tests, which the compiler had never seen ───────────
- *
- * `tsconfig.json` includes only `src/**\/*`, and no workflow ran `tsc` at all,
- * so not one test file in this app was ever typechecked. That is how
- * `capabilities: ["health", "config.manage"]` — a genuine type error against
- * `Capability[]`, because the capability was missing from the contract's enum —
- * sat in six test files across three merged PRs while every suite stayed green.
- * The compiler would have named all six. Nothing asked it.
- *
- * So `tsconfig.tests.json` adds `tests/**\/*` and `typecheck-known-red-tests.txt`
- * records what that costs today: 224 errors in 51 files, overwhelmingly
- * strict-null noise that is NOT the bug and is not being fixed here. The
- * baseline is per file for both configs, never a single total — one new error
- * hiding behind one fixed error is exactly the move a total cannot see.
+ * The tests are not all green yet. `tsconfig.tests.json` adds `tests/**\/*`,
+ * and `typecheck-known-red-tests.txt` records, per file, the errors still
+ * there and why each is not mechanical. The comparison is exact in both
+ * directions — the repo's ratchet shape: a new error fails, and so does a
+ * fixed one until the file is lowered to match. Per file, never a single
+ * total: one new error hiding behind one fixed error is exactly the move a
+ * total cannot see.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -35,12 +19,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const HUB_ROOT = join(import.meta.dir, "..", "..");
-const BASELINE_FILE = join(HUB_ROOT, "typecheck-known-red.txt");
-/** Only the `tests/` entries: `tsconfig.tests.json` compiles `src` too, and the
- *  two files are unioned below rather than repeating fifteen numbers. */
 const TESTS_BASELINE_FILE = join(HUB_ROOT, "typecheck-known-red-tests.txt");
 
-/** `src/routes/station-acp.ts(320,17): error TS2769: …` → `src/routes/station-acp.ts`. */
+/** `tests/integration/x.test.ts(320,17): error TS2769: …` → `tests/integration/x.test.ts`. */
 const ERROR_LINE = /^(\S+?)\(\d+,\d+\): error TS\d+:/;
 
 type Counts = Record<string, number>;
@@ -64,92 +45,60 @@ function parseCompilerOutput(output: string): Counts {
     // Indented continuation lines ("Type 'undefined' is not assignable…") belong
     // to the error above them; counting them would make the baseline depend on
     // how verbose a given overload failure happens to be.
-    if (!match) continue;
-    counts[match[1]!] = (counts[match[1]!] ?? 0) + 1;
+    const file = match?.[1];
+    if (!file) continue;
+    counts[file] = (counts[file] ?? 0) + 1;
   }
   return counts;
 }
 
-async function runTypecheck(script = "typecheck"): Promise<string> {
-  const proc = Bun.spawn(["bun", "run", script], {
-    cwd: HUB_ROOT,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+async function run(cmd: string[]): Promise<{ output: string; exitCode: number }> {
+  const proc = Bun.spawn(cmd, { cwd: HUB_ROOT, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
   ]);
-  await proc.exited;
-  return stdout + stderr;
+  return { output: stdout + stderr, exitCode: await proc.exited };
 }
 
-describe("the documented typecheck baseline", () => {
-  test("matches what the compiler actually reports", async () => {
-    const actual = parseCompilerOutput(await runTypecheck());
-    const documented = parseBaseline(readFileSync(BASELINE_FILE, "utf8"));
-
-    // Compared as whole objects so the failure names every file that moved, in
-    // both directions, rather than stopping at the first one.
-    expect(actual).toEqual(documented);
+describe("the hub's source typecheck", () => {
+  test("reports no errors", async () => {
+    const { output, exitCode } = await run(["bun", "run", "typecheck"]);
+    // Both, because each alone can lie: a non-zero exit with no parseable line
+    // (a config error) and a parseable line with exit 0 are both failures.
+    expect(parseCompilerOutput(output)).toEqual({});
+    expect(exitCode, output).toBe(0);
   }, 180_000);
-
-  test("the baseline file parses and is not empty", () => {
-    // Guards the guard: a baseline emptied by a bad edit would make the
-    // comparison above vacuous the moment the compiler went green for an
-    // unrelated reason.
-    const documented = parseBaseline(readFileSync(BASELINE_FILE, "utf8"));
-    expect(Object.keys(documented).length).toBeGreaterThan(0);
-    for (const [file, count] of Object.entries(documented)) {
-      expect(file, "baseline paths are relative to apps/hub").toStartWith("src/");
-      expect(count, `${file} must carry a positive error count`).toBeGreaterThan(0);
-    }
-  });
 });
 
-describe("the documented typecheck baseline, tests included", () => {
+describe("the tests typecheck baseline", () => {
   test("matches what the compiler actually reports", async () => {
-    const actual = parseCompilerOutput(await runTypecheck("typecheck:tests"));
-
-    // Guards the guard, and the one that matters most here: a `tsconfig.tests.json`
-    // that silently stopped including `tests/**\/*` would leave this comparing
-    // `src` to `src` and pass while checking nothing — which is the failure the
-    // whole file exists to close, reintroduced one level up.
-    expect(
-      Object.keys(actual).filter((f) => f.startsWith("tests/")).length,
-      "the tests config really compiles tests/",
-    ).toBeGreaterThan(10);
-
-    const documented = {
-      ...parseBaseline(readFileSync(BASELINE_FILE, "utf8")),
-      ...parseBaseline(readFileSync(TESTS_BASELINE_FILE, "utf8")),
-    };
+    const { output } = await run(["bun", "run", "typecheck:tests"]);
+    const documented = parseBaseline(readFileSync(TESTS_BASELINE_FILE, "utf8"));
 
     // Whole objects, so a failure names every file that moved in either
     // direction. Fewer errors than the baseline is good news that still turns
-    // this red: update the file and say so in the diff.
-    expect(actual).toEqual(documented);
+    // this red: lower the file and say so in the diff.
+    expect(parseCompilerOutput(output)).toEqual(documented);
   }, 300_000);
 
-  test("the tests baseline parses, is not empty, and does not restate src", () => {
+  test("the tests config really compiles tests/", async () => {
+    // Guards the guard: a `tsconfig.tests.json` that silently stopped including
+    // `tests/**\/*` would compare `src` to an empty baseline and pass while
+    // checking nothing. Asked of the compiler's own file list, not of its
+    // errors, because the errors are meant to reach zero.
+    const { output, exitCode } = await run(["bun", "run", "typecheck:tests", "--listFilesOnly"]);
+    expect(exitCode, output).toBe(0);
+    const testFiles = output.split("\n").filter((f) => f.startsWith(join(HUB_ROOT, "tests") + "/"));
+    expect(testFiles.length, "tsconfig.tests.json lists the test files").toBeGreaterThan(100);
+  }, 180_000);
+
+  test("the baseline parses and holds only tests/ paths with positive counts", () => {
     const documented = parseBaseline(readFileSync(TESTS_BASELINE_FILE, "utf8"));
-    expect(Object.keys(documented).length).toBeGreaterThan(10);
     for (const [file, count] of Object.entries(documented)) {
-      // A `src/` row here would be a second, divergeable copy of a number the
-      // file next door already owns.
+      // A `src/` row would be a number the source typecheck says must be zero.
       expect(file, "the tests baseline holds only tests/ paths").toStartWith("tests/");
       expect(count, `${file} must carry a positive error count`).toBeGreaterThan(0);
     }
-  });
-
-  test("the src baseline is untouched by the tests config", () => {
-    // `bun run typecheck` and its count of 15 are a published claim that this
-    // work was not allowed to move. Asserted here rather than trusted, because
-    // the tests config extends the src one and a stray `compilerOptions`
-    // override in it would change both at once.
-    const src = parseBaseline(readFileSync(BASELINE_FILE, "utf8"));
-    const total = Object.values(src).reduce((a, b) => a + b, 0);
-    // The typed PromptResponse stop-reason fix removes acp-agent's old error.
-    expect(total, "KNOWN-RED for src is 14 errors").toBe(14);
   });
 });

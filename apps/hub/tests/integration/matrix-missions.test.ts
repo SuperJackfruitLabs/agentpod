@@ -85,7 +85,7 @@ beforeAll(async () => {
   for (const [id, key, agent] of [[A, "hermes:one", AGENT_A], [B, "openclaw:two", AGENT_B]] as const) {
     await rawSql`
       INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, adopted_at, created_at)
-      VALUES (${id}, ${tenant}, ${OWNER}, ${NODE}, ${key.split(":")[0]}, ${key}, 'leaf', ${key},
+      VALUES (${id}, ${tenant}, ${OWNER}, ${NODE}, ${key.slice(0, key.indexOf(":"))}, ${key}, 'leaf', ${key},
               '["acp"]'::jsonb, ${agent}, now(), now())`;
   }
   // The person's Matrix id, which this route reads to invite them back into

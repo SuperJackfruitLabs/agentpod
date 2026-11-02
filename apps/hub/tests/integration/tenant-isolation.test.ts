@@ -43,7 +43,9 @@ const SHARED_USER = "tenant-isolation-user";
 const OWN_NODE = "node_1111111111111111aaaa";
 const FOREIGN_NODE = "node_2222222222222222bbbb";
 
-const scopedNames = Object.values(TENANT_SCOPED_TABLES).map((t) => getTableName(t)).sort();
+// Widened to string[]: the tests below ask whether a name read back from the
+// database is one of these, and that name is any string.
+const scopedNames: string[] = Object.values(TENANT_SCOPED_TABLES).map((t) => getTableName(t)).sort();
 
 beforeAll(async () => {
   await ensurePgMigrations();
@@ -121,11 +123,11 @@ describe("the boundary reached the database", () => {
     // The backfill's standing assertion, re-checked against whatever the suite
     // has since written rather than only against the migration's own output.
     for (const t of scopedNames) {
-      const [{ orphans }] = (await rawSql.unsafe(
+      const [row] = (await rawSql.unsafe(
         `SELECT count(*)::text AS orphans FROM "${t}" s
          WHERE NOT EXISTS (SELECT 1 FROM tenants x WHERE x.id = s.tenant_id)`,
       )) as unknown as { orphans: string }[];
-      expect({ table: t, orphans }).toEqual({ table: t, orphans: "0" });
+      expect({ table: t, orphans: row?.orphans }).toEqual({ table: t, orphans: "0" });
     }
   });
 });

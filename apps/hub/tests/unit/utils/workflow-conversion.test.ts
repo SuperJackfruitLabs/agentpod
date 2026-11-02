@@ -33,10 +33,10 @@ describe("Workflow Conversion Utilities", () => {
       const result = svelteFlowToWorkflow(svelteNodes, []);
 
       expect(result.nodes).toHaveLength(1);
-      expect(result.nodes[0].id).toBe("node-1");
-      expect(result.nodes[0].name).toBe("Start Trigger");
-      expect(result.nodes[0].type).toBe("manual-trigger");
-      expect(result.nodes[0].position).toEqual([100, 200]);
+      expect(result.nodes[0]?.id).toBe("node-1");
+      expect(result.nodes[0]?.name).toBe("Start Trigger");
+      expect(result.nodes[0]?.type).toBe("manual-trigger");
+      expect(result.nodes[0]?.position).toEqual([100, 200]);
       expect(result.connections).toEqual({});
     });
 
@@ -64,8 +64,8 @@ describe("Workflow Conversion Utilities", () => {
 
       expect(result.nodes).toHaveLength(2);
       expect(result.connections["Trigger"]).toBeDefined();
-      expect(result.connections["Trigger"].main[0]).toHaveLength(1);
-      expect(result.connections["Trigger"].main[0][0].node).toBe("HTTP Request");
+      expect(result.connections["Trigger"]?.main[0]).toHaveLength(1);
+      expect(result.connections["Trigger"]?.main[0]?.[0]?.node).toBe("HTTP Request");
     });
 
     test("should convert node with multiple outputs", () => {
@@ -97,7 +97,7 @@ describe("Workflow Conversion Utilities", () => {
 
       const result = svelteFlowToWorkflow(svelteNodes, svelteEdges);
 
-      expect(result.connections["Condition"].main[0]).toHaveLength(2);
+      expect(result.connections["Condition"]?.main[0]).toHaveLength(2);
     });
 
     test("should preserve node parameters in data", () => {
@@ -117,12 +117,12 @@ describe("Workflow Conversion Utilities", () => {
 
       const result = svelteFlowToWorkflow(svelteNodes, []);
 
-      expect(result.nodes[0].parameters.prompt).toBe("Summarize this text");
-      expect(result.nodes[0].parameters.model).toEqual({
+      expect(result.nodes[0]?.parameters.prompt).toBe("Summarize this text");
+      expect(result.nodes[0]?.parameters.model).toEqual({
         providerId: "anthropic",
         modelId: "claude-3",
       });
-      expect(result.nodes[0].parameters.timeout).toBe(30000);
+      expect(result.nodes[0]?.parameters.timeout).toBe(30000);
     });
 
     test("should use node id as name if label is missing", () => {
@@ -137,7 +137,7 @@ describe("Workflow Conversion Utilities", () => {
 
       const result = svelteFlowToWorkflow(svelteNodes, []);
 
-      expect(result.nodes[0].name).toBe("node-abc123");
+      expect(result.nodes[0]?.name).toBe("node-abc123");
     });
 
     test("should handle complex workflow with multiple paths", () => {
@@ -163,7 +163,7 @@ describe("Workflow Conversion Utilities", () => {
 
       expect(result.nodes).toHaveLength(6);
       expect(Object.keys(result.connections)).toHaveLength(5);
-      expect(result.connections["Check Result"].main[0]).toHaveLength(2);
+      expect(result.connections["Check Result"]?.main[0]).toHaveLength(2);
     });
   });
 
@@ -209,10 +209,10 @@ describe("Workflow Conversion Utilities", () => {
       const result = workflowToSvelteFlow(workflow);
 
       expect(result.nodes).toHaveLength(1);
-      expect(result.nodes[0].id).toBe("node-1");
-      expect(result.nodes[0].type).toBe("manual-trigger");
-      expect(result.nodes[0].position).toEqual({ x: 100, y: 200 });
-      expect(result.nodes[0].data.label).toBe("Trigger");
+      expect(result.nodes[0]?.id).toBe("node-1");
+      expect(result.nodes[0]?.type).toBe("manual-trigger");
+      expect(result.nodes[0]?.position).toEqual({ x: 100, y: 200 });
+      expect(result.nodes[0]?.data.label).toBe("Trigger");
     });
 
     test("should convert workflow with connections to edges", () => {
@@ -250,8 +250,8 @@ describe("Workflow Conversion Utilities", () => {
 
       expect(result.nodes).toHaveLength(2);
       expect(result.edges).toHaveLength(1);
-      expect(result.edges[0].source).toBe("node-1");
-      expect(result.edges[0].target).toBe("node-2");
+      expect(result.edges[0]?.source).toBe("node-1");
+      expect(result.edges[0]?.target).toBe("node-2");
     });
 
     test("should preserve node parameters", () => {
@@ -263,7 +263,7 @@ describe("Workflow Conversion Utilities", () => {
           {
             id: "ai-1",
             name: "AI Agent",
-            type: "ai-agent" as const,
+            type: "ai-chat" as const,
             position: [0, 0] as [number, number],
             parameters: {
               prompt: "Analyze this",
@@ -279,8 +279,8 @@ describe("Workflow Conversion Utilities", () => {
 
       const result = workflowToSvelteFlow(workflow);
 
-      expect(result.nodes[0].data.prompt).toBe("Analyze this");
-      expect(result.nodes[0].data.model).toEqual({
+      expect(result.nodes[0]?.data.prompt).toBe("Analyze this");
+      expect(result.nodes[0]?.data.model).toEqual({
         providerId: "openai",
         modelId: "gpt-4",
       });

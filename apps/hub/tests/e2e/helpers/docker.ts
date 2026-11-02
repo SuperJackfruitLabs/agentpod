@@ -2,7 +2,7 @@
  * E2E Docker Helper
  * 
  * Provides utilities for managing REAL Docker containers in E2E tests.
- * Unlike the mock in tests/mocks/docker.ts, this uses actual Docker API calls.
+ * This uses actual Docker API calls, not a mock.
  * 
  * Key features:
  * - Start/stop real containers
@@ -153,9 +153,11 @@ export class E2EDockerClient {
 
     if (info.NetworkSettings?.Ports) {
       for (const [containerPort, bindings] of Object.entries(info.NetworkSettings.Ports)) {
-        if (bindings && bindings.length > 0) {
-          const port = parseInt(containerPort.split("/")[0]);
-          ports[port] = parseInt(bindings[0].HostPort);
+        const first = bindings?.[0];
+        if (first) {
+          // "8080/tcp" → 8080: parseInt stops at the slash.
+          const port = parseInt(containerPort);
+          ports[port] = parseInt(first.HostPort);
         }
       }
     }

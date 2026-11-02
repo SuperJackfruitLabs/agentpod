@@ -86,7 +86,7 @@ beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: OWNER, email: "purpose-spaces@example.com", name: "PS" });
   OWNER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "ps-owner", userId: OWNER });
-  const agentFor: Record<string, string> = {
+  const agentFor: Record<typeof A | typeof B, string> = {
     [A]: await createPrincipal({ kind: "agent", handle: "ps-agent-a" }),
     [B]: await createPrincipal({ kind: "agent", handle: "ps-agent-b" }),
   };
@@ -101,10 +101,10 @@ beforeAll(async () => {
   for (const [id, key] of [
     [A, "openclaw:a"],
     [B, "openclaw:b"],
-  ]) {
+  ] as const) {
     await rawSql`
       INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, adopted_at, created_at)
-      VALUES (${id}, ${tenant}, ${OWNER}, ${NODE}, 'openclaw', ${key}, 'leaf', ${key}, '["acp"]'::jsonb, ${agentFor[id!]!}, now(), now())`;
+      VALUES (${id}, ${tenant}, ${OWNER}, ${NODE}, 'openclaw', ${key}, 'leaf', ${key}, '["acp"]'::jsonb, ${agentFor[id]}, now(), now())`;
   }
   await linkMatrixId(OWNER_PRINCIPAL, "@owner-ps:" + DOMAIN);
 });

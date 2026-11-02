@@ -37,7 +37,7 @@ const webhookPayloadSchema = z.object({
     stepId: z.string().optional(),
     stepName: z.string().optional(),
     status: z.string().optional(),
-    result: z.record(z.unknown()).optional(),
+    result: z.record(z.string(), z.unknown()).optional(),
     durationMs: z.number().optional(),
   }),
   timestamp: z.string(),

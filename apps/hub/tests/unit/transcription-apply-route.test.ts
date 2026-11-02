@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { jsonField } from "../helpers/json";
 import { Hono } from "hono";
 import { stationTranscriptionRoutes, type TranscriptionApplyTarget } from "../../src/routes/transcription-settings";
 
@@ -87,7 +88,7 @@ describe("POST /api/stations/:id/transcription/apply", () => {
     const { post, calls } = setup({ target: { ...HERMES, matrixIdentityMode: "bridge" } });
     const res = await post();
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/bridge/i);
+    expect((await jsonField(res, "error"))).toMatch(/bridge/i);
     expect(calls).toHaveLength(0);
   });
 
@@ -95,7 +96,7 @@ describe("POST /api/stations/:id/transcription/apply", () => {
     const { post, calls } = setup({ target: { ...HERMES, harness: "openclaw", stationKey: "openclaw:x" } });
     const res = await post();
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toContain("openclaw");
+    expect((await jsonField(res, "error"))).toContain("openclaw");
     expect(calls).toHaveLength(0);
   });
 
@@ -103,13 +104,13 @@ describe("POST /api/stations/:id/transcription/apply", () => {
     const { post } = setup({ answer: { ok: false, error: "transcription.apply: \"hermes:analyst-echo\": the transcription setting IS written to the profile, but the harness could not be restarted" } });
     const res = await post();
     expect(res.status).toBe(502);
-    expect((await res.json()).error).toContain("IS written");
+    expect((await jsonField(res, "error"))).toContain("IS written");
   });
 
   test("an answer this hub cannot read is a 502, not a 200", async () => {
     const { post } = setup({ answer: { ok: true, data: { accepted: true } } });
     const res = await post();
     expect(res.status).toBe(502);
-    expect((await res.json()).error).toMatch(/node/i);
+    expect((await jsonField(res, "error"))).toMatch(/node/i);
   });
 });

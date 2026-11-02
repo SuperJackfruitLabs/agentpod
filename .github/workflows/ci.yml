@@ -137,6 +137,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # In this job rather than one of its own: `hub` is a required check, and a
+      # new job would not gate. Before the suite so a type error fails in
+      # seconds under its own name, not as one red test among four thousand.
+      #
+      # `src` must be clean. The tests config is not yet (one known-red file,
+      # see typecheck-known-red-tests.txt), so it is held by the ratchet test —
+      # exact per-file counts, failing on a rise and on an unrecorded fall —
+      # which is run here by name and again inside `bun test`.
+      - name: Typecheck
+        working-directory: apps/hub
+        run: |
+          bun run typecheck
+          bun test tests/unit/typecheck-baseline.test.ts
+
       # Migrate before the suite, not inside it.
       #
       # Integration suites call `ensurePgMigrations()` in `beforeAll`, which is

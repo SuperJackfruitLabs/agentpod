@@ -218,7 +218,10 @@ const answers = (option: string | null, text: string | null = null) => (q: Quest
 };
 
 /** The ACP options a harness offers before running a command. */
-const RUN_TESTS_OPTIONS = [
+/** A permission option as the harness sends it; `kind` is optional on the wire. */
+type PermissionOption = { optionId: string; name: string; kind?: string };
+
+const RUN_TESTS_OPTIONS: PermissionOption[] = [
   { optionId: "allow_once", name: "Yes, run it", kind: "allow_once" },
   { optionId: "reject_once", name: "No, don't", kind: "reject_once" },
 ];
@@ -348,11 +351,11 @@ describe("a card worked start to finish", () => {
     // board reported it published. This is the seam that carries the rule now: the
     // contract keeps the field, and the renderer gives it a section of its own.
     const instructions = "Push to the repository's PRIMARY remote, never to GitHub directly.";
-    const board = fakeBoard((path) => {
+    const board = fakeBoard((path, body) => {
       if (path.endsWith(`/runs/${RUN_ID}`)) {
         return { status: 200, body: { ...contextBody, stage: { ...contextBody.stage, instructions } } };
       }
-      return happyBoard(path);
+      return happyBoard(path, body);
     });
     const acp = fakeAcp(() => [chunk("Pushed."), idle()]);
 

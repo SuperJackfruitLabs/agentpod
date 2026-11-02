@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { jsonField } from "../helpers/json";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
@@ -60,7 +61,7 @@ beforeAll(async () => {
   for (const [id, key] of [
     [A, "openclaw:a"],
     [B, "openclaw:b"],
-  ]) {
+  ] as const) {
     await rawSql`
       INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, adopted_at, created_at)
       VALUES (${id}, ${tenant}, ${OWNER}, ${NODE}, 'openclaw', ${key}, 'leaf', ${key}, '["acp"]'::jsonb, now(), now())`;
@@ -147,7 +148,7 @@ describe("PUT /api/nodes/:id/purpose", () => {
 
     const res = await put(`/nodes/${NODE}/purpose`, { purpose: "personal" });
 
-    expect((await res.json()).stationsLabelled).toBe(1);
+    expect((await jsonField(res, "stationsLabelled"))).toBe(1);
     expect(await purposeOf(A)).toBe("work");
     expect(await purposeOf(B)).toBe("personal");
   });
@@ -161,7 +162,7 @@ describe("PUT /api/nodes/:id/purpose", () => {
 
     const res = await put(`/nodes/${NODE}/purpose`, { purpose: null });
 
-    expect((await res.json()).stationsLabelled).toBe(0);
+    expect((await jsonField(res, "stationsLabelled"))).toBe(0);
     expect(await purposeOf(A)).toBe("personal");
     expect(announced).toEqual([]);
   });

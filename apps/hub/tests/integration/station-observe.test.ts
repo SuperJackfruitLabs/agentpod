@@ -20,6 +20,8 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
+import { jsonArray } from "../helpers/json";
+import { assertDefined } from "../helpers/assertions";
 import { Hono } from "hono";
 
 // src/ imports — DB URL is already set
@@ -129,7 +131,8 @@ afterAll(async () => {
 // ─── Helper: connect a fake node WS that answers all observe verbs ────────────
 
 async function connectFakeNode(
-  serverPort: number,
+  // Bun types `Server.port` as optional (a unix-socket server has none).
+  serverPort: number | undefined,
   nodeId: string,
   nodeSecret: string,
   overrides?: { fsRead?: unknown; fsListError?: string }
@@ -226,7 +229,9 @@ async function adoptStation(
   expect(res.status).toBe(200);
   const rows = (await res.json()) as StationRow[];
   expect(rows).toHaveLength(1);
-  return rows[0];
+  const [row] = rows;
+  assertDefined(row);
+  return row;
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -296,7 +301,7 @@ test(
       );
       expect(res.status).toBe(200);
 
-      const entries = await res.json();
+      const entries = await jsonArray(res);
       expect(Array.isArray(entries)).toBe(true);
       expect(entries).toHaveLength(2);
       expect(entries[0]).toMatchObject({ name: "file.txt", type: "file" });

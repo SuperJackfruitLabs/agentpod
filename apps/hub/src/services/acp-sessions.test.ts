@@ -419,7 +419,6 @@ test(
           workspacePath: null,
           capabilities: ["health"],
           matrixId: null,
-          adopted: false,
         },
       ]);
       await expect(
@@ -1412,7 +1411,6 @@ test(
           workspacePath: "/workspace/orphan",
           capabilities: ["health", "acp"],
           matrixId: null,
-          adopted: false,
         },
       ]);
       const staleId = `acps_${crypto.randomUUID()}`;

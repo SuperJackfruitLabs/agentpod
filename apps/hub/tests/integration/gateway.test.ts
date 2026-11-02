@@ -190,7 +190,8 @@ test("a node with invalid credentials is rejected", async () => {
     // Server calls ws.close(1008, "unauthorized"); Bun's WS client normalises
     // the server-sent 1008 to 1000 on the receiving end (a Bun quirk), so we
     // accept either.
-    expect([1000, 1008]).toContain(closeCode);
+    const accepted: Array<number | null> = [1000, 1008];
+    expect(accepted).toContain(closeCode);
 
     // The security property, and the one the old `onopen` guard was reaching
     // for: a rejected node is never registered, so nothing can be sent to it

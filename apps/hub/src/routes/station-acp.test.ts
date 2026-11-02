@@ -32,7 +32,7 @@ process.env.NODE_ENV = "test";
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
 import { Hono } from "hono";
-import type { AcpEvent, AcpSessionRow, DetectedStation } from "@agentpod/contract";
+import type { AcpEvent, AcpSessionRow, Capability, DetectedStation } from "@agentpod/contract";
 
 // src/ imports — DB URL is already set above
 import { rawSql } from "../db/drizzle";
@@ -121,7 +121,7 @@ async function enrollTestNode(hostname: string) {
 
 function detectedFor(
   stationKey: string,
-  capabilities: string[],
+  capabilities: Capability[],
   workspacePath = "/workspace/acproute"
 ): DetectedStation[] {
   return [

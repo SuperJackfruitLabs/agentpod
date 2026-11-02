@@ -280,7 +280,7 @@ test("refresh updates capabilities on an already-adopted station", async () => {
   await adoptStations(TEST_USER, testNodeId, ["refresh-caps"], [
     {
       key: "refresh-caps", harness: "codex", kind: "leaf", displayName: "old name",
-      parentKey: null, workspacePath: "/old", capabilities: ["health"], adopted: false,
+      parentKey: null, workspacePath: "/old", capabilities: ["health"],
     },
   ]);
 
@@ -358,7 +358,6 @@ test("refresh writes a matrixId onto a station adopted without one", async () =>
     {
       key: "refresh-mxid", harness: "hermes", kind: "leaf", displayName: "olivia",
       parentKey: null, workspacePath: "/root/.hermes", capabilities: ["health"],
-      adopted: false,
     },
   ]);
 
@@ -384,7 +383,7 @@ test("refresh clears a matrixId the node no longer reports", async () => {
     {
       key: "refresh-mxid-gone", harness: "hermes", kind: "leaf", displayName: "gone",
       parentKey: null, workspacePath: null, capabilities: ["health"],
-      matrixId: "@stale:id.agentpod.dev", adopted: false,
+      matrixId: "@stale:id.agentpod.dev",
     },
   ]);
 
@@ -409,7 +408,7 @@ test("refresh leaves matrixId alone for a harness that reports none", async () =
   await adoptStations(TEST_USER, testNodeId, ["refresh-mxid-absent"], [
     {
       key: "refresh-mxid-absent", harness: "codex", kind: "leaf", displayName: "codex",
-      parentKey: null, workspacePath: null, capabilities: ["health"], adopted: false,
+      parentKey: null, workspacePath: null, capabilities: ["health"],
     },
   ]);
 
@@ -492,7 +491,7 @@ test("refresh surfaces a capability the hub does not know, and still stores the 
   await adoptStations(TEST_USER, testNodeId, ["caps-ahead-of-hub"], [
     {
       key: "caps-ahead-of-hub", harness: "hermes", kind: "leaf", displayName: "ahead",
-      parentKey: null, workspacePath: "/w", capabilities: ["health"], adopted: false,
+      parentKey: null, workspacePath: "/w", capabilities: ["health"],
     },
   ]);
 

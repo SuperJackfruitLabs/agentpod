@@ -103,10 +103,10 @@ describe("acp_runs — AgentPod's own id space, enforced by the database", () =>
     // table had never held a row — which is what made the rename free. The table
     // has a writer now (services/bridge/ledger.ts), and it mints `attempt_`, so
     // this must stay true for a different reason: the writer respects the split.
-    const [{ count }] = await rawSql<
+    const [row] = await rawSql<
       { count: string }[]
     >`SELECT count(*)::text AS count FROM acp_runs WHERE id LIKE 'run\\_%'`;
-    expect(count).toBe("0");
+    expect(row?.count).toBe("0");
   });
 
   test("accepts an attempt id", async () => {

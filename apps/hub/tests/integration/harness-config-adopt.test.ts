@@ -30,6 +30,7 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
+import { assertDefined } from "../helpers/assertions";
 import { Hono } from "hono";
 import type { DetectedStation } from "@agentpod/contract";
 
@@ -531,7 +532,10 @@ test(
       expect(adopted.length).toBe(3);
       expect(adopted.map((s) => s.stationKey).sort()).toEqual([...keys].sort());
 
-      const [a, b, c] = keys.map((k) => adopted.find((s) => s.stationKey === k)!);
+      const [a, b, c] = keys.map((k) => adopted.find((s) => s.stationKey === k));
+      assertDefined(a);
+      assertDefined(b);
+      assertDefined(c);
 
       expect(await appliedValueOf(a.id, TIMEOUT_SETTING)).toBe(900);
       expect(await configReasonOf(a.id)).toBeNull();

@@ -63,11 +63,14 @@ const ENV = { SPEECH_URL: "http://env-speech:8841", SPEECH_API_KEY: KEY };
 
 const hubOn = { enabled: true, url: "http://hub-speech:8841", defaultVoice: "", mode: "always" as const, maxChars: 900 };
 
+// Widened so `toContain` accepts any voice name, which is what is being checked.
+const curated: readonly string[] = CURATED_VOICES;
+
 describe("assignedVoiceFor — a distinct default voice per agent", () => {
   test("stable: the same station always gets the same voice", () => {
     for (const id of ["st_1", "st_abc", "3f1c7a4e-0000-4000-8000-000000000001"]) {
       expect(assignedVoiceFor(id)).toBe(assignedVoiceFor(id));
-      expect(CURATED_VOICES).toContain(assignedVoiceFor(id));
+      expect(curated).toContain(assignedVoiceFor(id));
     }
   });
 

@@ -28,6 +28,7 @@ import {
   test,
   spyOn,
 } from "bun:test";
+import { jsonField } from "../helpers/json";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 
@@ -53,7 +54,7 @@ let userId: string;
 function app() {
   const a = new Hono();
   a.use("*", async (c, next) => {
-    c.set("user", { id: userId, role: "admin" });
+    c.set("user", { id: userId, authType: "org_plane", tenantId: BOOTSTRAP_TENANT_ID });
     await next();
   });
   a.route("/bridge/agents", adminBridgeAgentsRouter);
@@ -166,14 +167,14 @@ describe("what a create refuses, in words an operator can act on", () => {
   test("a station in no workspace of this tenant", async () => {
     const res = await post({ ...valid(), stationId: "station_does_not_exist" });
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("no such station in this workspace");
+    expect((await jsonField(res, "error"))).toBe("no such station in this workspace");
   });
 
   test("a duplicate key, which would make the ledger unreadable", async () => {
     await post(valid());
     const res = await post(valid());
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toContain("already exists");
+    expect((await jsonField(res, "error"))).toContain("already exists");
   });
 
   test("a refusal never carries the ciphertext the failed insert was holding", async () => {
@@ -217,7 +218,7 @@ describe("editing one", () => {
     const res = await patch("coder-kai", { enabled: false });
 
     expect(res.status).toBe(200);
-    expect((await res.json()).agent).toMatchObject({
+    expect((await jsonField(res, "agent"))).toMatchObject({
       enabled: false,
       hasToken: true,
       hasMcpToken: true,
@@ -229,7 +230,7 @@ describe("editing one", () => {
     await post({ ...valid(), mcpToken: MCP_TOKEN });
     const res = await patch("coder-kai", { mcpToken: null });
 
-    expect((await res.json()).agent).toMatchObject({
+    expect((await jsonField(res, "agent"))).toMatchObject({
       hasToken: true,
       hasMcpToken: false,
     });

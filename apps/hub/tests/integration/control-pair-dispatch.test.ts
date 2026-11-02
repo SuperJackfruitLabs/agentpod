@@ -68,7 +68,6 @@ beforeAll(async () => {
       parentKey: null,
       workspacePath: "/root/.hermes",
       capabilities: ["health", "acp"],
-      adopted: false,
     },
   ]);
   stationId = (await listAdopted({ tenantId: BOOTSTRAP_TENANT_ID }, nodeId)).find((s) => s.stationKey === stationKey)!.id;
@@ -92,7 +91,6 @@ beforeAll(async () => {
       parentKey: null,
       workspacePath: "/root/.hermes",
       capabilities: ["health", "acp"],
-      adopted: false,
     },
   ]);
   otherStationId = (await listAdopted({ tenantId: BOOTSTRAP_TENANT_ID }, OTHER_NODE)).find((s) => s.stationKey === stationKey)!.id;
@@ -124,7 +122,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     process.env.ENFORCE_CONTROL_PAIR = "true";
 
     await expect(
-      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "ask" })
     ).rejects.toThrow(/permission/i);
   });
 
@@ -136,7 +134,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     });
 
     await expect(
-      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "ask" })
     ).rejects.toThrow(/permission/i);
   });
 
@@ -148,7 +146,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     await setGrant(USER_PRINCIPAL, { mayDispatch: ["superpipeline:agt_anything"], mayGrantReach: false });
 
     await expect(
-      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "ask" })
     ).rejects.toThrow(/permission/i);
   });
 
@@ -164,7 +162,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     });
 
     await expect(
-      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "ask" })
     ).rejects.toThrow(/permission/i);
   });
 
@@ -175,7 +173,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     process.env.ENFORCE_CONTROL_PAIR = "true";
 
     await expect(
-      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "ask" })
     ).rejects.toThrow(/permission/i);
 
     // With a grant naming the station's actual occupant, the SAME call gets
@@ -185,7 +183,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await expect(
-      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "ask" })
     ).rejects.toThrow(/offline|not ready|does not support/i);
   });
 
@@ -202,7 +200,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     });
 
     await expect(
-      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "ask" })
     ).rejects.toThrow(/permission/i);
   });
 
@@ -217,7 +215,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     await setGrant(USER_PRINCIPAL, { mayDispatch: ["*", "prn_*"], mayGrantReach: false });
 
     await expect(
-      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "ask" })
     ).rejects.toThrow(/permission/i);
   });
 
@@ -252,7 +250,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     delete process.env.ENFORCE_CONTROL_PAIR;
 
     await expect(
-      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "default" })
+      createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId, userId: USER, mode: "ask" })
     ).rejects.toThrow(/offline|not ready|does not support/i);
   });
 });
