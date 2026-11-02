@@ -31,7 +31,7 @@ import {
   transcriptionSettings,
   type TranscriptionSettings,
 } from "../services/transcription-settings";
-import { testTranscription } from "../services/matrix-as/voice";
+import { testTranscription } from "../services/transcription-client";
 import { VERB_RESULTS } from "@agentpod/contract";
 import * as broker from "../services/broker";
 import { createLogger } from "../utils/logger";

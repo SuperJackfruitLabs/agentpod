@@ -43,13 +43,12 @@ import {
   isVoiceRefusal,
   loadVoice,
   transcriptContent,
-  MAX_VOICE_SECONDS,
   transcriptNotice,
   voiceNote,
   voicePrompt,
-  type Transcriber,
   type VoiceResult,
 } from "./voice";
+import { MAX_VOICE_SECONDS, type Transcriber } from "../transcription-client";
 import { RoomQueue, type DispatchOutcome, type FreeOutcome, type QueuedPrompt } from "./room-queue";
 import { SESSION_BUSY_MESSAGE } from "../acp-sessions";
 

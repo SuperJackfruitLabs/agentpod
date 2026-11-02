@@ -1,23 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import type { EncryptedFile } from "./attachments";
+import { audioSource, clock, isVoiceRefusal, loadVoice, transcriptContent, transcriptNotice, voiceNote, voicePrompt } from "./voice";
 import {
   MAX_VOICE_SECONDS,
-  audioSource,
-  clock,
-  isVoiceRefusal,
-  loadVoice,
   openAiTranscriber,
   silentWav,
   testTranscription,
   transcriberFromEnv,
-  transcriptContent,
   transcriptionFromEnv,
   TranscriptionHttpError,
-  transcriptNotice,
-  voiceNote,
-  voicePrompt,
   type Transcriber,
-} from "./voice";
+} from "../transcription-client";
 
 const AUDIO = new Uint8Array([0x4f, 0x67, 0x67, 0x53, 1, 2, 3, 4, 5, 6]);
 
