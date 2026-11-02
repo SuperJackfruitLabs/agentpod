@@ -6,16 +6,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-)
 
-const bridgeUsage = `usage:
-  fleet bridge list
-  fleet bridge add --key K --board B --station S --token T [--mcp-token M]
-                   [--mode M] [--concurrency N] [--profile P] [--wait-ms N] [--enabled true|false]
-  fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
-                   [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
-  fleet bridge rm KEY
-  fleet bridge related-work BOARD on|off`
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
+)
 
 // fleetBridge manages the superpipeline roster: which agent claims work from which
 // board, onto which station.
@@ -34,7 +27,7 @@ const bridgeUsage = `usage:
 // token reaches the hub only as an argument you supplied.
 func fleetBridge(args []string) {
 	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(bridgeUsage)
+		fmt.Println(fleetcli.BridgeUsage)
 		if len(args) == 0 {
 			os.Exit(2)
 		}
@@ -68,7 +61,7 @@ func fleetBridge(args []string) {
 		if len(missing) > 0 {
 			// Named together rather than one at a time: four required flags discovered by four
 			// failed invocations is four round trips to learn one sentence.
-			fmt.Fprintf(os.Stderr, "add requires %v\n\n%s\n", missing, bridgeUsage)
+			fmt.Fprintf(os.Stderr, "add requires %v\n\n%s\n", missing, fleetcli.BridgeUsage)
 			os.Exit(2)
 		}
 		body := map[string]any{"key": *key, "boardId": *board, "stationId": *station, "token": *token}
@@ -76,7 +69,7 @@ func fleetBridge(args []string) {
 		fleetSkillJSON(http.MethodPost, base, body)
 	case "set":
 		if len(args) < 2 || args[1] == "" {
-			fmt.Fprintf(os.Stderr, "set requires a roster KEY\n\n%s\n", bridgeUsage)
+			fmt.Fprintf(os.Stderr, "set requires a roster KEY\n\n%s\n", fleetcli.BridgeUsage)
 			os.Exit(2)
 		}
 		fs.Parse(args[2:])
@@ -90,20 +83,20 @@ func fleetBridge(args []string) {
 		if len(body) == 0 {
 			// A PATCH with nothing in it would answer 200 and change nothing, which reads as
 			// success. Refusing here is the difference between "done" and "nothing happened".
-			fmt.Fprintf(os.Stderr, "set needs at least one field to change\n\n%s\n", bridgeUsage)
+			fmt.Fprintf(os.Stderr, "set needs at least one field to change\n\n%s\n", fleetcli.BridgeUsage)
 			os.Exit(2)
 		}
 		fleetSkillJSON(http.MethodPatch, base+"/"+url.PathEscape(args[1]), body)
 	case "rm":
 		if len(args) < 2 || args[1] == "" {
-			fmt.Fprintf(os.Stderr, "rm requires a roster KEY\n\n%s\n", bridgeUsage)
+			fmt.Fprintf(os.Stderr, "rm requires a roster KEY\n\n%s\n", fleetcli.BridgeUsage)
 			os.Exit(2)
 		}
 		fleetSkillJSON(http.MethodDelete, base+"/"+url.PathEscape(args[1]), nil)
 	case "related-work":
 		fleetBridgeRelatedWork(args[1:])
 	default:
-		fmt.Fprintln(os.Stderr, bridgeUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.BridgeUsage)
 		os.Exit(2)
 	}
 }

@@ -6,30 +6,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
 )
-
-const stationsUsage = `Usage: fleet stations <verb>
-
-  fleet stations detected --node NODE_ID     what the node reports right now
-  fleet stations list --node NODE_ID         adopted stations, with their IDs
-  fleet stations adopt --node NODE_ID --key KEY [--key KEY …]
-  fleet stations unadopt --station STATION_ID
-
-  fleet stations git-identity --station STATION_ID   what it can push to forge as
-  fleet stations grant-push   --station STATION_ID   give it a forge push key
-  fleet stations revoke-push  --station STATION_ID   take that key away
-
-  fleet stations forge-api <verb> --station STATION_ID …   forge API access through the
-                                                     station's broker (operator only;
-                                                     see fleet stations forge-api --help)
-
-A detected station is not an agent until it is adopted. Adopting re-detects on
-the node first, so a key that has gone away is not adopted from a stale list.
-
-Push access is granted per station and never by adopting one: most stations
-never touch git, and a forge key for every station is an account nobody uses
-and a key nobody revokes. The keypair is generated ON THE NODE and the private
-half never leaves it — grant-push asks for the public half and registers that.`
 
 // fleet stations — the adoption surface the Console already had and this CLI
 // did not. A station the node detects is not yet an agent: it becomes one when
@@ -38,7 +17,7 @@ half never leaves it — grant-push asks for the public half and registers that.
 // see it nowhere in the fleet, and have no way to find out why.
 func fleetStations(args []string) {
 	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(stationsUsage)
+		fmt.Println(fleetcli.StationsUsage)
 		return
 	}
 	if args[0] == "forge-api" {

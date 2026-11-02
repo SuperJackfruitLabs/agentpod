@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcred"
 )
 
@@ -47,7 +48,7 @@ func hubBase() string {
 // fleetCmd dispatches `fleet <verb>`.
 func fleetCmd(args []string) {
 	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(helpText(version))
+		fmt.Println(fleetcli.HelpText(version))
 		return
 	}
 	switch args[0] {
@@ -104,7 +105,7 @@ func fleetCmd(args []string) {
 	case "skill":
 		fleetSkill(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "unknown fleet command: %q\n\n%s\n", args[0], helpText(version))
+		fmt.Fprintf(os.Stderr, "unknown fleet command: %q\n\n%s\n", args[0], fleetcli.HelpText(version))
 		os.Exit(2)
 	}
 }

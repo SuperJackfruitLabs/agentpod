@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
 )
 
 // fleetBridgeRelatedWork switches a board's "Related prior work" section on or off: the earlier
@@ -14,7 +16,7 @@ import (
 // agent restarts.
 func fleetBridgeRelatedWork(args []string) {
 	if len(args) != 2 || args[0] == "" || (args[1] != "on" && args[1] != "off") {
-		fmt.Fprintf(os.Stderr, "usage: fleet bridge related-work BOARD on|off\n\n%s\n", bridgeUsage)
+		fmt.Fprintf(os.Stderr, "usage: fleet bridge related-work BOARD on|off\n\n%s\n", fleetcli.BridgeUsage)
 		os.Exit(2)
 	}
 	fleetSkillJSON(http.MethodPut, "/api/admin/bridge/boards/"+url.PathEscape(args[0]), map[string]any{"relatedWork": args[1] == "on"})

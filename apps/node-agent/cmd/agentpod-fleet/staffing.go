@@ -7,13 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-)
 
-const staffUsage = `usage:
-  fleet staff options
-  fleet staff create --file PATH|-
-  fleet staff assign --station ID --file PATH|-
-  fleet staff unassign --station ID`
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
+)
 
 // fleetStaff puts an agent in a station, and takes it out again.
 //
@@ -27,7 +23,7 @@ const staffUsage = `usage:
 // from there.
 func fleetStaff(args []string) {
 	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(staffUsage)
+		fmt.Println(fleetcli.StaffUsage)
 		if len(args) == 0 {
 			os.Exit(2)
 		}
@@ -41,7 +37,7 @@ func fleetStaff(args []string) {
 		file := fs.String("file", "", "agent definition, or - for stdin")
 		fs.Parse(args[1:])
 		if *file == "" {
-			fmt.Fprintf(os.Stderr, "create requires --file PATH or --file -\n\n%s\n", staffUsage)
+			fmt.Fprintf(os.Stderr, "create requires --file PATH or --file -\n\n%s\n", fleetcli.StaffUsage)
 			os.Exit(2)
 		}
 		fleetSkillRequest(http.MethodPost, "/api/admin/agents", bytes.NewReader(readDocument(*file)), "application/json")
@@ -52,7 +48,7 @@ func fleetStaff(args []string) {
 		fs.Parse(args[1:])
 		id := stationOpID(*station)
 		if *file == "" {
-			fmt.Fprintf(os.Stderr, "assign requires --file PATH or --file -\n\n%s\n", staffUsage)
+			fmt.Fprintf(os.Stderr, "assign requires --file PATH or --file -\n\n%s\n", fleetcli.StaffUsage)
 			os.Exit(2)
 		}
 		fleetSkillRequest(http.MethodPut, "/api/admin/stations/"+url.PathEscape(id)+"/agent",
@@ -64,16 +60,10 @@ func fleetStaff(args []string) {
 		id := stationOpID(*station)
 		fleetSkillJSON(http.MethodDelete, "/api/admin/stations/"+url.PathEscape(id)+"/agent", nil)
 	default:
-		fmt.Fprintln(os.Stderr, staffUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.StaffUsage)
 		os.Exit(2)
 	}
 }
-
-const settingsUsage = `usage:
-  fleet settings show
-  fleet settings signup [enable|disable]
-  fleet settings transcription [show|set --file PATH|- |test]
-  fleet settings speech [show|set --file PATH|- |test]`
 
 // fleetSettings reads and changes hub-wide configuration.
 //
@@ -82,7 +72,7 @@ const settingsUsage = `usage:
 // so the read is the default and each direction has to be named.
 func fleetSettings(args []string) {
 	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(settingsUsage)
+		fmt.Println(fleetcli.SettingsUsage)
 		if len(args) == 0 {
 			os.Exit(2)
 		}
@@ -98,14 +88,14 @@ func fleetSettings(args []string) {
 			return
 		}
 		if args[1] != "enable" && args[1] != "disable" {
-			fmt.Fprintf(os.Stderr, "signup takes enable or disable, got %q\n\n%s\n", args[1], settingsUsage)
+			fmt.Fprintf(os.Stderr, "signup takes enable or disable, got %q\n\n%s\n", args[1], fleetcli.SettingsUsage)
 			os.Exit(2)
 		}
 		fleetSkillJSON(http.MethodPost, base+"/signup/"+args[1], map[string]any{})
 	case "transcription", "speech":
 		settingsSubresource(base+"/"+args[0], args[0], args[1:])
 	default:
-		fmt.Fprintln(os.Stderr, settingsUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.SettingsUsage)
 		os.Exit(2)
 	}
 }
@@ -128,12 +118,12 @@ func settingsSubresource(base, name string, args []string) {
 		file := fs.String("file", "", "settings document, or - for stdin")
 		fs.Parse(args[1:])
 		if *file == "" {
-			fmt.Fprintf(os.Stderr, "set requires --file PATH or --file -\n\n%s\n", settingsUsage)
+			fmt.Fprintf(os.Stderr, "set requires --file PATH or --file -\n\n%s\n", fleetcli.SettingsUsage)
 			os.Exit(2)
 		}
 		fleetSkillRequest(http.MethodPut, base, bytes.NewReader(readDocument(*file)), "application/json")
 	default:
-		fmt.Fprintln(os.Stderr, settingsUsage)
+		fmt.Fprintln(os.Stderr, fleetcli.SettingsUsage)
 		os.Exit(2)
 	}
 }

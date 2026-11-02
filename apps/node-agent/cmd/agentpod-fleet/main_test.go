@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
 )
 
 // The seven verbs this binary exists for today. This is only a "there are still seven" sanity
@@ -37,7 +39,7 @@ func dispatchedVerbs(t *testing.T) map[string]bool {
 // dispatch layers rather than checking fleet.go against its own help entries.
 func listedVerbs(t *testing.T) map[string]bool {
 	t.Helper()
-	help := helpText("test")
+	help := fleetcli.HelpText("test")
 	listed := map[string]bool{}
 	for _, line := range strings.Split(help, "\n") {
 		m := regexp.MustCompile(`^  fleet ([a-z][a-z-]*)`).FindStringSubmatch(line)
@@ -88,7 +90,7 @@ func TestCarriesNoNodeVerbs(t *testing.T) {
 
 // Help names this binary, not the one it was extracted from.
 func TestHelpListsEveryVerbAndSaysFleet(t *testing.T) {
-	help := helpText("test")
+	help := fleetcli.HelpText("test")
 	if strings.Contains(help, "apn fleet") {
 		t.Error("help still says `apn fleet`; this binary is `fleet`")
 	}

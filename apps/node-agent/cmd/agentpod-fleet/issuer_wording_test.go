@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/clidoc"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
 )
 
 // staleIssuer matches wording from before the organization plane, when the hub minted the
@@ -17,12 +18,12 @@ var staleIssuer = regexp.MustCompile(`(?i)hub-issued|hub tokens?\b|issued by the
 // reference page (which carries each flag's usage string from its FlagSet).
 func TestHelpNamesNoStaleTokenIssuer(t *testing.T) {
 	var all strings.Builder
-	all.WriteString(helpText("test"))
+	all.WriteString(fleetcli.HelpText("test"))
 	src, err := clidoc.Load(".")
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := clidoc.Render(reference, src)
+	page, err := clidoc.Render(fleetcli.Reference, src)
 	if err != nil {
 		t.Fatal(err)
 	}

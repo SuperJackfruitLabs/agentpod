@@ -4,10 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
-)
 
-const inviteUsage = `usage:
-  fleet invite [--label TEXT] [--ttl-minutes N]`
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
+)
 
 // fleetInvite mints the token a machine presents to `apn enroll`.
 //
@@ -19,7 +18,7 @@ const inviteUsage = `usage:
 // restating a policy that is the hub's to hold.
 func fleetInvite(args []string) {
 	if helpRequested(args) {
-		fmt.Println(inviteUsage)
+		fmt.Println(fleetcli.InviteUsage)
 		return
 	}
 	fs := flag.NewFlagSet("fleet invite", flag.ExitOnError)

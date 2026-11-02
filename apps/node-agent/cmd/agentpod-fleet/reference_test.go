@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/clidoc"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
 )
 
 var update = flag.Bool("update", false, "rewrite the generated reference page")
@@ -21,7 +22,7 @@ func TestReferencePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := clidoc.Sync(reference, src, referencePage, *update); err != nil {
+	if err := clidoc.Sync(fleetcli.Reference, src, referencePage, *update); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -34,9 +35,9 @@ func TestReferenceGuardCatchesARemovedEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{"nodes telemetry", "principals add-service", "settings speech test", "devices revoke", "version"} {
-		b := reference
+		b := fleetcli.Reference
 		b.Commands = nil
-		for _, c := range reference.Commands {
+		for _, c := range fleetcli.Reference.Commands {
 			if c.Path != path {
 				b.Commands = append(b.Commands, c)
 			}

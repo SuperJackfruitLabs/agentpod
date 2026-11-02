@@ -7,29 +7,14 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
 )
-
-const mcpProxyUsage = `usage:
-  fleet mcp-proxy list [--node ID]                            every station: declared, served, state
-  fleet mcp-proxy enable STATION_ID...                        serve these stations
-  fleet mcp-proxy enable --all-eligible [--node ID]           serve every station whose harness can use it
-  fleet mcp-proxy disable STATION_ID...                       stop serving these stations
-  fleet mcp-proxy rotate STATION_ID... | --node ID            new secrets; sessions holding old ones are refused
-
-The node's loopback MCP proxy gives a station's harness sessions the hub's and
-SuperLibrary's MCP tools, as the station's own agent. Only Hermes, Claude Code,
-Codex, opencode, Muse and Kilo stations can use it: OpenClaw's and Pi's ACP adapters take
-no HTTP MCP servers in session/new, and enabling one is refused.
-
-A change is written to the node's config and applied without a restart, and
-leaves an audit row per station. A state of "drifted" means what was declared
-here and what the node serves disagree — re-run enable or disable to settle it.
-Secrets never leave the node.`
 
 // fleetMCPProxy manages which stations each node's loopback MCP proxy serves.
 func fleetMCPProxy(args []string) {
 	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(mcpProxyUsage)
+		fmt.Println(fleetcli.McpProxyUsage)
 		if len(args) == 0 {
 			os.Exit(2)
 		}
@@ -93,7 +78,7 @@ func fleetMCPProxy(args []string) {
 			fleetSkillJSON(http.MethodPost, base+"/rotate", map[string]any{"stationIds": fs.Args()})
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "unknown mcp-proxy verb: %q\n%s\n", args[0], strings.SplitN(mcpProxyUsage, "\n\n", 2)[0])
+		fmt.Fprintf(os.Stderr, "unknown mcp-proxy verb: %q\n%s\n", args[0], strings.SplitN(fleetcli.McpProxyUsage, "\n\n", 2)[0])
 		os.Exit(2)
 	}
 }
