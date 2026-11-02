@@ -68,11 +68,47 @@ locks in an improvement.
 run by the hub's `bun test` (it reads the console and the packages too). It holds:
 
 - the largest file-level import cycle in each source tree (`largestCycle`);
-- the folder-level cycles in the hub: one across its top-level folders (`auth`, `config`, `db`,
-  `models`, `routes`, `services`, `telemetry`, `utils`), and one across 17 entries of
-  `services/` (`FOLDER_CYCLES`). A cycle may lose members or vanish; it may not gain one, and no
-  new cycle may appear;
+- the hub's layer order (`HUB_LAYERS`, below): every import between the hub's top-level folders
+  and files points down it. Back-edges still allowed are listed in `KNOWN_BACK_EDGES`, which may
+  only shrink; it has been empty since Phase 1. A new top-level folder or file fails the test
+  until it is given a place in the order;
+- the folder-level cycles in the hub (`FOLDER_CYCLES`): none across its top-level folders (eight
+  of them formed one cycle until Phase 1), and one across 4 entries of `services/`
+  (`acp-sessions`, `bridge`, `matrix-as`, `org-plane`; 17 until Phase 1). A cycle may lose
+  members or vanish; it may not gain one, and no new cycle may appear;
 - shipped files over 1,000 lines, each held at its current size (`oversize`).
+
+### The hub's layers
+
+Lowest first. An import may point at its own layer or a lower one, never a higher one.
+
+| Layer | Holds | May import |
+|---|---|---|
+| `config.ts` | the environment, read once into `config` (the Docker daemon's env contract included) | nothing |
+| `ws.ts` | the one shared Bun WebSocket helper | nothing |
+| `telemetry/` | OpenTelemetry setup, spans, trace propagation | nothing in the hub |
+| `utils/` | logger, ids, encryption, redaction helpers: no domain | `config`, `telemetry` |
+| `db/` | the Drizzle client, schema, migrations | the above |
+| `models/` | one table's reads and writes | the above |
+| `auth/` | token verification, the caller's authority, and the org plane it reads (`auth/org-plane/`: its config, client, directory, grants, principals, the hub's home org) | the above |
+| `services/` | the domain | the above |
+| `mcp/`, `middleware/`, `routes/` | the hub's MCP server, HTTP middleware, HTTP and WebSocket routes | the above |
+| `validate-config.ts` | boot validation, which reads every subsystem's settings | the above |
+| `index.ts` | the composition root: wires listeners and dependencies, serves | everything |
+
+When a lower layer needs something from a higher one, do not list a back-edge. Phase 1 removed
+each of them one of three ways, and the next one should be removed the same way:
+
+- **a pure helper, type or constant moves down** to the layer that needs it (`gateCapability`
+  went to `services/station-registry.ts`; `StationRow` to `db/schema/stations.ts`; the Docker
+  daemon's env parser to `config.ts`; `dispatch-span.ts` declares the one field it reads);
+- **a misplaced file moves** with `git mv` to where its imports say it belongs (the org plane's
+  client and reads into `auth/org-plane/`; boot validation up beside `index.ts`; a database read
+  out of `telemetry/`);
+- **a genuine upward call becomes a narrow interface** declared in the lower layer and passed in
+  as a parameter where the pieces are put together (`index.ts`, or the route that builds the
+  call). No service locators and no new global registries. (Phase 1 needed none: every back-edge
+  it found was one of the two cases above.)
 
 **Go:** [`apps/node-agent/internal/archtest/size_test.go`](../../apps/node-agent/internal/archtest/size_test.go),
 run by `go test ./...`. It holds shipped files over 1,000 lines (`oversizeFiles`) and packages
