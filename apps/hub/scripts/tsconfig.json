@@ -1,0 +1,10 @@
+{
+  // This folder sits outside ../tsconfig.json's `include` (src only), so without this file
+  // tools that look for the nearest tsconfig.json — the type-aware linter, editors — fall back
+  // to the repository root's solution config and see no hub settings at all. Same compiler
+  // settings as the hub; the typecheck baselines still run ../tsconfig.json and
+  // ../tsconfig.tests.json, which this file does not change.
+  "extends": "../tsconfig.json",
+  "include": ["../src/**/*", "./**/*"],
+  "exclude": ["../node_modules"]
+}

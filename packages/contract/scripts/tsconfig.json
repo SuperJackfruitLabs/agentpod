@@ -1,0 +1,6 @@
+{
+  // Outside ../tsconfig.json's `include`; without this file the type-aware linter falls back
+  // to the repository root's solution config. Same settings as the package.
+  "extends": "../tsconfig.json",
+  "include": ["../src/**/*", "./**/*"]
+}

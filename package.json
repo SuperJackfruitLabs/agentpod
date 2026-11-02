@@ -16,9 +16,13 @@
     "test:unit": "turbo run test:unit",
     "test:integration": "turbo run test:integration",
     "lint": "turbo run lint",
+    "lint:ts": "node scripts/lint.mjs",
+    "lint:go": "node scripts/lint-go.mjs",
     "clean": "turbo run clean && rm -rf node_modules .turbo"
   },
   "devDependencies": {
+    "oxlint": "1.88.0",
+    "oxlint-tsgolint": "7.0.2004",
     "turbo": "^2.10.13",
     "typescript": "~5.9.3"
   },

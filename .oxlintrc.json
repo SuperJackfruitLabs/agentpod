@@ -1,0 +1,83 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "unicorn",
+    "oxc",
+    "import",
+    "node",
+    "promise",
+    "vitest"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "rules": {
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/await-thenable": "error",
+    "typescript/switch-exhaustiveness-check": [
+      "error",
+      {
+        "considerDefaultExhaustiveForUnions": true
+      }
+    ],
+    "typescript/consistent-type-imports": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error",
+    "no-empty": [
+      "error",
+      {
+        "allowEmptyCatch": false
+      }
+    ],
+    "no-console": "error",
+    "no-unused-vars": [
+      "error",
+      {
+        "ignoreRestSiblings": true,
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_"
+      }
+    ],
+    "no-control-regex": "off",
+    "no-unmodified-loop-condition": "off"
+  },
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.svelte-kit/**",
+    "**/.turbo/**",
+    "**/generated/**",
+    "apps/console/vendor/**",
+    "apps/landing/**",
+    "docs-site/**",
+    "docs/**",
+    "cloudflare/worker/**",
+    "**/vitest.config.ts",
+    "**/vite.config.*",
+    "**/svelte.config.js",
+    "**/drizzle.config.ts"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "scripts/**",
+        "**/scripts/**",
+        "apps/console/e2e/**",
+        "**/tests/**",
+        "**/test/**",
+        "**/*.test.ts",
+        "**/*.svelte.test.ts",
+        "apps/hub/src/utils/logger.ts",
+        "cloudflare/worker-v2/src/**"
+      ],
+      "rules": {
+        "no-console": "off"
+      }
+    }
+  ]
+}
