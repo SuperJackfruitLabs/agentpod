@@ -30,7 +30,8 @@ export interface DispatchOutcome {
   status: string;
 }
 
-type Status = DispatchOutcome["status"] | "threw";
+/** A dispatch's outcome status, or "threw" when `work` did. */
+type Status = DispatchOutcome["status"];
 
 const COMPLETED: ReadonlySet<Status> = new Set(["reported", "self-reported", "unreported", "replayed"]);
 const ERRORED: ReadonlySet<Status> = new Set(["failed", "foreign-run", "threw"]);
