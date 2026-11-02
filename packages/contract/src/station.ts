@@ -38,7 +38,7 @@ export function partitionCapabilities(xs: readonly string[]): {
 // feature could not activate on a real fleet. The drop is now reportable —
 // `unknownCapabilitiesByStation` below hands a consumer exactly what was
 // thrown away, and the hub logs it at warn (see `reportUnknownCapabilities` in
-// apps/hub/src/services/station-registry.ts).
+// apps/hub/src/services/stations/registry.ts).
 export const CapabilityList = z
   .array(z.string())
   .transform((xs) => partitionCapabilities(xs).known);
