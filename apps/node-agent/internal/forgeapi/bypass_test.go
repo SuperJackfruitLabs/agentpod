@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi/stkpolicy"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stkclient"
 )
 
@@ -740,7 +741,7 @@ func TestCacheIsPerStationAndInvalidatedByDeliverPolicyRevoke(t *testing.T) {
 	if fx.stub("stn_1").probes != 2 || fx.stub("stn_2").probes != 1 {
 		t.Fatalf("after deliver: %d %d", fx.stub("stn_1").probes, fx.stub("stn_2").probes)
 	}
-	if _, err := fx.m.Policy(context.Background(), PolicyParams{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "read", Rules: []Rule{}}); err != nil {
+	if _, err := fx.m.Policy(context.Background(), PolicyParams{StationID: "stn_1", GrantID: "fag_aaa111", Preset: "read", Rules: []stkpolicy.Rule{}}); err != nil {
 		t.Fatal(err)
 	}
 	fx.verify("stn_1", "fag_aaa111", honouredCurl)

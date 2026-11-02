@@ -1,4 +1,4 @@
-package forgeapi
+package stkpolicy
 
 import (
 	"bytes"
@@ -46,6 +46,7 @@ type stkService struct {
 	AllowGraphQL *bool             `yaml:"allow_graphql"`
 	Labels       map[string]string `yaml:"labels"`
 }
+
 type stkRule struct {
 	Allow string         `yaml:"allow"`
 	Deny  string         `yaml:"deny"`

@@ -1,4 +1,16 @@
-package forgeapi
+package stkpolicy
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"net/url"
+	"regexp"
+	"sort"
+	"strings"
+
+	"go.yaml.in/yaml/v3"
+)
 
 // The stk policy file (supertoolkit.yaml), as the node edits it.
 //
@@ -13,18 +25,6 @@ package forgeapi
 // write by the node re-emits the file with two-space indentation and normalised scalar quoting.
 // A comment survives; its column or blank lines around it may move. After that first
 // normalisation a replay of the same entry produces the same bytes.
-
-import (
-	"bytes"
-	"errors"
-	"fmt"
-	"net/url"
-	"regexp"
-	"sort"
-	"strings"
-
-	"go.yaml.in/yaml/v3"
-)
 
 // Errors a caller can test with errors.Is.
 var (

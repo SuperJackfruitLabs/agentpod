@@ -1,4 +1,12 @@
-package forgeapi
+package stkpolicy
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"go.yaml.in/yaml/v3"
+)
 
 // The shared base policy: an operator-authored file of services every station needs. The node
 // COPIES its entries into each station's own policy file (each station has its own stk, see
@@ -12,14 +20,6 @@ package forgeapi
 // What this does NOT do: deliver credentials. A shared service's credential is not the hub's to
 // send and the node invents no path for it; whoever runs the station's stk loads it (for example
 // `stk connect` against the instance), or the service is one that needs none.
-
-import (
-	"errors"
-	"fmt"
-	"strings"
-
-	"go.yaml.in/yaml/v3"
-)
 
 // SharedGrantPrefix starts the `grant` label of every copied shared entry. stk accepts exactly
 // three label keys, so the marker has to live in a value; a hub grant id never starts with it

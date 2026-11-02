@@ -1,6 +1,6 @@
 //go:build windows
 
-package forgeapi
+package stkpolicy
 
 import "os"
 

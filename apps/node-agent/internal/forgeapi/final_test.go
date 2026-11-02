@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi/stkpolicy"
 )
 
 // ---- I1: a deliver whose wiring fails must not leave the credential brokered ----
@@ -35,7 +37,7 @@ func TestAWiringFailureAfterTheStoreRollsTheGrantBackCredentialFirst(t *testing.
 	if len(entryAtRevoke) != 1 || !entryAtRevoke[0] {
 		t.Fatalf("the credential must be forgotten while its policy entry still exists: %v", entryAtRevoke)
 	}
-	if m, _ := ManagedEntries(fx.policyOf("stn_1")); len(m) != 0 {
+	if m, _ := stkpolicy.ManagedEntries(fx.policyOf("stn_1")); len(m) != 0 {
 		t.Fatalf("the grant is still in the policy: %v", m)
 	}
 	calls := fx.stub("stn_1").callList()
@@ -106,7 +108,7 @@ func TestAHealthyDeliverStillSucceedsAndKeepsItsGrant(t *testing.T) {
 	if _, err := fx.deliverKeyed("stn_1", "fag_1", "forge.example.com"); err != nil {
 		t.Fatal(err)
 	}
-	if m, _ := ManagedEntries(fx.policyOf("stn_1")); len(m) != 1 {
+	if m, _ := stkpolicy.ManagedEntries(fx.policyOf("stn_1")); len(m) != 1 {
 		t.Fatalf("entries = %v", m)
 	}
 	_ = bytes.Equal
@@ -453,7 +455,7 @@ func TestWritePolicyFileRefusesASymlink(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Skip("no symlinks here")
 	}
-	if err := writePolicyFile(link, []byte("services: {}\n")); err == nil {
+	if err := stkpolicy.WritePolicyFile(link, []byte("services: {}\n")); err == nil {
 		t.Fatal("wrote through a symlink")
 	}
 	if b, _ := os.ReadFile(target); string(b) != "keep" {

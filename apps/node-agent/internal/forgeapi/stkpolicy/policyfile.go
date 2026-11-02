@@ -1,4 +1,4 @@
-package forgeapi
+package stkpolicy
 
 import (
 	"errors"
@@ -16,8 +16,8 @@ const DefaultPolicyPath = "/etc/stk/supertoolkit.yaml"
 // never world-readable.
 const newFileMode os.FileMode = 0o640
 
-// readPolicyFile returns the file's bytes; a missing file is (nil, false, nil).
-func readPolicyFile(path string) (data []byte, existed bool, err error) {
+// ReadPolicyFile returns the file's bytes; a missing file is (nil, false, nil).
+func ReadPolicyFile(path string) (data []byte, existed bool, err error) {
 	data, err = os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, false, nil
@@ -28,12 +28,12 @@ func readPolicyFile(path string) (data []byte, existed bool, err error) {
 	return data, true, nil
 }
 
-// writePolicyFile replaces path atomically: a temporary file in the same directory, fsynced, then
+// WritePolicyFile replaces path atomically: a temporary file in the same directory, fsynced, then
 // renamed over the target. The mode is the existing file's with every world bit cleared (0640
 // for a new file), and the owner and group are carried over (a new file takes its directory's
 // group, which is how it ends up readable by the stk user). A reader, stk included, sees the
 // old file or the new one, never half of either.
-func writePolicyFile(path string, data []byte) error {
+func WritePolicyFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	mode := newFileMode
 	// Lstat: the node runs as root and the directory can be reached by others, so a symlink at
@@ -86,13 +86,13 @@ func writePolicyFile(path string, data []byte) error {
 	return nil
 }
 
-// restorePolicyFile puts the file back as it was: the previous bytes, or no file at all.
-func restorePolicyFile(path string, prev []byte, existed bool) error {
+// RestorePolicyFile puts the file back as it was: the previous bytes, or no file at all.
+func RestorePolicyFile(path string, prev []byte, existed bool) error {
 	if !existed {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove %s: %w", path, err)
 		}
 		return nil
 	}
-	return writePolicyFile(path, prev)
+	return WritePolicyFile(path, prev)
 }

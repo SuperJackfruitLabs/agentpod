@@ -1,4 +1,4 @@
-package forgeapi
+package stkpolicy
 
 import (
 	"bytes"

@@ -30,6 +30,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/forgeapi/stkpolicy"
 )
 
 // DefaultHarnessEnvRoot holds one directory per instance: <root>/<instance name>/<unit>.env.
@@ -99,11 +101,11 @@ var unitNameRE = regexp.MustCompile(`^[A-Za-z0-9:_.@-]{1,200}\.(service)$`)
 // reach. nil when the station holds no grant of its own (a shared base service alone does not make
 // a station a forge station). The client is the station's own instance's.
 func (m *StationInstances) stationEnv(ctx context.Context, st *stationState) (map[string]string, []string, error) {
-	data, _, err := readPolicyFile(st.inst.ConfigPath)
+	data, _, err := stkpolicy.ReadPolicyFile(st.inst.ConfigPath)
 	if err != nil {
 		return nil, nil, coded("policy-read-failed", err)
 	}
-	entries, err := ManagedEntries(data)
+	entries, err := stkpolicy.ManagedEntries(data)
 	if err != nil {
 		return nil, nil, coded("policy-invalid", err)
 	}

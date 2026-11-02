@@ -28,14 +28,12 @@ const (
 
 // oversizeFiles lists the files over fileLimit and the most lines each may have. Lower these;
 // never raise them.
-var oversizeFiles = map[string]int{
-	"internal/forgeapi/instances.go": 1164,
-}
+var oversizeFiles = map[string]int{}
 
 // oversizePackages lists the packages over packageLimit and the most lines each may have.
 // Lower these; never raise them.
 var oversizePackages = map[string]int{
-	"internal/forgeapi": 5344,
+	"internal/forgeapi": 4483,
 }
 
 // shippedSizes returns the line count of every shipped .go file under root, keyed by its
