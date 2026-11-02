@@ -6,8 +6,10 @@ description: Install the node agent on a machine and watch it appear in the cons
 A **node** is a machine in your fleet. Enrolling one takes a hub, an enrollment token, and
 one command on the target host.
 
-This page assumes a hub is already running. If you are standing one up, the deployment
-runbook in the repository covers that end.
+This page assumes you already have access to a running hub and its console.
+Since v0.1.92, the hub requires `ORG_PLANE_*` configuration and a credential from
+an external account service that is not public source. The deployment runbook
+alone is not a complete self-hosting path for current releases.
 
 ## 1. Get an enrollment token
 
@@ -67,7 +69,10 @@ This prints the harness stations found on the host as JSON. It needs no hub conn
 no account — it is the fastest way to confirm the agent sees what you expected before you
 go looking in the console.
 
-AgentPod ships detection for **Hermes, OpenClaw, Claude Code, Codex, OpenCode and Pi**.
+The v0.1.98 release described on the landing page ships detection for **Hermes,
+OpenClaw, Claude Code, Codex, OpenCode, Pi, Muse Code and Kilo**. Detection does
+not imply the same capabilities for every harness; Muse Code and Kilo capabilities
+beyond detection have not been checked.
 
 ## 5. Adopt a station
 
