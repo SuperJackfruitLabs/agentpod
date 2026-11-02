@@ -167,7 +167,18 @@ the appservice at all.
 
 **Go:** [`apps/node-agent/internal/archtest/size_test.go`](../../apps/node-agent/internal/archtest/size_test.go),
 run by `go test ./...`. It holds shipped files over 1,000 lines (`oversizeFiles`) and packages
-over 4,000 lines (`oversizePackages`).
+over 4,000 lines (`oversizePackages`). Since Phase 5 `oversizeFiles` is empty and
+`oversizePackages` holds `internal/forgeapi` alone.
+
+The harness descriptors are a family of packages with one direction. `internal/descriptor` is the
+contract (station types, `Descriptor` and its optional interfaces), the `Registry` and the verb
+handler, and imports none of its subpackages; the shared helpers (`descriptor/hostfs`, `hostproc`,
+`configdoc`, `acpskills`) import only it; each harness is its own package (`descriptor/hermes`,
+`openclaw`, `claudecode`, `codex`, `opencode`, `pi`, `kilo`, `muse`, `salaamharness`) over those;
+`descriptor/profilewriter` and the test-only `descriptor/harnesses` sit on top. Go refuses an
+import cycle, so the direction holds by construction. The binaries keep dispatch, flag parsing and
+wiring in `cmd/`; their command tables and references live in `internal/nodecli` and
+`internal/fleetcli`.
 
 When a number falls, the test names it; lower the recorded value in the same change. Never raise
 one to make a change fit: split the file or break the edge instead.
