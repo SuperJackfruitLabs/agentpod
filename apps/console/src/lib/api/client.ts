@@ -35,7 +35,7 @@ export function handleUnauthorized(res?: Response): void {
     !window.location.pathname.startsWith("/login")
   ) {
     clearAuthSession();
-    goto("/login");
+    void goto("/login");
   }
 }
 

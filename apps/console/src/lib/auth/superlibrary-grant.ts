@@ -146,16 +146,16 @@ function refresh(plane: PlaneDiscovery, opts: GrantOptions): Promise<string> {
       try {
         grant = await tokenRequest(plane, { grant_type: "refresh_token", refresh_token: refreshToken }, opts);
       } catch (err) {
-        if (gen !== generation) throw new Error("Signed out.");
+        if (gen !== generation) throw new Error("Signed out.", { cause: err });
         if (err instanceof RefusedError) {
           // This grant is over (expired, revoked, reused). The hub's is not touched: the next click
           // runs a new authorize, silent while the plane's session is alive.
           tokens = null;
-          throw new Error(ENDED);
+          throw new Error(ENDED, { cause: err });
         }
         // Down, not refused: keep the grant. A token that still works is the answer.
         if (tokens && tokens.expiresAt > now()) return tokens.access;
-        throw new Error(UNAVAILABLE);
+        throw new Error(UNAVAILABLE, { cause: err });
       }
       if (gen !== generation) throw new Error("Signed out.");
       tokens = { access: grant.access, expiresAt: grant.expiresAt, refresh: grant.refresh ?? refreshToken };

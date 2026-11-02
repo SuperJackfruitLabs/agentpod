@@ -268,7 +268,11 @@ describe("two separate grants", () => {
     const down = () => Promise.reject(new TypeError("offline"));
     const { h } = await granted(harness([() => json(200, { access_token: "sl-at1", expires_in: 300, refresh_token: "sl-rt1" }), down, down, down, down, down, down]));
     expect(await superlibraryAccessToken(PLANE, { ...h.opts, now: () => 299_000 })).toBe("sl-at1");
-    await expect(superlibraryAccessToken(PLANE, { ...h.opts, now: () => 301_000 })).rejects.toThrow(/unavailable/i);
+    // The sentence replaces the network error; the error itself stays on as the cause.
+    await expect(superlibraryAccessToken(PLANE, { ...h.opts, now: () => 301_000 })).rejects.toMatchObject({
+      message: expect.stringMatching(/unavailable/i),
+      cause: expect.anything(),
+    });
     expect(hasSuperlibraryGrant()).toBe(true);
   });
 
