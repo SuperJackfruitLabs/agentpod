@@ -44,14 +44,14 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { matrixRooms } from "../db/schema/matrix";
 import { stations } from "../db/schema/stations";
-import { provisionStationNow, stationSetupMatrixDomain } from "../services/station-hooks";
+import { provisionStationNow, stationSetupMatrixDomain } from "../services/stations/hooks";
 import { OrgPlaneError } from "../auth/org-plane/client";
 import { principalDirectory } from "../auth/org-plane/directory";
 import { createPlaneAgent } from "../services/org-plane/agent-placement";
 import { unboundRoomsForStation } from "../services/matrix-as/station-room";
 import { principalById } from "../auth/org-plane/principals";
-import { markGrantsRevoking } from "../services/station-forge-api";
-import { kickForgeApiRevoke } from "../services/forge-api-reconcile";
+import { markGrantsRevoking } from "../services/forge-api/station-forge-api";
+import { kickForgeApiRevoke } from "../services/forge-api/reconcile";
 import { createLogger } from "../utils/logger";
 import { resolveTenantId } from "../auth/tenant";
 

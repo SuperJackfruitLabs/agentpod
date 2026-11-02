@@ -14,8 +14,8 @@ import {
   SUSPENDED_AT_UNKNOWN,
 } from "../../auth/org-plane/principals";
 import { getGrant, setGrant } from "../../auth/org-plane/grants";
-import { resolveMatrixId } from "../matrix-identity";
-import { matrixIdForPrincipal } from "../principal-matrix-id";
+import { resolveMatrixId } from "../matrix/identity";
+import { matrixIdForPrincipal } from "../matrix/principal-id";
 import { rawSql } from "../../db/drizzle";
 
 const HUMAN: PlanePrincipal = {

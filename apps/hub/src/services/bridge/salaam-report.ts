@@ -14,9 +14,9 @@ import {
 } from "../../../../../packages/contract/src/salaam-work-payload";
 import { SalaamWorkCompletion } from "../../../../../packages/contract/src/salaam-work-completion";
 type SalaamWorkCompletionValue = import("zod").infer<typeof SalaamWorkCompletion>;
-import { workDigest } from "../salaam-work";
-import { validateSalaamAuthority } from "../salaam-authority";
-import * as broker from "../broker";
+import { workDigest } from "../salaam/work";
+import { validateSalaamAuthority } from "../salaam/authority";
+import * as broker from "../broker/broker";
 import type { SuperpipelineClient, RunContext } from "./superpipeline";
 import type { SalaamPublication } from "./salaam-publish";
 const same = (a: unknown, b: unknown) =>

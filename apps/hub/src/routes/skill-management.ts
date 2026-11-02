@@ -1,4 +1,4 @@
-import { nodeRefusal } from "../services/skill-operation-diagnostics";
+import { nodeRefusal } from "../services/skills/operation-diagnostics";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { and, eq, gt, inArray } from "drizzle-orm";
@@ -25,12 +25,12 @@ import { db } from "../db/drizzle";
 import { skillOperations } from "../db/schema/skills";
 import { stations } from "../db/schema/stations";
 import { principalForUser } from "../auth/org-plane/principals";
-import { verifyNodeCredential } from "../services/enrollment";
-import { requireGrantReach } from "../services/grant-reach";
+import { verifyNodeCredential } from "../services/nodes/enrollment";
+import { requireGrantReach } from "../services/control/grant-reach";
 import { isOrgPlaneUnavailable, orgPlaneOutageBody } from "../auth/caller-authority";
-import { getStation } from "../services/station-registry";
+import { getStation } from "../services/stations/registry";
 import { refuseWithoutReach } from "./station-writes";
-import { gateCapability } from "../services/station-registry";
+import { gateCapability } from "../services/stations/registry";
 import {
   SkillRequestError,
   MAX_SKILL_ARTIFACT_BYTES,
@@ -39,13 +39,13 @@ import {
   getSkillArtifact,
   deleteSkillArtifact,
   type SkillOwner,
-} from "../services/skill-artifacts";
+} from "../services/skills/artifacts";
 import {
   importTrustedSkillRelease,
   listTrustedSkillReleases,
-} from "../services/trusted-skill-catalog";
-import { createSkillReleaseCohort, listSkillReleaseCohorts } from "../services/skill-release-cohorts";
-import { createSkillReleaseCanaryOperation, getSkillReleaseCanaryOperation } from "../services/skill-release-canary";
+} from "../services/skills/trusted-catalog";
+import { createSkillReleaseCohort, listSkillReleaseCohorts } from "../services/skills/release-cohorts";
+import { createSkillReleaseCanaryOperation, getSkillReleaseCanaryOperation } from "../services/skills/release-canary";
 import { SkillReleaseCohortCreateRequest } from "@agentpod/contract";
 import {
   createSkillOperation,
@@ -54,8 +54,8 @@ import {
   listSkillOperations,
   operationResult,
   MANAGED_PLUGIN,
-} from "../services/skill-operations";
-import * as broker from "../services/broker";
+} from "../services/skills/operations";
+import * as broker from "../services/broker/broker";
 import { canaryOperationIdentity } from "./canary-operation";
 import { isWorkspaceAdminUser, WORKSPACE_ADMIN_REQUIRED } from "../auth/workspace-authority";
 

@@ -31,7 +31,7 @@ import {
   resetProvisioners,
 } from "../../src/services/provisioner/registry";
 import type { RuntimeProvisioner } from "../../src/services/provisioner/types";
-import { createRuntime } from "../../src/services/runtimes";
+import { createRuntime } from "../../src/services/runtimes/runtimes";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const TEST_USER = "test-user-runtime-token-001";

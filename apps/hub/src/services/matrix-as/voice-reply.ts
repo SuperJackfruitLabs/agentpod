@@ -41,9 +41,9 @@
  */
 
 import { VOICE_REPLY_CONTENT_KEY, VoiceReply } from "@agentpod/contract";
-import { encryptAttachment, type EncryptedFileInfo } from "./attachments";
-import type { ResolvedSpeech, SpeakMode } from "../speech-settings";
-import type { SpeechEndpoint, SpokenAudio } from "../speech-client";
+import { encryptAttachment, type EncryptedFileInfo } from "../matrix/attachments";
+import type { ResolvedSpeech, SpeakMode } from "../speech/speech-settings";
+import type { SpeechEndpoint, SpokenAudio } from "../speech/speech-client";
 import { beginQuietSend, noteHubEvent } from "../push/hub-events";
 
 /** What `body` and `filename` say, as Element names its own voice messages. */

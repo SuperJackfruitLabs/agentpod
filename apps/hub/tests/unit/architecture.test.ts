@@ -44,13 +44,13 @@ const TREES: Tree[] = [
     root: "apps/hub/src",
     largestCycle: 3,
     oversize: {
-      "services/acp-sessions.ts": 3514,
+      "services/acp/sessions.ts": 3514,
       "services/bridge/dispatch.ts": 1338,
       "services/bridge/salaam-dispatch.ts": 1583,
-      "services/matrix-as/gates.ts": 1168,
+      "services/matrix-as/gates.ts": 1139,
       "services/matrix-as/outbound.ts": 1147,
-      "services/runtimes.ts": 1317,
-      "services/station-forge-api.ts": 2082,
+      "services/forge-api/station-forge-api.ts": 2082,
+      "services/runtimes/runtimes.ts": 1317,
     },
   },
   {
@@ -70,7 +70,7 @@ const TREES: Tree[] = [
  *  it may not gain one, and no new cycle may appear. */
 const FOLDER_CYCLES: { root: string; cycles: string[][] }[] = [
   { root: "apps/hub/src", cycles: [] },
-  { root: "apps/hub/src/services", cycles: [["acp-sessions", "bridge", "matrix-as", "org-plane"]] },
+  { root: "apps/hub/src/services", cycles: [] },
 ];
 
 /**

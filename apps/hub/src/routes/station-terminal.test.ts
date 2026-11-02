@@ -25,7 +25,7 @@ import { rawSql } from "../db/drizzle";
 import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { waitForNodeOnline } from "../../tests/helpers/wait";
-import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
+import { mintEnrollmentToken, enrollNode } from "../services/nodes/enrollment";
 import { setGrant } from "../auth/org-plane/grants";
 import { createPrincipal } from "../../tests/helpers/principals";
 import { gatewayRoutes } from "./gateway";
@@ -33,7 +33,7 @@ import { stationTerminalRoutes } from "./station-terminal";
 import { stationRoutes } from "./stations";
 import { websocket } from "../ws";
 import type { AuthUser } from "../auth/middleware";
-import type { StationRow } from "../services/station-registry";
+import type { StationRow } from "../services/stations/registry";
 import { clearGrant, forgetPrincipals } from "../../tests/helpers/principals";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 

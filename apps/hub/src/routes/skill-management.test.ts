@@ -12,8 +12,8 @@ import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { createTestUser, deleteTestUsers } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { fakePlane } from "../../tests/helpers/fake-plane";
-import { connectionManager } from "../services/connection-manager";
-import * as broker from "../services/broker";
+import { connectionManager } from "../services/broker/connection-manager";
+import * as broker from "../services/broker/broker";
 import {
   createSkillManagementRoutes,
   skillArtifactDownloadRoutes,

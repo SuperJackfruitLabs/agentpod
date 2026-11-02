@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import * as realBroker from "../broker";
+import * as realBroker from "../broker/broker";
 import { linkArtifact, MAX_CONCURRENT_LINKS, type LinkDeps, type LinkInput } from "./link";
 
 const STATION = { id: "stn_1", stationKey: "builder", nodeId: "node_1", nodeStatus: "online", tenantId: "tnt_1" };

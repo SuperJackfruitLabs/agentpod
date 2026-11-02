@@ -44,19 +44,19 @@ import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
 import { bridgeDispatches } from "../../db/schema/bridge";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
-import { mintEnrollmentToken, enrollNode } from "../enrollment";
-import { adoptStations } from "../station-registry";
+import { mintEnrollmentToken, enrollNode } from "../nodes/enrollment";
+import { adoptStations } from "../stations/registry";
 // Workspace authority spec: these routes are a workspace admin's. This file's "admin" fixture
 // (createTestUser role: "admin", a hub_operators seat) stands for one here; the real token path
 // is tests/integration/workspace-authority.test.ts.
 import { workspaceAdminMiddleware as adminMiddleware } from "../../auth/workspace-authority";
 import { isUserAdmin } from "../../models/admin-users";
 import { agentsAdminRouter } from "../../routes/agents-admin";
-import { onProvisionStation, onStationsAdopted } from "../station-hooks";
+import { onProvisionStation, onStationsAdopted } from "../stations/hooks";
 import { provisionStation } from "./provision";
 import { roomForStation } from "./station-room";
 import { projectGate } from "./gates";
-import { bridgeUserId } from "./names";
+import { bridgeUserId } from "../matrix/names";
 import type { GatePendingDelivery } from "./gates";
 import { forgetPrincipals } from "../../../tests/helpers/principals";
 

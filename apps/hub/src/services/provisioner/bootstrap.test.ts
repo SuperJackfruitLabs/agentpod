@@ -40,7 +40,7 @@ import {
   getProvisionerUnguarded,
   resetProvisioners,
 } from "./registry";
-import { setActivityHook } from "../broker";
+import { setActivityHook } from "../broker/broker";
 import type { ModalClientLike } from "./modal-api";
 
 /**

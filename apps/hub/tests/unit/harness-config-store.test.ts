@@ -27,7 +27,7 @@ import { db } from "../../src/db/drizzle";
 import { declaredHarnessConfig } from "../../src/db/schema/harness-config";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { declare, undeclare, resolveFor } from "../../src/services/harness-config";
+import { declare, undeclare, resolveFor } from "../../src/services/harness-config/harness-config";
 
 const SETTING = "hermes.approvals.timeout";
 // The fixture tenant other hub unit tests use for rows that carry a real FK to

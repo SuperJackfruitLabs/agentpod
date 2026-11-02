@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { InMemoryConnectionManager } from "../../src/services/connection-manager";
+import { InMemoryConnectionManager } from "../../src/services/broker/connection-manager";
 
 test("register/isOnline/unregister + send routes to the registered sink", () => {
   const cm = new InMemoryConnectionManager();

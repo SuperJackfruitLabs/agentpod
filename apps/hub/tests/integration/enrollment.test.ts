@@ -21,9 +21,9 @@ import {
   mintEnrollmentToken,
   enrollNode,
   verifyNodeCredential,
-} from "../../src/services/enrollment";
-import { listNodes } from "../../src/services/node-registry";
-import { adoptStations } from "../../src/services/station-registry";
+} from "../../src/services/nodes/enrollment";
+import { listNodes } from "../../src/services/nodes/registry";
+import { adoptStations } from "../../src/services/stations/registry";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { nodeEnrollRoutes } from "../../src/routes/nodes";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";

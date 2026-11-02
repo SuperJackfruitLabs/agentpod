@@ -19,7 +19,7 @@ import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { pollUntil, waitForNodeOnline } from "../helpers/wait";
 import { createPrincipal, forgetPrincipals, linkMatrixId } from "../helpers/principals";
-import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/nodes/enrollment";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
 import { reportingAgentFor } from "../../src/services/push/fleet/agent-identity";

@@ -39,8 +39,8 @@ import { db, rawSql } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { matrixRooms } from "../../db/schema/matrix";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
-import { mintEnrollmentToken, enrollNode } from "../enrollment";
-import { adoptStations } from "../station-registry";
+import { mintEnrollmentToken, enrollNode } from "../nodes/enrollment";
+import { adoptStations } from "../stations/registry";
 // Workspace authority spec: these routes are a workspace admin's. This file's "admin" fixture
 // (createTestUser role: "admin", a hub_operators seat) stands for one here; the real token path
 // is tests/integration/workspace-authority.test.ts.
@@ -48,7 +48,7 @@ import { workspaceAdminMiddleware as adminMiddleware } from "../../auth/workspac
 import { isUserAdmin } from "../../models/admin-users";
 import { agentsAdminRouter } from "../../routes/agents-admin";
 import { createPrincipal } from "../../../tests/helpers/principals";
-import { onProvisionStation } from "../station-hooks";
+import { onProvisionStation } from "../stations/hooks";
 import { provisionStation } from "./provision";
 import { roomForStation, roomAliasForStation } from "./station-room";
 import { forgetPrincipals } from "../../../tests/helpers/principals";

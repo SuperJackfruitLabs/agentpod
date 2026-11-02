@@ -1,6 +1,6 @@
 /** Explicit, owner-scoped onboarding. Existing assign/move APIs keep their semantics. */
-import { markGrantsRevoking } from "../services/station-forge-api";
-import { kickForgeApiRevoke } from "../services/forge-api-reconcile";
+import { markGrantsRevoking } from "../services/forge-api/station-forge-api";
+import { kickForgeApiRevoke } from "../services/forge-api/reconcile";
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
@@ -12,8 +12,8 @@ import { stationSetups } from "../db/schema/station-setup";
 import {
   provisionStationNow,
   stationSetupMatrixDomain,
-} from "../services/station-hooks";
-import { bridgeUserId } from "../services/matrix-as/names";
+} from "../services/stations/hooks";
+import { bridgeUserId } from "../services/matrix/names";
 import { roomForStation } from "../services/matrix-as/station-room";
 import { OrgPlaneError } from "../auth/org-plane/client";
 import { principalDirectory } from "../auth/org-plane/directory";

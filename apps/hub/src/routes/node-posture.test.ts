@@ -30,7 +30,7 @@ import { stationAudit } from "../db/schema/audit";
 import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { waitForNodeOnline } from "../../tests/helpers/wait";
-import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
+import { mintEnrollmentToken, enrollNode } from "../services/nodes/enrollment";
 import { gatewayRoutes } from "./gateway";
 import { nodePostureRoutes } from "./node-posture";
 import { websocket } from "../ws";

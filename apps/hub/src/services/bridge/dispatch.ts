@@ -73,7 +73,7 @@ import { ActivityCoalescer, type BoardActivity } from "./coalesce";
 import type { AgentSpanRecorder } from "../../telemetry/agent-spans";
 import { attemptSpanFacts } from "./attempt-facts";
 import { inDispatchSpan } from "../../telemetry/dispatch-span";
-import { isControlPairDenied } from "../control-pair";
+import { isControlPairDenied } from "../control/control-pair";
 import type { Fingerprint } from "../evidence/fingerprint";
 import { fingerprintWithin, resolveStationFingerprint, resolveStationOccupant, within } from "../evidence/station-fingerprint";
 import { fetchRelatedWork, prefetchRelatedWork, relatedBasis, relatedWorkEnabled } from "../superlibrary/related";

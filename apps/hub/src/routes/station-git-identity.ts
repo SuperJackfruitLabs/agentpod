@@ -32,17 +32,17 @@ import { eq } from "drizzle-orm";
 
 import { db } from "../db/drizzle";
 import { stationGitIdentities } from "../db/schema/git-identities";
-import * as broker from "../services/broker";
-import { getStation } from "../services/station-registry";
+import * as broker from "../services/broker/broker";
+import { getStation } from "../services/stations/registry";
 import { principalHandle, principalNames } from "../auth/org-plane/principals";
-import { recordAudit } from "../services/audit";
+import { recordAudit } from "../services/audit/audit";
 import {
   deliverCommitAuthor,
   registerStationGitIdentity,
   revokeStationGitIdentity,
-} from "../services/station-git-identity";
+} from "../services/forge/station-git-identity";
 import { VERB_RESULTS } from "@agentpod/contract";
-import type { FetchLike, ForgeConfig } from "../services/forge";
+import type { FetchLike, ForgeConfig } from "../services/forge/agent-account";
 import { createLogger } from "../utils/logger";
 import type { AuthUser } from "../auth/middleware";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";

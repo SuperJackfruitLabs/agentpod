@@ -15,7 +15,7 @@
  */
 
 import { test, expect, describe } from "bun:test";
-import { InMemoryHealthCache } from "../../src/services/health-cache";
+import { InMemoryHealthCache } from "../../src/services/nodes/health-cache";
 import type { StationHealthReport } from "@agentpod/contract";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import {
   bridgeUserId,
   bridgeAlias,
   bridgeAliasForHandle,
-} from "../../src/services/matrix-as/names";
+} from "../../src/services/matrix/names";
 import { provisionStationForAlias } from "../../src/services/matrix-as/provision";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";

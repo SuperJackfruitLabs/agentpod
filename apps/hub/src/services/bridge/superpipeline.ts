@@ -43,8 +43,7 @@
  */
 
 import type { BoardActivity } from "./coalesce";
-import type { GatePendingDelivery } from "../matrix-as/gates";
-import type { ElicitationPendingDelivery } from "../matrix-as/elicitation-card";
+import type { ElicitationPendingDelivery, GatePendingDelivery } from "./deliveries";
 import { context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import { tracer } from "../../telemetry/otel";
 import { injectTraceHeaders } from "../../telemetry/propagation";

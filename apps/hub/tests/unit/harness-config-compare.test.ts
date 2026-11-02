@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { compare } from "../../src/services/harness-config";
+import { compare } from "../../src/services/harness-config/harness-config";
 
 const SETTING = {
   id: "hermes.approvals.timeout", harness: "hermes", scope: "profile" as const,

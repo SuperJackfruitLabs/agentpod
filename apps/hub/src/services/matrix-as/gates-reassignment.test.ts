@@ -38,7 +38,7 @@ import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
 import { bridgeDispatches } from "../../db/schema/bridge";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
-import { mintEnrollmentToken, enrollNode } from "../enrollment";
+import { mintEnrollmentToken, enrollNode } from "../nodes/enrollment";
 import { createPrincipal } from "../../../tests/helpers/principals";
 // Workspace authority spec: these routes are a workspace admin's. This file's "admin" fixture
 // (createTestUser role: "admin", a hub_operators seat) stands for one here; the real token path
@@ -48,7 +48,7 @@ import { isUserAdmin } from "../../models/admin-users";
 import { agentsAdminRouter } from "../../routes/agents-admin";
 import { projectGate, roomAgentUser } from "./gates";
 import { roomForStation } from "./station-room";
-import { bridgeUserId, bridgeAlias } from "./names";
+import { bridgeUserId, bridgeAlias } from "../matrix/names";
 import { provisionStation } from "./provision";
 import type { GatePendingDelivery } from "./gates";
 import { forgetPrincipals } from "../../../tests/helpers/principals";

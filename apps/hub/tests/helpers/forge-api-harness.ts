@@ -14,7 +14,7 @@ import { db, rawSql } from "../../src/db/drizzle";
 import { stationForgeApiGrants as g, type StationForgeApiGrant } from "../../src/db/schema/forge-api-grants";
 import { getProvider, type ForgeProvider } from "../../src/services/forge-api/providers";
 import { githubProvider } from "../../src/services/forge-api/github";
-import type { ForgeApiDeps } from "../../src/services/station-forge-api";
+import type { ForgeApiDeps } from "../../src/services/forge-api/station-forge-api";
 import { createPrincipal } from "./principals";
 
 export const FORGE = "https://forge.recon.test";

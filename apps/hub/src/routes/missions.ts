@@ -17,12 +17,12 @@ import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { matrixMissions, matrixMissionMembers } from "../db/schema/matrix";
-import { matrixIdForPrincipal } from "../services/principal-matrix-id";
+import { matrixIdForPrincipal } from "../services/matrix/principal-id";
 import { grantAllowsPrincipal } from "../auth/org-plane/grants";
 import { principalHandle } from "../auth/org-plane/principals";
 import { callerGrant, callerPrincipal } from "../auth/caller-authority";
-import { isControlPairEnforced } from "../services/control-pair";
-import { bridgeUserId } from "../services/matrix-as/names";
+import { isControlPairEnforced } from "../services/control/control-pair";
+import { bridgeUserId } from "../services/matrix/names";
 import { missionAlias } from "../services/matrix-as/missions";
 import {
   ensureSpaceRecord,

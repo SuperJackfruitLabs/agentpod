@@ -14,7 +14,7 @@ import {
   salaamWorkDecisions,
   salaamWorkReports,
 } from "../../src/db/schema/salaam-work";
-import { makeSalaamExecution } from "../../src/services/salaam-authority";
+import { makeSalaamExecution } from "../../src/services/salaam/authority";
 import {
   reserveSalaamWork,
   deliverSalaamWork,
@@ -25,8 +25,8 @@ import {
   markReported,
   findUnreportedOutput,
 } from "../../src/services/bridge/ledger";
-import { workDigest } from "../../src/services/salaam-work";
-import * as broker from "../../src/services/broker";
+import { workDigest } from "../../src/services/salaam/work";
+import * as broker from "../../src/services/broker/broker";
 import { fakePlane } from "../helpers/fake-plane";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import corpus from "../../../../packages/contract/src/fixtures/salaam-work-payload-v1.json";

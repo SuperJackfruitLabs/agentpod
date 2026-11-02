@@ -25,7 +25,7 @@ import postgres from "postgres";
 import { createTestUser } from "../helpers/database";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { getProvider, type ForgeProvider } from "../../src/services/forge-api/providers";
-import { sealHandover } from "../../src/services/handover-seal";
+import { sealHandover } from "../../src/services/forge-api/handover-seal";
 import {
   createForgeApiGrant,
   deliverGrant,
@@ -35,7 +35,7 @@ import {
   POOL_RESERVE,
   claimFaults,
   type ForgeApiDeps,
-} from "../../src/services/station-forge-api";
+} from "../../src/services/forge-api/station-forge-api";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 const RUN = crypto.randomUUID().slice(0, 8);

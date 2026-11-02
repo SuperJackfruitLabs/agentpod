@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { SelfStation } from "../self-station";
+import type { SelfStation } from "../stations/self-station";
 import { linkFromOwnStation } from "./link-own";
 import { linkArtifact } from "./link";
 import type { LinkInput, LinkResult } from "./link";

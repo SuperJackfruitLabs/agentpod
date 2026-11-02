@@ -43,14 +43,14 @@ import {
   pollUntil,
   type FakeAcpNodeOpts,
 } from "../../tests/helpers/acp-fake-node";
-import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
-import { adoptStations } from "../services/station-registry";
+import { mintEnrollmentToken, enrollNode } from "../services/nodes/enrollment";
+import { adoptStations } from "../services/stations/registry";
 import {
   endSession,
   getSession,
   promptSession,
   _subscriberCountForTest,
-} from "../services/acp-sessions";
+} from "../services/acp/sessions";
 import { gatewayRoutes } from "./gateway";
 import { stationAcpRoutes } from "./station-acp";
 import { websocket } from "../ws";

@@ -43,12 +43,13 @@ import { createLogger } from "../../utils/logger";
 import { GATE_REQUEST_CONTENT_KEY, type GateRequestCard } from "@agentpod/contract";
 import { noteHubEvent } from "../push/hub-events";
 import { legacyRequestEvents } from "./legacy-events";
-import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix-identity";
+import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix/identity";
 import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plane/assertion";
-import { stationSpeaker } from "./names";
+import { stationSpeaker } from "../matrix/names";
 import { principalHandle } from "../../auth/org-plane/principals";
 import { roomForStation } from "./station-room";
 import { moveInProgress } from "./identity-move";
+import type { GatePendingDelivery } from "../bridge/deliveries";
 
 const log = createLogger("matrix-gates");
 
@@ -85,37 +86,7 @@ export type GateOptionId = (typeof GATE_OPTION_IDS)[number];
 export const isGateOptionId = (v: unknown): v is GateOptionId =>
   typeof v === "string" && (GATE_OPTION_IDS as readonly string[]).includes(v);
 
-/** The body superpipeline pushes on `gate.pending`. */
-export interface GatePendingDelivery {
-  event: "gate.pending";
-  boardId: string;
-  cardId: string;
-  gateId: string;
-  stageKey: string;
-  returnStageKey: string;
-  cardTitle: string;
-  producedBy: string;
-  /**
-   * What the reviewer is being asked to approve — the previous stage's
-   * handoff, bounded by the board at 600 characters.
-   *
-   * Optional because a board that has not shipped superpipeline#… yet sends none,
-   * and a gate without it must still render.
-   */
-  handoffSummary?: string | null;
-  /**
-   * What the board is CALLED, which this hub has no other way to learn — the board's
-   * metadata route resolves a user session, the same wall that makes `humansFor` an
-   * injected dependency.
-   *
-   * Optional, and that is load-bearing rather than politeness: a board that has not
-   * shipped the field yet sends none, and the room must keep the name it has rather
-   * than be renamed to nothing. See `renameIfNeeded`.
-   */
-  boardName?: string | null;
-  options: Array<{ id: string; label: string }>;
-  ts: string;
-}
+export type { GatePendingDelivery };
 
 /**
  * Is this a gate this hub knows how to post?

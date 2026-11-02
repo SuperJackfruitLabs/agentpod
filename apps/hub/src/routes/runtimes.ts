@@ -40,7 +40,7 @@ import {
   stopRuntime,
   enabledProviders,
   providerManifests,
-} from "../services/runtimes";
+} from "../services/runtimes/runtimes";
 
 export const runtimeRoutes = new Hono()
 

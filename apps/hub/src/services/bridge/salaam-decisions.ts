@@ -16,11 +16,11 @@ import {
   SalaamWorkPayload,
   canonicalSalaamWork,
 } from "../../../../../packages/contract/src/salaam-work-payload";
-import { workDigest } from "../salaam-work";
+import { workDigest } from "../salaam/work";
 import { stations } from "../../db/schema/stations";
-import { AlwaysAllowRefused, alwaysAllowFromAnswer } from "../agent-approval-rules";
-import { renewSalaamExecution, validateSalaamAuthority } from "../salaam-authority";
-import * as broker from "../broker";
+import { AlwaysAllowRefused, alwaysAllowFromAnswer } from "../salaam/approval-rules";
+import { renewSalaamExecution, validateSalaamAuthority } from "../salaam/authority";
+import * as broker from "../broker/broker";
 import type { SuperpipelineClient } from "./superpipeline";
 const strictSchema = SuperpipelineStrictDecision;
 const producerSchema = z

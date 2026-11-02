@@ -15,7 +15,7 @@
  */
 import { describe, test, expect } from "bun:test";
 import { ConfigRefusalCode } from "@agentpod/contract";
-import { statusForRefusal } from "../../src/services/harness-config-apply";
+import { statusForRefusal } from "../../src/services/harness-config/apply";
 
 /** Every code, with the status the documented rule gives it. */
 const EXPECTED: Record<string, 400 | 409> = {

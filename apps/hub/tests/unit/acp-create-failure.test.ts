@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { createSessionFailure } from "../../src/routes/station-acp";
-import { SalaamAuthorityDenied } from "../../src/services/salaam-authority";
-import { ControlPairDenied } from "../../src/services/control-pair";
+import { SalaamAuthorityDenied } from "../../src/services/salaam/authority";
+import { ControlPairDenied } from "../../src/services/control/control-pair";
 
 // Spec 2026-10-23 C10/C16: the console measured a 502 for "no dispatch grant", which an edge then
 // replaced with HTML. A refusal is 403; a node failure is 424/503; nothing is 502.

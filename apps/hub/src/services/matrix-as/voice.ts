@@ -15,8 +15,8 @@
  */
 
 import { VOICE_TRANSCRIPT_CONTENT_KEY, type VoiceTranscript } from "@agentpod/contract";
-import { decryptAttachment, parseMxc, type EncryptedFile } from "./attachments";
-import { MAX_VOICE_SECONDS, type Transcript, type Transcriber } from "../transcription-client";
+import { decryptAttachment, parseMxc, type EncryptedFile } from "../matrix/attachments";
+import { MAX_VOICE_SECONDS, type Transcript, type Transcriber } from "../speech/transcription-client";
 
 /**
  * The biggest audio file fetched, before decryption. Five minutes of voice is

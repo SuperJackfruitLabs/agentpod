@@ -25,11 +25,11 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import {
   mintEnrollmentToken,
   enrollNode,
-} from "../../src/services/enrollment";
-import { listNodes } from "../../src/services/node-registry";
+} from "../../src/services/nodes/enrollment";
+import { listNodes } from "../../src/services/nodes/registry";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
-import { connectionManager } from "../../src/services/connection-manager";
+import { connectionManager } from "../../src/services/broker/connection-manager";
 import {
   pollUntil,
   waitForNodeOnline,

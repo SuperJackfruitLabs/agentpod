@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { configurationHealthFrom } from "../../src/services/harness-config-apply";
+import { configurationHealthFrom } from "../../src/services/harness-config/apply";
 const health = {running:true,pid:42,cpuPct:null,memBytes:null,diskBytes:null,uptimeSec:null,lastActivity:null,note:null};
 test("Salaam configuration activation is optional for old nodes and requires live typed health",()=>{
   const configurationDigest="a".repeat(64);

@@ -3,8 +3,8 @@ import type { Station } from "@agentpod/contract";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
-import { adoptStations, announceStationsForNode } from "../../src/services/station-registry";
-import { onStationsAdopted } from "../../src/services/station-hooks";
+import { adoptStations, announceStationsForNode } from "../../src/services/stations/registry";
+import { onStationsAdopted } from "../../src/services/stations/hooks";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 /**

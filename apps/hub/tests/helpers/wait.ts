@@ -20,7 +20,7 @@
  * comes online still fails, it just fails with a diagnosis.
  */
 
-import { connectionManager } from "../../src/services/connection-manager";
+import { connectionManager } from "../../src/services/broker/connection-manager";
 
 /**
  * Poll `condition()` every `pollMs` until it returns something truthy, or

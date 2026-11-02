@@ -6,13 +6,13 @@ import { db } from "../../db/drizzle";
 import { acpSessions } from "../../db/schema/acp";
 import { bridgeDispatches } from "../../db/schema/bridge";
 import { salaamWorkOwners } from "../../db/schema/salaam-work";
-import { prepareSalaamWork, workDigest } from "../salaam-work";
+import { prepareSalaamWork, workDigest } from "../salaam/work";
 import {
   SalaamWorkPayload,
   canonicalSalaamWork,
 } from "../../../../../packages/contract/src/salaam-work-payload";
-import { validateSalaamAuthority } from "../salaam-authority";
-import * as broker from "../broker";
+import { validateSalaamAuthority } from "../salaam/authority";
+import * as broker from "../broker/broker";
 import type { ClaimedWork, RunContext } from "./superpipeline";
 
 const receiptSchema = z

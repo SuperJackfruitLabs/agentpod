@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { readFileSync } from "node:fs";
 import { cors } from "hono/cors";
 import { edgeSafeStatus } from "../../src/middleware/edge-safe-status";
-import { stationFailure } from "../../src/services/station-failure";
+import { stationFailure } from "../../src/services/stations/failure";
 
 // Spec 2026-10-23 C16: an edge replaces an origin 502/504 with CORS-less HTML, so the console
 // shows "Couldn't reach the hub" for what was really a station failure. The hub never sends them.

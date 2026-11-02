@@ -31,8 +31,8 @@
  */
 
 import { VERB_RESULTS } from "@agentpod/contract";
-import * as broker from "../broker";
-import { stationReportedMatrixId } from "../station-hooks";
+import * as broker from "../broker/broker";
+import { stationReportedMatrixId } from "../stations/hooks";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("adopt-signal");

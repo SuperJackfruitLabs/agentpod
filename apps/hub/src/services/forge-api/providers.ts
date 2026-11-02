@@ -6,7 +6,7 @@
  */
 import type { ForgeApiMode, ForgeApiPreset, ForgeApiProvider } from "@agentpod/contract";
 
-import type { FetchLike, ForgeConfig } from "../forge";
+import type { FetchLike, ForgeConfig } from "../forge/agent-account";
 export { ForgeApiConfigError } from "./errors";
 import { createForgejoProvider } from "./forgejo";
 import { githubProvider } from "./github";

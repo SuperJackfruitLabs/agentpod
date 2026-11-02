@@ -1,22 +1,22 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { EnrollRequest } from "@agentpod/contract";
-import { enrollNode, verifyNodeCredential } from "../services/enrollment";
-import { listNodes } from "../services/node-registry";
-import { nodesWithFixedImage } from "../services/runtimes";
+import { enrollNode, verifyNodeCredential } from "../services/nodes/enrollment";
+import { listNodes } from "../services/nodes/registry";
+import { nodesWithFixedImage } from "../services/runtimes/runtimes";
 import {
   executeRollout,
   planRollout,
   summarise,
   type RolloutNode,
-} from "../services/rollout";
-import { request as brokerRequest } from "../services/broker";
+} from "../services/nodes/rollout";
+import { request as brokerRequest } from "../services/broker/broker";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 import { logAdminAction, type LogAdminActionInput } from "../models/admin-audit-log";
 import { createLogger } from "../utils/logger";
-import { removeNode, nodeInTenant } from "../services/node-removal";
-import { requireFleetGrantReach } from "../services/grant-reach";
-import { isControlPairEnforced, isGrantReachDenied, GrantReachDenied } from "../services/control-pair";
+import { removeNode, nodeInTenant } from "../services/nodes/removal";
+import { requireFleetGrantReach } from "../services/control/grant-reach";
+import { isControlPairEnforced, isGrantReachDenied, GrantReachDenied } from "../services/control/control-pair";
 import { callerPrincipal } from "../auth/caller-authority";
 import { resolveTenantId } from "../auth/tenant";
 

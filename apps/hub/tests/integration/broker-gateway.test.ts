@@ -27,10 +27,10 @@ import { waitForNodeOnline } from "../helpers/wait";
 import {
   mintEnrollmentToken,
   enrollNode,
-} from "../../src/services/enrollment";
+} from "../../src/services/nodes/enrollment";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
-import * as broker from "../../src/services/broker";
+import * as broker from "../../src/services/broker/broker";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 // ─── Minimal test server ──────────────────────────────────────────────────────

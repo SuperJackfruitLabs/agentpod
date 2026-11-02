@@ -16,8 +16,8 @@ import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { agentApprovalRules as rules, type AgentApprovalRule } from "../db/schema/agent-approval-rules";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
-import { recordAudit } from "../services/audit";
-import { APPROVAL_RULE_SCOPES, NoOccupant, setApprovalRule } from "../services/agent-approval-rules";
+import { recordAudit } from "../services/audit/audit";
+import { APPROVAL_RULE_SCOPES, NoOccupant, setApprovalRule } from "../services/salaam/approval-rules";
 import type { AuthUser } from "../auth/middleware";
 
 const SetBody = z.object({ scope: z.enum(APPROVAL_RULE_SCOPES) }).strict();

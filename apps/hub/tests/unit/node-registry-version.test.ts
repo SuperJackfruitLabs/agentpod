@@ -13,7 +13,7 @@
  */
 
 import { test, expect } from "bun:test";
-import { annotateWithVersion } from "../../src/services/node-registry";
+import { annotateWithVersion } from "../../src/services/nodes/registry";
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 

@@ -9,7 +9,7 @@ import { authMiddleware } from "../../src/auth/middleware";
 import { enrollmentTokenRoutes } from "../../src/routes/enrollment-tokens";
 import { nodeEnrollRoutes, nodeRoutes } from "../../src/routes/nodes";
 import { stationRoutes } from "../../src/routes/stations";
-import { adoptStations } from "../../src/services/station-registry";
+import { adoptStations } from "../../src/services/stations/registry";
 import { tenantForOrg } from "../../src/auth/org-plane/tenant";
 
 /**

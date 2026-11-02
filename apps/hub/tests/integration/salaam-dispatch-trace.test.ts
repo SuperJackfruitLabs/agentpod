@@ -19,9 +19,9 @@ import {
   salaamWorkReports,
 } from "../../src/db/schema/salaam-work";
 import { runOnce, type DispatchDeps } from "../../src/services/bridge/dispatch";
-import { makeSalaamExecution } from "../../src/services/salaam-authority";
-import { workDigest } from "../../src/services/salaam-work";
-import * as broker from "../../src/services/broker";
+import { makeSalaamExecution } from "../../src/services/salaam/authority";
+import { workDigest } from "../../src/services/salaam/work";
+import * as broker from "../../src/services/broker/broker";
 import {
   _setProvidersForTest,
   ensureContextManager,

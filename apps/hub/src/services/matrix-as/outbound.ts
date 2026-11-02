@@ -12,8 +12,8 @@
  */
 
 import { PERMISSION_REQUEST_CONTENT_KEY, TURN_ERROR_CONTENT_KEY, type AcpEvent } from "@agentpod/contract";
-import { turnErrorCard } from "../turn-error";
-import { subscribe as subscribeToSession } from "../acp-sessions";
+import { turnErrorCard } from "../acp/turn-error";
+import { subscribe as subscribeToSession } from "../acp/sessions";
 import {
   deltaContent,
   LIVE_DELTA_TYPE,

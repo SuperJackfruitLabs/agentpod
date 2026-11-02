@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { createNodeRoutes } from "../../src/routes/nodes";
-import type { RolloutNode } from "../../src/services/rollout";
+import type { RolloutNode } from "../../src/services/nodes/rollout";
 
 /**
  * POST /api/nodes/update-all — the fleet rollout of issue #295.

@@ -48,11 +48,11 @@ import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { stationForgeApiGrants as g, type StationForgeApiGrant } from "../db/schema/forge-api-grants";
 import { isWorkspaceAdmin } from "../auth/workspace-authority";
-import { requireIssueCredentials } from "../services/grant-reach";
-import { isGrantReachDenied } from "../services/control-pair";
-import { recordAudit } from "../services/audit";
-import * as broker from "../services/broker";
-import type { FetchLike, ForgeConfig } from "../services/forge";
+import { requireIssueCredentials } from "../services/control/grant-reach";
+import { isGrantReachDenied } from "../services/control/control-pair";
+import { recordAudit } from "../services/audit/audit";
+import * as broker from "../services/broker/broker";
+import type { FetchLike, ForgeConfig } from "../services/forge/agent-account";
 import { getProvider } from "../services/forge-api/providers";
 import { ForgeApiConfigError } from "../services/forge-api/errors";
 import { instanceOrigin, isConfiguredForge, isIpLiteral } from "../services/forge-api/instance";
@@ -69,7 +69,7 @@ import {
   updateGrantPolicy,
   verifyGrant,
   type ForgeApiDeps,
-} from "../services/station-forge-api";
+} from "../services/forge-api/station-forge-api";
 import { createLogger } from "../utils/logger";
 import type { AuthUser } from "../auth/middleware";
 
@@ -262,7 +262,7 @@ export function createStationForgeApiRoutes(deps: StationForgeApiDeps) {
       now: () => new Date(),
       forgeOrigin: forge.baseUrl,
       // Loaded on use: libsodium has no business in the route module's import graph.
-      seal: async (pk, material) => (await import("../services/handover-seal")).sealHandover(pk, material),
+      seal: async (pk, material) => (await import("../services/forge-api/handover-seal")).sealHandover(pk, material),
       ...deps.service,
     };
   }

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { SalaamAuthority } from "../../../../../packages/contract/src/salaam-authority";
 import { traceMeta } from "../../telemetry/propagation";
-import * as broker from "../broker";
+import * as broker from "../broker/broker";
 const receipt = z
   .object({
     version: z.literal(1),

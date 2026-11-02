@@ -23,14 +23,14 @@ import { stationAudit } from "../../src/db/schema/audit";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
 import { waitForNodeOnline } from "../helpers/wait";
-import { enrollNode, mintEnrollmentToken } from "../../src/services/enrollment";
+import { enrollNode, mintEnrollmentToken } from "../../src/services/nodes/enrollment";
 import { createMcpProxyRoutes } from "../../src/routes/mcp-proxy";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { stationRoutes } from "../../src/routes/stations";
 import { websocket } from "../../src/ws";
-import { connectionManager } from "../../src/services/connection-manager";
+import { connectionManager } from "../../src/services/broker/connection-manager";
 import type { AuthUser } from "../../src/auth/middleware";
-import type { StationRow } from "../../src/services/station-registry";
+import type { StationRow } from "../../src/services/stations/registry";
 import { McpProxyFleetView } from "@agentpod/contract";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 

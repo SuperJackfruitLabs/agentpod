@@ -32,7 +32,7 @@ process.env.NODE_ENV = "test";
 import { describe, expect, test } from "bun:test";
 
 import { stationMatrixCredentialRoutesFor } from "./station-matrix-credential";
-import type { MatrixBridge } from "../services/matrix-as/index";
+import type { MatrixBridge } from "../services/matrix-as/service";
 
 const PATH = "/nodes/some-node/stations/some-station/matrix-credential";
 

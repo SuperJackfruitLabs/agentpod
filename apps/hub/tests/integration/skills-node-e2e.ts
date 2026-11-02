@@ -24,12 +24,12 @@ import { stations } from "../../src/db/schema/stations";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
-import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/nodes/enrollment";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { installFakePlane } from "../helpers/fake-plane";
 import { setGrant } from "../../src/auth/org-plane/grants";
-import { connectionManager } from "../../src/services/connection-manager";
-import * as broker from "../../src/services/broker";
+import { connectionManager } from "../../src/services/broker/connection-manager";
+import * as broker from "../../src/services/broker/broker";
 import {
   createSkillManagementRoutes,
   skillArtifactDownloadRoutes,

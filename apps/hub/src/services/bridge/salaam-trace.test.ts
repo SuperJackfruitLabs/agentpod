@@ -2,7 +2,7 @@ import { expect, test, spyOn } from "bun:test";
 import { context, trace, ROOT_CONTEXT, TraceFlags } from "@opentelemetry/api";
 import { ensureContextManager } from "../../telemetry/otel";
 import { forwardSalaamWorkTrace, traceDeliveryEvidence } from "./salaam-trace";
-import * as broker from "../broker";
+import * as broker from "../broker/broker";
 import corpus from "../../../../../packages/contract/src/fixtures/execution-evidence-v1.json";
 const binding = {
   ...corpus.success[0]!.value.binding,

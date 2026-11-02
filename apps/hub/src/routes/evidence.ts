@@ -55,9 +55,9 @@ import {
   type SessionRef,
   type WireItem,
 } from "../services/evidence/transcript";
-import { recordAudit } from "../services/audit";
+import { recordAudit } from "../services/audit/audit";
 import { EVIDENCE_READ, TRANSCRIPTS_READ, type GrantScope } from "../auth/org-plane/grants";
-import { contentRedactor } from "../services/redact-content";
+import { contentRedactor } from "../services/evidence/redact-content";
 
 export interface EvidenceDeps {
   now?: () => Date;

@@ -21,14 +21,14 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
-import { requireIssueCredentials } from "../services/grant-reach";
-import { isGrantReachDenied } from "../services/control-pair";
-import { bridgeUserId, bridgeLocalpart } from "../services/matrix-as/names";
+import { requireIssueCredentials } from "../services/control/grant-reach";
+import { isGrantReachDenied } from "../services/control/control-pair";
+import { bridgeUserId, bridgeLocalpart } from "../services/matrix/names";
 import { roomAliasForStation } from "../services/matrix-as/station-room";
 import { isMatrixUserInUse } from "../services/matrix-as/client";
 import { principalHandle } from "../auth/org-plane/principals";
-import { mintCredentialAuthorization, UnknownStationError } from "../services/matrix-credential";
-import { isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix-as/names";
+import { mintCredentialAuthorization, UnknownStationError } from "../services/matrix/credential";
+import { isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix/names";
 import {
   preJoinRefusal,
   type MoveState,

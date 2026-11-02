@@ -13,7 +13,7 @@
 import { Hono } from "hono";
 import { McpProxyChangeRequest, McpProxyRotateRequest } from "@agentpod/contract";
 
-import { changeProxy, fleetView, oneStation, rotateProxy } from "../services/mcp-proxy";
+import { changeProxy, fleetView, oneStation, rotateProxy } from "../services/stations/mcp-proxy";
 import type { AuthUser } from "../auth/middleware";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 

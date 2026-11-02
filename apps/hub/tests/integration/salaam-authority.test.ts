@@ -15,7 +15,7 @@ import {
   validateSalaamAuthority,
   salaamStationStopped,
   SalaamAuthorityDenied,
-} from "../../src/services/salaam-authority";
+} from "../../src/services/salaam/authority";
 import { fakePlane } from "../helpers/fake-plane";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 

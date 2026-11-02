@@ -43,13 +43,13 @@ import { eq } from "drizzle-orm";
 
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
-import { verifyNodeCredential } from "../services/enrollment";
+import { verifyNodeCredential } from "../services/nodes/enrollment";
 import { principalHandle } from "../auth/org-plane/principals";
-import { redeemCredentialAuthorization } from "../services/matrix-credential";
-import { bridgeLocalpart, isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix-as/names";
+import { redeemCredentialAuthorization } from "../services/matrix/credential";
+import { bridgeLocalpart, isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix/names";
 import { isMatrixUserInUse } from "../services/matrix-as/client";
 import type { IssuedCredentials } from "./station-matrix";
-import type { MatrixBridge } from "../services/matrix-as/index";
+import type { MatrixBridge } from "../services/matrix-as/service";
 
 export interface StationMatrixCredentialDeps {
   credentials: {

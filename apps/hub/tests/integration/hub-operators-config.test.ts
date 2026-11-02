@@ -5,7 +5,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { newPrincipalId } from "../helpers/fake-plane";
 import { db } from "../../src/db/drizzle";
 import { hubOperators } from "../../src/db/schema/operators";
-import { HubOperatorsConfigError, parseHubOperators, reconcileHubOperators } from "../../src/services/hub-operators";
+import { HubOperatorsConfigError, parseHubOperators, reconcileHubOperators } from "../../src/services/hub/operators";
 import { collectConfigErrors } from "../../src/validate-config";
 
 /**

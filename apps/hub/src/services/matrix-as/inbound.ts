@@ -22,11 +22,11 @@ import { matrixRooms } from "../../db/schema/matrix";
 import { acpSessions } from "../../db/schema/acp";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
-import { IDENTITY_UNAVAILABLE_TEXT, resolveMatrixId } from "../matrix-identity";
+import { IDENTITY_UNAVAILABLE_TEXT, resolveMatrixId } from "../matrix/identity";
 import { OrgPlaneError } from "../../auth/org-plane/client";
 import { getGrant, grantAllowsPrincipal } from "../../auth/org-plane/grants";
-import { isControlPairEnforced } from "../control-pair";
-import { bridgeUserId } from "./names";
+import { isControlPairEnforced } from "../control/control-pair";
+import { bridgeUserId } from "../matrix/names";
 import { boardRoomFor } from "./board-room";
 import { principalHandle } from "../../auth/org-plane/principals";
 import {
@@ -37,7 +37,7 @@ import {
 } from "./permissions";
 import { createLogger } from "../../utils/logger";
 import { parseGateDecision } from "./gates";
-import { imageNote, imageSource, isRefusal, loadImage, type PromptImage } from "./attachments";
+import { imageNote, imageSource, isRefusal, loadImage, type PromptImage } from "../matrix/attachments";
 import {
   audioSource,
   isVoiceRefusal,
@@ -48,9 +48,9 @@ import {
   voicePrompt,
   type VoiceResult,
 } from "./voice";
-import { MAX_VOICE_SECONDS, type Transcriber } from "../transcription-client";
+import { MAX_VOICE_SECONDS, type Transcriber } from "../speech/transcription-client";
 import { RoomQueue, type DispatchOutcome, type FreeOutcome, type QueuedPrompt } from "./room-queue";
-import { SESSION_BUSY_MESSAGE } from "../acp-sessions";
+import { SESSION_BUSY_MESSAGE } from "../acp/sessions";
 
 const log = createLogger("matrix-inbound");
 

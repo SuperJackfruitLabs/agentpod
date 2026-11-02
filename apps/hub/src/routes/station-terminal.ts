@@ -29,14 +29,14 @@
 
 import { Hono } from "hono";
 import { upgradeWebSocket } from "../ws";
-import * as broker from "../services/broker";
-import { getStation } from "../services/station-registry";
-import { gateCapability } from "../services/station-registry";
-import { requireGrantReach } from "../services/grant-reach";
+import * as broker from "../services/broker/broker";
+import { getStation } from "../services/stations/registry";
+import { gateCapability } from "../services/stations/registry";
+import { requireGrantReach } from "../services/control/grant-reach";
 import { isOrgPlaneUnavailable } from "../auth/caller-authority";
-import { isGrantReachDenied } from "../services/control-pair";
-import { connectionManager } from "../services/connection-manager";
-import { recordAudit } from "../services/audit";
+import { isGrantReachDenied } from "../services/control/control-pair";
+import { connectionManager } from "../services/broker/connection-manager";
+import { recordAudit } from "../services/audit/audit";
 import { db } from "../db/drizzle";
 import { isAllowedOrigin } from "../config";
 import type { AuthUser } from "../auth/middleware";

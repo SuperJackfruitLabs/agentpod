@@ -25,8 +25,8 @@ import {
   createFleetService,
   deriveStatus,
   type RawFleetRow,
-} from "../../src/services/fleet";
-import type { CachedHealth } from "../../src/services/health-cache";
+} from "../../src/services/nodes/fleet";
+import type { CachedHealth } from "../../src/services/nodes/health-cache";
 import type { StationHealthReport } from "@agentpod/contract";
 
 // ─── Seed data ────────────────────────────────────────────────────────────────

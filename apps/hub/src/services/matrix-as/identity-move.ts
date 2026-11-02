@@ -65,10 +65,10 @@ import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { matrixCredentialAuthorizations } from "../../db/schema/matrix-credentials";
 import { createLogger } from "../../utils/logger";
-import { bridgeUserId } from "./names";
+import { bridgeUserId } from "../matrix/names";
 import { roomForStation, unboundRoomsForStation } from "./station-room";
 import { principalHandle } from "../../auth/org-plane/principals";
-import { onStationMatrixIdReported } from "../station-hooks";
+import { onStationMatrixIdReported } from "../stations/hooks";
 
 const log = createLogger("identity-move");
 

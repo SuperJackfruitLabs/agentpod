@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { executeRollout, planRollout, type RolloutNode } from "../../src/services/rollout";
+import { executeRollout, planRollout, type RolloutNode } from "../../src/services/nodes/rollout";
 
 /**
  * Issue #295. Nothing ever asked the fleet to update: no ticker in the agent,

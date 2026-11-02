@@ -11,14 +11,14 @@ import { db, rawSql } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { createPrincipal } from "../../tests/helpers/principals";
-import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
+import { mintEnrollmentToken, enrollNode } from "../services/nodes/enrollment";
 // Workspace authority spec: these routes are a workspace admin's. This file's "admin" fixture
 // (createTestUser role: "admin", a hub_operators seat) stands for one here; the real token path
 // is tests/integration/workspace-authority.test.ts.
 import { workspaceAdminMiddleware as adminMiddleware } from "../auth/workspace-authority";
 import { isUserAdmin } from "../models/admin-users";
 import { agentsAdminRouter } from "./agents-admin";
-import { onProvisionStation } from "../services/station-hooks";
+import { onProvisionStation } from "../services/stations/hooks";
 import { setOrgPlaneForTests, TEST_PLANE } from "../auth/org-plane/config";
 import {
   OrgPlaneError,
@@ -568,7 +568,7 @@ test("the options list unplaced, unsuspended agents from the plane with their di
 
 test("setup on an empty station marks its forge API grants revoking and kicks the revoke after commit", async () => {
   const { harness } = await import("../../tests/helpers/forge-api-harness");
-  const { configureForgeApiReconcile } = await import("../services/forge-api-reconcile");
+  const { configureForgeApiReconcile } = await import("../services/forge-api/reconcile");
   const { pollUntil } = await import("../../tests/helpers/wait");
   const id = await station();
   const grantId = `fag_setup_${crypto.randomUUID().replace(/-/g, "")}`;

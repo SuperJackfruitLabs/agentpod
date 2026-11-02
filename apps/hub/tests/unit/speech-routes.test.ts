@@ -7,7 +7,7 @@ import {
   type HubSpeechRecord,
   type SpeechStore,
   type StationSpeechRecord,
-} from "../../src/services/speech-settings";
+} from "../../src/services/speech/speech-settings";
 import { adminSpeechRoutes, speechVoicesRoutes, stationSpeechRoutes } from "../../src/routes/speech-settings";
 import { encrypt, decrypt } from "../../src/utils/encryption";
 

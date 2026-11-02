@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { assertSalaamManagedMcp } from "../../src/services/salaam-mcp";
+import { assertSalaamManagedMcp } from "../../src/services/salaam/mcp";
 
 test("Salaam proxy claims require matching actual adapter capabilities", () => {
   const valid = {

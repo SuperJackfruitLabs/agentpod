@@ -20,10 +20,10 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { db } from "../db/drizzle";
-import * as broker from "../services/broker";
-import { getStation } from "../services/station-registry";
-import { recordAudit } from "../services/audit";
-import { gateCapability } from "../services/station-registry";
+import * as broker from "../services/broker/broker";
+import { getStation } from "../services/stations/registry";
+import { recordAudit } from "../services/audit/audit";
+import { gateCapability } from "../services/stations/registry";
 import type { AuthUser } from "../auth/middleware";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 

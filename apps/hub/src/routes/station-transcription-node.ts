@@ -32,11 +32,11 @@ import { eq } from "drizzle-orm";
 
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
-import { verifyNodeCredential } from "../services/enrollment";
+import { verifyNodeCredential } from "../services/nodes/enrollment";
 import {
   resolveTranscriptionFor,
   type ResolvedTranscription,
-} from "../services/transcription-settings";
+} from "../services/speech/transcription-settings";
 
 export interface NodeTranscriptionDeps {
   /** Injected by tests; defaults to Phase A's resolver. */

@@ -4,12 +4,12 @@ import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { createPrincipal } from "../../src/auth/org-plane/principals";
-import { connectionManager } from "../../src/services/connection-manager";
-import { handleNodeMessage } from "../../src/services/broker";
-import { createMatrixBridge, matrixBridgeConfig } from "../../src/services/matrix-as";
+import { connectionManager } from "../../src/services/broker/connection-manager";
+import { handleNodeMessage } from "../../src/services/broker/broker";
+import { createMatrixBridge, matrixBridgeConfig } from "../../src/services/matrix-as/service";
 import { provisionStation } from "../../src/services/matrix-as/provision";
-import { onStationsAdopted } from "../../src/services/station-hooks";
-import { announceStationsForNode } from "../../src/services/station-registry";
+import { onStationsAdopted } from "../../src/services/stations/hooks";
+import { announceStationsForNode } from "../../src/services/stations/registry";
 
 /**
  * Item 9 live gap (staging, hub 34aac256): the node reported the new persona, but the station's

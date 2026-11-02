@@ -17,8 +17,8 @@ import { ModalRuntimeProvisioner } from "./modal";
 import { createModalApi } from "./modal-api";
 import type { CreateModalApiOptions } from "./modal-api";
 import { FlyMachinesProvisioner } from "./fly";
-import { createActivityToucher } from "../runtime-activity";
-import { setActivityHook } from "../broker";
+import { createActivityToucher } from "./runtime-activity";
+import { setActivityHook } from "../broker/broker";
 
 export interface BootstrapOptions {
   /**

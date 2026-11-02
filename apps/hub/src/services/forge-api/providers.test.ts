@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { ForgeApiMode, ForgeApiPreset, ForgeApiProvider } from "@agentpod/contract";
 
-import type { FetchLike } from "../forge";
+import type { FetchLike } from "../forge/agent-account";
 import { ForgeApiConfigError } from "./errors";
 import { tokenName } from "./forgejo";
 import { getProvider, splitRepo, type ForgeGrantRef } from "./providers";

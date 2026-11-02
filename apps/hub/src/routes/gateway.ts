@@ -12,17 +12,17 @@
 
 import { Hono } from "hono";
 import { GatewayClientMessage } from "@agentpod/contract";
-import { verifyNodeCredential } from "../services/enrollment";
-import { setNodeStatus, setNodeAgentVersion, setNodeCapabilities } from "../services/node-registry";
-import { connectionManager } from "../services/connection-manager";
-import type { Send, Close } from "../services/connection-manager";
-import { handleNodeMessage, dropNode } from "../services/broker";
+import { verifyNodeCredential } from "../services/nodes/enrollment";
+import { setNodeStatus, setNodeAgentVersion, setNodeCapabilities } from "../services/nodes/registry";
+import { connectionManager } from "../services/broker/connection-manager";
+import type { Send, Close } from "../services/broker/connection-manager";
+import { handleNodeMessage, dropNode } from "../services/broker/broker";
 import { upgradeWebSocket } from "../ws";
-import { autoAdoptProvisionedHarness } from "../services/runtime-autoadopt";
-import { completeRuntimeStartForNode } from "../services/runtimes";
-import { refreshAdoptedCapabilities, announceStationsForNode } from "../services/station-registry";
-import { recordHealth, clearNode } from "../services/health-cache";
-import { reportTurnError } from "../services/acp-sessions";
+import { autoAdoptProvisionedHarness } from "../services/runtimes/autoadopt";
+import { completeRuntimeStartForNode } from "../services/runtimes/runtimes";
+import { refreshAdoptedCapabilities, announceStationsForNode } from "../services/stations/registry";
+import { recordHealth, clearNode } from "../services/nodes/health-cache";
+import { reportTurnError } from "../services/acp/sessions";
 import { reportAgentTurn } from "../services/push/fleet/agent-reports";
 
 // Node connects with `Authorization: Bearer <nodeId>:<nodeSecret>`.

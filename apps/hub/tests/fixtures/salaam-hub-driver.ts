@@ -21,12 +21,12 @@ import {
 import { createStationTokenRoutes } from "../../src/routes/station-token";
 import { salaamMcpFixture } from "./salaam-mcp-server";
 import { createTestUser, deleteTestUser } from "../helpers/database";
-import { connectionManager } from "../../src/services/connection-manager";
+import { connectionManager } from "../../src/services/broker/connection-manager";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
-import * as sessions from "../../src/services/acp-sessions";
-import { getSalaamPrompt } from "../../src/services/salaam-prompts";
-import * as authority from "../../src/services/salaam-authority";
+import * as sessions from "../../src/services/acp/sessions";
+import { getSalaamPrompt } from "../../src/services/salaam/prompts";
+import * as authority from "../../src/services/salaam/authority";
 
 const cfg = JSON.parse(readFileSync(process.argv[2]!, "utf8"));
 const database = new URL(process.env.DATABASE_URL ?? "http://missing");

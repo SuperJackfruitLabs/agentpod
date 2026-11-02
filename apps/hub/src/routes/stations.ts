@@ -14,7 +14,7 @@
  *   DELETE /stations/:stationId             → unadopt
  */
 
-import { stationFailure } from "../services/station-failure";
+import { stationFailure } from "../services/stations/failure";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { zValidator } from "@hono/zod-validator";
@@ -24,8 +24,8 @@ import { db } from "../db/drizzle";
 import { nodes } from "../db/schema/nodes";
 import { resolveTenantId } from "../auth/tenant";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
-import * as broker from "../services/broker";
-import { connectionManager } from "../services/connection-manager";
+import * as broker from "../services/broker/broker";
+import { connectionManager } from "../services/broker/connection-manager";
 import { VERB_RESULTS } from "@agentpod/contract";
 import { sniffImage } from "../utils/sniff-image";
 import {
@@ -34,7 +34,7 @@ import {
   unadopt,
   getStation,
   reportUnknownCapabilities,
-} from "../services/station-registry";
+} from "../services/stations/registry";
 
 /** The most a console file read may ask for: an image preview, not a download. */
 const FILE_READ_MAX_BYTES = 8 * 1024 * 1024;

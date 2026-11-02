@@ -22,7 +22,7 @@ import { db } from "../../../db/drizzle";
 import { matrixRooms } from "../../../db/schema/matrix";
 import { stations } from "../../../db/schema/stations";
 import { principalForUser } from "../../../auth/org-plane/principals";
-import { matrixIdForPrincipal } from "../../principal-matrix-id";
+import { matrixIdForPrincipal } from "../../matrix/principal-id";
 import type { ReportingAgent } from "./agent-reports";
 import { cardName } from "./names";
 

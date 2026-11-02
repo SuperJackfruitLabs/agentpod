@@ -25,8 +25,8 @@ import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { nodes } from "../db/schema/nodes";
-import * as broker from "../services/broker";
-import { recordAudit } from "../services/audit";
+import * as broker from "../services/broker/broker";
+import { recordAudit } from "../services/audit/audit";
 import type { AuthUser } from "../auth/middleware";
 import { tenantScope } from "../db/tenant-scope";
 

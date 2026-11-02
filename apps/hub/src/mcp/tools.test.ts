@@ -12,7 +12,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { registerHubTools, type ToolDeps } from "./tools";
-import type { SelfStation } from "../services/self-station";
+import type { SelfStation } from "../services/stations/self-station";
 
 /** A stand-in for McpServer that records what was registered. */
 function recordingServer() {

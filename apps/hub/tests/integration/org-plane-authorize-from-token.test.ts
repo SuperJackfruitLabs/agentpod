@@ -9,9 +9,9 @@ import { setOrgPlaneForTests, TEST_PLANE } from "../../src/auth/org-plane/config
 import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../../src/auth/org-plane/directory";
 import { OrgPlaneError, type PlanePrincipal } from "../../src/auth/org-plane/client";
 import { OrgPlaneUnavailable, type TokenAuthority } from "../../src/auth/caller-authority";
-import { isControlPairDenied, isGrantReachDenied } from "../../src/services/control-pair";
-import { requireGrantReach, requireIssueCredentials } from "../../src/services/grant-reach";
-import { createSession } from "../../src/services/acp-sessions";
+import { isControlPairDenied, isGrantReachDenied } from "../../src/services/control/control-pair";
+import { requireGrantReach, requireIssueCredentials } from "../../src/services/control/grant-reach";
+import { createSession } from "../../src/services/acp/sessions";
 import { stationAcpRoutes } from "../../src/routes/station-acp";
 import { createStationSayRoutes } from "../../src/routes/station-say";
 import { createMissionRoutes } from "../../src/routes/missions";

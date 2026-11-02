@@ -27,7 +27,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { getProvider, type ForgeProvider } from "../../src/services/forge-api/providers";
-import type { ForgeApiDeps } from "../../src/services/station-forge-api";
+import type { ForgeApiDeps } from "../../src/services/forge-api/station-forge-api";
 import { createStationForgeApiRoutes } from "../../src/routes/station-forge-api";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 

@@ -67,8 +67,8 @@ import { declaredHarnessConfig } from "../db/schema/harness-config";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
-import * as broker from "../services/broker";
-import { getStation, type StationRow } from "../services/station-registry";
+import * as broker from "../services/broker/broker";
+import { getStation, type StationRow } from "../services/stations/registry";
 import {
   declare,
   undeclare,
@@ -79,8 +79,8 @@ import {
   setOptOut,
   clearOptOut,
   listOptOuts,
-} from "../services/harness-config";
-import { planFor, applyFor, ConfigApplyError, getAppliedWrites, readConfigurationHealth } from "../services/harness-config-apply";
+} from "../services/harness-config/harness-config";
+import { planFor, applyFor, ConfigApplyError, getAppliedWrites, readConfigurationHealth } from "../services/harness-config/apply";
 import { callerPrincipal } from "../auth/caller-authority";
 import type { AuthUser } from "../auth/middleware";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";

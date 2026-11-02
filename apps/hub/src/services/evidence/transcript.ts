@@ -16,7 +16,7 @@ import { foldEvidenceEvent, emptyEvidenceFold, itemFirstSeq, type EvidenceItem }
 import { db } from "../../db/drizzle";
 import { acpEvents, acpSessions } from "../../db/schema/acp";
 import { tenantScope } from "../../db/tenant-scope";
-import type { Redactor } from "../redact-content";
+import type { Redactor } from "./redact-content";
 
 export const PAGE_LIMIT = 200;
 export const FIELD_LIMIT_BYTES = 16 * 1024;

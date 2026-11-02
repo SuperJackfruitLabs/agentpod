@@ -13,7 +13,7 @@ import {
   createSpeechSettings,
   dbSpeechStore,
   SPEECH_SETTING_KEY,
-} from "../../src/services/speech-settings";
+} from "../../src/services/speech/speech-settings";
 import { stationForRoom } from "../../src/services/matrix-as/stations";
 import { TENANT_SCOPED_TABLES } from "../../src/db/tenant-scope";
 import { encrypt, decrypt } from "../../src/utils/encryption";

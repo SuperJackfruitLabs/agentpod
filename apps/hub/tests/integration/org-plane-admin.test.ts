@@ -8,7 +8,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { setOrgPlaneForTests, TEST_PLANE } from "../../src/auth/org-plane/config";
 import { hubOperatorMiddleware } from "../../src/auth/workspace-authority";
 import { isUserAdmin } from "../../src/models/admin-users";
-import { requireFleetGrantReach } from "../../src/services/grant-reach";
+import { requireFleetGrantReach } from "../../src/services/control/grant-reach";
 import { adminRouter } from "../../src/routes/admin";
 import { meRoutes } from "../../src/routes/me";
 

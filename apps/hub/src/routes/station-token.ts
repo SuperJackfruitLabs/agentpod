@@ -37,7 +37,7 @@ import { decodeJwt } from "jose";
 
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
-import { verifyNodeCredential } from "../services/enrollment";
+import { verifyNodeCredential } from "../services/nodes/enrollment";
 import { HUB_AUDIENCE, STATION_TOKEN_AUDIENCES } from "../config";
 import { orgPlane, type OrgPlaneConfig } from "../auth/org-plane/config";
 import { orgPlaneClient, OrgPlaneError, type OrgPlaneClient } from "../auth/org-plane/client";

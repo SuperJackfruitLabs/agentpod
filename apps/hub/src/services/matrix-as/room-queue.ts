@@ -14,7 +14,7 @@
  * a node or a database.
  */
 
-import type { PromptImage } from "./attachments";
+import type { PromptImage } from "../matrix/attachments";
 
 export interface QueuedPrompt {
   text: string;

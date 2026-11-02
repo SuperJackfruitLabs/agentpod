@@ -42,12 +42,12 @@ import { stations } from "../../src/db/schema/stations";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUser } from "../helpers/database";
-import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/nodes/enrollment";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import {
   mintCredentialAuthorization,
   redeemCredentialAuthorization,
-} from "../../src/services/matrix-credential";
+} from "../../src/services/matrix/credential";
 import { createStationMatrixCredentialRoutes } from "../../src/routes/station-matrix-credential";
 import { MatrixUserInUse } from "../../src/services/matrix-as/client";
 import type { IssuedCredentials } from "../../src/routes/station-matrix";

@@ -25,8 +25,8 @@ import { createStationGitIdentityRoutes } from "../../src/routes/station-git-ide
 import { createStationMatrixRoutes } from "../../src/routes/station-matrix";
 import { createMcpProxyRoutes } from "../../src/routes/mcp-proxy";
 import { createSkillManagementRoutes } from "../../src/routes/skill-management";
-import type { TranscriptionSettings } from "../../src/services/transcription-settings";
-import type { SpeechSettings } from "../../src/services/speech-settings";
+import type { TranscriptionSettings } from "../../src/services/speech/transcription-settings";
+import type { SpeechSettings } from "../../src/services/speech/speech-settings";
 
 /**
  * Workspace authority spec, step 4 (W4): a node, station or runtime belongs to the workspace, not
