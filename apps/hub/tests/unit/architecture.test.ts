@@ -49,7 +49,6 @@ const TREES: Tree[] = [
     oversize: {
       "services/bridge/dispatch.ts": 1338,
       "services/bridge/salaam-dispatch.ts": 1583,
-      "services/matrix-as/outbound.ts": 1147,
       "services/forge-api/station-forge-api.ts": 2082,
       "services/runtimes/runtimes.ts": 1317,
     },
