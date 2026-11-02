@@ -193,8 +193,13 @@ describe("createFlyPacer", () => {
     // same evidence, no waiting, and an exact assertion instead of a fuzzy one.
     const delays: number[] = [];
     const realSetTimeout = globalThis.setTimeout;
+    //
+    // Only the client's own timers are recorded. The swap is process-wide, and
+    // `bun test` runs every file in one process: a Postgres connection left by
+    // an earlier file arms its 20 s idle timer through the same global when a
+    // late reply lands (seen with plane-reads.test.ts run just before this one).
     globalThis.setTimeout = ((fn: () => void, ms?: number) => {
-      delays.push(ms ?? 0);
+      if (new Error().stack?.includes("provisioner/fly-api.ts")) delays.push(ms ?? 0);
       return realSetTimeout(fn, 0);
     }) as unknown as typeof globalThis.setTimeout;
 
