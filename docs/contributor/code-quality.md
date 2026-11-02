@@ -3,8 +3,9 @@
 > **Checked.** Every number below is held by a script or a test that fails when it is wrong.
 > This page explains them; the numbers themselves live in the files it cites.
 
-Phase 0 of the modularity work (2026-11-02): guardrails, not restructuring. Each check records
-how the code looks today and fails if it gets worse. Each one also fails if it gets **better**
+Phase 0 of the modularity work (2026-11-02) put these guardrails in; Phases 1–7 restructured the
+code under them ([modularity-plan.md](modularity-plan.md) has the outcome). Each check records
+how the code looks and fails if it gets worse. Each one also fails if it gets **better**
 without the record being lowered, so a stale record cannot let the next regression through.
 
 ## TypeScript lint: `pnpm lint:ts`
@@ -31,9 +32,12 @@ the repo's TypeScript 5.9. Configuration: [`.oxlintrc.json`](../../.oxlintrc.jso
   [`scripts/lint-baseline.json`](../../scripts/lint-baseline.json). A count may fall but never
   rise; a rule not in the baseline must be clean. After a cleanup, `pnpm lint:ts --update`
   writes the lower counts (it refuses to raise one); lint fails until you do.
-- **Shipped source stays clean** of the rules listed in `SRC_CLEAN` in `scripts/lint.mjs`
-  (floating promises among them), whatever the baseline allows in tests and scripts. "Shipped"
-  means under a `src/` folder and not a test file.
+- **Shipped source stays clean** of the rules listed in `SRC_CLEAN` in `scripts/lint.mjs`,
+  whatever the baseline allows in tests and scripts. "Shipped" means under a `src/` folder and
+  not a test file. Since Phase 7 that is 16 rules, among them `any`, an empty block without a
+  comment, floating and misused promises, unused code, type-only imports written as values, and
+  unnecessary assertions and conversions. `no-console` is not among them: the hub's 79 plain
+  stdout lines are deliberate (modularity-plan.md says why).
 - **Before running it:** `pnpm install --frozen-lockfile`, then
   `(cd apps/console && pnpm exec svelte-kit sync)` and `(cd cloudflare/worker-v2 && npm ci)`.
   Without them the typed rules cannot load those projects and report `tsconfig-error`.
@@ -58,7 +62,9 @@ Linters: `errcheck`, `govet`, `staticcheck`, `ineffassign`, `unused`, `gosec`, `
 were measured and left off (mostly style). gosec's file-permission, variable-path and
 subprocess checks are off because they fire on the node-agent's purpose; the config says why
 for each. The script always analyses the linux/amd64 build, so a Mac and CI count the same.
-The ratchet is the same as for TypeScript, per linter, in
+In shipped code `errcheck` and `bodyclose` are at zero since Phase 7: an error the code means
+to drop is dropped with `_ =` and a comment saying why. The ratchet is the same as for
+TypeScript, per linter, in
 [`scripts/lint-go-baseline.json`](../../scripts/lint-go-baseline.json); `pnpm lint:go --update`
 locks in an improvement.
 
@@ -182,6 +188,54 @@ wiring in `cmd/`; their command tables and references live in `internal/nodecli`
 
 When a number falls, the test names it; lower the recorded value in the same change. Never raise
 one to make a change fit: split the file or break the edge instead.
+
+## Inside the large modules
+
+Phases 3 and 4 split the hub's seven files over 1,000 lines. Each old file that other code
+imported stayed as a **surface**: a file of re-exports with the same export set as before
+(compared at runtime by its characterization test), so no caller changed. The pieces are flat
+files in the module, named by the surface they came from:
+
+| Module | Surface | Pieces |
+|---|---|---|
+| `acp` | `sessions.ts` (re-exports, and registers the node-online hook) | the session store and rows (`session-state`, `rows`), opening and ending (`open`, `end`, `ending`, `cancel`), the wire and its streams (`transport`, `ws-stream`, `handshake`, `updates`, `events`), turns and permissions (`turn`, `prompt`, `permissions`, `gates`, `busy`, `timing`), Salaam liveness (`salaam-authority`, `recovery`), boot reconciliation (`boot`) |
+| `bridge` | `dispatch.ts`, `salaam-dispatch.ts` | `dispatch-*` (types, grant, readiness, prompt, run, turn, work, exits) and `salaam-dispatch-*` (plan, start, drive, drivers, settle, release, resume, expired, stopped, proofs, log) |
+| `forge-api` | `station-forge-api.ts` | `grant-*`, one file per step of a grant's life (create, claim, mint, deliver, verify, rotate, revoke, policy, transition) and its shared types and rows |
+| `runtimes` | `runtimes.ts` | one file per lifecycle verb (`create`, `start`, `stop`, `destroy`, `reprovision`, `rotation`, `probe`), the reads, the rows, the unobserved and auto-adopt sweeps |
+| `matrix-as` | `gates.ts`, `outbound.ts` | `gate-*` (wire, projection, decision, resolve, reads, sweep) and `outbound-*` (state, send, streams, flush, handle, marks, payloads, log) |
+
+A new file in one of these modules goes beside its siblings with the same prefix. Import a
+piece from inside the module; from outside, import the module's `index.ts`.
+
+## The console
+
+Route pages compose components and hold no domain logic. The station page
+(`routes/nodes/[id]/stations/[stationId]/+page.svelte`) loads the station, derives what the
+caller may do, and composes `lib/components/stations/station-page/`: `StationHeader`,
+`StationTabBar` (the roving tabindex), `StationConfigTab`, `StationAboutSheet` and
+`StationConfigEditorDialog`. Which tabs and configuration sections a station has, and which
+one a URL selects, is the pure `station-page/tabs.ts`. The panels it hosts are the components
+beside it in `lib/components/stations/`. The console's files are held to the same 1,000-line
+limit by the hub's architecture test (its `oversize` record is empty).
+
+## Practices
+
+- **Characterize before restructuring.** Before a file splits, pin what it does that no test
+  pins: its exports, its calls in order, its output. Commit the pin on its own against the old
+  code, and see each new test fail against a change planted in the old code. A test that cannot
+  fail proves nothing.
+- **Move, then fix.** A split moves code verbatim (methods with their receivers, comments with
+  their code) and exports only what crosses the new boundary. Behaviour changes, even obvious
+  improvements, go in their own change.
+- **Snapshots must hold in a bare environment and on Linux.** Fix the clock, the viewport, ids
+  and anything else the machine supplies; normalise what a framework only marks for a frame
+  (bits-ui's `data-starting-style`), never the content. Run the test with `env -i` and with
+  `CI=true` (where a missing snapshot fails instead of being written), and on its own with `-t`.
+  A golden written on macOS must not depend on the platform.
+- **A lint finding is fixed, not hidden.** Where a rule is wrong about a line (a defensive
+  conversion of a value TypeScript cannot see, or tsgolint reading a file under a different
+  tsconfig than the one that compiles it), disable it for that line only, with
+  `// oxlint-disable-next-line <rule> -- <why>`.
 
 ## In CI
 

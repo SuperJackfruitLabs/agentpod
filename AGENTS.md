@@ -19,6 +19,17 @@ Per-area notes that are worth reading before touching that area:
 | [`docs/README.md`](./docs/README.md) | What every document in `docs/` is for, and which kind it is |
 | [`docs/contributor/code-quality.md`](./docs/contributor/code-quality.md) | The lint and architecture ratchets (`pnpm lint:ts`, `pnpm lint:go`, the architecture tests): counts may fall, never rise |
 
+## Structure rules
+
+The code's shape is held by tests, not by review (`docs/contributor/code-quality.md`). In the
+hub, top-level folders import down `HUB_LAYERS`, and every folder under `services/` is a module
+imported from outside only through its `index.ts` (named re-exports, nothing else), importing
+only modules in a lower `SERVICE_LAYERS` tier. No shipped file over 1,000 lines (TypeScript or
+Go), no Go package over 4,000 (`internal/forgeapi` is the one held exception), and lint counts
+only fall (`pnpm lint:ts`, `pnpm lint:go`; shipped source stays clean of the `SRC_CLEAN` rules).
+Before splitting a file, pin its behaviour with characterization tests committed against the
+old code; a split moves code and changes no behaviour.
+
 ## MCP servers
 
 Use `context7` when you need documentation for a library (Svelte, Hono, Drizzle, Bun) rather
