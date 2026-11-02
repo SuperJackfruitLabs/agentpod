@@ -20,10 +20,11 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
 
-    // Path aliases
-    "baseUrl": ".",
+    // Path aliases. Relative to this file, with no baseUrl: TypeScript 7 (and the
+    // type-aware linter, which runs on it) removed baseUrl, and nothing here
+    // resolves a bare specifier through it.
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
 
     // Some stricter flags

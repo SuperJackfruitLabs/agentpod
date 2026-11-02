@@ -17,6 +17,7 @@ Per-area notes that are worth reading before touching that area:
 | [`TESTING.md`](./TESTING.md) | How to run and write tests per tier, and the test-postgres requirement |
 | [`CONTRIBUTING.md`](./CONTRIBUTING.md) | Branch flow, commit style, what to run before pushing |
 | [`docs/README.md`](./docs/README.md) | What every document in `docs/` is for, and which kind it is |
+| [`docs/contributor/code-quality.md`](./docs/contributor/code-quality.md) | The lint and architecture ratchets (`pnpm lint:ts`, `pnpm lint:go`, the architecture tests): counts may fall, never rise |
 
 ## MCP servers
 

@@ -191,7 +191,10 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 		}
 		// Reject a wrong package before claiming any on-disk namespace. The
 		// store verifies it again when persisting the plan under its own lock.
-		artifact, err := skills.ReadArtifact(ctx, bytes.NewReader(archive), params["archiveSHA256"], harness)
+		// `=`, not `:=`: a new err here would also catch the store's error
+		// below and drop it, leaving a nil store.
+		var artifact *skills.Artifact
+		artifact, err = skills.ReadArtifact(ctx, bytes.NewReader(archive), params["archiveSHA256"], harness)
 		if err != nil {
 			return nil, false, err
 		}

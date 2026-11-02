@@ -1,0 +1,48 @@
+# golangci-lint v2, pinned in CI and in scripts/lint-go.mjs (see docs/contributor/code-quality.md).
+# Findings that exist today are counted per linter in scripts/lint-go-baseline.json at the repo
+# root; a count may fall, never rise.
+version: "2"
+
+run:
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errcheck
+    - errorlint
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - noctx
+    - staticcheck
+    - unconvert
+    - unused
+  # revive and gocritic were measured (2026-11-02: 343 and 25 findings) and left off: almost all
+  # of it is style (exported-symbol comments, unused parameters on interface methods), not defects.
+  settings:
+    gosec:
+      excludes:
+        # The node-agent's job is to read and write files at operator- and harness-chosen paths
+        # and to launch harness processes, so these fire on the product's purpose, not on bugs
+        # (2026-11-02: 222, 215, 118, 31 and 57 findings respectively).
+        - G301 # directory permissions
+        - G302 # chmod / open file permissions
+        - G304 # file path from a variable
+        - G306 # WriteFile permissions
+        - G204 # subprocess launched with a variable
+        # Unchecked errors are errcheck's, which applies the exclusion presets below; G104 would
+        # count every one of them a second time.
+        - G104
+  exclusions:
+    presets:
+      - std-error-handling
+      - common-false-positives
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

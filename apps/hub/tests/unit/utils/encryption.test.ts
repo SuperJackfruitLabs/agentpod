@@ -137,6 +137,13 @@ describe('Encryption Utility', () => {
       
       await expect(decrypt(truncated)).rejects.toThrow();
     });
+
+    test('a decrypt failure keeps the underlying error as its cause', async () => {
+      const error = await decrypt('not-valid-base64!!!').catch((e: unknown) => e);
+      if (!(error instanceof Error)) throw new Error('decrypt did not reject with an Error');
+      expect(error.message).toBe('Failed to decrypt data');
+      expect(error.cause).toBeDefined();
+    });
   });
 
   describe('clearKeyCache', () => {

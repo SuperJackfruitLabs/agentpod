@@ -1,0 +1,18 @@
+{
+  // The repository-level scripts, as a project of their own. Without it they fall to the
+  // root tsconfig.json, a solution file whose references the type-aware linter rejects.
+  // Bun's types come from the hub, which is where the scripts' runtime is installed.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "typeRoots": ["../apps/hub/node_modules/@types"],
+    "types": ["bun"]
+  },
+  "include": ["*.ts", "*.mjs"]
+}

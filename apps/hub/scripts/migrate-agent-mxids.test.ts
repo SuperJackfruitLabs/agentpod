@@ -68,7 +68,6 @@ test("a room whose new address matches its recorded one is skipped, not re-sent"
     rooms: async () => [{ roomId: "!r:h", handle: "writer-quill", oldUserId: "@agent_writer-quill:h" }],
     invite: fail,
     isJoined: async () => false,
-    isJoined: async () => false,
     join: fail,
     leave: fail,
     setDirect: fail,

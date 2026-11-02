@@ -47,6 +47,13 @@ cd apps/node-agent && go test -race ./...
 cd apps/console && pnpm check && pnpm test
 ```
 
+And the lint ratchets, which may only fall ([docs/contributor/code-quality.md](docs/contributor/code-quality.md)):
+
+```bash
+pnpm lint:ts                     # oxlint, type-aware; --update after a cleanup
+pnpm lint:go                     # golangci-lint v2.15.0 on the node-agent; --update after a cleanup
+```
+
 ## Deployment
 
 Operators: see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (hub/VPS + console/Cloudflare Pages) and [docs/OPERATING.md](docs/OPERATING.md) (day-2 operations).

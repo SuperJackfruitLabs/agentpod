@@ -248,6 +248,73 @@ jobs:
       # and a job of its own would not gate.
       - name: Test the release version comparator
         run: sh fly/node-image/test-latest-release.sh
+
+  # Type-aware TypeScript lint with a ratchet: per-rule counts in scripts/lint-baseline.json may
+  # fall, never rise (docs/contributor/code-quality.md). Its own job, so a lint failure reads as
+  # one, and it is not yet a required check.
+  lint-ts:
+    name: lint-ts
+    needs: [changes]
+    if: needs.changes.outputs.app == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The type-aware rules load each project's tsconfig. The console's extends the one
+      # `svelte-kit sync` generates, and the worker sits outside the pnpm workspace with its own
+      # lockfile; without either, the run reports typescript(tsconfig-error) and fails.
+      - name: Generate the console's tsconfig
+        working-directory: apps/console
+        run: pnpm exec svelte-kit sync
+
+      - name: Install the worker's dependencies
+        working-directory: cloudflare/worker-v2
+        run: npm ci
+
+      - name: Lint (ratchet)
+        run: node scripts/lint.mjs
+
+  # golangci-lint over the node-agent, pinned, with the same ratchet (scripts/lint-go-baseline.json).
+  lint-go:
+    name: lint-go
+    needs: [changes]
+    if: needs.changes.outputs.app == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/node-agent/go.mod
+          cache-dependency-path: apps/node-agent/go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # Built from source at an exact version with the module's Go, so it understands that Go;
+      # scripts/lint-go.mjs refuses any other version.
+      - name: Install golangci-lint
+        run: GOBIN="$PWD/.bin" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+
+      - name: Lint (ratchet)
+        run: node scripts/lint-go.mjs
   # Every push to main puts the hub on the staging plane (staging-hub.agentpod.dev) at once; the
   # PR's required checks already ran the tests. Production moves only on a `v*` tag
   # (release-hub.yml). The key can only run /usr/local/sbin/staging-deploy (`<product> <sha>`),
