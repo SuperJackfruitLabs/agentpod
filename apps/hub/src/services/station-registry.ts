@@ -12,7 +12,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { notifyStationsAdopted, stationReportedMatrixId } from "./station-hooks";
 import { db, type DbExecutor } from "../db/drizzle";
-import { stations } from "../db/schema/stations";
+import { stations, type StationRow } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
 import { VERB_RESULTS, unknownCapabilitiesByStation } from "@agentpod/contract";
@@ -24,7 +24,7 @@ import { createLogger } from "../utils/logger";
 
 const log = createLogger("station-registry");
 
-export type StationRow = typeof stations.$inferSelect;
+export type { StationRow };
 
 /**
  * Returns true if the station's capabilities array includes the given cap.
