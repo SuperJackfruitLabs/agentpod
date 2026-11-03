@@ -34,3 +34,20 @@ old code; a split moves code and changes no behaviour.
 
 Use `context7` when you need documentation for a library (Svelte, Hono, Drizzle, Bun) rather
 than answering from memory.
+
+## Things agents get wrong
+
+- **Run what CI runs before pushing.** Read `.github/workflows/ci.yml` (jobs `contract`, `hub`, `node-agent`, `console`, `worker`, `lint-ts`, `lint-go`); the commands are in [`CLAUDE.md`](CLAUDE.md) rather than guessing; the commands are there.
+- **Snapshots and goldens pass in a bare environment and on Linux.** Run them under `env -i PATH="$PATH" HOME="$HOME" CI=true bun test <file>`. Normalise platform strings (OS, arch) and `COLORTERM` in the test instead of recording your machine's.
+- **Count lint baselines on a clean install** (`pnpm install --frozen-lockfile`), never on a tree with stray packages or a stale build.
+- **No skipped tests.** Never `.skip`, `.only` or delete a red test to get green; fix it, or say in the PR why it is red.
+- **Characterization test first.** Before a refactor that touches behaviour, commit a test against the old code and prove it can fail (revert the code, watch it go red).
+- **Check the PR is still open before pushing to its branch.** PRs are often merged within minutes, and a push to a merged branch strands the work.
+- **CI runs only for PRs into `main`** (and two dead branches). A PR stacked on another branch gets no checks: target `main`.
+- **`gh pr edit` fails here** with a classic-Projects GraphQL error. Edit a PR with `gh api -X PATCH repos/SuperJackfruitLabs/agentpod/pulls/N -f body=...`.
+- **Hub DB tests need Postgres:** the pgvector container on `:5434` and the explicit `DATABASE_URL` in [`CLAUDE.md`](CLAUDE.md). A run without it is not a pass.
+- **CI pins Bun** (`bun-version` in `ci.yml`). Local Bun may differ and behave differently (exit listeners, for one); check `bun --version` before trusting a local result.
+- **`apps/hub/typecheck-known-red-tests.txt`** holds the known-red test typecheck errors with exact counts. A rise fails, and so does an unrecorded fall: update the file when you fix one.
+- **A `v*` tag deploys the hub and console to production** (`release-hub.yml`) and publishes node-agent binaries. Only the operator tags.
+- **The Claude CI files are synced copies.** `.github/claude/claude-ci.mjs` and the `claude-review`/`claude-triage` workflows come from the suite's shared kit; change them there, not here. The advisory PR review follows [`REVIEW.md`](REVIEW.md).
+

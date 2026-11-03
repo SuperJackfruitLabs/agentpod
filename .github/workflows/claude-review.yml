@@ -1,0 +1,73 @@
+# Shared kit file (claude-ci). Every product carries this byte-identical at
+# .github/workflows/claude-review.yml; do not edit a copy, change the master and sync it.
+#
+# An advisory Claude review of each pull request, against the repo's REVIEW.md. It posts or
+# updates one comment and never approves, blocks or requests changes. It is a no-op until the
+# repository has a CLAUDE_CI_API_KEY secret. Pull request code is never checked out or run: the
+# script and REVIEW.md come from the base branch, and the diff is read through the API. This is
+# a `pull_request` workflow, so pull requests from forks get no secrets and are skipped.
+name: claude-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Is a key set
+        id: gate
+        env:
+          KEY: ${{ secrets.CLAUDE_CI_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::notice::skipped: no CLAUDE_CI_API_KEY"
+            echo "on=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "on=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Fetch the review script from the base branch
+        id: kit
+        if: steps.gate.outputs.on == 'true'
+        continue-on-error: true
+        env:
+          TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          code=$(curl -sS -o "$RUNNER_TEMP/claude-ci.mjs" -w '%{http_code}' \
+            -H "Authorization: Bearer $TOKEN" -H 'Accept: application/vnd.github.raw' \
+            "$GITHUB_API_URL/repos/$REPO/contents/.github/claude/claude-ci.mjs?ref=$BASE" || true)
+          if [ "$code" = 200 ]; then
+            echo "on=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::skipped: the base branch has no .github/claude/claude-ci.mjs (HTTP $code)"
+            echo "on=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Review
+        if: steps.kit.outputs.on == 'true'
+        continue-on-error: true
+        timeout-minutes: 8
+        env:
+          CLAUDE_CI_API_KEY: ${{ secrets.CLAUDE_CI_API_KEY }}
+          CLAUDE_CI_MODEL: ${{ vars.CLAUDE_CI_MODEL }}
+          CLAUDE_CI_BASE_URL: ${{ vars.CLAUDE_CI_BASE_URL }}
+          CLAUDE_CI_MAX_DIFF_KB: ${{ vars.CLAUDE_CI_MAX_DIFF_KB }}
+          CI_HOST: github
+          CI_TOKEN: ${{ github.token }}
+          CI_REPO: ${{ github.repository }}
+          CI_PR: ${{ github.event.pull_request.number }}
+          CI_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: CI_API_URL="$GITHUB_API_URL" node "$RUNNER_TEMP/claude-ci.mjs" review
