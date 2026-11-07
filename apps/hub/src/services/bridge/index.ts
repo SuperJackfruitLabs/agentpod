@@ -4,7 +4,7 @@
  */
 export { isBridgeEnabled, loadBridgeConfig } from "./config";
 export type { BridgeConfig } from "./config";
-export type { ElicitationPendingDelivery, GatePendingDelivery } from "./deliveries";
+export type { DeliveryPendingDelivery, ElicitationPendingDelivery, GatePendingDelivery } from "./deliveries";
 export { checkBridgeDispatchGrant, ensureBridgeDispatchGrant } from "./dispatch-grant";
 export { attachExecutionReference } from "./execution-reference";
 export { startSuperpipelineBridge } from "./loop";

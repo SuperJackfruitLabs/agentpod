@@ -18,6 +18,7 @@ import {
   handleElicitationAnswer,
   openQuestionInRoom,
   projectElicitation,
+  recordedQuestion,
   answerElicitationAtSuperpipeline,
   type ElicitationAnswerDeps,
   type ElicitationProjectionDeps,
@@ -135,6 +136,57 @@ describe("a question is posted into its board's room", () => {
     const { deps, roomCalls } = rig();
     await projectElicitation(BOOTSTRAP_TENANT_ID, delivery({ boardName: null }), deps);
     expect(roomCalls[0]).not.toHaveProperty("boardName");
+  });
+
+  test("the message carries question.v2 beside the unchanged v1 card, and records what it offered", async () => {
+    const d = delivery({
+      options: [
+        { id: "run_them", label: "Run the tests", meaning: "choose", needsComment: false },
+        { id: "skip", label: "Skip them", meaning: "choose", needsComment: false },
+      ],
+    });
+    const { deps, sent } = rig();
+    await projectElicitation(BOOTSTRAP_TENANT_ID, d, deps);
+
+    expect(sent[0]?.extra).toMatchObject({
+      msgtype: "m.text",
+      suite_event_type: "dev.superpipeline.question.v2",
+      elicitation_id: d.elicitationId,
+      options: [
+        { id: "run_them", label: "Run the tests", meaning: "choose", needs_comment: false },
+        { id: "skip", label: "Skip them", meaning: "choose", needs_comment: false },
+      ],
+    });
+    expect(sent[0]?.extra?.[ELICITATION_REQUEST_CONTENT_KEY]).toMatchObject({
+      options: [
+        { id: "run_them", label: "Run the tests" },
+        { id: "skip", label: "Skip them" },
+      ],
+    });
+
+    const [row] = await db
+      .select()
+      .from(matrixElicitationEvents)
+      .where(eq(matrixElicitationEvents.elicitationId, d.elicitationId));
+    // The typed-reply column keeps `{id, label}`; question.v2's options are recorded beside it.
+    expect(JSON.parse(row?.optionsJson ?? "null")).toEqual([
+      { id: "run_them", label: "Run the tests" },
+      { id: "skip", label: "Skip them" },
+    ]);
+    expect(row?.optionsV2).toEqual([
+      { id: "run_them", label: "Run the tests", meaning: "choose", needs_comment: false },
+      { id: "skip", label: "Skip them", meaning: "choose", needs_comment: false },
+    ]);
+    expect(row?.freeTextMaxLength).toBeNull();
+    expect(await recordedQuestion(d.elicitationId)).toMatchObject({ roomId: ROOM, eventId: row?.eventId, freeText: null });
+  });
+
+  test("a question with no options records its free-text limit", async () => {
+    const d = delivery({ options: [], freeText: { maxLength: 500 } });
+    const { deps, sent } = rig();
+    await projectElicitation(BOOTSTRAP_TENANT_ID, d, deps);
+    expect(sent[0]?.extra).toMatchObject({ options: [], free_text: { max_length: 500 } });
+    expect(await recordedQuestion(d.elicitationId)).toMatchObject({ options: [], freeText: { max_length: 500 } });
   });
 
   test("a redelivered question is posted once", async () => {

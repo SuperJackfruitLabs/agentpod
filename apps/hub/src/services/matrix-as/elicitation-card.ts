@@ -129,8 +129,10 @@ export function elicitationRequestCard(
     card_title: d.cardTitle,
     asked_by: d.agentId,
     prompt: d.question,
-    // The prose keeps all of them; only the buttons are capped.
-    options: d.options.slice(0, MAX_BUTTONS),
+    // The prose keeps all of them; only the buttons are capped. `{id, label}` and nothing else:
+    // a board that speaks the decision envelope sends more on each option, and that rides in
+    // question.v2 (`question-wire.ts`) — this card stays what v1 clients have always read.
+    options: d.options.slice(0, MAX_BUTTONS).map((o) => ({ id: o.id, label: o.label })),
     ...(deepLink ? { deep_link: deepLink } : {}),
   };
 }

@@ -28,13 +28,14 @@ import { matrixElicitationEvents } from "../../db/schema/matrix";
 import { createLogger } from "../../utils/logger";
 import {
   ELICITATION_REQUEST_CONTENT_KEY,
-  elicitationProseBody,
   elicitationRequestCard,
   type ElicitationPendingDelivery,
 } from "./elicitation-card";
+import { boundedQuestion, questionFreeTextV2, questionOptionsV2, questionV2Content } from "./question-wire";
 import { matchPermissionAnswer, unmatchedAnswerText } from "./permissions";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
 import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plane/assertion";
+import type { RecordedQuestion } from "./question-answer";
 
 const log = createLogger("matrix-elicitations");
 
@@ -120,9 +121,12 @@ async function releaseClaim(elicitationId: string): Promise<void> {
  */
 export async function projectElicitation(
   tenantId: string,
-  d: ElicitationPendingDelivery,
+  delivery: ElicitationPendingDelivery,
   deps: ElicitationProjectionDeps,
 ): Promise<ElicitationProjectionOutcome> {
+  // Bounded once, here, so the prose, the v1 card, question.v2 and the recorded options are all
+  // the same question — and the message fits one event (`boundedQuestion`).
+  const d = boundedQuestion(delivery);
   const found = await deps.boardRoom(d.boardId, tenantId, {
     ...(d.boardName ? { boardName: d.boardName } : {}),
   });
@@ -165,7 +169,11 @@ export async function projectElicitation(
       // sent", and every other reader treats it as taken — which is what stops a
       // concurrent delivery from asking the same question again.
       eventId: `pending:${d.elicitationId}`,
-      optionsJson: JSON.stringify(d.options),
+      // `{id, label}`: what a typed reply is matched against, as it always was.
+      optionsJson: JSON.stringify(d.options.map((o) => ({ id: o.id, label: o.label }))),
+      // question.v2: what a structured answer is judged against — exactly what the message carries.
+      optionsV2: questionOptionsV2(d),
+      freeTextMaxLength: questionFreeTextV2(d)?.max_length ?? null,
     })
     .onConflictDoNothing({ target: matrixElicitationEvents.elicitationId })
     .returning({ elicitationId: matrixElicitationEvents.elicitationId });
@@ -178,7 +186,13 @@ export async function projectElicitation(
     // One message, carrying the card inside it, for the reason the gate path gives: one
     // question is one event and one push — a push a phone can classify even in an
     // unencrypted room, where a custom event type matches no push rule.
-    eventId = await deps.sendText(found.speakerMxid, found.roomId, elicitationProseBody(d, deepLink), {
+    //
+    // The message IS the question.v2 (charter: the decision envelope covers questions and
+    // follow-ups §2): its content carries the marker and the v2 fields beside the v1 card, so a
+    // v2 client and a v1 client read one event and one push, and an answer references it.
+    const { body, ...v2 } = questionV2Content(d, deepLink);
+    eventId = await deps.sendText(found.speakerMxid, found.roomId, String(body), {
+      ...v2,
       [ELICITATION_REQUEST_CONTENT_KEY]: elicitationRequestCard(d, deepLink),
     });
     deps.noteHubEvent?.(eventId, "elicitation");
@@ -272,6 +286,32 @@ export async function openQuestionInRoom(roomId: string): Promise<OpenQuestion |
 }
 
 /**
+ * What this hub recorded when it posted a question, for judging a question.answer.v2; null when
+ * it never posted it, or the message is still being sent (nothing in the room can answer that).
+ */
+export async function recordedQuestion(elicitationId: string): Promise<RecordedQuestion | null> {
+  const [row] = await db
+    .select({
+      boardId: matrixElicitationEvents.boardId,
+      roomId: matrixElicitationEvents.roomId,
+      eventId: matrixElicitationEvents.eventId,
+      options: matrixElicitationEvents.optionsV2,
+      freeTextMaxLength: matrixElicitationEvents.freeTextMaxLength,
+    })
+    .from(matrixElicitationEvents)
+    .where(eq(matrixElicitationEvents.elicitationId, elicitationId))
+    .limit(1);
+  if (!row || row.eventId.startsWith("pending:")) return null;
+  return {
+    boardId: row.boardId,
+    roomId: row.roomId,
+    eventId: row.eventId,
+    options: row.options,
+    freeText: row.freeTextMaxLength === null ? null : { max_length: row.freeTextMaxLength },
+  };
+}
+
+/**
  * Claim the right to say in the room that the board took an answer.
  *
  * True exactly once per question. An answer delivered twice — a double tap, a re-sent
@@ -308,7 +348,10 @@ export async function answerElicitationAtSuperpipeline(
   input: {
     boardId: string;
     elicitationId: string;
-    option: string;
+    /** The option chosen. Absent for a free-text answer to a question with no options. */
+    option?: string;
+    /** What the person typed: a free-text answer, or the input an option asked for. */
+    text?: string;
     principalId: string;
     /** The Matrix sender, asserted by the org plane under it (contract §3.4b). */
     senderMxid: string;
@@ -344,7 +387,10 @@ export async function answerElicitationAtSuperpipeline(
       {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ option: input.option }),
+        body: JSON.stringify({
+          ...(input.option !== undefined ? { option: input.option } : {}),
+          ...(input.text !== undefined ? { text: input.text } : {}),
+        }),
       },
     );
   } catch (err) {
@@ -489,11 +535,27 @@ export async function handleElicitationAnswer(
     senderMxid: event.sender,
   });
 
+  const chosen = open.options.find((o) => o.id === matched);
+  return reportAnswer(result, open.elicitationId, chosen?.label ?? matched, roomId, deps);
+}
+
+/**
+ * Say in the room what the board did with an answer — a typed reply's or a question.answer.v2's,
+ * so the two paths cannot come to word it differently. `answered` is how the receipt names what
+ * was chosen; null for a free-text answer.
+ */
+export async function reportAnswer(
+  result: { ok: true } | { ok: false; code: string },
+  elicitationId: string,
+  answered: string | null,
+  roomId: string,
+  deps: Pick<ElicitationAnswerDeps, "reply" | "claimOutcome">,
+): Promise<{ status: "answered"; elicitationId: string } | { status: "refused"; code: string }> {
   if (!result.ok) {
     if (result.code === "ELICITATION_NOT_PENDING" || result.code === "ELICITATION_NOT_FOUND") {
       // Answered on the board, or retired by a newer question. Said once, under the
       // same claim a successful answer uses, so a double tap leaves one line.
-      if (await deps.claimOutcome(open.elicitationId)) {
+      if (await deps.claimOutcome(elicitationId)) {
         await deps.reply(roomId, "That one is already settled — the board has it.");
       }
       return { status: "refused", code: result.code };
@@ -507,9 +569,8 @@ export async function handleElicitationAnswer(
     return { status: "refused", code: result.code };
   }
 
-  if (await deps.claimOutcome(open.elicitationId)) {
-    const chosen = open.options.find((o) => o.id === matched);
-    await deps.reply(roomId, `Answered: ${chosen?.label ?? matched}. The agent is unblocked.`);
+  if (await deps.claimOutcome(elicitationId)) {
+    await deps.reply(roomId, answered ? `Answered: ${answered}. The agent is unblocked.` : "Answered. The agent is unblocked.");
   }
-  return { status: "answered", elicitationId: open.elicitationId };
+  return { status: "answered", elicitationId };
 }

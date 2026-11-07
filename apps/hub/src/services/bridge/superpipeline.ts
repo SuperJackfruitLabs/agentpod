@@ -551,6 +551,19 @@ export class SuperpipelineClient {
     return res.elicitations ?? [];
   }
 
+  /**
+   * Every manual delivery the board is still owed a live link for — the read half of the sweep
+   * for `delivery.pending`. `unknown[]`: the sweep checks each with `isDeliveryPending` before it
+   * carries anything, and a throw from `send` stays a throw, as for the two reads above.
+   */
+  async pendingDeliveries(): Promise<unknown[]> {
+    const res = await this.send("GET", `/v1/boards/${this.boardId}/deliveries/pending`);
+    if (typeof res === "object" && res !== null && "deliveries" in res && Array.isArray(res.deliveries)) {
+      return res.deliveries;
+    }
+    return [];
+  }
+
   private verb(lease: RunLease, action: string, extra: Record<string, unknown> = {}): Promise<unknown> {
     return this.send("POST", `/v1/boards/${this.boardId}/runs/${lease.runId}/${action}`, {
       leaseEpoch: lease.leaseEpoch,

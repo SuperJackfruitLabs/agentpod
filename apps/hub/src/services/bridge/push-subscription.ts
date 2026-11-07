@@ -18,8 +18,12 @@
 
 import { SuperpipelineClient, type Fetcher } from "./superpipeline";
 
-/** The two events the push route projects; anything else it acknowledges and ignores. */
-export const PUSH_EVENTS = ["gate.pending", "elicitation.pending"] as const;
+/**
+ * The events the push route projects; anything else it acknowledges and ignores. `delivery.pending`
+ * is the follow-up a manual-delivery approval owes (charter: "The decision envelope covers
+ * questions and follow-ups" §3).
+ */
+export const PUSH_EVENTS = ["gate.pending", "elicitation.pending", "delivery.pending"] as const;
 
 export function pushHookUrl(publicUrl: string): string {
   return `${publicUrl.replace(/\/+$/, "")}/public/bridge/superpipeline/push`;

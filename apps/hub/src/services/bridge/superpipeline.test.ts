@@ -266,6 +266,27 @@ describe("SuperpipelineClient — pending gates", () => {
   });
 });
 
+describe("SuperpipelineClient — pending delivery follow-ups", () => {
+  test("reads the follow-ups a board is still owed, from the sweep's route", async () => {
+    const followUp = { event: "delivery.pending", gateId: "gate_8f3a" };
+    const { client, calls } = fakeBoard(() => ({ status: 200, body: { deliveries: [followUp] } }));
+    expect(await client.pendingDeliveries()).toEqual([followUp]);
+    expect(calls[0]?.url).toBe(`https://board.test/v1/boards/${BOARD}/deliveries/pending`);
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.headers.Authorization).toBe(`Bearer ${TOKEN}`);
+  });
+
+  test("reads a body with no list as nothing owed", async () => {
+    const { client } = fakeBoard(() => ({ status: 200, body: {} }));
+    expect(await client.pendingDeliveries()).toEqual([]);
+  });
+
+  test("throws on a refusal rather than reporting nothing owed", async () => {
+    const { client } = fakeBoard(() => ({ status: 401, body: boardError("UNAUTHORIZED") }));
+    await expect(client.pendingDeliveries()).rejects.toBeInstanceOf(SuperpipelineApiError);
+  });
+});
+
 const tel = useTestTelemetry();
 
 describe("SuperpipelineClient: tracing", () => {

@@ -34,10 +34,19 @@ import {
   GATE_OUTCOME_TYPE,
   settleGateOutcome,
 } from "./gates";
-import { assertPrincipal } from "../../auth/org-plane/assertion";
+import { assertPrincipal, type AssertionSubject } from "../../auth/org-plane/assertion";
 import { resolveMatrixId } from "../matrix";
 import { boardRoomFor } from "./board-room";
-import { answerElicitationAtSuperpipeline, claimElicitationOutcome, handleElicitationAnswer } from "./elicitations";
+import {
+  answerElicitationAtSuperpipeline,
+  claimElicitationOutcome,
+  handleElicitationAnswer,
+  recordedQuestion,
+} from "./elicitations";
+import { handleQuestionAnswer } from "./question-answer";
+import { handleDeliveryAnswer, settleDeliveryOutcome } from "./delivery-answer";
+import { claimDeliveryOutcome, recordedDelivery } from "./delivery-projection";
+import { updateDeliveryAtSuperpipeline } from "./gate-resolve";
 import { principalById, principalForUser, principalLabel } from "../../auth/org-plane/principals";
 import { attachRoomToSession, forgetTurnTrigger, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
@@ -57,6 +66,18 @@ import { resolveSpeechFor } from "../speech";
 import { synthesize } from "../speech";
 
 const log = createLogger("matrix-bridge");
+
+/**
+ * Who a Matrix sender is, and what kind of principal: the one source for the envelope's answers.
+ * Linked through `principal_identities` only — the control that makes minting an assertion for
+ * another principal safe to have at all.
+ */
+async function principalForMatrixId(mxid: string) {
+  const identity = await resolveMatrixId(mxid);
+  if (identity?.kind !== "principal") return null;
+  const principal = await principalById(identity.principalId);
+  return principal ? { id: principal.id, kind: principal.kind } : null;
+}
 
 /** The image types `avatar.ts` accepts, by extension. Anything else is declined there. */
 function contentTypeFor(path: string): string {
@@ -175,6 +196,12 @@ export interface MatrixBridge {
    * Reject for a decision already made. `services/matrix-as/gate-sweep.ts` is the caller.
    */
   settleGate(gateId: string, decision: string, decidedBy: string | null): Promise<boolean>;
+  /**
+   * Close a delivery follow-up's room card when the board no longer owes it — a link recorded on
+   * the web, the mode switched, the subject expired, the card archived. The gate sweep is the
+   * caller. True only when THIS call claimed the receipt.
+   */
+  settleDelivery(gateId: string): Promise<boolean>;
   /**
    * Close a room card for a question that is over — answered on the board, or
    * retired by a newer question from the same agent.
@@ -517,6 +544,55 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       }
     : undefined;
 
+  const replyInRoom = async (room: string, body: string) => {
+    const speaker = await roomSpeakerFor(room, cfg.domain);
+    return speaker ? speakingClient.sendText(speaker, room, body) : null;
+  };
+  /** A follow-up's structured receipt: the gate's own outcome event, spoken by the room's speaker. */
+  const sendOutcomeInRoom = async (room: string, content: Record<string, unknown>) => {
+    const speaker = await roomSpeakerFor(room, cfg.domain);
+    return speaker ? speakingClient.sendCustomEvent(speaker, room, GATE_OUTCOME_TYPE, content) : null;
+  };
+  /** An assertion for the person, named for the plane that will verify it (see the gate path). */
+  const mintForBoard = (subject: AssertionSubject) =>
+    assertPrincipal({ ...subject, audience: superpipelineBaseUrl });
+
+  /**
+   * A structured answer to a question (question.answer.v2), wired on the same condition as the
+   * typed one. The kind is not narrowed, as for a typed reply: the board refuses the asking agent.
+   */
+  const questions = superpipelineBaseUrl
+    ? {
+        handle: async (event: { sender: string; content: Record<string, unknown> }, roomId: string) =>
+          handleQuestionAnswer(event, roomId, {
+            principalForMatrixId,
+            recordedQuestion,
+            answer: (input) => answerElicitationAtSuperpipeline(input, { baseUrl: superpipelineBaseUrl, mint: mintForBoard }),
+            reply: replyInRoom,
+            claimOutcome: claimElicitationOutcome,
+          }),
+      }
+    : undefined;
+
+  /**
+   * An answer to a delivery follow-up (delivery.answer.v2): the live link, or a switch to
+   * automatic delivery, carried to the board's delivery route as the person who answered.
+   */
+  const deliveries = superpipelineBaseUrl
+    ? {
+        handle: async (event: { sender: string; content: Record<string, unknown> }, roomId: string) =>
+          handleDeliveryAnswer(event, roomId, {
+            principalForMatrixId,
+            recordedDelivery,
+            updateDelivery: (input) => updateDeliveryAtSuperpipeline(input, { baseUrl: superpipelineBaseUrl, mint: mintForBoard }),
+            reply: replyInRoom,
+            claimOutcome: claimDeliveryOutcome,
+            displayNameFor: (principalId: string) => principalLabel(principalId),
+            sendOutcome: sendOutcomeInRoom,
+          }),
+      }
+    : undefined;
+
   /**
    * An agent's reply, spoken (`voice-reply.ts`): after a turn ends with text,
    * when the station's speech settings say so — the console's station and
@@ -544,6 +620,8 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       : undefined,
     gates,
     elicitations,
+    questions,
+    deliveries,
     client: speakingClient,
     // Voice notes to text, looked up per voice note for the room's station:
     // its own setting, then the hub's (both in the console), then the
@@ -602,6 +680,17 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
         );
       }
       return true;
+    },
+
+    settleDelivery: async (gateId) => {
+      // A follow-up this hub never posted, or one still being sent, has no card to settle.
+      const row = await recordedDelivery(gateId);
+      if (!row) return false;
+      return settleDeliveryOutcome(gateId, "settled_elsewhere", null, row.roomId, row, {
+        claimOutcome: claimDeliveryOutcome,
+        reply: replyInRoom,
+        sendOutcome: sendOutcomeInRoom,
+      });
     },
 
     settleGate: async (gateId, decision, decidedBy) => {
