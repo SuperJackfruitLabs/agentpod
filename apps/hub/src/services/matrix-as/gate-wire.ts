@@ -136,7 +136,9 @@ export function gateEventContent(
     // it does not show them. Additive, so `schema_version` moves rather than
     // the type — a renderer written against v1 ignores it and still draws the
     // buttons.
-    ...(d.handoffSummary ? { handoff_summary: d.handoffSummary } : {}),
+    // Bounded for the same reason as a preview (`HANDOFF_SUMMARY_BYTES`): a subject-bound gate's
+    // summary is its preview text joined, and this card rides inside the prose message.
+    ...(d.handoffSummary ? { handoff_summary: cutToBytes(d.handoffSummary, HANDOFF_SUMMARY_BYTES) } : {}),
     options,
     ...(deepLink ? { deep_link: deepLink } : {}),
   };
@@ -178,6 +180,42 @@ const PREVIEW_BLOCKS_MAX = 20;
 const OPTION_ID_MAX = 200;
 const OPTIONS_MAX = 20;
 const SUBJECT_KEY_MAX = 512;
+/**
+ * The whole preview's budget, in UTF-8 bytes of its JSON-encoded strings — the measure that
+ * actually fills an event. The preview rides twice in the prose message (fenced in the body and
+ * in `subject.preview`) and a handoff summary twice more (v2 and the v1 card), and Matrix refuses
+ * an event over 64 KiB — before Megolm's base64 adds a third in an encrypted board room. Without
+ * a total, twenty blocks at their per-block limits made an event that never reached the room.
+ */
+const PREVIEW_TOTAL_BYTES = 16_000;
+/** A handoff summary's budget, same measure. The board bounds an ordinary one at 600 characters. */
+const HANDOFF_SUMMARY_BYTES = 4_000;
+
+const utf8 = new TextEncoder();
+/** What a string costs inside an event: its JSON encoding, in UTF-8 bytes. */
+const jsonBytes = (v: string): number => utf8.encode(JSON.stringify(v)).length;
+
+/** Cut a string to fit `max` JSON-encoded bytes, marking the cut; never splits a surrogate pair. */
+function cutToBytes(v: string, max: number): string {
+  if (jsonBytes(v) <= max) return v;
+  let lo = 0;
+  let hi = v.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (jsonBytes(`${v.slice(0, mid)}…`) <= max) lo = mid;
+    else hi = mid - 1;
+  }
+  const code = v.charCodeAt(lo - 1);
+  const end = code >= 0xd800 && code <= 0xdbff ? lo - 1 : lo;
+  return `${v.slice(0, end)}…`;
+}
+
+/** What one preview block costs against `PREVIEW_TOTAL_BYTES`. */
+function blockBytes(b: GatePreviewBlock): number {
+  if (b.type === "text") return jsonBytes(b.label ?? "") + jsonBytes(b.text);
+  if (b.type === "field") return jsonBytes(b.label) + jsonBytes(b.value);
+  return jsonBytes(b.label) + jsonBytes(b.url);
+}
 
 const cut = (max: number) => (v: string) => (v.length > max ? `${v.slice(0, max - 1)}…` : v);
 
@@ -258,18 +296,30 @@ export function gateSubjectV2(d: GatePendingDelivery): GateSubjectV2 | null {
   if (!parsed.success) return null;
   const s = parsed.data;
   const raw = s.preview ?? [];
-  // An older board that sent a preview and no flag is taken as complete; one that sent no
-  // preview at all has shown the person nothing.
-  let complete = s.previewComplete ?? s.preview !== undefined;
+  // An older board that sent a preview and no flag is taken as complete. The board's flag is
+  // only ever able to make a preview LESS complete: a preview that is absent, not an array
+  // (both read as undefined here), or empty once checked has shown the person nothing,
+  // whatever the flag says.
+  let complete = s.previewComplete !== false && s.preview !== undefined;
   const preview: GatePreviewBlock[] = [];
+  let used = 0;
+  let full = false;
   for (const block of raw) {
     const b = PreviewBlock.safeParse(block);
-    // Dropped (malformed, or past the block limit) or cut: either way, not all of it.
-    if (!b.success || preview.length === PREVIEW_BLOCKS_MAX || !ExactPreviewBlock.safeParse(block).success) {
+    // Dropped (malformed, past the block limit, past the byte budget) or cut: either way, not
+    // all of it. Once the budget is reached every later block is dropped, so what is shown is
+    // always a prefix of what the board sent, in its order.
+    if (!b.success || !ExactPreviewBlock.safeParse(block).success) complete = false;
+    if (!b.success) continue;
+    if (full || preview.length === PREVIEW_BLOCKS_MAX || used + blockBytes(b.data) > PREVIEW_TOTAL_BYTES) {
+      full = true;
       complete = false;
+      continue;
     }
-    if (b.success && preview.length < PREVIEW_BLOCKS_MAX) preview.push(b.data);
+    used += blockBytes(b.data);
+    preview.push(b.data);
   }
+  if (preview.length === 0) complete = false;
   return {
     id: s.id,
     digest: s.digest,
@@ -310,6 +360,10 @@ const RawOption = z.object({
  * be offered an approval of something the card cannot show them.
  */
 export function gateOptionsV2(d: GatePendingDelivery): GateOptionV2[] {
+  // The board said this gate is bound to a subject, and the hub could not carry it. The gate is
+  // then recorded as bound to nothing, so an approval would pass this hub's subject checks
+  // without any binding — every approving option goes, not only those naming a delivery.
+  // Revise and reject stay, so the person can still send the work back.
   const subjectShowable = d.approvalSubject == null || gateSubjectV2(d) !== null;
   const seen = new Set<string>();
   const out: GateOptionV2[] = [];
@@ -317,12 +371,13 @@ export function gateOptionsV2(d: GatePendingDelivery): GateOptionV2[] {
     const parsed = RawOption.safeParse(raw);
     if (!parsed.success || seen.has(parsed.data.id)) continue;
     const o = parsed.data;
-    if (o.delivery && !subjectShowable) continue;
+    const meaning = o.meaning ?? derivedMeaning(o.id);
+    if (!subjectShowable && (o.delivery || meaning === "approve")) continue;
     seen.add(o.id);
     out.push({
       id: o.id,
       label: o.label,
-      meaning: o.meaning ?? derivedMeaning(o.id),
+      meaning,
       needs_comment: o.needsComment ?? o.id === "request_changes",
       ...(o.delivery ? { delivery: o.delivery } : {}),
     });
@@ -383,7 +438,7 @@ export function gateV2Content(d: GatePendingDelivery, deepLink?: string): Record
     card_title: d.cardTitle,
     produced_by: d.producedBy,
     prompt: `Approve "${d.cardTitle}"?`,
-    ...(d.handoffSummary ? { handoff_summary: d.handoffSummary } : {}),
+    ...(d.handoffSummary ? { handoff_summary: cutToBytes(d.handoffSummary, HANDOFF_SUMMARY_BYTES) } : {}),
     options: gateOptionsV2(d),
     ...(subject ? { subject } : {}),
     ...(deepLink ? { deep_link: deepLink } : {}),

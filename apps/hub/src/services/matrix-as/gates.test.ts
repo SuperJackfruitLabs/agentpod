@@ -1067,6 +1067,8 @@ describe("gate.v2 — resolving at the board with the subject binding", () => {
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { GATE_REQUEST_CONTENT_KEY } from "@agentpod/contract";
+import { gateRequestCard } from "./gates";
 
 /** The rules every gate.v2 the hub sends keeps: a body, options with meaning and needs_comment, unique ids, a subject digest. */
 function wellFormed(c: Record<string, unknown>): boolean {
@@ -1172,5 +1174,83 @@ describe("gate.v2 against the shared corpus", () => {
       expect(r.status, why).toBe("refused");
       expect(resolved, why).toHaveLength(0);
     }
+  });
+});
+
+/** The projection this hub would record for a delivery, as `claimGate` records it. */
+function recordedFor(d: GatePendingDelivery): Partial<GateDecisionDeps> {
+  const subject = gateSubjectV2(d);
+  return {
+    projectionFor: async () => ({
+      tenantId: "fleet_1",
+      boardId: "brd_7c1f",
+      eventId: GATE_EVENT_ID,
+      options: gateOptionsV2(d),
+      subjectId: subject?.id ?? null,
+      subjectDigest: subject?.digest ?? null,
+      subjectPreviewComplete: subject?.preview_complete ?? null,
+    }),
+  };
+}
+
+describe("gate.v2 — review fixes: a preview flag is not proof, a subject that cannot be carried offers no approval, an event fits", () => {
+  test("a board's previewComplete: true with no usable preview is not complete, and an approval of it is refused", async () => {
+    const { preview: _preview, ...noPreview } = SUBJECT;
+    for (const approvalSubject of [
+      noPreview,
+      { ...SUBJECT, preview: "not an array" },
+      { ...SUBJECT, preview: [] },
+      { ...SUBJECT, preview: [{ type: "text" }, { type: "image", src: "https://x" }] },
+    ]) {
+      const d: GatePendingDelivery = { ...PUBLISHING, approvalSubject: { ...approvalSubject, previewComplete: true } };
+      expect(gateSubjectV2(d)?.preview_complete).toBe(false);
+      const { deps, resolved } = decisionDeps(recordedFor(d));
+      const r = await handleGateDecision({ sender: "@person:id.example", content: decisionV2() }, "!room", deps);
+      expect(r).toEqual({ status: "refused", reason: "preview-incomplete" });
+      expect(resolved).toHaveLength(0);
+    }
+  });
+
+  test("a subject the hub could not carry leaves no approve-meaning option at all; revise and reject stay", async () => {
+    const d: GatePendingDelivery = {
+      ...DELIVERY,
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "request_changes", label: "Request changes" },
+        { id: "reject", label: "Reject" },
+      ],
+      approvalSubject: { id: "aps_x", schema: "social-publish/v1" },
+    };
+    expect(gateOptionsV2(d).map((o) => o.id)).toEqual(["request_changes", "reject"]);
+    const { deps, resolved } = decisionDeps(recordedFor(d));
+    const r = await handleGateDecision(
+      { sender: "@person:id.example", content: decisionV2({ option_id: "approve", subject: undefined }) },
+      "!room",
+      deps
+    );
+    expect(r).toEqual({ status: "refused", reason: "bad-option" });
+    expect(resolved).toHaveLength(0);
+  });
+
+  test("a gate whose preview would overflow an event still fits one, with the preview marked incomplete", () => {
+    // Every block at its per-block limit, in a script that costs three bytes a character, and
+    // the board's handoff summary being all of that text joined — what the board sends.
+    const long = "語".repeat(4000);
+    const preview = Array.from({ length: 20 }, (_, i) => ({ type: "text", label: `Post ${i + 1}`, text: long }));
+    const d: GatePendingDelivery = {
+      ...PUBLISHING,
+      handoffSummary: preview.map((b) => b.text).join("\n\n"),
+      approvalSubject: { ...SUBJECT, previewComplete: true, preview },
+    };
+    const { body, ...v2 } = gateV2Content(d, "https://board.example/b/brd_7c1f/c/crd_5e10");
+    // The prose message as it is sent: the v2 fields, the v1 card beside them, and the body.
+    const content = { ...v2, [GATE_REQUEST_CONTENT_KEY]: gateRequestCard(d), msgtype: "m.text", body };
+    const bytes = new TextEncoder().encode(JSON.stringify(content)).length;
+    // Under 64 KiB with room for Megolm's base64 (×4/3) in an encrypted board room.
+    expect(bytes).toBeLessThan(48_000);
+    expect(gateSubjectV2(d)?.preview_complete).toBe(false);
+    // The body shows the bounded preview, not the full one.
+    expect(String(body)).toContain("Post 1:");
+    expect(String(body)).not.toContain("Post 20:");
   });
 });
