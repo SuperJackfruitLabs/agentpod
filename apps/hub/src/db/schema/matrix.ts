@@ -6,6 +6,8 @@ import {
   uniqueIndex,
   foreignKey,
   primaryKey,
+  jsonb,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { stations } from "./stations";
@@ -299,6 +301,15 @@ export const matrixElicitationEvents = pgTable(
   ]
 );
 
+/** One option a projected gate offered — the gate.v2 wire shape, as recorded. */
+export interface MatrixGateOption {
+  id: string;
+  label: string;
+  meaning: string;
+  needs_comment: boolean;
+  delivery?: string;
+}
+
 export const matrixGateEvents = pgTable(
   "matrix_gate_events",
   {
@@ -336,6 +347,25 @@ export const matrixGateEvents = pgTable(
      * event still exists. Null for gates posted before the key existed.
      */
     proseEventId: text("prose_event_id"),
+    /**
+     * What the gate offered when it was projected, as carried in its gate.v2 (`id`, `label`,
+     * `meaning`, `needs_comment`, `delivery`). A decision.v2 is checked against THIS list —
+     * there is no fixed one — so an option the gate never offered is refused here before
+     * superpipeline refuses it again. Null for gates projected before gate.v2.
+     */
+    options: jsonb("options").$type<MatrixGateOption[]>(),
+    /**
+     * The approval subject a subject-bound gate was projected with. An answer to such a gate
+     * must carry a subject binding; superpipeline matches the binding against its own subject.
+     * Null for a gate bound to no subject, and for gates projected before gate.v2.
+     */
+    approvalSubjectId: text("approval_subject_id"),
+    approvalSubjectDigest: text("approval_subject_digest"),
+    /**
+     * Whether the subject's preview reached the room in full. False (or null on a subject gate)
+     * refuses an approving decision.v2: nobody approves what the card could not show.
+     */
+    approvalSubjectPreviewComplete: boolean("approval_subject_preview_complete"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [

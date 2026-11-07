@@ -37,6 +37,7 @@
  * `index.ts`) and the tests use, from the files that hold each concern.
  *
  *   gate-wire        event types, option ids, `isGatePending`, the prose and the event content
+ *                    (v1, and gate.v2: options as offered, the subject and its preview)
  *   gate-projection  `projectGate`: the claim, the held-for-a-join answer, the sends
  *   gate-decision    the way back: parsing a decision, acting on it, the outcome receipt
  *   gate-resolve     resolving at superpipeline as the human, with a minted assertion
@@ -46,16 +47,22 @@
 export type { GatePendingDelivery } from "../bridge";
 export {
   GATE_DECISION_SUITE_TYPE,
+  GATE_DECISION_V2_SUITE_TYPE,
   GATE_EVENT_TYPE,
   GATE_OPTION_IDS,
   GATE_OUTCOME_TYPE,
+  GATE_V2_SUITE_TYPE,
   gateEventContent,
+  gateOptionsV2,
   gateProseBody,
   gateRequestCard,
+  gateSubjectV2,
+  gateV2Content,
+  gateV2ProseBody,
   isGateOptionId,
   isGatePending,
 } from "./gate-wire";
-export type { GateOptionId } from "./gate-wire";
+export type { GateOptionId, GateOptionV2, GateSubjectV2 } from "./gate-wire";
 export { projectGate } from "./gate-projection";
 export type { GateProjectionDeps, ProjectionOutcome } from "./gate-projection";
 export { handleGateDecision, parseGateDecision, settleGateOutcome } from "./gate-decision";
@@ -63,6 +70,7 @@ export type {
   DecisionRefusal,
   GateDecisionDeps,
   GateDecisionEvent,
+  GateSubjectBinding,
   ParsedGateDecision,
 } from "./gate-decision";
 export { resolveGateAtSuperpipeline } from "./gate-resolve";

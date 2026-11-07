@@ -841,6 +841,13 @@
       "when": 1792580400009,
       "tag": "0119_matrix_profile_key",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1792580400010,
+      "tag": "0120_gate_v2_options",
+      "breakpoints": true
     }
   ]
 }

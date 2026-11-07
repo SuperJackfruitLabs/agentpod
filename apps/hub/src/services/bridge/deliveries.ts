@@ -35,7 +35,22 @@ export interface GatePendingDelivery {
    * than be renamed to nothing. See `renameIfNeeded`.
    */
   boardName?: string | null;
-  options: Array<{ id: string; label: string }>;
+  /**
+   * What the gate offers. `id` and `label` since v1; `meaning`, `needsComment` and `delivery`
+   * since gate.v2 (charter: decisions/2026-11-07-gate-v2-is-the-decision-envelope.md).
+   *
+   * The gate.v2 fields are typed `unknown` on purpose: an older board sends none, and what a
+   * board sends is checked before it is carried (`gateOptionsV2`), never trusted as typed.
+   */
+  options: Array<{ id: string; label: string; meaning?: unknown; needsComment?: unknown; delivery?: unknown }>;
+  /**
+   * The exact outbound action a subject-bound gate approves: `{ id, digest, schema, revision,
+   * expiresAt, preview }`. Absent on a gate bound to no subject and from an older board.
+   * `unknown` for the same reason as the options' gate.v2 fields — `gateSubjectV2` checks it.
+   */
+  approvalSubject?: unknown;
+  /** The board's own path to the card, for a subject-bound gate. Not carried: `deep_link` is. */
+  reviewUrl?: string | null;
   ts: string;
 }
 

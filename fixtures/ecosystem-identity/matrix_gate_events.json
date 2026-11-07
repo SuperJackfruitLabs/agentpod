@@ -1,6 +1,6 @@
 {
   "corpus": "ecosystem-identity/matrix-gate-events",
-  "version": 2,
+  "version": 3,
   "authoredAt": "2026-08-30",
   "authoredFrom": "the gates table in superpipeline apps/api/src/board/board-do.ts, the GateDecision union it resolves against, and charter decisions/2026-08-30-a-gate-closes-over-chat.md",
   "purpose": "A superpipeline approval gate crosses into a Matrix room and a human's answer crosses back. Three codebases must agree on the field names: the board that opens the gate, the Application Service that projects and resolves it, and the client that draws the buttons. A rename in any one of them is a gate that silently never resolves — which reads to the human as a button that does nothing.",
@@ -20,7 +20,8 @@
       "reject"
     ],
     "meaning": "NOT free-form. superpipeline's resolveGate takes `GateDecision = 'approve' | 'request_changes' | 'reject'`, so an option id outside this set renders a button that is refused on resolution. superpipeline#34 proposed free-form ids mirroring a `select` signal's semantics; that is a good instinct and it is not what the endpoint does. Widening gates to arbitrary options is a `.v2`, not a field change.",
-    "labelsAreFree": "`label` is display text and carries no meaning. Per-board wording belongs there."
+    "labelsAreFree": "`label` is display text and carries no meaning. Per-board wording belongs there.",
+    "v2": "Applies to v1 only. gate.v2 (charter decisions/2026-11-07-gate-v2-is-the-decision-envelope.md) keeps no list: options come from the gate, each saying what it means, and superpipeline refuses an id the gate did not offer."
   },
   "droppedDeliberately": {
     "run_id": "superpipeline's gates gained a nullable `run_id` for evidence (superpipeline gate-run-id PR, SuperJackfruitLabs/superpipeline#145). The Matrix event still does not carry it: a room needs no run to ask or answer, and the event shape is unchanged.",
@@ -402,6 +403,550 @@
       ],
       "matrixEventType": "m.room.message",
       "discriminator": "`suite_event_type` in content, because the Matrix event type is m.room.message. The Application Service switches on it."
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.v2",
+      "direction": "outbound — the board asks",
+      "decidedBy": "charter decisions/2026-11-07-gate-v2-is-the-decision-envelope.md",
+      "sender": "the board room's speaker, as for v1",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content. The Application Service sends it as the same prose message that carries the v1 card under `dev.superpipeline.gate`, so v1 and v2 clients read one event and one push; the legacy `dev.superpipeline.gate.v1` custom event still follows while v1 clients need it.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "suite_event_type",
+        "schema_version",
+        "board_id",
+        "card_id",
+        "gate_id",
+        "stage_key",
+        "return_stage_key",
+        "card_title",
+        "produced_by",
+        "prompt",
+        "options"
+      ],
+      "notes": {
+        "options": "Each option is {id, label, meaning, needs_comment, delivery?}. NO list of valid ids: the carrier and the renderer carry what the gate offers, and superpipeline refuses an id the gate did not offer. A client draws by `meaning` (approve | reject | revise | choose | defer), never by id.",
+        "olderBoards": "A board that sends options as {id, label} only is still projected: meaning is derived (approve, approve_automatic, approve_manual → approve; reject → reject; request_changes → revise; anything else → defer) and needs_comment is true for request_changes only.",
+        "subject": "Present only on a gate bound to an approval subject: {id, digest, schema, revision, expires_at, preview, preview_complete}. preview blocks are {type: text, label?, text} | {type: field, label, value} | {type: link, label, url}; text and link url at most 4000 characters, labels and values at most 200, at most 20 blocks. preview_complete is false when anything was cut or dropped to fit; a client must not offer an approving option on an incomplete preview, or one whose blocks it cannot draw.",
+        "body": "For a subject-bound gate the body shows the preview — the exact post, fenced so markdown keeps every character — so a stock client sees what is being approved."
+      },
+      "accept": [
+        {
+          "why": "a gate bound to a publishing subject: four options, the exact post in the preview and the body",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Announce the release\" at stage `approve`.\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\nAccount: @fixture_account on X\n\nApproval expires: 2030-01-02T03:04:05Z\n\n[Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3a",
+            "stage_key": "approve",
+            "return_stage_key": "draft",
+            "card_title": "Announce the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Announce the release\"?",
+            "handoff_summary": "Our next release ships today.\n\nThanks to everyone who tested it.",
+            "options": [
+              {
+                "id": "approve_manual",
+                "label": "Approve — I'll post it myself",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "manual"
+              },
+              {
+                "id": "approve_automatic",
+                "label": "Approve — post automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d",
+              "schema": "social-publish/v1",
+              "revision": 1,
+              "expires_at": "2030-01-02T03:04:05Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "label": "Post",
+                  "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                },
+                {
+                  "type": "field",
+                  "label": "Account",
+                  "value": "@fixture_account on X"
+                },
+                {
+                  "type": "field",
+                  "label": "Approval expires",
+                  "value": "2030-01-02T03:04:05Z"
+                }
+              ],
+              "preview_complete": true
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "an ordinary gate bound to no subject: no subject field, and the body is the v1 sentence",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Add OAuth login\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_9a22)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_9a22",
+            "gate_id": "gate_4e8b",
+            "stage_key": "review",
+            "return_stage_key": "code",
+            "card_title": "Add OAuth login",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Add OAuth login\"?",
+            "handoff_summary": "Added the OAuth routes and a test for the refresh-token path.",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_9a22"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "an option with no meaning. A sender must say what each option means; only a carrier projecting an older board derives it, and then it sends the derived value.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Announce the release\" at stage `approve`.\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\nAccount: @fixture_account on X\n\nApproval expires: 2030-01-02T03:04:05Z\n\n[Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3a",
+            "stage_key": "approve",
+            "return_stage_key": "draft",
+            "card_title": "Announce the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Announce the release\"?",
+            "handoff_summary": "Our next release ships today.\n\nThanks to everyone who tested it.",
+            "options": [
+              {
+                "id": "approve_manual",
+                "label": "Approve — I'll post it myself",
+                "needs_comment": false,
+                "delivery": "manual"
+              },
+              {
+                "id": "approve_automatic",
+                "label": "Approve — post automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d",
+              "schema": "social-publish/v1",
+              "revision": 1,
+              "expires_at": "2030-01-02T03:04:05Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "label": "Post",
+                  "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                },
+                {
+                  "type": "field",
+                  "label": "Account",
+                  "value": "@fixture_account on X"
+                },
+                {
+                  "type": "field",
+                  "label": "Approval expires",
+                  "value": "2030-01-02T03:04:05Z"
+                }
+              ],
+              "preview_complete": true
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "a subject with no digest. The answer must copy the digest back, and superpipeline binds the decision to it.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Announce the release\" at stage `approve`.\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\nAccount: @fixture_account on X\n\nApproval expires: 2030-01-02T03:04:05Z\n\n[Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3a",
+            "stage_key": "approve",
+            "return_stage_key": "draft",
+            "card_title": "Announce the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Announce the release\"?",
+            "handoff_summary": "Our next release ships today.\n\nThanks to everyone who tested it.",
+            "options": [
+              {
+                "id": "approve_manual",
+                "label": "Approve — I'll post it myself",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "manual"
+              },
+              {
+                "id": "approve_automatic",
+                "label": "Approve — post automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "subject": {
+              "id": "aps_2c9e71",
+              "schema": "social-publish/v1",
+              "revision": 1,
+              "expires_at": "2030-01-02T03:04:05Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "label": "Post",
+                  "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                },
+                {
+                  "type": "field",
+                  "label": "Account",
+                  "value": "@fixture_account on X"
+                },
+                {
+                  "type": "field",
+                  "label": "Approval expires",
+                  "value": "2030-01-02T03:04:05Z"
+                }
+              ],
+              "preview_complete": true
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "no body. A stock client would show nothing.",
+          "content": {
+            "msgtype": "m.text",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_9a22",
+            "gate_id": "gate_4e8b",
+            "stage_key": "review",
+            "return_stage_key": "code",
+            "card_title": "Add OAuth login",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Add OAuth login\"?",
+            "handoff_summary": "Added the OAuth routes and a test for the refresh-token path.",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_9a22"
+          }
+        },
+        {
+          "why": "duplicate option ids. Answering is by id.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Add OAuth login\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_9a22)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_9a22",
+            "gate_id": "gate_4e8b",
+            "stage_key": "review",
+            "return_stage_key": "code",
+            "card_title": "Add OAuth login",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Add OAuth login\"?",
+            "handoff_summary": "Added the OAuth routes and a test for the refresh-token path.",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              },
+              {
+                "id": "approve",
+                "label": "Approve again",
+                "meaning": "approve",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_9a22"
+          }
+        },
+        {
+          "why": "camelCase on the Matrix wire. `needsComment` is the board's push field; the Matrix field is `needs_comment`.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Add OAuth login\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_9a22)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_9a22",
+            "gate_id": "gate_4e8b",
+            "stage_key": "review",
+            "return_stage_key": "code",
+            "card_title": "Add OAuth login",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Add OAuth login\"?",
+            "handoff_summary": "Added the OAuth routes and a test for the refresh-token path.",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needsComment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_9a22"
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.decision.v2",
+      "direction": "inbound — the human answers",
+      "decidedBy": "charter decisions/2026-11-07-gate-v2-is-the-decision-envelope.md",
+      "sender": "the human's own Matrix session, as for v1",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "schema_version",
+        "suite_event_type",
+        "gate_id",
+        "option_id",
+        "m.relates_to"
+      ],
+      "notes": {
+        "optionId": "Any id the gate offered. The Application Service checks it against the options it recorded for that gate when it projected it, never a fixed list; superpipeline is the final judge.",
+        "comment": "Required when the chosen option has needs_comment.",
+        "subject": "Required on an answer to a subject-bound gate: {id, digest} copied from the gate the person saw. The Application Service passes them to superpipeline's resolve as approvalSubjectId and approvalSubjectDigest. An approving answer is refused when the gate's preview_complete was false.",
+        "unchanged": "Attribution and every v1 refusal (unlinked sender, the Application Service's own namespace, gate_id disagreeing with m.relates_to, a bad push signature) are unchanged."
+      },
+      "accept": [
+        {
+          "why": "an automatic approval of the publishing gate, bound to the subject the person saw",
+          "content": {
+            "msgtype": "m.text",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.decision.v2",
+            "gate_id": "gate_8f3a",
+            "body": "Approved — post automatically",
+            "option_id": "approve_automatic",
+            "comment": null,
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "request changes, with the comment that option needs",
+          "content": {
+            "msgtype": "m.text",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.decision.v2",
+            "gate_id": "gate_8f3a",
+            "body": "Requested changes",
+            "option_id": "request_changes",
+            "comment": "Say which release.",
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "an answer to a subject-bound gate with no subject binding",
+          "content": {
+            "msgtype": "m.text",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.decision.v2",
+            "gate_id": "gate_8f3a",
+            "body": "Approved — post automatically",
+            "option_id": "approve_automatic",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "an option that needs a comment, without one",
+          "content": {
+            "msgtype": "m.text",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.decision.v2",
+            "gate_id": "gate_8f3a",
+            "body": "Requested changes",
+            "option_id": "request_changes",
+            "comment": "",
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "an option the gate did not offer",
+          "content": {
+            "msgtype": "m.text",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.decision.v2",
+            "gate_id": "gate_8f3a",
+            "body": "Approved",
+            "option_id": "approve",
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "no m.relates_to, exactly as for v1",
+          "content": {
+            "msgtype": "m.text",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.decision.v2",
+            "gate_id": "gate_8f3a",
+            "body": "Approved — post automatically",
+            "option_id": "approve_automatic",
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d"
+            }
+          }
+        }
+      ]
     }
   ]
 }

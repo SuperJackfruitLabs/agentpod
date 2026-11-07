@@ -15,7 +15,15 @@ import { GATE_REQUEST_CONTENT_KEY } from "@agentpod/contract";
 import { noteHubEvent } from "../push";
 import { legacyRequestEvents } from "./legacy-events";
 import type { GatePendingDelivery } from "../bridge";
-import { GATE_EVENT_TYPE, boardLink, gateEventContent, gateProseBody, gateRequestCard } from "./gate-wire";
+import {
+  GATE_EVENT_TYPE,
+  boardLink,
+  gateEventContent,
+  gateOptionsV2,
+  gateRequestCard,
+  gateSubjectV2,
+  gateV2Content,
+} from "./gate-wire";
 
 const log = createLogger("matrix-gates");
 
@@ -149,8 +157,14 @@ async function heldForJoin(d: GatePendingDelivery, roomId: string): Promise<Proj
   return { status: "awaiting-join", roomId };
 }
 
-/** Take the gate's claim; false when another delivery of the same gate already holds it. */
+/**
+ * Take the gate's claim; false when another delivery of the same gate already holds it.
+ *
+ * The claim also records what the gate offered and the subject it is bound to — exactly what
+ * its gate.v2 carries — because a decision.v2 is checked against them, not against a list.
+ */
 async function claimGate(tenantId: string, d: GatePendingDelivery, roomId: string): Promise<boolean> {
+  const subject = gateSubjectV2(d);
   const claimed = await db
     .insert(matrixGateEvents)
     .values({
@@ -163,6 +177,10 @@ async function claimGate(tenantId: string, d: GatePendingDelivery, roomId: strin
       // id means "being sent"; the sweep treats it as taken, which is what
       // stops a concurrent delivery from posting the same question.
       eventId: `pending:${d.gateId}`,
+      options: gateOptionsV2(d),
+      approvalSubjectId: subject?.id ?? null,
+      approvalSubjectDigest: subject?.digest ?? null,
+      approvalSubjectPreviewComplete: subject?.preview_complete ?? null,
     })
     .onConflictDoNothing({ target: matrixGateEvents.gateId })
     .returning({ gateId: matrixGateEvents.gateId });
@@ -208,10 +226,18 @@ async function sendGateEvents(
   // custom event still follows while clients in the field read only it
   // (`AGENTPOD_LEGACY_PERMISSION_EVENTS`, default on); with it off, the prose is
   // the event a decision references.
+  //
+  // **The prose IS the gate.v2** (charter → `decisions/2026-11-07-gate-v2-is-the-decision-envelope.md`):
+  // its content carries the `dev.superpipeline.gate.v2` marker and the v2 fields beside the v1
+  // card, so a v2 client and a v1 client read the same single event and push, and a
+  // decision.v2 references it like any other. For a subject-bound gate its body shows the
+  // preview; for any other gate the body is the v1 sentence, unchanged.
   let eventId: string | null;
   let proseEventId: string | null;
   try {
-    proseEventId = await deps.sendText(stationUser, roomId, gateProseBody(d, deepLink), {
+    const { body, ...v2 } = gateV2Content(d, deepLink);
+    proseEventId = await deps.sendText(stationUser, roomId, String(body), {
+      ...v2,
       [GATE_REQUEST_CONTENT_KEY]: gateRequestCard(d, deepLink),
     });
     noteHubEvent(proseEventId, "gate");
