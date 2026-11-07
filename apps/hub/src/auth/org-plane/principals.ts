@@ -76,6 +76,18 @@ export async function principalHandle(id: string): Promise<string | null> {
   return (await principalDirectory().principal(id))?.handle ?? null;
 }
 
+/**
+ * What to call a principal in a sentence a person reads: the display name when one is set, else the
+ * handle. A handle is an address — for a person it comes from the email's local part, so
+ * `mail@example.com` signs in as `mail` — and a receipt that says "Rejected by mail" names
+ * nobody. Null when the id names nobody, as for `principalHandle`.
+ */
+export async function principalLabel(id: string): Promise<string | null> {
+  const p = await principalDirectory().principal(id);
+  if (!p) return null;
+  return p.displayName?.trim() || p.handle || null;
+}
+
 /** A principal's handle and display name, or null. The display name is null when none was set. */
 export async function principalNames(id: string): Promise<{ handle: string; displayName: string | null } | null> {
   const p = await principalDirectory().principal(id);
