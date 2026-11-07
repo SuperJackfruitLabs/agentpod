@@ -524,6 +524,18 @@ describe("healing a device that will never heal", () => {
   });
 });
 
+/** How many of these requests asked for `user`'s devices (a keys/query naming them). */
+function queriesFor(seen: CryptoRequest[], user: string): number {
+  return seen.filter((r) => {
+    try {
+      const keys = (JSON.parse(r.body) as { device_keys?: Record<string, unknown> }).device_keys;
+      return keys !== undefined && Object.prototype.hasOwnProperty.call(keys, user);
+    } catch {
+      return false;
+    }
+  }).length;
+}
+
 /**
  * agentpod#604, 2026-11-07: a person who signed in on a new device never received the
  * room key for gate messages. The machine already tracked them, so `updateTrackedUsers`
@@ -533,15 +545,6 @@ describe("healing a device that will never heal", () => {
  */
 describe("a recipient's devices are asked for on every send", () => {
   const HUMAN = `@rakesh:${DOMAIN}`;
-  const queriesFor = (seen: CryptoRequest[], user: string) =>
-    seen.filter((r) => {
-      try {
-        const keys = (JSON.parse(r.body) as { device_keys?: Record<string, unknown> }).device_keys;
-        return keys !== undefined && Object.prototype.hasOwnProperty.call(keys, user);
-      } catch {
-        return false;
-      }
-    }).length;
 
   test("a second send to someone already tracked still queries their devices", async () => {
     const { seen, send } = recorder();
