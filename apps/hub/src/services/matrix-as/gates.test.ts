@@ -656,3 +656,521 @@ describe("saying in the room that the board accepted an answer", () => {
     expect(replies[0]).toContain("Rejected");
   });
 });
+
+import {
+  GATE_DECISION_V2_SUITE_TYPE,
+  GATE_V2_SUITE_TYPE,
+  gateOptionsV2,
+  gateSubjectV2,
+  gateV2Content,
+} from "./gates";
+
+/**
+ * gate.v2 (charter: decisions/2026-11-07-gate-v2-is-the-decision-envelope.md).
+ *
+ * A gate bound to a publishing subject reached a room with only Request changes and Reject:
+ * this hub filtered the options on the three v1 ids and dropped approve_automatic and
+ * approve_manual, showed no post text, and sent no subject binding back. v2 carries the
+ * options the gate offers, what each one means, and the subject's preview.
+ */
+const POST_TEXT = "Shipping the new release today.\n\nNotes: *fast* paths & `code`.";
+const SUBJECT = {
+  id: "aps_fixture01",
+  digest: "sha256:3f1c0d9a",
+  schema: "social-publish/v1",
+  revision: 1,
+  expiresAt: "2030-01-02T03:04:05Z",
+  previewComplete: true,
+  preview: [
+    { type: "text", label: "Post", text: POST_TEXT },
+    { type: "field", label: "Account", value: "@fixture_account on X" },
+    { type: "field", label: "Approval expires", value: "2030-01-02T03:04:05Z" },
+  ],
+};
+const PUBLISHING: GatePendingDelivery = {
+  ...DELIVERY,
+  cardId: "crd_5e10",
+  gateId: "gate_7d21",
+  stageKey: "approve",
+  returnStageKey: "draft",
+  cardTitle: "Announce the release",
+  handoffSummary: POST_TEXT,
+  options: [
+    { id: "approve_manual", label: "Approve — I'll post it myself", meaning: "approve", needsComment: false, delivery: "manual" },
+    { id: "approve_automatic", label: "Approve — post automatically", meaning: "approve", needsComment: false, delivery: "automatic" },
+    { id: "request_changes", label: "Request changes", meaning: "revise", needsComment: true },
+    { id: "reject", label: "Reject", meaning: "reject", needsComment: false },
+  ],
+  approvalSubject: SUBJECT,
+  reviewUrl: "/b/brd_7c1f/c/crd_5e10",
+};
+
+describe("gate.v2 — what the gate offers, carried as offered", () => {
+  test("a publishing gate carries all four options with their meaning, comment rule and delivery", () => {
+    const c = gateV2Content(PUBLISHING);
+    expect(c.suite_event_type).toBe(GATE_V2_SUITE_TYPE);
+    expect(c.msgtype).toBe("m.text");
+    expect(c.options).toEqual([
+      { id: "approve_manual", label: "Approve — I'll post it myself", meaning: "approve", needs_comment: false, delivery: "manual" },
+      { id: "approve_automatic", label: "Approve — post automatically", meaning: "approve", needs_comment: false, delivery: "automatic" },
+      { id: "request_changes", label: "Request changes", meaning: "revise", needs_comment: true },
+      { id: "reject", label: "Reject", meaning: "reject", needs_comment: false },
+    ]);
+  });
+
+  test("a subject-bound gate carries its identity, digest and preview, snake_case on the wire", () => {
+    expect(gateV2Content(PUBLISHING).subject).toEqual({
+      id: "aps_fixture01",
+      digest: "sha256:3f1c0d9a",
+      schema: "social-publish/v1",
+      revision: 1,
+      expires_at: "2030-01-02T03:04:05Z",
+      preview: SUBJECT.preview,
+      preview_complete: true,
+    });
+  });
+
+  test("preview_complete: the board's flag is carried; an older board's preview with no flag is complete; no preview is not", () => {
+    const { previewComplete: _flag, ...olderBoard } = SUBJECT;
+    const { preview: _preview, ...noPreview } = olderBoard;
+    const complete = [{ ...SUBJECT, previewComplete: false }, olderBoard, noPreview].map(
+      (approvalSubject) => gateSubjectV2({ ...PUBLISHING, approvalSubject })?.preview_complete
+    );
+    expect(complete).toEqual([false, true, false]);
+  });
+
+  test("the prose body shows the exact post, so a stock client sees what is being approved", () => {
+    const body = String(gateV2Content(PUBLISHING, "https://board.example/b/brd_7c1f/c/crd_5e10").body);
+    expect(body).toContain(POST_TEXT);
+    expect(body).toContain("Account: @fixture_account on X");
+    expect(body).toContain("[Open the card](https://board.example/b/brd_7c1f/c/crd_5e10)");
+    // Fenced, so markdown cannot eat the post's own asterisks and backticks.
+    expect(body).toContain("```\n" + POST_TEXT + "\n```");
+  });
+
+  test("a gate with no subject has no subject field, and its body is the v1 sentence", () => {
+    const c = gateV2Content(DELIVERY);
+    expect(c.subject).toBeUndefined();
+    expect(c.body).toBe(gateProseBody(DELIVERY));
+  });
+
+  test("an older board's options (no meaning) still project, with meanings derived from the id", () => {
+    const old: GatePendingDelivery = {
+      ...DELIVERY,
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "approve_automatic", label: "Post it" },
+        { id: "approve_manual", label: "I'll post it" },
+        { id: "request_changes", label: "Request changes" },
+        { id: "reject", label: "Reject" },
+        { id: "later", label: "Later" },
+      ],
+    };
+    expect(gateOptionsV2(old)).toEqual([
+      { id: "approve", label: "Approve", meaning: "approve", needs_comment: false },
+      { id: "approve_automatic", label: "Post it", meaning: "approve", needs_comment: false },
+      { id: "approve_manual", label: "I'll post it", meaning: "approve", needs_comment: false },
+      { id: "request_changes", label: "Request changes", meaning: "revise", needs_comment: true },
+      { id: "reject", label: "Reject", meaning: "reject", needs_comment: false },
+      { id: "later", label: "Later", meaning: "defer", needs_comment: false },
+    ]);
+  });
+
+  test("keeps no list of valid ids: an id superpipeline offers is carried even if this hub never heard of it", () => {
+    const c = gateV2Content({
+      ...DELIVERY,
+      options: [{ id: "pick_b", label: "B", meaning: "choose", needsComment: false }],
+    });
+    expect(c.options).toEqual([{ id: "pick_b", label: "B", meaning: "choose", needs_comment: false }]);
+  });
+
+  test("the v1 payload is unchanged: it still filters to the three v1 ids", () => {
+    // A v1 client keeps exactly what it had; only gate.v2 carries the subject's options.
+    expect(gateEventContent(PUBLISHING).options).toEqual([
+      { id: "request_changes", label: "Request changes" },
+      { id: "reject", label: "Reject" },
+    ]);
+    expect(gateEventContent(PUBLISHING).subject).toBeUndefined();
+  });
+});
+
+describe("gate.v2 — what arrives from the network is bounded", () => {
+  test("a preview is re-validated: long strings are cut, malformed and excess blocks dropped, unknown keys stripped", () => {
+    const blocks: unknown[] = [
+      { type: "text", label: "L".repeat(500), text: "x".repeat(5000), extra: "stripped" },
+      { type: "field", label: "Account", value: "v".repeat(300) },
+      { type: "link", label: "Board", url: "javascript:alert(1)" },
+      { type: "link", label: "Board", url: "https://board.example/b/1" },
+      { type: "image", src: "https://x" },
+      { type: "text" },
+      "not a block",
+      ...Array.from({ length: 30 }, (_, i) => ({ type: "field", label: `f${i}`, value: "v" })),
+    ];
+    const subject = gateV2Content({ ...PUBLISHING, approvalSubject: { ...SUBJECT, preview: blocks } }).subject;
+    if (typeof subject !== "object" || subject === null || !("preview" in subject) || !Array.isArray(subject.preview)) {
+      throw new Error("expected a subject with a preview");
+    }
+    const preview: unknown[] = subject.preview;
+    expect(preview).toHaveLength(20);
+    expect(preview[0]).toEqual({ type: "text", label: `${"L".repeat(199)}…`, text: `${"x".repeat(3999)}…` });
+    expect(preview[1]).toEqual({ type: "field", label: "Account", value: `${"v".repeat(199)}…` });
+    expect(preview[2]).toEqual({ type: "link", label: "Board", url: "https://board.example/b/1" });
+    expect(preview[3]).toEqual({ type: "field", label: "f0", value: "v" });
+    // This hub cut and dropped blocks, so the preview is no longer everything there was.
+    expect(subject).toHaveProperty("preview_complete", false);
+  });
+
+  test("a single cut string makes the preview incomplete even when the board said it was complete", () => {
+    const subject = gateSubjectV2({
+      ...PUBLISHING,
+      approvalSubject: { ...SUBJECT, preview: [{ type: "text", label: "Post", text: "x".repeat(4001) }] },
+    });
+    expect(subject?.preview_complete).toBe(false);
+  });
+
+  test("a malformed subject is not carried, and no option that would approve it is offered", () => {
+    const c = gateV2Content({ ...PUBLISHING, approvalSubject: { id: "aps_x", schema: "social-publish/v1" } });
+    expect(c.subject).toBeUndefined();
+    expect(c.options).toEqual([
+      { id: "request_changes", label: "Request changes", meaning: "revise", needs_comment: true },
+      { id: "reject", label: "Reject", meaning: "reject", needs_comment: false },
+    ]);
+  });
+
+  test("an option with no usable id or label is dropped, a duplicate id keeps the first, and nonsense meanings are derived", () => {
+    expect(
+      gateOptionsV2({
+        ...DELIVERY,
+        options: [
+          { id: "", label: "Empty" },
+          { id: "approve", label: "Approve", meaning: "obliterate", needsComment: "yes", delivery: "teleport" },
+          { id: "approve", label: "Approve again" },
+          { id: "x".repeat(300), label: "Too long" },
+        ],
+      })
+    ).toEqual([{ id: "approve", label: "Approve", meaning: "approve", needs_comment: false }]);
+  });
+});
+
+/** A decision.v2, answering the publishing gate above. */
+function decisionV2(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    msgtype: "m.text",
+    body: "Approved — post automatically",
+    schema_version: 1,
+    suite_event_type: GATE_DECISION_V2_SUITE_TYPE,
+    gate_id: "gate_7d21",
+    option_id: "approve_automatic",
+    subject: { id: "aps_fixture01", digest: "sha256:3f1c0d9a" },
+    "m.relates_to": { rel_type: "m.reference", event_id: GATE_EVENT_ID },
+    ...over,
+  };
+}
+
+/** The projection this hub recorded for the publishing gate: its offered options and its subject. */
+function publishingDeps(over: Partial<GateDecisionDeps> = {}) {
+  return decisionDeps({
+    projectionFor: async () => ({
+      tenantId: "fleet_1",
+      boardId: "brd_7c1f",
+      eventId: GATE_EVENT_ID,
+      options: gateOptionsV2(PUBLISHING),
+      subjectId: "aps_fixture01",
+      subjectDigest: "sha256:3f1c0d9a",
+      subjectPreviewComplete: true,
+    }),
+    ...over,
+  });
+}
+
+describe("gate.v2 — reading and acting on a decision.v2", () => {
+  test("parses an option id this hub has no list for, and the subject binding", () => {
+    expect(parseGateDecision(decisionV2())).toMatchObject({
+      version: 2,
+      gateId: "gate_7d21",
+      optionId: "approve_automatic",
+      subject: { id: "aps_fixture01", digest: "sha256:3f1c0d9a" },
+      referencedEventId: GATE_EVENT_ID,
+    });
+  });
+
+  test("a v1 decision still refuses an id outside the three", () => {
+    expect(parseGateDecision(decision({ option_id: "approve_automatic" }))).toBeNull();
+  });
+
+  test("approve_automatic with its subject binding resolves, carrying the binding to superpipeline", async () => {
+    const { deps, resolved } = publishingDeps();
+    const r = await handleGateDecision({ sender: "@person:id.example", content: decisionV2() }, "!room", deps);
+    expect(r).toEqual({ status: "resolved" });
+    expect(resolved[0]).toMatchObject({
+      gateId: "gate_7d21",
+      decision: "approve_automatic",
+      approvalSubject: { id: "aps_fixture01", digest: "sha256:3f1c0d9a" },
+      principalId: "68jYD9VOCmXlPhIYGFOgoZVE6vDUVHPA",
+    });
+  });
+
+  test("refused when the option was not offered for THAT gate", async () => {
+    const { deps, resolved, replies } = publishingDeps();
+    const r = await handleGateDecision(
+      { sender: "@person:id.example", content: decisionV2({ option_id: "approve" }) },
+      "!room",
+      deps
+    );
+    expect(r).toEqual({ status: "refused", reason: "bad-option" });
+    expect(resolved).toHaveLength(0);
+    expect(replies[0]).toContain("Nothing has changed");
+  });
+
+  test("refused when the gate's offered options were never recorded", async () => {
+    const { deps, resolved } = decisionDeps();
+    const r = await handleGateDecision(
+      { sender: "@person:id.example", content: decisionV2({ option_id: "approve", subject: undefined }) },
+      "!room",
+      deps
+    );
+    expect(r).toEqual({ status: "refused", reason: "bad-option" });
+    expect(resolved).toHaveLength(0);
+  });
+
+  test("refused when an option that needs a comment arrives without one", async () => {
+    for (const comment of [undefined, null, "", "   "]) {
+      const { deps, resolved, replies } = publishingDeps();
+      const r = await handleGateDecision(
+        { sender: "@person:id.example", content: decisionV2({ option_id: "request_changes", comment }) },
+        "!room",
+        deps
+      );
+      expect(r).toEqual({ status: "refused", reason: "comment-required" });
+      expect(resolved).toHaveLength(0);
+      expect(replies[0]).toContain("comment");
+    }
+  });
+
+  test("request_changes with its comment resolves and carries the comment", async () => {
+    const { deps, resolved } = publishingDeps();
+    const r = await handleGateDecision(
+      { sender: "@person:id.example", content: decisionV2({ option_id: "request_changes", comment: "Shorter, please." }) },
+      "!room",
+      deps
+    );
+    expect(r).toEqual({ status: "resolved" });
+    expect(resolved[0]).toMatchObject({ decision: "request_changes", comment: "Shorter, please." });
+  });
+
+  test("refused when an answer to a subject-bound gate carries no subject binding", async () => {
+    for (const subject of [undefined, null, { id: "aps_fixture01" }, { digest: "sha256:3f1c0d9a" }, "aps_fixture01"]) {
+      const { deps, resolved } = publishingDeps();
+      const r = await handleGateDecision(
+        { sender: "@person:id.example", content: decisionV2({ subject }) },
+        "!room",
+        deps
+      );
+      expect(r).toEqual({ status: "refused", reason: "subject-missing" });
+      expect(resolved).toHaveLength(0);
+    }
+  });
+
+  test("an approving answer is refused when the subject's preview was not shown in full; revise and reject still go", async () => {
+    for (const subjectPreviewComplete of [false, null]) {
+      const incomplete = (over: Partial<GateDecisionDeps> = {}) =>
+        decisionDeps({
+          projectionFor: async () => ({
+            tenantId: "fleet_1",
+            boardId: "brd_7c1f",
+            eventId: GATE_EVENT_ID,
+            options: gateOptionsV2(PUBLISHING),
+            subjectId: "aps_fixture01",
+            subjectDigest: "sha256:3f1c0d9a",
+            subjectPreviewComplete,
+          }),
+          ...over,
+        });
+      for (const option_id of ["approve_automatic", "approve_manual"]) {
+        const { deps, resolved, replies } = incomplete();
+        const r = await handleGateDecision(
+          { sender: "@person:id.example", content: decisionV2({ option_id }) },
+          "!room",
+          deps
+        );
+        expect(r).toEqual({ status: "refused", reason: "preview-incomplete" });
+        expect(resolved).toHaveLength(0);
+        expect(replies[0]).toContain("Nothing has changed");
+      }
+      const reject = incomplete();
+      expect(
+        await handleGateDecision({ sender: "@person:id.example", content: decisionV2({ option_id: "reject" }) }, "!room", reject.deps)
+      ).toEqual({ status: "resolved" });
+    }
+  });
+
+  test("every v1 refusal still holds for v2: unlinked sender, mismatched reference, an agent", async () => {
+    const unlinked = publishingDeps({ principalForMatrixId: async () => null });
+    expect(
+      await handleGateDecision({ sender: "@x:elsewhere.org", content: decisionV2() }, "!room", unlinked.deps)
+    ).toEqual({ status: "refused", reason: "unlinked-sender" });
+
+    const mismatch = publishingDeps();
+    expect(
+      await handleGateDecision(
+        { sender: "@person:id.example", content: decisionV2({ "m.relates_to": { rel_type: "m.reference", event_id: "$other" } }) },
+        "!room",
+        mismatch.deps
+      )
+    ).toEqual({ status: "refused", reason: "reference-mismatch" });
+
+    const agent = publishingDeps({ principalForMatrixId: async () => ({ id: "prn_agent", kind: "agent" as const }) });
+    expect(
+      await handleGateDecision({ sender: "@agent:id.example", content: decisionV2() }, "!room", agent.deps)
+    ).toEqual({ status: "refused", reason: "not-human" });
+
+    for (const r of [unlinked, mismatch, agent]) expect(r.resolved).toHaveLength(0);
+  });
+
+  test("a v1 decision on a gate with no recorded options resolves exactly as before, with no binding", async () => {
+    const { deps, resolved } = decisionDeps();
+    await handleGateDecision({ sender: "@person:id.example", content: decision() }, "!room", deps);
+    expect(resolved[0]).not.toHaveProperty("approvalSubject");
+  });
+});
+
+describe("gate.v2 — resolving at the board with the subject binding", () => {
+  test("sends approvalSubjectId and approvalSubjectDigest beside the decision and comment", async () => {
+    const calls: Array<RequestInit> = [];
+    const f: typeof fetch = Object.assign(
+      async (_url: string | URL | Request, init?: RequestInit) => {
+        calls.push(init ?? {});
+        return new Response("{}", { status: 200 });
+      },
+      { preconnect: fetch.preconnect }
+    );
+    await resolveGateAtSuperpipeline(
+      {
+        boardId: "brd_7c1f",
+        gateId: "gate_7d21",
+        decision: "approve_automatic",
+        comment: null,
+        principalId: "prn_fixture",
+        senderMxid: "@person:id.example",
+        approvalSubject: { id: "aps_fixture01", digest: "sha256:3f1c0d9a" },
+      },
+      { baseUrl: "https://k.dev", mint: async () => "t", fetch: f }
+    );
+    const sent = calls[0]?.body;
+    expect(JSON.parse(typeof sent === "string" ? sent : "")).toEqual({
+      decision: "approve_automatic",
+      approvalSubjectId: "aps_fixture01",
+      approvalSubjectDigest: "sha256:3f1c0d9a",
+    });
+  });
+});
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+/** The rules every gate.v2 the hub sends keeps: a body, options with meaning and needs_comment, unique ids, a subject digest. */
+function wellFormed(c: Record<string, unknown>): boolean {
+  if (typeof c.body !== "string" || !Array.isArray(c.options)) return false;
+  const options: unknown[] = c.options;
+  const ids = new Set<unknown>();
+  for (const o of options) {
+    if (typeof o !== "object" || o === null || !("id" in o) || !("meaning" in o) || !("needs_comment" in o)) return false;
+    ids.add(o.id);
+  }
+  if (ids.size !== options.length) return false;
+  const s = c.subject;
+  return s === undefined || (typeof s === "object" && s !== null && "id" in s && "digest" in s);
+}
+
+/**
+ * The shared corpus's gate.v2 and decision.v2 examples — what supermessage and superpipeline
+ * validate too. The hub's own output must BE the accepted gates, and the hub must refuse every
+ * rejected answer.
+ */
+describe("gate.v2 against the shared corpus", () => {
+  const corpusText = readFileSync(
+    join(import.meta.dir, "../../../../../fixtures/ecosystem-identity/matrix_gate_events.json"),
+    "utf8"
+  );
+  const corpus: unknown = JSON.parse(corpusText);
+  const events: Array<{ suiteEventType: string; accept: Array<{ content: Record<string, unknown> }>; reject: Array<{ why: string; content: Record<string, unknown> }> }> =
+    typeof corpus === "object" && corpus !== null && "events" in corpus && Array.isArray(corpus.events) ? corpus.events : [];
+  const gateV2 = events.find((e) => e.suiteEventType === GATE_V2_SUITE_TYPE);
+  const decisionV2Corpus = events.find((e) => e.suiteEventType === GATE_DECISION_V2_SUITE_TYPE);
+
+  const corpusPost = "Our next release ships today.\n\nThanks to everyone who tested it.";
+  const corpusPublishing: GatePendingDelivery = {
+    ...DELIVERY,
+    cardId: "crd_6b40",
+    gateId: "gate_8f3a",
+    stageKey: "approve",
+    returnStageKey: "draft",
+    cardTitle: "Announce the release",
+    handoffSummary: corpusPost,
+    options: PUBLISHING.options,
+    approvalSubject: {
+      id: "aps_2c9e71",
+      digest: "sha256:9b2f4e0c1a7d",
+      schema: "social-publish/v1",
+      revision: 1,
+      expiresAt: "2030-01-02T03:04:05Z",
+      previewComplete: true,
+      preview: [
+        { type: "text", label: "Post", text: corpusPost },
+        { type: "field", label: "Account", value: "@fixture_account on X" },
+        { type: "field", label: "Approval expires", value: "2030-01-02T03:04:05Z" },
+      ],
+    },
+  };
+
+  test("the hub's gate.v2 for a publishing gate and for an ordinary gate is exactly what the corpus accepts", () => {
+    expect(gateV2?.accept).toHaveLength(2);
+    expect(gateV2Content(corpusPublishing, "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40")).toEqual(
+      gateV2?.accept[0]?.content ?? {}
+    );
+    expect(
+      gateV2Content(
+        { ...DELIVERY, handoffSummary: "Added the OAuth routes and a test for the refresh-token path." },
+        "https://superpipeline.dev/b/brd_7c1f/c/crd_9a22"
+      )
+    ).toEqual(gateV2?.accept[1]?.content ?? {});
+  });
+
+  test("every gate.v2 the corpus rejects breaks a rule the hub's own output keeps", () => {
+    for (const { content } of gateV2?.accept ?? []) expect(wellFormed(content)).toBe(true);
+    expect(gateV2?.reject.length).toBeGreaterThanOrEqual(4);
+    for (const { why, content } of gateV2?.reject ?? []) expect(wellFormed(content), why).toBe(false);
+  });
+
+  const corpusDeps = () =>
+    decisionDeps({
+      projectionFor: async () => ({
+        tenantId: "fleet_1",
+        boardId: "brd_7c1f",
+        eventId: "$gateEventId",
+        options: gateOptionsV2(corpusPublishing),
+        subjectId: "aps_2c9e71",
+        subjectDigest: "sha256:9b2f4e0c1a7d",
+        subjectPreviewComplete: true,
+      }),
+    });
+
+  test("every decision.v2 the corpus accepts resolves, carrying its binding", async () => {
+    expect(decisionV2Corpus?.accept.length).toBeGreaterThanOrEqual(2);
+    for (const { content } of decisionV2Corpus?.accept ?? []) {
+      const { deps, resolved } = corpusDeps();
+      expect(await handleGateDecision({ sender: "@person:id.example", content }, "!room", deps)).toEqual({ status: "resolved" });
+      expect(resolved[0]).toMatchObject({ approvalSubject: { id: "aps_2c9e71", digest: "sha256:9b2f4e0c1a7d" } });
+    }
+  });
+
+  test("every decision.v2 the corpus rejects is refused, and nothing resolves", async () => {
+    expect(decisionV2Corpus?.reject.length).toBeGreaterThanOrEqual(4);
+    for (const { why, content } of decisionV2Corpus?.reject ?? []) {
+      const { deps, resolved } = corpusDeps();
+      const r = await handleGateDecision({ sender: "@person:id.example", content }, "!room", deps);
+      expect(r.status, why).toBe("refused");
+      expect(resolved, why).toHaveLength(0);
+    }
+  });
+});

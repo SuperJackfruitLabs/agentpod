@@ -7,7 +7,12 @@
 
 import { createLogger } from "../../utils/logger";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
-import { GATE_DECISION_SUITE_TYPE, GATE_OUTCOME_TYPE, isGateOptionId, type GateOptionId } from "./gate-wire";
+import {
+  GATE_DECISION_SUITE_TYPE,
+  GATE_DECISION_V2_SUITE_TYPE,
+  GATE_OUTCOME_TYPE,
+  isGateOptionId,
+} from "./gate-wire";
 
 const log = createLogger("matrix-gates");
 
@@ -26,18 +31,50 @@ export type DecisionRefusal =
   | "not-human"
   | "unknown-gate"
   | "reference-mismatch"
-  | "bad-option";
+  /** gate.v2: an option this hub did not record as offered for that gate. */
+  | "bad-option"
+  /** gate.v2: an option that needs a comment arrived without one. */
+  | "comment-required"
+  /** gate.v2: an answer to a subject-bound gate that does not say which subject it approves. */
+  | "subject-missing"
+  /** gate.v2: an approving answer to a subject gate whose preview was not shown in full. */
+  | "preview-incomplete";
 
 export interface GateDecisionEvent {
   sender: string;
   content: Record<string, unknown>;
 }
 
+/** The subject an answer says it was shown: copied from the gate.v2 the person saw. */
+export interface GateSubjectBinding {
+  id: string;
+  digest: string;
+}
+
 export interface ParsedGateDecision {
+  /** Which answer type it arrived as: `decision.v1` or `decision.v2`. */
+  version: 1 | 2;
   gateId: string;
-  optionId: GateOptionId;
+  /**
+   * For v1, one of the three v1 ids. For v2, whatever the client sent: this hub keeps no list,
+   * and `handleGateDecision` checks it against the options recorded for that gate.
+   */
+  optionId: string;
   comment: string | null;
   referencedEventId: string | null;
+  /** v2 only, and null when absent or malformed. */
+  subject: GateSubjectBinding | null;
+}
+
+/** The subject binding a decision.v2 carries, or null when there is none to read. */
+function subjectBinding(v: unknown): GateSubjectBinding | null {
+  if (typeof v !== "object" || v === null) return null;
+  if (!("id" in v) || !("digest" in v)) return null;
+  const { id, digest } = v;
+  if (typeof id !== "string" || id.length === 0 || typeof digest !== "string" || digest.length === 0) {
+    return null;
+  }
+  return { id, digest };
 }
 
 /**
@@ -54,9 +91,14 @@ export interface ParsedGateDecision {
 export function parseGateDecision(content: unknown): ParsedGateDecision | null {
   if (typeof content !== "object" || content === null) return null;
   const c = content as Record<string, unknown>;
-  if (c.suite_event_type !== GATE_DECISION_SUITE_TYPE) return null;
+  const version = c.suite_event_type === GATE_DECISION_SUITE_TYPE ? 1 : c.suite_event_type === GATE_DECISION_V2_SUITE_TYPE ? 2 : null;
+  if (version === null) return null;
   if (typeof c.gate_id !== "string" || c.gate_id.length === 0) return null;
-  if (!isGateOptionId(c.option_id)) return null;
+  // v1 keeps its three ids. v2 keeps no list (charter gate.v2 §2): any non-empty id is read,
+  // and checked against what the gate offered once the gate is known.
+  const optionId = c.option_id;
+  if (typeof optionId !== "string" || optionId.length === 0) return null;
+  if (version === 1 && !isGateOptionId(optionId)) return null;
 
   const rel = c["m.relates_to"];
   let referencedEventId: string | null = null;
@@ -68,10 +110,12 @@ export function parseGateDecision(content: unknown): ParsedGateDecision | null {
   }
 
   return {
+    version,
     gateId: c.gate_id,
-    optionId: c.option_id,
+    optionId,
     comment: typeof c.comment === "string" && c.comment.trim() !== "" ? c.comment : null,
     referencedEventId,
+    subject: version === 2 ? subjectBinding(c.subject) : null,
   };
 }
 
@@ -105,6 +149,16 @@ export interface GateDecisionDeps {
     eventId: string;
     /** The prose message carrying the gate, when it was recorded. */
     proseEventId?: string | null;
+    /**
+     * What the gate offered when it was projected (gate.v2). Null for a gate projected before
+     * this hub recorded options — a decision.v2 on one is refused, since nothing says what it
+     * offered; a decision.v1 is unaffected.
+     */
+    options?: ReadonlyArray<{ id: string; meaning: string; needs_comment: boolean }> | null;
+    /** The subject a subject-bound gate approves; null when it is bound to none. */
+    subjectId?: string | null;
+    /** Whether the subject's preview was carried in full; false refuses an approving answer. */
+    subjectPreviewComplete?: boolean | null;
   } | null>;
   /**
    * Resolve the gate at superpipeline **as `principalId`**, never as this service.
@@ -117,7 +171,7 @@ export interface GateDecisionDeps {
     tenantId: string;
     boardId: string;
     gateId: string;
-    decision: GateOptionId;
+    decision: string;
     comment: string | null;
     principalId: string;
     /**
@@ -125,6 +179,8 @@ export interface GateDecisionDeps {
      * human itself (contract §3.4b); `principalId` is what the hub resolved, checked against it.
      */
     senderMxid: string;
+    /** gate.v2: the subject the person was shown, for superpipeline to match against its own. */
+    approvalSubject?: GateSubjectBinding;
   }): Promise<{ ok: true } | { ok: false; code: string }>;
   /** Say something back in the room. Used when a gate was already resolved. */
   reply(roomId: string, body: string): Promise<unknown>;
@@ -140,6 +196,41 @@ export interface GateDecisionDeps {
   displayNameFor?(principalId: string): Promise<string | null>;
   /** Remember that a receipt was posted, so a repeated decision cannot post a second. */
   markOutcomePosted?(gateId: string): Promise<boolean>;
+}
+
+/**
+ * Why a decision.v2 must not be carried, or null when it may.
+ *
+ * Checked against what THIS gate offered when it was projected — never a fixed list. This is
+ * the carrier refusing what it can already see is wrong; superpipeline remains the judge and
+ * refuses again on its own terms (an id not offered, a binding that does not match).
+ */
+function v2Refusal(
+  parsed: ParsedGateDecision,
+  projection: NonNullable<Awaited<ReturnType<GateDecisionDeps["projectionFor"]>>>,
+): { reason: DecisionRefusal; text: string } | null {
+  const option = projection.options?.find((o) => o.id === parsed.optionId);
+  if (!option) {
+    return { reason: "bad-option", text: "That is not one of this gate's options. Nothing has changed." };
+  }
+  if (option.needs_comment && !parsed.comment) {
+    return { reason: "comment-required", text: "That answer needs a comment. Nothing has changed." };
+  }
+  if (projection.subjectId && !parsed.subject) {
+    return {
+      reason: "subject-missing",
+      text: "That answer did not say which version it approves. Nothing has changed.",
+    };
+  }
+  // The card could not show everything being approved, so an approval of it is refused here —
+  // a client should not have offered one (charter gate.v2 §3). Request changes and reject stay.
+  if (projection.subjectId && option.meaning === "approve" && projection.subjectPreviewComplete !== true) {
+    return {
+      reason: "preview-incomplete",
+      text: "The card could not show everything being approved, so it cannot be approved from here. Open the card on the board. Nothing has changed.",
+    };
+  }
+  return null;
 }
 
 /** What superpipeline's refusal of a decision becomes: the reason, and what is said in the room. */
@@ -274,6 +365,20 @@ export async function handleGateDecision(
     return { status: "refused", reason: "not-human" };
   }
 
+  // gate.v2: after attribution, so a stranger or an agent cannot make this hub speak.
+  if (parsed.version === 2) {
+    const refusal = v2Refusal(parsed, projection);
+    if (refusal) {
+      log.warn("a gate.v2 decision was refused before it reached the board", {
+        gateId: parsed.gateId,
+        optionId: parsed.optionId,
+        reason: refusal.reason,
+      });
+      await deps.reply(roomId, refusal.text);
+      return { status: "refused", reason: refusal.reason };
+    }
+  }
+
   const result = await deps.resolveGate({
     tenantId: projection.tenantId,
     boardId: projection.boardId,
@@ -282,6 +387,7 @@ export async function handleGateDecision(
     comment: parsed.comment,
     principalId: principal.id,
     senderMxid: event.sender,
+    ...(parsed.subject ? { approvalSubject: parsed.subject } : {}),
   });
 
   if (result.ok) {

@@ -9,7 +9,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "../../db/drizzle";
 import { bridgeDispatches } from "../../db/schema/bridge";
-import { matrixGateEvents, matrixRooms } from "../../db/schema/matrix";
+import { matrixGateEvents, matrixRooms, type MatrixGateOption } from "../../db/schema/matrix";
 import { stations } from "../../db/schema/stations";
 import { stationSpeaker } from "../matrix";
 import { principalHandle } from "../../auth/org-plane/principals";
@@ -44,6 +44,12 @@ export async function projectionForGate(gateId: string): Promise<{
   roomId: string;
   eventId: string;
   proseEventId: string | null;
+  /** What the gate offered when it was projected (gate.v2); null for older gates. */
+  options: MatrixGateOption[] | null;
+  /** The subject a subject-bound gate approves; null when bound to none. */
+  subjectId: string | null;
+  subjectDigest: string | null;
+  subjectPreviewComplete: boolean | null;
 } | null> {
   const [row] = await db
     .select({
@@ -52,6 +58,10 @@ export async function projectionForGate(gateId: string): Promise<{
       roomId: matrixGateEvents.roomId,
       eventId: matrixGateEvents.eventId,
       proseEventId: matrixGateEvents.proseEventId,
+      options: matrixGateEvents.options,
+      subjectId: matrixGateEvents.approvalSubjectId,
+      subjectDigest: matrixGateEvents.approvalSubjectDigest,
+      subjectPreviewComplete: matrixGateEvents.approvalSubjectPreviewComplete,
     })
     .from(matrixGateEvents)
     .where(eq(matrixGateEvents.gateId, gateId))

@@ -6,7 +6,6 @@
 
 import { createLogger } from "../../utils/logger";
 import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plane/assertion";
-import type { GateOptionId } from "./gate-wire";
 
 const log = createLogger("matrix-gates");
 
@@ -27,10 +26,13 @@ export async function resolveGateAtSuperpipeline(
   input: {
     boardId: string;
     gateId: string;
-    decision: GateOptionId;
+    /** The option id the person chose. Not checked against a list: superpipeline judges it. */
+    decision: string;
     comment: string | null;
     principalId: string;
     senderMxid: string;
+    /** gate.v2: the subject the person was shown, sent so superpipeline can bind to it. */
+    approvalSubject?: { id: string; digest: string };
   },
   deps: {
     baseUrl: string;
@@ -70,6 +72,12 @@ export async function resolveGateAtSuperpipeline(
         body: JSON.stringify({
           decision: input.decision,
           ...(input.comment ? { comment: input.comment } : {}),
+          ...(input.approvalSubject
+            ? {
+                approvalSubjectId: input.approvalSubject.id,
+                approvalSubjectDigest: input.approvalSubject.digest,
+              }
+            : {}),
         }),
       }
     );
