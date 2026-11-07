@@ -6,6 +6,8 @@ export { signalNodeToAdopt } from "./adopt-signal";
 export { boardProjectionDeps, withJoinWake } from "./board-projection";
 export { matrixIdsForBoardHumans } from "./board-room";
 export { isMatrixUserInUse } from "./client";
+export { isDeliveryPending } from "./delivery-wire";
+export { projectDelivery } from "./delivery-projection";
 export { isElicitationPending } from "./elicitation-card";
 export { startElicitationSweeper } from "./elicitation-sweep";
 export { postedElicitationsAwaitingOutcome, projectElicitation } from "./elicitations";

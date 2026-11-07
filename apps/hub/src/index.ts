@@ -25,6 +25,7 @@ import { boardProjectionDeps, withJoinWake } from './services/matrix-as/index.ts
 import { startGateSweeper } from './services/matrix-as/index.ts';
 import { startElicitationSweeper } from './services/matrix-as/index.ts';
 import { projectElicitation, postedElicitationsAwaitingOutcome } from './services/matrix-as/index.ts';
+import { projectDelivery } from './services/matrix-as/index.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
 // Node gateway WebSocket routes
@@ -432,6 +433,11 @@ if (matrixBridge) {
      * sweep already asks each board what is still pending; this settles what is not.
      */
     settleOutcome: (gateId, decision, decidedBy) => matrixBridge.settleGate(gateId, decision, decidedBy),
+    // …and the follow-up a manual-delivery approval owes: the floor beneath `delivery.pending`.
+    // `projectDelivery` is idempotent on `gate_id`, as `projectGate` is.
+    projectDelivery: (tenantId, delivery) => projectDelivery(tenantId, delivery, gateProjection),
+    // …and its card closed when the board no longer owes it (settled on the board).
+    settleDelivery: (gateId) => matrixBridge.settleDelivery(gateId),
     // What each board still waits on: the fleet card drops gates answered on the
     // board, and shows again the ones a restart forgot.
     onBoardPending: (boardId, gates) =>

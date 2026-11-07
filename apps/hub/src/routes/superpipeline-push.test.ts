@@ -202,3 +202,66 @@ test("an elicitation missing the id an answer is addressed to is ignored, not pr
   expect(await res.json()).toMatchObject({ ignored: true });
   expect(said).toHaveLength(0);
 });
+
+/**
+ * The follow-up a manual-delivery approval owes (charter: "The decision envelope covers questions
+ * and follow-ups" §3), through the same signed door.
+ */
+const FOLLOW_UP = {
+  event: "delivery.pending",
+  boardId: "brd_7c1f",
+  boardName: "Release board",
+  cardId: "crd_6b40",
+  cardTitle: "Announce the release",
+  gateId: "gate_8f3a",
+  stageKey: "approve",
+  approvalSubject: {
+    id: "aps_2c9e71",
+    digest: "sha256:9b2f4e0c1a7d",
+    schema: "social-publish/v1",
+    revision: 1,
+    expiresAt: "2030-01-02T03:04:05Z",
+    preview: [{ type: "text", label: "Post", text: "Our next release ships today." }],
+    previewComplete: true,
+  },
+  options: [
+    {
+      id: "record_live_url",
+      label: "Record the live link",
+      meaning: "defer",
+      needsComment: false,
+      input: { kind: "url", label: "Live link", required: true, maxLength: 2000 },
+    },
+    { id: "switch_to_automatic", label: "Post it automatically", meaning: "approve", needsComment: false, delivery: "automatic" },
+  ],
+  ts: "2026-11-07T10:00:00.000Z",
+};
+
+test("a signed delivery.pending is routed to the delivery projection", async () => {
+  // As for a question: the board room is refused, so the projection answers `no-room` before it
+  // writes anything, and that outcome proves the body reached the delivery path.
+  const askedFor: string[] = [];
+  const d = deps({
+    boardRoom: async (boardId: string) => {
+      askedFor.push(boardId);
+      return null;
+    },
+  });
+  const raw = JSON.stringify(FOLLOW_UP);
+  const res = await post(d, raw, await sign(SECRET, raw));
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({ ok: true, status: "no-room" });
+  expect(askedFor).toEqual([FOLLOW_UP.boardId]);
+});
+
+test("a delivery.pending for a board this hub does not know is 404", async () => {
+  const raw = JSON.stringify(FOLLOW_UP);
+  const res = await post(deps({ tenantIdFor: async () => null }), raw, await sign(SECRET, raw));
+  expect(res.status).toBe(404);
+});
+
+test("a delivery.pending with no gate id is ignored, not projected", async () => {
+  const raw = JSON.stringify({ ...FOLLOW_UP, gateId: "" });
+  const res = await post(deps(), raw, await sign(SECRET, raw));
+  expect(await res.json()).toMatchObject({ ignored: true });
+});

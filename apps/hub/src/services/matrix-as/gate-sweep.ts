@@ -46,6 +46,8 @@ import { subscribeBoardsToPush } from "../bridge";
 import { createLogger } from "../../utils/logger";
 import { isGatePending } from "./gates";
 import type { GatePendingDelivery, ProjectionOutcome } from "./gates";
+import { isDeliveryPending, type DeliveryPendingDelivery } from "./delivery-wire";
+import type { DeliveryProjectionOutcome } from "./delivery-projection";
 
 const log = createLogger("gate-sweep");
 
@@ -86,6 +88,24 @@ export interface GateSweepDeps {
    * that could not be read: its gates are not therefore closed.
    */
   onBoardPending?(boardId: string, gates: GatePendingDelivery[]): Promise<void>;
+
+  /**
+   * The follow-ups manual-delivery approvals still owe, read from `GET …/deliveries/pending` —
+   * the floor beneath the `delivery.pending` push, as the rest of this sweep is beneath
+   * `gate.pending` (charter: "The decision envelope covers questions and follow-ups" §3).
+   * `unknown[]`: each is checked with `isDeliveryPending` before it is carried. Optional, with
+   * `projectDelivery`, so a caller that only wants gates keeps working.
+   */
+  pendingDeliveries?(boardId: string): Promise<unknown[]>;
+  /** Post a follow-up, exactly once. Idempotent on `gate_id`. */
+  projectDelivery?(tenantId: string, d: DeliveryPendingDelivery): Promise<DeliveryProjectionOutcome>;
+  /** Follow-ups this hub posted on a board and has not settled (`outcome_posted_at IS NULL`). */
+  postedDeliveriesAwaitingOutcome?(boardId: string): Promise<Array<{ gateId: string }>>;
+  /**
+   * Settle a follow-up the board no longer owes — link recorded on the web, mode switched,
+   * subject expired, card archived — with its receipt, claimed once. True when this call posted it.
+   */
+  settleDelivery?(gateId: string): Promise<boolean>;
 }
 
 /** Every way `projectGate` can end. Derived, so a new outcome cannot be forgotten here. */
@@ -150,6 +170,12 @@ export interface GateSweepResult {
    * could not answer "is anything still being decided behind my back".
    */
   settled: number;
+  /**
+   * Delivery follow-ups: seen, put in a room by this pass, and those that could be put nowhere
+   * (a person owes a live link nobody asked them for), and room cards settled because the board no
+   * longer owes them. `failedBoards` could not be read, and settle nothing.
+   */
+  deliveries: { checked: number; projected: number; stuck: number; settled: number; failedBoards: string[] };
 }
 
 /** One sweep pass. Deps are injected so this runs with no network and no db. */
@@ -167,6 +193,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
     failed: 0,
   };
   const failedBoards: string[] = [];
+  const deliveries: GateSweepResult["deliveries"] = { checked: 0, projected: 0, stuck: 0, settled: 0, failedBoards: [] };
 
   for (const boardId of await deps.boards()) {
     const tenantId = await deps.tenantIdFor(boardId);
@@ -286,6 +313,8 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
         });
       }
     }
+
+    await sweepDeliveries(boardId, tenantId, deps, deliveries);
   }
 
   const stuck = STUCK.reduce((n, status) => n + byStatus[status], 0);
@@ -295,7 +324,73 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
     log.warn("pending gates the sweep could not deliver", { stuck, ...byStatus });
   }
 
-  return { checked, projected, byStatus, failedBoards, settled };
+  return { checked, projected, byStatus, failedBoards, settled, deliveries };
+}
+
+/**
+ * One board's delivery follow-ups: read, and each posted once. A board whose list cannot be read
+ * is counted and stepped over, and so is a follow-up whose post throws — the same per-board,
+ * per-item isolation as the gates above.
+ */
+async function sweepDeliveries(
+  boardId: string,
+  tenantId: string,
+  deps: GateSweepDeps,
+  tally: GateSweepResult["deliveries"],
+): Promise<void> {
+  if (!deps.pendingDeliveries || !deps.projectDelivery) return;
+  let pending: unknown[];
+  try {
+    pending = await deps.pendingDeliveries(boardId);
+  } catch (err) {
+    tally.failedBoards.push(boardId);
+    log.warn("could not ask a board for its pending delivery follow-ups", {
+      boardId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+  for (const d of pending) {
+    if (!isDeliveryPending(d)) {
+      log.error("board described a delivery follow-up in an unknown shape", { boardId });
+      continue;
+    }
+    tally.checked++;
+    try {
+      const outcome = await deps.projectDelivery(tenantId, d);
+      if (outcome.status === "posted") {
+        tally.projected++;
+        log.warn("a delivery follow-up reached its room only by sweep", { gateId: d.gateId, boardId });
+      } else if (outcome.status === "no-room" || outcome.status === "not-accepted") {
+        tally.stuck++;
+        log.warn("a delivery follow-up could not be put in a room", { gateId: d.gateId, boardId, status: outcome.status });
+      }
+    } catch (err) {
+      tally.stuck++;
+      log.warn("could not project a delivery follow-up", {
+        gateId: d.gateId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Only now, with a list the board actually answered with: absent from it means settled on the
+  // board. A failed read returned above, so it settles nothing — the gate sweep's rule.
+  const stillOwed = new Set(pending.filter(isDeliveryPending).map((d) => d.gateId));
+  for (const posted of (await deps.postedDeliveriesAwaitingOutcome?.(boardId)) ?? []) {
+    if (stillOwed.has(posted.gateId)) continue;
+    try {
+      if (await deps.settleDelivery?.(posted.gateId)) {
+        tally.settled++;
+        log.info("settled a room card for a delivery follow-up settled on the board", { gateId: posted.gateId, boardId });
+      }
+    } catch (err) {
+      log.warn("could not settle a delivery follow-up", {
+        gateId: posted.gateId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 }
 
 /**
@@ -314,7 +409,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
  */
 export function bridgeGateSweepDeps(
   config: BridgeConfig,
-  rest: Pick<GateSweepDeps, "tenantIdFor" | "project" | "settleOutcome" | "onBoardPending">,
+  rest: Pick<GateSweepDeps, "tenantIdFor" | "project" | "settleOutcome" | "onBoardPending" | "projectDelivery" | "settleDelivery">,
   fetchImpl: Fetcher = fetchAdapter,
   roster: (() => Promise<Array<{ boardId: string; token: string }>>) | undefined = defaultRoster,
 ): GateSweepDeps {
@@ -341,6 +436,18 @@ export function bridgeGateSweepDeps(
         token,
         fetch: fetchImpl,
       }).pendingGates();
+    },
+
+    postedDeliveriesAwaitingOutcome: async (boardId) => {
+      const { postedDeliveriesAwaitingOutcome } = await import("./delivery-projection");
+      return postedDeliveriesAwaitingOutcome(boardId);
+    },
+
+    // No credential is not "nothing owed": a throw is read as "could not be read".
+    pendingDeliveries: async (boardId) => {
+      const token = (await tokensForBoards()).get(boardId);
+      if (!token) throw new Error(`no bridge credential for board ${boardId}`);
+      return new SuperpipelineClient({ baseUrl: config.baseUrl, boardId, token, fetch: fetchImpl }).pendingDeliveries();
     },
 
     /**
@@ -418,7 +525,7 @@ export const GATE_SWEEP_INTERVAL_MS = 5 * 60_000;
  * belongs to something the operator actually turned on.
  */
 export function startGateSweeper(
-  rest: Pick<GateSweepDeps, "tenantIdFor" | "project" | "settleOutcome" | "onBoardPending">,
+  rest: Pick<GateSweepDeps, "tenantIdFor" | "project" | "settleOutcome" | "onBoardPending" | "projectDelivery" | "settleDelivery">,
   opts: {
     config?: BridgeConfig | null;
     intervalMs?: number;

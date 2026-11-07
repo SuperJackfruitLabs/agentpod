@@ -37,6 +37,8 @@ import {
 } from "./permissions";
 import { createLogger } from "../../utils/logger";
 import { parseGateDecision } from "./gates";
+import { parseQuestionAnswer } from "./question-answer";
+import { parseDeliveryAnswer } from "./delivery-answer";
 import { imageNote, imageSource, isRefusal, loadImage, type PromptImage } from "../matrix";
 import {
   audioSource,
@@ -100,6 +102,18 @@ export interface InboundDeps {
    */
   elicitations?: {
     handle(event: { sender: string; body: string }, roomId: string): Promise<unknown>;
+  };
+  /**
+   * A structured answer to a question (`dev.superpipeline.question.answer.v2`) and to a delivery
+   * follow-up (`dev.superpipeline.delivery.answer.v2`): the decision envelope's answers, which
+   * name what they answer and reference its message, as a gate decision does. Optional, for the
+   * reason `gates` is.
+   */
+  questions?: {
+    handle(event: { sender: string; content: Record<string, unknown> }, roomId: string): Promise<unknown>;
+  };
+  deliveries?: {
+    handle(event: { sender: string; content: Record<string, unknown> }, roomId: string): Promise<unknown>;
   };
   client: {
     sendText(userId: string, roomId: string, body: string): Promise<string | null>;
@@ -396,6 +410,16 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
       { sender: event.sender, content: event.content },
       event.room_id
     );
+    return;
+  }
+  // The envelope's other two answers, for the same reasons and in the same place: never a prompt,
+  // and never read as a typed reply to the question open in the room.
+  if (deps.questions && event.content && parseQuestionAnswer(event.content)) {
+    await deps.questions.handle({ sender: event.sender, content: event.content }, event.room_id);
+    return;
+  }
+  if (deps.deliveries && event.content && parseDeliveryAnswer(event.content)) {
+    await deps.deliveries.handle({ sender: event.sender, content: event.content }, event.room_id);
     return;
   }
 

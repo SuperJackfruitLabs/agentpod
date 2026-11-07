@@ -510,7 +510,7 @@ describe("subscribing the boards to push when the sweeper starts", () => {
         body: {
           url: "https://hub.test/public/bridge/superpipeline/push",
           token: "shh",
-          events: ["gate.pending", "elicitation.pending"],
+          events: ["gate.pending", "elicitation.pending", "delivery.pending"],
         },
       },
     ]);
@@ -691,5 +691,124 @@ describe("settling a gate decided somewhere the room never heard about", () => {
     const out = await sweepGates(r.deps);
     expect(seen).toEqual(["gate_a", "gate_b"]);
     expect(out.settled).toBe(1);
+  });
+});
+
+/**
+ * The floor beneath `delivery.pending` (charter: "The decision envelope covers questions and
+ * follow-ups" §3): the same sweep reads each board's `deliveries/pending` and posts each
+ * follow-up once — `projectDelivery` is idempotent on `gate_id`, as `projectGate` is.
+ */
+/** A `delivery.pending` body as the board lists it. */
+function followUp(gateId: string, boardId: string): Record<string, unknown> {
+  return {
+    event: "delivery.pending",
+    boardId,
+    cardId: `crd_${gateId}`,
+    cardTitle: "Announce the release",
+    gateId,
+    stageKey: "approve",
+    options: [{ id: "record_live_url", label: "Record the live link" }],
+    ts: "2026-11-07T10:00:00.000Z",
+  };
+}
+
+describe("the sweep, for delivery follow-ups", () => {
+  test("posts every follow-up a board is still owed, and skips a shape it does not know", async () => {
+    const posted: string[] = [];
+    const f = fake({
+      pendingDeliveries: async (boardId) => [followUp("gate_9", boardId), { event: "delivery.pending" }],
+      projectDelivery: async (_tenant, d) => {
+        posted.push(d.gateId);
+        return { status: "posted", roomId: "!r:h", eventId: "$f" };
+      },
+    });
+    const result = await sweepGates(f.deps);
+    expect(posted).toEqual(["gate_9"]);
+    expect(result.deliveries).toEqual({ checked: 1, projected: 1, stuck: 0, settled: 0, failedBoards: [] });
+  });
+
+  test("a board whose follow-ups cannot be read is named, and the gates are swept all the same", async () => {
+    const f = fake({
+      pendingDeliveries: async () => {
+        throw new Error("503");
+      },
+      projectDelivery: async () => ({ status: "already" }),
+    });
+    const result = await sweepGates(f.deps);
+    expect(result.projected).toBe(1);
+    expect(result.deliveries.failedBoards).toEqual(["brd_one"]);
+  });
+
+  test("a follow-up that cannot be put in a room, or whose post throws, is counted stuck", async () => {
+    const f = fake({
+      pendingDeliveries: async (b) => [followUp("gate_a", b), followUp("gate_b", b)],
+      projectDelivery: async (_t, d) => {
+        if (d.gateId === "gate_b") throw new Error("403");
+        return { status: "no-room" };
+      },
+    });
+    expect((await sweepGates(f.deps)).deliveries).toMatchObject({ checked: 2, projected: 0, stuck: 2 });
+  });
+
+  test("the bridge's deps read deliveries/pending with that board's own credential", async () => {
+    const sent: Array<{ url: string; token: string }> = [];
+    const fetchImpl = async (url: string, init: { headers: Record<string, string> }) => {
+      sent.push({ url, token: init.headers.Authorization ?? "" });
+      return { status: 200, ok: true, json: async () => ({ deliveries: [] }) };
+    };
+    const deps = bridgeGateSweepDeps(
+      { baseUrl: "https://board.test", source: "superpipeline" },
+      { tenantIdFor: async () => "flt_a", project: async () => ({ status: "already" }) },
+      fetchImpl,
+      async () => [{ boardId: "brd_two", token: "spa_two" }],
+    );
+    expect(await deps.pendingDeliveries?.("brd_two")).toEqual([]);
+    expect(sent).toEqual([{ url: "https://board.test/v1/boards/brd_two/deliveries/pending", token: "Bearer spa_two" }]);
+    // No credential is not "nothing owed".
+    await expect(deps.pendingDeliveries?.("brd_unknown") ?? Promise.resolve([])).rejects.toThrow();
+  });
+});
+
+/** A sweep whose board still owes one follow-up and has two recorded, and which claims each settle once. */
+function settling(over: Partial<GateSweepDeps> = {}) {
+  const settled: string[] = [];
+  let claims = new Set<string>();
+  const f = fake({
+    pendingDeliveries: async (b) => [followUp("gate_live", b)],
+    projectDelivery: async () => ({ status: "already" }),
+    postedDeliveriesAwaitingOutcome: async () => [{ gateId: "gate_live" }, { gateId: "gate_done" }],
+    settleDelivery: async (gateId) => {
+      if (claims.has(gateId)) return false;
+      claims = new Set([...claims, gateId]);
+      settled.push(gateId);
+      return true;
+    },
+    ...over,
+  });
+  return { f, settled };
+}
+
+/**
+ * A follow-up settled on the board — a link recorded on the web, the mode switched, the subject
+ * expired, the card archived — leaves the room card closed, not a ghost (the gate sweep's rule).
+ */
+describe("the sweep settles follow-ups the board no longer owes", () => {
+
+  test("settles a recorded follow-up missing from the pending list, once, and leaves a still-pending one alone", async () => {
+    const { f, settled } = settling();
+    expect((await sweepGates(f.deps)).deliveries.settled).toBe(1);
+    expect((await sweepGates(f.deps)).deliveries.settled).toBe(0);
+    expect(settled).toEqual(["gate_done"]);
+  });
+
+  test("a board whose follow-ups cannot be read settles nothing", async () => {
+    const { f, settled } = settling({
+      pendingDeliveries: async () => {
+        throw new Error("503");
+      },
+    });
+    expect((await sweepGates(f.deps)).deliveries.settled).toBe(0);
+    expect(settled).toEqual([]);
   });
 });

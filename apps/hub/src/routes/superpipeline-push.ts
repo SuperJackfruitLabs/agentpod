@@ -29,6 +29,7 @@ import {
 } from "../services/matrix-as";
 import { isElicitationPending } from "../services/matrix-as";
 import { projectElicitation } from "../services/matrix-as";
+import { isDeliveryPending, projectDelivery } from "../services/matrix-as";
 
 const log = createLogger("superpipeline-push");
 
@@ -108,6 +109,22 @@ export function createSuperpipelinePushRoutes(deps: SuperpipelinePushDeps) {
         elicitationId: body.elicitationId,
         status: outcome.status,
       });
+      return c.json({ ok: true, status: outcome.status }, 200);
+    }
+
+    /**
+     * The follow-up a manual-delivery approval owes (charter: "The decision envelope covers
+     * questions and follow-ups" §3), through the same door and refused the same way. Disjoint
+     * from the other two by `event`.
+     */
+    if (isDeliveryPending(body)) {
+      const tenantId = await deps.tenantIdFor(body.boardId);
+      if (!tenantId) {
+        log.warn("push for a board mapped to no fleet", { boardId: body.boardId });
+        return c.json({ error: "unknown board" }, 404);
+      }
+      const outcome = await projectDelivery(tenantId, body, deps);
+      log.info("delivery follow-up projected", { gateId: body.gateId, status: outcome.status });
       return c.json({ ok: true, status: outcome.status }, 200);
     }
 

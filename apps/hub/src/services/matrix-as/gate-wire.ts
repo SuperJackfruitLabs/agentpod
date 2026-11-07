@@ -196,7 +196,7 @@ const utf8 = new TextEncoder();
 const jsonBytes = (v: string): number => utf8.encode(JSON.stringify(v)).length;
 
 /** Cut a string to fit `max` JSON-encoded bytes, marking the cut; never splits a surrogate pair. */
-function cutToBytes(v: string, max: number): string {
+export function cutToBytes(v: string, max: number): string {
   if (jsonBytes(v) <= max) return v;
   let lo = 0;
   let hi = v.length;
@@ -217,7 +217,8 @@ function blockBytes(b: GatePreviewBlock): number {
   return jsonBytes(b.label) + jsonBytes(b.url);
 }
 
-const cut = (max: number) => (v: string) => (v.length > max ? `${v.slice(0, max - 1)}…` : v);
+/** A transform that cuts a string to `max` characters, marking the cut. */
+export const cut = (max: number) => (v: string) => (v.length > max ? `${v.slice(0, max - 1)}…` : v);
 
 /** A preview block, re-validated: unknown keys stripped, strings cut, links http(s) only. */
 const PreviewBlock = z.discriminatedUnion("type", [
@@ -292,7 +293,15 @@ export interface GateSubjectV2 {
  * sent is not a subject this hub can carry, which `gateOptionsV2` then treats as unshowable.
  */
 export function gateSubjectV2(d: GatePendingDelivery): GateSubjectV2 | null {
-  const parsed = RawSubject.safeParse(d.approvalSubject);
+  return subjectV2(d.approvalSubject);
+}
+
+/**
+ * An approval subject off the wire — a gate's, or a delivery follow-up's — re-validated and
+ * re-bounded, or null when it is not one this hub can carry. `gateSubjectV2` says what it checks.
+ */
+export function subjectV2(wire: unknown): GateSubjectV2 | null {
+  const parsed = RawSubject.safeParse(wire);
   if (!parsed.success) return null;
   const s = parsed.data;
   const raw = s.preview ?? [];
@@ -393,7 +402,7 @@ function fenced(text: string): string {
   return `${fence}\n${text}\n${fence}`;
 }
 
-function previewMarkdown(preview: GatePreviewBlock[]): string {
+export function previewMarkdown(preview: GatePreviewBlock[]): string {
   return preview
     .map((b) => {
       if (b.type === "text") return b.label ? `${b.label}:\n${fenced(b.text)}` : fenced(b.text);
@@ -443,4 +452,76 @@ export function gateV2Content(d: GatePendingDelivery, deepLink?: string): Record
     ...(subject ? { subject } : {}),
     ...(deepLink ? { deep_link: deepLink } : {}),
   };
+}
+
+// ── An option that asks for input ────────────────────────────────────────────
+//
+// charter → "The decision envelope covers questions and follow-ups" §1: an option may ask the
+// person to type something when they choose it. Shared by a question's options and a delivery
+// follow-up's, so the two cannot come to disagree about what a valid answer is. The board still
+// judges the value; this only refuses what it can already see is wrong.
+
+/** The longest an option's input may ever be here, whatever a board advertises. */
+export const OPTION_INPUT_MAX = 4000;
+
+/** What an option asks the person to type, as it rides on the Matrix wire. */
+export interface OptionInputV2 {
+  kind: "text" | "url";
+  label: string;
+  required: boolean;
+  max_length: number;
+}
+
+const RawInput = z.object({
+  kind: z.enum(["text", "url"]),
+  label: z.string().transform(cut(PREVIEW_FIELD_MAX)),
+  required: z.boolean().optional().catch(undefined),
+  maxLength: z.number().int().positive().optional().catch(undefined),
+});
+
+/**
+ * An option's input off the board's push (camelCase), bounded for the Matrix wire, or undefined
+ * when the option asks for none or for something this hub cannot check. A missing `maxLength`
+ * gets this hub's own limit; a larger one is lowered to it.
+ */
+export function optionInputV2(raw: unknown): OptionInputV2 | undefined {
+  const parsed = RawInput.safeParse(raw);
+  if (!parsed.success) return undefined;
+  const i = parsed.data;
+  return {
+    kind: i.kind,
+    label: i.label,
+    required: i.required ?? false,
+    max_length: Math.min(i.maxLength ?? OPTION_INPUT_MAX, OPTION_INPUT_MAX),
+  };
+}
+
+/** Why typed input cannot be carried; every value is a refusal. */
+export type InputRefusal = "input-required" | "text-too-long" | "url-invalid";
+
+/** Is this an absolute `https://` address with a host? */
+export function isHttpsUrl(v: string): boolean {
+  if (!/^https:\/\/[^\s<>]+$/.test(v)) return false;
+  try {
+    const u = new URL(v);
+    return u.protocol === "https:" && u.hostname !== "";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Why `text` is not an answer this input takes, or null when it is. Blank is empty. A `url` input
+ * takes an `https://` address and nothing else; length is counted in characters, as the board
+ * counts it.
+ */
+export function inputRefusal(
+  input: Pick<OptionInputV2, "kind" | "required" | "max_length">,
+  text: string | null,
+): InputRefusal | null {
+  const value = text?.trim() ?? "";
+  if (value === "") return input.required ? "input-required" : null;
+  if (value.length > input.max_length) return "text-too-long";
+  if (input.kind === "url" && !isHttpsUrl(value)) return "url-invalid";
+  return null;
 }

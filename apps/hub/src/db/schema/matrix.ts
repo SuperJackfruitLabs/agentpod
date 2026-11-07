@@ -8,6 +8,7 @@ import {
   primaryKey,
   jsonb,
   boolean,
+  integer,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { stations } from "./stations";
@@ -285,6 +286,18 @@ export const matrixElicitationEvents = pgTable(
      */
     optionsJson: text("options_json").notNull().default("[]"),
     /**
+     * question.v2 (charter: "The decision envelope covers questions and follow-ups"): the options
+     * as the question's question.v2 carried them (`id`, `label`, `meaning`, `needs_comment`,
+     * `input`). A question.answer.v2 is judged against THIS list. Null for questions posted
+     * before question.v2 — a structured answer to one is refused; a typed reply is unaffected.
+     */
+    optionsV2: jsonb("options_v2").$type<MatrixQuestionOption[]>(),
+    /**
+     * The longest free-text answer the question takes, when it has no options and is answered by
+     * typing. Null for a question with options, and for questions posted before question.v2.
+     */
+    freeTextMaxLength: integer("free_text_max_length"),
+    /**
      * When this hub said in the room that the board accepted an answer.
      *
      * The claim that stops a second receipt: an answer delivered twice — a double tap,
@@ -300,6 +313,62 @@ export const matrixElicitationEvents = pgTable(
     index("matrix_elicitation_events_room_idx").on(t.roomId),
   ]
 );
+
+/** One option a delivery follow-up offered — the delivery.v2 wire shape, as recorded. */
+export interface MatrixDeliveryOption {
+  id: string;
+  label: string;
+  meaning: string;
+  needs_comment: boolean;
+  input?: { kind: "text" | "url"; label: string; required: boolean; max_length: number };
+  delivery?: string;
+}
+
+/**
+ * The follow-up a post approved for manual delivery owes, posted into its board's room once
+ * (charter: "The decision envelope covers questions and follow-ups" §3): record the live link, or
+ * switch to automatic delivery.
+ *
+ * Keyed by the gate, because there is one follow-up per gate and the answer is addressed to it.
+ * Its own table rather than columns on {@link matrixGateEvents}: a gate approved on the board's
+ * web app was never projected here, and still owes its follow-up in the room.
+ */
+export const matrixDeliveryEvents = pgTable(
+  "matrix_delivery_events",
+  {
+    gateId: text("gate_id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    boardId: text("board_id").notNull(),
+    cardId: text("card_id").notNull(),
+    roomId: text("room_id").notNull(),
+    /** The follow-up's prose message — the event an answer references. `pending:<gateId>` while sending. */
+    eventId: text("event_id").notNull(),
+    /** What the follow-up offered, as its delivery.v2 carried them. An answer is checked against THIS list. */
+    options: jsonb("options").$type<MatrixDeliveryOption[]>().notNull(),
+    approvalSubjectId: text("approval_subject_id"),
+    approvalSubjectDigest: text("approval_subject_digest"),
+    /** False (or null) refuses `switch_to_automatic`: nobody turns on posting what the card could not show. */
+    approvalSubjectPreviewComplete: boolean("approval_subject_preview_complete"),
+    /** When this hub said in the room what the board did with an answer — the claim on the receipt. */
+    outcomePostedAt: timestamp("outcome_posted_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("matrix_delivery_events_tenant_id_idx").on(t.tenantId),
+    uniqueIndex("matrix_delivery_events_event_idx").on(t.eventId),
+  ]
+);
+
+/** One option a projected question offered — the question.v2 wire shape, as recorded. */
+export interface MatrixQuestionOption {
+  id: string;
+  label: string;
+  meaning: string;
+  needs_comment: boolean;
+  input?: { kind: "text" | "url"; label: string; required: boolean; max_length: number };
+}
 
 /** One option a projected gate offered — the gate.v2 wire shape, as recorded. */
 export interface MatrixGateOption {

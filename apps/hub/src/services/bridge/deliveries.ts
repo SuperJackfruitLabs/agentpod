@@ -73,6 +73,35 @@ export interface ElicitationPendingDelivery {
   agentId: string;
   /** The question. May be empty: an agent can stop on options alone. */
   question: string;
-  options: Array<{ id: string; label: string }>;
+  /**
+   * `id` and `label` since the first version; `meaning`, `needsComment` and `input` since the
+   * decision envelope covers questions (charter: "The decision envelope covers questions and
+   * follow-ups"). The newer fields are `unknown` for the reason the gate's are: an older board
+   * sends none, and they are checked before they are carried (`questionOptionsV2`).
+   */
+  options: Array<{ id: string; label: string; meaning?: unknown; needsComment?: unknown; input?: unknown }>;
+  /** On a question with no options: it is answered by typing, at most `maxLength` characters. */
+  freeText?: unknown;
+  ts: string;
+}
+
+/**
+ * The body the board pushes on `delivery.pending`: a post approved for manual delivery still owes
+ * the board its live link (charter: "The decision envelope covers questions and follow-ups" §3).
+ * Also what `GET /v1/boards/:id/deliveries/pending` lists, for the sweep.
+ *
+ * `approvalSubject` and each option's envelope fields are `unknown`: checked before they are
+ * carried (`deliveryV2Content`), never trusted as typed.
+ */
+export interface DeliveryPendingDelivery {
+  event: "delivery.pending";
+  boardId: string;
+  boardName?: string | null;
+  cardId: string;
+  cardTitle: string;
+  gateId: string;
+  stageKey: string;
+  approvalSubject?: unknown;
+  options: Array<{ id: string; label: string; meaning?: unknown; needsComment?: unknown; input?: unknown; delivery?: unknown }>;
   ts: string;
 }

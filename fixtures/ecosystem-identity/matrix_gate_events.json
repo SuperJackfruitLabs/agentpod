@@ -1,6 +1,6 @@
 {
   "corpus": "ecosystem-identity/matrix-gate-events",
-  "version": 3,
+  "version": 4,
   "authoredAt": "2026-08-30",
   "authoredFrom": "the gates table in superpipeline apps/api/src/board/board-do.ts, the GateDecision union it resolves against, and charter decisions/2026-08-30-a-gate-closes-over-chat.md",
   "purpose": "A superpipeline approval gate crosses into a Matrix room and a human's answer crosses back. Three codebases must agree on the field names: the board that opens the gate, the Application Service that projects and resolves it, and the client that draws the buttons. A rename in any one of them is a gate that silently never resolves — which reads to the human as a button that does nothing.",
@@ -943,6 +943,1136 @@
             "subject": {
               "id": "aps_2c9e71",
               "digest": "sha256:9b2f4e0c1a7d"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.question.v2",
+      "direction": "outbound — an agent asks",
+      "decidedBy": "charter decisions/2026-11-07-the-decision-envelope-covers-questions-and-follow-ups.md",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content. The Application Service sends it as the same prose message that carries the v1 question card under `dev.superpipeline.elicitation`, which stays unchanged, so v1 and v2 clients read one event and one push.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "suite_event_type",
+        "schema_version",
+        "elicitation_id",
+        "board_id",
+        "card_id",
+        "run_id",
+        "stage_key",
+        "card_title",
+        "asked_by",
+        "question",
+        "options"
+      ],
+      "notes": {
+        "options": "Each option is {id, label, meaning, needs_comment, input?}. A question's option means `choose`, or `approve`/`reject` on a strict decision; a carrier projecting an older board that sends no meaning derives `choose` and sends that. needs_comment is false on a question's option.",
+        "input": "An option may ask for input: {kind: text | url, label, required, max_length}, snake_case on the Matrix wire (the board's push says maxLength). A required input must not be empty; a url input takes an https:// URL. The board still judges the value.",
+        "freeText": "Present only on a question with no options: {max_length}, at most 2000. Such a question is answered with text alone.",
+        "body": "The question's prose, as before: options numbered, so a stock client can still answer by replying a number. A question with no options names the board."
+      },
+      "accept": [
+        {
+          "why": "a question with options, one of which asks for text",
+          "content": {
+            "msgtype": "m.text",
+            "body": "An agent is waiting on you — \"Upgrade the build image\" at stage `build`.\n\nThe tests need network access. May I run them?\n\n1. Run the tests\n2. Skip them\n3. Something else\n\nReply with the number, or the option's name. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_51d0)",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "elc_7f3c",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_51d0",
+            "run_id": "run_12",
+            "stage_key": "build",
+            "card_title": "Upgrade the build image",
+            "asked_by": "agt_31d0",
+            "question": "The tests need network access. May I run them?",
+            "options": [
+              {
+                "id": "run_them",
+                "label": "Run the tests",
+                "meaning": "choose",
+                "needs_comment": false
+              },
+              {
+                "id": "skip",
+                "label": "Skip them",
+                "meaning": "choose",
+                "needs_comment": false
+              },
+              {
+                "id": "other",
+                "label": "Something else",
+                "meaning": "choose",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should I do instead?",
+                  "required": true,
+                  "max_length": 500
+                }
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_51d0"
+          }
+        },
+        {
+          "why": "a question with no options, answered by typing",
+          "content": {
+            "msgtype": "m.text",
+            "body": "An agent is waiting on you — \"Upgrade the build image\" at stage `build`.\n\nWhich branch should I base the fix on?\n\nAnswer this one on the board. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_51d0)",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "elc_8a21",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_51d0",
+            "run_id": "run_12",
+            "stage_key": "build",
+            "card_title": "Upgrade the build image",
+            "asked_by": "agt_31d0",
+            "question": "Which branch should I base the fix on?",
+            "options": [],
+            "free_text": {
+              "max_length": 2000
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_51d0"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "an option with no meaning. A sender must say what each option means.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "An agent is waiting on you — \"Upgrade the build image\" at stage `build`.\n\nThe tests need network access. May I run them?\n\n1. Run the tests\n2. Skip them\n3. Something else\n\nReply with the number, or the option's name. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_51d0)",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "elc_7f3c",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_51d0",
+            "run_id": "run_12",
+            "stage_key": "build",
+            "card_title": "Upgrade the build image",
+            "asked_by": "agt_31d0",
+            "question": "The tests need network access. May I run them?",
+            "options": [
+              {
+                "id": "run_them",
+                "label": "Run the tests",
+                "needs_comment": false
+              },
+              {
+                "id": "skip",
+                "label": "Skip them",
+                "meaning": "choose",
+                "needs_comment": false
+              },
+              {
+                "id": "other",
+                "label": "Something else",
+                "meaning": "choose",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should I do instead?",
+                  "required": true,
+                  "max_length": 500
+                }
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_51d0"
+          }
+        },
+        {
+          "why": "camelCase on the Matrix wire. `maxLength` is the board's push field; the Matrix field is `max_length`.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "An agent is waiting on you — \"Upgrade the build image\" at stage `build`.\n\nThe tests need network access. May I run them?\n\n1. Run the tests\n2. Skip them\n3. Something else\n\nReply with the number, or the option's name. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_51d0)",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "elc_7f3c",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_51d0",
+            "run_id": "run_12",
+            "stage_key": "build",
+            "card_title": "Upgrade the build image",
+            "asked_by": "agt_31d0",
+            "question": "The tests need network access. May I run them?",
+            "options": [
+              {
+                "id": "run_them",
+                "label": "Run the tests",
+                "meaning": "choose",
+                "needs_comment": false
+              },
+              {
+                "id": "skip",
+                "label": "Skip them",
+                "meaning": "choose",
+                "needs_comment": false
+              },
+              {
+                "id": "other",
+                "label": "Something else",
+                "meaning": "choose",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should I do instead?",
+                  "required": true,
+                  "maxLength": 500
+                }
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_51d0"
+          }
+        },
+        {
+          "why": "duplicate option ids. Answering is by id.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "An agent is waiting on you — \"Upgrade the build image\" at stage `build`.\n\nThe tests need network access. May I run them?\n\n1. Run the tests\n2. Skip them\n3. Something else\n\nReply with the number, or the option's name. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_51d0)",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "elc_7f3c",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_51d0",
+            "run_id": "run_12",
+            "stage_key": "build",
+            "card_title": "Upgrade the build image",
+            "asked_by": "agt_31d0",
+            "question": "The tests need network access. May I run them?",
+            "options": [
+              {
+                "id": "run_them",
+                "label": "Run the tests",
+                "meaning": "choose",
+                "needs_comment": false
+              },
+              {
+                "id": "run_them",
+                "label": "Skip them",
+                "meaning": "choose",
+                "needs_comment": false
+              },
+              {
+                "id": "other",
+                "label": "Something else",
+                "meaning": "choose",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should I do instead?",
+                  "required": true,
+                  "max_length": 500
+                }
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_51d0"
+          }
+        },
+        {
+          "why": "free_text beside options. Text alone answers only a question with nothing to choose.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "An agent is waiting on you — \"Upgrade the build image\" at stage `build`.\n\nThe tests need network access. May I run them?\n\n1. Run the tests\n2. Skip them\n3. Something else\n\nReply with the number, or the option's name. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_51d0)",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "elc_7f3c",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_51d0",
+            "run_id": "run_12",
+            "stage_key": "build",
+            "card_title": "Upgrade the build image",
+            "asked_by": "agt_31d0",
+            "question": "The tests need network access. May I run them?",
+            "options": [
+              {
+                "id": "run_them",
+                "label": "Run the tests",
+                "meaning": "choose",
+                "needs_comment": false
+              },
+              {
+                "id": "skip",
+                "label": "Skip them",
+                "meaning": "choose",
+                "needs_comment": false
+              },
+              {
+                "id": "other",
+                "label": "Something else",
+                "meaning": "choose",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should I do instead?",
+                  "required": true,
+                  "max_length": 500
+                }
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_51d0",
+            "free_text": {
+              "max_length": 2000
+            }
+          }
+        },
+        {
+          "why": "no body. A stock client would show nothing.",
+          "content": {
+            "msgtype": "m.text",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "elc_7f3c",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_51d0",
+            "run_id": "run_12",
+            "stage_key": "build",
+            "card_title": "Upgrade the build image",
+            "asked_by": "agt_31d0",
+            "question": "The tests need network access. May I run them?",
+            "options": [
+              {
+                "id": "run_them",
+                "label": "Run the tests",
+                "meaning": "choose",
+                "needs_comment": false
+              },
+              {
+                "id": "skip",
+                "label": "Skip them",
+                "meaning": "choose",
+                "needs_comment": false
+              },
+              {
+                "id": "other",
+                "label": "Something else",
+                "meaning": "choose",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should I do instead?",
+                  "required": true,
+                  "max_length": 500
+                }
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_51d0"
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.question.answer.v2",
+      "direction": "inbound — the human answers",
+      "decidedBy": "charter decisions/2026-11-07-the-decision-envelope-covers-questions-and-follow-ups.md",
+      "sender": "the human's own Matrix session",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "schema_version",
+        "suite_event_type",
+        "elicitation_id",
+        "m.relates_to"
+      ],
+      "notes": {
+        "answer": "`option_id` (with `text` when that option has an input), or `text` alone for a question with free_text. The Application Service checks it against the options and the free_text limit it recorded for that question when it posted it, never a fixed list; the board is the final judge.",
+        "relatesTo": "An m.reference to the question's prose message, exactly as a gate decision references its gate.",
+        "unchanged": "Attribution refusals (unlinked sender, the Application Service's own namespace, a reference that is not the question's message) are the gate decision's. A typed reply of a number or a label still answers the question open in the room."
+      },
+      "accept": [
+        {
+          "why": "an option the question offered",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Run the tests",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "elc_7f3c",
+            "option_id": "run_them",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$questionEventId"
+            }
+          }
+        },
+        {
+          "why": "the option that asks for text, with its text",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Something else: run only the unit tests",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "elc_7f3c",
+            "option_id": "other",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$questionEventId"
+            },
+            "text": "Run only the unit tests"
+          }
+        },
+        {
+          "why": "a free-text answer to a question with no options",
+          "content": {
+            "msgtype": "m.text",
+            "body": "main",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "elc_8a21",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$questionEventId"
+            },
+            "text": "main"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "an option the question did not offer",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Ship it",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "elc_7f3c",
+            "option_id": "ship_it",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$questionEventId"
+            }
+          }
+        },
+        {
+          "why": "the option whose input is required, with no text",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Something else",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "elc_7f3c",
+            "option_id": "other",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$questionEventId"
+            }
+          }
+        },
+        {
+          "why": "an empty free-text answer",
+          "content": {
+            "msgtype": "m.text",
+            "body": " ",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "elc_8a21",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$questionEventId"
+            },
+            "text": "   "
+          }
+        },
+        {
+          "why": "a free-text answer over the question's limit",
+          "content": {
+            "msgtype": "m.text",
+            "body": "(long)",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "elc_8a21",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$questionEventId"
+            },
+            "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        },
+        {
+          "why": "no m.relates_to, exactly as for a gate decision",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Run the tests",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "elc_7f3c",
+            "option_id": "run_them"
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.delivery.v2",
+      "direction": "outbound — the board asks for the live link a manual delivery owes",
+      "decidedBy": "charter decisions/2026-11-07-the-decision-envelope-covers-questions-and-follow-ups.md",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content. Posted once per gate into the gate's board room when the board pushes `delivery.pending` (a subject-bound gate resolved approve_manual), or when the sweep finds it at GET /v1/boards/:id/deliveries/pending.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "suite_event_type",
+        "schema_version",
+        "board_id",
+        "card_id",
+        "gate_id",
+        "stage_key",
+        "card_title",
+        "options"
+      ],
+      "notes": {
+        "options": "`record_live_url` (meaning defer, a required url input) and `switch_to_automatic` (meaning approve, delivery automatic). Nothing else: each maps to one call on the board's delivery route.",
+        "subject": "{id, digest, schema, revision, expires_at, preview, preview_complete}, bounded as gate.v2's subject is. switch_to_automatic is offered only when preview_complete is true — the board offers it only then, and a carrier whose own bounding marks the preview incomplete drops it.",
+        "body": "The preview, fenced as gate.v2's is, and the choices."
+      },
+      "accept": [
+        {
+          "why": "a complete preview: both choices",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Waiting on a live link — \"Announce the release\" was approved to be posted by hand. Once it is live, record its link here.\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\nAccount: @fixture_account on X\n\n- Record the live link\n- Post it automatically\n\n[Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.delivery.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3a",
+            "stage_key": "approve",
+            "card_title": "Announce the release",
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d",
+              "schema": "social-publish/v1",
+              "revision": 1,
+              "expires_at": "2030-01-02T03:04:05Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "label": "Post",
+                  "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                },
+                {
+                  "type": "field",
+                  "label": "Account",
+                  "value": "@fixture_account on X"
+                }
+              ],
+              "preview_complete": true
+            },
+            "options": [
+              {
+                "id": "record_live_url",
+                "label": "Record the live link",
+                "meaning": "defer",
+                "needs_comment": false,
+                "input": {
+                  "kind": "url",
+                  "label": "Live link",
+                  "required": true,
+                  "max_length": 2000
+                }
+              },
+              {
+                "id": "switch_to_automatic",
+                "label": "Post it automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "an incomplete preview: recording the live link only",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Waiting on a live link — \"Announce the release\" was approved to be posted by hand. Once it is live, record its link here.\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\nAccount: @fixture_account on X\n\n- Record the live link\n\n[Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.delivery.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3b",
+            "stage_key": "approve",
+            "card_title": "Announce the release",
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d",
+              "schema": "social-publish/v1",
+              "revision": 1,
+              "expires_at": "2030-01-02T03:04:05Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "label": "Post",
+                  "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                },
+                {
+                  "type": "field",
+                  "label": "Account",
+                  "value": "@fixture_account on X"
+                }
+              ],
+              "preview_complete": false
+            },
+            "options": [
+              {
+                "id": "record_live_url",
+                "label": "Record the live link",
+                "meaning": "defer",
+                "needs_comment": false,
+                "input": {
+                  "kind": "url",
+                  "label": "Live link",
+                  "required": true,
+                  "max_length": 2000
+                }
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "switch_to_automatic on an incomplete preview. Nobody turns on posting what the card could not show.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Waiting on a live link — \"Announce the release\" was approved to be posted by hand. Once it is live, record its link here.\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\nAccount: @fixture_account on X\n\n- Record the live link\n\n[Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.delivery.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3b",
+            "stage_key": "approve",
+            "card_title": "Announce the release",
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d",
+              "schema": "social-publish/v1",
+              "revision": 1,
+              "expires_at": "2030-01-02T03:04:05Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "label": "Post",
+                  "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                },
+                {
+                  "type": "field",
+                  "label": "Account",
+                  "value": "@fixture_account on X"
+                }
+              ],
+              "preview_complete": false
+            },
+            "options": [
+              {
+                "id": "record_live_url",
+                "label": "Record the live link",
+                "meaning": "defer",
+                "needs_comment": false,
+                "input": {
+                  "kind": "url",
+                  "label": "Live link",
+                  "required": true,
+                  "max_length": 2000
+                }
+              },
+              {
+                "id": "switch_to_automatic",
+                "label": "Post it automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "record_live_url with no input. The live link is required.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Waiting on a live link — \"Announce the release\" was approved to be posted by hand. Once it is live, record its link here.\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\nAccount: @fixture_account on X\n\n- Record the live link\n- Post it automatically\n\n[Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.delivery.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3a",
+            "stage_key": "approve",
+            "card_title": "Announce the release",
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d",
+              "schema": "social-publish/v1",
+              "revision": 1,
+              "expires_at": "2030-01-02T03:04:05Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "label": "Post",
+                  "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                },
+                {
+                  "type": "field",
+                  "label": "Account",
+                  "value": "@fixture_account on X"
+                }
+              ],
+              "preview_complete": true
+            },
+            "options": [
+              {
+                "id": "record_live_url",
+                "label": "Record the live link",
+                "meaning": "defer",
+                "needs_comment": false
+              },
+              {
+                "id": "switch_to_automatic",
+                "label": "Post it automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "camelCase on the Matrix wire. The Matrix field is `max_length`.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Waiting on a live link — \"Announce the release\" was approved to be posted by hand. Once it is live, record its link here.\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\nAccount: @fixture_account on X\n\n- Record the live link\n- Post it automatically\n\n[Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.delivery.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3a",
+            "stage_key": "approve",
+            "card_title": "Announce the release",
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d",
+              "schema": "social-publish/v1",
+              "revision": 1,
+              "expires_at": "2030-01-02T03:04:05Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "label": "Post",
+                  "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                },
+                {
+                  "type": "field",
+                  "label": "Account",
+                  "value": "@fixture_account on X"
+                }
+              ],
+              "preview_complete": true
+            },
+            "options": [
+              {
+                "id": "record_live_url",
+                "label": "Record the live link",
+                "meaning": "defer",
+                "needs_comment": false,
+                "input": {
+                  "kind": "url",
+                  "label": "Live link",
+                  "required": true,
+                  "maxLength": 2000
+                }
+              },
+              {
+                "id": "switch_to_automatic",
+                "label": "Post it automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "record_live_url asking for text. The live link is a url input.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Waiting on a live link — \"Announce the release\" was approved to be posted by hand. Once it is live, record its link here.\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\nAccount: @fixture_account on X\n\n- Record the live link\n- Post it automatically\n\n[Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.delivery.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3a",
+            "stage_key": "approve",
+            "card_title": "Announce the release",
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d",
+              "schema": "social-publish/v1",
+              "revision": 1,
+              "expires_at": "2030-01-02T03:04:05Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "label": "Post",
+                  "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                },
+                {
+                  "type": "field",
+                  "label": "Account",
+                  "value": "@fixture_account on X"
+                }
+              ],
+              "preview_complete": true
+            },
+            "options": [
+              {
+                "id": "record_live_url",
+                "label": "Record the live link",
+                "meaning": "defer",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "Live link",
+                  "required": true,
+                  "max_length": 2000
+                }
+              },
+              {
+                "id": "switch_to_automatic",
+                "label": "Post it automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "no body. A stock client would show nothing.",
+          "content": {
+            "msgtype": "m.text",
+            "suite_event_type": "dev.superpipeline.delivery.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3a",
+            "stage_key": "approve",
+            "card_title": "Announce the release",
+            "subject": {
+              "id": "aps_2c9e71",
+              "digest": "sha256:9b2f4e0c1a7d",
+              "schema": "social-publish/v1",
+              "revision": 1,
+              "expires_at": "2030-01-02T03:04:05Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "label": "Post",
+                  "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                },
+                {
+                  "type": "field",
+                  "label": "Account",
+                  "value": "@fixture_account on X"
+                }
+              ],
+              "preview_complete": true
+            },
+            "options": [
+              {
+                "id": "record_live_url",
+                "label": "Record the live link",
+                "meaning": "defer",
+                "needs_comment": false,
+                "input": {
+                  "kind": "url",
+                  "label": "Live link",
+                  "required": true,
+                  "max_length": 2000
+                }
+              },
+              {
+                "id": "switch_to_automatic",
+                "label": "Post it automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.delivery.answer.v2",
+      "direction": "inbound — the human answers the follow-up",
+      "decidedBy": "charter decisions/2026-11-07-the-decision-envelope-covers-questions-and-follow-ups.md",
+      "sender": "the human's own Matrix session",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "schema_version",
+        "suite_event_type",
+        "gate_id",
+        "option_id",
+        "m.relates_to"
+      ],
+      "notes": {
+        "answer": "`record_live_url` with `text`, the live post's https:// URL; or `switch_to_automatic`. The Application Service checks it against the options it recorded for that follow-up, refuses switch_to_automatic when the recorded preview was incomplete, and calls the board's POST /v1/boards/:id/gates/:gateId/delivery with {liveUrl} or {mode: automatic}, as the person who answered.",
+        "unchanged": "Attribution refusals are the gate decision's, including refusing a principal that is not a person."
+      },
+      "accept": [
+        {
+          "why": "the live link, as an https URL",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Live at https://social.example/posts/1",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.delivery.answer.v2",
+            "gate_id": "gate_8f3a",
+            "option_id": "record_live_url",
+            "text": "https://social.example/posts/1",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$deliveryEventId"
+            }
+          }
+        },
+        {
+          "why": "switching to automatic delivery on a complete preview",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Post it automatically",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.delivery.answer.v2",
+            "gate_id": "gate_8f3a",
+            "option_id": "switch_to_automatic",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$deliveryEventId"
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "a link that is not https",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Live at http://social.example/posts/1",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.delivery.answer.v2",
+            "gate_id": "gate_8f3a",
+            "option_id": "record_live_url",
+            "text": "http://social.example/posts/1",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$deliveryEventId"
+            }
+          }
+        },
+        {
+          "why": "recording the live link with no link",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Live",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.delivery.answer.v2",
+            "gate_id": "gate_8f3a",
+            "option_id": "record_live_url",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$deliveryEventId"
+            }
+          }
+        },
+        {
+          "why": "an option the follow-up did not offer",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Remind me tomorrow",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.delivery.answer.v2",
+            "gate_id": "gate_8f3a",
+            "option_id": "remind_me",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$deliveryEventId"
+            }
+          }
+        },
+        {
+          "why": "switching to automatic delivery on a follow-up whose preview was incomplete",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Post it automatically",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.delivery.answer.v2",
+            "gate_id": "gate_8f3b",
+            "option_id": "switch_to_automatic",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$deliveryEventId"
+            }
+          }
+        },
+        {
+          "why": "no m.relates_to, exactly as for a gate decision",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Live at https://social.example/posts/1",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.delivery.answer.v2",
+            "gate_id": "gate_8f3a",
+            "option_id": "record_live_url",
+            "text": "https://social.example/posts/1"
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.outcome.v1",
+      "direction": "outbound — the receipt that closes a card",
+      "decidedBy": "charter decisions/2026-11-07-the-decision-envelope-covers-questions-and-follow-ups.md (a follow-up is settled by a receipt, like a gate)",
+      "sender": "the board room's speaker",
+      "matrixEventType": "dev.superpipeline.gate.outcome.v1",
+      "discriminator": "The event type, with `suite_event_type` repeated in content. Sent beside a prose line, which is what a stock client shows.",
+      "requiredFields": [
+        "suite_event_type",
+        "gate_id",
+        "board_id",
+        "decision",
+        "decided_by",
+        "m.relates_to"
+      ],
+      "notes": {
+        "relatesTo": "An m.reference to the event whose card it closes: the gate's for a gate, the follow-up's delivery.v2 message for a follow-up.",
+        "decision": "For a gate, the option chosen. For a delivery follow-up, `record_live_url` or `switch_to_automatic`, or `settled_elsewhere` when the board stopped owing it without an answer from the room (a link recorded on the web, the mode switched, the approval expired, the card archived).",
+        "decidedBy": "The person's label, never an mxid. Null when nobody in the room settled it."
+      },
+      "accept": [
+        {
+          "why": "a gate approved for manual delivery",
+          "content": {
+            "suite_event_type": "dev.superpipeline.gate.outcome.v1",
+            "gate_id": "gate_8f3a",
+            "board_id": "brd_7c1f",
+            "decision": "approve_manual",
+            "decided_by": "fixture-person",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "a follow-up answered with its live link",
+          "content": {
+            "suite_event_type": "dev.superpipeline.gate.outcome.v1",
+            "gate_id": "gate_8f3a",
+            "board_id": "brd_7c1f",
+            "decision": "record_live_url",
+            "decided_by": "fixture-person",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$deliveryEventId"
+            }
+          }
+        },
+        {
+          "why": "a follow-up switched to automatic delivery",
+          "content": {
+            "suite_event_type": "dev.superpipeline.gate.outcome.v1",
+            "gate_id": "gate_8f3a",
+            "board_id": "brd_7c1f",
+            "decision": "switch_to_automatic",
+            "decided_by": "fixture-person",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$deliveryEventId"
+            }
+          }
+        },
+        {
+          "why": "a follow-up settled on the board, naming nobody",
+          "content": {
+            "suite_event_type": "dev.superpipeline.gate.outcome.v1",
+            "gate_id": "gate_8f3a",
+            "board_id": "brd_7c1f",
+            "decision": "settled_elsewhere",
+            "decided_by": null,
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$deliveryEventId"
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "no m.relates_to. A client cannot tell which card to close.",
+          "content": {
+            "suite_event_type": "dev.superpipeline.gate.outcome.v1",
+            "gate_id": "gate_8f3a",
+            "board_id": "brd_7c1f",
+            "decision": "record_live_url",
+            "decided_by": "fixture-person"
+          }
+        },
+        {
+          "why": "a quoted reply rather than an m.reference",
+          "content": {
+            "suite_event_type": "dev.superpipeline.gate.outcome.v1",
+            "gate_id": "gate_8f3a",
+            "board_id": "brd_7c1f",
+            "decision": "record_live_url",
+            "decided_by": "fixture-person",
+            "m.relates_to": {
+              "m.in_reply_to": {
+                "event_id": "$deliveryEventId"
+              }
+            }
+          }
+        },
+        {
+          "why": "no gate_id",
+          "content": {
+            "suite_event_type": "dev.superpipeline.gate.outcome.v1",
+            "board_id": "brd_7c1f",
+            "decision": "record_live_url",
+            "decided_by": "fixture-person",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$deliveryEventId"
+            }
+          }
+        },
+        {
+          "why": "no decision",
+          "content": {
+            "suite_event_type": "dev.superpipeline.gate.outcome.v1",
+            "gate_id": "gate_8f3a",
+            "board_id": "brd_7c1f",
+            "decided_by": null,
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$deliveryEventId"
             }
           }
         }
