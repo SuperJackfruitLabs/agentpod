@@ -498,7 +498,7 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
       // keys/query per encrypted send is cheap; a stale list is not.
       const others = recipients.filter((u) => u.toString() !== userId);
       if (others.length > 0) {
-        const query = machine.queryKeysForUsers(others) as unknown as { id: string; type: RequestType; body: string };
+        const query = machine.queryKeysForUsers(others);
         const answer = await deps.send(userId, { id: query.id, type: query.type, body: query.body });
         await machine.markRequestAsSent(query.id, query.type, answer);
       }

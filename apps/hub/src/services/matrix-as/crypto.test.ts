@@ -527,12 +527,15 @@ describe("healing a device that will never heal", () => {
 /** How many of these requests asked for `user`'s devices (a keys/query naming them). */
 function queriesFor(seen: CryptoRequest[], user: string): number {
   return seen.filter((r) => {
+    let parsed: unknown;
     try {
-      const keys = (JSON.parse(r.body) as { device_keys?: Record<string, unknown> }).device_keys;
-      return keys !== undefined && Object.prototype.hasOwnProperty.call(keys, user);
+      parsed = JSON.parse(r.body);
     } catch {
       return false;
     }
+    if (typeof parsed !== "object" || parsed === null || !("device_keys" in parsed)) return false;
+    const keys = parsed.device_keys;
+    return typeof keys === "object" && keys !== null && Object.hasOwn(keys, user);
   }).length;
 }
 
