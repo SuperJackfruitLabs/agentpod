@@ -483,6 +483,26 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
       await machine.updateTrackedUsers(recipients);
       await flush(userId, machine);
 
+      // 1b. ...and ask again, every time, for everyone but the sender.
+      //
+      // `updateTrackedUsers` does not re-query a user it already tracks and
+      // believes current. A machine only learns of a new device through an
+      // MSC3202 device-list change, and `feedAgents` hands those to machines
+      // that are LOADED — a machine loaded later still holds the device list
+      // it persisted before. A person who signs in on a new device while it
+      // is unloaded is then shared with on their OLD devices only: no
+      // `m.no_olm`, no warning, no heal, and every message to the new device
+      // is "this device has no key for it" (agentpod#604, 2026-11-07).
+      // An explicit query makes the device list current for this send
+      // whatever the machine missed. Gate and turn messages are rare, so one
+      // keys/query per encrypted send is cheap; a stale list is not.
+      const others = recipients.filter((u) => u.toString() !== userId);
+      if (others.length > 0) {
+        const query = machine.queryKeysForUsers(others) as unknown as { id: string; type: RequestType; body: string };
+        const answer = await deps.send(userId, { id: query.id, type: query.type, body: query.body });
+        await machine.markRequestAsSent(query.id, query.type, answer);
+      }
+
       // 2. Have an olm session with each of them, claiming a one-time key
       //    where there is none. Olm is what carries the megolm key in step 3.
       const missing = await machine.getMissingSessions(recipients);

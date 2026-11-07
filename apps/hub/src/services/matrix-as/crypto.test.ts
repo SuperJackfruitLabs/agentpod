@@ -523,3 +523,45 @@ describe("healing a device that will never heal", () => {
     expect(STALE_RETRY_COOLDOWN_MS).toBeLessThanOrEqual(30 * 60_000);
   });
 });
+
+/**
+ * agentpod#604, 2026-11-07: a person who signed in on a new device never received the
+ * room key for gate messages. The machine already tracked them, so `updateTrackedUsers`
+ * asked nothing, and the device-list change that would have marked them outdated had
+ * arrived while the machine was not loaded. Every send must ask for the recipients'
+ * current devices, however long the machine has believed its list.
+ */
+describe("a recipient's devices are asked for on every send", () => {
+  const HUMAN = `@rakesh:${DOMAIN}`;
+  const queriesFor = (seen: CryptoRequest[], user: string) =>
+    seen.filter((r) => {
+      try {
+        const keys = (JSON.parse(r.body) as { device_keys?: Record<string, unknown> }).device_keys;
+        return keys !== undefined && Object.prototype.hasOwnProperty.call(keys, user);
+      } catch {
+        return false;
+      }
+    }).length;
+
+  test("a second send to someone already tracked still queries their devices", async () => {
+    const { seen, send } = recorder();
+    const crypto = createAgentCrypto({ storeDir: await storeDir(), domain: DOMAIN, send, deviceIdFor, uploadSigningKeys });
+
+    await crypto.encrypt(ALICE, ROOM, [ALICE, HUMAN], "m.room.message", { body: "first" });
+    const before = seen.length;
+    await crypto.encrypt(ALICE, ROOM, [ALICE, HUMAN], "m.room.message", { body: "second" });
+
+    expect(queriesFor(seen.slice(before), HUMAN)).toBeGreaterThanOrEqual(1);
+  });
+
+  test("the sender's own devices are not queried on its behalf", async () => {
+    const { seen, send } = recorder();
+    const crypto = createAgentCrypto({ storeDir: await storeDir(), domain: DOMAIN, send, deviceIdFor, uploadSigningKeys });
+
+    await crypto.encrypt(ALICE, ROOM, [ALICE, HUMAN], "m.room.message", { body: "first" });
+    const before = seen.length;
+    await crypto.encrypt(ALICE, ROOM, [ALICE], "m.room.message", { body: "alone" });
+
+    expect(queriesFor(seen.slice(before), ALICE)).toBe(0);
+  });
+});
