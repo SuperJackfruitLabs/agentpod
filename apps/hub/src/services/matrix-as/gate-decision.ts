@@ -371,6 +371,10 @@ export async function settleGateOutcome(
 /** How each decision reads in a sentence. Falls back to the option id. */
 const OUTCOME_VERBS: Record<string, string> = {
   approve: "Approved",
+  // An approval gate bound to a publishing subject offers these two instead of `approve`; they
+  // read as the raw key ("approve_automatic by …") until they were named here.
+  approve_automatic: "Approved for automatic delivery",
+  approve_manual: "Approved for manual delivery",
   reject: "Rejected",
   request_changes: "Changes requested",
 };

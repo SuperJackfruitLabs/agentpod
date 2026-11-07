@@ -38,7 +38,7 @@ import { assertPrincipal } from "../../auth/org-plane/assertion";
 import { resolveMatrixId } from "../matrix";
 import { boardRoomFor } from "./board-room";
 import { answerElicitationAtSuperpipeline, claimElicitationOutcome, handleElicitationAnswer } from "./elicitations";
-import { principalById, principalForUser, principalHandle } from "../../auth/org-plane/principals";
+import { principalById, principalForUser, principalLabel } from "../../auth/org-plane/principals";
 import { attachRoomToSession, forgetTurnTrigger, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission, sessionIsBusy, whenIdle } from "../acp";
@@ -444,7 +444,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
                 ? speakingClient.sendCustomEvent(speaker, roomId, GATE_OUTCOME_TYPE, content)
                 : null;
             },
-            displayNameFor: (principalId: string) => principalHandle(principalId),
+            displayNameFor: (principalId: string) => principalLabel(principalId),
             /**
              * Claim the receipt before it is posted. `where outcome_posted_at is null`
              * makes the claim the write, so two decisions racing leave one line.
@@ -627,7 +627,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
               .returning({ gateId: matrixGateEvents.gateId });
             return claimed.length > 0;
           },
-          displayNameFor: (principalId) => principalHandle(principalId),
+          displayNameFor: (principalId) => principalLabel(principalId),
           reply: async (roomId, body) => {
             const speaker = await roomSpeakerFor(roomId, cfg.domain);
             if (speaker) await speakingClient.sendText(speaker, roomId, body);

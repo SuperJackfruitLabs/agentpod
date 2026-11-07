@@ -142,6 +142,7 @@ import {
   GATE_OUTCOME_TYPE,
   handleGateDecision,
   parseGateDecision,
+  settleGateOutcome,
   type GateDecisionDeps,
 } from "./gates";
 
@@ -600,6 +601,26 @@ describe("saying in the room that the board accepted an answer", () => {
     const { deps, replies } = receiptDeps({ displayNameFor: async () => "someone-else" });
     await handleGateDecision(decision, "!room", deps);
     expect(replies[0]).toContain("someone-else");
+  });
+
+  test("an automatic or manual approval reads as words, not as its option key", async () => {
+    // A gate bound to a publishing subject offers approve_automatic / approve_manual. The
+    // receipt printed the raw key — "approve_automatic by …" — in the operator's room.
+    for (const [optionId, words] of [
+      ["approve_automatic", "Approved for automatic delivery"],
+      ["approve_manual", "Approved for manual delivery"],
+    ] as const) {
+      const { deps, replies } = receiptDeps();
+      // The path a decision made on the web takes (the gate sweep), and the Matrix path's last step.
+      await settleGateOutcome(
+        { gateId: "gate_4e8b", decision: optionId, decidedBy: "prn_fixture" },
+        "!room",
+        { boardId: "brd_fixture", eventId: GATE_EVENT_ID },
+        deps,
+      );
+      expect(replies[0]).toContain(words);
+      expect(replies[0]).not.toContain(optionId);
+    }
   });
 
   test("a second delivery of the same decision leaves one receipt, not two", async () => {
