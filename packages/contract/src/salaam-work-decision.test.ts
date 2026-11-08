@@ -139,3 +139,28 @@ test("an answer may choose approve-run", () => {
   expect(SalaamWorkDecisionAnswer.safeParse(answer).success).toBe(true);
   expect(SalaamWorkDecisionAnswer.safeParse({ ...answer, option_id: "approve-always" }).success).toBe(false);
 });
+
+// Charter 2026-11-07 (strict decisions bind their subject) §3: Salaam says per file whether a preview
+// was cut. The hub re-hashes the PARSED decision (`workDigest`), so the mirror must keep the field —
+// a schema that stripped or refused it would change the digest of every new offer.
+import truncatedCorpus from "./fixtures/salaam-work-decision-preview-truncated-v1.json";
+for (const offer of truncatedCorpus.offers)
+  test(`a Salaam offer keeps its digest through the mirror: ${offer.name}`, () => {
+    const parsed = SalaamWorkDecision.parse(offer.decision);
+    expect(parsed.detail?.files[0]).toHaveProperty("preview_truncated");
+    expect(createHash("sha256").update(canonicalSalaamWork(parsed)).digest("hex")).toBe(offer.decision_digest);
+  });
+test("an offer saved before preview_truncated existed still parses and keeps its digest", () => {
+  const [offer] = truncatedCorpus.offers;
+  const detail = { ...offer!.decision.detail, files: offer!.decision.detail.files.map(({ preview_truncated: _cut, ...f }) => f) };
+  const parsed = SalaamWorkDecision.parse({ ...offer!.decision, detail });
+  expect(parsed.detail?.files[0]).not.toHaveProperty("preview_truncated");
+  expect(createHash("sha256").update(canonicalSalaamWork(parsed)).digest("hex")).toBe(
+    createHash("sha256").update(canonicalSalaamWork({ ...offer!.decision, detail })).digest("hex"),
+  );
+});
+test("preview_truncated must be a boolean", () => {
+  const [offer] = truncatedCorpus.offers;
+  const files = offer!.decision.detail.files.map((f) => ({ ...f, preview_truncated: "yes" }));
+  expect(SalaamWorkDecision.safeParse({ ...offer!.decision, detail: { ...offer!.decision.detail, files } }).success).toBe(false);
+});

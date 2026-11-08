@@ -1,0 +1,91 @@
+{
+  "_source": "Produced by Salaam (feat/preview-truncated, approvalDetail + workDecision + digest from src/agentpod and src/core/protocol.ts) from the shared salaam-work-decision-v1 corpus decision. Not hand-written: the digests are Salaam's.",
+  "offers": [
+    {
+      "name": "a create cut at 1200 characters (preview_truncated: true)",
+      "decision": {
+        "version": 1,
+        "request_id": "11111111-1111-4111-8111-111111111111",
+        "work_request_id": "22222222-2222-4222-8222-222222222222",
+        "binding_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "task_id": "33333333-3333-4333-8333-333333333333",
+        "plan_revision": 1,
+        "operation_id": "44444444-4444-4444-8444-444444444444",
+        "operation_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "approval_id": "55555555-5555-4555-8555-555555555555",
+        "approval_revision": 1,
+        "expires_at": 1792500000000,
+        "question": "Approve the exact checked operation?",
+        "options": [
+          {
+            "id": "approve",
+            "title": "Approve once"
+          },
+          {
+            "id": "deny",
+            "title": "Deny"
+          }
+        ],
+        "detail": {
+          "version": 1,
+          "reason": "Write the long notes",
+          "files": [
+            {
+              "path": "notes/long.md",
+              "change": "create",
+              "bytes": 1300,
+              "preview": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+              "preview_truncated": true
+            }
+          ],
+          "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "summary": "Create notes/long.md in the workspace"
+        }
+      },
+      "decision_digest": "a4314f6971a17ca5db68d25d39220f7f2cdc94b6f2e9173d4ade28eb9e4a0e08"
+    },
+    {
+      "name": "a whole edit (preview_truncated: false)",
+      "decision": {
+        "version": 1,
+        "request_id": "11111111-1111-4111-8111-111111111111",
+        "work_request_id": "22222222-2222-4222-8222-222222222222",
+        "binding_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "task_id": "33333333-3333-4333-8333-333333333333",
+        "plan_revision": 1,
+        "operation_id": "44444444-4444-4444-8444-444444444444",
+        "operation_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "approval_id": "55555555-5555-4555-8555-555555555555",
+        "approval_revision": 1,
+        "expires_at": 1792500000000,
+        "question": "Approve the exact checked operation?",
+        "options": [
+          {
+            "id": "approve",
+            "title": "Approve once"
+          },
+          {
+            "id": "deny",
+            "title": "Deny"
+          }
+        ],
+        "detail": {
+          "version": 1,
+          "reason": null,
+          "files": [
+            {
+              "path": "app.js",
+              "change": "edit",
+              "bytes": 16,
+              "preview": "console.log(1);\n",
+              "preview_truncated": false
+            }
+          ],
+          "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "summary": "Edit app.js in the workspace"
+        }
+      },
+      "decision_digest": "0588c96c7eff47e1a83d9fc1d0ecda3cc3b72e559a5c402bb9da29d9851dbceb"
+    }
+  ]
+}
