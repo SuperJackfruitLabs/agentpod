@@ -411,10 +411,13 @@ describe("the binding reaches the board's answer route", () => {
       {
         baseUrl: "https://board.test",
         mint: async () => "assertion",
-        fetch: (async (_url: string, init: RequestInit) => {
-          bodies.push(typeof init.body === "string" ? JSON.parse(init.body) : null);
-          return new Response("{}", { status: 200 });
-        }) as unknown as typeof fetch,
+        fetch: Object.assign(
+          async (_url: string | URL | Request, init?: RequestInit) => {
+            bodies.push(typeof init?.body === "string" ? JSON.parse(init.body) : null);
+            return new Response("{}", { status: 200 });
+          },
+          { preconnect: fetch.preconnect },
+        ),
       },
     );
     expect(bodies).toEqual([{ option: "deny", subject: { id: SUBJECT.id, digest: SUBJECT.digest } }]);
@@ -463,7 +466,10 @@ function wellFormedSubjectQuestion(c: Record<string, unknown>): boolean {
   if (typeof s.id !== "string" || typeof s.digest !== "string" || typeof s.preview_complete !== "boolean") return false;
   if (!Array.isArray(c.options)) return false;
   return c.options.every(
-    (o) => isObj(o) && (o.scope === undefined || ["once", "run", "always"].includes(String(o.scope))) && (o.requires === undefined || o.requires === "workspace-admin"),
+    (o) =>
+      isObj(o) &&
+      (o.scope === undefined || o.scope === "once" || o.scope === "run" || o.scope === "always") &&
+      (o.requires === undefined || o.requires === "workspace-admin"),
   );
 }
 

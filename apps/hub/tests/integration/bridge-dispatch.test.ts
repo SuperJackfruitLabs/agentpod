@@ -213,6 +213,13 @@ function askingBoard(
   return { handler, elicitations };
 }
 
+/** An elicitation activity's `parameter`, or null for anything else posted. */
+function elicitationParameter(body: unknown): Record<string, unknown> | null {
+  if (typeof body !== "object" || body === null || !("type" in body) || body.type !== "elicitation") return null;
+  const p = "parameter" in body ? body.parameter : null;
+  return typeof p === "object" && p !== null ? { ...p } : null;
+}
+
 /** A human picking one of the offered options. */
 const answers = (option: string | null, text: string | null = null) => (q: Question) => {
   q.status = "answered";
@@ -1064,12 +1071,11 @@ describe("a permission request is asked of a human", () => {
     // Charter 2026-11-07 §7. A board without per-option meanings ignores the extra keys; one that
     // understands them and refuses (INVALID_APPROVAL_SUBJECT / INVALID_ELICITATION) must not lose
     // the question.
-    const asked = askingBoard(answers("allow_once"), (path, body) => {
-      const p = (body as { type?: string; parameter?: { subject?: unknown } } | null) ?? {};
-      return path.endsWith("/activities") && p.type === "elicitation" && p.parameter?.subject !== undefined
+    const asked = askingBoard(answers("allow_once"), (path, body) =>
+      path.endsWith("/activities") && elicitationParameter(body)?.subject !== undefined
         ? { status: 400, body: boardError("INVALID_APPROVAL_SUBJECT") }
-        : null;
-    });
+        : null,
+    );
     const board = fakeBoard(asked.handler);
     const acp = fakeAcp(() => [permissionRequest()], { onAnswer: () => [chunk("412 tests passed."), idle()] });
 
@@ -1077,11 +1083,11 @@ describe("a permission request is asked of a human", () => {
 
     const elicitations = board.calls
       .filter((c) => c.path.endsWith("/activities"))
-      .map((c) => c.body as { type?: string; parameter?: Record<string, unknown> })
-      .filter((a) => a.type === "elicitation");
+      .map((c) => elicitationParameter(c.body))
+      .filter((p) => p !== null);
     expect(elicitations).toHaveLength(2);
-    expect(elicitations[0]?.parameter?.subject).toBeDefined();
-    expect(elicitations[1]?.parameter).toEqual({
+    expect(elicitations[0]?.subject).toBeDefined();
+    expect(elicitations[1]).toEqual({
       requestSeq: expect.any(Number),
       options: [
         { name: "allow_once", title: "Yes, run it" },

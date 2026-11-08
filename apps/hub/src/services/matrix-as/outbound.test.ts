@@ -7,6 +7,7 @@ import {
 import { _resetHubEventsForTest, hubEventKind, hubEventTurn, quietSendsInFlight } from "../push/hub-events";
 import { clearPendingPermission, matchPermissionAnswer, pendingPermissionFor } from "./permissions";
 import { setFleetSink } from "../push/fleet/sink";
+import type { OutboundDeps } from "./outbound-state";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   attachRoomToSession,
@@ -1047,20 +1048,23 @@ describe("a permission request a client can render", () => {
     const order: string[] = [];
     const recorded: Array<{ roomId: string; requestId: string; digest: string }> = [];
     const noted: Array<[string, string]> = [];
-    const { deps: d } = recordingDeps();
-    const withRecords = {
-      ...d,
-      client: { ...d.client, sendText: async (...args: Parameters<typeof d.client.sendText>) => (order.push("send"), d.client.sendText(...args)) },
+    const base = deps();
+    const withRecords: OutboundDeps = {
+      ...base,
+      client: {
+        ...base.client,
+        sendText: async (userId, roomId, body, extra) => (order.push("send"), base.client.sendText(userId, roomId, body, extra)),
+      },
       permissionRecords: {
-        record: async (roomId: string, p: { requestId: string; subject: { digest: string } }) => {
+        record: async (roomId, p) => {
           order.push("record");
           recorded.push({ roomId, requestId: p.requestId, digest: p.subject.digest });
           return true;
         },
-        noteEvent: async (requestId: string, eventId: string) => void noted.push([requestId, eventId]),
+        noteEvent: async (requestId, eventId) => void noted.push([requestId, eventId]),
       },
     };
-    attachRoomToSession(SESSION, ROOM, AGENT, withRecords as unknown as Parameters<typeof attachRoomToSession>[3]);
+    attachRoomToSession(SESSION, ROOM, AGENT, withRecords);
 
     emit(permission(7));
     await settle();
@@ -1069,17 +1073,24 @@ describe("a permission request a client can render", () => {
     const extra = sent[0]?.extra ?? {};
     expect(extra.suite_event_type).toBe("dev.agentpod.permission.v2");
     expect(extra.request_id).toBe(`${SESSION}:7`);
-    expect((extra.subject as { schema: string }).schema).toBe("harness-permission/v1");
     expect(extra[PERMISSION_REQUEST_CONTENT_KEY]).toBeDefined();
     expect(order).toEqual(["record", "send"]);
-    expect(recorded).toEqual([{ roomId: ROOM, requestId: `${SESSION}:7`, digest: (extra.subject as { digest: string }).digest }]);
+    expect(recorded).toEqual([{ roomId: ROOM, requestId: `${SESSION}:7`, digest: expect.any(String) }]);
+    expect(extra.subject).toMatchObject({ schema: "harness-permission/v1", digest: recorded[0]?.digest });
     expect(noted).toEqual([[`${SESSION}:7`, "$evt"]]);
   });
 
   test("a failed record still asks the question", async () => {
-    const { deps: d } = recordingDeps();
-    const failing = { ...d, permissionRecords: { record: async () => { throw new Error("db down"); }, noteEvent: async () => {} } };
-    attachRoomToSession(SESSION, ROOM, AGENT, failing as unknown as Parameters<typeof attachRoomToSession>[3]);
+    const failing: OutboundDeps = {
+      ...deps(),
+      permissionRecords: {
+        record: async () => {
+          throw new Error("db down");
+        },
+        noteEvent: async () => {},
+      },
+    };
+    attachRoomToSession(SESSION, ROOM, AGENT, failing);
     emit(permission(7));
     await settle();
     expect(sent).toHaveLength(1);
