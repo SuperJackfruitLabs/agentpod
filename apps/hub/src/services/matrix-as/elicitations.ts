@@ -100,7 +100,9 @@ export interface ElicitationProjectionDeps {
 
 /** Where the card's link goes. The same shape the gate link uses. */
 function boardLink(baseUrl: string | undefined, boardId: string, cardId: string): string | undefined {
-  if (!baseUrl) return undefined;
+  // A question with no card (a SuperToolkit approval request) has nothing to link to: a link to
+  // `/c/` would open nothing, which reads as a broken card rather than an honest absence.
+  if (!baseUrl || cardId === "") return undefined;
   return `${baseUrl.replace(/\/+$/, "")}/b/${encodeURIComponent(boardId)}/c/${encodeURIComponent(cardId)}`;
 }
 
@@ -341,6 +343,7 @@ export async function recordedQuestion(elicitationId: string): Promise<RecordedQ
   const [row] = await db
     .select({
       boardId: matrixElicitationEvents.boardId,
+      cardId: matrixElicitationEvents.cardId,
       roomId: matrixElicitationEvents.roomId,
       eventId: matrixElicitationEvents.eventId,
       options: matrixElicitationEvents.optionsV2,
@@ -356,6 +359,7 @@ export async function recordedQuestion(elicitationId: string): Promise<RecordedQ
   if (!row || row.eventId.startsWith("pending:")) return null;
   return {
     boardId: row.boardId,
+    cardId: row.cardId,
     roomId: row.roomId,
     eventId: row.eventId,
     options: row.options,
@@ -621,7 +625,7 @@ export async function handleElicitationAnswer(
   });
 
   const chosen = open.options.find((o) => o.id === matched);
-  return reportAnswer(result, open.elicitationId, chosen?.label ?? matched, roomId, deps);
+  return reportAnswer(result, open.elicitationId, chosen?.label ?? matched, roomId, deps, { approvalRequest: open.cardId === "" });
 }
 
 /** Said when a typed reply (or a v1 card's button) tries to approve a subject-bound question. */
@@ -633,6 +637,9 @@ const BOARD_SUBJECT_TEXT: Record<string, string> = {
   APPROVAL_SUBJECT_MISMATCH:
     "The board says that answer was for a different version of this decision. Open the latest one and answer again. Nothing has changed.",
   DECISION_EXPIRED: "The board says this decision has expired, so it can no longer be answered. Nothing has changed.",
+  // A SuperToolkit approval request (charter: "Waiting cards and broker approvals reach chat" §4).
+  WORKSPACE_ADMIN_REQUIRED: "Only workspace owners and admins can allow this. Nothing has changed.",
+  SEPARATION_OF_DUTIES: "Whoever made a request can't also decide it. Someone else has to answer. Nothing has changed.",
 };
 
 /**
@@ -646,6 +653,8 @@ export async function reportAnswer(
   answered: string | null,
   roomId: string,
   deps: Pick<ElicitationAnswerDeps, "reply" | "claimOutcome">,
+  /** A SuperToolkit approval request: no agent is unblocked by it, the broker reads the decision. */
+  opts: { approvalRequest?: boolean } = {},
 ): Promise<{ status: "answered"; elicitationId: string } | { status: "refused"; code: string }> {
   if (!result.ok) {
     if (result.code === "ELICITATION_NOT_PENDING" || result.code === "ELICITATION_NOT_FOUND") {
@@ -666,7 +675,8 @@ export async function reportAnswer(
   }
 
   if (await deps.claimOutcome(elicitationId)) {
-    await deps.reply(roomId, answered ? `Answered: ${answered}. The agent is unblocked.` : "Answered. The agent is unblocked.");
+    const tail = opts.approvalRequest ? "SuperToolkit has the decision." : "The agent is unblocked.";
+    await deps.reply(roomId, answered ? `Answered: ${answered}. ${tail}` : `Answered. ${tail}`);
   }
   return { status: "answered", elicitationId };
 }

@@ -82,6 +82,8 @@ export function referenceOf(content: object): string | null {
 /** What this hub recorded when it posted a question (`recordedQuestion`). */
 export interface RecordedQuestion {
   boardId: string;
+  /** Empty for a SuperToolkit approval request, which belongs to no card. Absent in older fixtures. */
+  cardId?: string;
   roomId: string;
   /** The question's prose message: the one event an answer may reference. */
   eventId: string;
@@ -296,6 +298,8 @@ export async function handleQuestionAnswer(
     principalId: identity.id,
     senderMxid: event.sender,
   });
-  const reported = await reportAnswer(result, parsed.elicitationId, verdict.label, roomId, deps);
+  const reported = await reportAnswer(result, parsed.elicitationId, verdict.label, roomId, deps, {
+    approvalRequest: q.cardId === "",
+  });
   return reported.status === "answered" ? reported : { status: "refused", reason: "board-refused", code: reported.code };
 }
