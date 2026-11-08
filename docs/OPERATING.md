@@ -1728,7 +1728,8 @@ signal. A lost lease (409 `STALE_LEASE`) is *not* a halt; it is ordinary and the
 
 Each board the roster names is subscribed to the hub's signed push route
 (`$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/push`, events `gate.pending`,
-`elicitation.pending`, `delivery.pending` and `attention.pending`, signed with
+`elicitation.pending`, `delivery.pending`, `attention.pending`, `decision.reminded` and
+`decision.escalated`, signed with
 `SUPERPIPELINE_PUSH_SECRET`) by the gate sweeper — at hub start and
 again every five minutes, with the board's first rostered credential. Registration is an upsert, so
 the refresh repairs a rebuilt board or a rotated secret. Nothing to run by hand:
@@ -1756,6 +1757,38 @@ buttons). Logs: `matrix-attention` (`waiting card projected`, `an attention.answ
 with the reason, `superpipeline refused a waiting card answer` with the code) and `gate-sweep`
 (`a waiting card reached its room only by sweep`, `settled a waiting card whose wait ended
 elsewhere`).
+
+**Unanswered decisions remind, then escalate** (charter, 2026-11-08). A stage's timeout is
+superpipeline's: the four pending pushes carry `deadline: {remindAt?, escalateAt?}`, carried into the
+envelopes as `deadline { remind_at?, escalate_at? }` (absent when none). When a deadline passes the
+board pushes `decision.reminded` or `decision.escalated` (`decisionKind` gate | question | delivery |
+attention, `decisionId` the gate, elicitation or wait id). The hub replies to the card it posted for
+that decision — never to one it did not post (`unknown-card`), one already settled, or one outside
+the board's room — once per decision and notice, claimed in `matrix_decision_notices` (migration
+0124) before it is sent and released if the send fails, so the board's retry posts it.
+
+- **Who is invited.** On `decision.escalated` the hub reads the workspace's people through the
+  organization-plane directory it already uses (`GET /api/principals?kind=human`): the tenant's org
+  (`tenants.external_id` for an `org-plane` tenant), role `owner` or `admin`, not suspended, with a
+  linked Matrix identity. They are invited by the board's speaker, once per board and person
+  (`matrix_escalation_invites`); someone who leaves is not invited again — delete their row to undo
+  that. A refused invite is forgotten and retried on the next escalation. A bootstrap tenant with no
+  org has nobody to invite (logged).
+- **One tenant or nobody.** A board known to several tenants (rostered or dispatched under more than
+  one) is neither reminded nor escalated: `a board known to several tenants is never reminded or
+  escalated` (once per board).
+- **What admins see.** The notice is an `m.text` reply to the card with `suite_event_type`
+  `dev.superpipeline.decision.escalated.v1` (or `…reminded.v1`) and `board_id`, `card_id`,
+  `decision_kind`, `decision_id`, `waiting_since`, `escalated_at`, plus the card link. The board room
+  is encrypted to joined members, so when an invited admin's join is seen the open escalations are
+  posted again once (`re-posted open escalations for a workspace admin who joined`); the original
+  card stays unreadable to them, which is why the notice links the card.
+- **An expired subject** closes its gate as `expired`; the sweep settles the room card with the
+  `Expired — …` receipt (`decision: "expired"`, `decided_by: null`).
+
+Logs: `matrix-decision-notices` (`a decision reminded`, `a decision escalated to the workspace admins`
+with `admins` and `invited`, `an escalation could not invite a workspace admin`) and
+`superpipeline-push` (`decision timeout handled` with the status).
 
 **SuperToolkit approval requests** arrive on `elicitation.pending` with an empty card and an
 `apr_…` id, and are posted and answered like any subject-bound question — the room shows the
@@ -1829,6 +1862,18 @@ at claim.
 **Older boards.** A superpipeline that predates comments sends no `comments` field; the prompt then
 renders exactly as `card-prompt/3` did — no section, and no mention of the comment tools that
 server does not have. Nothing to configure in either direction.
+
+### A permission wait survives a restart
+
+A board-dispatched harness permission waits for the earlier of the agent's `permissionWaitMs` and
+its request's `harness-permission/v1` expiry (30 minutes from the ask). The wait is recorded on the
+dispatch row (`permission_session_id`, `permission_request_seq`, `permission_wait_until`, migration
+0124) and cleared when it ends. The harness's request lives in the process that drove the session, so
+after a hub restart nothing can answer it: on its next claim cycle, before claiming, each agent ends
+any wait its previous process left — the board is told `fail` (so the question is asked again on the
+next attempt), the session is ended, and the row is `abandoned` with a reason naming the restart.
+A board that cannot be reached keeps the row for the next cycle. Log: `ended a permission wait a
+restart cut short`.
 
 ### Reading `bridge_dispatches`
 
