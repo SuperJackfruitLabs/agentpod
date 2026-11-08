@@ -49,12 +49,12 @@ describe("subscribing each board to the hub's push", () => {
     expect(sent[0]!.body).toEqual({
       url: `${PUBLIC}/public/bridge/superpipeline/push`,
       token: "shh",
-      events: ["gate.pending", "elicitation.pending", "delivery.pending"],
+      events: ["gate.pending", "elicitation.pending", "delivery.pending", "attention.pending"],
     });
   });
 
   test("subscribes to every event the push route projects, the delivery follow-up included", () => {
-    expect([...PUSH_EVENTS].sort()).toEqual(["delivery.pending", "elicitation.pending", "gate.pending"]);
+    expect([...PUSH_EVENTS].sort()).toEqual(["attention.pending", "delivery.pending", "elicitation.pending", "gate.pending"]);
   });
 
   test("registers nothing without a signing secret — the route would refuse every push", async () => {
