@@ -39,6 +39,19 @@ import { createLogger } from "../../utils/logger";
 import { parseGateDecision } from "./gates";
 import { parseQuestionAnswer } from "./question-answer";
 import { parseDeliveryAnswer } from "./delivery-answer";
+import {
+  PERMISSION_OUTCOME_TYPE,
+  isPermissionAnswerMarked,
+  parsePermissionAnswer,
+} from "./permission-wire";
+import {
+  answerTypedPermission,
+  handlePermissionAnswer,
+  refuseLatePermissionReply,
+  typedPermissionGate,
+  type PermissionAnswerDeps,
+} from "./permission-answer";
+import type { PermissionAnswerer } from "../acp";
 import { imageNote, imageSource, isRefusal, loadImage, type PromptImage } from "../matrix";
 import {
   audioSource,
@@ -177,9 +190,15 @@ export interface InboundDeps {
       userId: string,
       sessionId: string,
       requestSeq: number,
-      optionId: string
+      optionId: string,
+      answeredBy?: PermissionAnswerer
     ): Promise<void>;
   };
+  /**
+   * A person's label for a permission receipt ("Allow once — answered by …"); never an mxid.
+   * Optional: without it a receipt names nobody.
+   */
+  displayNameFor?(principalId: string): Promise<string | null>;
   /**
    * Start streaming this session into this room.
    *
@@ -423,6 +442,11 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
     return;
   }
 
+  // A permission.answer.v2 (AgentPod's own envelope) is judged below, after the sender and the
+  // grant — it answers the agent, so it is dispatching by another name. Whatever it carries, it is
+  // never a prompt, and its body may be anything (or nothing).
+  const permissionAnswer = isPermissionAnswerMarked(event.content);
+
   // An image's `body` is its file name, not something the sender said — the
   // bridge used to send that name as the whole message, and the agent could
   // only guess at a picture it never received (2026-09-24). Its words are the
@@ -442,7 +466,7 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
   // Whitespace is not a prompt. Sending one would start a turn with nothing in
   // it and cost an agent a round trip to say so. A bare image or voice note is
   // not nothing.
-  if (text.trim() === "" && !image && !audio) return;
+  if (text.trim() === "" && !image && !audio && !permissionAnswer) return;
 
   // ── A board room answers questions; it never starts sessions ──────────────
   //
@@ -458,6 +482,7 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
   // own prose happened to match.
   const board = await boardRoomFor(event.room_id);
   if (board) {
+    if (permissionAnswer) return;
     if (deps.elicitations && event.sender !== board.speakerMxid) {
       await deps.elicitations.handle({ sender: event.sender, body: text }, event.room_id);
     }
@@ -565,8 +590,36 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
   // Checked before prompting, because while a permission is pending the
   // session cannot take a prompt — it is parked. Treating the answer as a
   // message would lose the answer AND fail the prompt.
+  const answerer = { principalId, mxid: event.sender };
+  const permissionDeps: PermissionAnswerDeps = {
+    answer: async (sessionId, requestSeq, optionId, answeredBy) => {
+      if (!deps.acp.answerPermission) throw new Error("This hub cannot answer permission requests from a room yet.");
+      // The station's owner, for the reason the typed path below gives.
+      await deps.acp.answerPermission(room.stationUserId, sessionId, requestSeq, optionId, answeredBy);
+    },
+    say,
+    sendOutcome: async (content) =>
+      deps.client.sendCustomEvent ? deps.client.sendCustomEvent(agentUser, room.roomId, PERMISSION_OUTCOME_TYPE, content) : null,
+    displayNameFor: async (id) => (await deps.displayNameFor?.(id)) ?? null,
+  };
+
+  // ── A structured answer to a permission request (permission.answer.v2) ────
+  if (permissionAnswer) {
+    const parsed = parsePermissionAnswer(event.content);
+    if (!parsed) {
+      log.warn("a malformed permission.answer.v2, ignored", { room: room.roomId, sender: event.sender });
+      return;
+    }
+    await handlePermissionAnswer(parsed, { roomId: room.roomId, sessionId: room.sessionId, answerer }, permissionDeps);
+    return;
+  }
+
   const waiting = pendingPermissionFor(room.roomId);
   if (waiting) {
+    // Judged against the durable record first: a request that expired or was settled elsewhere
+    // is refused and dropped, never answered — and never left to swallow the next message.
+    const gate = await typedPermissionGate(waiting, room.roomId, permissionDeps);
+    if (gate === "refused") return;
     const optionId = matchPermissionAnswer(text, waiting.options);
     if (!optionId) {
       // Not resolved to the nearest-looking option: approving a tool call the
@@ -581,6 +634,14 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
       return;
     }
 
+    // A recorded request is answered under the same checks as permission.answer.v2 — the preview
+    // rule included — and claimed before the agent is answered (`answerTypedPermission`).
+    if (gate) {
+      const out = await answerTypedPermission(gate, optionId, { roomId: room.roomId, sessionId: waiting.sessionId, answerer }, permissionDeps);
+      log.info("permission answer from a room", { principalId, room: room.roomId, optionId, status: out.status });
+      return;
+    }
+
     try {
       // The station's owner, for the same reason `createSession` takes it:
       // `requireLive` scopes on the session's `user_id`, a Better Auth id.
@@ -588,7 +649,8 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
         room.stationUserId,
         waiting.sessionId,
         waiting.requestSeq,
-        optionId
+        optionId,
+        { via: "room", principalId, mxid: event.sender }
       );
       // Only after it was accepted: a cleared question plus a failed answer
       // would leave the agent parked with nothing able to release it.
@@ -608,6 +670,13 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
     }
     return;
   }
+
+  // ── A late answer to a permission request that is no longer waiting ───────
+  //
+  // Nothing is parked, but the room's last request closed moments ago (answered in the console,
+  // expired) or was left behind by a restart, and this reply is one of its options. Passing it on
+  // would hand the agent a bare "1" as an instruction; it is refused in the room instead.
+  if (!image && !audio && (await refuseLatePermissionReply(room.roomId, text, permissionDeps))) return;
 
   // ── Say it to the agent ───────────────────────────────────────────────────
   //

@@ -7,6 +7,7 @@ import {
 import { _resetHubEventsForTest, hubEventKind, hubEventTurn, quietSendsInFlight } from "../push/hub-events";
 import { clearPendingPermission, matchPermissionAnswer, pendingPermissionFor } from "./permissions";
 import { setFleetSink } from "../push/fleet/sink";
+import type { OutboundDeps } from "./outbound-state";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   attachRoomToSession,
@@ -1040,6 +1041,77 @@ describe("a permission request a client can render", () => {
     await settle();
 
     expect(hubEventKind("$custom-1")).toBeUndefined();
+  });
+
+  test("the same prose message carries permission.v2, recorded before it is sent", async () => {
+    // Charter 2026-11-07 §5: AgentPod's own envelope beside the v1 card, with a durable binding.
+    const order: string[] = [];
+    const recorded: Array<{ roomId: string; requestId: string; digest: string }> = [];
+    const noted: Array<[string, string]> = [];
+    const base = deps();
+    const withRecords: OutboundDeps = {
+      ...base,
+      client: {
+        ...base.client,
+        sendText: async (userId, roomId, body, extra) => (order.push("send"), base.client.sendText(userId, roomId, body, extra)),
+      },
+      permissionRecords: {
+        record: async (roomId, p) => {
+          order.push("record");
+          recorded.push({ roomId, requestId: p.requestId, digest: p.subject.digest });
+          return true;
+        },
+        noteEvent: async (requestId, eventId) => void noted.push([requestId, eventId]),
+      },
+    };
+    attachRoomToSession(SESSION, ROOM, AGENT, withRecords);
+
+    emit(permission(7));
+    await settle();
+
+    expect(sent).toHaveLength(1);
+    const extra = sent[0]?.extra ?? {};
+    expect(extra.suite_event_type).toBe("dev.agentpod.permission.v2");
+    expect(extra.request_id).toBe(`${SESSION}:7`);
+    expect(extra[PERMISSION_REQUEST_CONTENT_KEY]).toBeDefined();
+    expect(order).toEqual(["record", "send"]);
+    expect(recorded).toEqual([{ roomId: ROOM, requestId: `${SESSION}:7`, digest: expect.any(String) }]);
+    expect(extra.subject).toMatchObject({ schema: "harness-permission/v1", digest: recorded[0]?.digest });
+    expect(noted).toEqual([[`${SESSION}:7`, "$evt"]]);
+  });
+
+  test("a permission answered anywhere settles the room's record", async () => {
+    const settled: Array<{ sessionId: string; payload: unknown }> = [];
+    const withSettle: OutboundDeps = {
+      ...deps(),
+      permissionRecords: {
+        record: async () => true,
+        noteEvent: async () => {},
+        settle: async (sessionId, payload) => void settled.push({ sessionId, payload }),
+      },
+    };
+    attachRoomToSession(SESSION, ROOM, AGENT, withSettle);
+    emit(permission(7));
+    emit({ sessionId: SESSION, seq: 8, type: "permission-answer", payload: { requestSeq: 7, optionId: "allow" }, createdAt: new Date().toISOString() });
+    await settle();
+    expect(settled).toEqual([{ sessionId: SESSION, payload: { requestSeq: 7, optionId: "allow" } }]);
+  });
+
+  test("a failed record still asks the question", async () => {
+    const failing: OutboundDeps = {
+      ...deps(),
+      permissionRecords: {
+        record: async () => {
+          throw new Error("db down");
+        },
+        noteEvent: async () => {},
+      },
+    };
+    attachRoomToSession(SESSION, ROOM, AGENT, failing);
+    emit(permission(7));
+    await settle();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.body).toContain("Permission needed");
   });
 
   test("a deployment without sendCustomEvent still asks in words", async () => {

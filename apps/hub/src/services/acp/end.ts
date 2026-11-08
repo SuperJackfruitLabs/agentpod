@@ -11,8 +11,8 @@ import { turnErrorFromReason } from "./turn-error";
 
 /** Resolve all parked permission promises with the SDK's cancelled outcome. */
 export function rejectPendingPermissions(live: LiveSession): void {
-  for (const [requestSeq, resolve] of live.pending) {
-    resolve({ outcome: { outcome: "cancelled" } });
+  for (const [requestSeq, parked] of live.pending) {
+    parked.resolve({ outcome: { outcome: "cancelled" } });
     persistEvent(live, "permission-answer", { requestSeq, cancelled: true });
   }
   live.pending.clear();

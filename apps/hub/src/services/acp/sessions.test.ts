@@ -73,6 +73,7 @@ import {
   promptSession,
   cancelTurn,
   answerPermission,
+  cancelPermission,
   setMode,
   endSession,
   subscribe,
@@ -926,6 +927,72 @@ test("promptSession reports an adapter that completes without any visible update
     server.stop(true);
   }
 });
+
+test(
+  "ask mode: an option the request did not offer is refused and the request stays parked; the answerer is recorded",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-offered-host", {
+      stationKey: "acp-offered-station",
+      permission: { toolKind: "execute" },
+    });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+      await promptSession(TEST_USER, row.id, "run a command");
+      const { hit: permReq } = await pollForEvent(row.id, (e) => e.type === "permission-request");
+      const requestSeq = (permReq as { seq: number }).seq;
+
+      // Charter 2026-11-07 §6: the option must be one the harness offered — on every surface.
+      await expect(answerPermission(TEST_USER, row.id, requestSeq, "allow_everything")).rejects.toThrow(/not offered/);
+      expect(fake.permissionOutcomes).toHaveLength(0);
+
+      await answerPermission(TEST_USER, row.id, requestSeq, "allow", { via: "room", principalId: "prn_answerer", mxid: "@answerer:id.test" });
+      await pollUntil(() => fake.permissionOutcomes.length === 1);
+      const { hit: answer } = await pollForEvent(row.id, (e) => e.type === "permission-answer");
+      expect(answer.payload).toEqual({
+        requestSeq,
+        optionId: "allow",
+        answeredBy: { via: "room", principalId: "prn_answerer", mxid: "@answerer:id.test" },
+      });
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "ask mode: an expired request is released with the cancelled outcome, once",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-expire-host", {
+      stationKey: "acp-expire-station",
+      permission: { toolKind: "execute" },
+    });
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+      await promptSession(TEST_USER, row.id, "run a command");
+      const { hit: permReq } = await pollForEvent(row.id, (e) => e.type === "permission-request");
+      const requestSeq = (permReq as { seq: number }).seq;
+
+      expect(await cancelPermission("someone-else", row.id, requestSeq, "expired")).toBe(false);
+      expect(await cancelPermission(TEST_USER, row.id, requestSeq, "expired")).toBe(true);
+      await pollUntil(() => fake.permissionOutcomes.length === 1);
+      expect(fake.permissionOutcomes[0]).toEqual({ outcome: "cancelled" });
+      const { hit: answer } = await pollForEvent(row.id, (e) => e.type === "permission-answer");
+      expect(answer.payload).toEqual({ requestSeq, cancelled: true, reason: "expired" });
+      expect(await cancelPermission(TEST_USER, row.id, requestSeq, "expired")).toBe(false);
+      await expect(answerPermission(TEST_USER, row.id, requestSeq, "allow")).rejects.toThrow();
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
 
 test(
   "ask mode: permission parks (status waiting), answerPermission resolves it, events persisted, agent sees selected outcome",

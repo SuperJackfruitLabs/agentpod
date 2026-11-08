@@ -251,6 +251,15 @@ export function isForeignRun(err: unknown): boolean {
   return err instanceof SuperpipelineApiError && err.code === "NOT_RUN_OWNER";
 }
 
+/**
+ * The board refused a question's decision envelope — a per-option meaning or scope, or the
+ * `harness-permission/v1` subject. A board without per-option meanings ignores both keys (it reads
+ * an option's name and title only), so this is a board that understands them and disagreed.
+ */
+export function isEnvelopeRefusal(err: unknown): boolean {
+  return err instanceof SuperpipelineApiError && (err.code === "INVALID_APPROVAL_SUBJECT" || err.code === "INVALID_ELICITATION");
+}
+
 /** superpipeline replies `{error: {ok:false, code, message}}`, or `{error: "…"}`. */
 function readError(body: unknown): { code: string | null; message: string } {
   const e = (body as { error?: unknown } | null)?.error;

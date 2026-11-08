@@ -16,6 +16,10 @@ export const SalaamApprovalDetail = z
             change: z.enum(["create", "edit", "delete"]),
             bytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
             preview: z.string().max(1200).nullable(),
+            /** Salaam says outright whether `preview` is all of what will be written (charter
+             * 2026-11-07, strict decisions bind their subject §3). Optional: offers saved before it
+             * existed lack it. Kept, never stripped — the hub re-hashes the parsed decision. */
+            preview_truncated: z.boolean().optional(),
           })
           .strict(),
       )

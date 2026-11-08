@@ -14,8 +14,8 @@ import { attemptSpanFacts } from "./attempt-facts";
 import type { Fingerprint } from "../evidence";
 import { fingerprintWithin, resolveStationFingerprint } from "../evidence";
 import { DEFAULT_PERMISSION_WAIT_MS } from "./config";
-import { isAutoAnswered, selectedOptionId } from "./permission";
-import { isForeignRun, isLeaseSuperseded, type ClaimedWork, type RunElicitation } from "./superpipeline";
+import { isAutoAnswered, selectedOptionId, withoutApprovals } from "./permission";
+import { isEnvelopeRefusal, isForeignRun, isLeaseSuperseded, type ClaimedWork, type RunElicitation } from "./superpipeline";
 import { startAttempt, type CoalescingCounts, type DispatchKey } from "./ledger";
 import {
   DEFAULT_HEARTBEAT_MS,
@@ -176,9 +176,24 @@ export function post(t: Turn, activities: BoardActivity[]): void {
     // and a 502 on the wire is a delivery question. The queue logs those
     // separately, and coalescing is what bounds how many there can be.
     t.counts.activitiesPosted++;
-    queue(t, async () => {
-      await t.deps.client.activity(t.work, a);
-    });
+    queue(t, () => postActivity(t, a));
+  }
+}
+
+/**
+ * Post one activity. A board that refuses a permission question's envelope (its meanings or its
+ * subject) understands the envelope, so it gets the question again, once, with its approving
+ * options removed (`withoutApprovals`) — never an approvable question bound to nothing. A board
+ * that predates the envelope ignores it and never refuses. Any other refusal is the queue's.
+ */
+async function postActivity(t: Turn, a: BoardActivity): Promise<void> {
+  try {
+    await t.deps.client.activity(t.work, a);
+  } catch (err) {
+    const declineOnly = withoutApprovals(a);
+    if (!declineOnly || !isEnvelopeRefusal(err)) throw err;
+    t.log("the board refused a permission question's envelope; posted it decline-only", { error: String(err) });
+    await t.deps.client.activity(t.work, declineOnly);
   }
 }
 
@@ -323,7 +338,11 @@ async function askTheHuman(t: Turn, request: AcpEvent): Promise<PermissionResolu
       // Null means the answer selected nothing the harness offered — free
       // text, or an option from somewhere else. Not a decision, and not a
       // reason to pick one.
-      return optionId === null ? { kind: "unmappable" } : { kind: "answered", optionId };
+      if (optionId === null) return { kind: "unmappable" };
+      const by = question.answer?.answeredBy;
+      return by
+        ? { kind: "answered", optionId, answeredBy: { boardUserId: by, principalId: question.answer?.answeredByPrincipal ?? null } }
+        : { kind: "answered", optionId };
     }
 
     if (t.abortCause) return { kind: "aborted" };
@@ -372,7 +391,15 @@ async function resolvePermission(t: Turn, request: AcpEvent): Promise<TurnEnd | 
     card: key.externalCardId,
     option: outcome.resolution.optionId,
   });
-  await deps.acp.answerPermission(deps.agent.hubUserId, t.session.id, request.seq, outcome.resolution.optionId);
+  // Who answered is recorded on the session's permission-answer (charter 2026-11-07 §6).
+  const by = outcome.resolution.answeredBy;
+  await deps.acp.answerPermission(
+    deps.agent.hubUserId,
+    t.session.id,
+    request.seq,
+    outcome.resolution.optionId,
+    ...(by ? [{ via: "board" as const, principalId: by.principalId, userId: by.boardUserId }] : []),
+  );
   return null;
 }
 

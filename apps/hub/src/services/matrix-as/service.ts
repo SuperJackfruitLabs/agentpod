@@ -50,7 +50,11 @@ import { updateDeliveryAtSuperpipeline } from "./gate-resolve";
 import { principalById, principalForUser, principalLabel } from "../../auth/org-plane/principals";
 import { attachRoomToSession, forgetTurnTrigger, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
-  answerPermission, sessionIsBusy, whenIdle } from "../acp";
+  answerPermission, cancelPermission, sessionIsBusy, whenIdle } from "../acp";
+import { acpSessions } from "../../db/schema/acp";
+import { expirePermissions, settleFromSessionEvent } from "./permission-answer";
+import { notePermissionEvent, recordPermissionRequest } from "./permission-records";
+import { PERMISSION_OUTCOME_TYPE } from "./permission-wire";
 import { createLogger } from "../../utils/logger";
 import { bridgeModeOnly } from "./bridge-agents";
 import { createAgentCrypto, feedAgents, type AgentCrypto } from "./crypto";
@@ -209,6 +213,11 @@ export interface MatrixBridge {
    * True only when THIS call claimed the outcome, so two sweeps leave one line.
    */
   settleElicitation(elicitationId: string, roomId: string): Promise<boolean>;
+  /**
+   * Expire every permission request projected into a station room whose 30 minutes are up: the
+   * agent is answered `cancelled` and the card is closed (`expirePermissions`). The count expired.
+   */
+  expirePermissions(): Promise<number>;
   /**
    * Feed the encryption side-channels of one transaction to the agents it
    * concerns. Null when no crypto store is configured — a plaintext bridge
@@ -656,16 +665,45 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
         client: speakingClient,
         readerFor: readerForRoom,
         nameFor: agentNameForRoom,
+        // permission.v2's durable binding: what a room's answer is judged against.
+        permissionRecords: {
+          record: recordPermissionRequest,
+          noteEvent: notePermissionEvent,
+          settle: (session, payload, post) =>
+            settleFromSessionEvent(session, payload, { ...post, displayNameFor: (id) => principalLabel(id) }),
+        },
         speak: voiceReplier.speakTurn,
       }),
     noteTrigger: noteTurnTrigger,
     forgetTrigger: forgetTurnTrigger,
+    displayNameFor: (principalId: string) => principalLabel(principalId),
   };
 
   return {
     client: speakingClient,
     config: cfg,
     provisionDeps,
+
+    expirePermissions: () =>
+      expirePermissionsLogged({
+        // The session's owner is who `requireLive` scopes on, as for an answer.
+        cancel: async (record) => {
+          const [session] = await db
+            .select({ userId: acpSessions.userId })
+            .from(acpSessions)
+            .where(eq(acpSessions.id, record.sessionId))
+            .limit(1);
+          return session ? cancelPermission(session.userId, record.sessionId, record.requestSeq, "expired") : false;
+        },
+        say: async (roomId, body) => {
+          const agent = await roomAgentUser(roomId, cfg.domain);
+          return agent ? speakingClient.sendText(agent, roomId, body) : null;
+        },
+        sendOutcome: async (roomId, content) => {
+          const agent = await roomAgentUser(roomId, cfg.domain);
+          return agent ? speakingClient.sendCustomEvent(agent, roomId, PERMISSION_OUTCOME_TYPE, content) : null;
+        },
+      }),
 
     settleElicitation: async (elicitationId, roomId) => {
       // Claim first: the line in the room is the visible half, and posting it before
@@ -780,6 +818,16 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
  * Runs after the routes are mounted, so a homeserver that starts pushing
  * immediately finds somewhere to push to.
  */
+/** The permission expiry sweep, never rejecting: a failure is logged and the next tick tries again. */
+async function expirePermissionsLogged(deps: Parameters<typeof expirePermissions>[0]): Promise<number> {
+  try {
+    return await expirePermissions(deps);
+  } catch (err) {
+    log.error("permission expiry failed", { error: err instanceof Error ? err.message : String(err) });
+    return 0;
+  }
+}
+
 export async function startMatrixBridge(bridge: MatrixBridge): Promise<void> {
   const result = await provisionAll(bridge.provisionDeps);
   log.info("matrix bridge ready", {

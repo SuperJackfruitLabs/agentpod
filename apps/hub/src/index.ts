@@ -459,6 +459,12 @@ if (matrixBridge) {
     settle: (elicitationId, roomId) => matrixBridge.settleElicitation(elicitationId, roomId),
   });
 
+  // Harness permissions projected into station rooms expire 30 minutes after they were asked
+  // (charter: strict decisions and harness permissions bind their subject §5): the agent is told
+  // `cancelled` rather than left parked, and the card is closed. Checked every minute; unref'd so
+  // it never holds the process open.
+  setInterval(() => void matrixBridge.expirePermissions(), 60_000).unref();
+
   app.route(
     '/_matrix/app/v1',
     createMatrixAsRoutes({

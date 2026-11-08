@@ -18,7 +18,9 @@ import {
   cut,
   cutToBytes,
   optionInputV2,
+  subjectV2,
   type GateOptionMeaning,
+  type GateSubjectV2,
   type OptionInputV2,
 } from "./gate-wire";
 
@@ -28,6 +30,15 @@ export const QUESTION_ANSWER_V2_SUITE_TYPE = "dev.superpipeline.question.answer.
 /** The longest typed answer a question takes: the board's own limit (`ELICITATION_TEXT_MAX`). */
 export const QUESTION_TEXT_MAX = 2000;
 
+/**
+ * How far an option reaches, and who may take it (charter: "Strict decisions and harness
+ * permissions bind their subject" §2). A client shows them; the producer judges both.
+ */
+export const OPTION_SCOPES = ["once", "run", "always"] as const;
+export type OptionScope = (typeof OPTION_SCOPES)[number];
+export const OPTION_REQUIRES = ["workspace-admin"] as const;
+export type OptionRequires = (typeof OPTION_REQUIRES)[number];
+
 /** One option of a question.v2, as it rides on the Matrix wire. */
 export interface QuestionOptionV2 {
   id: string;
@@ -35,6 +46,8 @@ export interface QuestionOptionV2 {
   meaning: GateOptionMeaning;
   needs_comment: boolean;
   input?: OptionInputV2;
+  scope?: OptionScope;
+  requires?: OptionRequires;
 }
 
 /**
@@ -95,7 +108,19 @@ const RawOption = z.object({
   meaning: z.enum(GATE_OPTION_MEANINGS).optional().catch(undefined),
   needsComment: z.boolean().optional().catch(undefined),
   input: z.unknown().optional(),
+  scope: z.enum(OPTION_SCOPES).optional().catch(undefined),
+  requires: z.enum(OPTION_REQUIRES).optional().catch(undefined),
 });
+
+/**
+ * The subject a question is bound to — a strict decision's operation or a board-dispatched harness
+ * permission — re-validated and re-bounded exactly like a gate's (`subjectV2`), or null when it is
+ * bound to none or sent something this hub cannot carry. The digest is opaque here: compared byte
+ * for byte, never computed.
+ */
+export function questionSubjectV2(d: ElicitationPendingDelivery): GateSubjectV2 | null {
+  return d.approvalSubject == null ? null : subjectV2(d.approvalSubject);
+}
 
 /**
  * The options a question offers, for question.v2: every option the board sent, in its order.
@@ -105,20 +130,27 @@ const RawOption = z.object({
  * question's option then means `choose` and asks for no comment.
  */
 export function questionOptionsV2(d: ElicitationPendingDelivery): QuestionOptionV2[] {
+  // The board said this question is bound to a subject and the hub could not carry it: nothing
+  // here could show what an approval approves, so no approving option is offered (the gate rule).
+  const subjectShowable = d.approvalSubject == null || questionSubjectV2(d) !== null;
   const seen = new Set<string>();
   const out: QuestionOptionV2[] = [];
   for (const raw of d.options) {
     const parsed = RawOption.safeParse(raw);
     if (!parsed.success || seen.has(parsed.data.id)) continue;
     const o = parsed.data;
+    const meaning = o.meaning ?? "choose";
+    if (!subjectShowable && meaning === "approve") continue;
     seen.add(o.id);
     const input = optionInputV2(o.input);
     out.push({
       id: o.id,
       label: o.label,
-      meaning: o.meaning ?? "choose",
+      meaning,
       needs_comment: o.needsComment ?? false,
       ...(input ? { input } : {}),
+      ...(o.scope ? { scope: o.scope } : {}),
+      ...(o.requires ? { requires: o.requires } : {}),
     });
     if (out.length === OPTIONS_V2_MAX) break;
   }
@@ -144,11 +176,26 @@ export function questionFreeTextV2(d: ElicitationPendingDelivery): { max_length:
  * the `suite_event_type` marker. The v1 card rides beside it under its own key, unchanged.
  * Expects a `boundedQuestion`.
  */
+/**
+ * What a stock client reads under a question bound to a subject. A typed reply cannot approve one
+ * (`handleElicitationAnswer`): the person never saw what it approves, which only question.v2's
+ * preview shows.
+ */
+export const SUBJECT_QUESTION_NOTE =
+  "This approves an exact operation. Approve it in an updated app, which shows what it does, or on the board. A reply here can only decline it.";
+
+/** The question's prose: as before, with the note above when it is bound to a subject. */
+export function questionProseBody(d: ElicitationPendingDelivery, deepLink?: string): string {
+  const prose = elicitationProseBody(d, deepLink);
+  return d.approvalSubject == null || d.options.length === 0 ? prose : `${prose}\n\n${SUBJECT_QUESTION_NOTE}`;
+}
+
 export function questionV2Content(d: ElicitationPendingDelivery, deepLink?: string): Record<string, unknown> {
   const freeText = questionFreeTextV2(d);
+  const subject = questionSubjectV2(d);
   return {
     msgtype: "m.text",
-    body: elicitationProseBody(d, deepLink),
+    body: questionProseBody(d, deepLink),
     suite_event_type: QUESTION_V2_SUITE_TYPE,
     schema_version: 1,
     elicitation_id: d.elicitationId,
@@ -161,6 +208,7 @@ export function questionV2Content(d: ElicitationPendingDelivery, deepLink?: stri
     question: d.question,
     options: questionOptionsV2(d),
     ...(freeText ? { free_text: freeText } : {}),
+    ...(subject ? { subject } : {}),
     ...(deepLink ? { deep_link: deepLink } : {}),
   };
 }

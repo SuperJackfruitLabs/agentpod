@@ -20,11 +20,23 @@
  * spellings exist for callers that already had those shapes and we do not.
  */
 
+import {
+  harnessPermissionSubject,
+  permissionKindMeaning,
+  requestedAt,
+  type HarnessPermissionSubject,
+  type PermissionMeaning,
+  type PermissionPreviewBlock,
+  type PermissionScope,
+} from "../acp";
+
 /** One option as a harness offers it over ACP. */
 interface AcpOption {
   optionId: string;
   /** Human-readable label. Optional here: `optionId` is the only requirement. */
   name?: string;
+  /** ACP's kind (`allow_once`, `reject_always`, …): what the option means. */
+  kind?: string;
 }
 
 /** One option as superpipeline stores it, and as a human sees it on the card. */
@@ -47,16 +59,16 @@ export interface BoardAnswer {
  * id, so an option without one cannot be selected, and inventing an id would
  * offer a human a choice the harness will not accept.
  */
-function readOptions(raw: unknown): Array<{ optionId: string; label: string }> {
+function readOptions(raw: unknown): Array<{ optionId: string; label: string; kind?: string }> {
   if (!Array.isArray(raw)) return [];
-  const out: Array<{ optionId: string; label: string }> = [];
+  const out: Array<{ optionId: string; label: string; kind?: string }> = [];
   for (const entry of raw) {
     if (!entry || typeof entry !== "object") continue;
     const o = entry as Partial<AcpOption>;
     const optionId = typeof o.optionId === "string" ? o.optionId.trim() : "";
     if (optionId === "") continue;
     const name = typeof o.name === "string" ? o.name.trim() : "";
-    out.push({ optionId, label: name === "" ? optionId : name });
+    out.push({ optionId, label: name === "" ? optionId : name, ...(typeof o.kind === "string" ? { kind: o.kind } : {}) });
   }
   return out;
 }
@@ -64,6 +76,74 @@ function readOptions(raw: unknown): Array<{ optionId: string; label: string }> {
 /** ACP's options, in the shape superpipeline stores and shows to a human. */
 export function toBoardOptions(raw: unknown): BoardOption[] {
   return readOptions(raw).map((o) => ({ name: o.optionId, title: o.label }));
+}
+
+/** A board option that says what it means (charter: strict decisions bind their subject §7). */
+export interface MeaningfulBoardOption extends BoardOption {
+  meaning: PermissionMeaning;
+  scope?: PermissionScope;
+}
+
+/**
+ * ACP's options with what each means and how far it reaches, from its kind: allow_once →
+ * approve/once, allow_always → approve/always, reject_once → reject/once, reject_always →
+ * reject/always, anything else a neutral choice. So a reject_always no longer looks like a neutral
+ * choice on the board. A board that predates per-option meanings ignores the two extra keys.
+ */
+export function toMeaningfulBoardOptions(raw: unknown): MeaningfulBoardOption[] {
+  return readOptions(raw).map((o) => {
+    const mapped = permissionKindMeaning(o.kind);
+    return { name: o.optionId, title: o.label, meaning: mapped.meaning, ...(mapped.scope ? { scope: mapped.scope } : {}) };
+  });
+}
+
+/** What a board takes of a poster's preview: well under its refusal bounds (64 blocks, 16,000 characters). */
+const BOARD_BLOCKS_MAX = 20;
+const BOARD_TEXT_MAX = 4000;
+
+const cutText = (v: string): string => (v.length > BOARD_TEXT_MAX ? `${v.slice(0, BOARD_TEXT_MAX - 1)}…` : v);
+
+function cutBlock(b: PermissionPreviewBlock): PermissionPreviewBlock {
+  return b.type === "text"
+    ? { type: "text", ...(b.label !== undefined ? { label: cutText(b.label) } : {}), text: cutText(b.text) }
+    : { type: "field", label: cutText(b.label), value: cutText(b.value) };
+}
+
+const blockCut = (b: PermissionPreviewBlock): boolean =>
+  b.type === "text" ? b.text.length > BOARD_TEXT_MAX || (b.label?.length ?? 0) > BOARD_TEXT_MAX : b.value.length > BOARD_TEXT_MAX || b.label.length > BOARD_TEXT_MAX;
+
+/**
+ * The `harness-permission/v1` subject a board-dispatched permission is posted with: the same id,
+ * digest and expiry as the station room's permission.v2, its preview cut to fit what a board takes
+ * (anything cut makes it incomplete, and the board withholds approval on an incomplete preview).
+ */
+export function boardPermissionSubject(sessionId: string, requestSeq: number, payload: unknown, createdAt: unknown): HarnessPermissionSubject {
+  const { subject } = harnessPermissionSubject(sessionId, requestSeq, payload, requestedAt(createdAt));
+  const kept = subject.preview.slice(0, BOARD_BLOCKS_MAX);
+  const complete = subject.preview_complete && kept.length === subject.preview.length && !kept.some(blockCut);
+  return { ...subject, preview: kept.map(cutBlock), preview_complete: complete };
+}
+
+/**
+ * The same elicitation with every option that could approve removed, and no envelope: only the
+ * options that reject, as `{name, title}`. Null for any activity that carried no envelope.
+ *
+ * Used once, when a board that understands the envelope refuses it (`isEnvelopeRefusal`). Reposting
+ * the whole question unbound would let the board accept an approval bound to nothing — exactly what
+ * the subject exists to prevent — so the person is still asked, but can only decline from the board;
+ * an approval goes through the room or the console, where the request is shown in full.
+ */
+export function withoutApprovals<A extends { type: string; parameter?: unknown }>(activity: A): (Omit<A, "parameter"> & { parameter: unknown }) | null {
+  if (activity.type !== "elicitation") return null;
+  const p = activity.parameter;
+  if (typeof p !== "object" || p === null || !("subject" in p) || !("options" in p) || !Array.isArray(p.options)) return null;
+  const options: BoardOption[] = [];
+  for (const o of p.options) {
+    if (typeof o !== "object" || o === null || !("meaning" in o) || o.meaning !== "reject") continue;
+    if ("name" in o && typeof o.name === "string" && "title" in o && typeof o.title === "string") options.push({ name: o.name, title: o.title });
+  }
+  const requestSeq = "requestSeq" in p ? p.requestSeq : undefined;
+  return { ...activity, parameter: { requestSeq, options } };
 }
 
 /**

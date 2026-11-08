@@ -121,6 +121,7 @@ function fakeAcp(script: () => AcpEvent[], opts: FakeAcpOpts = {}) {
     prompts: [] as string[],
     ended: [] as string[],
     answers: [] as Array<{ requestSeq: number; optionId: string }>,
+    answeredBy: [] as unknown[],
   };
   const emit = (e: AcpEvent) => subs.forEach((fn) => fn(e));
   const port: AcpPort = {
@@ -149,8 +150,9 @@ function fakeAcp(script: () => AcpEvent[], opts: FakeAcpOpts = {}) {
     async endSession(_u, _s, reason) {
       state.ended.push(reason);
     },
-    async answerPermission(_u, _s, requestSeq, optionId) {
+    async answerPermission(_u, _s, requestSeq, optionId, answeredBy) {
       state.answers.push({ requestSeq, optionId });
+      state.answeredBy.push(answeredBy);
       queueMicrotask(() => {
         for (const e of opts.onAnswer?.(optionId) ?? []) emit(e);
       });
@@ -209,6 +211,13 @@ function askingBoard(
     return { status: 200, body: { ok: true } };
   };
   return { handler, elicitations };
+}
+
+/** An elicitation activity's `parameter`, or null for anything else posted. */
+function elicitationParameter(body: unknown): Record<string, unknown> | null {
+  if (typeof body !== "object" || body === null || !("type" in body) || body.type !== "elicitation") return null;
+  const p = "parameter" in body ? body.parameter : null;
+  return typeof p === "object" && p !== null ? { ...p } : null;
 }
 
 /** A human picking one of the offered options. */
@@ -1056,6 +1065,46 @@ describe("a permission request is asked of a human", () => {
       ],
     });
     expect(asked.elicitations[0]!.options).toHaveLength(2);
+  });
+
+  for (const code of ["INVALID_APPROVAL_SUBJECT", "INVALID_ELICITATION"]) {
+    test(`a board that refuses the envelope (${code}) is asked again once, decline-only — never an unbound approval`, async () => {
+      // Charter 2026-11-07 §7. A board without per-option meanings ignores the extra keys; one that
+      // refuses them knows the envelope, so reposting it unbound would let it accept an approval
+      // bound to nothing. The person is still asked, and can decline from the board.
+      const asked = askingBoard(answers("reject_once"), (path, body) =>
+        path.endsWith("/activities") && elicitationParameter(body)?.subject !== undefined
+          ? { status: 400, body: boardError(code) }
+          : null,
+      );
+      const board = fakeBoard(asked.handler);
+      const acp = fakeAcp(() => [permissionRequest()], { onAnswer: () => [chunk("ok"), idle()] });
+
+      await runOnce(deps(board.client, acp.port));
+
+      const elicitations = board.calls
+        .filter((c) => c.path.endsWith("/activities"))
+        .map((c) => elicitationParameter(c.body))
+        .filter((p) => p !== null);
+      expect(elicitations).toHaveLength(2);
+      expect(elicitations[0]?.subject).toBeDefined();
+      expect(elicitations[1]).toEqual({ requestSeq: expect.any(Number), options: [{ name: "reject_once", title: "No, don't" }] });
+      expect(asked.elicitations).toHaveLength(1);
+      expect(acp.state.answers.at(-1)?.optionId).toBe("reject_once");
+    });
+  }
+
+  test("who answered on the board is recorded with the answer", async () => {
+    // Charter 2026-11-07 §6: the session's permission-answer names the answerer.
+    const asked = askingBoard((q) => {
+      q.status = "answered";
+      q.answer = { option: "allow_once", text: null, answeredBy: "usr_the_human", answeredAt: "2026-01-01T00:00:00.000Z" };
+      Object.assign(q.answer, { answeredByPrincipal: "prn_the_human" });
+    });
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()], { onAnswer: () => [chunk("ok"), idle()] });
+    await runOnce(deps(board.client, acp.port));
+    expect(acp.state.answeredBy).toEqual([{ via: "board", principalId: "prn_the_human", userId: "usr_the_human" }]);
   });
 
   test("the lease is held throughout — the run is never handed back to ask", async () => {

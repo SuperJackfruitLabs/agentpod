@@ -194,8 +194,8 @@ const hubAcpPort: AcpPort = {
   ensureStrictSession: (userId, sessionId) => acpSessions.ensureSalaamLive(userId, sessionId),
   subscribe: (sessionId, fn) => acpSessions.subscribe(sessionId, fn),
   endSession: (userId, sessionId, reason) => acpSessions.endSession(userId, sessionId, reason),
-  answerPermission: (userId, sessionId, requestSeq, optionId) =>
-    acpSessions.answerPermission(userId, sessionId, requestSeq, optionId),
+  answerPermission: (userId, sessionId, requestSeq, optionId, answeredBy) =>
+    acpSessions.answerPermission(userId, sessionId, requestSeq, optionId, answeredBy),
 };
 
 /**

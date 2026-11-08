@@ -10,11 +10,15 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  boardPermissionSubject,
   isAutoAnswered,
   permissionQuestion,
   selectedOptionId,
   toBoardOptions,
+  toMeaningfulBoardOptions,
+  withoutApprovals,
 } from "./permission";
+import { harnessPermissionSubject } from "../acp";
 
 /** What a harness offers over ACP: an id for the machine, a name for the human. */
 const OFFERED = [
@@ -119,5 +123,48 @@ describe("a request the hub already answered", () => {
     expect(isAutoAnswered({ toolCall: { title: "Write a.ts" } })).toBe(false);
     expect(isAutoAnswered({ auto: false })).toBe(false);
     expect(isAutoAnswered(null)).toBe(false);
+  });
+});
+
+describe("a board-dispatched permission carries its meanings and subject (charter 2026-11-07 §7)", () => {
+  const PAYLOAD = { toolCall: { title: "Run it", kind: "execute", rawInput: { command: "make" } }, options: OFFERED };
+
+  test("meanings and scopes come from ACP's kinds; an option with no kind is a neutral choice", () => {
+    expect(toMeaningfulBoardOptions([...OFFERED, { optionId: "later", name: "Later" }])).toEqual([
+      { name: "allow_once", title: "Yes, run it", meaning: "approve", scope: "once" },
+      { name: "allow_always", title: "Yes, and don't ask again", meaning: "approve", scope: "always" },
+      { name: "reject_once", title: "No", meaning: "reject", scope: "once" },
+      { name: "later", title: "Later", meaning: "choose" },
+    ]);
+  });
+
+  test("the subject is the station room's: same id, digest and expiry", () => {
+    const at = "2026-11-07T10:00:00.000Z";
+    const board = boardPermissionSubject("acps_x", 3, PAYLOAD, at);
+    const room = harnessPermissionSubject("acps_x", 3, PAYLOAD, new Date(at)).subject;
+    expect(board).toEqual(room);
+    expect(board.expires_at).toBe("2026-11-07T10:30:00.000Z");
+  });
+
+  test("a preview too large for a board is cut, and then it is incomplete", () => {
+    const big = { ...PAYLOAD, toolCall: { ...PAYLOAD.toolCall, rawInput: { command: "x".repeat(20_000) } } };
+    const subject = boardPermissionSubject("acps_x", 3, big, "2026-11-07T10:00:00.000Z");
+    expect(subject.preview_complete).toBe(false);
+    for (const b of subject.preview) expect(JSON.stringify(b).length).toBeLessThan(16_000);
+    const many = { ...PAYLOAD, toolCall: { ...PAYLOAD.toolCall, locations: Array.from({ length: 80 }, (_, i) => ({ path: `f${i}` })) } };
+    const listed = boardPermissionSubject("acps_x", 3, many, "2026-11-07T10:00:00.000Z");
+    expect(listed.preview.length).toBeLessThanOrEqual(20);
+    expect(listed.preview_complete).toBe(false);
+  });
+
+  test("the fallback for a board that refused the envelope keeps only the options that reject — never an unbound approval", () => {
+    const activity = {
+      type: "elicitation",
+      body: "q",
+      parameter: { requestSeq: 4, options: toMeaningfulBoardOptions(OFFERED), subject: boardPermissionSubject("acps_x", 4, PAYLOAD, null) },
+    };
+    expect(withoutApprovals(activity)).toEqual({ type: "elicitation", body: "q", parameter: { requestSeq: 4, options: [{ name: "reject_once", title: "No" }] } });
+    expect(withoutApprovals({ type: "elicitation", parameter: { requestSeq: 4, options: toBoardOptions(OFFERED) } })).toBeNull();
+    expect(withoutApprovals({ type: "thought", body: "x" })).toBeNull();
   });
 });

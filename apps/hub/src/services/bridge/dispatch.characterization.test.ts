@@ -287,7 +287,9 @@ function normalize<T>(value: T): T {
     .replace(/attempt_[0-9a-f-]{36}/g, "<attempt>")
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<uuid>")
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/g, "<time>")
-    .replace(/"fingerprintDigest":"[^"]+"/g, '"fingerprintDigest":"<digest>"');
+    .replace(/"fingerprintDigest":"[^"]+"/g, '"fingerprintDigest":"<digest>"')
+    // A permission subject's digest covers its session id, which is a fresh uuid per run.
+    .replace(/"digest":"[0-9a-f]{64}"/g, '"digest":"<digest>"');
   return JSON.parse(text);
 }
 
@@ -4537,15 +4539,39 @@ test("a question answered: elicitation, polled, the answer delivered, the work f
           "parameter": {
             "options": [
               {
+                "meaning": "approve",
                 "name": "allow_once",
+                "scope": "once",
                 "title": "Yes, run it",
               },
               {
+                "meaning": "reject",
                 "name": "reject_once",
+                "scope": "once",
                 "title": "No, don't",
               },
             ],
             "requestSeq": 2,
+            "subject": {
+              "digest": "<digest>",
+              "expires_at": "<time>",
+              "id": "acps_<uuid>:2",
+              "preview": [
+                {
+                  "label": "Tool",
+                  "type": "field",
+                  "value": "Run \`bun test\`",
+                },
+                {
+                  "label": "Kind",
+                  "type": "field",
+                  "value": "execute",
+                },
+              ],
+              "preview_complete": true,
+              "revision": 1,
+              "schema": "harness-permission/v1",
+            },
           },
           "signal": "select",
           "type": "elicitation",
@@ -4866,15 +4892,39 @@ test("a question nobody answers in time: the session ended, the attempt failed, 
             "parameter": {
               "options": [
                 {
+                  "meaning": "approve",
                   "name": "allow_once",
+                  "scope": "once",
                   "title": "Yes, run it",
                 },
                 {
+                  "meaning": "reject",
                   "name": "reject_once",
+                  "scope": "once",
                   "title": "No, don't",
                 },
               ],
               "requestSeq": 1,
+              "subject": {
+                "digest": "<digest>",
+                "expires_at": "<time>",
+                "id": "acps_<uuid>:1",
+                "preview": [
+                  {
+                    "label": "Tool",
+                    "type": "field",
+                    "value": "Run \`bun test\`",
+                  },
+                  {
+                    "label": "Kind",
+                    "type": "field",
+                    "value": "execute",
+                  },
+                ],
+                "preview_complete": true,
+                "revision": 1,
+                "schema": "harness-permission/v1",
+              },
             },
             "signal": "select",
             "type": "elicitation",
@@ -5166,15 +5216,39 @@ test("the fail after an unanswered question answers 409: aborted", async () => {
             "parameter": {
               "options": [
                 {
+                  "meaning": "approve",
                   "name": "allow_once",
+                  "scope": "once",
                   "title": "Yes, run it",
                 },
                 {
+                  "meaning": "reject",
                   "name": "reject_once",
+                  "scope": "once",
                   "title": "No, don't",
                 },
               ],
               "requestSeq": 1,
+              "subject": {
+                "digest": "<digest>",
+                "expires_at": "<time>",
+                "id": "acps_<uuid>:1",
+                "preview": [
+                  {
+                    "label": "Tool",
+                    "type": "field",
+                    "value": "Run \`bun test\`",
+                  },
+                  {
+                    "label": "Kind",
+                    "type": "field",
+                    "value": "execute",
+                  },
+                ],
+                "preview_complete": true,
+                "revision": 1,
+                "schema": "harness-permission/v1",
+              },
             },
             "signal": "select",
             "type": "elicitation",
@@ -5441,15 +5515,39 @@ test("a session that dies while a human decides interrupts the wait", async () =
             "parameter": {
               "options": [
                 {
+                  "meaning": "approve",
                   "name": "allow_once",
+                  "scope": "once",
                   "title": "Yes, run it",
                 },
                 {
+                  "meaning": "reject",
                   "name": "reject_once",
+                  "scope": "once",
                   "title": "No, don't",
                 },
               ],
               "requestSeq": 1,
+              "subject": {
+                "digest": "<digest>",
+                "expires_at": "<time>",
+                "id": "acps_<uuid>:1",
+                "preview": [
+                  {
+                    "label": "Tool",
+                    "type": "field",
+                    "value": "Run \`bun test\`",
+                  },
+                  {
+                    "label": "Kind",
+                    "type": "field",
+                    "value": "execute",
+                  },
+                ],
+                "preview_complete": true,
+                "revision": 1,
+                "schema": "harness-permission/v1",
+              },
             },
             "signal": "select",
             "type": "elicitation",

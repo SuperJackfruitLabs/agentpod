@@ -59,6 +59,20 @@ being awkward about.
 A question **stops standing** the moment the turn moves on: answered in the console, cancelled, or
 failed. A room can never approve something that was already decided.
 
+**It expires after 30 minutes.** A question nobody answers in that time is withdrawn: the agent is
+told it was not given permission (it is not left waiting for ever), and the room says so. A reply
+that arrives after a question closed — expired, or answered in the console a moment earlier — is
+refused in the room. It is **never** passed to the agent as a message, so a late `1` cannot turn
+into an instruction. Once you have talked to the agent again, a number is an ordinary message.
+
+**Updated apps show what you are allowing.** The same message also carries the request in full for
+apps that understand it: the tool, its command, each file change and the files it touches, with
+buttons that say what each option does (*allow once*, *always*, *reject*). Such an answer is bound
+to exactly the request you saw — if the agent asked something else since, it is refused. When the
+card could not show everything (a very long change, a terminal), nothing in the room can allow it —
+not a button, and not a typed number either; answer in the console. Whoever answers, by button, by
+number or in the console, is recorded with the answer, and the card closes wherever it was answered.
+
 ## Messaging an agent is dispatching it
 
 Sending a message spends the agent's time, so it needs the same authority as dispatching it any

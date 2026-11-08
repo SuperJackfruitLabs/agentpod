@@ -6,8 +6,10 @@
 
 import { PERMISSION_REQUEST_CONTENT_KEY, type AcpEvent } from "@agentpod/contract";
 import { inlinePermissionOptions, noteHubEvent, permissionDecisionKey } from "../push";
+import { requestedAt } from "../acp";
 import { foldToolUpdate, noteUnmappedKind, PERMISSION_REQUEST_TYPE, permissionRequestContent } from "./activity";
 import { legacyRequestEvents } from "./legacy-events";
+import { PERMISSION_OUTCOME_TYPE, harnessPermission, permissionV2Content, type HarnessPermission } from "./permission-wire";
 import { flush, scheduleFlush } from "./outbound-flush";
 import { log } from "./outbound-log";
 import { mark, reportError, startTyping, stopTyping } from "./outbound-marks";
@@ -40,10 +42,12 @@ export async function handleEvent(
       return onPermissionRequest(ctx, event);
     case "error":
       return onError(ctx, event);
+    case "permission-answer":
+      return onPermissionAnswer(ctx, event);
     default:
-      // user-prompt and permission-answer are echoes of what already
-      // happened in the room, or of a console action. Repeating them would
-      // make the agent quote the person it is talking to.
+      // user-prompt is an echo of what already happened in the room, or of a
+      // console action. Repeating it would make the agent quote the person it
+      // is talking to. (permission-answer only settles the record, above.)
       return;
   }
 }
@@ -298,11 +302,17 @@ async function onPermissionRequest(ctx: RoomContext, event: AcpEvent): Promise<v
     request.title,
     request.options
   );
+  // permission.v2 (charter: strict decisions and harness permissions bind their subject §5): the
+  // same prose message also carries AgentPod's own envelope — meanings, scopes and the
+  // `harness-permission/v1` subject — recorded first so an answer is judged against it.
+  const v2 = structured ? harnessPermission(sessionId, event.seq, event.payload, requestedAt(event.createdAt)) : null;
+  if (v2) await recordPermission(ctx, v2);
   const proseId = await say(ctx,
     permissionPrompt(request.title, request.options),
-    structured ? { [PERMISSION_REQUEST_CONTENT_KEY]: structured } : undefined
+    structured ? { ...(v2 ? permissionV2Content(v2) : {}), [PERMISSION_REQUEST_CONTENT_KEY]: structured } : undefined
   );
   noteHubEvent(proseId, "permission");
+  if (v2 && proseId) await notePermissionEvent(ctx, v2.requestId, proseId);
 
   if (proseId && request.options.length > 0) noteDecisionAsked(ctx, event.seq, proseId, request);
 
@@ -311,6 +321,30 @@ async function onPermissionRequest(ctx: RoomContext, event: AcpEvent): Promise<v
   // (`AGENTPOD_LEGACY_PERMISSION_EVENTS`, default on).
   if (structured && ctx.deps.client.sendCustomEvent && legacyRequestEvents()) {
     await sendLegacyRequest(ctx, structured, proseId);
+  }
+}
+
+/** Record the binding; a failure is logged, never a lost question — the room still asks. */
+async function recordPermission(ctx: RoomContext, p: HarnessPermission): Promise<void> {
+  try {
+    await ctx.deps.permissionRecords?.record(ctx.roomId, p);
+  } catch (err) {
+    log.error("could not record a permission request; answers fall back to the room's memory", {
+      sessionId: ctx.sessionId,
+      requestId: p.requestId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+async function notePermissionEvent(ctx: RoomContext, requestId: string, eventId: string): Promise<void> {
+  try {
+    await ctx.deps.permissionRecords?.noteEvent(requestId, eventId);
+  } catch (err) {
+    log.error("could not note a permission request's message", {
+      requestId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -365,6 +399,29 @@ async function sendLegacyRequest(
   // The prose already pushed; this one must not buzz a second time.
   // Only when the prose landed — otherwise this is the question.
   if (proseId) noteHubEvent(legacyId, "companion");
+}
+
+/**
+ * A permission answered anywhere — the console, a board, an editor, or released as the session
+ * ended. The room's record and card are closed with the real outcome, so a request answered in the
+ * console is never swept as expired. Not repeated in words otherwise: the person answered.
+ */
+async function onPermissionAnswer(ctx: RoomContext, event: AcpEvent): Promise<void> {
+  const { agentUser, roomId, deps } = ctx;
+  const records = deps.permissionRecords;
+  if (!records?.settle) return;
+  try {
+    await records.settle(ctx.sessionId, event.payload, {
+      say: (body) => say(ctx, body),
+      sendOutcome: async (content) =>
+        deps.client.sendCustomEvent ? deps.client.sendCustomEvent(agentUser, roomId, PERMISSION_OUTCOME_TYPE, content) : null,
+    });
+  } catch (err) {
+    log.error("could not settle a permission request's record", {
+      sessionId: ctx.sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 async function onError(ctx: RoomContext, event: AcpEvent): Promise<void> {
