@@ -22,7 +22,7 @@
 
 import type { AcpEvent } from "@agentpod/contract";
 
-import { isAutoAnswered, permissionQuestion, toBoardOptions } from "./permission";
+import { boardPermissionSubject, isAutoAnswered, permissionQuestion, toMeaningfulBoardOptions } from "./permission";
 
 /**
  * One superpipeline activity, in the shape its REST handler actually reads.
@@ -164,7 +164,15 @@ export class ActivityCoalescer {
           // `parameter`, not `signalMetadata`: see BoardActivity. And the
           // options are TRANSLATED, not forwarded — superpipeline echoes the chosen
           // option's `name` back, so `name` has to be the ACP `optionId`.
-          parameter: { requestSeq: event.seq, options: toBoardOptions(payload.options) },
+          //
+          // Each option says what it means, and the request's `harness-permission/v1` subject rides
+          // with it (charter: strict decisions and harness permissions bind their subject §7), so
+          // the board withholds an approval it cannot show and binds the answer to this request.
+          parameter: {
+            requestSeq: event.seq,
+            options: toMeaningfulBoardOptions(payload.options),
+            subject: boardPermissionSubject(event.sessionId, event.seq, payload, event.createdAt),
+          },
         });
 
       case "permission-answer":

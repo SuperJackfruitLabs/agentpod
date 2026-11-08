@@ -6,6 +6,7 @@
 
 import { PERMISSION_REQUEST_CONTENT_KEY, type AcpEvent } from "@agentpod/contract";
 import { inlinePermissionOptions, noteHubEvent, permissionDecisionKey } from "../push";
+import { requestedAt } from "../acp";
 import { foldToolUpdate, noteUnmappedKind, PERMISSION_REQUEST_TYPE, permissionRequestContent } from "./activity";
 import { legacyRequestEvents } from "./legacy-events";
 import { harnessPermission, permissionV2Content, type HarnessPermission } from "./permission-wire";
@@ -319,12 +320,6 @@ async function onPermissionRequest(ctx: RoomContext, event: AcpEvent): Promise<v
   if (structured && ctx.deps.client.sendCustomEvent && legacyRequestEvents()) {
     await sendLegacyRequest(ctx, structured, proseId);
   }
-}
-
-/** When the request was made: the event's own time, or now when it carries none readable. */
-function requestedAt(createdAt: unknown): Date {
-  const at = typeof createdAt === "string" ? Date.parse(createdAt) : Number.NaN;
-  return Number.isNaN(at) ? new Date() : new Date(at);
 }
 
 /** Record the binding; a failure is logged, never a lost question — the room still asks. */

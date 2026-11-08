@@ -212,6 +212,44 @@ describe("ActivityCoalescer — projection", () => {
     expect(a!.body).toContain("Write a.ts");
   });
 
+  test("each option says what it means, and the request's harness-permission/v1 subject rides with it", () => {
+    // Charter 2026-11-07 §7: a reject_always must not look like a neutral choice on the board, and
+    // the board binds an approval to exactly this request.
+    const options = [
+      { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+      { optionId: "allow_always", name: "Always allow", kind: "allow_always" },
+      { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+      { optionId: "reject_always", name: "Never", kind: "reject_always" },
+    ];
+    const request = ev("permission-request", { toolCall: { title: "Write a.ts", kind: "edit" }, options });
+    const [a] = drain([request]);
+    const parameter = a?.parameter;
+    expect(parameter).toMatchObject({
+      options: [
+        { name: "allow_once", title: "Allow once", meaning: "approve", scope: "once" },
+        { name: "allow_always", title: "Always allow", meaning: "approve", scope: "always" },
+        { name: "reject_once", title: "Reject", meaning: "reject", scope: "once" },
+        { name: "reject_always", title: "Never", meaning: "reject", scope: "always" },
+      ],
+      subject: {
+        schema: "harness-permission/v1",
+        id: `${request.sessionId}:${request.seq}`,
+        revision: 1,
+        expires_at: "2026-08-14T00:30:00.000Z",
+        preview: [
+          { type: "field", label: "Tool", value: "Write a.ts" },
+          { type: "field", label: "Kind", value: "edit" },
+        ],
+        preview_complete: true,
+      },
+    });
+    // Exactly the poster subject's keys: superpipeline refuses any other (`PosterSubject.strict()`).
+    const subject = typeof parameter === "object" && parameter !== null && "subject" in parameter ? parameter.subject : null;
+    expect(Object.keys(subject ?? {}).toSorted()).toEqual(
+      ["digest", "expires_at", "id", "preview", "preview_complete", "revision", "schema"],
+    );
+  });
+
   test("a permission request the hub already answered is NOT an elicitation", () => {
     // full-auto answers every request, and accept-edits answers the edit ones —
     // and both still persist a `permission-request` event, marked `auto`.

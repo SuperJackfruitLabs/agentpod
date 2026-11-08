@@ -1058,6 +1058,38 @@ describe("a permission request is asked of a human", () => {
     expect(asked.elicitations[0]!.options).toHaveLength(2);
   });
 
+  test("a board that refuses the envelope is asked again without it, once — the person is still asked", async () => {
+    // Charter 2026-11-07 §7. A board without per-option meanings ignores the extra keys; one that
+    // understands them and refuses (INVALID_APPROVAL_SUBJECT / INVALID_ELICITATION) must not lose
+    // the question.
+    const asked = askingBoard(answers("allow_once"), (path, body) => {
+      const p = (body as { type?: string; parameter?: { subject?: unknown } } | null) ?? {};
+      return path.endsWith("/activities") && p.type === "elicitation" && p.parameter?.subject !== undefined
+        ? { status: 400, body: boardError("INVALID_APPROVAL_SUBJECT") }
+        : null;
+    });
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()], { onAnswer: () => [chunk("412 tests passed."), idle()] });
+
+    await runOnce(deps(board.client, acp.port));
+
+    const elicitations = board.calls
+      .filter((c) => c.path.endsWith("/activities"))
+      .map((c) => c.body as { type?: string; parameter?: { subject?: unknown; options?: unknown } })
+      .filter((a) => a.type === "elicitation");
+    expect(elicitations).toHaveLength(2);
+    expect(elicitations[0]?.parameter?.subject).toBeDefined();
+    expect(elicitations[1]?.parameter).toEqual({
+      requestSeq: expect.any(Number),
+      options: [
+        { name: "allow_once", title: "Yes, run it" },
+        { name: "reject_once", title: "No, don't" },
+      ],
+    });
+    expect(asked.elicitations).toHaveLength(1);
+    expect(acp.state.answers.at(-1)?.optionId).toBe("allow_once");
+  });
+
   test("the lease is held throughout — the run is never handed back to ask", async () => {
     const asked = askingBoard(answers("allow_once"));
     const board = fakeBoard(asked.handler);

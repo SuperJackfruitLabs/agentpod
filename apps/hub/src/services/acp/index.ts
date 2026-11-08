@@ -30,5 +30,17 @@ export {
   whenIdle,
 } from "./sessions";
 export type { PermissionAnswerer } from "./sessions";
+export {
+  HARNESS_PERMISSION_SCHEMA,
+  PERMISSION_TTL_MS,
+  canonicalJson,
+  harnessPermissionSubject,
+  permissionDigest,
+  permissionKindMeaning,
+  permissionPreview,
+  permissionRequestId,
+  requestedAt,
+} from "./harness-permission";
+export type { HarnessPermissionSubject, PermissionMeaning, PermissionPreviewBlock, PermissionScope } from "./harness-permission";
 export { turnErrorCard } from "./turn-error";
 export { webSocketStream } from "./ws-stream";

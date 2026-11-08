@@ -14,8 +14,8 @@ import { attemptSpanFacts } from "./attempt-facts";
 import type { Fingerprint } from "../evidence";
 import { fingerprintWithin, resolveStationFingerprint } from "../evidence";
 import { DEFAULT_PERMISSION_WAIT_MS } from "./config";
-import { isAutoAnswered, selectedOptionId } from "./permission";
-import { isForeignRun, isLeaseSuperseded, type ClaimedWork, type RunElicitation } from "./superpipeline";
+import { isAutoAnswered, selectedOptionId, withoutEnvelope } from "./permission";
+import { isEnvelopeRefusal, isForeignRun, isLeaseSuperseded, type ClaimedWork, type RunElicitation } from "./superpipeline";
 import { startAttempt, type CoalescingCounts, type DispatchKey } from "./ledger";
 import {
   DEFAULT_HEARTBEAT_MS,
@@ -176,9 +176,23 @@ export function post(t: Turn, activities: BoardActivity[]): void {
     // and a 502 on the wire is a delivery question. The queue logs those
     // separately, and coalescing is what bounds how many there can be.
     t.counts.activitiesPosted++;
-    queue(t, async () => {
-      await t.deps.client.activity(t.work, a);
-    });
+    queue(t, () => postActivity(t, a));
+  }
+}
+
+/**
+ * Post one activity. A board that refuses a permission question's envelope (its meanings or its
+ * subject) gets the question again without it, once — the person is still asked, as before, and
+ * the refusal is logged. Any other refusal is the queue's to handle.
+ */
+async function postActivity(t: Turn, a: BoardActivity): Promise<void> {
+  try {
+    await t.deps.client.activity(t.work, a);
+  } catch (err) {
+    const plain = withoutEnvelope(a);
+    if (!plain || !isEnvelopeRefusal(err)) throw err;
+    t.log("the board refused a permission question's envelope; posted it without", { error: String(err) });
+    await t.deps.client.activity(t.work, plain);
   }
 }
 

@@ -12,12 +12,22 @@
  * Pure; no database and no Matrix.
  */
 
-import { createHash } from "node:crypto";
 import { z } from "zod";
 
+import {
+  HARNESS_PERMISSION_SCHEMA,
+  PERMISSION_TTL_MS,
+  canonicalJson,
+  harnessPermissionSubject,
+  permissionKindMeaning,
+  permissionPreview,
+  permissionRequestId,
+} from "../acp";
 import { subjectV2, type GateOptionMeaning, type GateSubjectV2 } from "./gate-wire";
 import { bindingOf, referenceOf } from "./question-answer";
 import type { OptionScope } from "./question-wire";
+
+export { HARNESS_PERMISSION_SCHEMA, PERMISSION_TTL_MS, canonicalJson, permissionPreview, permissionRequestId };
 
 export const PERMISSION_V2_SUITE_TYPE = "dev.agentpod.permission.v2";
 export const PERMISSION_ANSWER_V2_SUITE_TYPE = "dev.agentpod.permission.answer.v2";
@@ -26,10 +36,6 @@ export const PERMISSION_ANSWER_V2_SUITE_TYPE = "dev.agentpod.permission.answer.v
  * board and a gate, and a harness permission has neither.
  */
 export const PERMISSION_OUTCOME_TYPE = "dev.agentpod.permission.outcome.v1";
-export const HARNESS_PERMISSION_SCHEMA = "harness-permission/v1";
-
-/** How long a person has to answer: the existing board-dispatch bound (charter §5). */
-export const PERMISSION_TTL_MS = 30 * 60_000;
 
 /** One option of a permission.v2, as it rides on the Matrix wire. */
 export interface PermissionOptionV2 {
@@ -38,14 +44,6 @@ export interface PermissionOptionV2 {
   meaning: GateOptionMeaning;
   scope?: OptionScope;
 }
-
-/** ACP's option kinds, and what each means here (charter §5). Anything else is a neutral choice. */
-const KIND_MEANINGS: Record<string, { meaning: GateOptionMeaning; scope: OptionScope }> = {
-  allow_once: { meaning: "approve", scope: "once" },
-  allow_always: { meaning: "approve", scope: "always" },
-  reject_once: { meaning: "reject", scope: "once" },
-  reject_always: { meaning: "reject", scope: "always" },
-};
 
 const AcpOption = z.object({ optionId: z.string().min(1).max(200), name: z.string(), kind: z.string().optional() });
 
@@ -59,91 +57,18 @@ export function permissionOptionsV2(rawOptions: unknown): PermissionOptionV2[] {
     if (!parsed.success || seen.has(parsed.data.optionId)) continue;
     const o = parsed.data;
     seen.add(o.optionId);
-    const mapped = o.kind ? KIND_MEANINGS[o.kind] : undefined;
+    const mapped = permissionKindMeaning(o.kind);
     out.push({
       id: o.optionId,
       label: o.name.length > 200 ? `${o.name.slice(0, 199)}…` : o.name,
-      ...(mapped ? { meaning: mapped.meaning, scope: mapped.scope } : { meaning: "choose" }),
+      meaning: mapped.meaning,
+      ...(mapped.scope ? { scope: mapped.scope } : {}),
     });
   }
   return out;
 }
 
-/** Recursively sorted-key JSON, no whitespace; array order kept. The digest's encoding. */
-export function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value).filter(([, v]) => v !== undefined);
-    return `{${entries
-      .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value ?? null);
-}
-
-/**
- * The digest of a request: sha256 hex of the canonical `{session_id, request_seq, tool_call,
- * options}`, over the FULL ACP data — not the preview. Two requests that differ in anything the
- * harness sent have different digests, so an answer can be bound to exactly what was asked.
- */
-export function permissionDigest(sessionId: string, requestSeq: number, toolCall: unknown, options: unknown): string {
-  const canonical = canonicalJson({ session_id: sessionId, request_seq: requestSeq, tool_call: toolCall ?? null, options: options ?? [] });
-  return createHash("sha256").update(canonical).digest("hex");
-}
-
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-
-/** A command, from ACP's `rawInput`: a string, or an argv joined by spaces. */
-function commandOf(rawInput: Record<string, unknown>): string | null {
-  const c = rawInput.command;
-  if (typeof c === "string") return c;
-  if (Array.isArray(c) && c.every((part) => typeof part === "string")) return c.join(" ");
-  return null;
-}
-
-/**
- * The preview blocks a person must see before approving: the tool's title and kind, its command or
- * raw input, each diff's path and new text, and the locations it touches (charter §5). `drawn` is
- * false when the tool call carries something this cannot show (a terminal, an image): the preview
- * is then incomplete however short it is.
- */
-export function permissionPreview(toolCall: unknown): { blocks: unknown[]; drawn: boolean } {
-  const tc = isRecord(toolCall) ? toolCall : {};
-  const blocks: unknown[] = [];
-  let drawn = true;
-  blocks.push({ type: "field", label: "Tool", value: typeof tc.title === "string" && tc.title !== "" ? tc.title : "an action" });
-  if (typeof tc.kind === "string" && tc.kind !== "") blocks.push({ type: "field", label: "Kind", value: tc.kind });
-  if (tc.rawInput !== undefined && tc.rawInput !== null) {
-    const command = isRecord(tc.rawInput) ? commandOf(tc.rawInput) : null;
-    blocks.push(
-      command !== null
-        ? { type: "text", label: "Command", text: command }
-        : { type: "text", label: "Input", text: JSON.stringify(tc.rawInput, null, 2) },
-    );
-  }
-  for (const item of Array.isArray(tc.content) ? tc.content : []) {
-    if (isRecord(item) && item.type === "diff" && typeof item.path === "string" && typeof item.newText === "string") {
-      blocks.push({ type: "text", label: item.path, text: item.newText });
-    } else if (isRecord(item) && item.type === "content" && isRecord(item.content) && item.content.type === "text" && typeof item.content.text === "string") {
-      blocks.push({ type: "text", label: "Detail", text: item.content.text });
-    } else {
-      drawn = false;
-    }
-  }
-  for (const loc of Array.isArray(tc.locations) ? tc.locations : []) {
-    if (!isRecord(loc) || typeof loc.path !== "string") {
-      drawn = false;
-      continue;
-    }
-    const line = typeof loc.line === "number" ? `:${loc.line}` : "";
-    blocks.push({ type: "field", label: "Location", value: `${loc.path}${line}` });
-  }
-  return { blocks, drawn };
-}
-
-/** The request id an answer is addressed to: the subject's id. */
-export const permissionRequestId = (sessionId: string, requestSeq: number): string => `${sessionId}:${requestSeq}`;
 
 /** Everything permission.v2 needs from a request, and the binding recorded for it. */
 export interface HarnessPermission {
@@ -167,33 +92,20 @@ export function harnessPermission(
   payload: unknown,
   requestedAt: Date,
 ): HarnessPermission | null {
-  const p = isRecord(payload) ? payload : {};
-  // The digest is over the data as it crossed the wire: a JSON round trip drops what JSON cannot
-  // carry, so the same request digests the same wherever it is recomputed.
-  const toolCall: unknown = p.toolCall === undefined ? null : JSON.parse(JSON.stringify(p.toolCall));
-  const rawOptions: unknown = p.options === undefined ? [] : JSON.parse(JSON.stringify(p.options));
-  const expiresAt = new Date(requestedAt.getTime() + PERMISSION_TTL_MS);
-  const preview = permissionPreview(toolCall);
-  const subject = subjectV2({
-    id: permissionRequestId(sessionId, requestSeq),
-    digest: permissionDigest(sessionId, requestSeq, toolCall, rawOptions),
-    schema: HARNESS_PERMISSION_SCHEMA,
-    revision: 1,
-    expiresAt: expiresAt.toISOString(),
-    preview: preview.blocks,
-    previewComplete: preview.drawn,
-  });
+  const raw = harnessPermissionSubject(sessionId, requestSeq, payload, requestedAt);
+  // Re-bounded by gate.v2's own helper: the same bounds, the same byte budget, the same rule.
+  const subject = subjectV2({ ...raw.subject, expiresAt: raw.subject.expires_at, previewComplete: raw.subject.preview_complete });
   if (!subject) return null;
-  const tc = isRecord(toolCall) ? toolCall : {};
+  const tc = isRecord(raw.toolCall) ? raw.toolCall : {};
   return {
     requestId: subject.id,
     sessionId,
     requestSeq,
     title: typeof tc.title === "string" && tc.title !== "" ? tc.title : "an action",
     toolKind: typeof tc.kind === "string" && tc.kind !== "" ? tc.kind : null,
-    options: permissionOptionsV2(rawOptions),
+    options: permissionOptionsV2(raw.options),
     subject,
-    expiresAt,
+    expiresAt: new Date(requestedAt.getTime() + PERMISSION_TTL_MS),
   };
 }
 
