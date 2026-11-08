@@ -26,6 +26,7 @@ import { startGateSweeper } from './services/matrix-as/index.ts';
 import { startElicitationSweeper } from './services/matrix-as/index.ts';
 import { projectElicitation, postedElicitationsAwaitingOutcome } from './services/matrix-as/index.ts';
 import { projectDelivery } from './services/matrix-as/index.ts';
+import { projectAttention, reconcileBoardAttention, recordedAttention } from './services/matrix-as/index.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
 // Node gateway WebSocket routes
@@ -438,6 +439,11 @@ if (matrixBridge) {
     projectDelivery: (tenantId, delivery) => projectDelivery(tenantId, delivery, gateProjection),
     // …and its card closed when the board no longer owes it (settled on the board).
     settleDelivery: (gateId) => matrixBridge.settleDelivery(gateId),
+    // …and cards waiting on a person: posted once per wait, and closed when the wait ends elsewhere.
+    projectAttention: (tenantId, waiting) => projectAttention(tenantId, waiting, gateProjection),
+    settleAttention: (key) => matrixBridge.settleAttention(key),
+    onBoardAttention: (boardId, waiting) =>
+      reconcileBoardAttention(boardId, waiting, { humansFor: matrixIdsForBoardHumans, postedFor: recordedAttention }),
     // What each board still waits on: the fleet card drops gates answered on the
     // board, and shows again the ones a restart forgot.
     onBoardPending: (boardId, gates) =>

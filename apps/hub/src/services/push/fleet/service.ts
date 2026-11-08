@@ -215,6 +215,17 @@ export function createFleetService(deps: FleetServiceDeps) {
       }
     },
 
+    /** A sweep of `boardId` found these `kind` decisions still pending, by key: the others are closed. */
+    reconcileBoardDecisions(kind: "attention", boardId: string, pendingKeys: ReadonlySet<string>): void {
+      for (const [id, r] of readers) {
+        for (const d of r.fleet.decisions.values()) {
+          if (d.kind === kind && d.boardId === boardId && !pendingKeys.has(d.key)) {
+            this.note(id, { type: "decision-cleared", key: d.key });
+          }
+        }
+      }
+    },
+
     knowsDecision(key: string): boolean {
       for (const r of readers.values()) if (r.fleet.decisions.has(key)) return true;
       return false;

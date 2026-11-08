@@ -39,6 +39,7 @@ import { createLogger } from "../../utils/logger";
 import { parseGateDecision } from "./gates";
 import { parseQuestionAnswer } from "./question-answer";
 import { parseDeliveryAnswer } from "./delivery-answer";
+import { parseAttentionAnswer } from "./attention-answer";
 import {
   PERMISSION_OUTCOME_TYPE,
   isPermissionAnswerMarked,
@@ -126,6 +127,10 @@ export interface InboundDeps {
     handle(event: { sender: string; content: Record<string, unknown> }, roomId: string): Promise<unknown>;
   };
   deliveries?: {
+    handle(event: { sender: string; content: Record<string, unknown> }, roomId: string): Promise<unknown>;
+  };
+  /** An answer to a waiting card (`dev.superpipeline.attention.answer.v2`): resume or archive it. */
+  attention?: {
     handle(event: { sender: string; content: Record<string, unknown> }, roomId: string): Promise<unknown>;
   };
   client: {
@@ -439,6 +444,10 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
   }
   if (deps.deliveries && event.content && parseDeliveryAnswer(event.content)) {
     await deps.deliveries.handle({ sender: event.sender, content: event.content }, event.room_id);
+    return;
+  }
+  if (deps.attention && event.content && parseAttentionAnswer(event.content)) {
+    await deps.attention.handle({ sender: event.sender, content: event.content }, event.room_id);
     return;
   }
 

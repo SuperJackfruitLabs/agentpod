@@ -83,7 +83,12 @@ export const FleetLiveDecision = z
     roomId: z.string().min(1),
     eventId: z.string().min(1),
     agent: z.string().min(1),
-    kind: z.enum(["permission", "gate"]),
+    /**
+     * `attention` (2026-11-08): a card waiting on a person. It is sent with no options — resuming
+     * needs typed words, and archiving is not a Lock Screen tap — so an app that predates it and
+     * reads an unknown kind as a permission still offers nothing it could send.
+     */
+    kind: z.enum(["permission", "gate", "attention"]),
     question: chars(FLEET_QUESTION_MAX),
     /** Inline options only — at most two. */
     options: z.array(FleetLiveDecisionOption).max(FLEET_DECISION_OPTIONS_MAX),

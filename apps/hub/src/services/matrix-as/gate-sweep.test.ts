@@ -510,7 +510,7 @@ describe("subscribing the boards to push when the sweeper starts", () => {
         body: {
           url: "https://hub.test/public/bridge/superpipeline/push",
           token: "shh",
-          events: ["gate.pending", "elicitation.pending", "delivery.pending"],
+          events: ["gate.pending", "elicitation.pending", "delivery.pending", "attention.pending"],
         },
       },
     ]);
@@ -767,6 +767,25 @@ describe("the sweep, for delivery follow-ups", () => {
     expect(sent).toEqual([{ url: "https://board.test/v1/boards/brd_two/deliveries/pending", token: "Bearer spa_two" }]);
     // No credential is not "nothing owed".
     await expect(deps.pendingDeliveries?.("brd_unknown") ?? Promise.resolve([])).rejects.toThrow();
+  });
+});
+
+describe("the bridge reads each board's waiting cards with that board's own credential", () => {
+  test("GET …/attention/pending; no credential is a failed read, not an empty board", async () => {
+    const sent: Array<{ url: string; token: string }> = [];
+    const fetchImpl = async (url: string, init: { headers: Record<string, string> }) => {
+      sent.push({ url, token: init.headers.Authorization ?? "" });
+      return { status: 200, ok: true, json: async () => ({ attention: [] }) };
+    };
+    const deps = bridgeGateSweepDeps(
+      { baseUrl: "https://board.test", source: "superpipeline" },
+      { tenantIdFor: async () => "flt_a", project: async () => ({ status: "already" }) },
+      fetchImpl,
+      async () => [{ boardId: "brd_two", token: "spa_two" }],
+    );
+    expect(await deps.pendingAttention?.("brd_two")).toEqual([]);
+    expect(sent).toEqual([{ url: "https://board.test/v1/boards/brd_two/attention/pending", token: "Bearer spa_two" }]);
+    await expect(deps.pendingAttention?.("brd_unknown") ?? Promise.resolve([])).rejects.toThrow();
   });
 });
 

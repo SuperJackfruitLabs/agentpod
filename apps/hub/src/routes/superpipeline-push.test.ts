@@ -265,3 +265,44 @@ test("a delivery.pending with no gate id is ignored, not projected", async () =>
   const res = await post(deps(), raw, await sign(SECRET, raw));
   expect(await res.json()).toMatchObject({ ignored: true });
 });
+
+/** A card waiting on a person (charter: "Waiting cards and broker approvals reach chat" §1), through the same signed door. */
+const WAITING = {
+  event: "attention.pending",
+  boardId: "brd_7c1f",
+  boardName: "Release board",
+  cardId: "crd_6b40",
+  cardTitle: "Ship the release",
+  stageKey: "build",
+  stageName: "Build",
+  waitId: "wait_0123456789abcdef",
+  reason: "blocked",
+  detail: "the staging database is down",
+  summary: null,
+  failureCount: null,
+  earlierStages: [],
+  options: [{ id: "archive", label: "Archive", meaning: "reject", needsComment: false }],
+  ts: "2026-11-08T10:00:00.000Z",
+};
+
+test("a signed attention.pending is routed to the attention projection", async () => {
+  const askedFor: string[] = [];
+  const d = deps({
+    boardRoom: async (boardId: string) => {
+      askedFor.push(boardId);
+      return null;
+    },
+  });
+  const raw = JSON.stringify(WAITING);
+  const res = await post(d, raw, await sign(SECRET, raw));
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({ ok: true, status: "no-room" });
+  expect(askedFor).toEqual([WAITING.boardId]);
+});
+
+test("an attention.pending for a board this hub does not know is 404; one with no wait id is ignored", async () => {
+  const raw = JSON.stringify(WAITING);
+  expect((await post(deps({ tenantIdFor: async () => null }), raw, await sign(SECRET, raw))).status).toBe(404);
+  const noWait = JSON.stringify({ ...WAITING, waitId: "" });
+  expect(await (await post(deps(), noWait, await sign(SECRET, noWait))).json()).toMatchObject({ ignored: true });
+});

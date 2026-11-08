@@ -372,6 +372,47 @@ export const matrixDeliveryEvents = pgTable(
   ]
 );
 
+/** One option of a waiting card, as its attention.v2 carried it. */
+export interface MatrixAttentionOption {
+  id: string;
+  label: string;
+  meaning: string;
+  needs_comment: boolean;
+  input?: { kind: "text" | "url"; label: string; required: boolean; max_length: number };
+}
+
+/**
+ * A card waiting on a person, posted into its board's room once per wait (charter: "Waiting cards
+ * and broker approvals reach chat" §1): resume here, resume at an earlier stage, or archive.
+ *
+ * Keyed by board, card and wait: a card that parks again is listed under a new wait id, and is a
+ * new card in the room — an answer names the wait it was given, and the board refuses a stale one.
+ */
+export const matrixAttentionEvents = pgTable(
+  "matrix_attention_events",
+  {
+    boardId: text("board_id").notNull(),
+    cardId: text("card_id").notNull(),
+    waitId: text("wait_id").notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    roomId: text("room_id").notNull(),
+    /** The card's prose message — the event an answer references. `pending:<waitId>` while sending. */
+    eventId: text("event_id").notNull(),
+    /** What the card offered, as its attention.v2 carried them. An answer is checked against THIS list. */
+    options: jsonb("options").$type<MatrixAttentionOption[]>().notNull(),
+    /** When this hub said in the room how the wait ended — the claim on the receipt. */
+    outcomePostedAt: timestamp("outcome_posted_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.boardId, t.cardId, t.waitId] }),
+    index("matrix_attention_events_tenant_id_idx").on(t.tenantId),
+    uniqueIndex("matrix_attention_events_event_idx").on(t.eventId),
+  ]
+);
+
 /**
  * A harness permission request projected into a station room as permission.v2, and its binding
  * (charter: "Strict decisions and harness permissions bind their subject" §5–6).
