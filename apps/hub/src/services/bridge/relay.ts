@@ -65,6 +65,8 @@ export function readRelayCredential(
 export interface SuperpipelineRelay {
   /** The relay token when `tenantId` is the relay's workspace; null for any other, or when it cannot be had. */
   tokenFor(tenantId: string): Promise<string | null>;
+  /** SuperPipeline refused the token (401/403): forget it, so the next use exchanges afresh. */
+  invalidate(): void;
 }
 
 export interface RelayDeps {
@@ -75,18 +77,24 @@ export interface RelayDeps {
   now?(): number;
 }
 
+/** After a refused or failed exchange, nothing is asked again (or logged again) for this long. */
+export const RELAY_RETRY_AFTER_MS = 60_000;
+
 export function createSuperpipelineRelay(deps: RelayDeps): SuperpipelineRelay {
   const now = () => (deps.now ? deps.now() : Date.now());
   let cached: { token: string; tenantId: string | null; renewAt: number } | null = null;
+  /** Until when a failed exchange is the answer: one exchange and one log line per window. */
+  let failedUntil = 0;
+  /** One exchange at a time: concurrent callers share it. */
+  let inFlight: Promise<{ token: string; tenantId: string | null } | null> | null = null;
 
-  async function current(): Promise<{ token: string; tenantId: string | null } | null> {
-    if (cached && now() < cached.renewAt) return cached;
+  async function exchange(): Promise<{ token: string; tenantId: string | null } | null> {
     try {
       const { accessToken, expiresIn } = await deps.exchange();
       const org = decodeJwt(accessToken).org;
       if (typeof org !== "string" || org === "") {
         log.warn("the relay token carries no workspace; approval requests are not relayed");
-        cached = null;
+        failedUntil = now() + RELAY_RETRY_AFTER_MS;
         return null;
       }
       const tenantId = await deps.tenantForOrg(org);
@@ -94,13 +102,24 @@ export function createSuperpipelineRelay(deps: RelayDeps): SuperpipelineRelay {
       cached = { token: accessToken, tenantId, renewAt: now() + Math.max(0, expiresIn * 1000 - RENEW_BEFORE_MS) };
       return cached;
     } catch (err) {
-      // Never the credential or the token: only that the exchange failed.
+      // Never the credential or the token: only that the exchange failed. Logged once per window.
       log.warn("could not exchange the relay credential; approval requests wait for the next try", {
         error: err instanceof Error ? err.message : String(err),
+        retryInMs: RELAY_RETRY_AFTER_MS,
       });
       cached = null;
+      failedUntil = now() + RELAY_RETRY_AFTER_MS;
       return null;
     }
+  }
+
+  async function current(): Promise<{ token: string; tenantId: string | null } | null> {
+    if (cached && now() < cached.renewAt) return cached;
+    if (now() < failedUntil) return null;
+    inFlight ??= exchange().finally(() => {
+      inFlight = null;
+    });
+    return inFlight;
   }
 
   return {
@@ -108,6 +127,9 @@ export function createSuperpipelineRelay(deps: RelayDeps): SuperpipelineRelay {
       const c = await current();
       // The tenant rule: a workspace's credential is used for that workspace's boards and no other.
       return c && c.tenantId !== null && c.tenantId === tenantId ? c.token : null;
+    },
+    invalidate: () => {
+      cached = null;
     },
   };
 }

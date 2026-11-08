@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { RELAY_CREDENTIAL_ENV, createSuperpipelineRelay, readRelayCredential, type RelayDeps } from "./relay";
+import { RELAY_CREDENTIAL_ENV, RELAY_RETRY_AFTER_MS, createSuperpipelineRelay, readRelayCredential, type RelayDeps } from "./relay";
 
 /**
  * The SuperPipeline decision relay (charter: waiting cards and broker approvals reach chat §3–4):
@@ -74,17 +74,37 @@ describe("the tenant rule: one workspace's credential, that workspace's boards o
     expect(await noOrg.relay.tokenFor(TENANT)).toBeNull();
   });
 
-  test("an exchange the plane refuses is null, never a throw, and is tried again next time", async () => {
+  test("an exchange the plane refuses is null, never a throw; not asked again until the window passes", async () => {
     let fail = true;
-    const { relay: r } = relay({
+    let calls = 0;
+    const t = relay({
       exchange: async () => {
+        calls++;
         if (fail) throw new Error("org plane answered 401 (invalid_client)");
         return { accessToken: token({ org: ORG }), expiresIn: 300 };
       },
     });
-    expect(await r.tokenFor(TENANT)).toBeNull();
+    expect(await t.relay.tokenFor(TENANT)).toBeNull();
     fail = false;
-    expect(await r.tokenFor(TENANT)).toBe(token({ org: ORG }));
+    expect(await t.relay.tokenFor(TENANT)).toBeNull();
+    expect(calls).toBe(1);
+    t.advance(RELAY_RETRY_AFTER_MS);
+    expect(await t.relay.tokenFor(TENANT)).toBe(token({ org: ORG }));
+    expect(calls).toBe(2);
+  });
+
+  test("concurrent callers share one exchange", async () => {
+    const t = relay();
+    await Promise.all([t.relay.tokenFor(TENANT), t.relay.tokenFor(TENANT), t.relay.tokenFor("fleet_other")]);
+    expect(t.exchanges()).toBe(1);
+  });
+
+  test("a token SuperPipeline refused is forgotten: the next use exchanges afresh", async () => {
+    const t = relay();
+    await t.relay.tokenFor(TENANT);
+    t.relay.invalidate();
+    expect(await t.relay.tokenFor(TENANT)).toBe(token({ org: ORG, n: 2 }));
+    expect(t.exchanges()).toBe(2);
   });
 
   test("the token is reused until a minute before it expires, then renewed", async () => {

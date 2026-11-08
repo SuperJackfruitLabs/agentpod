@@ -134,4 +134,22 @@ describe("the relay's own push config, for approval requests", () => {
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]?.error).toStartWith("relay: ");
   });
+
+  test("a 401/403 on the relay's registration makes the relay forget its token", async () => {
+    let refused = 0;
+    let call = 0;
+    const { fetchImpl } = recordingFetch();
+    await subscribeBoardsToPush({
+      baseUrl: BASE,
+      publicUrl: PUBLIC,
+      secret: "shh",
+      fetch: async (url, init) => (++call === 2 ? { status: 401, ok: false, json: async () => ({ error: { code: "UNAUTHORIZED" } }) } : fetchImpl(url, init)),
+      boards: async () => new Map([["brd_one", "spa_one"]]),
+      relayTokenFor: async () => "relay.jwt.token",
+      onRelayRefused: () => {
+        refused++;
+      },
+    });
+    expect(refused).toBe(1);
+  });
 });

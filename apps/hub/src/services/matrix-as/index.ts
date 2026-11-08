@@ -10,6 +10,8 @@ export { isAttentionPending } from "./attention-wire";
 export { projectAttention, recordedAttention } from "./attention-projection";
 export type { AttentionProjectionDeps } from "./attention-projection";
 export { reconcileBoardAttention } from "./fleet-attention";
+export { relayTokenForBoard } from "./relay-scope";
+export { isApprovalRequest } from "./question-wire";
 export { isDeliveryPending } from "./delivery-wire";
 export { projectDelivery } from "./delivery-projection";
 export { isElicitationPending } from "./elicitation-card";

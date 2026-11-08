@@ -16,7 +16,7 @@
 
 import { describe, expect, spyOn, test } from "bun:test";
 
-import { bridgeGateSweepDeps, relayTokenForBoard, startGateSweeper, sweepBoardNow, sweepGates, type GateSweepDeps } from "./gate-sweep";
+import { bridgeGateSweepDeps, startGateSweeper, sweepBoardNow, sweepGates, type GateSweepDeps } from "./gate-sweep";
 import type { GatePendingDelivery, ProjectionOutcome } from "./gates";
 
 function gate(gateId: string, boardId: string): GatePendingDelivery {
@@ -829,23 +829,5 @@ describe("the sweep settles follow-ups the board no longer owes", () => {
     });
     expect((await sweepGates(f.deps)).deliveries.settled).toBe(0);
     expect(settled).toEqual([]);
-  });
-});
-
-const relayTenantIdFor = async (b: string) => (b === "brd_mine" ? "fleet_relay" : b === "brd_theirs" ? "fleet_other" : null);
-
-describe("the relay's token reaches only a board of its own workspace", () => {
-  test("a board this hub does not work is never offered the relay; others get what the relay says for their tenant", async () => {
-    const asked: string[] = [];
-    const relay = {
-      tokenFor: async (tenantId: string) => {
-        asked.push(tenantId);
-        return tenantId === "fleet_relay" ? "relay.jwt.token" : null;
-      },
-    };
-    expect(await relayTokenForBoard(relay, relayTenantIdFor, "brd_mine")).toBe("relay.jwt.token");
-    expect(await relayTokenForBoard(relay, relayTenantIdFor, "brd_theirs")).toBeNull();
-    expect(await relayTokenForBoard(relay, relayTenantIdFor, "brd_unknown")).toBeNull();
-    expect(asked).toEqual(["fleet_relay", "fleet_other"]);
   });
 });

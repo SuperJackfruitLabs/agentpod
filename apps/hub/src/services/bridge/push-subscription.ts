@@ -16,7 +16,7 @@
  * `SUPERPIPELINE_PUSH_SECRET`, never the agent's credential.
  */
 
-import { SuperpipelineClient, type Fetcher } from "./superpipeline";
+import { SuperpipelineApiError, SuperpipelineClient, type Fetcher } from "./superpipeline";
 
 /**
  * The events the push route projects; anything else it acknowledges and ignores. `delivery.pending`
@@ -46,6 +46,8 @@ export interface SubscribeOptions {
    * board sends them on only to a service-registered config.
    */
   relayTokenFor?: (boardId: string) => Promise<string | null>;
+  /** SuperPipeline refused the relay's token (401/403): the relay forgets it. */
+  onRelayRefused?: () => void;
 }
 
 /**
@@ -90,6 +92,7 @@ export async function subscribeBoardsToPush(opts: SubscribeOptions): Promise<Sub
       });
       result.relayed.push(boardId);
     } catch (err) {
+      if (err instanceof SuperpipelineApiError && (err.status === 401 || err.status === 403)) opts.onRelayRefused?.();
       result.failed.push({ boardId, error: `relay: ${err instanceof Error ? err.message : String(err)}` });
     }
   }

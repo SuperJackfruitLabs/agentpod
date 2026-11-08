@@ -27,6 +27,7 @@ import { startElicitationSweeper } from './services/matrix-as/index.ts';
 import { projectElicitation, postedElicitationsAwaitingOutcome } from './services/matrix-as/index.ts';
 import { projectDelivery } from './services/matrix-as/index.ts';
 import { projectAttention, reconcileBoardAttention, recordedAttention } from './services/matrix-as/index.ts';
+import { relayTokenForBoard } from './services/matrix-as/index.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
 // Node gateway WebSocket routes
@@ -421,6 +422,8 @@ if (matrixBridge) {
       secret: process.env.SUPERPIPELINE_PUSH_SECRET,
       tenantIdFor: tenantForBoard,
       ...gateProjection,
+      approvalRequestAllowed: async (tenantId, boardId) =>
+        superpipelineRelay ? (await relayTokenForBoard(superpipelineRelay, tenantId, boardId)) !== null : false,
     }),
   );
 

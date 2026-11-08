@@ -490,7 +490,7 @@ Answers are never sent with it — they go as the person who answered.
    means the workspace has never used this hub.
 
 One credential serves one workspace; a hub serving several workspaces relays for the one whose
-credential it holds.
+credential it holds. A board that more than one tenant on this hub works never gets the relay.
 
 `ENCRYPTION_KEY` (at least 32 characters) becomes **required** when the bridge is on, and the hub
 refuses to boot without it. Every rostered agent's credentials are encrypted with it; an unset one

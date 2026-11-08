@@ -8,7 +8,7 @@
 import { and, eq } from "drizzle-orm";
 
 import { db } from "../../db/drizzle";
-import { bridgeDispatches } from "../../db/schema/bridge";
+import { bridgeAgents, bridgeDispatches } from "../../db/schema/bridge";
 import { matrixGateEvents, matrixRooms, type MatrixGateOption } from "../../db/schema/matrix";
 import { stations } from "../../db/schema/stations";
 import { stationSpeaker } from "../matrix";
@@ -128,4 +128,21 @@ export async function roomAgentUser(roomId: string, domain: string): Promise<str
     { identityMode: row.identityMode, harnessMxid: row.harnessMxid, handle },
     domain
   );
+}
+
+/**
+ * Every tenant that knows a board here: those that roster an agent on it and those this hub
+ * dispatched its work for. Usually one. More than one makes `tenantForBoard` an arbitrary pick, so
+ * a credential that is one workspace's (the SuperPipeline relay) is never used for such a board.
+ */
+export async function tenantsForBoard(boardId: string): Promise<string[]> {
+  const rostered = await db
+    .selectDistinct({ tenantId: bridgeAgents.tenantId })
+    .from(bridgeAgents)
+    .where(eq(bridgeAgents.boardId, boardId));
+  const dispatched = await db
+    .selectDistinct({ tenantId: bridgeDispatches.tenantId })
+    .from(bridgeDispatches)
+    .where(and(eq(bridgeDispatches.externalSource, "superpipeline"), eq(bridgeDispatches.boardId, boardId)));
+  return [...new Set([...rostered, ...dispatched].map((r) => r.tenantId))].toSorted();
 }

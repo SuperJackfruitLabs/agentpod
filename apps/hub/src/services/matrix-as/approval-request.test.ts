@@ -315,7 +315,8 @@ describe("an approval request with no subject the hub could carry is never allow
   test("allow_once is not offered: not in question.v2, the prose, the v1 card, or what a reply is matched against", async () => {
     for (const d of [bare, { ...APPROVAL_REQUEST, approvalSubject: { id: "x" } }]) {
       const c = questionV2Content(boundedQuestion(d));
-      expect((c.options as Array<{ id: string }>).map((o) => o.id)).toEqual(["deny"]);
+      expect(questionOptionsV2(boundedQuestion(d)).map((o) => o.id)).toEqual(["deny"]);
+      expect(c.options).toEqual(questionOptionsV2(boundedQuestion(d)));
       expect(String(c.body)).toContain("1. Deny");
       expect(String(c.body)).not.toContain("Allow once");
       expect(String(c.body)).toContain("could not be shown here, so it cannot be allowed");

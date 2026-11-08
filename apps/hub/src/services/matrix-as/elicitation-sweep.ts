@@ -17,6 +17,8 @@
  */
 import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge";
 import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig, type SuperpipelineRelay } from "../bridge";
+import { SuperpipelineApiError } from "../bridge";
+import { relayTokenForBoard, type TenantsForBoard } from "./relay-scope";
 import { createLogger } from "../../utils/logger";
 import type { ElicitationPendingDelivery } from "./elicitation-card";
 import type { ElicitationProjectionOutcome } from "./elicitations";
@@ -37,9 +39,13 @@ export interface ElicitationSweepDeps {
   /**
    * The same read, saying whether it could list SuperToolkit approval requests: true when it was
    * made with the relay's token (`relay.ts`). An agent's read never lists them, so it must not settle
-   * a posted approval request as over. Optional; absent, every read is an agent's.
+   * a posted approval request as over. `tenantId` is the tenant the sweep projects into: the relay
+   * is decided for that tenant and no other lookup. Optional; absent, every read is an agent's.
    */
-  pendingElicitationsScoped?(boardId: string): Promise<{ elicitations: ElicitationPendingDelivery[]; approvalRequests: boolean }>;
+  pendingElicitationsScoped?(
+    boardId: string,
+    tenantId: string,
+  ): Promise<{ elicitations: ElicitationPendingDelivery[]; approvalRequests: boolean }>;
   /** Post the question, exactly once. Idempotent on `elicitation_id`. */
   project(tenantId: string, d: ElicitationPendingDelivery): Promise<ElicitationProjectionOutcome>;
   /** Questions this hub put in a room and has not yet said anything final about. */
@@ -95,7 +101,7 @@ export async function sweepElicitations(deps: ElicitationSweepDeps): Promise<Eli
     let approvalRequestsListed = false;
     try {
       if (deps.pendingElicitationsScoped) {
-        const read = await deps.pendingElicitationsScoped(boardId);
+        const read = await deps.pendingElicitationsScoped(boardId, tenantId);
         pending = read.elicitations;
         approvalRequestsListed = read.approvalRequests;
       } else {
@@ -172,6 +178,7 @@ export function bridgeElicitationSweepDeps(
   fetchImpl: Fetcher = fetchAdapter,
   roster: (() => Promise<Array<{ boardId: string; token: string }>>) | undefined = undefined,
   relay: SuperpipelineRelay | null = null,
+  tenantsForBoard?: TenantsForBoard,
 ): ElicitationSweepDeps {
   const tokensForBoards = async () => {
     const map = new Map<string, string>();
@@ -192,22 +199,31 @@ export function bridgeElicitationSweepDeps(
     boards: async () => [...(await tokensForBoards()).keys()],
     /**
      * With the relay's token for a board of its own workspace — card questions and approval
-     * requests both — and otherwise the agent's. A relay read that fails is a failed read: falling
-     * back to the agent's would list no approval request and so settle every one as over.
+     * requests both — decided for the tenant the sweep projects into; otherwise the agent's. A relay
+     * read that fails falls back to the agent's for the card questions: that read says it listed no
+     * approval requests, so none is settled on it.
      */
-    pendingElicitationsScoped: async (boardId) => {
-      const tenantId = relay ? await rest.tenantIdFor(boardId) : null;
-      const relayToken = relay && tenantId ? await relay.tokenFor(tenantId) : null;
-      if (!relayToken) return { elicitations: await agentRead(boardId), approvalRequests: false };
-      // A plane-minted service token, not an agent's `spa_`: carried as the client's resolved credential.
-      const elicitations = await new SuperpipelineClient({
-        baseUrl: config.baseUrl,
-        boardId,
-        token: "",
-        credential: async () => relayToken,
-        fetch: fetchImpl,
-      }).pendingElicitations();
-      return { elicitations, approvalRequests: true };
+    pendingElicitationsScoped: async (boardId, tenantId) => {
+      const relayToken = relay ? await relayTokenForBoard(relay, tenantId, boardId, tenantsForBoard) : null;
+      if (!relay || !relayToken) return { elicitations: await agentRead(boardId), approvalRequests: false };
+      try {
+        // A plane-minted service token, not an agent's `spa_`: carried as the client's resolved credential.
+        const elicitations = await new SuperpipelineClient({
+          baseUrl: config.baseUrl,
+          boardId,
+          token: "",
+          credential: async () => relayToken,
+          fetch: fetchImpl,
+        }).pendingElicitations();
+        return { elicitations, approvalRequests: true };
+      } catch (err) {
+        if (err instanceof SuperpipelineApiError && (err.status === 401 || err.status === 403)) relay.invalidate();
+        log.warn("the relay could not read a board's questions; reading card questions with the agent's credential", {
+          boardId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return { elicitations: await agentRead(boardId), approvalRequests: false };
+      }
     },
     pendingElicitations: async (boardId) => {
       const token = (await tokensForBoards()).get(boardId);

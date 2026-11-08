@@ -50,6 +50,7 @@ import { isDeliveryPending, type DeliveryPendingDelivery } from "./delivery-wire
 import type { DeliveryProjectionOutcome } from "./delivery-projection";
 import { isAttentionPending, type AttentionPendingDelivery } from "./attention-wire";
 import type { AttentionProjectionOutcome, WaitKey } from "./attention-projection";
+import { relayTokenForBoard, type TenantsForBoard } from "./relay-scope";
 
 const log = createLogger("gate-sweep");
 
@@ -671,7 +672,7 @@ export function startGateSweeper(
      * board added, rebuilt, or a rotated secret is repaired within one interval. Without it no
      * board pushes and every gate waits for the sweep. See `bridge/push-subscription.ts`.
      */
-    push?: { secret: string | undefined; publicUrl: string; relay?: SuperpipelineRelay | null };
+    push?: { secret: string | undefined; publicUrl: string; relay?: SuperpipelineRelay | null; tenantsForBoard?: TenantsForBoard };
   } = {},
 ): (() => void) | null {
   const config =
@@ -720,19 +721,6 @@ export async function sweepBoardNow(boardId: string): Promise<GateSweepResult | 
 }
 
 /**
- * The relay's SuperPipeline token for a board, or null: a board this hub does not work belongs to
- * no tenant, and a board of another workspace never gets the relay's credential.
- */
-export async function relayTokenForBoard(
-  relay: SuperpipelineRelay,
-  tenantIdFor: (boardId: string) => Promise<string | null>,
-  boardId: string,
-): Promise<string | null> {
-  const tenantId = await tenantIdFor(boardId);
-  return tenantId ? relay.tokenFor(tenantId) : null;
-}
-
-/**
  * One push-subscription pass, logged so an operator can tell "subscribed" from "never tried".
  *
  * Logs a board's subscription when it first succeeds (or recovers), and every refusal — not a
@@ -743,7 +731,7 @@ function pushSubscriber(
   config: BridgeConfig,
   fetchImpl: Fetcher,
   roster: () => Promise<Array<{ boardId: string; token: string }>>,
-  push: { secret: string | undefined; publicUrl: string; relay?: SuperpipelineRelay | null } | undefined,
+  push: { secret: string | undefined; publicUrl: string; relay?: SuperpipelineRelay | null; tenantsForBoard?: TenantsForBoard } | undefined,
   tenantIdFor: (boardId: string) => Promise<string | null>,
 ): () => Promise<void> {
   if (!push) return async () => {};
@@ -763,7 +751,13 @@ function pushSubscriber(
         fetch: fetchImpl,
         boards: () => boardCredentials(roster),
         // The relay's token only for a board of the relay's own workspace (`relay.ts`).
-        ...(relay ? { relayTokenFor: (boardId: string) => relayTokenForBoard(relay, tenantIdFor, boardId) } : {}),
+        ...(relay
+          ? {
+              relayTokenFor: async (boardId: string) =>
+                relayTokenForBoard(relay, await tenantIdFor(boardId), boardId, push.tenantsForBoard),
+              onRelayRefused: () => relay.invalidate(),
+            }
+          : {}),
       });
       for (const boardId of result.subscribed) {
         if (!subscribed.has(boardId)) log.info("push subscription registered", { boardId });

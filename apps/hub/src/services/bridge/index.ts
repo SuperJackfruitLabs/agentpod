@@ -27,5 +27,5 @@ export {
 export { probeSalaamWork, settleNeverDispatchedSalaamWork } from "./salaam-dispatch";
 export { traceDeliveryEvidence } from "./salaam-trace";
 export { bridgeReadiness } from "./station-readiness";
-export { SuperpipelineClient, fetchAdapter } from "./superpipeline";
+export { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./superpipeline";
 export type { Fetcher } from "./superpipeline";

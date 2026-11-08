@@ -1771,8 +1771,14 @@ They reach chat only with the **decision relay** (`SUPERPIPELINE_RELAY_CREDENTIA
 `approval-requests:relay`. With it, each board of the relay's workspace gets a second push config,
 registered by the relay service for `elicitation.pending` only, and the question sweep reads those
 boards' `elicitations/pending` with the relay token. Other workspaces' boards keep their agent
-credential. A relay read that fails is a failed read (nothing is settled), and an agent's read never
-settles a posted approval request, since it cannot list one. Logs: `superpipeline-relay` (`… is
+credential. The relay is decided once per board for the tenant the hub projects into, and a board
+known to more than one tenant here (rostered or dispatched under several) never gets it — logged once,
+`a board known to several tenants never gets the relay`. A pushed approval request is posted only
+when that same check passes for the tenant the push is routed to; otherwise it is dropped
+(`an approval request was pushed for a board the relay does not serve here`). A relay read that is
+refused falls back to the agent's credential for card questions (`the relay could not read a board's
+questions`); a 401/403 makes the relay exchange a fresh token, a refused exchange is retried after a
+minute, and an agent's read never settles a posted approval request, since it cannot list one. Logs: `superpipeline-relay` (`… is
 unset; SuperToolkit approval requests will not reach chat` once at start, `could not exchange the
 relay credential`, `has no tenant on this hub`) and `gate-sweep` (`relay push subscription
 registered`; a refusal is `push subscription refused` with `relay:` in the error).
