@@ -31,11 +31,22 @@ import {
   elicitationRequestCard,
   type ElicitationPendingDelivery,
 } from "./elicitation-card";
-import { boundedQuestion, questionFreeTextV2, questionOptionsV2, questionV2Content } from "./question-wire";
+import {
+  boundedQuestion,
+  questionFreeTextV2,
+  questionOptionsV2,
+  questionSubjectV2,
+  questionV2Content,
+} from "./question-wire";
 import { matchPermissionAnswer, unmatchedAnswerText } from "./permissions";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
 import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plane/assertion";
-import type { RecordedQuestion } from "./question-answer";
+import {
+  SUBJECT_REFUSAL_TEXT,
+  subjectRefusal,
+  type RecordedQuestion,
+  type RecordedSubject,
+} from "./question-answer";
 
 const log = createLogger("matrix-elicitations");
 
@@ -157,6 +168,7 @@ export async function projectElicitation(
     return { status: "awaiting-join", roomId: found.roomId };
   }
 
+  const subject = questionSubjectV2(d);
   const claimed = await db
     .insert(matrixElicitationEvents)
     .values({
@@ -174,6 +186,13 @@ export async function projectElicitation(
       // question.v2: what a structured answer is judged against — exactly what the message carries.
       optionsV2: questionOptionsV2(d),
       freeTextMaxLength: questionFreeTextV2(d)?.max_length ?? null,
+      // A subject-bound question: the binding its question.v2 carried, which every answer — a
+      // structured one or a typed reply — is judged against (charter: strict decisions and harness
+      // permissions bind their subject §4).
+      approvalSubjectId: subject?.id ?? null,
+      approvalSubjectDigest: subject?.digest ?? null,
+      approvalSubjectPreviewComplete: subject ? subject.preview_complete : null,
+      approvalSubjectExpiresAt: subject ? expiryOf(subject.expires_at) : null,
     })
     .onConflictDoNothing({ target: matrixElicitationEvents.elicitationId })
     .returning({ elicitationId: matrixElicitationEvents.elicitationId });
@@ -237,6 +256,33 @@ export interface OpenQuestion {
   cardId: string;
   roomId: string;
   options: Array<{ id: string; label: string }>;
+  /** What each option means, as question.v2 carried it; empty for a question posted before it. */
+  meanings: ReadonlyMap<string, string>;
+  /** The subject a typed reply would be bound to; null when the question has none. */
+  subject: RecordedSubject | null;
+}
+
+/** An ISO expiry as a time, or null when it is absent or unreadable — the board still judges it. */
+function expiryOf(iso: string | null): Date | null {
+  if (iso === null) return null;
+  const at = Date.parse(iso);
+  return Number.isNaN(at) ? null : new Date(at);
+}
+
+/** The recorded binding of a question row, or null when it is bound to no subject. */
+function recordedSubjectOf(row: {
+  approvalSubjectId: string | null;
+  approvalSubjectDigest: string | null;
+  approvalSubjectPreviewComplete: boolean | null;
+  approvalSubjectExpiresAt: Date | null;
+}): RecordedSubject | null {
+  if (row.approvalSubjectId === null || row.approvalSubjectDigest === null) return null;
+  return {
+    id: row.approvalSubjectId,
+    digest: row.approvalSubjectDigest,
+    previewComplete: row.approvalSubjectPreviewComplete === true,
+    expiresAt: row.approvalSubjectExpiresAt,
+  };
 }
 
 /**
@@ -282,6 +328,8 @@ export async function openQuestionInRoom(roomId: string): Promise<OpenQuestion |
     cardId: live.cardId,
     roomId: live.roomId,
     options,
+    meanings: new Map((live.optionsV2 ?? []).map((o) => [o.id, o.meaning])),
+    subject: recordedSubjectOf(live),
   };
 }
 
@@ -297,6 +345,10 @@ export async function recordedQuestion(elicitationId: string): Promise<RecordedQ
       eventId: matrixElicitationEvents.eventId,
       options: matrixElicitationEvents.optionsV2,
       freeTextMaxLength: matrixElicitationEvents.freeTextMaxLength,
+      approvalSubjectId: matrixElicitationEvents.approvalSubjectId,
+      approvalSubjectDigest: matrixElicitationEvents.approvalSubjectDigest,
+      approvalSubjectPreviewComplete: matrixElicitationEvents.approvalSubjectPreviewComplete,
+      approvalSubjectExpiresAt: matrixElicitationEvents.approvalSubjectExpiresAt,
     })
     .from(matrixElicitationEvents)
     .where(eq(matrixElicitationEvents.elicitationId, elicitationId))
@@ -308,6 +360,7 @@ export async function recordedQuestion(elicitationId: string): Promise<RecordedQ
     eventId: row.eventId,
     options: row.options,
     freeText: row.freeTextMaxLength === null ? null : { max_length: row.freeTextMaxLength },
+    subject: recordedSubjectOf(row),
   };
 }
 
@@ -352,6 +405,8 @@ export async function answerElicitationAtSuperpipeline(
     option?: string;
     /** What the person typed: a free-text answer, or the input an option asked for. */
     text?: string;
+    /** On a subject-bound question: the binding the answer is for. The board refuses a mismatch. */
+    subject?: { id: string; digest: string };
     principalId: string;
     /** The Matrix sender, asserted by the org plane under it (contract §3.4b). */
     senderMxid: string;
@@ -390,6 +445,7 @@ export async function answerElicitationAtSuperpipeline(
         body: JSON.stringify({
           ...(input.option !== undefined ? { option: input.option } : {}),
           ...(input.text !== undefined ? { text: input.text } : {}),
+          ...(input.subject !== undefined ? { subject: input.subject } : {}),
         }),
       },
     );
@@ -461,9 +517,13 @@ export interface ElicitationAnswerDeps {
     boardId: string;
     elicitationId: string;
     option: string;
+    /** On a subject-bound question: the binding recorded when it was posted. */
+    subject?: { id: string; digest: string };
     principalId: string;
     senderMxid: string;
   }): Promise<{ ok: true } | { ok: false; code: string }>;
+  /** The clock a subject's expiry is judged by. Absent: the real one. */
+  now?(): Date;
   /** Say something back in the room. */
   reply(roomId: string, body: string): Promise<unknown>;
   /** True exactly once per question — see `claimElicitationOutcome`. */
@@ -527,10 +587,35 @@ export async function handleElicitationAnswer(
     return { status: "refused", code: "UNRESOLVED_SENDER" };
   }
 
+  // A question bound to a subject (a strict decision, a board-dispatched harness permission): a
+  // typed reply never approves it — the person typed against prose that does not show what is
+  // approved, and a v1 card's buttons arrive here too. Anything else goes through bound to the
+  // version recorded when the question was posted, so a decline of a since-replaced version is
+  // refused by the board rather than applied to the new one.
+  let subject: { id: string; digest: string } | undefined;
+  if (open.subject) {
+    const meaning = open.meanings.get(matched);
+    if (meaning === undefined || meaning === "approve") {
+      log.info("a typed reply tried to approve a subject-bound question; refused", {
+        elicitationId: open.elicitationId,
+        optionId: matched,
+      });
+      await deps.reply(roomId, TYPED_APPROVAL_REFUSED_TEXT);
+      return { status: "refused", code: "SUBJECT_NOT_SHOWN" };
+    }
+    subject = { id: open.subject.id, digest: open.subject.digest };
+    const refused = subjectRefusal(open.subject, subject, meaning, deps.now?.() ?? new Date());
+    if (refused) {
+      await deps.reply(roomId, SUBJECT_REFUSAL_TEXT[refused]);
+      return { status: "refused", code: refused === "expired" ? "DECISION_EXPIRED" : refused };
+    }
+  }
+
   const result = await deps.answer({
     boardId: open.boardId,
     elicitationId: open.elicitationId,
     option: matched,
+    ...(subject ? { subject } : {}),
     principalId: identity.id,
     senderMxid: event.sender,
   });
@@ -538,6 +623,17 @@ export async function handleElicitationAnswer(
   const chosen = open.options.find((o) => o.id === matched);
   return reportAnswer(result, open.elicitationId, chosen?.label ?? matched, roomId, deps);
 }
+
+/** Said when a typed reply (or a v1 card's button) tries to approve a subject-bound question. */
+export const TYPED_APPROVAL_REFUSED_TEXT =
+  "This approves an exact operation that a typed reply can't show you. Open it in an updated app or on the board to approve it. Nothing has changed.";
+
+/** The board's refusals of a subject binding, in words. */
+const BOARD_SUBJECT_TEXT: Record<string, string> = {
+  APPROVAL_SUBJECT_MISMATCH:
+    "The board says that answer was for a different version of this decision. Open the latest one and answer again. Nothing has changed.",
+  DECISION_EXPIRED: "The board says this decision has expired, so it can no longer be answered. Nothing has changed.",
+};
 
 /**
  * Say in the room what the board did with an answer — a typed reply's or a question.answer.v2's,
@@ -564,7 +660,7 @@ export async function reportAnswer(
       roomId,
       result.code === "IDENTITY_UNAVAILABLE"
         ? IDENTITY_UNAVAILABLE_TEXT
-        : `That did not go through (${result.code}). Nothing has changed.`,
+        : (BOARD_SUBJECT_TEXT[result.code] ?? `That did not go through (${result.code}). Nothing has changed.`),
     );
     return { status: "refused", code: result.code };
   }

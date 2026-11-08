@@ -298,6 +298,17 @@ export const matrixElicitationEvents = pgTable(
      */
     freeTextMaxLength: integer("free_text_max_length"),
     /**
+     * The subject a question is bound to, as its question.v2 carried it (charter: "Strict
+     * decisions and harness permissions bind their subject"): a strict decision's operation, or a
+     * board-dispatched harness permission. A question.answer.v2 must carry exactly this binding;
+     * an approval is refused when the preview was incomplete, and any answer after the expiry.
+     * Null on a question bound to nothing.
+     */
+    approvalSubjectId: text("approval_subject_id"),
+    approvalSubjectDigest: text("approval_subject_digest"),
+    approvalSubjectPreviewComplete: boolean("approval_subject_preview_complete"),
+    approvalSubjectExpiresAt: timestamp("approval_subject_expires_at"),
+    /**
      * When this hub said in the room that the board accepted an answer.
      *
      * The claim that stops a second receipt: an answer delivered twice — a double tap,
@@ -361,6 +372,57 @@ export const matrixDeliveryEvents = pgTable(
   ]
 );
 
+/**
+ * A harness permission request projected into a station room as permission.v2, and its binding
+ * (charter: "Strict decisions and harness permissions bind their subject" §5–6).
+ *
+ * AgentPod is the judge of a harness permission, so this is the record an answer is judged
+ * against: the subject digest, the options offered, the expiry, and whether it is still pending.
+ * It used to live only in memory (`permissions.ts`), so nothing expired, nobody was recorded as
+ * answering, and after a restart a late "1" became an ordinary prompt to the agent.
+ */
+export const matrixPermissionRequests = pgTable(
+  "matrix_permission_requests",
+  {
+    /** `<session_id>:<request_seq>` — the subject's id. */
+    requestId: text("request_id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    roomId: text("room_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    requestSeq: integer("request_seq").notNull(),
+    /** The prose message carrying permission.v2 — the event an answer references. Null while sending. */
+    eventId: text("event_id"),
+    /** sha256 of the canonical request (`harness-permission/v1`). An answer must carry it exactly. */
+    subjectDigest: text("subject_digest").notNull(),
+    /** False refuses an approving permission.answer.v2: nobody approves what the card could not show. */
+    previewComplete: boolean("preview_complete").notNull(),
+    options: jsonb("options").$type<MatrixPermissionOption[]>().notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    /** `pending`, then exactly one of `answered`, `expired`, `cancelled`. */
+    status: text("status").notNull().default("pending"),
+    optionId: text("option_id"),
+    answeredByPrincipal: text("answered_by_principal"),
+    answeredByMxid: text("answered_by_mxid"),
+    closedAt: timestamp("closed_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("matrix_permission_requests_tenant_id_idx").on(t.tenantId),
+    index("matrix_permission_requests_room_idx").on(t.roomId),
+    index("matrix_permission_requests_pending_idx").on(t.status, t.expiresAt),
+  ]
+);
+
+/** One option a permission.v2 offered, as recorded. */
+export interface MatrixPermissionOption {
+  id: string;
+  label: string;
+  meaning: string;
+  scope?: string;
+}
+
 /** One option a projected question offered — the question.v2 wire shape, as recorded. */
 export interface MatrixQuestionOption {
   id: string;
@@ -368,6 +430,8 @@ export interface MatrixQuestionOption {
   meaning: string;
   needs_comment: boolean;
   input?: { kind: "text" | "url"; label: string; required: boolean; max_length: number };
+  scope?: string;
+  requires?: string;
 }
 
 /** One option a projected gate offered — the gate.v2 wire shape, as recorded. */

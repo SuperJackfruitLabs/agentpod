@@ -79,9 +79,25 @@ export interface ElicitationPendingDelivery {
    * follow-ups"). The newer fields are `unknown` for the reason the gate's are: an older board
    * sends none, and they are checked before they are carried (`questionOptionsV2`).
    */
-  options: Array<{ id: string; label: string; meaning?: unknown; needsComment?: unknown; input?: unknown }>;
+  options: Array<{
+    id: string;
+    label: string;
+    meaning?: unknown;
+    needsComment?: unknown;
+    input?: unknown;
+    /** `once` | `run` | `always`, and `workspace-admin` (charter: strict decisions bind their subject §2). */
+    scope?: unknown;
+    requires?: unknown;
+  }>;
   /** On a question with no options: it is answered by typing, at most `maxLength` characters. */
   freeText?: unknown;
+  /**
+   * The exact thing an approving answer approves, on a strict decision (`salaam-operation/v1`) or
+   * a poster-bound harness permission (`harness-permission/v1`): `{id, digest, schema, revision,
+   * expiresAt, preview, previewComplete}`, camelCase like a gate's. `unknown`: checked before it is
+   * carried (`questionSubjectV2`). Absent from a board that predates it, and on any other question.
+   */
+  approvalSubject?: unknown;
   ts: string;
 }
 

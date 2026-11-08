@@ -30,6 +30,25 @@ export interface ParsedQuestionAnswer {
   /** Trimmed; null when absent or blank. */
   text: string | null;
   referencedEventId: string | null;
+  /** The binding copied from the question the person saw; absent when the answer carries none. */
+  subject?: { id: string; digest: string };
+}
+
+/** The longest subject id or digest read off an answer — the gate's bound. */
+const SUBJECT_KEY_MAX = 512;
+
+/**
+ * An answer's `subject {id, digest}`, or null when it carries none or one that is not two
+ * non-empty strings. Shared with the permission answer.
+ */
+export function bindingOf(content: object): { id: string; digest: string } | null {
+  if (!("subject" in content)) return null;
+  const s = content.subject;
+  if (typeof s !== "object" || s === null || !("id" in s) || !("digest" in s)) return null;
+  const { id, digest } = s;
+  if (typeof id !== "string" || typeof digest !== "string") return null;
+  if (id === "" || digest === "" || id.length > SUBJECT_KEY_MAX || digest.length > SUBJECT_KEY_MAX) return null;
+  return { id, digest };
 }
 
 /**
@@ -46,7 +65,8 @@ export function parseQuestionAnswer(content: unknown): ParsedQuestionAnswer | nu
   if (typeof elicitationId !== "string" || elicitationId.length === 0 || elicitationId.length > ID_MAX) return null;
   const optionId = "option_id" in content && typeof content.option_id === "string" && content.option_id !== "" ? content.option_id : null;
   const text = "text" in content && typeof content.text === "string" && content.text.trim() !== "" ? content.text.trim() : null;
-  return { elicitationId, optionId, text, referencedEventId: referenceOf(content) };
+  const subject = bindingOf(content);
+  return { elicitationId, optionId, text, referencedEventId: referenceOf(content), ...(subject ? { subject } : {}) };
 }
 
 /** The event an `m.reference` relation points at, or null. Shared with the delivery answer. */
@@ -69,11 +89,53 @@ export interface RecordedQuestion {
   options: ReadonlyArray<{
     id: string;
     label: string;
+    meaning?: string;
     input?: { kind: "text" | "url"; required: boolean; max_length: number };
   }> | null;
   /** Present when the question has no options and is answered by typing. */
   freeText: { max_length: number } | null;
+  /** The subject its question.v2 carried; null or absent when it is bound to none. */
+  subject?: RecordedSubject | null;
 }
+
+/** A subject's binding as this hub recorded it when it posted the question. */
+export interface RecordedSubject {
+  id: string;
+  digest: string;
+  /** False (or unknown) refuses an approving answer: the card could not show it all. */
+  previewComplete: boolean;
+  /** Null when the subject named no expiry this hub could read; the board still judges it. */
+  expiresAt: Date | null;
+}
+
+/**
+ * Why an answer to a subject-bound question must not be carried, or null. The order is the gate's
+ * (`v2Refusal`): a binding first, then its match, then expiry, then the preview rule for approvals.
+ * Shared by question.answer.v2 and a typed reply, so the two cannot come to disagree.
+ */
+export function subjectRefusal(
+  recorded: RecordedSubject,
+  binding: { id: string; digest: string } | null,
+  meaning: string | undefined,
+  now: Date,
+): SubjectRefusal | null {
+  if (!binding) return "subject-missing";
+  if (binding.id !== recorded.id || binding.digest !== recorded.digest) return "subject-mismatch";
+  if (recorded.expiresAt !== null && now.getTime() >= recorded.expiresAt.getTime()) return "expired";
+  if (meaning === "approve" && !recorded.previewComplete) return "preview-incomplete";
+  return null;
+}
+
+export type SubjectRefusal = "subject-missing" | "subject-mismatch" | "expired" | "preview-incomplete";
+
+/** What the room is told for each, and the board's own codes for the same two situations. */
+export const SUBJECT_REFUSAL_TEXT: Record<SubjectRefusal, string> = {
+  "subject-missing": "That answer did not say which version it answers. Nothing has changed.",
+  "subject-mismatch": "That answer was for a different version of this decision. Open the latest one and answer again. Nothing has changed.",
+  expired: "This decision has expired, so it can no longer be answered. Nothing has changed.",
+  "preview-incomplete":
+    "The card could not show everything being approved, so it cannot be approved from here. Open it on the board. Nothing has changed.",
+};
 
 /** Why a question.answer.v2 was not carried. Every value is a refusal. */
 export type QuestionAnswerRefusal =
@@ -87,20 +149,27 @@ export type QuestionAnswerRefusal =
   | "input-required"
   | "text-too-long"
   | "url-invalid"
+  | SubjectRefusal
   /** The board refused it; `code` says why. */
   | "board-refused";
 
 export interface QuestionAnswerDeps extends Pick<ElicitationAnswerDeps, "principalForMatrixId" | "reply" | "claimOutcome"> {
   recordedQuestion(elicitationId: string): Promise<RecordedQuestion | null>;
-  /** The board's answer route as the person (`answerElicitationAtSuperpipeline`): an option, text, or both. */
+  /**
+   * The board's answer route as the person (`answerElicitationAtSuperpipeline`): an option, text,
+   * or both — and the subject binding, on a question bound to one.
+   */
   answer(input: {
     boardId: string;
     elicitationId: string;
     option?: string;
     text?: string;
+    subject?: { id: string; digest: string };
     principalId: string;
     senderMxid: string;
   }): Promise<{ ok: true } | { ok: false; code: string }>;
+  /** The clock expiry is judged by. Absent: the real one. */
+  now?(): Date;
 }
 
 export type QuestionAnswerOutcome =
@@ -114,11 +183,25 @@ const REFUSAL_TEXT: Record<"bad-option" | "input-required" | "url-invalid", stri
   "url-invalid": "That answer needs an https:// link. Nothing has changed.",
 };
 
+type Verdict =
+  | { option?: string; text?: string; subject?: { id: string; digest: string }; label: string | null }
+  | { refusal: "bad-option" | "input-required" | "text-too-long" | "url-invalid" | SubjectRefusal; limit?: number };
+
 /**
  * What the answer would pass to the board, or why it must not: checked against what THIS
- * question offered when it was posted.
+ * question offered when it was posted — and, on a question bound to a subject, against the binding
+ * recorded then (charter: strict decisions and harness permissions bind their subject §4).
  */
-function judge(
+function judge(parsed: ParsedQuestionAnswer, q: RecordedQuestion, now: Date): Verdict {
+  const verdict = judgeOption(parsed, q);
+  if ("refusal" in verdict || !q.subject) return verdict;
+  const meaning = q.options?.find((o) => o.id === verdict.option)?.meaning;
+  const refused = subjectRefusal(q.subject, parsed.subject ?? null, meaning, now);
+  if (refused) return { refusal: refused };
+  return { ...verdict, subject: { id: q.subject.id, digest: q.subject.digest } };
+}
+
+function judgeOption(
   parsed: ParsedQuestionAnswer,
   q: RecordedQuestion,
 ): { option?: string; text?: string; label: string | null } | { refusal: "bad-option" | "input-required" | "text-too-long" | "url-invalid"; limit?: number } {
@@ -136,6 +219,10 @@ function judge(
   const refused = inputRefusal(option.input, parsed.text);
   if (refused) return { refusal: refused, limit: option.input.max_length };
   return { option: option.id, ...(parsed.text !== null ? { text: parsed.text } : {}), label: option.label };
+}
+
+function refusalText(r: "bad-option" | "input-required" | "url-invalid" | SubjectRefusal): string {
+  return r === "bad-option" || r === "input-required" || r === "url-invalid" ? REFUSAL_TEXT[r] : SUBJECT_REFUSAL_TEXT[r];
 }
 
 /**
@@ -184,7 +271,7 @@ export async function handleQuestionAnswer(
     return { status: "refused", reason: "unlinked-sender" };
   }
 
-  const verdict = judge(parsed, q);
+  const verdict = judge(parsed, q, deps.now?.() ?? new Date());
   if ("refusal" in verdict) {
     log.warn("a question.answer.v2 was refused before it reached the board", {
       elicitationId: parsed.elicitationId,
@@ -195,7 +282,7 @@ export async function handleQuestionAnswer(
       roomId,
       verdict.refusal === "text-too-long"
         ? `That answer is longer than this question takes (at most ${verdict.limit ?? 0} characters). Nothing has changed.`
-        : REFUSAL_TEXT[verdict.refusal],
+        : refusalText(verdict.refusal),
     );
     return { status: "refused", reason: verdict.refusal };
   }
@@ -205,6 +292,7 @@ export async function handleQuestionAnswer(
     elicitationId: parsed.elicitationId,
     ...(verdict.option !== undefined ? { option: verdict.option } : {}),
     ...(verdict.text !== undefined ? { text: verdict.text } : {}),
+    ...(verdict.subject ? { subject: verdict.subject } : {}),
     principalId: identity.id,
     senderMxid: event.sender,
   });
