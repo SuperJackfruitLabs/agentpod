@@ -16,6 +16,7 @@
  */
 
 import { z } from "zod";
+import { deadlineField } from "./decision-timeout-wire";
 
 import type { AttentionPendingDelivery } from "../bridge";
 import {
@@ -233,6 +234,7 @@ export function attentionV2Content(d: AttentionPendingDelivery, deepLink?: strin
     summary: boundedText(d.summary, SUMMARY_BYTES),
     failure_count: failureCountOf(d.failureCount),
     options,
+    ...deadlineField(d.deadline),
     ...(deepLink ? { deep_link: deepLink } : {}),
   };
 }

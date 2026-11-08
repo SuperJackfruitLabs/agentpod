@@ -7,6 +7,7 @@
 
 import { type GateRequestCard } from "@agentpod/contract";
 import { z } from "zod";
+import { deadlineField } from "./decision-timeout-wire";
 import type { GatePendingDelivery } from "../bridge";
 
 export const GATE_EVENT_TYPE = "dev.superpipeline.gate.v1";
@@ -450,6 +451,7 @@ export function gateV2Content(d: GatePendingDelivery, deepLink?: string): Record
     ...(d.handoffSummary ? { handoff_summary: cutToBytes(d.handoffSummary, HANDOFF_SUMMARY_BYTES) } : {}),
     options: gateOptionsV2(d),
     ...(subject ? { subject } : {}),
+    ...deadlineField(d.deadline),
     ...(deepLink ? { deep_link: deepLink } : {}),
   };
 }

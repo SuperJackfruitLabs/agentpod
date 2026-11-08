@@ -11,6 +11,7 @@
  */
 
 import { z } from "zod";
+import { deadlineField } from "./decision-timeout-wire";
 
 import { elicitationProseBody, type ElicitationPendingDelivery } from "./elicitation-card";
 import {
@@ -249,6 +250,7 @@ export function questionV2Content(d: ElicitationPendingDelivery, deepLink?: stri
     ...(freeText ? { free_text: freeText } : {}),
     ...(subject ? { subject } : {}),
     ...(typeof d.approvalRequestId === "string" && d.approvalRequestId !== "" ? { approval_request_id: d.approvalRequestId } : {}),
+    ...deadlineField(d.deadline),
     ...(deepLink ? { deep_link: deepLink } : {}),
   };
 }
