@@ -599,6 +599,11 @@ export const matrixDecisionNotices = pgTable(
     noticedAt: text("noticed_at").notNull(),
     /** The notice's own event, once sent. */
     eventId: text("event_id"),
+    /**
+     * When the decision's card was last moved below for an admin who joined (`decision-repost.ts`).
+     * An admin who joined before it can read it, so their join moves nothing.
+     */
+    cardRepostedAt: timestamp("card_reposted_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [

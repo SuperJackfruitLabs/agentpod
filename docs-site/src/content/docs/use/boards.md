@@ -130,8 +130,11 @@ card. The board keeps the clock; nothing is ever approved, rejected or resumed b
   decision. An invited admin sees what the room sees and answers like anyone in it; the board judges
   every answer by its usual rules. Each admin is invited to a board once: somebody who leaves the room
   is not invited back by the next escalation. Because the room is encrypted, an admin cannot read what
-  was posted before they joined, so when they join the room re-posts the escalations still open, each
-  with its card link.
+  was posted before they joined, so when they join, each card still waiting is **moved below**: posted
+  again in full — preview, options, deadline — with the escalation under it. The copy below is the one
+  that counts; the earlier card says *Moved below* and an answer to it is refused, so nothing is
+  answered twice. If the board cannot be read at that moment, only the escalation (with its link) is
+  posted again.
 
 A board that more than one workspace on the hub knows is never escalated, and a card the room never
 showed is not replied to.

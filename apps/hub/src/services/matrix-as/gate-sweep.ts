@@ -776,3 +776,19 @@ function pushSubscriber(
     }
   };
 }
+
+/**
+ * What a board is waiting on now — its gates, follow-ups and waiting cards — read with the running
+ * sweeper's own deps, so an escalated card moved below is rebuilt from the same reads the sweep
+ * posts from (`decision-repost.ts`). Throws when no sweeper runs or a read fails.
+ */
+export async function readBoardPending(boardId: string): Promise<unknown[]> {
+  const deps = running;
+  if (!deps) throw new Error("no gate sweeper is running");
+  const [gates, deliveries, attention] = await Promise.all([
+    deps.pendingGates(boardId),
+    deps.pendingDeliveries?.(boardId) ?? [],
+    deps.pendingAttention?.(boardId) ?? [],
+  ]);
+  return [...gates, ...deliveries, ...attention];
+}

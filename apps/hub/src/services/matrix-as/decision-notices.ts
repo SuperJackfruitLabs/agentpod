@@ -16,9 +16,10 @@
  * (posted before this hub, still being sent, or already settled) nothing is said and nobody invited.
  *
  * **Readable after joining.** A board room is encrypted to its joined members, so an invited admin
- * cannot read anything sent before they accept. When an escalation invitee's join is seen, the
- * board's still-open escalations are posted again (`repostEscalationsOnJoin`); the earlier card stays
- * unreadable to them, which is why the notice carries the card's link.
+ * cannot read anything sent before they accept. When an escalation invitee's join is seen, each
+ * still-open escalated card is moved below — posted again from a fresh read, its record moved to the
+ * new event (`decision-repost.ts`) — and its escalation notice posted again in reply to it
+ * (`repostEscalationsOnJoin`). If the board cannot be read, only the notice is posted, with its link.
  */
 import { and, eq, isNull } from "drizzle-orm";
 
@@ -37,13 +38,12 @@ import { DECISION_KINDS, type DecisionKind, type DecisionTimeoutDelivery } from 
 import { decisionNoticeContent, noticeAt } from "./decision-timeout-wire";
 import { boardLink } from "./gate-wire";
 import type { TenantsForBoard } from "./relay-scope";
+import { moveCardBelow, type CardRepostDeps } from "./decision-repost";
 
 const log = createLogger("matrix-decision-notices");
 const warnedAmbiguous = new Set<string>();
 
-export interface DecisionNoticeDeps {
-  boardBaseUrl?: string;
-  sendText(userId: string, roomId: string, body: string, extra?: Record<string, unknown>): Promise<string | null>;
+export interface DecisionNoticeDeps extends CardRepostDeps {
   /** Invite somebody into a room. Absent: an escalation invites nobody (and says so). */
   invite?(asUserId: string, roomId: string, invitee: string): Promise<void>;
   /** The Matrix ids of a tenant's workspace owners and admins (`workspace-admins.ts`). */
@@ -246,14 +246,20 @@ async function sendNotice(
 }
 
 /**
- * An admin an escalation invited has joined the board room: post the board's still-open escalations
- * again, which they could not read before. Once per invitee (the join claims `joined_at`). The count
- * posted.
+ * An admin an escalation invited has joined the board room: move the board's still-open escalated
+ * cards below and post their notices again, which they could not read before. Once per invitee (the
+ * join claims `joined_at`), and nothing for a card moved after `joinedAt` — they can read that one.
+ * The count of escalations posted again.
  */
-export async function repostEscalationsOnJoin(boardId: string, mxid: string, deps: DecisionNoticeDeps): Promise<number> {
+export async function repostEscalationsOnJoin(
+  boardId: string,
+  mxid: string,
+  deps: DecisionNoticeDeps,
+  joinedAt: Date = new Date(),
+): Promise<number> {
   const [invite] = await db
     .update(matrixEscalationInvites)
-    .set({ joinedAt: new Date() })
+    .set({ joinedAt })
     .where(and(eq(matrixEscalationInvites.boardId, boardId), eq(matrixEscalationInvites.mxid, mxid), isNull(matrixEscalationInvites.joinedAt)))
     .returning();
   if (!invite) return 0;
@@ -270,12 +276,34 @@ export async function repostEscalationsOnJoin(boardId: string, mxid: string, dep
         eq(matrixDecisionNotices.notice, "escalated"),
       ),
     );
+  let pending: unknown[] | null | undefined;
   let reposted = 0;
   for (const n of notices) {
     const kind = DECISION_KINDS.find((k) => k === n.decisionKind);
     if (!kind) continue;
+    // Moved below after this admin joined: they can read the card and its notice.
+    if (n.cardRepostedAt && n.cardRepostedAt >= joinedAt) continue;
+    const target = { boardId: n.boardId, cardId: n.cardId, decisionKind: kind, decisionId: n.decisionId };
+    const before = await cardEventFor(n.tenantId, n.boardId, n.cardId, kind, n.decisionId);
+    if (!before?.open || before.roomId !== room.roomId) continue;
+
+    // One fresh read for the whole join, and only when there is something to move.
+    if (pending === undefined) pending = await readPending(boardId, deps);
+    if (pending && (await moveCardBelow(target, n.tenantId, room, pending, deps)) === "moved") {
+      await db
+        .update(matrixDecisionNotices)
+        .set({ cardRepostedAt: new Date() })
+        .where(
+          and(
+            eq(matrixDecisionNotices.boardId, n.boardId),
+            eq(matrixDecisionNotices.decisionKind, n.decisionKind),
+            eq(matrixDecisionNotices.decisionId, n.decisionId),
+            eq(matrixDecisionNotices.notice, "escalated"),
+          ),
+        );
+    }
     const card = await cardEventFor(n.tenantId, n.boardId, n.cardId, kind, n.decisionId);
-    if (!card?.open || card.roomId !== room.roomId) continue;
+    if (!card?.open) continue;
     const d: DecisionTimeoutDelivery = {
       event: "decision.escalated",
       boardId: n.boardId,
@@ -294,4 +322,18 @@ export async function repostEscalationsOnJoin(boardId: string, mxid: string, dep
   }
   if (reposted > 0) log.info("re-posted open escalations for a workspace admin who joined", { boardId, reposted });
   return reposted;
+}
+
+/** What the board waits on now, or null when it cannot be read (only the notices are posted then). */
+async function readPending(boardId: string, deps: DecisionNoticeDeps): Promise<unknown[] | null> {
+  if (!deps.pendingOnBoard) return null;
+  try {
+    return await deps.pendingOnBoard(boardId);
+  } catch (err) {
+    log.warn("could not read a board to move its escalated cards; posting the notices only", {
+      boardId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
 }

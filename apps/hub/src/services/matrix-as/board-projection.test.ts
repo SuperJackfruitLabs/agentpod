@@ -36,6 +36,7 @@ describe("the projection deps the hub builds", () => {
     const deps = boardProjectionDeps(bridge());
     expect(typeof deps.invite).toBe("function");
     expect(typeof deps.workspaceAdmins).toBe("function");
+    expect(typeof deps.pendingOnBoard).toBe("function");
   });
 
   test("carry humanJoined, and it asks the homeserver who has joined the board room", async () => {
@@ -67,15 +68,15 @@ describe("a human joining a board room", () => {
     expect(woken.sort()).toEqual(["gates:brd_one", "questions:brd_one"]);
   });
 
-  test("re-posts open escalations for the person who joined", async () => {
+  test("re-posts open escalations for the person who joined, as of when they joined", async () => {
     const reposted: string[] = [];
-    await wakeHeldOnJoin(join, {
+    await wakeHeldOnJoin({ ...join, origin_server_ts: 1762600000000 }, {
       lookup,
       sweepGates: async () => {},
       sweepElicitations: async () => {},
-      repostEscalations: async (b, who) => void reposted.push(`${b}:${who}`),
+      repostEscalations: async (b, who, at) => void reposted.push(`${b}:${who}:${at.getTime()}`),
     });
-    expect(reposted).toEqual([`brd_one:${HUMAN}`]);
+    expect(reposted).toEqual([`brd_one:${HUMAN}:1762600000000`]);
   });
 
   test("one sweep failing does not stop the other", async () => {

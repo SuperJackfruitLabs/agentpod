@@ -1780,9 +1780,20 @@ the board's room — once per decision and notice, claimed in `matrix_decision_n
 - **What admins see.** The notice is an `m.text` reply to the card with `suite_event_type`
   `dev.superpipeline.decision.escalated.v1` (or `…reminded.v1`) and `board_id`, `card_id`,
   `decision_kind`, `decision_id`, `waiting_since`, `escalated_at`, plus the card link. The board room
-  is encrypted to joined members, so when an invited admin's join is seen the open escalations are
-  posted again once (`re-posted open escalations for a workspace admin who joined`); the original
-  card stays unreadable to them, which is why the notice links the card.
+  is encrypted to joined members, so when an invited admin's join is seen (`decision-repost.ts`):
+  - each open escalated card is **moved below**. The board is read fresh (the sweeps' own reads), the
+    card is rebuilt by the same builders and posted again, and the decision's record
+    (`matrix_gate_events` / `_elicitation_` / `_delivery_` / `_attention_events`) has only its event id
+    moved to the new message. That happens only if the board still offers the same options under the
+    same subject, and only while the record still points at the old card and is unsettled.
+    Options, subject binding, wait id and the receipt's claim are unchanged, so answers are judged as
+    before; an answer to the old card fails the reference check (`reference-mismatch`). The old card
+    gets a *Moved below* reply; a copy that lost a race to an answer says it does not count.
+  - then the escalation notice is posted again, in reply to the new card.
+  - Once per invitee's join, and nothing for a card moved after that admin joined (by the join's
+    `origin_server_ts`; `matrix_decision_notices.card_reposted_at`). A board that cannot be read
+    gets the notice alone. Logs: `moved an escalated card below for an admin who joined`, `an
+    escalated card was not moved`, `could not read a board to move its escalated cards`.
 - **An expired subject** closes its gate as `expired`; the sweep settles the room card with the
   `Expired — …` receipt (`decision: "expired"`, `decided_by: null`).
 

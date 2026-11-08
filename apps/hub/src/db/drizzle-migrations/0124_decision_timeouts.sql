@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS "matrix_decision_notices" (
   "waiting_since" text NOT NULL,
   "noticed_at" text NOT NULL,
   "event_id" text,
+  "card_reposted_at" timestamp,
   "created_at" timestamp DEFAULT now() NOT NULL,
   CONSTRAINT "matrix_decision_notices_pk" PRIMARY KEY ("board_id", "decision_kind", "decision_id", "notice"),
   CONSTRAINT "matrix_decision_notices_tenant_id_tenants_id_fk"

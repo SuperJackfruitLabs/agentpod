@@ -16,10 +16,10 @@ import {
   ensureBoardRoom,
   matrixIdsForBoardHumans,
 } from "./board-room";
-import { sweepElicitationBoardNow } from "./elicitation-sweep";
+import { readBoardQuestions, sweepElicitationBoardNow } from "./elicitation-sweep";
 import { noteGatePosted } from "./fleet-gates";
 import { noteAttentionPosted } from "./fleet-attention";
-import { sweepBoardNow } from "./gate-sweep";
+import { readBoardPending, sweepBoardNow } from "./gate-sweep";
 import type { MatrixBridge } from "./service";
 import { repostEscalationsOnJoin, type DecisionNoticeDeps } from "./decision-notices";
 import { workspaceAdminMatrixIds } from "./workspace-admins";
@@ -99,6 +99,11 @@ export function boardProjectionDeps(bridge: Pick<MatrixBridge, "client" | "confi
      */
     invite: (asUserId: string, roomId: string, invitee: string) => client.invite(asUserId, roomId, invitee),
     workspaceAdmins: workspaceAdminMatrixIds,
+    /** What a board waits on now, so an escalated card can be moved below for an admin who joined. */
+    pendingOnBoard: async (boardId: string) => {
+      const [cards, questions] = await Promise.all([readBoardPending(boardId), readBoardQuestions(boardId)]);
+      return [...cards, ...questions];
+    },
     /** A posted gate is a pending decision on each of the board's humans' fleet card. */
     onPosted: (
       d: Parameters<typeof noteGatePosted>[0],
@@ -112,14 +117,18 @@ export function boardProjectionDeps(bridge: Pick<MatrixBridge, "client" | "confi
   };
 }
 
-type MembershipEvent = Parameters<typeof boardForHumanJoin>[0];
+type MembershipEvent = Parameters<typeof boardForHumanJoin>[0] & { origin_server_ts?: number };
+
+/** When the join happened, by the homeserver's clock; now when it did not say. */
+const joinTime = (event: MembershipEvent): Date =>
+  typeof event.origin_server_ts === "number" && Number.isFinite(event.origin_server_ts) ? new Date(event.origin_server_ts) : new Date();
 
 export interface WakeDeps {
   lookup: (roomId: string) => Promise<{ boardId: string; speakerMxid: string } | null>;
   sweepGates: (boardId: string) => Promise<unknown>;
   sweepElicitations: (boardId: string) => Promise<unknown>;
-  /** A workspace admin an escalation invited has joined: post its open escalations again. */
-  repostEscalations?: (boardId: string, mxid: string) => Promise<unknown>;
+  /** A workspace admin an escalation invited has joined: move its open escalated cards below. */
+  repostEscalations?: (boardId: string, mxid: string, joinedAt: Date) => Promise<unknown>;
 }
 
 const defaultWake: WakeDeps = {
@@ -140,7 +149,7 @@ export async function wakeHeldOnJoin(event: MembershipEvent, deps: WakeDeps = de
   const results = await Promise.allSettled([
     deps.sweepGates(boardId),
     deps.sweepElicitations(boardId),
-    ...(deps.repostEscalations ? [deps.repostEscalations(boardId, who)] : []),
+    ...(deps.repostEscalations ? [deps.repostEscalations(boardId, who, joinTime(event))] : []),
   ]);
   for (const r of results) {
     if (r.status === "rejected") {
@@ -159,7 +168,10 @@ export async function wakeHeldOnJoin(event: MembershipEvent, deps: WakeDeps = de
  */
 export function joinWake(projection: DecisionNoticeDeps): (event: MembershipEvent) => Promise<void> {
   return (event) =>
-    wakeHeldOnJoin(event, { ...defaultWake, repostEscalations: (boardId, mxid) => repostEscalationsOnJoin(boardId, mxid, projection) });
+    wakeHeldOnJoin(event, {
+      ...defaultWake,
+      repostEscalations: (boardId, mxid, joinedAt) => repostEscalationsOnJoin(boardId, mxid, projection, joinedAt),
+    });
 }
 
 /**
