@@ -30,7 +30,8 @@ import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import type { BridgeAgentConfig } from "../../src/services/bridge/config";
 import { runOnce, type AcpPort, type DispatchDeps } from "../../src/services/bridge/dispatch";
 import { SuperpipelineClient } from "../../src/services/bridge/superpipeline";
-import { dispatchOutcome, findUnreportedOutput, openDispatch, recordProduced } from "../../src/services/bridge/ledger";
+import { dispatchOutcome, findUnreportedOutput, openDispatch, recordPermissionWait, recordProduced } from "../../src/services/bridge/ledger";
+import { recoverPermissionWaits } from "../../src/services/bridge/dispatch-recover";
 import { makeFingerprint } from "../../src/services/evidence/fingerprint";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
@@ -1252,6 +1253,108 @@ describe("a question nobody answers", () => {
     // human is not going quiet, so the bound on the wait is policy, not the
     // lease — and that only holds if the beat carries on through it.
     expect(board.verbs().filter((v) => v === "heartbeat").length).toBeGreaterThan(0);
+  });
+});
+
+/** The ledger's record of a run's permission wait. */
+async function waitRecord(runId = RUN_ID) {
+  const [row] = await db
+    .select({ session: bridgeDispatches.permissionSessionId, seq: bridgeDispatches.permissionRequestSeq, until: bridgeDispatches.permissionWaitUntil })
+    .from(bridgeDispatches)
+    .where(eq(bridgeDispatches.externalRunId, runId));
+  return row ?? null;
+}
+
+describe("a permission wait is bounded by its request's expiry and outlives the process (charter decision 8)", () => {
+  test("the request's expiry ends the wait when it comes before the agent's own limit", async () => {
+    const asked = askingBoard(() => {});
+    const board = fakeBoard(asked.handler);
+    // Asked 30 minutes less a moment ago: its harness-permission/v1 subject expires almost at once.
+    const request = { ...permissionRequest(), createdAt: new Date(Date.now() - 30 * 60_000 + 150).toISOString() };
+    const acp = fakeAcp(() => [request]);
+
+    const started = Date.now();
+    const result = await runOnce(deps(board.client, acp.port, undefined, { permissionWaitMs: 60_000, permissionPollMs: 5 }));
+
+    expect(result.status).toBe("unanswered");
+    expect(result.reason).toContain("expired");
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(acp.state.answers).toHaveLength(0);
+  });
+
+  test("while it waits the ledger holds the wait, and once it ends the ledger forgets it", async () => {
+    const seen: Array<Promise<Awaited<ReturnType<typeof waitRecord>>>> = [];
+    const asked = askingBoard((_q, reads) => {
+      if (reads === 2) seen.push(waitRecord());
+    });
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()]);
+
+    const before = Date.now();
+    await runOnce(deps(board.client, acp.port, undefined, { permissionWaitMs: 300, permissionPollMs: 5 }));
+
+    const during = await seen[0];
+    expect(during?.session).toBe(SESSION_ID);
+    expect(during?.seq).toEqual(expect.any(Number));
+    // The earlier of the two bounds: the agent's 300 ms, not the request's 30 minutes.
+    expect(during?.until?.getTime()).toBeLessThan(before + 5_000);
+    expect(await waitRecord()).toEqual({ session: null, seq: null, until: null });
+  });
+
+  const lease = { runId: "run_restart00000000a", epoch: 4 };
+  const leftBehind = async (until: Date) => {
+    await openDispatch({ ...key(lease.runId), agentKey: agent.key, stationId: STATION_ID, leaseEpoch: lease.epoch });
+    await recordPermissionWait(key(lease.runId), { sessionId: SESSION_ID, requestSeq: 7, until });
+  };
+
+  test("after a restart the cut-short wait is ended as unanswered: the board is told, the run abandoned, the session ended", async () => {
+    await leftBehind(new Date(Date.now() + 20 * 60_000));
+    const board = fakeBoard(() => ({ status: 200, body: { ok: true } }));
+    const acp = fakeAcp(() => []);
+
+    expect(await recoverPermissionWaits(deps(board.client, acp.port))).toBe(1);
+
+    const failed = board.calls.find((c) => c.path.endsWith(`/runs/${lease.runId}/fail`));
+    expect(failed?.body).toMatchObject({ leaseEpoch: lease.epoch, reason: expect.stringContaining("restarted") });
+    const outcome = await dispatchOutcome(key(lease.runId));
+    expect(outcome?.outcome).toBe("abandoned");
+    expect(outcome?.reason).toContain("permission");
+    expect(acp.state.ended).toHaveLength(1);
+    expect(await waitRecord(lease.runId)).toEqual({ session: null, seq: null, until: null });
+
+    // Once: a second pass finds nothing.
+    expect(await recoverPermissionWaits(deps(board.client, acp.port))).toBe(0);
+    expect(board.calls.filter((c) => c.path.endsWith("/fail"))).toHaveLength(1);
+  });
+
+  test("a wait whose deadline passed while the hub was down says nobody answered in time", async () => {
+    await leftBehind(new Date(Date.now() - 60_000));
+    const board = fakeBoard(() => ({ status: 200, body: { ok: true } }));
+    await recoverPermissionWaits(deps(board.client, fakeAcp(() => []).port));
+    const failed = board.calls.find((c) => c.path.endsWith("/fail"));
+    expect(failed?.body).toMatchObject({ reason: expect.stringContaining("nobody answered") });
+  });
+
+  test("a board that already reclaimed the run still lets the ledger close it", async () => {
+    await leftBehind(new Date(Date.now() + 60_000));
+    const board = fakeBoard(() => ({ status: 409, body: boardError("STALE_LEASE") }));
+    expect(await recoverPermissionWaits(deps(board.client, fakeAcp(() => []).port))).toBe(1);
+    expect((await dispatchOutcome(key(lease.runId)))?.outcome).toBe("abandoned");
+  });
+
+  test("a board that cannot be reached keeps the wait for the next cycle", async () => {
+    await leftBehind(new Date(Date.now() + 60_000));
+    const board = fakeBoard(() => ({ status: 503, body: boardError("UNAVAILABLE") }));
+    expect(await recoverPermissionWaits(deps(board.client, fakeAcp(() => []).port))).toBe(0);
+    expect((await dispatchOutcome(key(lease.runId)))?.outcome).toBe("working");
+    expect((await waitRecord(lease.runId))?.seq).toBe(7);
+  });
+
+  test("a restarted hub ends the cut-short wait before it claims anything", async () => {
+    await leftBehind(new Date(Date.now() + 60_000));
+    const board = fakeBoard(() => ({ status: 200, body: { claimed: false } }));
+    await runOnce(deps(board.client, fakeAcp(() => []).port));
+    expect(board.verbs().slice(0, 2)).toEqual(["fail", "claims"]);
   });
 });
 

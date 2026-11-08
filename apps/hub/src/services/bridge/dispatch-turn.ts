@@ -14,9 +14,9 @@ import { attemptSpanFacts } from "./attempt-facts";
 import type { Fingerprint } from "../evidence";
 import { fingerprintWithin, resolveStationFingerprint } from "../evidence";
 import { DEFAULT_PERMISSION_WAIT_MS } from "./config";
-import { isAutoAnswered, selectedOptionId, withoutApprovals } from "./permission";
+import { boardPermissionSubject, isAutoAnswered, selectedOptionId, withoutApprovals } from "./permission";
 import { isEnvelopeRefusal, isForeignRun, isLeaseSuperseded, type ClaimedWork, type RunElicitation } from "./superpipeline";
-import { startAttempt, type CoalescingCounts, type DispatchKey } from "./ledger";
+import { clearPermissionWait, recordPermissionWait, startAttempt, type CoalescingCounts, type DispatchKey } from "./ledger";
 import {
   DEFAULT_HEARTBEAT_MS,
   DEFAULT_PERMISSION_POLL_MS,
@@ -122,7 +122,9 @@ export function newTurn(
 function whyNoAnswer(resolution: PermissionResolution): string {
   switch (resolution.kind) {
     case "timeout":
-      return `the agent asked for permission and nobody answered within ${Math.round(resolution.waitMs / 1000)}s`;
+      return resolution.expired
+        ? "the agent asked for permission and nobody answered before the request expired"
+        : `the agent asked for permission and nobody answered within ${Math.round(resolution.waitMs / 1000)}s`;
     case "cancelled":
       return "the agent asked for permission and the question was cancelled before it was answered — its run ended, its card moved, or a newer question superseded it";
     case "unmappable":
@@ -316,7 +318,14 @@ async function askTheHuman(t: Turn, request: AcpEvent): Promise<PermissionResolu
 
   const waitMs = deps.permissionWaitMs ?? deps.agent.permissionWaitMs ?? DEFAULT_PERMISSION_WAIT_MS;
   const pollMs = deps.permissionPollMs ?? DEFAULT_PERMISSION_POLL_MS;
-  const deadline = Date.now() + waitMs;
+  // Bounded by the earlier of the agent's limit and the request's own expiry (charter: "Unanswered
+  // decisions remind, then escalate" §8): past `expires_at` the board refuses an approval of it
+  // anyway, so waiting longer holds the harness for an answer that cannot count.
+  const expiresAt = Date.parse(boardPermissionSubject(t.session.id, request.seq, request.payload, request.createdAt).expires_at);
+  const deadline = Number.isFinite(expiresAt) ? Math.min(Date.now() + waitMs, expiresAt) : Date.now() + waitMs;
+  const expired = Number.isFinite(expiresAt) && expiresAt < Date.now() + waitMs;
+  // Recorded so a restart that cuts the wait short is noticed and the run ended (`dispatch-recover.ts`).
+  await recordPermissionWait(t.key, { sessionId: t.session.id, requestSeq: request.seq, until: new Date(deadline) });
   const offered = (request.payload as { options?: unknown } | null)?.options;
   let questionId: string | null = null;
 
@@ -346,7 +355,7 @@ async function askTheHuman(t: Turn, request: AcpEvent): Promise<PermissionResolu
     }
 
     if (t.abortCause) return { kind: "aborted" };
-    if (Date.now() >= deadline) return { kind: "timeout", waitMs };
+    if (Date.now() >= deadline) return { kind: "timeout", waitMs, expired };
     await sleep(pollMs);
   }
 }
@@ -381,6 +390,8 @@ async function resolvePermission(t: Turn, request: AcpEvent): Promise<TurnEnd | 
     askTheHuman(t, request).then((resolution) => ({ resolution })),
     t.turn.then((interrupted) => ({ interrupted })),
   ]);
+  // The wait is over however it ended: answered, given up on, or the turn interrupted it.
+  await clearPermissionWait(t.key).catch(() => {});
 
   if ("interrupted" in outcome) return outcome.interrupted;
   if (outcome.resolution.kind !== "answered") {

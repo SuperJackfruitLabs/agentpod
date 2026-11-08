@@ -219,6 +219,7 @@ export type PermissionResolution =
   | { kind: "unmappable" }
   /** The board has no record of the question, so nobody can be asked it. */
   | { kind: "unrecorded" }
-  | { kind: "timeout"; waitMs: number }
+  /** `expired`: the request's own `harness-permission/v1` expiry came before `waitMs`. */
+  | { kind: "timeout"; waitMs: number; expired?: boolean }
   /** The lease went while we waited. The abort path owns the outcome. */
   | { kind: "aborted" };
