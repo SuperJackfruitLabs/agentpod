@@ -1727,8 +1727,9 @@ signal. A lost lease (409 `STALE_LEASE`) is *not* a halt; it is ordinary and the
 ### Gates arrive by push; the sweep is the floor
 
 Each board the roster names is subscribed to the hub's signed push route
-(`$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/push`, events `gate.pending` and
-`elicitation.pending`, signed with `SUPERPIPELINE_PUSH_SECRET`) by the gate sweeper — at hub start and
+(`$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/push`, events `gate.pending`,
+`elicitation.pending`, `delivery.pending` and `attention.pending`, signed with
+`SUPERPIPELINE_PUSH_SECRET`) by the gate sweeper — at hub start and
 again every five minutes, with the board's first rostered credential. Registration is an upsert, so
 the refresh repairs a rebuilt board or a rotated secret. Nothing to run by hand:
 
@@ -1740,6 +1741,27 @@ journalctl -u agentpod-hub | grep 'gate projected'      # a push arriving, secon
 `push subscription skipped` means the secret is unset and every gate waits for the sweep (≤ 5 min).
 Until 2026-10-07 no board was ever subscribed — superpipeline accepted the registration from a
 person only — so every gate came by sweep.
+
+**Cards waiting on a person** (charter: waiting cards and broker approvals reach chat). A card
+parked for `repeated-failure`, `blocked` or `not-authorised` is pushed as `attention.pending` and
+listed at `GET /v1/boards/:id/attention/pending`; the hub posts `dev.superpipeline.attention.v2`
+into the board room once per wait and records it in `matrix_attention_events` (migration 0123,
+keyed by board, card and wait id; `outcome_posted_at` is the receipt's claim). An answer
+(`attention.answer.v2`) is checked against the recorded options and sent as the person to the
+board's `cards/:id/resume` or `cards/:id/archive` with `expectedWaitId`; `WAIT_CHANGED` closes the
+card as settled elsewhere. The sweep posts what push missed and closes cards whose wait the board no
+longer lists (`dev.superpipeline.attention.outcome.v1`, `settled_elsewhere`) — only after a read that
+succeeded. Waiting cards count as decisions on the fleet Live Activity (`kind: attention`, no inline
+buttons). Logs: `matrix-attention` (`waiting card projected`, `an attention.answer.v2 was refused`
+with the reason, `superpipeline refused a waiting card answer` with the code) and `gate-sweep`
+(`a waiting card reached its room only by sweep`, `settled a waiting card whose wait ended
+elsewhere`).
+
+**SuperToolkit approval requests** arrive on `elicitation.pending` with an empty card and an
+`apr_…` id, and are posted and answered like any subject-bound question — the room shows the
+request's preview, never a card link. superpipeline refuses `allow_once` from anyone but a workspace
+owner or admin (`WORKSPACE_ADMIN_REQUIRED`), which the room says in words. They are not on the
+fleet Live Activity: no question is.
 
 ### When the agent reports for itself
 
