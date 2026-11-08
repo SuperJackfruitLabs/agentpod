@@ -1301,6 +1301,33 @@ describe("a permission wait is bounded by its request's expiry and outlives the 
     expect(await waitRecord()).toEqual({ session: null, seq: null, until: null });
   });
 
+  test("a turn that ends while the question is still being posted leaves no wait behind", async () => {
+    const asked = askingBoard(() => {});
+    // The board takes a while with the elicitation, so the ask is still draining the queue when the
+    // session dies and the turn is decided.
+    const slow = new SuperpipelineClient({
+      baseUrl: "https://board.test",
+      boardId: BOARD_ID,
+      token: TOKEN,
+      fetch: async (url, init) => {
+        const path = new URL(url).pathname;
+        if (path.endsWith("/activities")) await new Promise((r) => setTimeout(r, 150));
+        const { status, body } = asked.handler(path, init.body ? JSON.parse(init.body) : undefined);
+        return { status, ok: status >= 200 && status < 300, json: async () => body };
+      },
+    });
+    const acp = fakeAcp(() => {
+      setTimeout(() => acp.emit(ev("state", { status: "ended", reason: "the harness exited" })), 30);
+      return [permissionRequest()];
+    });
+
+    const result = await runOnce(deps(slow, acp.port, undefined, { permissionWaitMs: 30_000, permissionPollMs: 5 }));
+    expect(result.status).toBe("failed");
+    // Sleeping is how "it did not happen" is shown: the queued post finishes after the turn.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(await waitRecord()).toEqual({ session: null, seq: null, until: null });
+  });
+
   const lease = { runId: "run_restart00000000a", epoch: 4 };
   const leftBehind = async (until: Date) => {
     await openDispatch({ ...key(lease.runId), agentKey: agent.key, stationId: STATION_ID, leaseEpoch: lease.epoch });
