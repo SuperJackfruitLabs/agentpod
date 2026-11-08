@@ -510,7 +510,7 @@ describe("subscribing the boards to push when the sweeper starts", () => {
         body: {
           url: "https://hub.test/public/bridge/superpipeline/push",
           token: "shh",
-          events: ["gate.pending", "elicitation.pending", "delivery.pending", "attention.pending"],
+          events: ["gate.pending", "elicitation.pending", "delivery.pending", "attention.pending", "decision.reminded", "decision.escalated"],
         },
       },
     ]);

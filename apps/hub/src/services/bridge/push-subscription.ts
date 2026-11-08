@@ -22,9 +22,19 @@ import { SuperpipelineApiError, SuperpipelineClient, type Fetcher } from "./supe
  * The events the push route projects; anything else it acknowledges and ignores. `delivery.pending`
  * is the follow-up a manual-delivery approval owes (charter: "The decision envelope covers
  * questions and follow-ups" §3); `attention.pending` a card waiting on a person (charter: "Waiting
- * cards and broker approvals reach chat" §1).
+ * cards and broker approvals reach chat" §1); `decision.reminded` / `decision.escalated` a decision that
+ * passed its stage's timeout.
  */
-export const PUSH_EVENTS = ["gate.pending", "elicitation.pending", "delivery.pending", "attention.pending"] as const;
+export const PUSH_EVENTS = [
+  "gate.pending",
+  "elicitation.pending",
+  "delivery.pending",
+  "attention.pending",
+  // A waiting decision passed its stage's timeout (charter: "Unanswered decisions remind, then
+  // escalate" §2): the hub replies to the card it posted, and on escalation invites the admins.
+  "decision.reminded",
+  "decision.escalated",
+] as const;
 
 export function pushHookUrl(publicUrl: string): string {
   return `${publicUrl.replace(/\/+$/, "")}/public/bridge/superpipeline/push`;
