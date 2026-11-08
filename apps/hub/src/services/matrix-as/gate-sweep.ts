@@ -80,9 +80,17 @@ export interface GateSweepDeps {
    */
   postedGatesAwaitingOutcome?(boardId: string): Promise<Array<{ gateId: string; cardId: string }>>;
   /** How a gate was decided, or null when that cannot be read. `GET …/gates/:gateId`. */
-  decisionFor?(boardId: string, gateId: string): Promise<{ decision: string; decidedBy: string | null } | null>;
-  /** Post the outcome receipt and claim it, so two sweeps leave one line. */
-  settleOutcome?(gateId: string, decision: string, decidedBy: string | null): Promise<boolean>;
+  decisionFor?(
+    boardId: string,
+    gateId: string,
+  ): Promise<{ decision: string; decidedBy: string | null; chosen?: { id: string; label: string } | null } | null>;
+  /** Post the outcome receipt and claim it, so two sweeps leave one line. `chosen` names a variant chosen. */
+  settleOutcome?(
+    gateId: string,
+    decision: string,
+    decidedBy: string | null,
+    chosen?: { id: string; label: string } | null,
+  ): Promise<boolean>;
   /**
    * What a board said it is still waiting on, every pass it answered. The
    * fleet Live Activity clears the gates missing from it — an answer given on
@@ -342,7 +350,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
         // alone: posting "resolved" without the outcome would be inventing one, and a room that
         // says a gate was decided but not how is worse than one that still asks.
         if (!decided) continue;
-        if (await deps.settleOutcome?.(posted.gateId, decided.decision, decided.decidedBy)) {
+        if (await deps.settleOutcome?.(posted.gateId, decided.decision, decided.decidedBy, decided.chosen ?? null)) {
           settled++;
           log.info("settled a room card for a gate decided elsewhere", {
             gateId: posted.gateId,
@@ -618,7 +626,7 @@ export function bridgeGateSweepDeps(
       // Only a RESOLVED gate settles a card. A gate that is somehow neither pending nor resolved
       // is a shape this hub does not model, and guessing at it would put a wrong word in a room.
       if (!g || g.status !== "resolved" || !g.decision) return null;
-      return { decision: g.decision, decidedBy: g.decidedBy };
+      return { decision: g.decision, decidedBy: g.decidedBy, chosen: g.chosen };
     },
   };
 }

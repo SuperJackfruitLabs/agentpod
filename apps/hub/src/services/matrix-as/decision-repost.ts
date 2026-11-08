@@ -42,7 +42,7 @@ import type {
 import { attentionOptionsV2, attentionV2Content, isAttentionPending } from "./attention-wire";
 import { deliveryOptionsV2, deliverySubjectV2, deliveryV2Content, isDeliveryPending } from "./delivery-wire";
 import { ELICITATION_REQUEST_CONTENT_KEY, elicitationRequestCard, isElicitationPending } from "./elicitation-card";
-import { GATE_EVENT_TYPE, boardLink, gateEventContent, gateOptionsV2, gateRequestCard, gateSubjectV2, gateV2Content, isGatePending } from "./gate-wire";
+import { GATE_EVENT_TYPE, boardLink, gateEventContent, gateOptionsV2, gateRequestCard, gateSubjectV2, gateV2Content, gateVariantsV2, isGatePending } from "./gate-wire";
 import { legacyRequestEvents } from "./legacy-events";
 import { boundedQuestion, questionOptionsV2, questionSubjectV2, questionV2Content } from "./question-wire";
 
@@ -78,6 +78,13 @@ export type MoveOutcome = "moved" | "not-pending" | "changed" | "not-sent" | "se
 const ids = (options: ReadonlyArray<{ id: string; meaning?: string }> | null | undefined): string =>
   (options ?? []).map((o) => `${o.id}:${o.meaning ?? ""}`).join("|");
 
+/**
+ * A variant gate's subjects as one comparable value — what a re-posted card must still offer for the
+ * record its answers are judged against to hold (charter 2026-11-09). Null when there are none.
+ */
+const variantsKey = (variants: ReadonlyArray<{ id: string; digest: string }> | null | undefined): string | null =>
+  variants && variants.length > 0 ? variants.map((v) => `${v.id}@${v.digest}`).join("|") : null;
+
 const reply = (eventId: string) => ({ "m.relates_to": { "m.in_reply_to": { event_id: eventId } } });
 
 /** A decision's record as the move needs it: where its card is, and what an answer is judged against. */
@@ -106,7 +113,7 @@ function rebuild(t: MoveTarget, pending: unknown[], link: string | undefined): R
       const d: GatePendingDelivery = p;
       return {
         options: ids(gateOptionsV2(d)),
-        subjectDigest: gateSubjectV2(d)?.digest ?? null,
+        subjectDigest: gateSubjectV2(d)?.digest ?? variantsKey(gateVariantsV2(d)?.map((v) => ({ id: v.id, digest: v.subject.digest }))),
         content: { ...gateV2Content(d, link), [GATE_REQUEST_CONTENT_KEY]: gateRequestCard(d, link) },
         legacy: gateEventContent(d, link),
         gate: d,
@@ -136,7 +143,7 @@ async function recorded(t: MoveTarget, tenantId: string): Promise<Recorded | nul
   const mine = (r: { tenantId: string; boardId: string; cardId: string }) => r.tenantId === tenantId && r.boardId === t.boardId && r.cardId === t.cardId;
   if (t.decisionKind === "gate") {
     const [r] = await db.select().from(matrixGateEvents).where(eq(matrixGateEvents.gateId, t.decisionId)).limit(1);
-    return r && mine(r) ? { eventId: r.proseEventId ?? r.eventId, open: r.outcomePostedAt === null, options: ids(r.options), subjectDigest: r.approvalSubjectDigest } : null;
+    return r && mine(r) ? { eventId: r.proseEventId ?? r.eventId, open: r.outcomePostedAt === null, options: ids(r.options), subjectDigest: r.approvalSubjectDigest ?? variantsKey(r.approvalVariants) } : null;
   }
   if (t.decisionKind === "question") {
     const [r] = await db.select().from(matrixElicitationEvents).where(eq(matrixElicitationEvents.elicitationId, t.decisionId)).limit(1);

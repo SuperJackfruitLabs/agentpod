@@ -876,6 +876,13 @@
       "when": 1792580400014,
       "tag": "0124_decision_timeouts",
       "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1792580400015,
+      "tag": "0125_gate_variants",
+      "breakpoints": true
     }
   ]
 }

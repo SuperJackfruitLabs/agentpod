@@ -23,6 +23,7 @@ import {
   gateRequestCard,
   gateSubjectV2,
   gateV2Content,
+  gateVariantsV2,
 } from "./gate-wire";
 
 const log = createLogger("matrix-gates");
@@ -160,11 +161,13 @@ async function heldForJoin(d: GatePendingDelivery, roomId: string): Promise<Proj
 /**
  * Take the gate's claim; false when another delivery of the same gate already holds it.
  *
- * The claim also records what the gate offered and the subject it is bound to — exactly what
- * its gate.v2 carries — because a decision.v2 is checked against them, not against a list.
+ * The claim also records what the gate offered and the subject it is bound to, or the variants it
+ * offers a choice of — exactly what its gate.v2 carries — because a decision.v2 is checked against
+ * them, not against a list.
  */
 async function claimGate(tenantId: string, d: GatePendingDelivery, roomId: string): Promise<boolean> {
   const subject = gateSubjectV2(d);
+  const variants = gateVariantsV2(d);
   const claimed = await db
     .insert(matrixGateEvents)
     .values({
@@ -181,6 +184,15 @@ async function claimGate(tenantId: string, d: GatePendingDelivery, roomId: strin
       approvalSubjectId: subject?.id ?? null,
       approvalSubjectDigest: subject?.digest ?? null,
       approvalSubjectPreviewComplete: subject?.preview_complete ?? null,
+      approvalVariants:
+        variants?.map((v) => ({
+          id: v.id,
+          label: v.label,
+          subject_id: v.subject.id,
+          digest: v.subject.digest,
+          preview_complete: v.subject.preview_complete,
+          expires_at: v.subject.expires_at,
+        })) ?? null,
     })
     .onConflictDoNothing({ target: matrixGateEvents.gateId })
     .returning({ gateId: matrixGateEvents.gateId });

@@ -203,7 +203,12 @@ export interface MatrixBridge {
    * resolves the gate there and tells this hub nothing, leaving a room card offering Approve and
    * Reject for a decision already made. `services/matrix-as/gate-sweep.ts` is the caller.
    */
-  settleGate(gateId: string, decision: string, decidedBy: string | null): Promise<boolean>;
+  settleGate(
+    gateId: string,
+    decision: string,
+    decidedBy: string | null,
+    chosen?: { id: string; label: string } | null,
+  ): Promise<boolean>;
   /**
    * Close a delivery follow-up's room card when the board no longer owes it — a link recorded on
    * the web, the mode switched, the subject expired, the card archived. The gate sweep is the
@@ -780,7 +785,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       });
     },
 
-    settleGate: async (gateId, decision, decidedBy) => {
+    settleGate: async (gateId, decision, decidedBy, chosen) => {
       const [row] = await db
         .select()
         .from(matrixGateEvents)
@@ -791,7 +796,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       if (!row) return false;
 
       await settleGateOutcome(
-        { gateId, decision, decidedBy },
+        { gateId, decision, decidedBy, chosen: chosen ?? null },
         row.roomId,
         { boardId: row.boardId, eventId: row.eventId, proseEventId: row.proseEventId },
         {

@@ -13,6 +13,7 @@
 import { fleetSink, gateDecisionKey, noteFleet } from "../push";
 import { inlineGateOptions, type DecisionRecord } from "../push";
 import type { GatePendingDelivery } from "./gates";
+import { isVariantGate } from "./gate-wire";
 
 export interface PostedGate {
   roomId: string;
@@ -21,6 +22,7 @@ export interface PostedGate {
 }
 
 export function gateDecisionRecord(d: GatePendingDelivery, posted: PostedGate, at: number): DecisionRecord {
+  const variants = isVariantGate(d);
   return {
     key: gateDecisionKey(d.gateId),
     roomId: posted.roomId,
@@ -29,8 +31,10 @@ export function gateDecisionRecord(d: GatePendingDelivery, posted: PostedGate, a
     eventId: posted.proseEventId ?? posted.eventId,
     agent: d.producedBy,
     kind: "gate",
-    question: `Approve "${d.cardTitle}"?`,
-    options: inlineGateOptions(d.options),
+    question: variants ? `Choose a version of "${d.cardTitle}"` : `Approve "${d.cardTitle}"?`,
+    // A notification cannot show a choice of variants, so it offers no approval of any of them
+    // (charter 2026-11-09 §7); reject acts on the whole set and stays.
+    options: inlineGateOptions(variants ? d.options.filter((o) => o.id === "reject") : d.options),
     askedAt: at,
     boardId: d.boardId,
   };

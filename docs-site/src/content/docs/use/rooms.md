@@ -120,6 +120,9 @@ That is a deliberate widening of the gateway's otherwise strict line, taken so t
 something useful rather than "an agent needs you". It is the only place it applies: message pushes
 still carry ids only, and nothing else changed.
 
+A gate that offers a choice of versions never offers an approval on the Lock Screen — the card cannot
+show the versions — only a rejection; you choose in an updated app or on the board.
+
 A permission request or a gate the hub posted is also tagged on the push as time-sensitive, so it
 reaches a person through Focus — the tag, not the text.
 

@@ -618,9 +618,9 @@ function closable(c: Record<string, unknown>): boolean {
   );
 }
 
-describe("attention against the shared corpus (version 6, carried in 7)", () => {
-  test("the corpus is version 7", () => {
-    expect(corpus().version).toBe(7);
+describe("attention against the shared corpus (version 6, carried in 8)", () => {
+  test("the corpus is version 8", () => {
+    expect(corpus().version).toBe(8);
   });
 
   test("the hub's attention.v2 for a blocked card and a repeated failure is exactly what the corpus accepts", () => {
