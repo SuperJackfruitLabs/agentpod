@@ -4,6 +4,8 @@ process.env.NODE_ENV = "test";
 
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { ELICITATION_REQUEST_CONTENT_KEY } from "@agentpod/contract";
 
@@ -429,6 +431,85 @@ describe("the binding reaches the board's answer route", () => {
         claimOutcome: async () => true,
       });
       expect(replies[0]).toMatch(words);
+    }
+  });
+});
+
+// ── The shared corpus (fixture version 5) ────────────────────────────────────
+
+interface CorpusEvent {
+  suiteEventType: string;
+  variant?: string;
+  accept: Array<{ why: string; content: Record<string, unknown> }>;
+  reject: Array<{ why: string; content: Record<string, unknown> }>;
+}
+
+function corpusEvent(suiteEventType: string, variant: string): CorpusEvent | undefined {
+  const corpus: unknown = JSON.parse(
+    readFileSync(join(import.meta.dir, "../../../../../fixtures/ecosystem-identity/matrix_gate_events.json"), "utf8"),
+  );
+  const list: CorpusEvent[] =
+    typeof corpus === "object" && corpus !== null && "events" in corpus && Array.isArray(corpus.events) ? corpus.events : [];
+  return list.find((e) => e.suiteEventType === suiteEventType && e.variant === variant);
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const SUBJECT_KEYS = ["digest", "expires_at", "id", "preview", "preview_complete", "revision", "schema"];
+
+/** The rules a subject-bound question.v2 keeps, as a consumer would check them. */
+function wellFormedSubjectQuestion(c: Record<string, unknown>): boolean {
+  const s = c.subject;
+  if (!isObj(s) || Object.keys(s).toSorted().join() !== SUBJECT_KEYS.join()) return false;
+  if (typeof s.id !== "string" || typeof s.digest !== "string" || typeof s.preview_complete !== "boolean") return false;
+  if (!Array.isArray(c.options)) return false;
+  return c.options.every(
+    (o) => isObj(o) && (o.scope === undefined || ["once", "run", "always"].includes(String(o.scope))) && (o.requires === undefined || o.requires === "workspace-admin"),
+  );
+}
+
+describe("subject-bound question.v2 against the shared corpus", () => {
+  const asked = corpusEvent("dev.superpipeline.question.v2", "subject-bound");
+  const answered = corpusEvent("dev.superpipeline.question.answer.v2", "subject-bound");
+  const fixtureQuestion = strict({
+    elicitationId: "elc_9b44",
+    boardId: "brd_7c1f",
+    question: "Edit app.js in the workspace?",
+    approvalSubject: { ...SUBJECT, digest: "0588c96c7eff47e1a83d9fc1d0ecda3cc3b72e559a5c402bb9da29d9851dbceb", expiresAt: "2026-11-07T10:30:00.000Z" },
+  });
+
+  test("the hub's question.v2 for a strict decision is exactly what the corpus accepts", () => {
+    expect(asked?.accept).toHaveLength(1);
+    const { boardName: _n, ...d } = fixtureQuestion;
+    expect(questionV2Content(boundedQuestion(d), "https://superpipeline.dev/b/brd_7c1f/c/crd_51d0")).toEqual(asked?.accept[0]?.content ?? {});
+  });
+
+  test("every subject-bound question.v2 the corpus rejects breaks a rule the hub's output keeps", () => {
+    for (const { content } of asked?.accept ?? []) expect(wellFormedSubjectQuestion(content)).toBe(true);
+    expect(asked?.reject.length).toBeGreaterThanOrEqual(3);
+    for (const { why, content } of asked?.reject ?? []) expect(wellFormedSubjectQuestion(content), why).toBe(false);
+  });
+
+  const corpusRecorded = (): RecordedQuestion => ({
+    boardId: "brd_7c1f",
+    roomId: ROOM,
+    eventId: "$questionEventId",
+    options: questionOptionsV2(fixtureQuestion),
+    freeText: null,
+    subject: { id: SUBJECT.id, digest: "0588c96c7eff47e1a83d9fc1d0ecda3cc3b72e559a5c402bb9da29d9851dbceb", previewComplete: true, expiresAt: new Date(FUTURE) },
+  });
+
+  test("every subject-bound answer the corpus accepts is carried with its binding; every one it rejects is refused", async () => {
+    expect(answered?.accept.length).toBeGreaterThanOrEqual(2);
+    for (const { why, content } of answered?.accept ?? []) {
+      const { deps, answered: sent } = answerDeps(corpusRecorded());
+      expect((await handleQuestionAnswer({ sender: HUMAN, content }, ROOM, deps)).status, why).toBe("answered");
+      expect(sent[0]?.subject, why).toEqual({ id: SUBJECT.id, digest: "0588c96c7eff47e1a83d9fc1d0ecda3cc3b72e559a5c402bb9da29d9851dbceb" });
+    }
+    expect(answered?.reject.length).toBeGreaterThanOrEqual(3);
+    for (const { why, content } of answered?.reject ?? []) {
+      const { deps, answered: sent } = answerDeps(corpusRecorded());
+      expect((await handleQuestionAnswer({ sender: HUMAN, content }, ROOM, deps)).status, why).toBe("refused");
+      expect(sent, why).toHaveLength(0);
     }
   });
 });

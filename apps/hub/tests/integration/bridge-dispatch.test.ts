@@ -1075,7 +1075,7 @@ describe("a permission request is asked of a human", () => {
 
     const elicitations = board.calls
       .filter((c) => c.path.endsWith("/activities"))
-      .map((c) => c.body as { type?: string; parameter?: { subject?: unknown; options?: unknown } })
+      .map((c) => c.body as { type?: string; parameter?: Record<string, unknown> })
       .filter((a) => a.type === "elicitation");
     expect(elicitations).toHaveLength(2);
     expect(elicitations[0]?.parameter?.subject).toBeDefined();

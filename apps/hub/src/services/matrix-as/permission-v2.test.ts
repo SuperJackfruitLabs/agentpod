@@ -4,12 +4,17 @@ process.env.NODE_ENV = "test";
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { PERMISSION_REQUEST_CONTENT_KEY } from "@agentpod/contract";
 
 import { rawSql } from "../../db/drizzle";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../../../tests/helpers/database";
-import { expirePermissions } from "./permission-answer";
+import { permissionRequestContent } from "./activity";
+import { expirePermissions, permissionRefusal } from "./permission-answer";
 import { notePermissionEvent, permissionRecord, recordPermissionRequest } from "./permission-records";
 import {
   HARNESS_PERMISSION_SCHEMA,
@@ -20,9 +25,10 @@ import {
   parsePermissionAnswer,
   permissionOptionsV2,
   permissionPreview,
+  permissionOutcomeContent,
   permissionV2Content,
 } from "./permission-wire";
-import { clearPendingPermission, notePendingPermission, pendingPermissionFor } from "./permissions";
+import { clearPendingPermission, notePendingPermission, pendingPermissionFor, permissionPrompt } from "./permissions";
 
 /**
  * permission.v2 — a harness permission in AgentPod's own envelope (charter: "Strict decisions and
@@ -246,5 +252,110 @@ describe("permission.v2 — expiry", () => {
     const p = must(harnessPermission(SESSION, 23, PAYLOAD, new Date()));
     expect(await recordPermissionRequest("!unknown:id.test", p)).toBe(false);
     expect(await permissionRecord(p.requestId)).toBeNull();
+  });
+});
+
+// ── The shared corpus (fixture version 5) ────────────────────────────────────
+
+interface CorpusEvent {
+  suiteEventType: string;
+  accept: Array<{ why: string; content: Record<string, unknown> }>;
+  reject: Array<{ why: string; content: Record<string, unknown> }>;
+}
+
+function corpusEvent(suiteEventType: string): CorpusEvent | undefined {
+  const corpus: unknown = JSON.parse(
+    readFileSync(join(import.meta.dir, "../../../../../fixtures/ecosystem-identity/matrix_gate_events.json"), "utf8"),
+  );
+  const list: CorpusEvent[] =
+    typeof corpus === "object" && corpus !== null && "events" in corpus && Array.isArray(corpus.events) ? corpus.events : [];
+  return list.find((e) => e.suiteEventType === suiteEventType);
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+function wellFormedPermission(c: Record<string, unknown>): boolean {
+  if (c.suite_event_type !== PERMISSION_V2_SUITE_TYPE || typeof c.request_id !== "string" || typeof c.body !== "string") return false;
+  if (!isObj(c.subject) || c.subject.schema !== HARNESS_PERMISSION_SCHEMA || c.subject.id !== c.request_id) return false;
+  if (!isObj(c[PERMISSION_REQUEST_CONTENT_KEY])) return false;
+  return Array.isArray(c.options) && c.options.every((o) => isObj(o) && typeof o.id === "string" && typeof o.meaning === "string");
+}
+
+function wellFormedOutcome(c: Record<string, unknown>): boolean {
+  const rel = c["m.relates_to"];
+  return (
+    c.suite_event_type === "dev.agentpod.permission.outcome.v1" &&
+    ["selected", "expired", "cancelled"].includes(String(c.outcome)) &&
+    isObj(rel) &&
+    rel.rel_type === "m.reference" &&
+    typeof rel.event_id === "string"
+  );
+}
+
+describe("permission.v2 against the shared corpus", () => {
+  const FIXTURE_PAYLOAD = {
+    toolCall: { toolCallId: "tc_7", title: "Run the test suite", kind: "execute", rawInput: { command: "bun test" }, locations: [{ path: "apps/hub" }] },
+    options: [
+      { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+      { optionId: "allow_always", name: "Always allow", kind: "allow_always" },
+      { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+      { optionId: "reject_always", name: "Never allow", kind: "reject_always" },
+    ],
+  };
+  const p = must(harnessPermission("acps_3f0c", 12, FIXTURE_PAYLOAD, new Date("2026-11-07T10:00:00.000Z")));
+  const named = FIXTURE_PAYLOAD.options.map((o) => ({ optionId: o.optionId, name: o.name }));
+
+  test("the hub's permission prose message is exactly what the corpus accepts", () => {
+    const event = corpusEvent(PERMISSION_V2_SUITE_TYPE);
+    expect(event?.accept).toHaveLength(1);
+    const ours: Record<string, unknown> = {
+      msgtype: "m.text",
+      body: permissionPrompt(p.title, named),
+      ...permissionV2Content(p),
+      [PERMISSION_REQUEST_CONTENT_KEY]: permissionRequestContent("acps_3f0c", 12, p.title, named),
+    };
+    expect(ours).toEqual(event?.accept[0]?.content ?? {});
+    for (const { content } of event?.accept ?? []) expect(wellFormedPermission(content)).toBe(true);
+    for (const { why, content } of event?.reject ?? []) expect(wellFormedPermission(content), why).toBe(false);
+  });
+
+  test("every answer the corpus accepts passes the hub's judgement; every one it rejects is refused", () => {
+    const event = corpusEvent("dev.agentpod.permission.answer.v2");
+    const record = {
+      requestId: p.requestId,
+      tenantId: BOOTSTRAP_TENANT_ID,
+      roomId: "!room",
+      sessionId: "acps_3f0c",
+      requestSeq: 12,
+      eventId: "$permissionEventId",
+      digest: p.subject.digest,
+      previewComplete: p.subject.preview_complete,
+      options: p.options,
+      expiresAt: new Date(Date.now() + 60_000),
+      status: "pending" as const,
+      optionId: null,
+      answeredByPrincipal: null,
+      closedAt: null,
+    };
+    const ctx = { roomId: "!room", sessionId: "acps_3f0c" };
+    expect(event?.accept.length).toBeGreaterThanOrEqual(2);
+    for (const { why, content } of event?.accept ?? []) {
+      expect(permissionRefusal(must(parsePermissionAnswer(content)), record, ctx, new Date()), why).toBeNull();
+    }
+    expect(event?.reject.length).toBeGreaterThanOrEqual(3);
+    for (const { why, content } of event?.reject ?? []) {
+      const parsed = parsePermissionAnswer(content);
+      expect(parsed === null || permissionRefusal(parsed, record, ctx, new Date()) !== null, why).toBe(true);
+    }
+  });
+
+  test("the hub's outcomes are exactly what the corpus accepts", () => {
+    const event = corpusEvent("dev.agentpod.permission.outcome.v1");
+    const ref = { requestId: p.requestId, sessionId: "acps_3f0c", requestSeq: 12, eventId: "$permissionEventId" };
+    expect(event?.accept.map((a) => a.content)).toEqual([
+      permissionOutcomeContent(ref, "selected", "allow_once", "fixture-person"),
+      permissionOutcomeContent(ref, "expired", null, null),
+    ]);
+    for (const { why, content } of event?.reject ?? []) expect(wellFormedOutcome(content), why).toBe(false);
   });
 });

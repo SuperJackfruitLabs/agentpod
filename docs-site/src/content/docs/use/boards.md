@@ -88,6 +88,14 @@ otherwise — so a board that has not been reconfigured is served late rather th
 **Buttons only.** A question whose agent offered no options cannot be answered from the room, and
 the room says where it can be answered rather than pretending.
 
+**Some questions approve an exact operation.** A strict decision (a Salaam agent asking to write a
+file) and a harness permission routed through a board both carry what they would do: the summary,
+the files and their previews, or the command. An updated app shows it and binds your answer to that
+exact version; an answer for a version that has since changed, or one that arrives after the
+decision expired, is refused. Replying with a number can **decline** such a question but never
+approve it — the reply cannot show you what you would be approving — so the room points you to an
+updated app or the board instead.
+
 ## Next
 
 - [Talking to an agent in a room](/use/rooms/) — the bridge these cards arrive on

@@ -1,6 +1,6 @@
 {
   "corpus": "ecosystem-identity/matrix-gate-events",
-  "version": 4,
+  "version": 5,
   "authoredAt": "2026-08-30",
   "authoredFrom": "the gates table in superpipeline apps/api/src/board/board-do.ts, the GateDecision union it resolves against, and charter decisions/2026-08-30-a-gate-closes-over-chat.md",
   "purpose": "A superpipeline approval gate crosses into a Matrix room and a human's answer crosses back. Three codebases must agree on the field names: the board that opens the gate, the Application Service that projects and resolves it, and the client that draws the buttons. A rename in any one of them is a gate that silently never resolves — which reads to the human as a button that does nothing.",
@@ -2073,6 +2073,1052 @@
             "m.relates_to": {
               "rel_type": "m.reference",
               "event_id": "$deliveryEventId"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.question.v2",
+      "variant": "subject-bound",
+      "direction": "outbound — an agent asks for a strict decision, or a board-dispatched harness permission",
+      "decidedBy": "charter decisions/2026-11-07-strict-decisions-and-permissions-bind-their-subject.md",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as for any question.v2. A consumer that finds the first question.v2 entry by suiteEventType reads the ordinary one; this entry adds `subject` and option `scope` / `requires`.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "suite_event_type",
+        "schema_version",
+        "elicitation_id",
+        "board_id",
+        "card_id",
+        "run_id",
+        "stage_key",
+        "card_title",
+        "asked_by",
+        "question",
+        "options",
+        "subject"
+      ],
+      "notes": {
+        "subject": "gate.v2's subject in snake_case: {id, digest, schema, revision, expires_at, preview, preview_complete}, re-bounded by the carrier as for a gate. schema is `salaam-operation/v1` (a strict decision: id = the offer's request id, digest = the decision digest) or `harness-permission/v1` (a board-dispatched harness permission). The digest is opaque: compared byte for byte, never computed.",
+        "withholding": "A client offers no approve-meaning option unless preview_complete is true and every block is drawable. The Application Service refuses an approving answer on an incomplete preview, as for a gate.",
+        "options": "Each option may carry scope (once | run | always) and requires (workspace-admin). A client shows them and may hide an option the viewer cannot take; the producer judges both.",
+        "body": "The question's prose, numbered as before, with a line saying a reply here can only decline it: a typed reply (and a v1 card's button) never approves a subject-bound question."
+      },
+      "accept": [
+        {
+          "why": "a strict decision with a complete preview",
+          "content": {
+            "msgtype": "m.text",
+            "body": "An agent is waiting on you — \"Upgrade the build image\" at stage `build`.\n\nEdit app.js in the workspace?\n\n1. Approve\n2. Approve for this run\n3. Always allow\n4. Deny\n\nReply with the number, or the option's name. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_51d0)\n\nThis approves an exact operation. Approve it in an updated app, which shows what it does, or on the board. A reply here can only decline it.",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "elc_9b44",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_51d0",
+            "run_id": "run_12",
+            "stage_key": "build",
+            "card_title": "Upgrade the build image",
+            "asked_by": "agt_31d0",
+            "question": "Edit app.js in the workspace?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "once"
+              },
+              {
+                "id": "approve-run",
+                "label": "Approve for this run",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "run"
+              },
+              {
+                "id": "always",
+                "label": "Always allow",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "always",
+                "requires": "workspace-admin"
+              },
+              {
+                "id": "deny",
+                "label": "Deny",
+                "meaning": "reject",
+                "needs_comment": false,
+                "scope": "once"
+              }
+            ],
+            "subject": {
+              "id": "8f9a0d0e-4b2a-4c1e-9c55-1a2b3c4d5e6f",
+              "digest": "0588c96c7eff47e1a83d9fc1d0ecda3cc3b72e559a5c402bb9da29d9851dbceb",
+              "schema": "salaam-operation/v1",
+              "revision": 1,
+              "expires_at": "2026-11-07T10:30:00.000Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "text": "Edit app.js in the workspace"
+                },
+                {
+                  "type": "field",
+                  "label": "File",
+                  "value": "app.js · edit · 16 bytes"
+                },
+                {
+                  "type": "text",
+                  "text": "console.log(1);\n"
+                }
+              ],
+              "preview_complete": true
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_51d0"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "the subject in camelCase. The Matrix wire is snake_case.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "An agent is waiting on you — \"Upgrade the build image\" at stage `build`.\n\nEdit app.js in the workspace?\n\n1. Approve\n2. Approve for this run\n3. Always allow\n4. Deny\n\nReply with the number, or the option's name. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_51d0)\n\nThis approves an exact operation. Approve it in an updated app, which shows what it does, or on the board. A reply here can only decline it.",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "elc_9b44",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_51d0",
+            "run_id": "run_12",
+            "stage_key": "build",
+            "card_title": "Upgrade the build image",
+            "asked_by": "agt_31d0",
+            "question": "Edit app.js in the workspace?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "once"
+              },
+              {
+                "id": "approve-run",
+                "label": "Approve for this run",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "run"
+              },
+              {
+                "id": "always",
+                "label": "Always allow",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "always",
+                "requires": "workspace-admin"
+              },
+              {
+                "id": "deny",
+                "label": "Deny",
+                "meaning": "reject",
+                "needs_comment": false,
+                "scope": "once"
+              }
+            ],
+            "subject": {
+              "id": "8f9a0d0e-4b2a-4c1e-9c55-1a2b3c4d5e6f",
+              "digest": "0588c96c7eff47e1a83d9fc1d0ecda3cc3b72e559a5c402bb9da29d9851dbceb",
+              "schema": "salaam-operation/v1",
+              "revision": 1,
+              "expires_at": "2026-11-07T10:30:00.000Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "text": "Edit app.js in the workspace"
+                },
+                {
+                  "type": "field",
+                  "label": "File",
+                  "value": "app.js · edit · 16 bytes"
+                },
+                {
+                  "type": "text",
+                  "text": "console.log(1);\n"
+                }
+              ],
+              "previewComplete": true
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_51d0"
+          }
+        },
+        {
+          "why": "an option scope outside once | run | always",
+          "content": {
+            "msgtype": "m.text",
+            "body": "An agent is waiting on you — \"Upgrade the build image\" at stage `build`.\n\nEdit app.js in the workspace?\n\n1. Approve\n2. Approve for this run\n3. Always allow\n4. Deny\n\nReply with the number, or the option's name. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_51d0)\n\nThis approves an exact operation. Approve it in an updated app, which shows what it does, or on the board. A reply here can only decline it.",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "elc_9b44",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_51d0",
+            "run_id": "run_12",
+            "stage_key": "build",
+            "card_title": "Upgrade the build image",
+            "asked_by": "agt_31d0",
+            "question": "Edit app.js in the workspace?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "forever"
+              },
+              {
+                "id": "approve-run",
+                "label": "Approve for this run",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "run"
+              },
+              {
+                "id": "always",
+                "label": "Always allow",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "always",
+                "requires": "workspace-admin"
+              },
+              {
+                "id": "deny",
+                "label": "Deny",
+                "meaning": "reject",
+                "needs_comment": false,
+                "scope": "once"
+              }
+            ],
+            "subject": {
+              "id": "8f9a0d0e-4b2a-4c1e-9c55-1a2b3c4d5e6f",
+              "digest": "0588c96c7eff47e1a83d9fc1d0ecda3cc3b72e559a5c402bb9da29d9851dbceb",
+              "schema": "salaam-operation/v1",
+              "revision": 1,
+              "expires_at": "2026-11-07T10:30:00.000Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "text": "Edit app.js in the workspace"
+                },
+                {
+                  "type": "field",
+                  "label": "File",
+                  "value": "app.js · edit · 16 bytes"
+                },
+                {
+                  "type": "text",
+                  "text": "console.log(1);\n"
+                }
+              ],
+              "preview_complete": true
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_51d0"
+          }
+        },
+        {
+          "why": "a subject with no digest: nothing to bind an answer to",
+          "content": {
+            "msgtype": "m.text",
+            "body": "An agent is waiting on you — \"Upgrade the build image\" at stage `build`.\n\nEdit app.js in the workspace?\n\n1. Approve\n2. Approve for this run\n3. Always allow\n4. Deny\n\nReply with the number, or the option's name. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_51d0)\n\nThis approves an exact operation. Approve it in an updated app, which shows what it does, or on the board. A reply here can only decline it.",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "elc_9b44",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_51d0",
+            "run_id": "run_12",
+            "stage_key": "build",
+            "card_title": "Upgrade the build image",
+            "asked_by": "agt_31d0",
+            "question": "Edit app.js in the workspace?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "once"
+              },
+              {
+                "id": "approve-run",
+                "label": "Approve for this run",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "run"
+              },
+              {
+                "id": "always",
+                "label": "Always allow",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "always",
+                "requires": "workspace-admin"
+              },
+              {
+                "id": "deny",
+                "label": "Deny",
+                "meaning": "reject",
+                "needs_comment": false,
+                "scope": "once"
+              }
+            ],
+            "subject": {
+              "id": "8f9a0d0e-4b2a-4c1e-9c55-1a2b3c4d5e6f",
+              "schema": "salaam-operation/v1",
+              "revision": 1,
+              "expires_at": "2026-11-07T10:30:00.000Z",
+              "preview": [
+                {
+                  "type": "text",
+                  "text": "Edit app.js in the workspace"
+                },
+                {
+                  "type": "field",
+                  "label": "File",
+                  "value": "app.js · edit · 16 bytes"
+                },
+                {
+                  "type": "text",
+                  "text": "console.log(1);\n"
+                }
+              ],
+              "preview_complete": true
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_51d0"
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.question.answer.v2",
+      "variant": "subject-bound",
+      "direction": "inbound — the human answers a subject-bound question",
+      "decidedBy": "charter decisions/2026-11-07-strict-decisions-and-permissions-bind-their-subject.md",
+      "sender": "the human's own Matrix session",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "schema_version",
+        "suite_event_type",
+        "elicitation_id",
+        "option_id",
+        "subject",
+        "m.relates_to"
+      ],
+      "notes": {
+        "subject": "{id, digest} copied from the question the person saw. The Application Service refuses an answer without it, one that does not match the binding it recorded when it posted the question, an approval when that preview was incomplete, and any answer after expires_at; it then passes `subject` to the board's answer route, which judges it again (APPROVAL_SUBJECT_MISMATCH, DECISION_EXPIRED).",
+        "typed": "A typed reply never approves a subject-bound question. A typed decline is carried bound to the recorded subject, so the board refuses it if the subject has since changed."
+      },
+      "accept": [
+        {
+          "why": "an approval carrying the binding",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approve",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "elc_9b44",
+            "option_id": "approve",
+            "subject": {
+              "id": "8f9a0d0e-4b2a-4c1e-9c55-1a2b3c4d5e6f",
+              "digest": "0588c96c7eff47e1a83d9fc1d0ecda3cc3b72e559a5c402bb9da29d9851dbceb"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$questionEventId"
+            }
+          }
+        },
+        {
+          "why": "a decline carrying the binding",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Deny",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "elc_9b44",
+            "option_id": "deny",
+            "subject": {
+              "id": "8f9a0d0e-4b2a-4c1e-9c55-1a2b3c4d5e6f",
+              "digest": "0588c96c7eff47e1a83d9fc1d0ecda3cc3b72e559a5c402bb9da29d9851dbceb"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$questionEventId"
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "an approval with no binding",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approve",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "elc_9b44",
+            "option_id": "approve",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$questionEventId"
+            }
+          }
+        },
+        {
+          "why": "a binding whose digest is not the question's",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approve",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "elc_9b44",
+            "option_id": "approve",
+            "subject": {
+              "id": "8f9a0d0e-4b2a-4c1e-9c55-1a2b3c4d5e6f",
+              "digest": "0000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$questionEventId"
+            }
+          }
+        },
+        {
+          "why": "a decline whose binding names another subject",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Deny",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "elc_9b44",
+            "option_id": "deny",
+            "subject": {
+              "id": "another-approval",
+              "digest": "0588c96c7eff47e1a83d9fc1d0ecda3cc3b72e559a5c402bb9da29d9851dbceb"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$questionEventId"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.agentpod.permission.v2",
+      "direction": "outbound — a harness asks permission (ACP session/request_permission)",
+      "decidedBy": "charter decisions/2026-11-07-strict-decisions-and-permissions-bind-their-subject.md §5",
+      "sender": "the station's agent, in its station room",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content. AgentPod's own namespace, because AgentPod judges a harness permission. The same prose message carries the v1 card under `dev.agentpod.permission`, unchanged, so v1 and v2 clients read one event and one push.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "suite_event_type",
+        "schema_version",
+        "request_id",
+        "session_id",
+        "request_seq",
+        "title",
+        "options",
+        "subject"
+      ],
+      "notes": {
+        "options": "From ACP's kinds: allow_once → approve/once, allow_always → approve/always, reject_once → reject/once, reject_always → reject/always; any other kind → choose with no scope. `id` is the ACP optionId the answer names.",
+        "subject": "schema harness-permission/v1; id = `<session_id>:<request_seq>` (= request_id); digest = sha256 hex of the canonical (recursively sorted keys, no whitespace) JSON {session_id, request_seq, tool_call, options} over the full ACP request; revision 1; expires_at 30 minutes after the request; preview: the tool title and kind, the command or raw input, each diff's path and new text, the locations. preview_complete is false when anything was cut or cannot be drawn (a terminal, an image).",
+        "body": "The v1 prose, numbered, so a stock client can still answer by replying a number. The typed path is judged against the same record: a request that expired or was settled is refused, never answered."
+      },
+      "accept": [
+        {
+          "why": "a command, with all four ACP option kinds",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Permission needed: Run the test suite\n\n1. Allow once\n2. Always allow\n3. Reject\n4. Never allow\n\nReply with the number, or the option's name.",
+            "suite_event_type": "dev.agentpod.permission.v2",
+            "schema_version": 1,
+            "request_id": "acps_3f0c:12",
+            "session_id": "acps_3f0c",
+            "request_seq": 12,
+            "title": "Run the test suite",
+            "tool_kind": "execute",
+            "options": [
+              {
+                "id": "allow_once",
+                "label": "Allow once",
+                "meaning": "approve",
+                "scope": "once"
+              },
+              {
+                "id": "allow_always",
+                "label": "Always allow",
+                "meaning": "approve",
+                "scope": "always"
+              },
+              {
+                "id": "reject_once",
+                "label": "Reject",
+                "meaning": "reject",
+                "scope": "once"
+              },
+              {
+                "id": "reject_always",
+                "label": "Never allow",
+                "meaning": "reject",
+                "scope": "always"
+              }
+            ],
+            "subject": {
+              "id": "acps_3f0c:12",
+              "digest": "bb03bfd8ee6d757e6957d029cd6a7b8e004f16386755ce672e3f97f445563878",
+              "schema": "harness-permission/v1",
+              "revision": 1,
+              "expires_at": "2026-11-07T10:30:00.000Z",
+              "preview": [
+                {
+                  "type": "field",
+                  "label": "Tool",
+                  "value": "Run the test suite"
+                },
+                {
+                  "type": "field",
+                  "label": "Kind",
+                  "value": "execute"
+                },
+                {
+                  "type": "text",
+                  "label": "Command",
+                  "text": "bun test"
+                },
+                {
+                  "type": "field",
+                  "label": "Location",
+                  "value": "apps/hub"
+                }
+              ],
+              "preview_complete": true
+            },
+            "dev.agentpod.permission": {
+              "schema_version": 1,
+              "session_id": "acps_3f0c",
+              "request_seq": 12,
+              "title": "Run the test suite",
+              "options": [
+                {
+                  "option_id": "allow_once",
+                  "name": "Allow once"
+                },
+                {
+                  "option_id": "allow_always",
+                  "name": "Always allow"
+                },
+                {
+                  "option_id": "reject_once",
+                  "name": "Reject"
+                },
+                {
+                  "option_id": "reject_always",
+                  "name": "Never allow"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "an option with no meaning",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Permission needed: Run the test suite\n\n1. Allow once\n2. Always allow\n3. Reject\n4. Never allow\n\nReply with the number, or the option's name.",
+            "suite_event_type": "dev.agentpod.permission.v2",
+            "schema_version": 1,
+            "request_id": "acps_3f0c:12",
+            "session_id": "acps_3f0c",
+            "request_seq": 12,
+            "title": "Run the test suite",
+            "tool_kind": "execute",
+            "options": [
+              {
+                "id": "allow_once",
+                "label": "Allow once",
+                "scope": "once"
+              },
+              {
+                "id": "allow_always",
+                "label": "Always allow",
+                "meaning": "approve",
+                "scope": "always"
+              },
+              {
+                "id": "reject_once",
+                "label": "Reject",
+                "meaning": "reject",
+                "scope": "once"
+              },
+              {
+                "id": "reject_always",
+                "label": "Never allow",
+                "meaning": "reject",
+                "scope": "always"
+              }
+            ],
+            "subject": {
+              "id": "acps_3f0c:12",
+              "digest": "bb03bfd8ee6d757e6957d029cd6a7b8e004f16386755ce672e3f97f445563878",
+              "schema": "harness-permission/v1",
+              "revision": 1,
+              "expires_at": "2026-11-07T10:30:00.000Z",
+              "preview": [
+                {
+                  "type": "field",
+                  "label": "Tool",
+                  "value": "Run the test suite"
+                },
+                {
+                  "type": "field",
+                  "label": "Kind",
+                  "value": "execute"
+                },
+                {
+                  "type": "text",
+                  "label": "Command",
+                  "text": "bun test"
+                },
+                {
+                  "type": "field",
+                  "label": "Location",
+                  "value": "apps/hub"
+                }
+              ],
+              "preview_complete": true
+            },
+            "dev.agentpod.permission": {
+              "schema_version": 1,
+              "session_id": "acps_3f0c",
+              "request_seq": 12,
+              "title": "Run the test suite",
+              "options": [
+                {
+                  "option_id": "allow_once",
+                  "name": "Allow once"
+                },
+                {
+                  "option_id": "allow_always",
+                  "name": "Always allow"
+                },
+                {
+                  "option_id": "reject_once",
+                  "name": "Reject"
+                },
+                {
+                  "option_id": "reject_always",
+                  "name": "Never allow"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "why": "a subject of another schema",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Permission needed: Run the test suite\n\n1. Allow once\n2. Always allow\n3. Reject\n4. Never allow\n\nReply with the number, or the option's name.",
+            "suite_event_type": "dev.agentpod.permission.v2",
+            "schema_version": 1,
+            "request_id": "acps_3f0c:12",
+            "session_id": "acps_3f0c",
+            "request_seq": 12,
+            "title": "Run the test suite",
+            "tool_kind": "execute",
+            "options": [
+              {
+                "id": "allow_once",
+                "label": "Allow once",
+                "meaning": "approve",
+                "scope": "once"
+              },
+              {
+                "id": "allow_always",
+                "label": "Always allow",
+                "meaning": "approve",
+                "scope": "always"
+              },
+              {
+                "id": "reject_once",
+                "label": "Reject",
+                "meaning": "reject",
+                "scope": "once"
+              },
+              {
+                "id": "reject_always",
+                "label": "Never allow",
+                "meaning": "reject",
+                "scope": "always"
+              }
+            ],
+            "subject": {
+              "id": "acps_3f0c:12",
+              "digest": "bb03bfd8ee6d757e6957d029cd6a7b8e004f16386755ce672e3f97f445563878",
+              "schema": "salaam-operation/v1",
+              "revision": 1,
+              "expires_at": "2026-11-07T10:30:00.000Z",
+              "preview": [
+                {
+                  "type": "field",
+                  "label": "Tool",
+                  "value": "Run the test suite"
+                },
+                {
+                  "type": "field",
+                  "label": "Kind",
+                  "value": "execute"
+                },
+                {
+                  "type": "text",
+                  "label": "Command",
+                  "text": "bun test"
+                },
+                {
+                  "type": "field",
+                  "label": "Location",
+                  "value": "apps/hub"
+                }
+              ],
+              "preview_complete": true
+            },
+            "dev.agentpod.permission": {
+              "schema_version": 1,
+              "session_id": "acps_3f0c",
+              "request_seq": 12,
+              "title": "Run the test suite",
+              "options": [
+                {
+                  "option_id": "allow_once",
+                  "name": "Allow once"
+                },
+                {
+                  "option_id": "allow_always",
+                  "name": "Always allow"
+                },
+                {
+                  "option_id": "reject_once",
+                  "name": "Reject"
+                },
+                {
+                  "option_id": "reject_always",
+                  "name": "Never allow"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "why": "no request_id: nothing an answer can name",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Permission needed: Run the test suite\n\n1. Allow once\n2. Always allow\n3. Reject\n4. Never allow\n\nReply with the number, or the option's name.",
+            "suite_event_type": "dev.agentpod.permission.v2",
+            "schema_version": 1,
+            "session_id": "acps_3f0c",
+            "request_seq": 12,
+            "title": "Run the test suite",
+            "tool_kind": "execute",
+            "options": [
+              {
+                "id": "allow_once",
+                "label": "Allow once",
+                "meaning": "approve",
+                "scope": "once"
+              },
+              {
+                "id": "allow_always",
+                "label": "Always allow",
+                "meaning": "approve",
+                "scope": "always"
+              },
+              {
+                "id": "reject_once",
+                "label": "Reject",
+                "meaning": "reject",
+                "scope": "once"
+              },
+              {
+                "id": "reject_always",
+                "label": "Never allow",
+                "meaning": "reject",
+                "scope": "always"
+              }
+            ],
+            "subject": {
+              "id": "acps_3f0c:12",
+              "digest": "bb03bfd8ee6d757e6957d029cd6a7b8e004f16386755ce672e3f97f445563878",
+              "schema": "harness-permission/v1",
+              "revision": 1,
+              "expires_at": "2026-11-07T10:30:00.000Z",
+              "preview": [
+                {
+                  "type": "field",
+                  "label": "Tool",
+                  "value": "Run the test suite"
+                },
+                {
+                  "type": "field",
+                  "label": "Kind",
+                  "value": "execute"
+                },
+                {
+                  "type": "text",
+                  "label": "Command",
+                  "text": "bun test"
+                },
+                {
+                  "type": "field",
+                  "label": "Location",
+                  "value": "apps/hub"
+                }
+              ],
+              "preview_complete": true
+            },
+            "dev.agentpod.permission": {
+              "schema_version": 1,
+              "session_id": "acps_3f0c",
+              "request_seq": 12,
+              "title": "Run the test suite",
+              "options": [
+                {
+                  "option_id": "allow_once",
+                  "name": "Allow once"
+                },
+                {
+                  "option_id": "allow_always",
+                  "name": "Always allow"
+                },
+                {
+                  "option_id": "reject_once",
+                  "name": "Reject"
+                },
+                {
+                  "option_id": "reject_always",
+                  "name": "Never allow"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.agentpod.permission.answer.v2",
+      "direction": "inbound — the human answers a harness permission",
+      "decidedBy": "charter decisions/2026-11-07-strict-decisions-and-permissions-bind-their-subject.md §6",
+      "sender": "the human's own Matrix session",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content. Never passed to the agent as a prompt, whatever it carries.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "schema_version",
+        "suite_event_type",
+        "request_id",
+        "option_id",
+        "subject",
+        "m.relates_to"
+      ],
+      "notes": {
+        "judge": "AgentPod checks the request (recorded for this room), the m.reference to its prose message, the room's current session, the binding {id, digest}, that the option was offered, that the request is still pending and unexpired, the preview rule for approvals, and the answerer's grant to dispatch the agent. It records who answered and closes the card with dev.agentpod.permission.outcome.v1. A late or stale answer is refused with a reply in the room."
+      },
+      "accept": [
+        {
+          "why": "allow once",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Allow once",
+            "schema_version": 1,
+            "suite_event_type": "dev.agentpod.permission.answer.v2",
+            "request_id": "acps_3f0c:12",
+            "option_id": "allow_once",
+            "subject": {
+              "id": "acps_3f0c:12",
+              "digest": "bb03bfd8ee6d757e6957d029cd6a7b8e004f16386755ce672e3f97f445563878"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$permissionEventId"
+            }
+          }
+        },
+        {
+          "why": "reject once",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Reject",
+            "schema_version": 1,
+            "suite_event_type": "dev.agentpod.permission.answer.v2",
+            "request_id": "acps_3f0c:12",
+            "option_id": "reject_once",
+            "subject": {
+              "id": "acps_3f0c:12",
+              "digest": "bb03bfd8ee6d757e6957d029cd6a7b8e004f16386755ce672e3f97f445563878"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$permissionEventId"
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "a binding whose digest is not the request's",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Allow once",
+            "schema_version": 1,
+            "suite_event_type": "dev.agentpod.permission.answer.v2",
+            "request_id": "acps_3f0c:12",
+            "option_id": "allow_once",
+            "subject": {
+              "id": "acps_3f0c:12",
+              "digest": "0000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$permissionEventId"
+            }
+          }
+        },
+        {
+          "why": "no binding",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Allow once",
+            "schema_version": 1,
+            "suite_event_type": "dev.agentpod.permission.answer.v2",
+            "request_id": "acps_3f0c:12",
+            "option_id": "allow_once",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$permissionEventId"
+            }
+          }
+        },
+        {
+          "why": "an option the request did not offer",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Allow everything",
+            "schema_version": 1,
+            "suite_event_type": "dev.agentpod.permission.answer.v2",
+            "request_id": "acps_3f0c:12",
+            "option_id": "allow_everything",
+            "subject": {
+              "id": "acps_3f0c:12",
+              "digest": "bb03bfd8ee6d757e6957d029cd6a7b8e004f16386755ce672e3f97f445563878"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$permissionEventId"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.agentpod.permission.outcome.v1",
+      "direction": "outbound — the receipt that closes a permission card",
+      "decidedBy": "charter decisions/2026-11-07-strict-decisions-and-permissions-bind-their-subject.md §6",
+      "sender": "the station's agent",
+      "matrixEventType": "dev.agentpod.permission.outcome.v1",
+      "discriminator": "The event type, with `suite_event_type` repeated in content. Sent beside a prose line, which is what a stock client shows.",
+      "requiredFields": [
+        "suite_event_type",
+        "request_id",
+        "session_id",
+        "request_seq",
+        "outcome",
+        "option_id",
+        "decided_by",
+        "m.relates_to"
+      ],
+      "notes": {
+        "outcome": "`selected` (answered from the room, option_id says which), or `expired` (30 minutes passed unanswered: the agent was answered ACP `cancelled`, option_id null).",
+        "decidedBy": "The person's label, never an mxid. Null when nobody in the room settled it.",
+        "relatesTo": "An m.reference to the permission's prose message, the event its card is drawn from."
+      },
+      "accept": [
+        {
+          "why": "answered from the room",
+          "content": {
+            "suite_event_type": "dev.agentpod.permission.outcome.v1",
+            "request_id": "acps_3f0c:12",
+            "session_id": "acps_3f0c",
+            "request_seq": 12,
+            "outcome": "selected",
+            "option_id": "allow_once",
+            "decided_by": "fixture-person",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$permissionEventId"
+            }
+          }
+        },
+        {
+          "why": "expired unanswered",
+          "content": {
+            "suite_event_type": "dev.agentpod.permission.outcome.v1",
+            "request_id": "acps_3f0c:12",
+            "session_id": "acps_3f0c",
+            "request_seq": 12,
+            "outcome": "expired",
+            "option_id": null,
+            "decided_by": null,
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$permissionEventId"
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "no m.relates_to. A client cannot tell which card to close.",
+          "content": {
+            "suite_event_type": "dev.agentpod.permission.outcome.v1",
+            "request_id": "acps_3f0c:12",
+            "session_id": "acps_3f0c",
+            "request_seq": 12,
+            "outcome": "selected",
+            "option_id": "allow_once",
+            "decided_by": "fixture-person"
+          }
+        },
+        {
+          "why": "an outcome outside selected | expired | cancelled",
+          "content": {
+            "suite_event_type": "dev.agentpod.permission.outcome.v1",
+            "request_id": "acps_3f0c:12",
+            "session_id": "acps_3f0c",
+            "request_seq": 12,
+            "outcome": "approved",
+            "option_id": "allow_once",
+            "decided_by": "fixture-person",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$permissionEventId"
             }
           }
         }

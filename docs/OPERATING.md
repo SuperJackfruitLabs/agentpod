@@ -1443,6 +1443,23 @@ once every client reads the embedded key. Answers work either way: a permission
 answer is matched against the request the hub holds for the room, and a gate
 decision may reference either the prose or the legacy event.
 
+**Permissions are recorded and expire** (charter: strict decisions and harness
+permissions bind their subject). The permission prose message also carries
+`dev.agentpod.permission.v2` (meanings, scopes and a `harness-permission/v1`
+subject; `apps/hub/src/services/matrix-as/permission-wire.ts`), and each request
+is recorded in `matrix_permission_requests` (migration 0122): its digest, options,
+expiry, and how it closed — `answered` (with `answered_by_principal`), `expired` or
+`cancelled`. The session's `permission-answer` event now names who answered
+(`answeredBy: {via: room|console|board|editor, …}`), and `answerPermission` refuses
+an option the request did not offer, from every surface. A request unanswered for
+30 minutes is expired by a once-a-minute sweep: the agent gets ACP `cancelled`, the
+room gets a line and `dev.agentpod.permission.outcome.v1`. A typed reply to a
+closed request is refused in the room and never prompted to the agent. Logs:
+`matrix-permissions` (`a permission.answer.v2 was refused` with the reason;
+`a late reply to a closed permission request was not passed to the agent`).
+Pending permissions still do not survive a restart (the ACP session does not);
+their rows are expired by the sweep when their time is up.
+
 **What never pushes.** The hub's own reactions on a message (👀 working, ✅
 done, ❌ failed) and a turn's activity record (`dev.agentpod.turn.v1`, which is
 `m.room.encrypted` in an encrypted room and so matches `.m.rule.encrypted`) are
