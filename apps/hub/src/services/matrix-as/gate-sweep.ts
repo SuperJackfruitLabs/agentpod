@@ -42,12 +42,15 @@
 
 import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge";
 import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig } from "../bridge";
-import { subscribeBoardsToPush } from "../bridge";
+import { subscribeBoardsToPush, type SuperpipelineRelay } from "../bridge";
 import { createLogger } from "../../utils/logger";
 import { isGatePending } from "./gates";
 import type { GatePendingDelivery, ProjectionOutcome } from "./gates";
 import { isDeliveryPending, type DeliveryPendingDelivery } from "./delivery-wire";
 import type { DeliveryProjectionOutcome } from "./delivery-projection";
+import { isAttentionPending, type AttentionPendingDelivery } from "./attention-wire";
+import type { AttentionProjectionOutcome, WaitKey } from "./attention-projection";
+import { relayTokenForBoard, type TenantsForBoard } from "./relay-scope";
 
 const log = createLogger("gate-sweep");
 
@@ -106,7 +109,41 @@ export interface GateSweepDeps {
    * subject expired, card archived — with its receipt, claimed once. True when this call posted it.
    */
   settleDelivery?(gateId: string): Promise<boolean>;
+
+  /**
+   * The cards a board says are waiting on a person, read from `GET …/attention/pending` — the
+   * floor beneath the `attention.pending` push (charter: "Waiting cards and broker approvals reach
+   * chat" §1). `unknown[]`, each checked with `isAttentionPending`. Optional, with
+   * `projectAttention`, so a caller that only wants gates keeps working.
+   */
+  pendingAttention?(boardId: string): Promise<unknown[]>;
+  /** Post a waiting card, exactly once per wait. Idempotent on board + card + wait. */
+  projectAttention?(tenantId: string, d: AttentionPendingDelivery): Promise<AttentionProjectionOutcome>;
+  /** Waiting cards this hub posted on a board and has not settled (`outcome_posted_at IS NULL`). */
+  postedAttentionAwaitingOutcome?(boardId: string): Promise<WaitKey[]>;
+  /** Close a card whose wait ended elsewhere, with its receipt, claimed once. True when this call posted it. */
+  settleAttention?(key: WaitKey): Promise<boolean>;
+  /**
+   * What a board said is still waiting, every pass it answered: the fleet Live Activity drops the
+   * waits missing from it and shows again the ones a restart forgot (`fleet-attention.ts`). Not
+   * called for a board that could not be read.
+   */
+  onBoardAttention?(boardId: string, waiting: AttentionPendingDelivery[]): Promise<void>;
 }
+
+/** What the running hub supplies; the rest is built from the bridge's configuration. */
+type SweepRest = Pick<
+  GateSweepDeps,
+  | "tenantIdFor"
+  | "project"
+  | "settleOutcome"
+  | "onBoardPending"
+  | "projectDelivery"
+  | "settleDelivery"
+  | "projectAttention"
+  | "settleAttention"
+  | "onBoardAttention"
+>;
 
 /** Every way `projectGate` can end. Derived, so a new outcome cannot be forgotten here. */
 export type GateOutcomeStatus = ProjectionOutcome["status"];
@@ -176,6 +213,8 @@ export interface GateSweepResult {
    * longer owes them. `failedBoards` could not be read, and settle nothing.
    */
   deliveries: { checked: number; projected: number; stuck: number; settled: number; failedBoards: string[] };
+  /** Waiting cards, counted as follow-ups are: seen, posted by this pass, stuck, and settled. */
+  attention: { checked: number; projected: number; stuck: number; settled: number; failedBoards: string[] };
 }
 
 /** One sweep pass. Deps are injected so this runs with no network and no db. */
@@ -194,6 +233,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
   };
   const failedBoards: string[] = [];
   const deliveries: GateSweepResult["deliveries"] = { checked: 0, projected: 0, stuck: 0, settled: 0, failedBoards: [] };
+  const attention: GateSweepResult["attention"] = { checked: 0, projected: 0, stuck: 0, settled: 0, failedBoards: [] };
 
   for (const boardId of await deps.boards()) {
     const tenantId = await deps.tenantIdFor(boardId);
@@ -315,6 +355,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
     }
 
     await sweepDeliveries(boardId, tenantId, deps, deliveries);
+    await sweepAttention(boardId, tenantId, deps, attention);
   }
 
   const stuck = STUCK.reduce((n, status) => n + byStatus[status], 0);
@@ -324,7 +365,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
     log.warn("pending gates the sweep could not deliver", { stuck, ...byStatus });
   }
 
-  return { checked, projected, byStatus, failedBoards, settled, deliveries };
+  return { checked, projected, byStatus, failedBoards, settled, deliveries, attention };
 }
 
 /**
@@ -393,6 +434,87 @@ async function sweepDeliveries(
   }
 }
 
+/** One wait's identity, as the sweep compares them. */
+const waitKeyOf = (k: WaitKey) => `${k.cardId}\u0000${k.waitId}`;
+
+/**
+ * One board's waiting cards: read, and each posted once per wait; then the cards this hub posted
+ * whose wait the board no longer lists are closed (`settled_elsewhere`). A failed read settles
+ * nothing — the gate sweep's rule — and a card that reappears under a new wait id is a new card,
+ * so its old one is settled here.
+ */
+async function sweepAttention(
+  boardId: string,
+  tenantId: string,
+  deps: GateSweepDeps,
+  tally: GateSweepResult["attention"],
+): Promise<void> {
+  if (!deps.pendingAttention || !deps.projectAttention) return;
+  let pending: unknown[];
+  try {
+    pending = await deps.pendingAttention(boardId);
+  } catch (err) {
+    tally.failedBoards.push(boardId);
+    log.warn("could not ask a board for its waiting cards", {
+      boardId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+  const waiting: AttentionPendingDelivery[] = [];
+  for (const d of pending) {
+    if (!isAttentionPending(d) || d.boardId !== boardId) {
+      log.error("board described a waiting card in an unknown shape", { boardId });
+      continue;
+    }
+    waiting.push(d);
+    tally.checked++;
+    try {
+      const outcome = await deps.projectAttention(tenantId, d);
+      if (outcome.status === "posted") {
+        tally.projected++;
+        log.warn("a waiting card reached its room only by sweep", { cardId: d.cardId, waitId: d.waitId, boardId });
+      } else if (outcome.status === "no-room" || outcome.status === "not-accepted") {
+        tally.stuck++;
+        log.warn("a waiting card could not be put in a room", { cardId: d.cardId, waitId: d.waitId, boardId, status: outcome.status });
+      }
+    } catch (err) {
+      tally.stuck++;
+      log.warn("could not project a waiting card", {
+        cardId: d.cardId,
+        waitId: d.waitId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (deps.onBoardAttention) {
+    await deps.onBoardAttention(boardId, waiting).catch((err) =>
+      log.warn("could not report a board's waiting cards to the fleet card", {
+        boardId,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+
+  // Only now, with a list the board actually answered with: absent from it means the wait ended.
+  const stillWaiting = new Set(waiting.map(waitKeyOf));
+  for (const posted of (await deps.postedAttentionAwaitingOutcome?.(boardId)) ?? []) {
+    if (stillWaiting.has(waitKeyOf(posted))) continue;
+    try {
+      if (await deps.settleAttention?.(posted)) {
+        tally.settled++;
+        log.info("settled a waiting card whose wait ended elsewhere", { ...posted });
+      }
+    } catch (err) {
+      log.warn("could not settle a waiting card", {
+        ...posted,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
 /**
  * The board-facing half of the sweep, built from the bridge's own configuration.
  *
@@ -409,7 +531,7 @@ async function sweepDeliveries(
  */
 export function bridgeGateSweepDeps(
   config: BridgeConfig,
-  rest: Pick<GateSweepDeps, "tenantIdFor" | "project" | "settleOutcome" | "onBoardPending" | "projectDelivery" | "settleDelivery">,
+  rest: SweepRest,
   fetchImpl: Fetcher = fetchAdapter,
   roster: (() => Promise<Array<{ boardId: string; token: string }>>) | undefined = defaultRoster,
 ): GateSweepDeps {
@@ -448,6 +570,18 @@ export function bridgeGateSweepDeps(
       const token = (await tokensForBoards()).get(boardId);
       if (!token) throw new Error(`no bridge credential for board ${boardId}`);
       return new SuperpipelineClient({ baseUrl: config.baseUrl, boardId, token, fetch: fetchImpl }).pendingDeliveries();
+    },
+
+    postedAttentionAwaitingOutcome: async (boardId) => {
+      const { postedAttentionAwaitingOutcome } = await import("./attention-projection");
+      return postedAttentionAwaitingOutcome(boardId);
+    },
+
+    // No credential is not "nothing waiting": a throw is read as "could not be read".
+    pendingAttention: async (boardId) => {
+      const token = (await tokensForBoards()).get(boardId);
+      if (!token) throw new Error(`no bridge credential for board ${boardId}`);
+      return new SuperpipelineClient({ baseUrl: config.baseUrl, boardId, token, fetch: fetchImpl }).pendingAttention();
     },
 
     /**
@@ -525,7 +659,7 @@ export const GATE_SWEEP_INTERVAL_MS = 5 * 60_000;
  * belongs to something the operator actually turned on.
  */
 export function startGateSweeper(
-  rest: Pick<GateSweepDeps, "tenantIdFor" | "project" | "settleOutcome" | "onBoardPending" | "projectDelivery" | "settleDelivery">,
+  rest: SweepRest,
   opts: {
     config?: BridgeConfig | null;
     intervalMs?: number;
@@ -538,7 +672,7 @@ export function startGateSweeper(
      * board added, rebuilt, or a rotated secret is repaired within one interval. Without it no
      * board pushes and every gate waits for the sweep. See `bridge/push-subscription.ts`.
      */
-    push?: { secret: string | undefined; publicUrl: string };
+    push?: { secret: string | undefined; publicUrl: string; relay?: SuperpipelineRelay | null; tenantsForBoard?: TenantsForBoard };
   } = {},
 ): (() => void) | null {
   const config =
@@ -548,7 +682,7 @@ export function startGateSweeper(
   const fetchImpl = opts.fetch ?? fetchAdapter;
   const deps = bridgeGateSweepDeps(config, rest, fetchImpl, opts.roster);
   running = deps;
-  const subscribe = pushSubscriber(config, fetchImpl, opts.roster ?? defaultRoster, opts.push);
+  const subscribe = pushSubscriber(config, fetchImpl, opts.roster ?? defaultRoster, opts.push, rest.tenantIdFor);
   void subscribe();
   const timer = setInterval(() => {
     void subscribe();
@@ -597,7 +731,8 @@ function pushSubscriber(
   config: BridgeConfig,
   fetchImpl: Fetcher,
   roster: () => Promise<Array<{ boardId: string; token: string }>>,
-  push: { secret: string | undefined; publicUrl: string } | undefined,
+  push: { secret: string | undefined; publicUrl: string; relay?: SuperpipelineRelay | null; tenantsForBoard?: TenantsForBoard } | undefined,
+  tenantIdFor: (boardId: string) => Promise<string | null>,
 ): () => Promise<void> {
   if (!push) return async () => {};
   if (!push.secret) {
@@ -605,6 +740,8 @@ function pushSubscriber(
     return async () => {};
   }
   const subscribed = new Set<string>();
+  const relayed = new Set<string>();
+  const relay = push.relay ?? null;
   return async () => {
     try {
       const result = await subscribeBoardsToPush({
@@ -613,10 +750,22 @@ function pushSubscriber(
         secret: push.secret,
         fetch: fetchImpl,
         boards: () => boardCredentials(roster),
+        // The relay's token only for a board of the relay's own workspace (`relay.ts`).
+        ...(relay
+          ? {
+              relayTokenFor: async (boardId: string) =>
+                relayTokenForBoard(relay, await tenantIdFor(boardId), boardId, push.tenantsForBoard),
+              onRelayRefused: () => relay.invalidate(),
+            }
+          : {}),
       });
       for (const boardId of result.subscribed) {
         if (!subscribed.has(boardId)) log.info("push subscription registered", { boardId });
         subscribed.add(boardId);
+      }
+      for (const boardId of result.relayed) {
+        if (!relayed.has(boardId)) log.info("relay push subscription registered", { boardId });
+        relayed.add(boardId);
       }
       for (const f of result.failed) {
         subscribed.delete(f.boardId);

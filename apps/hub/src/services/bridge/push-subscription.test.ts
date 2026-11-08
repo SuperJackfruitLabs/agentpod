@@ -39,7 +39,7 @@ describe("subscribing each board to the hub's push", () => {
         ]),
     });
 
-    expect(result).toEqual({ subscribed: ["brd_one", "brd_two"], failed: [] });
+    expect(result).toEqual({ subscribed: ["brd_one", "brd_two"], relayed: [], failed: [] });
     expect(sent.map((s) => [s.method, s.url, s.auth])).toEqual([
       ["POST", `${BASE}/v1/boards/brd_one/push-configs`, "Bearer spa_one"],
       ["POST", `${BASE}/v1/boards/brd_two/push-configs`, "Bearer spa_two"],
@@ -49,12 +49,12 @@ describe("subscribing each board to the hub's push", () => {
     expect(sent[0]!.body).toEqual({
       url: `${PUBLIC}/public/bridge/superpipeline/push`,
       token: "shh",
-      events: ["gate.pending", "elicitation.pending", "delivery.pending"],
+      events: ["gate.pending", "elicitation.pending", "delivery.pending", "attention.pending"],
     });
   });
 
   test("subscribes to every event the push route projects, the delivery follow-up included", () => {
-    expect([...PUSH_EVENTS].sort()).toEqual(["delivery.pending", "elicitation.pending", "gate.pending"]);
+    expect([...PUSH_EVENTS].sort()).toEqual(["attention.pending", "delivery.pending", "elicitation.pending", "gate.pending"]);
   });
 
   test("registers nothing without a signing secret — the route would refuse every push", async () => {
@@ -68,7 +68,7 @@ describe("subscribing each board to the hub's push", () => {
     });
 
     expect(sent).toHaveLength(0);
-    expect(result).toEqual({ subscribed: [], failed: [] });
+    expect(result).toEqual({ subscribed: [], relayed: [], failed: [] });
   });
 
   test("one board refusing does not stop the others", async () => {
@@ -91,5 +91,65 @@ describe("subscribing each board to the hub's push", () => {
 
   test("the hook URL tolerates a trailing slash on the public URL", () => {
     expect(pushHookUrl("https://hub.test/")).toBe("https://hub.test/public/bridge/superpipeline/push");
+  });
+});
+
+describe("the relay's own push config, for approval requests", () => {
+  test("a board of the relay's workspace also gets elicitation.pending registered with the relay token", async () => {
+    const { sent, fetchImpl } = recordingFetch();
+    const result = await subscribeBoardsToPush({
+      baseUrl: BASE,
+      publicUrl: PUBLIC,
+      secret: "shh",
+      fetch: fetchImpl,
+      boards: async () =>
+        new Map([
+          ["brd_one", "spa_one"],
+          ["brd_two", "spa_two"],
+        ]),
+      relayTokenFor: async (boardId) => (boardId === "brd_one" ? "relay.jwt.token" : null),
+    });
+    expect(result).toEqual({ subscribed: ["brd_one", "brd_two"], relayed: ["brd_one"], failed: [] });
+    expect(sent.map((s) => [s.url, s.auth, s.body.events])).toEqual([
+      [`${BASE}/v1/boards/brd_one/push-configs`, "Bearer spa_one", [...PUSH_EVENTS]],
+      [`${BASE}/v1/boards/brd_one/push-configs`, "Bearer relay.jwt.token", ["elicitation.pending"]],
+      [`${BASE}/v1/boards/brd_two/push-configs`, "Bearer spa_two", [...PUSH_EVENTS]],
+    ]);
+    expect(sent[1]?.body.token).toBe("shh");
+  });
+
+  test("a refused relay registration is reported without costing the board its own subscription", async () => {
+    const { fetchImpl } = recordingFetch();
+    let call = 0;
+    const result = await subscribeBoardsToPush({
+      baseUrl: BASE,
+      publicUrl: PUBLIC,
+      secret: "shh",
+      fetch: async (url, init) => (++call === 2 ? { status: 403, ok: false, json: async () => ({ error: { code: "FORBIDDEN" } }) } : fetchImpl(url, init)),
+      boards: async () => new Map([["brd_one", "spa_one"]]),
+      relayTokenFor: async () => "relay.jwt.token",
+    });
+    expect(result.subscribed).toEqual(["brd_one"]);
+    expect(result.relayed).toEqual([]);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0]?.error).toStartWith("relay: ");
+  });
+
+  test("a 401/403 on the relay's registration makes the relay forget its token", async () => {
+    let refused = 0;
+    let call = 0;
+    const { fetchImpl } = recordingFetch();
+    await subscribeBoardsToPush({
+      baseUrl: BASE,
+      publicUrl: PUBLIC,
+      secret: "shh",
+      fetch: async (url, init) => (++call === 2 ? { status: 401, ok: false, json: async () => ({ error: { code: "UNAUTHORIZED" } }) } : fetchImpl(url, init)),
+      boards: async () => new Map([["brd_one", "spa_one"]]),
+      relayTokenFor: async () => "relay.jwt.token",
+      onRelayRefused: () => {
+        refused++;
+      },
+    });
+    expect(refused).toBe(1);
   });
 });

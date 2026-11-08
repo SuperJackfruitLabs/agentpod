@@ -4,11 +4,18 @@
  */
 export { isBridgeEnabled, loadBridgeConfig } from "./config";
 export type { BridgeConfig } from "./config";
-export type { DeliveryPendingDelivery, ElicitationPendingDelivery, GatePendingDelivery } from "./deliveries";
+export type {
+  AttentionPendingDelivery,
+  DeliveryPendingDelivery,
+  ElicitationPendingDelivery,
+  GatePendingDelivery,
+} from "./deliveries";
 export { checkBridgeDispatchGrant, ensureBridgeDispatchGrant } from "./dispatch-grant";
 export { attachExecutionReference } from "./execution-reference";
 export { startSuperpipelineBridge } from "./loop";
 export { subscribeBoardsToPush } from "./push-subscription";
+export { RELAY_CREDENTIAL_ENV, createSuperpipelineRelay, readRelayCredential, superpipelineRelayFromEnv } from "./relay";
+export type { SuperpipelineRelay } from "./relay";
 export {
   bridgePlaneCredential,
   createBridgeAgent,
@@ -20,5 +27,5 @@ export {
 export { probeSalaamWork, settleNeverDispatchedSalaamWork } from "./salaam-dispatch";
 export { traceDeliveryEvidence } from "./salaam-trace";
 export { bridgeReadiness } from "./station-readiness";
-export { SuperpipelineClient, fetchAdapter } from "./superpipeline";
+export { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./superpipeline";
 export type { Fetcher } from "./superpipeline";

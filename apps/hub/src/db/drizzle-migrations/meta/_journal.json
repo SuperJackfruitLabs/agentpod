@@ -862,6 +862,13 @@
       "when": 1792580400012,
       "tag": "0122_subject_bound_questions_and_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1792580400013,
+      "tag": "0123_attention_cards",
+      "breakpoints": true
     }
   ]
 }

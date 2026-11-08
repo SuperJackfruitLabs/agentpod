@@ -96,6 +96,34 @@ decision expired, is refused. Replying with a number can **decline** such a ques
 approve it — the reply cannot show you what you would be approving — so the room points you to an
 updated app or the board instead.
 
+## A card waiting on you
+
+A card also stops on a person when its agent keeps failing, says it is **blocked**, or is **not
+authorised** to go on. That reaches the board's room too, as its own card: what is wrong, what the
+agent said, and three choices.
+
+- **Resume here** — with a required instruction for the next attempt.
+- **Resume at an earlier stage** — one choice per earlier stage, with the same instruction.
+- **Archive** — with an optional remark.
+
+Moving the card forward is not offered from chat: a move skips the stage's work and cancels its
+gates, which deserves the board. Your answer goes to the board as you, and names the exact wait you
+were shown — if the card was resumed, archived or moved on the board meanwhile, or now waits on
+something else, the board refuses it, nothing changes, and the room says so. A card that parks again
+arrives as a new card. Whoever settles it, here or on the board, the card in the room closes.
+
+An older app shows the card as text with a link to the board; an updated app shows the buttons.
+
+## SuperToolkit approvals
+
+When a SuperToolkit write needs approval and the host is connected to SuperPipeline, the request
+reaches the board's room as an **approval request**: no card, no stage — what the agent wants to do
+(the service, the capability, the target, every argument in full, the station and the agent), with
+**Allow once** and **Deny**. Only **workspace owners and admins** can allow it; anyone else is told
+so and nothing changes, and the agent that asked can never decide its own request. An updated app
+binds your answer to exactly the request it showed; a reply with a number can deny it but never
+allow it. SuperToolkit checks the decision again before it acts.
+
 ## Next
 
 - [Talking to an agent in a room](/use/rooms/) — the bridge these cards arrive on

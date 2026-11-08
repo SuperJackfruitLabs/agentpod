@@ -46,7 +46,11 @@ import {
 import { handleQuestionAnswer } from "./question-answer";
 import { handleDeliveryAnswer, settleDeliveryOutcome } from "./delivery-answer";
 import { claimDeliveryOutcome, recordedDelivery } from "./delivery-projection";
-import { updateDeliveryAtSuperpipeline } from "./gate-resolve";
+import { answerAttentionAtSuperpipeline, updateDeliveryAtSuperpipeline } from "./gate-resolve";
+import { handleAttentionAnswer, settleAttentionOutcome } from "./attention-answer";
+import { claimAttentionOutcome, recordedAttention, type WaitKey } from "./attention-projection";
+import { ATTENTION_OUTCOME_TYPE } from "./attention-wire";
+import { clearAttentionDecision } from "./fleet-attention";
 import { principalById, principalForUser, principalLabel } from "../../auth/org-plane/principals";
 import { attachRoomToSession, forgetTurnTrigger, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
@@ -206,6 +210,12 @@ export interface MatrixBridge {
    * caller. True only when THIS call claimed the receipt.
    */
   settleDelivery(gateId: string): Promise<boolean>;
+  /**
+   * Close a waiting card's room card when its wait ended elsewhere — resumed, archived or moved on
+   * the board, or parked again under a new wait. The gate sweep is the caller. True only when THIS
+   * call claimed the receipt.
+   */
+  settleAttention(key: WaitKey): Promise<boolean>;
   /**
    * Close a room card for a question that is over — answered on the board, or
    * retired by a newer question from the same agent.
@@ -602,6 +612,32 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       }
     : undefined;
 
+  /** A waiting card's structured receipt, spoken by the room's speaker. */
+  const sendAttentionOutcome = async (room: string, content: Record<string, unknown>) => {
+    const speaker = await roomSpeakerFor(room, cfg.domain);
+    return speaker ? speakingClient.sendCustomEvent(speaker, room, ATTENTION_OUTCOME_TYPE, content) : null;
+  };
+
+  /**
+   * An answer to a waiting card (attention.answer.v2): a resume here or at an earlier stage, or an
+   * archive, carried to the board as the person who answered with the wait they were shown.
+   */
+  const attention = superpipelineBaseUrl
+    ? {
+        handle: async (event: { sender: string; content: Record<string, unknown> }, roomId: string) =>
+          handleAttentionAnswer(event, roomId, {
+            principalForMatrixId,
+            recordedAttention,
+            answer: (input) => answerAttentionAtSuperpipeline(input, { baseUrl: superpipelineBaseUrl, mint: mintForBoard }),
+            reply: replyInRoom,
+            claimOutcome: claimAttentionOutcome,
+            displayNameFor: (principalId: string) => principalLabel(principalId),
+            sendOutcome: sendAttentionOutcome,
+            onClosed: clearAttentionDecision,
+          }),
+      }
+    : undefined;
+
   /**
    * An agent's reply, spoken (`voice-reply.ts`): after a turn ends with text,
    * when the station's speech settings say so — the console's station and
@@ -631,6 +667,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     elicitations,
     questions,
     deliveries,
+    attention,
     client: speakingClient,
     // Voice notes to text, looked up per voice note for the room's station:
     // its own setting, then the hub's (both in the console), then the
@@ -728,6 +765,18 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
         claimOutcome: claimDeliveryOutcome,
         reply: replyInRoom,
         sendOutcome: sendOutcomeInRoom,
+      });
+    },
+
+    settleAttention: async (key: WaitKey) => {
+      // A card this hub never posted, or one still being sent, has nothing to close.
+      const row = await recordedAttention(key);
+      if (!row) return false;
+      return settleAttentionOutcome(row, "settled_elsewhere", null, row.roomId, {
+        claimOutcome: claimAttentionOutcome,
+        reply: replyInRoom,
+        sendOutcome: sendAttentionOutcome,
+        onClosed: clearAttentionDecision,
       });
     },
 

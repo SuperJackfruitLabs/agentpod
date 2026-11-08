@@ -277,6 +277,60 @@ describe("gates", () => {
   });
 });
 
+/** A waiting card's decision on board `boardId`. */
+const waiting = (id: string, boardId = "brd_1") => ({
+  type: "decision-asked" as const,
+  decision: {
+    key: `attn:${boardId}:crd_${id}:${id}`,
+    roomId: "!board:hs",
+    eventId: `$${id}`,
+    agent: "Release board",
+    kind: "attention" as const,
+    question: "Ship it is blocked",
+    options: [],
+    askedAt: now,
+    boardId,
+  },
+});
+
+describe("waiting cards", () => {
+  test("count as decisions, ride with no inline options, and a board sweep clears only that board's waits", async () => {
+    await registerUpdate();
+    fleet.note(READER, waiting("w1"));
+    fleet.note(READER, waiting("w2"));
+    fleet.note(READER, waiting("w3", "brd_2"));
+    await fleet.settled();
+    const state = lastAps()["content-state"];
+    expect(state.needsYou).toBe(3);
+    expect(state.decision).toMatchObject({ kind: "attention", options: [] });
+
+    fleet.reconcileBoardDecisions("attention", "brd_1", new Set(["attn:brd_1:crd_w2:w2"]));
+    await fleet.settled();
+    expect(lastAps()["content-state"].needsYou).toBe(2);
+    expect(fleet.knowsDecision("attn:brd_1:crd_w1:w1")).toBe(false);
+    expect(fleet.knowsDecision("attn:brd_1:crd_w2:w2")).toBe(true);
+    expect(fleet.knowsDecision("attn:brd_2:crd_w3:w3")).toBe(true);
+  });
+
+  test("a gate sweep never clears a waiting card, and a waiting-card sweep never clears a gate", async () => {
+    await registerUpdate();
+    fleet.note(READER, waiting("w1"));
+    fleet.note(READER, {
+      type: "decision-asked",
+      decision: { key: "gate:g1", roomId: "!board:hs", eventId: "$g1", agent: "lyra", kind: "gate", question: "Approve?", options: [], askedAt: now, boardId: "brd_1" },
+    });
+    fleet.reconcileGates("brd_1", new Set());
+    fleet.reconcileBoardDecisions("attention", "brd_1", new Set(["attn:brd_1:crd_w1:w1"]));
+    await fleet.settled();
+    expect(fleet.knowsDecision("attn:brd_1:crd_w1:w1")).toBe(true);
+    fleet.reconcileGates("brd_1", new Set(["g1"]));
+    fleet.reconcileBoardDecisions("attention", "brd_1", new Set());
+    await fleet.settled();
+    expect(fleet.knowsDecision("gate:g1")).toBe(true);
+    expect(fleet.knowsDecision("attn:brd_1:crd_w1:w1")).toBe(false);
+  });
+});
+
 describe("a hub restart", () => {
   test("an activity left up is ended if nothing happens within the active window", async () => {
     await tokens.upsert({ userId: READER, deviceId: "D1", kind: "update", activityId: "act-1", token: UPDATE, environment: "sandbox" });

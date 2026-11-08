@@ -6,6 +6,7 @@ export { reportAgentTurn } from "./fleet/agent-reports";
 export { cardName } from "./fleet/names";
 export type { FleetService } from "./fleet/service";
 export {
+  attentionDecisionKey,
   clearFleetDecision,
   fleetSink,
   gateDecisionKey,

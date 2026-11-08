@@ -18,6 +18,7 @@ import {
 } from "./board-room";
 import { sweepElicitationBoardNow } from "./elicitation-sweep";
 import { noteGatePosted } from "./fleet-gates";
+import { noteAttentionPosted } from "./fleet-attention";
 import { sweepBoardNow } from "./gate-sweep";
 import type { MatrixBridge } from "./service";
 
@@ -95,6 +96,11 @@ export function boardProjectionDeps(bridge: Pick<MatrixBridge, "client" | "confi
       d: Parameters<typeof noteGatePosted>[0],
       posted: Parameters<typeof noteGatePosted>[1],
     ) => noteGatePosted(d, posted, { humansFor: matrixIdsForBoardHumans }),
+    /** …and so is a posted waiting card. */
+    onAttentionPosted: (
+      d: Parameters<typeof noteAttentionPosted>[0],
+      posted: Parameters<typeof noteAttentionPosted>[1],
+    ) => noteAttentionPosted(d, posted, { humansFor: matrixIdsForBoardHumans }),
   };
 }
 

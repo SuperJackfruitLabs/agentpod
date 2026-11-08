@@ -77,6 +77,12 @@ describe("FleetContentState — the Live Activity's content, shared with the app
     expect(ok({ mxid: "" })).toBe(false);
   });
 
+  it("takes a waiting card's decision (kind attention, no options), and no kind it has not heard of", () => {
+    const attention = { ...fixture.decision, kind: "attention", options: [] };
+    expect(FleetContentState.safeParse({ ...fixture, decision: attention }).success).toBe(true);
+    expect(FleetContentState.safeParse({ ...fixture, decision: { ...fixture.decision, kind: "approval" } }).success).toBe(false);
+  });
+
   it("counts a bound in characters, not UTF-16 units", () => {
     const agent = { ...fixture.agents[1], step: "🔧".repeat(FLEET_STEP_MAX) };
     expect(FleetContentState.safeParse({ ...fixture, agents: [agent] }).success).toBe(true);

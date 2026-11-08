@@ -225,6 +225,9 @@ PROVISIONING_HUB_URL=https://hub.<your-domain>
 # lowercase string "true" — `1` and `TRUE` read as off.
 # ENABLE_SUPERPIPELINE_BRIDGE=false
 # SUPERPIPELINE_BASE_URL=https://superpipeline.dev
+# Optional: an Accounts service credential holding approval-requests:relay, so SuperToolkit
+# approval requests reach chat (see "The decision relay" below). Unset = they do not.
+# SUPERPIPELINE_RELAY_CREDENTIAL_FILE=/etc/agentpod/superpipeline-relay.credential
 # The roster itself is NOT here — it is the `bridge_agents` table, edited at
 # Admin -> Bridge in the console. ENCRYPTION_KEY above becomes required.
 EOF
@@ -462,6 +465,32 @@ Two variables, both required together:
 |---|---|
 | `ENABLE_SUPERPIPELINE_BRIDGE` | The gate. `isBridgeEnabled()` compares against the **literal lowercase `true`** — `1`, `TRUE` and `yes` are off. Boot validation uses the looser `getEnvBool`, so `=1` is the one value that passes validation *and* starts nothing. |
 | `SUPERPIPELINE_BASE_URL` | Origin of the superpipeline deployment, e.g. `https://superpipeline.dev`. Trailing slashes are stripped. |
+| `SUPERPIPELINE_RELAY_CREDENTIAL_FILE` | Optional. A file holding one line `svc_<20 hex>:<secret>`: an Accounts service credential with the `approval-requests:relay` scope. Set and unreadable or malformed refuses the boot; unset means SuperToolkit approval requests do not reach chat (logged once at start). See "The decision relay". |
+
+### The decision relay (SuperToolkit approval requests)
+
+SuperPipeline shows a SuperToolkit approval request — whose preview carries every argument — only
+to people and to a service holding `approval-requests:relay`, never to an agent's `spa_` token. The
+bridge reads and subscribes with agent tokens, so without a relay credential approval requests never
+reach a board room. Everything else (gates, questions, follow-ups, waiting cards) is unaffected.
+
+The credential belongs to **one workspace**: the hub uses it only for boards of the tenant that
+workspace maps to here (the `org` of the token the plane mints for it), never another workspace's.
+Answers are never sent with it — they go as the person who answered.
+
+1. In Accounts, create a service principal in the workspace whose boards should carry approval
+   requests, grant it the scope `approval-requests:relay`, and issue a credential for it.
+2. Write the credential to a file the hub can read, one line `svc_…:<secret>`, mode `600`:
+   `install -m 600 /dev/stdin /etc/agentpod/superpipeline-relay.credential`.
+3. Set `SUPERPIPELINE_RELAY_CREDENTIAL_FILE=/etc/agentpod/superpipeline-relay.credential` in
+   `/etc/agentpod/hub.env` and restart the hub.
+4. Check: `journalctl -u agentpod-hub | grep 'relay push subscription registered'` names each of the
+   workspace's boards within a minute (and again after a board is rebuilt). A warning
+   `could not exchange the relay credential` means the plane refused it; `has no tenant on this hub`
+   means the workspace has never used this hub.
+
+One credential serves one workspace; a hub serving several workspaces relays for the one whose
+credential it holds. A board that more than one tenant on this hub works never gets the relay.
 
 `ENCRYPTION_KEY` (at least 32 characters) becomes **required** when the bridge is on, and the hub
 refuses to boot without it. Every rostered agent's credentials are encrypted with it; an unset one

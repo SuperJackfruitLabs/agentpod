@@ -42,6 +42,7 @@ import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
 import {
   matrixAsTransactions,
+  matrixAttentionEvents,
   matrixDeliveryEvents,
   matrixElicitationEvents,
   matrixGateEvents,
@@ -155,6 +156,7 @@ export const TENANT_SCOPED_TABLES = {
   matrixGateEvents,
   matrixElicitationEvents,
   matrixDeliveryEvents,
+  matrixAttentionEvents,
   matrixPermissionRequests,
   matrixBoardRooms,
   matrixMissions,

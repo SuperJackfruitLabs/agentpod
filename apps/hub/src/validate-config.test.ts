@@ -13,6 +13,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { collectConfigErrors } from "./validate-config";
+import { RELAY_CREDENTIAL_ENV, type readRelayCredential } from "./services/bridge";
 import { config } from "./config";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -751,5 +752,16 @@ describe("validateConfig — ORG_PLANE_*", () => {
       "ORG_PLANE_URL",
       "ORG_PLANE_SERVICE_CREDENTIAL_FILE",
     ]);
+  });
+});
+
+const relayFields = (r: ReturnType<typeof readRelayCredential>) =>
+  collectConfigErrors(config, quiet, undefined, [], undefined, undefined, r).map((e) => e.field);
+
+describe("the SuperPipeline relay credential (SUPERPIPELINE_RELAY_CREDENTIAL_FILE)", () => {
+  it("set and unusable refuses the boot; unset passes", () => {
+    const fields = relayFields;
+    expect(fields({ ok: false, message: "cannot be read" })).toContain(RELAY_CREDENTIAL_ENV);
+    expect(fields({ ok: true, credential: null })).not.toContain(RELAY_CREDENTIAL_ENV);
   });
 });

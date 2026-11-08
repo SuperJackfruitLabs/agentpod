@@ -18,6 +18,7 @@ import {
   cut,
   cutToBytes,
   optionInputV2,
+  previewMarkdown,
   subjectV2,
   type GateOptionMeaning,
   type GateSubjectV2,
@@ -84,10 +85,15 @@ function optionBytes(o: ElicitationPendingDelivery["options"][number]): number {
  * budget are not listed (the card's link still reaches them on the board).
  */
 export function boundedQuestion(d: ElicitationPendingDelivery): ElicitationPendingDelivery {
+  // An approval request whose subject could not be carried — absent, or not one this hub can
+  // re-bound — shows nobody what an approval would allow, so only its declining options are listed:
+  // the prose, the v1 card, question.v2 and what a typed reply is matched against all lose the rest.
+  const declinesOnly = isApprovalRequest(d) && questionSubjectV2(d) === null;
   const options: ElicitationPendingDelivery["options"] = [];
   let used = 0;
   for (const raw of d.options) {
     if (raw.id.length > OPTION_ID_MAX) continue;
+    if (declinesOnly && raw.meaning !== "reject") continue;
     const label = cutToBytes(raw.label, LABEL_BYTES);
     const o = label === raw.label ? raw : { ...raw, label };
     const cost = optionBytes(o);
@@ -184,8 +190,41 @@ export function questionFreeTextV2(d: ElicitationPendingDelivery): { max_length:
 export const SUBJECT_QUESTION_NOTE =
   "This approves an exact operation. Approve it in an updated app, which shows what it does, or on the board. A reply here can only decline it.";
 
+/**
+ * Is this a SuperToolkit approval request hosted on the board (charter: "Waiting cards and broker
+ * approvals reach chat" §3)? It belongs to no card, run or stage: the board sends them empty, and
+ * names the request in `approvalRequestId`. Either is enough here — a question with no card can
+ * be described only by what it asks, never as a card at a stage.
+ */
+export function isApprovalRequest(d: Pick<ElicitationPendingDelivery, "cardId" | "approvalRequestId">): boolean {
+  return d.cardId === "" || (typeof d.approvalRequestId === "string" && d.approvalRequestId !== "");
+}
+
+/** What a stock client reads under an approval request, after its choices. */
+export const APPROVAL_REQUEST_NOTE =
+  "Only workspace owners and admins can allow this. Allow it in an updated app, which shows exactly what it does. A reply here can only deny it.";
+
+/**
+ * An approval request's prose: what is asked, the exact request (the subject's preview, fenced as a
+ * gate's is), the numbered choices, and who may allow it. No card and no link: there is none.
+ */
+function approvalRequestProse(d: ElicitationPendingDelivery): string {
+  const subject = questionSubjectV2(d);
+  const head = "A SuperToolkit approval request is waiting on a workspace owner or admin.";
+  const asked = d.question.trim();
+  const preview = subject ? previewMarkdown(subject.preview) : "";
+  const shown = !subject
+    ? "The request could not be shown here, so it cannot be allowed from this room."
+    : !subject.preview_complete
+      ? "The request could not be shown in full here, so it cannot be allowed from this room."
+      : "";
+  const numbered = d.options.map((o, i) => `${i + 1}. ${o.label}`).join("\n");
+  return [head, asked, preview, shown, numbered, APPROVAL_REQUEST_NOTE].filter((part) => part !== "").join("\n\n");
+}
+
 /** The question's prose: as before, with the note above when it is bound to a subject. */
 export function questionProseBody(d: ElicitationPendingDelivery, deepLink?: string): string {
+  if (isApprovalRequest(d)) return approvalRequestProse(d);
   const prose = elicitationProseBody(d, deepLink);
   return d.approvalSubject == null || d.options.length === 0 ? prose : `${prose}\n\n${SUBJECT_QUESTION_NOTE}`;
 }
@@ -209,6 +248,7 @@ export function questionV2Content(d: ElicitationPendingDelivery, deepLink?: stri
     options: questionOptionsV2(d),
     ...(freeText ? { free_text: freeText } : {}),
     ...(subject ? { subject } : {}),
+    ...(typeof d.approvalRequestId === "string" && d.approvalRequestId !== "" ? { approval_request_id: d.approvalRequestId } : {}),
     ...(deepLink ? { deep_link: deepLink } : {}),
   };
 }

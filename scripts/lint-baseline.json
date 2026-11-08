@@ -33,7 +33,7 @@
   "typescript(unbound-method)": 34,
   "unicorn(consistent-function-scoping)": 212,
   "unicorn(no-array-reverse)": 13,
-  "unicorn(no-array-sort)": 144,
+  "unicorn(no-array-sort)": 143,
   "unicorn(no-instanceof-builtins)": 1,
   "unicorn(no-invalid-fetch-options)": 3,
   "unicorn(no-useless-fallback-in-spread)": 8,

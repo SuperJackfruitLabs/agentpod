@@ -85,16 +85,20 @@ export interface AgentRecord {
 }
 
 export interface DecisionRecord {
-  /** `perm:<roomId>` for a permission (one per room at a time), `gate:<gateId>` for a gate. */
+  /**
+   * `perm:<roomId>` for a permission (one per room at a time), `gate:<gateId>` for a gate,
+   * `attn:<boardId>:<cardId>:<waitId>` for a card waiting on a person.
+   */
   key: string;
   roomId: string;
   eventId: string;
   agent: string;
-  kind: "permission" | "gate";
+  /** `attention`: a waiting card. It carries no inline options — a resume needs typed words. */
+  kind: "permission" | "gate" | "attention";
   question: string;
   options: FleetLiveDecisionOption[];
   askedAt: number;
-  /** A gate's board, so a sweep of that board can clear the gates it no longer lists. */
+  /** A gate's or waiting card's board, so a sweep of that board can clear what it no longer lists. */
   boardId?: string;
 }
 

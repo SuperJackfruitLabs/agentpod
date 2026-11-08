@@ -27,9 +27,11 @@ import {
   projectGate,
   type GateProjectionDeps,
 } from "../services/matrix-as";
-import { isElicitationPending } from "../services/matrix-as";
+import { isApprovalRequest, isElicitationPending } from "../services/matrix-as";
 import { projectElicitation } from "../services/matrix-as";
 import { isDeliveryPending, projectDelivery } from "../services/matrix-as";
+import { isAttentionPending, projectAttention } from "../services/matrix-as";
+import type { AttentionProjectionDeps } from "../services/matrix-as";
 
 const log = createLogger("superpipeline-push");
 
@@ -38,6 +40,14 @@ export interface SuperpipelinePushDeps extends GateProjectionDeps {
   secret: string | undefined;
   /** Which fleet this board's gates belong to. */
   tenantIdFor(boardId: string): Promise<string | null>;
+  /** A posted waiting card goes on the board's humans' fleet Live Activity (`boardProjectionDeps`). */
+  onAttentionPosted?: AttentionProjectionDeps["onAttentionPosted"];
+  /**
+   * May a SuperToolkit approval request on `boardId` be posted into `tenantId`'s room — the tenant
+   * this push is routed to? True only when the relay is that workspace's and no other tenant knows
+   * the board (`relay-scope.ts`). Absent: no approval request is ever posted from a push.
+   */
+  approvalRequestAllowed?(tenantId: string, boardId: string): Promise<boolean>;
 }
 
 const enc = new TextEncoder();
@@ -104,6 +114,15 @@ export function createSuperpipelinePushRoutes(deps: SuperpipelinePushDeps) {
         log.warn("push for a board mapped to no fleet", { boardId: body.boardId });
         return c.json({ error: "unknown board" }, 404);
       }
+      // An approval request carries every argument in full: it goes only into the room of the
+      // relay's own workspace. Dropped (200: a retry would not change it), and said in the log.
+      if (isApprovalRequest(body) && !(await deps.approvalRequestAllowed?.(tenantId, body.boardId))) {
+        log.warn("an approval request was pushed for a board the relay does not serve here; not posted", {
+          boardId: body.boardId,
+          elicitationId: body.elicitationId,
+        });
+        return c.json({ ok: true, ignored: true }, 200);
+      }
       const outcome = await projectElicitation(tenantId, body, deps);
       log.info("question projected", {
         elicitationId: body.elicitationId,
@@ -125,6 +144,21 @@ export function createSuperpipelinePushRoutes(deps: SuperpipelinePushDeps) {
       }
       const outcome = await projectDelivery(tenantId, body, deps);
       log.info("delivery follow-up projected", { gateId: body.gateId, status: outcome.status });
+      return c.json({ ok: true, status: outcome.status }, 200);
+    }
+
+    /**
+     * A card waiting on a person (charter: "Waiting cards and broker approvals reach chat" §1),
+     * through the same door and refused the same way. Disjoint from the others by `event`.
+     */
+    if (isAttentionPending(body)) {
+      const tenantId = await deps.tenantIdFor(body.boardId);
+      if (!tenantId) {
+        log.warn("push for a board mapped to no fleet", { boardId: body.boardId });
+        return c.json({ error: "unknown board" }, 404);
+      }
+      const outcome = await projectAttention(tenantId, body, deps);
+      log.info("waiting card projected", { cardId: body.cardId, waitId: body.waitId, status: outcome.status });
       return c.json({ ok: true, status: outcome.status }, 200);
     }
 

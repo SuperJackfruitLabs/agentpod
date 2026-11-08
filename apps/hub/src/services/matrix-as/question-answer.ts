@@ -82,6 +82,11 @@ export function referenceOf(content: object): string | null {
 /** What this hub recorded when it posted a question (`recordedQuestion`). */
 export interface RecordedQuestion {
   boardId: string;
+  /**
+   * A SuperToolkit approval request (`isApprovalRequest`, recorded when it was posted): answered by a
+   * person only, and never approved without a recorded subject.
+   */
+  approvalRequest?: boolean;
   roomId: string;
   /** The question's prose message: the one event an answer may reference. */
   eventId: string;
@@ -150,6 +155,10 @@ export type QuestionAnswerRefusal =
   | "text-too-long"
   | "url-invalid"
   | SubjectRefusal
+  /** A linked principal that is not a person answering an approval request: the hub carries only a person's answer. */
+  | "not-human"
+  /** An approval of an approval request whose subject was never carried: nothing showed what it allows. */
+  | "approval-unbound"
   /** The board refused it; `code` says why. */
   | "board-refused";
 
@@ -185,7 +194,11 @@ const REFUSAL_TEXT: Record<"bad-option" | "input-required" | "url-invalid", stri
 
 type Verdict =
   | { option?: string; text?: string; subject?: { id: string; digest: string }; label: string | null }
-  | { refusal: "bad-option" | "input-required" | "text-too-long" | "url-invalid" | SubjectRefusal; limit?: number };
+  | { refusal: "bad-option" | "input-required" | "text-too-long" | "url-invalid" | "approval-unbound" | SubjectRefusal; limit?: number };
+
+/** Said when an approval request whose subject was never carried is asked to allow. */
+export const APPROVAL_UNBOUND_TEXT =
+  "This request could not be shown here, so it cannot be allowed from this room. Nothing has changed.";
 
 /**
  * What the answer would pass to the board, or why it must not: checked against what THIS
@@ -194,7 +207,14 @@ type Verdict =
  */
 function judge(parsed: ParsedQuestionAnswer, q: RecordedQuestion, now: Date): Verdict {
   const verdict = judgeOption(parsed, q);
-  if ("refusal" in verdict || !q.subject) return verdict;
+  if ("refusal" in verdict) return verdict;
+  if (!q.subject) {
+    // Fail closed: an approval request with no recorded subject is never approved from here,
+    // whatever its recorded options say. Only an explicit decline goes on.
+    const meaning = q.options?.find((o) => o.id === verdict.option)?.meaning;
+    if (q.approvalRequest === true && meaning !== "reject") return { refusal: "approval-unbound" };
+    return verdict;
+  }
   const meaning = q.options?.find((o) => o.id === verdict.option)?.meaning;
   const refused = subjectRefusal(q.subject, parsed.subject ?? null, meaning, now);
   if (refused) return { refusal: refused };
@@ -221,7 +241,8 @@ function judgeOption(
   return { option: option.id, ...(parsed.text !== null ? { text: parsed.text } : {}), label: option.label };
 }
 
-function refusalText(r: "bad-option" | "input-required" | "url-invalid" | SubjectRefusal): string {
+function refusalText(r: "bad-option" | "input-required" | "url-invalid" | "approval-unbound" | SubjectRefusal): string {
+  if (r === "approval-unbound") return APPROVAL_UNBOUND_TEXT;
   return r === "bad-option" || r === "input-required" || r === "url-invalid" ? REFUSAL_TEXT[r] : SUBJECT_REFUSAL_TEXT[r];
 }
 
@@ -270,6 +291,17 @@ export async function handleQuestionAnswer(
     log.info("an answer from an unlinked sender, ignored", { sender: event.sender });
     return { status: "refused", reason: "unlinked-sender" };
   }
+  if (q.approvalRequest === true && identity.kind !== "human") {
+    // Charter §5: the hub only carries a person's answer to an approval request. Another agent in
+    // the room — the board stops only the requester — must not decide it, not even to deny.
+    log.warn("a non-human principal tried to answer an approval request", {
+      sender: event.sender,
+      principalId: identity.id,
+      kind: identity.kind,
+      elicitationId: parsed.elicitationId,
+    });
+    return { status: "refused", reason: "not-human" };
+  }
 
   const verdict = judge(parsed, q, deps.now?.() ?? new Date());
   if ("refusal" in verdict) {
@@ -296,6 +328,8 @@ export async function handleQuestionAnswer(
     principalId: identity.id,
     senderMxid: event.sender,
   });
-  const reported = await reportAnswer(result, parsed.elicitationId, verdict.label, roomId, deps);
+  const reported = await reportAnswer(result, parsed.elicitationId, verdict.label, roomId, deps, {
+    approvalRequest: q.approvalRequest === true,
+  });
   return reported.status === "answered" ? reported : { status: "refused", reason: "board-refused", code: reported.code };
 }

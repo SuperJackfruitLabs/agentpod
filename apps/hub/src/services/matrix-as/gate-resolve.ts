@@ -78,6 +78,42 @@ export async function updateDeliveryAtSuperpipeline(
   );
 }
 
+/**
+ * Resume a waiting card, or archive it, at superpipeline — **as the person who answered its
+ * attention.v2** (charter: "Waiting cards and broker approvals reach chat" §2). Both are
+ * person-only routes; the same per-answer assertion as a gate, for the same reason. The wait id
+ * goes as `expectedWaitId`, so a late tap never acts on a different wait: the board refuses a stale
+ * one `WAIT_CHANGED` and changes nothing.
+ */
+export async function answerAttentionAtSuperpipeline(
+  input: {
+    boardId: string;
+    cardId: string;
+    waitId: string;
+    action: { kind: "resume"; toStageKey: string | null; comment: string } | { kind: "archive"; comment: string | null };
+    principalId: string;
+    senderMxid: string;
+  },
+  deps: BoardCallDeps,
+): Promise<{ ok: true } | { ok: false; code: string }> {
+  const card = `/v1/boards/${encodeURIComponent(input.boardId)}/cards/${encodeURIComponent(input.cardId)}`;
+  const a = input.action;
+  if (a.kind === "resume") {
+    return postToBoardAsPrincipal(
+      `${card}/resume`,
+      { comment: a.comment, ...(a.toStageKey !== null ? { toStageKey: a.toStageKey } : {}), expectedWaitId: input.waitId },
+      { ...input, ref: input.waitId },
+      deps,
+    );
+  }
+  return postToBoardAsPrincipal(
+    `${card}/archive`,
+    { expectedWaitId: input.waitId, ...(a.comment !== null ? { comment: a.comment } : {}) },
+    { ...input, ref: input.waitId },
+    deps,
+  );
+}
+
 interface BoardCallDeps {
   baseUrl: string;
   mint(subject: AssertionSubject): Promise<string>;
@@ -88,7 +124,7 @@ interface BoardCallDeps {
 async function postToBoardAsPrincipal(
   path: string,
   body: Record<string, unknown>,
-  who: { gateId: string; principalId: string; senderMxid: string },
+  who: { gateId?: string; ref?: string; principalId: string; senderMxid: string },
   deps: BoardCallDeps,
 ): Promise<{ ok: true } | { ok: false; code: string }> {
   let token: string;
@@ -100,8 +136,8 @@ async function postToBoardAsPrincipal(
     // Anything else throws, as it always has.
     const code = assertionFailureCode(err);
     if (!code) throw err;
-    log.warn("no assertion for a gate decision", {
-      gateId: who.gateId,
+    log.warn("no assertion for a board call", {
+      ref: who.ref ?? who.gateId,
       code,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -123,8 +159,8 @@ async function postToBoardAsPrincipal(
   } catch (err) {
     // The network, not a refusal. Distinguished because a refusal is final and
     // this is not — the reader should be able to press the button again.
-    log.warn("gate resolution did not reach the board", {
-      gateId: who.gateId,
+    log.warn("a board call did not reach the board", {
+      ref: who.ref ?? who.gateId,
       error: err instanceof Error ? err.message : String(err),
     });
     return { ok: false, code: "UNREACHABLE" };

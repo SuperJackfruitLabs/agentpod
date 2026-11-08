@@ -73,6 +73,11 @@ card could not show everything (a very long change, a terminal), nothing in the 
 not a button, and not a typed number either; answer in the console. Whoever answers, by button, by
 number or in the console, is recorded with the answer, and the card closes wherever it was answered.
 
+**A board room carries more than gates and questions.** A card waiting on a person (blocked,
+failing, not authorised) and a SuperToolkit approval request arrive there too — see
+[Boards](/use/boards/#a-card-waiting-on-you). Answers to them are never passed to an agent as a
+message.
+
 ## Messaging an agent is dispatching it
 
 Sending a message spends the agent's time, so it needs the same authority as dispatching it any

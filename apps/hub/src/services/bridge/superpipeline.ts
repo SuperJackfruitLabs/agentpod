@@ -573,6 +573,20 @@ export class SuperpipelineClient {
     return [];
   }
 
+  /**
+   * Every card the board says is waiting on a person for a reason other than a question or a
+   * review — the read half of the sweep for `attention.pending`. `unknown[]`, checked with
+   * `isAttentionPending`; a throw from `send` stays a throw, as for the reads above, because absence
+   * from this list is what settles a room card.
+   */
+  async pendingAttention(): Promise<unknown[]> {
+    const res = await this.send("GET", `/v1/boards/${this.boardId}/attention/pending`);
+    if (typeof res === "object" && res !== null && "attention" in res && Array.isArray(res.attention)) {
+      return res.attention;
+    }
+    return [];
+  }
+
   private verb(lease: RunLease, action: string, extra: Record<string, unknown> = {}): Promise<unknown> {
     return this.send("POST", `/v1/boards/${this.boardId}/runs/${lease.runId}/${action}`, {
       leaseEpoch: lease.leaseEpoch,

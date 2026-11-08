@@ -98,7 +98,40 @@ export interface ElicitationPendingDelivery {
    * carried (`questionSubjectV2`). Absent from a board that predates it, and on any other question.
    */
   approvalSubject?: unknown;
+  /**
+   * A SuperToolkit approval request (`apr_…`, equal to `elicitationId`) hosted on the board
+   * (charter: "Waiting cards and broker approvals reach chat" §3). It belongs to no card, run or
+   * stage, so `cardId`, `runId` and `stageKey` are empty and the room must not link to a card.
+   */
+  approvalRequestId?: unknown;
   ts: string;
+}
+
+/**
+ * The body the board pushes on `attention.pending`: a card parked for a person for a reason other
+ * than a question or a review — `repeated-failure`, `blocked` or `not-authorised` (charter: "Waiting
+ * cards and broker approvals reach chat" §1). Also what `GET /v1/boards/:id/attention/pending`
+ * lists, for the sweep. `waitId` names this particular wait: a card that parks again is a new one.
+ *
+ * Everything past the identifiers is `unknown`: checked and bounded before it is carried
+ * (`attentionV2Content`), never trusted as typed.
+ */
+export interface AttentionPendingDelivery {
+  event: "attention.pending";
+  boardId: string;
+  boardName?: string | null;
+  cardId: string;
+  cardTitle: string;
+  stageKey: string;
+  stageName?: unknown;
+  waitId: string;
+  reason: string;
+  detail?: unknown;
+  summary?: unknown;
+  failureCount?: unknown;
+  earlierStages?: unknown;
+  options: unknown[];
+  ts?: string;
 }
 
 /**

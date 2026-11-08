@@ -287,6 +287,22 @@ describe("SuperpipelineClient — pending delivery follow-ups", () => {
   });
 });
 
+describe("SuperpipelineClient — cards waiting on a person", () => {
+  test("reads the cards a board says are waiting, from the sweep's route", async () => {
+    const waiting = { event: "attention.pending", cardId: "crd_1", waitId: "wait_0123456789abcdef" };
+    const { client, calls } = fakeBoard(() => ({ status: 200, body: { attention: [waiting] } }));
+    expect(await client.pendingAttention()).toEqual([waiting]);
+    expect(calls[0]?.url).toBe(`https://board.test/v1/boards/${BOARD}/attention/pending`);
+    expect(calls[0]?.method).toBe("GET");
+  });
+
+  test("reads a body with no list as nothing waiting, and throws on a refusal", async () => {
+    expect(await fakeBoard(() => ({ status: 200, body: {} })).client.pendingAttention()).toEqual([]);
+    const { client } = fakeBoard(() => ({ status: 401, body: boardError("UNAUTHORIZED") }));
+    await expect(client.pendingAttention()).rejects.toBeInstanceOf(SuperpipelineApiError);
+  });
+});
+
 const tel = useTestTelemetry();
 
 describe("SuperpipelineClient: tracing", () => {

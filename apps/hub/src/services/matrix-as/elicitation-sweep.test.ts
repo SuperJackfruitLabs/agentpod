@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { ElicitationPendingDelivery } from "./elicitation-card";
 import {
+  bridgeElicitationSweepDeps as buildSweepDeps,
   startElicitationSweeper,
   sweepElicitationBoardNow,
   sweepElicitations,
@@ -261,5 +262,111 @@ describe("a question held until somebody joins its board room", () => {
 
   test("with no sweeper running there is nothing to wake", async () => {
     expect(await sweepElicitationBoardNow("brd_one")).toBeNull();
+  });
+});
+
+/**
+ * SuperToolkit approval requests are listed only to the relay (charter: waiting cards and broker
+ * approvals reach chat §3): an agent's read never shows them, so it must never settle one as over,
+ * and the relay's token is used for its own workspace's boards only.
+ */
+/** The bridge's sweep deps over a relay for `fleet_relay`, recording which token each read used. */
+function reads(fail = false) {
+  const sent: Array<{ url: string; auth: string }> = [];
+  const invalidated: number[] = [];
+  const fetchImpl = async (url: string, init: { headers: Record<string, string> }) => {
+    sent.push({ url, auth: init.headers.Authorization ?? "" });
+    const relayed = (init.headers.Authorization ?? "").includes("relay");
+    if (fail && relayed) return { status: 403, ok: false, json: async () => ({ error: { code: "FORBIDDEN" } }) };
+    return { status: 200, ok: true, json: async () => ({ elicitations: [] }) };
+  };
+  const deps = buildSweepDeps(
+    { baseUrl: "https://board.test", source: "superpipeline" },
+    {
+      tenantIdFor: async (b) => (b === "brd_mine" ? "fleet_relay" : b === "brd_theirs" ? "fleet_other" : null),
+      project: async () => ({ status: "already" }),
+      postedAwaitingOutcome: async () => [],
+      settle: async () => false,
+    },
+    fetchImpl,
+    async () => [
+      { boardId: "brd_mine", token: "spa_mine" },
+      { boardId: "brd_theirs", token: "spa_theirs" },
+    ],
+    {
+      tokenFor: async (tenantId) => (tenantId === "fleet_relay" ? "relay.jwt.token" : null),
+      invalidate: () => {
+        invalidated.push(1);
+      },
+    },
+    async (b) => (b === "brd_mine" ? ["fleet_relay"] : b === "brd_theirs" ? ["fleet_other"] : []),
+  );
+  return { deps, sent, invalidated };
+}
+
+describe("approval requests and the relay", () => {
+  const posted = [
+    { elicitationId: "apr_1", roomId: "!r:x", approvalRequest: true },
+    { elicitationId: "elc_gone", roomId: "!r:x", approvalRequest: false },
+  ];
+
+  test("an agent's read settles a finished card question, never an approval request it could not see", async () => {
+    const { deps, settled } = rig({
+      pendingElicitationsScoped: async () => ({ elicitations: [], approvalRequests: false }),
+      postedAwaitingOutcome: async () => posted,
+    });
+    await sweepElicitations(deps);
+    expect(settled).toEqual(["elc_gone"]);
+  });
+
+  test("the relay's read settles an approval request that is no longer listed", async () => {
+    const { deps, settled } = rig({
+      pendingElicitationsScoped: async () => ({ elicitations: [], approvalRequests: true }),
+      postedAwaitingOutcome: async () => posted,
+    });
+    await sweepElicitations(deps);
+    expect(settled).toEqual(["apr_1", "elc_gone"]);
+  });
+
+
+  test("the relay's workspace's board is read with the relay token; another workspace's with its agent", async () => {
+    const { deps, sent } = reads();
+    expect(await deps.pendingElicitationsScoped?.("brd_mine", "fleet_relay")).toEqual({ elicitations: [], approvalRequests: true });
+    expect(await deps.pendingElicitationsScoped?.("brd_theirs", "fleet_other")).toEqual({ elicitations: [], approvalRequests: false });
+    expect(sent.map((s) => s.auth)).toEqual(["Bearer relay.jwt.token", "Bearer spa_theirs"]);
+  });
+
+  test("the relay is decided for the tenant the sweep projects into, not a second lookup", async () => {
+    const { deps, sent } = reads();
+    // The sweep resolved another tenant for this board: no relay read, whatever tenantIdFor says now.
+    expect(await deps.pendingElicitationsScoped?.("brd_mine", "fleet_other")).toEqual({ elicitations: [], approvalRequests: false });
+    expect(sent.map((s) => s.auth)).toEqual(["Bearer spa_mine"]);
+  });
+
+  test("a refused relay read falls back to the agent's for card questions, and the relay forgets its token", async () => {
+    const { deps, sent, invalidated } = reads(true);
+    expect(await deps.pendingElicitationsScoped?.("brd_mine", "fleet_relay")).toEqual({ elicitations: [], approvalRequests: false });
+    expect(sent.map((s) => s.auth)).toEqual(["Bearer relay.jwt.token", "Bearer spa_mine"]);
+    expect(invalidated).toHaveLength(1);
+  });
+
+  test("the sweep hands the scoped read the same tenant it projects into", async () => {
+    const tenants = ["fleet_a", "fleet_b"];
+    const scopedFor: string[] = [];
+    const projectedInto: string[] = [];
+    const { deps } = rig({
+      tenantIdFor: async () => tenants.shift() ?? "fleet_z",
+      pendingElicitationsScoped: async (_b, tenantId) => {
+        scopedFor.push(tenantId);
+        return { elicitations: [question("elc_1")], approvalRequests: true };
+      },
+      project: async (tenantId) => {
+        projectedInto.push(tenantId);
+        return { status: "already" };
+      },
+    });
+    await sweepElicitations(deps);
+    expect(scopedFor).toEqual(["fleet_a"]);
+    expect(projectedInto).toEqual(["fleet_a"]);
   });
 });
