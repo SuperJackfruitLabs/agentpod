@@ -96,6 +96,14 @@ decision expired, is refused. Replying with a number can **decline** such a ques
 approve it — the reply cannot show you what you would be approving — so the room points you to an
 updated app or the board instead.
 
+**A gate may offer a choice of versions.** An agent drafting a post can hand over up to three
+versions; the gate then asks you to choose one. An updated app shows each version and approves the
+one you pick; request changes and reject send the whole set back. Each version is shown within an
+equal share of the room's space, so a long one never crowds out the others, and a version that could
+not be shown in full here cannot be chosen from the room — choose it on the board. An older app, the
+phone's Lock Screen and a reply by number never approve any version: they can only send the set back,
+and say where to choose. Once a version is approved, the room's receipt names it.
+
 ## A card waiting on you
 
 A card also stops on a person when its agent keeps failing, says it is **blocked**, or is **not
