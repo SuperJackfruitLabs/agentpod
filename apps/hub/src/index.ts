@@ -444,7 +444,7 @@ if (matrixBridge) {
      * the room card offers Approve and Reject for a decision already made, with no expiry. The
      * sweep already asks each board what is still pending; this settles what is not.
      */
-    settleOutcome: (gateId, decision, decidedBy) => matrixBridge.settleGate(gateId, decision, decidedBy),
+    settleOutcome: (gateId, decision, decidedBy, chosen) => matrixBridge.settleGate(gateId, decision, decidedBy, chosen),
     // …and the follow-up a manual-delivery approval owes: the floor beneath `delivery.pending`.
     // `projectDelivery` is idempotent on `gate_id`, as `projectGate` is.
     projectDelivery: (tenantId, delivery) => projectDelivery(tenantId, delivery, gateProjection),

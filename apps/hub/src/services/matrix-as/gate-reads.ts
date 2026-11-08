@@ -9,7 +9,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "../../db/drizzle";
 import { bridgeAgents, bridgeDispatches } from "../../db/schema/bridge";
-import { matrixGateEvents, matrixRooms, type MatrixGateOption } from "../../db/schema/matrix";
+import { matrixGateEvents, matrixRooms, type MatrixGateOption, type MatrixGateVariant } from "../../db/schema/matrix";
 import { stations } from "../../db/schema/stations";
 import { stationSpeaker } from "../matrix";
 import { principalHandle } from "../../auth/org-plane/principals";
@@ -50,6 +50,8 @@ export async function projectionForGate(gateId: string): Promise<{
   subjectId: string | null;
   subjectDigest: string | null;
   subjectPreviewComplete: boolean | null;
+  /** A variant gate's variants as projected; null when the gate is not a choice. */
+  variants: MatrixGateVariant[] | null;
 } | null> {
   const [row] = await db
     .select({
@@ -62,6 +64,7 @@ export async function projectionForGate(gateId: string): Promise<{
       subjectId: matrixGateEvents.approvalSubjectId,
       subjectDigest: matrixGateEvents.approvalSubjectDigest,
       subjectPreviewComplete: matrixGateEvents.approvalSubjectPreviewComplete,
+      variants: matrixGateEvents.approvalVariants,
     })
     .from(matrixGateEvents)
     .where(eq(matrixGateEvents.gateId, gateId))

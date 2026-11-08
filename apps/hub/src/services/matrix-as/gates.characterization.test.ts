@@ -1293,6 +1293,7 @@ describe("the reads", () => {
           "subjectId": null,
           "subjectPreviewComplete": null,
           "tenantId": "fleet_00000000000000000000",
+          "variants": null,
         },
         "tenant": "fleet_00000000000000000000",
         "unboundRoom": null,

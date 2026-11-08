@@ -514,14 +514,20 @@ export class SuperpipelineClient {
    * has to say WHICH way. Null on any refusal, because "we could not read it" and "it was
    * approved" must never collapse into one answer.
    */
-  async gate(gateId: string): Promise<{ status: string; decision: string | null; decidedBy: string | null } | null> {
+  async gate(gateId: string): Promise<{
+    status: string;
+    decision: string | null;
+    decidedBy: string | null;
+    /** On a variant gate, the variant an approval chose (`variants[].chosen`); null otherwise. */
+    chosen: { id: string; label: string } | null;
+  } | null> {
     try {
       const res = (await this.send("GET", `/v1/boards/${this.boardId}/gates/${encodeURIComponent(gateId)}`)) as {
-        gate?: { status?: string; decision?: string | null; decidedBy?: string | null };
+        gate?: { status?: string; decision?: string | null; decidedBy?: string | null; variants?: unknown };
       };
       const g = res.gate;
       if (!g || typeof g.status !== "string") return null;
-      return { status: g.status, decision: g.decision ?? null, decidedBy: g.decidedBy ?? null };
+      return { status: g.status, decision: g.decision ?? null, decidedBy: g.decidedBy ?? null, chosen: chosenVariantOf(g.variants) };
     } catch {
       return null;
     }
@@ -632,4 +638,21 @@ export class SuperpipelineClient {
   release(lease: RunLease): Promise<unknown> {
     return this.verb(lease, "release");
   }
+}
+
+/**
+ * The variant a variant gate's read marks `chosen` (charter 2026-11-09), or null when there is none
+ * or the read is not a shape this hub can name it from. Only names it in a receipt.
+ */
+function chosenVariantOf(variants: unknown): { id: string; label: string } | null {
+  if (!Array.isArray(variants)) return null;
+  for (const v of variants) {
+    if (typeof v !== "object" || v === null || !("chosen" in v) || v.chosen !== true) continue;
+    if (!("id" in v) || !("label" in v)) continue;
+    const { id, label } = v;
+    if (typeof id === "string" && typeof label === "string" && label.trim() !== "") {
+      return { id, label: label.replace(/\s+/g, " ").trim().slice(0, 80) };
+    }
+  }
+  return null;
 }

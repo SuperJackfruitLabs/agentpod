@@ -1,6 +1,6 @@
 {
   "corpus": "ecosystem-identity/matrix-gate-events",
-  "version": 7,
+  "version": 8,
   "authoredAt": "2026-08-30",
   "authoredFrom": "the gates table in superpipeline apps/api/src/board/board-do.ts, the GateDecision union it resolves against, and charter decisions/2026-08-30-a-gate-closes-over-chat.md",
   "purpose": "A superpipeline approval gate crosses into a Matrix room and a human's answer crosses back. Three codebases must agree on the field names: the board that opens the gate, the Application Service that projects and resolves it, and the client that draws the buttons. A rename in any one of them is a gate that silently never resolves — which reads to the human as a button that does nothing.",
@@ -5011,6 +5011,817 @@
           }
         }
       ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.v2",
+      "variant": "choice",
+      "direction": "outbound — the board asks a person to choose one of several drafts",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-offer-a-choice-of-variants.md",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as for the entry without a variant; `subject` holds `variants` instead of a subject's identity.",
+      "requiredFields": [
+        "suite_event_type",
+        "options",
+        "subject"
+      ],
+      "notes": {
+        "subject": "{ variants: [{ id, label, subject }] }, 1 to 3 variants, with NO top-level id or digest: a client that predates variants cannot read this gate.v2 as a subject and falls back to the v1 card, which never offers a subject approval. Each variant's subject is the usual snake_case envelope {id, digest, schema, revision, expires_at, preview, preview_complete}.",
+        "bounds": "Each variant's preview is bounded to an equal share of the whole-preview budget, floor(16000 / n) UTF-8 bytes of JSON-encoded strings, by the board and again by the Application Service, so one long draft never costs another its preview. A variant that was cut says preview_complete: false on its own; its siblings keep theirs.",
+        "options": "The usual four. The choice is the binding, not an option: a client offers an approving option for a variant only when that variant's preview is complete and drawable; request changes and reject act on the whole set and are always offered.",
+        "malformed": "More than 3 variants, an identity beside them, a variant without an id, label, id or digest, or two variants sharing an id or a subject: the Application Service carries no subject and offers only request_changes and reject.",
+        "body": "Every variant's label and bounded preview, fenced; a variant whose preview is incomplete is said to be chosen on the board."
+      },
+      "accept": [
+        {
+          "why": "three variants, the third cut to its share by the board and so incomplete on its own",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Choice needed — \"Announce the release\" at stage `approve`. Choose one of 3 versions.\n\n**Short**\n\nPost:\n```\nOur next release ships today.\n```\n\n**With the thread**\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\n**Long form** — shortened here; choose it on the board.\n\nPost:\n```\nOur next release ships today. Here is everything in it, from the first…\n```\n\nTo choose, use an updated app or the board. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_7e31)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_7e31",
+            "gate_id": "gate_5d72",
+            "stage_key": "approve",
+            "return_stage_key": "draft",
+            "card_title": "Announce the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Choose a version of \"Announce the release\"",
+            "handoff_summary": "Choose one of 3 variants: \"Short\", \"With the thread\", \"Long form\". Open the card to see them before approving.",
+            "options": [
+              {
+                "id": "approve_manual",
+                "label": "Approve — I'll post it myself",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "manual"
+              },
+              {
+                "id": "approve_automatic",
+                "label": "Approve — post automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "subject": {
+              "variants": [
+                {
+                  "id": "short",
+                  "label": "Short",
+                  "subject": {
+                    "id": "aps_v1",
+                    "digest": "sha256:v1d1",
+                    "schema": "social-publish/v1",
+                    "revision": 1,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today."
+                      }
+                    ],
+                    "preview_complete": true
+                  }
+                },
+                {
+                  "id": "thread",
+                  "label": "With the thread",
+                  "subject": {
+                    "id": "aps_v2",
+                    "digest": "sha256:v2d1",
+                    "schema": "social-publish/v1",
+                    "revision": 2,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                      }
+                    ],
+                    "preview_complete": true
+                  }
+                },
+                {
+                  "id": "long",
+                  "label": "Long form",
+                  "subject": {
+                    "id": "aps_v3",
+                    "digest": "sha256:v3d1",
+                    "schema": "social-publish/v1",
+                    "revision": 3,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today. Here is everything in it, from the first…"
+                      }
+                    ],
+                    "preview_complete": false
+                  }
+                }
+              ]
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_7e31"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "four variants. At most three (operator ruling, 2026-11-09).",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Choice needed — \"Announce the release\" at stage `approve`. Choose one of 3 versions.\n\n**Short**\n\nPost:\n```\nOur next release ships today.\n```\n\n**With the thread**\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\n**Long form** — shortened here; choose it on the board.\n\nPost:\n```\nOur next release ships today. Here is everything in it, from the first…\n```\n\nTo choose, use an updated app or the board. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_7e31)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_7e31",
+            "gate_id": "gate_5d72",
+            "stage_key": "approve",
+            "return_stage_key": "draft",
+            "card_title": "Announce the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Choose a version of \"Announce the release\"",
+            "handoff_summary": "Choose one of 3 variants: \"Short\", \"With the thread\", \"Long form\". Open the card to see them before approving.",
+            "options": [
+              {
+                "id": "approve_manual",
+                "label": "Approve — I'll post it myself",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "manual"
+              },
+              {
+                "id": "approve_automatic",
+                "label": "Approve — post automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "subject": {
+              "variants": [
+                {
+                  "id": "short",
+                  "label": "Short",
+                  "subject": {
+                    "id": "aps_v1",
+                    "digest": "sha256:v1d1",
+                    "schema": "social-publish/v1",
+                    "revision": 1,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today."
+                      }
+                    ],
+                    "preview_complete": true
+                  }
+                },
+                {
+                  "id": "thread",
+                  "label": "With the thread",
+                  "subject": {
+                    "id": "aps_v2",
+                    "digest": "sha256:v2d1",
+                    "schema": "social-publish/v1",
+                    "revision": 2,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                      }
+                    ],
+                    "preview_complete": true
+                  }
+                },
+                {
+                  "id": "long",
+                  "label": "Long form",
+                  "subject": {
+                    "id": "aps_v3",
+                    "digest": "sha256:v3d1",
+                    "schema": "social-publish/v1",
+                    "revision": 3,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today. Here is everything in it, from the first…"
+                      }
+                    ],
+                    "preview_complete": false
+                  }
+                },
+                {
+                  "id": "fourth",
+                  "label": "Fourth",
+                  "subject": {
+                    "id": "aps_v4",
+                    "digest": "sha256:v4d1",
+                    "schema": "social-publish/v1",
+                    "revision": 1,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today."
+                      }
+                    ],
+                    "preview_complete": true
+                  }
+                }
+              ]
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_7e31"
+          }
+        },
+        {
+          "why": "an id and digest beside the variants. A client that predates variants would read it as an ordinary subject and offer to approve something that is not the choice.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Choice needed — \"Announce the release\" at stage `approve`. Choose one of 3 versions.\n\n**Short**\n\nPost:\n```\nOur next release ships today.\n```\n\n**With the thread**\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\n**Long form** — shortened here; choose it on the board.\n\nPost:\n```\nOur next release ships today. Here is everything in it, from the first…\n```\n\nTo choose, use an updated app or the board. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_7e31)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_7e31",
+            "gate_id": "gate_5d72",
+            "stage_key": "approve",
+            "return_stage_key": "draft",
+            "card_title": "Announce the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Choose a version of \"Announce the release\"",
+            "handoff_summary": "Choose one of 3 variants: \"Short\", \"With the thread\", \"Long form\". Open the card to see them before approving.",
+            "options": [
+              {
+                "id": "approve_manual",
+                "label": "Approve — I'll post it myself",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "manual"
+              },
+              {
+                "id": "approve_automatic",
+                "label": "Approve — post automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "subject": {
+              "id": "aps_v1",
+              "digest": "sha256:v1d1",
+              "variants": [
+                {
+                  "id": "short",
+                  "label": "Short",
+                  "subject": {
+                    "id": "aps_v1",
+                    "digest": "sha256:v1d1",
+                    "schema": "social-publish/v1",
+                    "revision": 1,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today."
+                      }
+                    ],
+                    "preview_complete": true
+                  }
+                },
+                {
+                  "id": "thread",
+                  "label": "With the thread",
+                  "subject": {
+                    "id": "aps_v2",
+                    "digest": "sha256:v2d1",
+                    "schema": "social-publish/v1",
+                    "revision": 2,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                      }
+                    ],
+                    "preview_complete": true
+                  }
+                },
+                {
+                  "id": "long",
+                  "label": "Long form",
+                  "subject": {
+                    "id": "aps_v3",
+                    "digest": "sha256:v3d1",
+                    "schema": "social-publish/v1",
+                    "revision": 3,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today. Here is everything in it, from the first…"
+                      }
+                    ],
+                    "preview_complete": false
+                  }
+                }
+              ]
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_7e31"
+          }
+        },
+        {
+          "why": "a variant whose subject has no digest. The chosen variant's digest is the binding.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Choice needed — \"Announce the release\" at stage `approve`. Choose one of 3 versions.\n\n**Short**\n\nPost:\n```\nOur next release ships today.\n```\n\n**With the thread**\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\n**Long form** — shortened here; choose it on the board.\n\nPost:\n```\nOur next release ships today. Here is everything in it, from the first…\n```\n\nTo choose, use an updated app or the board. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_7e31)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_7e31",
+            "gate_id": "gate_5d72",
+            "stage_key": "approve",
+            "return_stage_key": "draft",
+            "card_title": "Announce the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Choose a version of \"Announce the release\"",
+            "handoff_summary": "Choose one of 3 variants: \"Short\", \"With the thread\", \"Long form\". Open the card to see them before approving.",
+            "options": [
+              {
+                "id": "approve_manual",
+                "label": "Approve — I'll post it myself",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "manual"
+              },
+              {
+                "id": "approve_automatic",
+                "label": "Approve — post automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "subject": {
+              "variants": [
+                {
+                  "id": "short",
+                  "label": "Short",
+                  "subject": {
+                    "id": "aps_v1",
+                    "digest": "sha256:v1d1",
+                    "schema": "social-publish/v1",
+                    "revision": 1,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today."
+                      }
+                    ],
+                    "preview_complete": true
+                  }
+                },
+                {
+                  "id": "thread",
+                  "label": "With the thread",
+                  "subject": {
+                    "id": "aps_v2",
+                    "schema": "social-publish/v1",
+                    "revision": 2,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                      }
+                    ],
+                    "preview_complete": true
+                  }
+                },
+                {
+                  "id": "long",
+                  "label": "Long form",
+                  "subject": {
+                    "id": "aps_v3",
+                    "digest": "sha256:v3d1",
+                    "schema": "social-publish/v1",
+                    "revision": 3,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today. Here is everything in it, from the first…"
+                      }
+                    ],
+                    "preview_complete": false
+                  }
+                }
+              ]
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_7e31"
+          }
+        },
+        {
+          "why": "two variants sharing an id. A choice is made by variant; two with one id are an ambiguous answer.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Choice needed — \"Announce the release\" at stage `approve`. Choose one of 3 versions.\n\n**Short**\n\nPost:\n```\nOur next release ships today.\n```\n\n**With the thread**\n\nPost:\n```\nOur next release ships today.\n\nThanks to everyone who tested it.\n```\n\n**Long form** — shortened here; choose it on the board.\n\nPost:\n```\nOur next release ships today. Here is everything in it, from the first…\n```\n\nTo choose, use an updated app or the board. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_7e31)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_7e31",
+            "gate_id": "gate_5d72",
+            "stage_key": "approve",
+            "return_stage_key": "draft",
+            "card_title": "Announce the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Choose a version of \"Announce the release\"",
+            "handoff_summary": "Choose one of 3 variants: \"Short\", \"With the thread\", \"Long form\". Open the card to see them before approving.",
+            "options": [
+              {
+                "id": "approve_manual",
+                "label": "Approve — I'll post it myself",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "manual"
+              },
+              {
+                "id": "approve_automatic",
+                "label": "Approve — post automatically",
+                "meaning": "approve",
+                "needs_comment": false,
+                "delivery": "automatic"
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "subject": {
+              "variants": [
+                {
+                  "id": "short",
+                  "label": "Short",
+                  "subject": {
+                    "id": "aps_v1",
+                    "digest": "sha256:v1d1",
+                    "schema": "social-publish/v1",
+                    "revision": 1,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today."
+                      }
+                    ],
+                    "preview_complete": true
+                  }
+                },
+                {
+                  "id": "short",
+                  "label": "With the thread",
+                  "subject": {
+                    "id": "aps_v2",
+                    "digest": "sha256:v2d1",
+                    "schema": "social-publish/v1",
+                    "revision": 2,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today.\n\nThanks to everyone who tested it."
+                      }
+                    ],
+                    "preview_complete": true
+                  }
+                },
+                {
+                  "id": "long",
+                  "label": "Long form",
+                  "subject": {
+                    "id": "aps_v3",
+                    "digest": "sha256:v3d1",
+                    "schema": "social-publish/v1",
+                    "revision": 3,
+                    "expires_at": "2030-01-02T03:04:05Z",
+                    "preview": [
+                      {
+                        "type": "text",
+                        "label": "Post",
+                        "text": "Our next release ships today. Here is everything in it, from the first…"
+                      }
+                    ],
+                    "preview_complete": false
+                  }
+                }
+              ]
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_7e31"
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.v1",
+      "variant": "choice",
+      "direction": "outbound — the v1 fallback for a variant gate (the legacy event; the card embedded in the prose is the same without `body`)",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-offer-a-choice-of-variants.md §6",
+      "sender": "the board room's speaker",
+      "matrixEventType": "dev.superpipeline.gate.v1",
+      "requiredFields": [
+        "body",
+        "prompt",
+        "options"
+      ],
+      "notes": {
+        "options": "Never an approving option: a v1 card cannot bind an answer to a variant. Request changes and reject only.",
+        "body": "Says to choose in an updated app or on the board."
+      },
+      "accept": [
+        {
+          "why": "the variant gate above, as a v1 client sees it",
+          "content": {
+            "body": "Choice needed — \"Announce the release\" at stage `approve`. Choose a version in an updated app or on the board; request changes or reject can be sent from here. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_7e31)",
+            "schema_version": 2,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_7e31",
+            "gate_id": "gate_5d72",
+            "stage_key": "approve",
+            "return_stage_key": "draft",
+            "card_title": "Announce the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Choose a version of \"Announce the release\"",
+            "handoff_summary": "Choose one of 3 variants: \"Short\", \"With the thread\", \"Long form\". Open the card to see them before approving.",
+            "options": [
+              {
+                "id": "request_changes",
+                "label": "Request changes"
+              },
+              {
+                "id": "reject",
+                "label": "Reject"
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_7e31"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "a v1 card for a variant gate offering approve. Its answer could carry no choice.",
+          "content": {
+            "body": "Choice needed — \"Announce the release\" at stage `approve`. Choose a version in an updated app or on the board; request changes or reject can be sent from here. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_7e31)",
+            "schema_version": 2,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_7e31",
+            "gate_id": "gate_5d72",
+            "stage_key": "approve",
+            "return_stage_key": "draft",
+            "card_title": "Announce the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Choose a version of \"Announce the release\"",
+            "handoff_summary": "Choose one of 3 variants: \"Short\", \"With the thread\", \"Long form\". Open the card to see them before approving.",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve"
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes"
+              },
+              {
+                "id": "reject",
+                "label": "Reject"
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_7e31"
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.decision.v2",
+      "variant": "choice",
+      "direction": "inbound — the human chooses a variant, or sends the set back",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-offer-a-choice-of-variants.md §2",
+      "sender": "the human's own Matrix session",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content.",
+      "requiredFields": [
+        "suite_event_type",
+        "gate_id",
+        "option_id",
+        "m.relates_to"
+      ],
+      "notes": {
+        "subject": "On an approving answer, required: the {id, digest} of the variant chosen, copied from its subject. The Application Service refuses a binding that names no variant of the gate, a variant whose preview_complete was false, or one whose subject has expired, and passes the chosen binding to superpipeline's resolve as approvalSubjectId / approvalSubjectDigest.",
+        "setAnswers": "request_changes and reject act on the whole set and need no binding; one sent beside them is not forwarded."
+      },
+      "accept": [
+        {
+          "why": "an automatic approval choosing the second variant",
+          "content": {
+            "msgtype": "m.text",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.decision.v2",
+            "gate_id": "gate_5d72",
+            "body": "Approved — post automatically",
+            "option_id": "approve_automatic",
+            "subject": {
+              "id": "aps_v2",
+              "digest": "sha256:v2d1"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "a rejection of the whole set, with no binding",
+          "content": {
+            "msgtype": "m.text",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.decision.v2",
+            "gate_id": "gate_5d72",
+            "body": "Rejected",
+            "option_id": "reject",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "an approval with no binding: it chooses nothing",
+          "content": {
+            "msgtype": "m.text",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.decision.v2",
+            "gate_id": "gate_5d72",
+            "body": "Approved — post automatically",
+            "option_id": "approve_automatic",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "a binding that names no variant of the gate",
+          "content": {
+            "msgtype": "m.text",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.decision.v2",
+            "gate_id": "gate_5d72",
+            "body": "Approved — post automatically",
+            "option_id": "approve_automatic",
+            "subject": {
+              "id": "aps_v2",
+              "digest": "sha256:v1d1"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "choosing the variant whose preview was incomplete. It can be chosen on the board.",
+          "content": {
+            "msgtype": "m.text",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.decision.v2",
+            "gate_id": "gate_5d72",
+            "body": "Approved — I'll post it myself",
+            "option_id": "approve_manual",
+            "subject": {
+              "id": "aps_v3",
+              "digest": "sha256:v3d1"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.outcome.v1",
+      "variant": "choice",
+      "direction": "outbound — the receipt after a variant was chosen",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-offer-a-choice-of-variants.md",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "requiredFields": [
+        "suite_event_type",
+        "gate_id",
+        "decision"
+      ],
+      "notes": {
+        "chosen_variant": "Optional { id, label }: the variant an approval chose, when known — from the answer in the room, or from the board's read of the gate (variants[].chosen). The prose names its label."
+      },
+      "accept": [
+        {
+          "why": "an automatic approval of \"With the thread\"",
+          "content": {
+            "suite_event_type": "dev.superpipeline.gate.outcome.v1",
+            "gate_id": "gate_5d72",
+            "board_id": "brd_7c1f",
+            "decision": "approve_automatic",
+            "decided_by": "rakesh",
+            "chosen_variant": {
+              "id": "thread",
+              "label": "With the thread"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "reject": []
     }
   ]
 }

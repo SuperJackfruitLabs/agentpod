@@ -407,3 +407,71 @@ describe("gate.v2 rides on the prose message", () => {
     expect((await decideV2(d.gateId, proseId, { option_id: "reject" }).run()).status).toBe("resolved");
   });
 });
+
+/** One variant of a choice, as the board pushes it. */
+function variant(id: string, n: number, previewComplete: boolean) {
+  return {
+    id,
+    label: `Version ${id}`,
+    subject: {
+      id: `aps_${RUN}_${n}`,
+      digest: `sha256:${n}`,
+      schema: "social-publish/v1",
+      revision: n,
+      expiresAt: "2030-01-02T03:04:05Z",
+      previewComplete,
+      preview: [{ type: "text", label: "Post", text: `Draft ${id}` }],
+    },
+  };
+}
+
+/** A dispatched gate offering a choice of two variants, the second shortened by the board. */
+async function variantGate(): Promise<GatePendingDelivery> {
+  const d = await dispatchedGate();
+  return {
+    ...d,
+    options: [
+      { id: "approve_automatic", label: "Approve — post automatically", meaning: "approve", needsComment: false, delivery: "automatic" },
+      { id: "request_changes", label: "Request changes", meaning: "revise", needsComment: true },
+      { id: "reject", label: "Reject", meaning: "reject", needsComment: false },
+    ],
+    approvalSubject: { variants: [variant("a", 1, true), variant("b", 2, false)] },
+  };
+}
+
+describe("a variant gate rides on the prose message and is judged against what was recorded", () => {
+  test("each variant is recorded, and only a complete one can be chosen from the room", async () => {
+    const d = await variantGate();
+    const { deps, texts } = recordingDeps();
+    expect((await projectGate(BOOTSTRAP_TENANT_ID, d, deps)).status).toBe("sent");
+    expect(texts[0]?.extra?.subject).toMatchObject({ variants: [{ id: "a" }, { id: "b" }] });
+    const card = GateRequestCard.parse(texts[0]?.extra?.[GATE_REQUEST_CONTENT_KEY]);
+    expect(card.options.map((o) => o.id)).toEqual(["request_changes", "reject"]);
+
+    expect(await projectionForGate(d.gateId)).toMatchObject({
+      subjectId: null,
+      variants: [
+        { id: "a", label: "Version a", subject_id: `aps_${RUN}_1`, digest: "sha256:1", preview_complete: true, expires_at: "2030-01-02T03:04:05Z" },
+        { id: "b", label: "Version b", subject_id: `aps_${RUN}_2`, digest: "sha256:2", preview_complete: false, expires_at: "2030-01-02T03:04:05Z" },
+      ],
+    });
+    const proseId = texts[0]?.id ?? "";
+
+    const incomplete = decideV2(d.gateId, proseId, { subject: { id: `aps_${RUN}_2`, digest: "sha256:2" } });
+    expect(await incomplete.run()).toEqual({ status: "refused", reason: "variant-incomplete" });
+    const unknown = decideV2(d.gateId, proseId, { subject: { id: `aps_${RUN}_1`, digest: "sha256:2" } });
+    expect(await unknown.run()).toEqual({ status: "refused", reason: "variant-unknown" });
+    for (const r of [incomplete, unknown]) expect(r.resolved).toHaveLength(0);
+
+    const chosen = decideV2(d.gateId, proseId, { subject: { id: `aps_${RUN}_1`, digest: "sha256:1" } });
+    expect(await chosen.run()).toEqual({ status: "resolved" });
+    expect(chosen.resolved[0]).toMatchObject({ approvalSubject: { id: `aps_${RUN}_1`, digest: "sha256:1" } });
+  });
+
+  test("an ordinary gate records no variants", async () => {
+    const d = await dispatchedGate();
+    const { deps } = recordingDeps();
+    await projectGate(BOOTSTRAP_TENANT_ID, d, deps);
+    expect(await projectionForGate(d.gateId)).toMatchObject({ variants: null });
+  });
+});

@@ -5,6 +5,7 @@
  * Split out of `gates.ts`, which re-exports it.
  */
 
+import type { MatrixGateVariant } from "../../db/schema/matrix";
 import { createLogger } from "../../utils/logger";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
 import {
@@ -38,7 +39,17 @@ export type DecisionRefusal =
   /** gate.v2: an answer to a subject-bound gate that does not say which subject it approves. */
   | "subject-missing"
   /** gate.v2: an approving answer to a subject gate whose preview was not shown in full. */
-  | "preview-incomplete";
+  | "preview-incomplete"
+  /** A variant gate: an approving answer whose binding names none of the gate's variants. */
+  | "variant-unknown"
+  /** A variant gate: the chosen variant's preview was not shown in full here. */
+  | "variant-incomplete"
+  /** A variant gate: the chosen variant's subject has passed its expiry. */
+  | "variant-expired"
+  /** superpipeline: the binding names no subject of the gate, or one no longer active. */
+  | "subject-mismatch"
+  /** superpipeline: the approved subject has expired. */
+  | "subject-expired";
 
 export interface GateDecisionEvent {
   sender: string;
@@ -159,6 +170,8 @@ export interface GateDecisionDeps {
     subjectId?: string | null;
     /** Whether the subject's preview was carried in full; false refuses an approving answer. */
     subjectPreviewComplete?: boolean | null;
+    /** A variant gate's variants as projected (charter 2026-11-09); null when it is not a choice. */
+    variants?: ReadonlyArray<MatrixGateVariant> | null;
   } | null>;
   /**
    * Resolve the gate at superpipeline **as `principalId`**, never as this service.
@@ -216,6 +229,7 @@ function v2Refusal(
   if (option.needs_comment && !parsed.comment) {
     return { reason: "comment-required", text: "That answer needs a comment. Nothing has changed." };
   }
+  if (projection.variants) return variantRefusal(parsed, option, projection.variants);
   if (projection.subjectId && !parsed.subject) {
     return {
       reason: "subject-missing",
@@ -229,6 +243,53 @@ function v2Refusal(
       reason: "preview-incomplete",
       text: "The card could not show everything being approved, so it cannot be approved from here. Open the card on the board. Nothing has changed.",
     };
+  }
+  return null;
+}
+
+/** The variant an answer's binding names exactly, by subject id and digest, if any. */
+function chosenVariant(
+  binding: GateSubjectBinding | null,
+  variants: ReadonlyArray<MatrixGateVariant> | null | undefined,
+): MatrixGateVariant | null {
+  if (!binding || !variants) return null;
+  return variants.find((v) => v.subject_id === binding.id && v.digest === binding.digest) ?? null;
+}
+
+/** Has this expiry passed? An expiry that cannot be read is not taken as passed: the board judges. */
+function expired(expiresAt: string | null, now: number): boolean {
+  if (!expiresAt) return false;
+  const at = Date.parse(expiresAt);
+  return Number.isFinite(at) && at <= now;
+}
+
+/**
+ * Why an answer to a variant gate must not be carried (charter 2026-11-09 §2, §4). An approval is
+ * the choice: its binding must name exactly one recorded variant, whose preview reached the room in
+ * full and whose subject has not expired. Request changes and reject act on the whole set and need
+ * no binding.
+ */
+function variantRefusal(
+  parsed: ParsedGateDecision,
+  option: { meaning: string },
+  variants: ReadonlyArray<MatrixGateVariant>,
+): { reason: DecisionRefusal; text: string } | null {
+  if (option.meaning !== "approve") return null;
+  if (!parsed.subject) {
+    return { reason: "subject-missing", text: "That answer did not say which version it chooses. Nothing has changed." };
+  }
+  const chosen = chosenVariant(parsed.subject, variants);
+  if (!chosen) {
+    return { reason: "variant-unknown", text: "That is not one of the versions this gate offers. Nothing has changed." };
+  }
+  if (!chosen.preview_complete) {
+    return {
+      reason: "variant-incomplete",
+      text: "That version couldn't be shown in full here — choose it on the board. Nothing has changed.",
+    };
+  }
+  if (expired(chosen.expires_at, Date.now())) {
+    return { reason: "variant-expired", text: "That version has expired, so it can no longer be chosen. Nothing has changed." };
   }
   return null;
 }
@@ -266,6 +327,22 @@ async function refusalForCode(
       `That did not go through (${code}): the account service would not vouch for you. Nothing has changed.`,
     );
     return { status: "refused", reason: "assertion-refused" };
+  }
+
+  // A binding the board would not take: said in the room, because a person who chose a version and
+  // saw nothing happen would choose it again.
+  if (code === "APPROVAL_SUBJECT_MISMATCH") {
+    log.warn("superpipeline refused a decision's subject binding", { gateId, code });
+    await deps.reply(
+      roomId,
+      "The board did not accept that: what it approves is not one of this gate's versions, or was replaced. Open the card on the board. Nothing has changed.",
+    );
+    return { status: "refused", reason: "subject-mismatch" };
+  }
+  if (code === "DECISION_EXPIRED") {
+    log.warn("superpipeline refused a decision on an expired subject", { gateId, code });
+    await deps.reply(roomId, "That has expired, so it can no longer be approved. Nothing has changed.");
+    return { status: "refused", reason: "subject-expired" };
   }
 
   log.warn("superpipeline refused a decision", { gateId, code });
@@ -365,7 +442,12 @@ export async function handleGateDecision(
     return { status: "refused", reason: "not-human" };
   }
 
-  // gate.v2: after attribution, so a stranger or an agent cannot make this hub speak.
+  // gate.v2: after attribution, so a stranger or an agent cannot make this hub speak. A v1 answer
+  // carries no binding, so on a variant gate it can never be the choice.
+  if (parsed.version === 1 && projection.variants && parsed.optionId === "approve") {
+    await deps.reply(roomId, "Choose a version in an updated app or on the board. Nothing has changed.");
+    return { status: "refused", reason: "subject-missing" };
+  }
   if (parsed.version === 2) {
     const refusal = v2Refusal(parsed, projection);
     if (refusal) {
@@ -379,6 +461,11 @@ export async function handleGateDecision(
     }
   }
 
+  // On a variant gate the binding is the choice, carried only with an approval; request changes and
+  // reject act on the whole set, and a stale binding beside them must not make the board refuse.
+  const chosen = chosenVariant(parsed.subject, projection.variants);
+  const approving = projection.options?.find((o) => o.id === parsed.optionId)?.meaning === "approve";
+  const binding = projection.variants ? (approving && chosen ? parsed.subject : null) : parsed.subject;
   const result = await deps.resolveGate({
     tenantId: projection.tenantId,
     boardId: projection.boardId,
@@ -387,11 +474,11 @@ export async function handleGateDecision(
     comment: parsed.comment,
     principalId: principal.id,
     senderMxid: event.sender,
-    ...(parsed.subject ? { approvalSubject: parsed.subject } : {}),
+    ...(binding ? { approvalSubject: binding } : {}),
   });
 
   if (result.ok) {
-    await postOutcomeReceipt(roomId, parsed, principal.id, projection, deps);
+    await postOutcomeReceipt(roomId, parsed, principal.id, projection, deps, approving && chosen ? chosen : null);
     return { status: "resolved" };
   }
 
@@ -416,9 +503,10 @@ async function postOutcomeReceipt(
   principalId: string,
   projection: { boardId: string; eventId: string; proseEventId?: string | null },
   deps: GateDecisionDeps,
+  chosen: { id: string; label: string } | null,
 ): Promise<void> {
   await settleGateOutcome(
-    { gateId: parsed.gateId, decision: parsed.optionId, decidedBy: principalId },
+    { gateId: parsed.gateId, decision: parsed.optionId, decidedBy: principalId, ...(chosen ? { chosen } : {}) },
     roomId,
     projection,
     deps,
@@ -439,7 +527,13 @@ async function postOutcomeReceipt(
  * gate leave one receipt rather than two.
  */
 export async function settleGateOutcome(
-  decided: { gateId: string; decision: string; decidedBy: string | null },
+  decided: {
+    gateId: string;
+    decision: string;
+    decidedBy: string | null;
+    /** The variant an approval chose, on a variant gate, when it is known. */
+    chosen?: { id: string; label: string } | null;
+  },
   roomId: string,
   projection: { boardId: string; eventId: string; proseEventId?: string | null },
   deps: Pick<GateDecisionDeps, "markOutcomePosted" | "displayNameFor" | "reply" | "sendOutcome">,
@@ -450,7 +544,7 @@ export async function settleGateOutcome(
     if (deps.markOutcomePosted && !(await deps.markOutcomePosted(parsed.gateId))) return;
 
     const who = principalId ? ((await deps.displayNameFor?.(principalId)) ?? null) : null;
-    const verb = OUTCOME_VERBS[parsed.optionId] ?? parsed.optionId;
+    const verb = outcomeVerb(parsed.optionId, decided.chosen ?? null);
     const body =
       OUTCOME_SENTENCES[parsed.optionId] ?? (who ? `${verb} by ${who} — the board has it.` : `${verb} — the board has it.`);
 
@@ -464,6 +558,7 @@ export async function settleGateOutcome(
       board_id: projection.boardId,
       decision: parsed.optionId,
       decided_by: who,
+      ...(decided.chosen ? { chosen_variant: { id: decided.chosen.id, label: decided.chosen.label } } : {}),
       "m.relates_to": { rel_type: "m.reference", event_id: projection.eventId },
     });
   } catch (err) {
@@ -473,6 +568,16 @@ export async function settleGateOutcome(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/**
+ * How a decision reads in a sentence; an approval that chose a variant names it
+ * ("Approved "Short version" for automatic delivery").
+ */
+function outcomeVerb(decision: string, chosen: { label: string } | null): string {
+  const verb = OUTCOME_VERBS[decision] ?? decision;
+  if (!chosen || !verb.startsWith("Approved")) return verb;
+  return `Approved "${chosen.label}"${verb.slice("Approved".length)}`;
 }
 
 /** How each decision reads in a sentence. Falls back to the option id. */

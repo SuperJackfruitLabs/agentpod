@@ -43,6 +43,15 @@ const CARD_EVENT = "$gate-prose";
 const ADMIN = "@admin:test";
 const BOARDS = [BOARD, OTHER_BOARD];
 
+/** One variant of a choice, as the board pushes it. */
+function variant(id: string, digest: string) {
+  return {
+    id,
+    label: id,
+    subject: { id: `aps_${id}`, digest, schema: "social-publish/v1", revision: 1, preview: [{ type: "text", text: id }], previewComplete: true },
+  };
+}
+
 const escalated = (over: Partial<DecisionTimeoutDelivery> = {}): DecisionTimeoutDelivery => ({
   event: "decision.escalated",
   boardId: BOARD,
@@ -364,6 +373,37 @@ describe("an escalated card moved below for an admin who joined", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]?.extra?.suite_event_type).toBe(DECISION_ESCALATED_SUITE_TYPE);
     expect((await gateRow())?.proseEventId).toBe(CARD_EVENT);
+  });
+
+  const withVariants = (digest: string): GatePendingDelivery => ({
+    ...PENDING,
+    approvalSubject: { variants: [variant("short", "sha256:a"), variant("long", digest)] },
+  });
+
+  test("a variant gate moves only while the board offers the same variants it was recorded with", async () => {
+    const record = async () =>
+      db
+        .update(matrixGateEvents)
+        .set({
+          approvalVariants: [
+            { id: "short", label: "short", subject_id: "aps_short", digest: "sha256:a", preview_complete: true, expires_at: null },
+            { id: "long", label: "long", subject_id: "aps_long", digest: "sha256:b", preview_complete: true, expires_at: null },
+          ],
+        })
+        .where(eq(matrixGateEvents.gateId, GATE));
+
+    await record();
+    const redrafted = await escalateThenJoin({ pendingOnBoard: async () => [withVariants("sha256:c")] });
+    expect(redrafted.sent.map((x) => x.extra?.suite_event_type)).toEqual([DECISION_ESCALATED_SUITE_TYPE]);
+    expect((await gateRow())?.proseEventId).toBe(CARD_EVENT);
+
+    await clean();
+    await db.insert(matrixBoardRooms).values({ boardId: BOARD, roomId: ROOM, tenantId: BOOTSTRAP_TENANT_ID, speakerMxid: SPEAKER, alias: "agentpod_board_notice" });
+    await db.insert(matrixGateEvents).values({ gateId: GATE, tenantId: BOOTSTRAP_TENANT_ID, boardId: BOARD, cardId: CARD, roomId: ROOM, eventId: "$gate-legacy", proseEventId: CARD_EVENT });
+    await record();
+    const same = await escalateThenJoin({ pendingOnBoard: async () => [withVariants("sha256:b")] });
+    expect(same.sent[0]?.extra).toMatchObject({ suite_event_type: GATE_V2_SUITE_TYPE, subject: { variants: [{ id: "short" }, { id: "long" }] } });
+    expect((await gateRow())?.proseEventId).toBe("$notice1");
   });
 
   test("a card the board no longer lists, or a board that cannot be read, gets the notice alone", async () => {

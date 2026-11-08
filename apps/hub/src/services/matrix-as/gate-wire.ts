@@ -90,7 +90,20 @@ export function isGatePending(v: unknown): v is GatePendingDelivery {
 export function gateProseBody(d: GatePendingDelivery, link?: string): string {
   const where = `at stage \`${d.stageKey}\``;
   const tail = link ? ` [Open the card](${link})` : "";
+  if (isVariantGate(d)) return `Choice needed — "${d.cardTitle}" ${where}. ${VARIANT_CHOICE_NOTE}${tail}`;
   return `Approval needed — "${d.cardTitle}" ${where}. Approve, request changes, or reject.${tail}`;
+}
+
+/**
+ * What a client that cannot draw the variants is told (charter 2026-11-09 §6): where the choice is
+ * made. Such a client is never offered an approval of a variant.
+ */
+const VARIANT_CHOICE_NOTE =
+  "Choose a version in an updated app or on the board; request changes or reject can be sent from here.";
+
+/** The question a card asks: which version, for a variant gate; approve or not, otherwise. */
+function gatePrompt(d: GatePendingDelivery): string {
+  return isVariantGate(d) ? `Choose a version of "${d.cardTitle}"` : `Approve "${d.cardTitle}"?`;
 }
 
 /**
@@ -118,9 +131,11 @@ export function gateEventContent(
   deepLink?: string
 ): Record<string, unknown> {
   // `{id, label}` and nothing else: a board that speaks gate.v2 sends more on each option,
-  // and the v1 payload stays exactly what v1 clients have always read.
+  // and the v1 payload stays exactly what v1 clients have always read. A v1 card carries no
+  // subject and cannot bind an answer to one, so on a subject-bound gate (a variant gate among
+  // them) it never offers an approval, whatever ids the board sent (charter 2026-11-09 §6).
   const options = d.options
-    .filter((o) => isGateOptionId(o.id))
+    .filter((o) => isGateOptionId(o.id) && !(o.id === "approve" && d.approvalSubject != null))
     .map((o) => ({ id: o.id, label: o.label }));
   return {
     body: gateProseBody(d, deepLink),
@@ -132,7 +147,7 @@ export function gateEventContent(
     return_stage_key: d.returnStageKey,
     card_title: d.cardTitle,
     produced_by: d.producedBy,
-    prompt: `Approve "${d.cardTitle}"?`,
+    prompt: gatePrompt(d),
     // supermessage#37: without this the card asks a reviewer to approve work
     // it does not show them. Additive, so `schema_version` moves rather than
     // the type — a renderer written against v1 ignores it and still draws the
@@ -294,6 +309,8 @@ export interface GateSubjectV2 {
  * sent is not a subject this hub can carry, which `gateOptionsV2` then treats as unshowable.
  */
 export function gateSubjectV2(d: GatePendingDelivery): GateSubjectV2 | null {
+  // A variant gate's subject has no identity of its own; `gateVariantsV2` reads it.
+  if (isVariantGate(d)) return null;
   return subjectV2(d.approvalSubject);
 }
 
@@ -301,7 +318,7 @@ export function gateSubjectV2(d: GatePendingDelivery): GateSubjectV2 | null {
  * An approval subject off the wire — a gate's, or a delivery follow-up's — re-validated and
  * re-bounded, or null when it is not one this hub can carry. `gateSubjectV2` says what it checks.
  */
-export function subjectV2(wire: unknown): GateSubjectV2 | null {
+export function subjectV2(wire: unknown, totalBytes: number = PREVIEW_TOTAL_BYTES): GateSubjectV2 | null {
   const parsed = RawSubject.safeParse(wire);
   if (!parsed.success) return null;
   const s = parsed.data;
@@ -321,7 +338,7 @@ export function subjectV2(wire: unknown): GateSubjectV2 | null {
     // always a prefix of what the board sent, in its order.
     if (!b.success || !ExactPreviewBlock.safeParse(block).success) complete = false;
     if (!b.success) continue;
-    if (full || preview.length === PREVIEW_BLOCKS_MAX || used + blockBytes(b.data) > PREVIEW_TOTAL_BYTES) {
+    if (full || preview.length === PREVIEW_BLOCKS_MAX || used + blockBytes(b.data) > totalBytes) {
       full = true;
       complete = false;
       continue;
@@ -374,7 +391,7 @@ export function gateOptionsV2(d: GatePendingDelivery): GateOptionV2[] {
   // then recorded as bound to nothing, so an approval would pass this hub's subject checks
   // without any binding — every approving option goes, not only those naming a delivery.
   // Revise and reject stay, so the person can still send the work back.
-  const subjectShowable = d.approvalSubject == null || gateSubjectV2(d) !== null;
+  const subjectShowable = d.approvalSubject == null || gateSubjectV2(d) !== null || gateVariantsV2(d) !== null;
   const seen = new Set<string>();
   const out: GateOptionV2[] = [];
   for (const raw of d.options) {
@@ -421,6 +438,8 @@ export function previewMarkdown(preview: GatePreviewBlock[]): string {
  * asterisks — because charter decision 3 is that a person approves bytes they can see.
  */
 export function gateV2ProseBody(d: GatePendingDelivery, link?: string): string {
+  const variants = gateVariantsV2(d);
+  if (variants) return variantsProseBody(d, variants, link);
   const subject = gateSubjectV2(d);
   if (!subject) return gateProseBody(d, link);
   const head = `Approval needed — "${d.cardTitle}" at stage \`${d.stageKey}\`.`;
@@ -434,7 +453,10 @@ export function gateV2ProseBody(d: GatePendingDelivery, link?: string): string {
  * `suite_event_type` marker. Pinned by the shared fixture.
  */
 export function gateV2Content(d: GatePendingDelivery, deepLink?: string): Record<string, unknown> {
-  const subject = gateSubjectV2(d);
+  const variants = gateVariantsV2(d);
+  // A variant gate carries its variants inside `subject` with no `id` or `digest` of its own, so
+  // a client that predates variants cannot read this gate.v2 and draws the v1 card instead.
+  const subject = variants ? { variants } : gateSubjectV2(d);
   return {
     msgtype: "m.text",
     body: gateV2ProseBody(d, deepLink),
@@ -447,13 +469,95 @@ export function gateV2Content(d: GatePendingDelivery, deepLink?: string): Record
     return_stage_key: d.returnStageKey,
     card_title: d.cardTitle,
     produced_by: d.producedBy,
-    prompt: `Approve "${d.cardTitle}"?`,
+    prompt: gatePrompt(d),
     ...(d.handoffSummary ? { handoff_summary: cutToBytes(d.handoffSummary, HANDOFF_SUMMARY_BYTES) } : {}),
     options: gateOptionsV2(d),
     ...(subject ? { subject } : {}),
     ...deadlineField(d.deadline),
     ...(deepLink ? { deep_link: deepLink } : {}),
   };
+}
+
+// ── A choice of variants ─────────────────────────────────────────────────────
+//
+// charter → `decisions/2026-11-09-a-gate-may-offer-a-choice-of-variants.md`. A gate may offer up
+// to three drafts, each frozen as its own subject; the choice is the binding an approving answer
+// carries. Each variant is re-bounded here within an equal share of the preview budget, so one
+// long draft never costs another its preview, and each says on its own whether it is complete.
+
+/** At most this many variants (operator ruling, 2026-11-09); more is not a gate this hub carries. */
+export const GATE_VARIANTS_MAX = 3;
+/** The board's own bounds on a variant's id and label. */
+const VARIANT_ID_MAX = 64;
+const VARIANT_LABEL_MAX = 80;
+
+/** One variant of a choice, as it rides on the Matrix wire. */
+export interface GateVariantV2 {
+  id: string;
+  label: string;
+  subject: GateSubjectV2;
+}
+
+const RawVariant = z.object({
+  id: z.string().min(1).max(VARIANT_ID_MAX),
+  // One line: a label sits in a sentence and a picker row.
+  label: z
+    .string()
+    .transform((v) => cut(VARIANT_LABEL_MAX)(v.replace(/\s+/g, " ").trim()))
+    .refine((v) => v.length > 0),
+  subject: z.unknown(),
+});
+
+/** Does the board say this gate is a choice of variants — well formed or not? */
+export function isVariantGate(d: Pick<GatePendingDelivery, "approvalSubject">): boolean {
+  const s = d.approvalSubject;
+  return typeof s === "object" && s !== null && "variants" in s;
+}
+
+/**
+ * A variant gate's variants, re-validated and each re-bounded within `floor(16000 / n)` bytes, or
+ * null when this is not a variant gate or its variants cannot be carried: not a list, none, more
+ * than `GATE_VARIANTS_MAX`, an identity beside them, a variant whose id, label or subject is not
+ * one this hub can carry, or two variants sharing an id or a subject. A gate whose variants cannot
+ * be carried is treated like a subject that cannot be: no approving option is offered.
+ */
+export function gateVariantsV2(d: Pick<GatePendingDelivery, "approvalSubject">): GateVariantV2[] | null {
+  const s = d.approvalSubject;
+  if (typeof s !== "object" || s === null || !("variants" in s)) return null;
+  const raw = s.variants;
+  if ("id" in s || "digest" in s) return null;
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > GATE_VARIANTS_MAX) return null;
+  const share = Math.floor(PREVIEW_TOTAL_BYTES / raw.length);
+  const out: GateVariantV2[] = [];
+  for (const v of raw) {
+    const parsed = RawVariant.safeParse(v);
+    if (!parsed.success) return null;
+    const subject = subjectV2(parsed.data.subject, share);
+    if (!subject) return null;
+    if (out.some((o) => o.id === parsed.data.id || o.subject.id === subject.id)) return null;
+    out.push({ id: parsed.data.id, label: parsed.data.label, subject });
+  }
+  return out;
+}
+
+/** A label in prose, with markdown's punctuation escaped so it cannot become a link or a heading. */
+const plainMarkdown = (v: string): string => v.replace(/([\\`*_{}[\]()#+\-.!<>|~])/g, "\\$1");
+
+/**
+ * The sentence a stock client sees for a variant gate: every variant's label and bounded preview,
+ * in the board's order, with a variant this hub could not show in full said to be chosen on the
+ * board. The previews here are the same bounded blocks `subject.variants` carries, so the event
+ * holds each at most twice, as for a single subject.
+ */
+function variantsProseBody(d: GatePendingDelivery, variants: GateVariantV2[], link?: string): string {
+  const head = `Choice needed — "${d.cardTitle}" at stage \`${d.stageKey}\`. Choose one of ${variants.length} versions.`;
+  const parts = variants.map((v) => {
+    const title = `**${plainMarkdown(v.label)}**`;
+    const note = v.subject.preview_complete ? "" : " — shortened here; choose it on the board.";
+    return [`${title}${note}`, previewMarkdown(v.subject.preview)].filter((p) => p !== "").join("\n\n");
+  });
+  const tail = `To choose, use an updated app or the board.${link ? ` [Open the card](${link})` : ""}`;
+  return [head, ...parts, tail].join("\n\n");
 }
 
 // ── An option that asks for input ────────────────────────────────────────────

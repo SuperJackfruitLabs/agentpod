@@ -59,10 +59,13 @@ export {
   gateSubjectV2,
   gateV2Content,
   gateV2ProseBody,
+  gateVariantsV2,
+  GATE_VARIANTS_MAX,
   isGateOptionId,
   isGatePending,
+  isVariantGate,
 } from "./gate-wire";
-export type { GateOptionId, GateOptionV2, GateSubjectV2 } from "./gate-wire";
+export type { GateOptionId, GateOptionV2, GateSubjectV2, GateVariantV2 } from "./gate-wire";
 export { projectGate } from "./gate-projection";
 export type { GateProjectionDeps, ProjectionOutcome } from "./gate-projection";
 export { handleGateDecision, parseGateDecision, settleGateOutcome } from "./gate-decision";

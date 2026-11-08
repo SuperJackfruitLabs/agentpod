@@ -495,6 +495,21 @@ export interface MatrixGateOption {
   delivery?: string;
 }
 
+/**
+ * One variant of a choice a projected gate offered (charter 2026-11-09), as recorded: what a
+ * decision.v2 naming it is judged against.
+ */
+export interface MatrixGateVariant {
+  id: string;
+  label: string;
+  subject_id: string;
+  digest: string;
+  /** Whether this variant's own preview reached the room in full; false refuses choosing it here. */
+  preview_complete: boolean;
+  /** The variant's subject expiry, as the board sent it; null when it has none. */
+  expires_at: string | null;
+}
+
 export const matrixGateEvents = pgTable(
   "matrix_gate_events",
   {
@@ -551,6 +566,12 @@ export const matrixGateEvents = pgTable(
      * refuses an approving decision.v2: nobody approves what the card could not show.
      */
     approvalSubjectPreviewComplete: boolean("approval_subject_preview_complete"),
+    /**
+     * A variant gate's variants as projected, in the board's order (charter 2026-11-09). An
+     * approving decision.v2 must bind exactly one of these, complete and unexpired. Null for a
+     * gate that is not a choice, and for one whose variants could not be carried.
+     */
+    approvalVariants: jsonb("approval_variants").$type<MatrixGateVariant[]>(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [
