@@ -21,7 +21,7 @@ import {
 } from "../../src/db/schema/matrix";
 import { BOOTSTRAP_TENANT_ID, tenants } from "../../src/db/schema/tenants";
 import { tenantForOrg } from "../../src/auth/org-plane/tenant";
-import { handleDecisionTimeout, repostEscalationsOnJoin, type DecisionNoticeDeps } from "../../src/services/matrix-as/decision-notices";
+import { MAX_REPOST_ATTEMPTS, handleDecisionTimeout, repostEscalationsOnJoin, retryEscalationReposts, type DecisionNoticeDeps } from "../../src/services/matrix-as/decision-notices";
 import { DECISION_ESCALATED_SUITE_TYPE } from "../../src/services/matrix-as/decision-timeout-wire";
 import { workspaceAdminMatrixIds } from "../../src/services/matrix-as/workspace-admins";
 import type { AttentionPendingDelivery, DecisionTimeoutDelivery, GatePendingDelivery } from "../../src/services/bridge";
@@ -204,6 +204,19 @@ describe("an escalation", () => {
     const { deps, invited } = fakeDeps();
     await handleDecisionTimeout(escalated({ decisionId: "gate_notice02" }), deps);
     expect(invited).toHaveLength(1);
+  });
+
+  test("an admin already in the room counts as invited, so leaving later is not answered with another invite", async () => {
+    await db.insert(matrixGateEvents).values({ gateId: "gate_notice02", tenantId: BOOTSTRAP_TENANT_ID, boardId: BOARD, cardId: CARD, roomId: ROOM, eventId: "$g2" });
+    const member = fakeDeps({
+      invite: async () => {
+        throw new Error(`matrix invite failed: 403 M_FORBIDDEN ${ADMIN} is already in the room.`);
+      },
+    });
+    await handleDecisionTimeout(escalated(), member.deps);
+    const { deps, invited } = fakeDeps();
+    await handleDecisionTimeout(escalated({ decisionId: "gate_notice02" }), deps);
+    expect(invited).toHaveLength(0);
   });
 
   test("a board known to several tenants escalates to nobody", async () => {
@@ -401,6 +414,54 @@ describe("an escalated card moved below for an admin who joined", () => {
     expect((await gateRow())?.proseEventId).toBe("$other");
   });
 
+  test("the fleet Live Activity is pointed at the moved card, so a phone's answer references the one that counts", async () => {
+    const noted: unknown[] = [];
+    await escalateThenJoin({
+      onPosted: async (d, posted) => {
+        noted.push({ gateId: d.gateId, ...posted });
+      },
+    });
+    expect(noted).toEqual([{ gateId: GATE, roomId: ROOM, eventId: "$notice1", proseEventId: "$notice1" }]);
+  });
+
+  test("a notice that fails to post is given back and finished by the sweep's retry, without moving the card twice", async () => {
+    let failNotice = true;
+    const sent: Array<{ body: string; extra?: Record<string, unknown> }> = [];
+    const rig = fakeDeps({
+      pendingOnBoard: async () => [PENDING],
+      sendText: async (_u, _r, body, extra) => {
+        if (failNotice && extra?.suite_event_type === DECISION_ESCALATED_SUITE_TYPE && sent.length > 1) throw new Error("homeserver down");
+        sent.push({ body, ...(extra ? { extra } : {}) });
+        return `$notice${sent.length}`;
+      },
+    });
+    await db.update(matrixGateEvents).set({ options: recordedOptions }).where(eq(matrixGateEvents.gateId, GATE));
+    await handleDecisionTimeout(escalated(), rig.deps);
+    expect(await repostEscalationsOnJoin(BOARD, ADMIN, rig.deps)).toBe(0);
+    const cardsPosted = () => sent.filter((x) => x.extra?.suite_event_type === GATE_V2_SUITE_TYPE).length;
+    expect(cardsPosted()).toBe(1);
+
+    failNotice = false;
+    expect(await retryEscalationReposts(BOARD, rig.deps)).toBe(1);
+    expect(cardsPosted()).toBe(1);
+    expect(sent.at(-1)?.extra).toMatchObject({ suite_event_type: DECISION_ESCALATED_SUITE_TYPE, "m.relates_to": { "m.in_reply_to": { event_id: "$notice2" } } });
+    // Done: nothing more is owed.
+    expect(await retryEscalationReposts(BOARD, rig.deps)).toBe(0);
+    expect(await repostEscalationsOnJoin(BOARD, ADMIN, rig.deps)).toBe(0);
+  });
+
+  test("a re-post that keeps failing stops being retried", async () => {
+    const rig = fakeDeps();
+    await handleDecisionTimeout(escalated(), rig.deps);
+    rig.deps.sendText = async () => {
+      throw new Error("homeserver down");
+    };
+    await repostEscalationsOnJoin(BOARD, ADMIN, rig.deps);
+    for (let i = 0; i < 10; i++) await retryEscalationReposts(BOARD, rig.deps);
+    const [invite] = await db.select().from(matrixEscalationInvites).where(eq(matrixEscalationInvites.mxid, ADMIN));
+    expect(invite?.repostAttempts).toBe(MAX_REPOST_ATTEMPTS);
+  });
+
   test("an admin who had already joined when the card moved can read it and gets nothing; one who joined after it gets another move", async () => {
     await db.insert(matrixEscalationInvites).values([
       { boardId: BOARD, mxid: "@late:test", tenantId: BOOTSTRAP_TENANT_ID, roomId: ROOM },
@@ -422,12 +483,19 @@ describe("an escalated card moved below for an admin who joined", () => {
     await db.insert(matrixAttentionEvents).values({
       boardId: BOARD, cardId: CARD, waitId: "wait_mv", tenantId: BOOTSTRAP_TENANT_ID, roomId: ROOM, eventId: "$wait-card", options: attentionOptionsV2(waiting),
     });
-    const rig = fakeDeps({ pendingOnBoard: async () => [waiting] });
+    const noted: unknown[] = [];
+    const rig = fakeDeps({
+      pendingOnBoard: async () => [waiting],
+      onAttentionPosted: async (d, posted) => {
+        noted.push({ waitId: d.waitId, eventId: posted.eventId });
+      },
+    });
     await handleDecisionTimeout(escalated({ decisionKind: "attention", decisionId: "wait_mv" }), rig.deps);
     rig.sent.length = 0;
     expect(await repostEscalationsOnJoin(BOARD, ADMIN, rig.deps)).toBe(1);
     const [row] = await db.select().from(matrixAttentionEvents).where(eq(matrixAttentionEvents.waitId, "wait_mv"));
     expect(row?.eventId).toBe("$notice1");
     expect(rig.sent[1]).toMatchObject({ body: MOVED_BELOW_TEXT, extra: { "m.relates_to": { "m.in_reply_to": { event_id: "$wait-card" } } } });
+    expect(noted).toEqual([{ waitId: "wait_mv", eventId: "$notice1" }]);
   });
 });

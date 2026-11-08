@@ -28,6 +28,7 @@ import { projectElicitation, postedElicitationsAwaitingOutcome } from './service
 import { projectDelivery } from './services/matrix-as/index.ts';
 import { projectAttention, reconcileBoardAttention, recordedAttention } from './services/matrix-as/index.ts';
 import { relayTokenForBoard } from './services/matrix-as/index.ts';
+import { retryEscalationReposts } from './services/matrix-as/index.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
 // Node gateway WebSocket routes
@@ -456,6 +457,8 @@ if (matrixBridge) {
       reconcileBoardAttention(boardId, waiting, { humansFor: matrixIdsForBoardHumans, postedFor: recordedAttention }),
     // What each board still waits on: the fleet card drops gates answered on the
     // board, and shows again the ones a restart forgot.
+    // …and the escalations an admin who joined was owed, where posting them again failed.
+    retryJoinReposts: (boardId) => retryEscalationReposts(boardId, gateProjection),
     onBoardPending: (boardId, gates) =>
       reconcileBoardGates(boardId, gates, { humansFor: matrixIdsForBoardHumans, projectionFor: projectionForGate }),
   }, {

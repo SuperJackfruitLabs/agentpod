@@ -21,7 +21,7 @@
  * new event (`decision-repost.ts`) — and its escalation notice posted again in reply to it
  * (`repostEscalationsOnJoin`). If the board cannot be read, only the notice is posted, with its link.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 
 import { db } from "../../db/drizzle";
 import { matrixBoardRooms } from "../../db/schema/board-rooms";
@@ -41,6 +41,8 @@ import type { TenantsForBoard } from "./relay-scope";
 import { moveCardBelow, type CardRepostDeps } from "./decision-repost";
 
 const log = createLogger("matrix-decision-notices");
+/** How the homeserver refuses inviting a member (Synapse: 403 "… is already in the room."). */
+const ALREADY_IN_ROOM = /already in the room/i;
 const warnedAmbiguous = new Set<string>();
 
 export interface DecisionNoticeDeps extends CardRepostDeps {
@@ -147,6 +149,9 @@ async function inviteAdmins(
       await deps.invite(room.speakerMxid, room.roomId, mxid);
       invited++;
     } catch (err) {
+      // Already a member: the invite has nothing to do, and the record stands, so leaving later is
+      // still not answered with another invite.
+      if (err instanceof Error && ALREADY_IN_ROOM.test(err.message)) continue;
       await db
         .delete(matrixEscalationInvites)
         .where(and(eq(matrixEscalationInvites.boardId, room.boardId), eq(matrixEscalationInvites.mxid, mxid)));
@@ -245,11 +250,16 @@ async function sendNotice(
   return deps.sendText(room.speakerMxid, room.roomId, String(body), extra);
 }
 
+/** Passes at re-posting for one join before it stops being retried. */
+export const MAX_REPOST_ATTEMPTS = 5;
+
+type Invite = typeof matrixEscalationInvites.$inferSelect;
+
 /**
  * An admin an escalation invited has joined the board room: move the board's still-open escalated
- * cards below and post their notices again, which they could not read before. Once per invitee (the
- * join claims `joined_at`), and nothing for a card moved after `joinedAt` — they can read that one.
- * The count of escalations posted again.
+ * cards below and post their notices again, which they could not read before. The join is recorded
+ * once per invitee (`joined_at`); the work is claimed per escalation and given back when it fails, so
+ * `retryEscalationReposts` finishes it later without posting anything twice. The count posted.
  */
 export async function repostEscalationsOnJoin(
   boardId: string,
@@ -262,8 +272,38 @@ export async function repostEscalationsOnJoin(
     .set({ joinedAt })
     .where(and(eq(matrixEscalationInvites.boardId, boardId), eq(matrixEscalationInvites.mxid, mxid), isNull(matrixEscalationInvites.joinedAt)))
     .returning();
-  if (!invite) return 0;
-  const room = await boardRoomOf(boardId, invite.tenantId);
+  return invite ? repostForInvite(invite, deps) : 0;
+}
+
+/**
+ * Finish the re-posts a join left owed — a send that failed — on a board. Run by the gate sweep, so
+ * a failure is retried within five minutes, at most `MAX_REPOST_ATTEMPTS` passes per join.
+ */
+export async function retryEscalationReposts(boardId: string, deps: DecisionNoticeDeps): Promise<number> {
+  const owed = await db
+    .select()
+    .from(matrixEscalationInvites)
+    .where(
+      and(
+        eq(matrixEscalationInvites.boardId, boardId),
+        isNotNull(matrixEscalationInvites.joinedAt),
+        isNull(matrixEscalationInvites.repostedAt),
+        lt(matrixEscalationInvites.repostAttempts, MAX_REPOST_ATTEMPTS),
+      ),
+    );
+  let reposted = 0;
+  for (const invite of owed) reposted += await repostForInvite(invite, deps);
+  return reposted;
+}
+
+async function repostForInvite(invite: Invite, deps: DecisionNoticeDeps): Promise<number> {
+  const joinedAt = invite.joinedAt ?? new Date();
+  const inviteKey = and(eq(matrixEscalationInvites.boardId, invite.boardId), eq(matrixEscalationInvites.mxid, invite.mxid));
+  await db
+    .update(matrixEscalationInvites)
+    .set({ repostAttempts: sql`${matrixEscalationInvites.repostAttempts} + 1` })
+    .where(inviteKey);
+  const room = await boardRoomOf(invite.boardId, invite.tenantId);
   if (!room) return 0;
 
   const notices = await db
@@ -271,57 +311,78 @@ export async function repostEscalationsOnJoin(
     .from(matrixDecisionNotices)
     .where(
       and(
-        eq(matrixDecisionNotices.boardId, boardId),
+        eq(matrixDecisionNotices.boardId, invite.boardId),
         eq(matrixDecisionNotices.tenantId, invite.tenantId),
         eq(matrixDecisionNotices.notice, "escalated"),
       ),
     );
-  let pending: unknown[] | null | undefined;
+  const pending: { read?: Promise<unknown[] | null> } = {};
   let reposted = 0;
+  let failed = false;
   for (const n of notices) {
     const kind = DECISION_KINDS.find((k) => k === n.decisionKind);
-    if (!kind) continue;
-    // Moved below after this admin joined: they can read the card and its notice.
-    if (n.cardRepostedAt && n.cardRepostedAt >= joinedAt) continue;
-    const target = { boardId: n.boardId, cardId: n.cardId, decisionKind: kind, decisionId: n.decisionId };
+    // Posted again after this admin joined: they can read it.
+    if (!kind || (n.repostedAt && n.repostedAt >= joinedAt)) continue;
     const before = await cardEventFor(n.tenantId, n.boardId, n.cardId, kind, n.decisionId);
     if (!before?.open || before.roomId !== room.roomId) continue;
 
-    // One fresh read for the whole join, and only when there is something to move.
-    if (pending === undefined) pending = await readPending(boardId, deps);
-    if (pending && (await moveCardBelow(target, n.tenantId, room, pending, deps)) === "moved") {
-      await db
-        .update(matrixDecisionNotices)
-        .set({ cardRepostedAt: new Date() })
-        .where(
-          and(
-            eq(matrixDecisionNotices.boardId, n.boardId),
-            eq(matrixDecisionNotices.decisionKind, n.decisionKind),
-            eq(matrixDecisionNotices.decisionId, n.decisionId),
-            eq(matrixDecisionNotices.notice, "escalated"),
-          ),
-        );
+    const noticeKey = and(
+      eq(matrixDecisionNotices.boardId, n.boardId),
+      eq(matrixDecisionNotices.decisionKind, n.decisionKind),
+      eq(matrixDecisionNotices.decisionId, n.decisionId),
+      eq(matrixDecisionNotices.notice, "escalated"),
+    );
+    // Claimed before the work, so a join and a retry racing post it once.
+    const [claimed] = await db
+      .update(matrixDecisionNotices)
+      .set({ repostedAt: new Date() })
+      .where(and(noticeKey, or(isNull(matrixDecisionNotices.repostedAt), lt(matrixDecisionNotices.repostedAt, joinedAt))))
+      .returning({ boardId: matrixDecisionNotices.boardId });
+    if (!claimed) continue;
+    try {
+      // The card moves once per join: a retry after a notice that failed does not post it again.
+      if (!n.cardMovedAt || n.cardMovedAt < joinedAt) {
+        // One fresh read for the whole pass, and only when there is something to move.
+        pending.read ??= readPending(invite.boardId, deps);
+        const fresh = await pending.read;
+        const target = { boardId: n.boardId, cardId: n.cardId, decisionKind: kind, decisionId: n.decisionId };
+        if (fresh && (await moveCardBelow(target, n.tenantId, room, fresh, deps)) === "moved") {
+          await db.update(matrixDecisionNotices).set({ cardMovedAt: new Date() }).where(noticeKey);
+        }
+      }
+      const card = await cardEventFor(n.tenantId, n.boardId, n.cardId, kind, n.decisionId);
+      if (!card?.open) continue;
+      await sendNotice(noticeFromRow(n, kind), card.eventId, room, deps);
+      reposted++;
+    } catch (err) {
+      failed = true;
+      await db.update(matrixDecisionNotices).set({ repostedAt: n.repostedAt }).where(noticeKey);
+      log.warn("could not post an escalation again for a workspace admin who joined; retried by the sweep", {
+        boardId: n.boardId,
+        decisionId: n.decisionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
-    const card = await cardEventFor(n.tenantId, n.boardId, n.cardId, kind, n.decisionId);
-    if (!card?.open) continue;
-    const d: DecisionTimeoutDelivery = {
-      event: "decision.escalated",
-      boardId: n.boardId,
-      cardId: n.cardId,
-      cardTitle: n.cardTitle,
-      stageKey: n.stageKey,
-      stageName: n.stageName,
-      decisionKind: kind,
-      decisionId: n.decisionId,
-      waitingSince: n.waitingSince,
-      escalatedAt: n.noticedAt,
-      ts: n.noticedAt,
-    };
-    await sendNotice(d, card.eventId, room, deps);
-    reposted++;
   }
-  if (reposted > 0) log.info("re-posted open escalations for a workspace admin who joined", { boardId, reposted });
+  if (!failed) await db.update(matrixEscalationInvites).set({ repostedAt: new Date() }).where(inviteKey);
+  if (reposted > 0) log.info("re-posted open escalations for a workspace admin who joined", { boardId: invite.boardId, reposted });
   return reposted;
+}
+
+function noticeFromRow(n: typeof matrixDecisionNotices.$inferSelect, kind: DecisionKind): DecisionTimeoutDelivery {
+  return {
+    event: "decision.escalated",
+    boardId: n.boardId,
+    cardId: n.cardId,
+    cardTitle: n.cardTitle,
+    stageKey: n.stageKey,
+    stageName: n.stageName,
+    decisionKind: kind,
+    decisionId: n.decisionId,
+    waitingSince: n.waitingSince,
+    escalatedAt: n.noticedAt,
+    ts: n.noticedAt,
+  };
 }
 
 /** What the board waits on now, or null when it cannot be read (only the notices are posted then). */

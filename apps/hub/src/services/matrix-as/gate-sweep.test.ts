@@ -316,6 +316,20 @@ describe("the gate sweep", () => {
     expect(result.failedBoards).toEqual(["brd_down"]);
   });
 
+  test("retries escalations owed to an admin who joined, on each board that answered and no other", async () => {
+    const retried: string[] = [];
+    const f = fake({
+      boards: async () => ["brd_down", "brd_up"],
+      pendingGates: async (boardId) => {
+        if (boardId === "brd_down") throw new Error("connect ECONNREFUSED");
+        return [];
+      },
+      retryJoinReposts: async (boardId) => void retried.push(boardId),
+    });
+    await sweepGates(f.deps);
+    expect(retried).toEqual(["brd_up"]);
+  });
+
   test("refuses to project a gate in a shape it does not understand", async () => {
     // The push receiver validates because bytes arrive over a webhook; these
     // arrive over an authenticated read, which is not the same as a checked

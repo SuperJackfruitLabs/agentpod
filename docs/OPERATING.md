@@ -1772,7 +1772,8 @@ the board's room — once per decision and notice, claimed in `matrix_decision_n
   (`tenants.external_id` for an `org-plane` tenant), role `owner` or `admin`, not suspended, with a
   linked Matrix identity. They are invited by the board's speaker, once per board and person
   (`matrix_escalation_invites`); someone who leaves is not invited again — delete their row to undo
-  that. A refused invite is forgotten and retried on the next escalation. A bootstrap tenant with no
+  that. Someone already in the room counts as invited. A refused invite is forgotten and retried on
+  the next escalation. A bootstrap tenant with no
   org has nobody to invite (logged).
 - **One tenant or nobody.** A board known to several tenants (rostered or dispatched under more than
   one) is neither reminded nor escalated: `a board known to several tenants is never reminded or
@@ -1788,11 +1789,15 @@ the board's room — once per decision and notice, claimed in `matrix_decision_n
     same subject, and only while the record still points at the old card and is unsettled.
     Options, subject binding, wait id and the receipt's claim are unchanged, so answers are judged as
     before; an answer to the old card fails the reference check (`reference-mismatch`). The old card
-    gets a *Moved below* reply; a copy that lost a race to an answer says it does not count.
+    gets a *Moved below* reply; a copy that lost a race to an answer says it does not count. The fleet
+    Live Activity's decision is noted again with the new event, so a phone's answer references the
+    copy that counts.
   - then the escalation notice is posted again, in reply to the new card.
-  - Once per invitee's join, and nothing for a card moved after that admin joined (by the join's
-    `origin_server_ts`; `matrix_decision_notices.card_reposted_at`). A board that cannot be read
-    gets the notice alone. Logs: `moved an escalated card below for an admin who joined`, `an
+  - Once per invitee's join, and nothing for an escalation posted again after that admin joined (by
+    the join's `origin_server_ts`; `matrix_decision_notices.reposted_at`, `card_moved_at`). Each
+    escalation is claimed before the work and given back if a send fails; the gate sweep finishes
+    what a join left owed (`matrix_escalation_invites.reposted_at` null), at most five passes per join,
+    without moving a card twice. A board that cannot be read gets the notice alone. Logs: `moved an escalated card below for an admin who joined`, `an
     escalated card was not moved`, `could not read a board to move its escalated cards`.
 - **An expired subject** closes its gate as `expired`; the sweep settles the room card with the
   `Expired — …` receipt (`decision: "expired"`, `decided_by: null`).

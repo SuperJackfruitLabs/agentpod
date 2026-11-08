@@ -129,6 +129,11 @@ export interface GateSweepDeps {
    * called for a board that could not be read.
    */
   onBoardAttention?(boardId: string, waiting: AttentionPendingDelivery[]): Promise<void>;
+  /**
+   * Finish escalations owed to an admin who joined the board room, where a send failed
+   * (`retryEscalationReposts`). Called for a board that answered this pass.
+   */
+  retryJoinReposts?(boardId: string): Promise<unknown>;
 }
 
 /** What the running hub supplies; the rest is built from the bridge's configuration. */
@@ -143,6 +148,7 @@ type SweepRest = Pick<
   | "projectAttention"
   | "settleAttention"
   | "onBoardAttention"
+  | "retryJoinReposts"
 >;
 
 /** Every way `projectGate` can end. Derived, so a new outcome cannot be forgotten here. */
@@ -356,6 +362,9 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
 
     await sweepDeliveries(boardId, tenantId, deps, deliveries);
     await sweepAttention(boardId, tenantId, deps, attention);
+    await deps.retryJoinReposts?.(boardId).catch((err: unknown) =>
+      log.warn("could not retry escalations owed to an admin who joined", { boardId, error: String(err) }),
+    );
   }
 
   const stuck = STUCK.reduce((n, status) => n + byStatus[status], 0);

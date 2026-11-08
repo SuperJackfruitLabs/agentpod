@@ -603,7 +603,12 @@ export const matrixDecisionNotices = pgTable(
      * When the decision's card was last moved below for an admin who joined (`decision-repost.ts`).
      * An admin who joined before it can read it, so their join moves nothing.
      */
-    cardRepostedAt: timestamp("card_reposted_at"),
+    cardMovedAt: timestamp("card_moved_at"),
+    /**
+     * When this escalation was last posted again for an admin who joined: the claim on that work,
+     * taken before it and given back if it fails, so a retry posts it once.
+     */
+    repostedAt: timestamp("reposted_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [
@@ -630,6 +635,10 @@ export const matrixEscalationInvites = pgTable(
     roomId: text("room_id").notNull(),
     invitedAt: timestamp("invited_at").notNull().defaultNow(),
     joinedAt: timestamp("joined_at"),
+    /** When every open escalation was posted again for them; null while a retry is owed. */
+    repostedAt: timestamp("reposted_at"),
+    /** Passes made at that, so a re-post that keeps failing stops being retried. */
+    repostAttempts: integer("repost_attempts").notNull().default(0),
   },
   (t) => [
     primaryKey({ columns: [t.boardId, t.mxid] }),

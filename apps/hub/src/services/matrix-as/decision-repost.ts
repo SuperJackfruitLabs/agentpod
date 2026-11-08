@@ -58,6 +58,12 @@ export interface CardRepostDeps {
   sendCustomEvent?(userId: string, roomId: string, eventType: string, content: Record<string, unknown>): Promise<string | null>;
   /** Everything the board is waiting on now, read fresh; throws when it cannot be read. */
   pendingOnBoard?(boardId: string): Promise<unknown[]>;
+  /**
+   * The fleet Live Activity's record of a gate or waiting card, noted again after a move so a
+   * phone's answer references the card that counts (`fleet-gates.ts`, `fleet-attention.ts`).
+   */
+  onPosted?(d: GatePendingDelivery, posted: { roomId: string; eventId: string; proseEventId: string | null }): Promise<void>;
+  onAttentionPosted?(d: AttentionPendingDelivery, posted: { roomId: string; eventId: string }): Promise<void>;
 }
 
 export interface MoveTarget {
@@ -89,6 +95,9 @@ interface Rebuilt {
   content: Record<string, unknown>;
   /** A gate also posts its legacy custom event while v1 clients need it. */
   legacy?: Record<string, unknown>;
+  /** The envelope, for the kinds the fleet Live Activity shows. */
+  gate?: GatePendingDelivery;
+  attention?: AttentionPendingDelivery;
 }
 
 function rebuild(t: MoveTarget, pending: unknown[], link: string | undefined): Rebuilt | null {
@@ -100,6 +109,7 @@ function rebuild(t: MoveTarget, pending: unknown[], link: string | undefined): R
         subjectDigest: gateSubjectV2(d)?.digest ?? null,
         content: { ...gateV2Content(d, link), [GATE_REQUEST_CONTENT_KEY]: gateRequestCard(d, link) },
         legacy: gateEventContent(d, link),
+        gate: d,
       };
     }
     if (t.decisionKind === "question" && isElicitationPending(p) && p.elicitationId === t.decisionId && p.cardId === t.cardId) {
@@ -116,7 +126,7 @@ function rebuild(t: MoveTarget, pending: unknown[], link: string | undefined): R
     }
     if (t.decisionKind === "attention" && isAttentionPending(p) && p.waitId === t.decisionId && p.cardId === t.cardId) {
       const d: AttentionPendingDelivery = p;
-      return { options: ids(attentionOptionsV2(d)), subjectDigest: null, content: attentionV2Content(d, link) };
+      return { options: ids(attentionOptionsV2(d)), subjectDigest: null, content: attentionV2Content(d, link), attention: d };
     }
   }
   return null;
@@ -235,7 +245,20 @@ export async function moveCardBelow(
     await deps.sendText(room.speakerMxid, room.roomId, SETTLED_ABOVE_TEXT, reply(proseEventId));
     return "settled";
   }
-  await deps.sendText(room.speakerMxid, room.roomId, MOVED_BELOW_TEXT, reply(was.eventId));
+  // The record has moved: what follows must not fail the move, or a retry would post the card twice.
+  await deps
+    .sendText(room.speakerMxid, room.roomId, MOVED_BELOW_TEXT, reply(was.eventId))
+    .catch((err: unknown) => log.warn("a moved card's old copy could not be told", { decisionId: t.decisionId, error: String(err) }));
+  // The Lock Screen's copy moves with the record: an Approve from a phone references what it was
+  // given, and the old card's event is refused now (`reference-mismatch`).
+  const announced = fresh.gate
+    ? deps.onPosted?.(fresh.gate, { roomId: room.roomId, eventId, proseEventId })
+    : fresh.attention
+      ? deps.onAttentionPosted?.(fresh.attention, { roomId: room.roomId, eventId: proseEventId })
+      : undefined;
+  await announced?.catch((err: unknown) =>
+    log.warn("a moved card could not be shown again on the fleet card", { decisionId: t.decisionId, error: String(err) }),
+  );
   log.info("moved an escalated card below for an admin who joined", { boardId: t.boardId, decisionKind: t.decisionKind, decisionId: t.decisionId });
   return "moved";
 }

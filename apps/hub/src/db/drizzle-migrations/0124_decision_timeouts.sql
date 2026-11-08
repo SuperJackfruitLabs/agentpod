@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS "matrix_decision_notices" (
   "waiting_since" text NOT NULL,
   "noticed_at" text NOT NULL,
   "event_id" text,
-  "card_reposted_at" timestamp,
+  "card_moved_at" timestamp,
+  "reposted_at" timestamp,
   "created_at" timestamp DEFAULT now() NOT NULL,
   CONSTRAINT "matrix_decision_notices_pk" PRIMARY KEY ("board_id", "decision_kind", "decision_id", "notice"),
   CONSTRAINT "matrix_decision_notices_tenant_id_tenants_id_fk"
@@ -35,6 +36,8 @@ CREATE TABLE IF NOT EXISTS "matrix_escalation_invites" (
   "room_id" text NOT NULL,
   "invited_at" timestamp DEFAULT now() NOT NULL,
   "joined_at" timestamp,
+  "reposted_at" timestamp,
+  "repost_attempts" integer DEFAULT 0 NOT NULL,
   CONSTRAINT "matrix_escalation_invites_pk" PRIMARY KEY ("board_id", "mxid"),
   CONSTRAINT "matrix_escalation_invites_tenant_id_tenants_id_fk"
     FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE restrict

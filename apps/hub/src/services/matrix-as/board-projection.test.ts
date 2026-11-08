@@ -123,6 +123,10 @@ describe("src/index.ts", () => {
     expect(source).toMatch(/onEvent: withJoinWake\(/);
   });
 
+  test("the gate sweep retries escalations owed to an admin who joined, with the projection's deps", () => {
+    expect(source).toMatch(/retryJoinReposts: \(boardId\) => retryEscalationReposts\(boardId, gateProjection\)/);
+  });
+
   test("the join wake it mounts re-posts escalations with the projection's deps", () => {
     expect(source).toMatch(/withJoinWake\([^;]*joinWake\(gateProjection\)\)/);
   });

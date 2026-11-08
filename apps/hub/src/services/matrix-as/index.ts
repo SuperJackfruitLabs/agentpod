@@ -13,7 +13,7 @@ export { reconcileBoardAttention } from "./fleet-attention";
 export { relayTokenForBoard } from "./relay-scope";
 export { isApprovalRequest } from "./question-wire";
 export { isDecisionTimeout } from "./decision-timeout-wire";
-export { handleDecisionTimeout, repostEscalationsOnJoin } from "./decision-notices";
+export { handleDecisionTimeout, repostEscalationsOnJoin, retryEscalationReposts } from "./decision-notices";
 export type { DecisionNoticeDeps, DecisionNoticeOutcome } from "./decision-notices";
 export { isDeliveryPending } from "./delivery-wire";
 export { projectDelivery } from "./delivery-projection";
