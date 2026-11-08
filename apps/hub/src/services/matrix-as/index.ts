@@ -3,7 +3,7 @@
  * Every import from outside this folder goes through here; see docs/contributor/code-quality.md.
  */
 export { signalNodeToAdopt } from "./adopt-signal";
-export { boardProjectionDeps, withJoinWake } from "./board-projection";
+export { boardProjectionDeps, joinWake, withJoinWake } from "./board-projection";
 export { matrixIdsForBoardHumans } from "./board-room";
 export { isMatrixUserInUse } from "./client";
 export { isAttentionPending } from "./attention-wire";
@@ -12,6 +12,9 @@ export type { AttentionProjectionDeps } from "./attention-projection";
 export { reconcileBoardAttention } from "./fleet-attention";
 export { relayTokenForBoard } from "./relay-scope";
 export { isApprovalRequest } from "./question-wire";
+export { isDecisionTimeout } from "./decision-timeout-wire";
+export { handleDecisionTimeout, repostEscalationsOnJoin } from "./decision-notices";
+export type { DecisionNoticeDeps, DecisionNoticeOutcome } from "./decision-notices";
 export { isDeliveryPending } from "./delivery-wire";
 export { projectDelivery } from "./delivery-projection";
 export { isElicitationPending } from "./elicitation-card";

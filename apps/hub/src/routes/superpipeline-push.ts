@@ -32,6 +32,9 @@ import { projectElicitation } from "../services/matrix-as";
 import { isDeliveryPending, projectDelivery } from "../services/matrix-as";
 import { isAttentionPending, projectAttention } from "../services/matrix-as";
 import type { AttentionProjectionDeps } from "../services/matrix-as";
+import { handleDecisionTimeout, isDecisionTimeout } from "../services/matrix-as";
+import type { DecisionNoticeDeps, DecisionNoticeOutcome } from "../services/matrix-as";
+import type { DecisionTimeoutDelivery } from "../services/bridge";
 
 const log = createLogger("superpipeline-push");
 
@@ -48,6 +51,12 @@ export interface SuperpipelinePushDeps extends GateProjectionDeps {
    * the board (`relay-scope.ts`). Absent: no approval request is ever posted from a push.
    */
   approvalRequestAllowed?(tenantId: string, boardId: string): Promise<boolean>;
+  /** Invite a workspace admin into a board room when a decision escalates (`boardProjectionDeps`). */
+  invite?: DecisionNoticeDeps["invite"];
+  /** A tenant's workspace owners and admins, as Matrix ids (`boardProjectionDeps`). */
+  workspaceAdmins?: DecisionNoticeDeps["workspaceAdmins"];
+  /** Test seam: what a reminder or escalation does. Defaults to `handleDecisionTimeout`. */
+  handleDecisionTimeout?(d: DecisionTimeoutDelivery): Promise<DecisionNoticeOutcome>;
 }
 
 const enc = new TextEncoder();
@@ -159,6 +168,20 @@ export function createSuperpipelinePushRoutes(deps: SuperpipelinePushDeps) {
       }
       const outcome = await projectAttention(tenantId, body, deps);
       log.info("waiting card projected", { cardId: body.cardId, waitId: body.waitId, status: outcome.status });
+      return c.json({ ok: true, status: outcome.status }, 200);
+    }
+
+    /**
+     * A waiting decision passed its stage's timeout (charter: "Unanswered decisions remind, then
+     * escalate" §2-3): a reply to the card this hub posted, and on escalation the workspace admins
+     * invited. The board each picks by its own tenant rule (`decision-notices.ts`), so no
+     * `tenantIdFor` here. Disjoint from the others by `event`.
+     */
+    if (isDecisionTimeout(body)) {
+      const outcome = deps.handleDecisionTimeout
+        ? await deps.handleDecisionTimeout(body)
+        : await handleDecisionTimeout(body, deps);
+      log.info("decision timeout handled", { event: body.event, decisionId: body.decisionId, status: outcome.status });
       return c.json({ ok: true, status: outcome.status }, 200);
     }
 

@@ -32,6 +32,12 @@ function bridge(): Parameters<typeof boardProjectionDeps>[0] {
 }
 
 describe("the projection deps the hub builds", () => {
+  test("carry the invite and the workspace admins an escalation needs", () => {
+    const deps = boardProjectionDeps(bridge());
+    expect(typeof deps.invite).toBe("function");
+    expect(typeof deps.workspaceAdmins).toBe("function");
+  });
+
   test("carry humanJoined, and it asks the homeserver who has joined the board room", async () => {
     realFetch = globalThis.fetch;
     const urls: string[] = [];
@@ -59,6 +65,17 @@ describe("a human joining a board room", () => {
       sweepElicitations: async (b) => void woken.push(`questions:${b}`),
     });
     expect(woken.sort()).toEqual(["gates:brd_one", "questions:brd_one"]);
+  });
+
+  test("re-posts open escalations for the person who joined", async () => {
+    const reposted: string[] = [];
+    await wakeHeldOnJoin(join, {
+      lookup,
+      sweepGates: async () => {},
+      sweepElicitations: async () => {},
+      repostEscalations: async (b, who) => void reposted.push(`${b}:${who}`),
+    });
+    expect(reposted).toEqual([`brd_one:${HUMAN}`]);
   });
 
   test("one sweep failing does not stop the other", async () => {
@@ -103,5 +120,9 @@ describe("src/index.ts", () => {
 
   test("mounts the appservice handler wrapped so a join wakes held posts", () => {
     expect(source).toMatch(/onEvent: withJoinWake\(/);
+  });
+
+  test("the join wake it mounts re-posts escalations with the projection's deps", () => {
+    expect(source).toMatch(/withJoinWake\([^;]*joinWake\(gateProjection\)\)/);
   });
 });

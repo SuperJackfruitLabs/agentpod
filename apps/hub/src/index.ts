@@ -21,7 +21,7 @@ import { createSuperpipelinePushRoutes } from './routes/superpipeline-push.ts';
 import { projectGate, projectionForGate, tenantForBoard } from './services/matrix-as/index.ts';
 import { reconcileBoardGates } from './services/matrix-as/index.ts';
 import { matrixIdsForBoardHumans } from './services/matrix-as/index.ts';
-import { boardProjectionDeps, withJoinWake } from './services/matrix-as/index.ts';
+import { boardProjectionDeps, joinWake, withJoinWake } from './services/matrix-as/index.ts';
 import { startGateSweeper } from './services/matrix-as/index.ts';
 import { startElicitationSweeper } from './services/matrix-as/index.ts';
 import { projectElicitation, postedElicitationsAwaitingOutcome } from './services/matrix-as/index.ts';
@@ -487,7 +487,8 @@ if (matrixBridge) {
       hsToken: matrixBridge.config.hsToken,
       domain: matrixBridge.config.domain,
       // A human joining a board room is what a held gate or question waits on.
-      onEvent: withJoinWake((event) => matrixBridge.onEvent(event)),
+      // …and an admin an escalation invited sees the escalations sent before they joined.
+      onEvent: withJoinWake((event) => matrixBridge.onEvent(event), joinWake(gateProjection)),
       onProvisionAlias: (alias) => matrixBridge.onProvisionAlias(alias),
       // Null unless a crypto store is configured, in which case the route
       // skips the step entirely — a deployment that has not opted in pays

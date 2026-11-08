@@ -112,6 +112,18 @@ export const bridgeDispatches = pgTable(
     eventsReceived: integer("events_received"),
     activitiesPosted: integer("activities_posted"),
 
+    /**
+     * A permission request the run is parked on, waiting for a person to answer it on the board
+     * (charter: "Unanswered decisions remind, then escalate" §8). Set when the wait starts and
+     * cleared when it ends, so a row that still holds one after a restart is a wait the restart cut
+     * short: the harness's request lived in the old process and nothing can answer it now, so the
+     * run is ended as unanswered (`recoverPermissionWaits`). `permission_wait_until` is the earlier
+     * of the request's `harness-permission/v1` expiry and the agent's `permissionWaitMs`.
+     */
+    permissionSessionId: text("permission_session_id"),
+    permissionRequestSeq: integer("permission_request_seq"),
+    permissionWaitUntil: timestamp("permission_wait_until"),
+
     startedAt: timestamp("started_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },

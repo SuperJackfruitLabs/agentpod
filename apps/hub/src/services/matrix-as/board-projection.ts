@@ -21,6 +21,8 @@ import { noteGatePosted } from "./fleet-gates";
 import { noteAttentionPosted } from "./fleet-attention";
 import { sweepBoardNow } from "./gate-sweep";
 import type { MatrixBridge } from "./service";
+import { repostEscalationsOnJoin, type DecisionNoticeDeps } from "./decision-notices";
+import { workspaceAdminMatrixIds } from "./workspace-admins";
 
 const log = createLogger("matrix-board-projection");
 
@@ -91,6 +93,12 @@ export function boardProjectionDeps(bridge: Pick<MatrixBridge, "client" | "confi
         homeserverUrl: config.homeserverUrl,
         asToken: config.asToken,
       }),
+    /**
+     * A decision that escalated invites the workspace's owners and admins into its board room
+     * (charter: "Unanswered decisions remind, then escalate" §3), as the board's speaker.
+     */
+    invite: (asUserId: string, roomId: string, invitee: string) => client.invite(asUserId, roomId, invitee),
+    workspaceAdmins: workspaceAdminMatrixIds,
     /** A posted gate is a pending decision on each of the board's humans' fleet card. */
     onPosted: (
       d: Parameters<typeof noteGatePosted>[0],
@@ -110,6 +118,8 @@ export interface WakeDeps {
   lookup: (roomId: string) => Promise<{ boardId: string; speakerMxid: string } | null>;
   sweepGates: (boardId: string) => Promise<unknown>;
   sweepElicitations: (boardId: string) => Promise<unknown>;
+  /** A workspace admin an escalation invited has joined: post its open escalations again. */
+  repostEscalations?: (boardId: string, mxid: string) => Promise<unknown>;
 }
 
 const defaultWake: WakeDeps = {
@@ -126,7 +136,12 @@ const defaultWake: WakeDeps = {
 export async function wakeHeldOnJoin(event: MembershipEvent, deps: WakeDeps = defaultWake): Promise<void> {
   const boardId = await boardForHumanJoin(event, deps.lookup);
   if (!boardId) return;
-  const results = await Promise.allSettled([deps.sweepGates(boardId), deps.sweepElicitations(boardId)]);
+  const who = event.state_key ?? event.sender;
+  const results = await Promise.allSettled([
+    deps.sweepGates(boardId),
+    deps.sweepElicitations(boardId),
+    ...(deps.repostEscalations ? [deps.repostEscalations(boardId, who)] : []),
+  ]);
   for (const r of results) {
     if (r.status === "rejected") {
       log.warn("could not wake posts held for a board room join", {
@@ -136,6 +151,15 @@ export async function wakeHeldOnJoin(event: MembershipEvent, deps: WakeDeps = de
       });
     }
   }
+}
+
+/**
+ * The join wake the hub mounts: held gates and questions, and the escalations an invited admin
+ * could not read before they joined (`repostEscalationsOnJoin`), sent with the projection's deps.
+ */
+export function joinWake(projection: DecisionNoticeDeps): (event: MembershipEvent) => Promise<void> {
+  return (event) =>
+    wakeHeldOnJoin(event, { ...defaultWake, repostEscalations: (boardId, mxid) => repostEscalationsOnJoin(boardId, mxid, projection) });
 }
 
 /**
