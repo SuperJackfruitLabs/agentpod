@@ -1,6 +1,6 @@
 {
   "corpus": "ecosystem-identity/matrix-gate-events",
-  "version": 6,
+  "version": 7,
   "authoredAt": "2026-08-30",
   "authoredFrom": "the gates table in superpipeline apps/api/src/board/board-do.ts, the GateDecision union it resolves against, and charter decisions/2026-08-30-a-gate-closes-over-chat.md",
   "purpose": "A superpipeline approval gate crosses into a Matrix room and a human's answer crosses back. Three codebases must agree on the field names: the board that opens the gate, the Application Service that projects and resolves it, and the client that draws the buttons. A rename in any one of them is a gate that silently never resolves — which reads to the human as a button that does nothing.",
@@ -4364,6 +4364,649 @@
             "m.relates_to": {
               "rel_type": "m.reference",
               "event_id": "$someOtherEvent"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.v2",
+      "variant": "deadline",
+      "direction": "outbound — a waiting decision carries its stage's timeout",
+      "decidedBy": "charter decisions/2026-11-08-unanswered-decisions-remind-then-escalate.md §5",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as for the entry without a variant; this one adds `deadline`.",
+      "requiredFields": [
+        "suite_event_type",
+        "deadline"
+      ],
+      "notes": {
+        "deadline": "Optional. { remind_at?, escalate_at? }, ISO 8601, at least one when present; absent when no stage timeout applies. When the decision is reminded and escalated, not when it expires: separate from subject.expires_at, which bounds a binding's validity. A client may show it (\"escalates in 3 h\"); nothing resolves on it."
+      },
+      "accept": [
+        {
+          "why": "a gate with both deadlines",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Launch post\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3a",
+            "stage_key": "review",
+            "return_stage_key": "draft",
+            "card_title": "Launch post",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Launch post\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deadline": {
+              "remind_at": "2026-11-08T15:00:00.000Z",
+              "escalate_at": "2026-11-08T18:00:00.000Z"
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "deadline in the board's camelCase. The envelope is snake_case.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Launch post\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3a",
+            "stage_key": "review",
+            "return_stage_key": "draft",
+            "card_title": "Launch post",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Launch post\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deadline": {
+              "remindAt": "2026-11-08T15:00:00.000Z"
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "a deadline that is not a time",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Launch post\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3a",
+            "stage_key": "review",
+            "return_stage_key": "draft",
+            "card_title": "Launch post",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Launch post\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deadline": {
+              "remind_at": "in three hours"
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "an empty deadline. Absent means no timeout; an empty object means nothing.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Launch post\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3a",
+            "stage_key": "review",
+            "return_stage_key": "draft",
+            "card_title": "Launch post",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Launch post\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deadline": {},
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.question.v2",
+      "variant": "deadline",
+      "direction": "outbound — a waiting decision carries its stage's timeout",
+      "decidedBy": "charter decisions/2026-11-08-unanswered-decisions-remind-then-escalate.md §5",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as for the entry without a variant; this one adds `deadline`.",
+      "requiredFields": [
+        "suite_event_type",
+        "deadline"
+      ],
+      "notes": {
+        "deadline": "Optional. { remind_at?, escalate_at? }, ISO 8601, at least one when present; absent when no stage timeout applies. When the decision is reminded and escalated, not when it expires: separate from subject.expires_at, which bounds a binding's validity. A client may show it (\"escalates in 3 h\"); nothing resolves on it."
+      },
+      "accept": [
+        {
+          "why": "a question that only escalates",
+          "content": {
+            "msgtype": "m.text",
+            "body": "An agent is waiting on you — \"Launch post\" at stage `draft`.\n\nWhich headline?\n\n1. Ship it today\n2. Ship it Monday\n\nReply with the number, or the option's name. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "elc_5d21",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "run_id": "run_e074a2160c4b4f28",
+            "stage_key": "draft",
+            "card_title": "Launch post",
+            "asked_by": "agt_31d0",
+            "question": "Which headline?",
+            "options": [
+              {
+                "id": "a",
+                "label": "Ship it today",
+                "meaning": "choose",
+                "needs_comment": false
+              },
+              {
+                "id": "b",
+                "label": "Ship it Monday",
+                "meaning": "choose",
+                "needs_comment": false
+              }
+            ],
+            "deadline": {
+              "escalate_at": "2026-11-08T18:00:00.000Z"
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        }
+      ],
+      "reject": []
+    },
+    {
+      "suiteEventType": "dev.superpipeline.delivery.v2",
+      "variant": "deadline",
+      "direction": "outbound — a waiting decision carries its stage's timeout",
+      "decidedBy": "charter decisions/2026-11-08-unanswered-decisions-remind-then-escalate.md §5",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as for the entry without a variant; this one adds `deadline`.",
+      "requiredFields": [
+        "suite_event_type",
+        "deadline"
+      ],
+      "notes": {
+        "deadline": "Optional. { remind_at?, escalate_at? }, ISO 8601, at least one when present; absent when no stage timeout applies. When the decision is reminded and escalated, not when it expires: separate from subject.expires_at, which bounds a binding's validity. A client may show it (\"escalates in 3 h\"); nothing resolves on it."
+      },
+      "accept": [
+        {
+          "why": "a follow-up that only reminds",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Waiting on a live link — \"Launch post\" was approved to be posted by hand. Once it is live, record its link here.\n\n- Record the live link\n\n[Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.delivery.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "gate_id": "gate_8f3a",
+            "stage_key": "publish",
+            "card_title": "Launch post",
+            "options": [
+              {
+                "id": "record_live_url",
+                "label": "Record the live link",
+                "meaning": "approve",
+                "needs_comment": false,
+                "input": {
+                  "kind": "url",
+                  "label": "Live link",
+                  "required": true,
+                  "max_length": 2000
+                }
+              }
+            ],
+            "deadline": {
+              "remind_at": "2026-11-08T15:00:00.000Z"
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        }
+      ],
+      "reject": []
+    },
+    {
+      "suiteEventType": "dev.superpipeline.attention.v2",
+      "variant": "deadline",
+      "direction": "outbound — a waiting decision carries its stage's timeout",
+      "decidedBy": "charter decisions/2026-11-08-unanswered-decisions-remind-then-escalate.md §5",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as for the entry without a variant; this one adds `deadline`.",
+      "requiredFields": [
+        "suite_event_type",
+        "deadline"
+      ],
+      "notes": {
+        "deadline": "Optional. { remind_at?, escalate_at? }, ISO 8601, at least one when present; absent when no stage timeout applies. When the decision is reminded and escalated, not when it expires: separate from subject.expires_at, which bounds a binding's validity. A client may show it (\"escalates in 3 h\"); nothing resolves on it."
+      },
+      "accept": [
+        {
+          "why": "a waiting card with both deadlines",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A card is waiting on you — \"Launch post\" at Draft is blocked.\n\n```\nthe staging database is down\n```\n\n- Archive\n\nChoose in an updated app, or [open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40) on the board.",
+            "suite_event_type": "dev.superpipeline.attention.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "card_title": "Launch post",
+            "stage_key": "draft",
+            "stage_name": "Draft",
+            "wait_id": "wait_0123456789abcdef",
+            "reason": "blocked",
+            "detail": "the staging database is down",
+            "summary": null,
+            "failure_count": null,
+            "options": [
+              {
+                "id": "archive",
+                "label": "Archive",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deadline": {
+              "remind_at": "2026-11-08T15:00:00.000Z",
+              "escalate_at": "2026-11-08T18:00:00.000Z"
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        }
+      ],
+      "reject": []
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.outcome.v1",
+      "variant": "expired",
+      "direction": "outbound — the receipt that closes a gate whose subject expired",
+      "decidedBy": "charter decisions/2026-11-08-unanswered-decisions-remind-then-escalate.md §7",
+      "sender": "the board room's speaker",
+      "matrixEventType": "dev.superpipeline.gate.outcome.v1",
+      "discriminator": "As the entry without a variant.",
+      "requiredFields": [
+        "suite_event_type",
+        "gate_id",
+        "board_id",
+        "decision",
+        "decided_by",
+        "m.relates_to"
+      ],
+      "notes": {
+        "decision": "`expired`: the board closed a subject-bound gate when its subject passed expires_at. Nobody chose it, so decided_by is null; the prose says the gate expired, not that it was answered."
+      },
+      "accept": [
+        {
+          "why": "a subject-bound gate closed as expired",
+          "content": {
+            "suite_event_type": "dev.superpipeline.gate.outcome.v1",
+            "gate_id": "gate_8f3a",
+            "board_id": "brd_7c1f",
+            "decision": "expired",
+            "decided_by": null,
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "reject": []
+    },
+    {
+      "suiteEventType": "dev.superpipeline.decision.reminded.v1",
+      "direction": "outbound — a waiting decision is reminded",
+      "decidedBy": "charter decisions/2026-11-08-unanswered-decisions-remind-then-escalate.md §2",
+      "sender": "the board room's speaker, as a reply to the waiting card's message",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content. The prose body stands alone for a client that has never heard of it.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "suite_event_type",
+        "schema_version",
+        "board_id",
+        "card_id",
+        "decision_kind",
+        "decision_id",
+        "waiting_since",
+        "reminded_at",
+        "m.relates_to"
+      ],
+      "notes": {
+        "relatesTo": "An m.in_reply_to to the waiting card's own message: the gate's prose message, the question's, the follow-up's or the waiting card's.",
+        "decisionId": "The gate id for gate and delivery, the elicitation id for question, the wait id for attention.",
+        "once": "At most once per decision; a new gate, question or wait starts again."
+      },
+      "accept": [
+        {
+          "why": "a gate reminded after three hours",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Still waiting: \"Launch post\" has waited 3 h for an approval.",
+            "suite_event_type": "dev.superpipeline.decision.reminded.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "decision_kind": "gate",
+            "decision_id": "gate_8f3a",
+            "waiting_since": "2026-11-08T12:00:00.000Z",
+            "reminded_at": "2026-11-08T15:00:30.000Z",
+            "m.relates_to": {
+              "m.in_reply_to": {
+                "event_id": "$gateEventId"
+              }
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "no m.relates_to. A client cannot tell which card it is about.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Still waiting: \"Launch post\" has waited 3 h for an approval.",
+            "suite_event_type": "dev.superpipeline.decision.reminded.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "decision_kind": "gate",
+            "decision_id": "gate_8f3a",
+            "waiting_since": "2026-11-08T12:00:00.000Z",
+            "reminded_at": "2026-11-08T15:00:30.000Z"
+          }
+        },
+        {
+          "why": "an m.reference rather than a reply. A notice is a reply to the card; an m.reference is an answer or a receipt.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Still waiting: \"Launch post\" has waited 3 h for an approval.",
+            "suite_event_type": "dev.superpipeline.decision.reminded.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "decision_kind": "gate",
+            "decision_id": "gate_8f3a",
+            "waiting_since": "2026-11-08T12:00:00.000Z",
+            "reminded_at": "2026-11-08T15:00:30.000Z",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "no decision_id",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Still waiting: \"Launch post\" has waited 3 h for an approval.",
+            "suite_event_type": "dev.superpipeline.decision.reminded.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "decision_kind": "gate",
+            "waiting_since": "2026-11-08T12:00:00.000Z",
+            "reminded_at": "2026-11-08T15:00:30.000Z",
+            "m.relates_to": {
+              "m.in_reply_to": {
+                "event_id": "$gateEventId"
+              }
+            }
+          }
+        },
+        {
+          "why": "a decision_kind outside gate | question | delivery | attention",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Still waiting: \"Launch post\" has waited 3 h for an approval.",
+            "suite_event_type": "dev.superpipeline.decision.reminded.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "decision_kind": "vote",
+            "decision_id": "gate_8f3a",
+            "waiting_since": "2026-11-08T12:00:00.000Z",
+            "reminded_at": "2026-11-08T15:00:30.000Z",
+            "m.relates_to": {
+              "m.in_reply_to": {
+                "event_id": "$gateEventId"
+              }
+            }
+          }
+        },
+        {
+          "why": "no reminded_at",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Still waiting: \"Launch post\" has waited 3 h for an approval.",
+            "suite_event_type": "dev.superpipeline.decision.reminded.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "decision_kind": "gate",
+            "decision_id": "gate_8f3a",
+            "waiting_since": "2026-11-08T12:00:00.000Z",
+            "m.relates_to": {
+              "m.in_reply_to": {
+                "event_id": "$gateEventId"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.decision.escalated.v1",
+      "direction": "outbound — a waiting decision escalated to the workspace's owners and admins",
+      "decidedBy": "charter decisions/2026-11-08-unanswered-decisions-remind-then-escalate.md §2-3",
+      "sender": "the board room's speaker, as a reply to the waiting card's message",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content. The prose body stands alone for a client that has never heard of it.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "suite_event_type",
+        "schema_version",
+        "board_id",
+        "card_id",
+        "decision_kind",
+        "decision_id",
+        "waiting_since",
+        "escalated_at",
+        "m.relates_to"
+      ],
+      "notes": {
+        "relatesTo": "An m.in_reply_to to the waiting card's own message: the gate's prose message, the question's, the follow-up's or the waiting card's.",
+        "decisionId": "The gate id for gate and delivery, the elicitation id for question, the wait id for attention.",
+        "invited": "Posted after the workspace's owners and admins with a linked Matrix identity are invited into the board room; posted again when one of them joins, while the decision is still open, because an encrypted message sent before they joined is unreadable to them. deep_link is the card's address when the hub knows the board's URL.",
+        "once": "At most once per decision; a new gate, question or wait starts again."
+      },
+      "accept": [
+        {
+          "why": "a gate escalated after six hours",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Escalated to workspace admins after 6 h: \"Launch post\" is still waiting for an approval at Review. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.decision.escalated.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "decision_kind": "gate",
+            "decision_id": "gate_8f3a",
+            "waiting_since": "2026-11-08T12:00:00.000Z",
+            "escalated_at": "2026-11-08T18:02:11.000Z",
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40",
+            "m.relates_to": {
+              "m.in_reply_to": {
+                "event_id": "$gateEventId"
+              }
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "no m.relates_to. A client cannot tell which card it is about.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Escalated to workspace admins after 6 h: \"Launch post\" is still waiting for an approval at Review. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.decision.escalated.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "decision_kind": "gate",
+            "decision_id": "gate_8f3a",
+            "waiting_since": "2026-11-08T12:00:00.000Z",
+            "escalated_at": "2026-11-08T18:02:11.000Z",
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "an m.reference rather than a reply. A notice is a reply to the card; an m.reference is an answer or a receipt.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Escalated to workspace admins after 6 h: \"Launch post\" is still waiting for an approval at Review. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.decision.escalated.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "decision_kind": "gate",
+            "decision_id": "gate_8f3a",
+            "waiting_since": "2026-11-08T12:00:00.000Z",
+            "escalated_at": "2026-11-08T18:02:11.000Z",
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "no decision_id",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Escalated to workspace admins after 6 h: \"Launch post\" is still waiting for an approval at Review. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.decision.escalated.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "decision_kind": "gate",
+            "waiting_since": "2026-11-08T12:00:00.000Z",
+            "escalated_at": "2026-11-08T18:02:11.000Z",
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40",
+            "m.relates_to": {
+              "m.in_reply_to": {
+                "event_id": "$gateEventId"
+              }
+            }
+          }
+        },
+        {
+          "why": "a decision_kind outside gate | question | delivery | attention",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Escalated to workspace admins after 6 h: \"Launch post\" is still waiting for an approval at Review. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.decision.escalated.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "decision_kind": "vote",
+            "decision_id": "gate_8f3a",
+            "waiting_since": "2026-11-08T12:00:00.000Z",
+            "escalated_at": "2026-11-08T18:02:11.000Z",
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40",
+            "m.relates_to": {
+              "m.in_reply_to": {
+                "event_id": "$gateEventId"
+              }
+            }
+          }
+        },
+        {
+          "why": "no escalated_at",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Escalated to workspace admins after 6 h: \"Launch post\" is still waiting for an approval at Review. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40)",
+            "suite_event_type": "dev.superpipeline.decision.escalated.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "decision_kind": "gate",
+            "decision_id": "gate_8f3a",
+            "waiting_since": "2026-11-08T12:00:00.000Z",
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40",
+            "m.relates_to": {
+              "m.in_reply_to": {
+                "event_id": "$gateEventId"
+              }
             }
           }
         }

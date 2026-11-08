@@ -114,6 +114,35 @@ arrives as a new card. Whoever settles it, here or on the board, the card in the
 
 An older app shows the card as text with a link to the board; an updated app shows the buttons.
 
+## When nobody answers
+
+A board can give a stage a **timeout**: remind after so long, escalate after longer. It applies to
+everything waiting on that stage — its gate, an agent's question, a delivery follow-up, a waiting
+card. The board keeps the clock; nothing is ever approved, rejected or resumed because time passed.
+
+- **Each card says when.** A gate, question, follow-up or waiting card with a timeout carries its
+  deadline, so an updated app can show "escalates in 3 h".
+- **The reminder** is a short reply to the card in the board room: *Still waiting: "Launch post"
+  has waited 3 h for an approval.* Once per decision.
+- **The escalation** invites the workspace's **owners and admins** — as your workspace's Accounts
+  settings list them, and only those who have linked a Matrix account — into the board room, then
+  replies to the card: *Escalated to workspace admins after 6 h …*, with a link to the card. Once per
+  decision. An invited admin sees what the room sees and answers like anyone in it; the board judges
+  every answer by its usual rules. Each admin is invited to a board once: somebody who leaves the room
+  is not invited back by the next escalation. Because the room is encrypted, an admin cannot read what
+  was posted before they joined, so when they join, each card still waiting is **moved below**: posted
+  again in full — preview, options, deadline — with the escalation under it. The copy below is the one
+  that counts; the earlier card says *Moved below* and an answer to it is refused, so nothing is
+  answered twice. If the board cannot be read at that moment, only the escalation (with its link) is
+  posted again.
+
+A board that more than one workspace on the hub knows is never escalated, and a card the room never
+showed is not replied to.
+
+A gate whose approval subject **expires** before anyone approves it is closed by the board; the card
+in the room closes as *Expired*, and the board parks the card for a person (it arrives as a waiting
+card).
+
 ## SuperToolkit approvals
 
 When a SuperToolkit write needs approval and the host is connected to SuperPipeline, the request

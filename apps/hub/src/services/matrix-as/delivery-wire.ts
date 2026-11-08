@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import { deadlineField } from "./decision-timeout-wire";
 
 import type { DeliveryPendingDelivery } from "../bridge";
 import {
@@ -171,6 +172,7 @@ export function deliveryV2Content(d: DeliveryPendingDelivery, deepLink?: string)
     card_title: cut(LABEL_MAX)(d.cardTitle),
     ...(subject ? { subject } : {}),
     options,
+    ...deadlineField(d.deadline),
     ...(deepLink ? { deep_link: deepLink } : {}),
   };
 }

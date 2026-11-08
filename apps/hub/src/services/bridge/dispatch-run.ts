@@ -5,10 +5,18 @@ import { inDispatchSpan } from "../../telemetry/dispatch-span";
 import type { DispatchDeps, DispatchResult } from "./dispatch-types";
 import { probeReadiness } from "./dispatch-readiness";
 import { workClaimed } from "./dispatch-work";
+import { recoverPermissionWaits } from "./dispatch-recover";
 
 export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   const { client, acp, agent } = deps;
   const log = deps.log ?? (() => {});
+
+  // A permission wait a restart cut short is ended before anything is claimed (charter: "Unanswered
+  // decisions remind, then escalate" §8). A failure here must not stop the agent claiming: the
+  // next cycle tries again.
+  await recoverPermissionWaits(deps).catch((err: unknown) =>
+    log("could not recover permission waits a restart cut short", { error: String(err) }),
+  );
 
   const strict = await acp.strictWork?.({
     stationId: agent.stationId,

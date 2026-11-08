@@ -21,13 +21,14 @@ import { createSuperpipelinePushRoutes } from './routes/superpipeline-push.ts';
 import { projectGate, projectionForGate, tenantForBoard } from './services/matrix-as/index.ts';
 import { reconcileBoardGates } from './services/matrix-as/index.ts';
 import { matrixIdsForBoardHumans } from './services/matrix-as/index.ts';
-import { boardProjectionDeps, withJoinWake } from './services/matrix-as/index.ts';
+import { boardProjectionDeps, joinWake, withJoinWake } from './services/matrix-as/index.ts';
 import { startGateSweeper } from './services/matrix-as/index.ts';
 import { startElicitationSweeper } from './services/matrix-as/index.ts';
 import { projectElicitation, postedElicitationsAwaitingOutcome } from './services/matrix-as/index.ts';
 import { projectDelivery } from './services/matrix-as/index.ts';
 import { projectAttention, reconcileBoardAttention, recordedAttention } from './services/matrix-as/index.ts';
 import { relayTokenForBoard } from './services/matrix-as/index.ts';
+import { retryEscalationReposts } from './services/matrix-as/index.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
 // Node gateway WebSocket routes
@@ -456,6 +457,8 @@ if (matrixBridge) {
       reconcileBoardAttention(boardId, waiting, { humansFor: matrixIdsForBoardHumans, postedFor: recordedAttention }),
     // What each board still waits on: the fleet card drops gates answered on the
     // board, and shows again the ones a restart forgot.
+    // …and the escalations an admin who joined was owed, where posting them again failed.
+    retryJoinReposts: (boardId) => retryEscalationReposts(boardId, gateProjection),
     onBoardPending: (boardId, gates) =>
       reconcileBoardGates(boardId, gates, { humansFor: matrixIdsForBoardHumans, projectionFor: projectionForGate }),
   }, {
@@ -487,7 +490,8 @@ if (matrixBridge) {
       hsToken: matrixBridge.config.hsToken,
       domain: matrixBridge.config.domain,
       // A human joining a board room is what a held gate or question waits on.
-      onEvent: withJoinWake((event) => matrixBridge.onEvent(event)),
+      // …and an admin an escalation invited sees the escalations sent before they joined.
+      onEvent: withJoinWake((event) => matrixBridge.onEvent(event), joinWake(gateProjection)),
       onProvisionAlias: (alias) => matrixBridge.onProvisionAlias(alias),
       // Null unless a crypto store is configured, in which case the route
       // skips the step entirely — a deployment that has not opted in pays

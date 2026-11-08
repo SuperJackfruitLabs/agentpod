@@ -349,3 +349,48 @@ test("an approval request is posted only into the room of the relay's own worksp
   expect(await (await post(allowing, raw, await sign(SECRET, raw))).json()).toMatchObject({ ok: true, status: "no-room" });
   expect(askedFor).toEqual([APPROVAL_REQUEST.boardId]);
 });
+
+describe("a decision that passed its stage's timeout", () => {
+  const ESCALATED = {
+    event: "decision.escalated",
+    boardId: "brd_7c1f",
+    cardId: "crd_9a22",
+    cardTitle: "Add OAuth login",
+    stageKey: "review",
+    decisionKind: "gate",
+    decisionId: "gate_4e8b",
+    waitingSince: "2026-11-08T12:00:00.000Z",
+    escalatedAt: "2026-11-08T18:00:00.000Z",
+    ts: "2026-11-08T18:00:00.000Z",
+  };
+
+  test("is handed to the reminder and escalation path, and says what became of it", async () => {
+    const handled: unknown[] = [];
+    const d = deps({
+      handleDecisionTimeout: async (body) => {
+        handled.push(body);
+        return { status: "sent", invited: 1 };
+      },
+    });
+    const raw = JSON.stringify(ESCALATED);
+    const res = await post(d, raw, await sign(SECRET, raw));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, status: "sent" });
+    expect(handled).toEqual([ESCALATED]);
+  });
+
+  test("one this hub cannot act on is acknowledged and goes nowhere", async () => {
+    const handled: unknown[] = [];
+    const d = deps({
+      handleDecisionTimeout: async (body) => {
+        handled.push(body);
+        return { status: "sent", invited: 0 };
+      },
+    });
+    const raw = JSON.stringify({ ...ESCALATED, decisionKind: "vote" });
+    const res = await post(d, raw, await sign(SECRET, raw));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, ignored: true });
+    expect(handled).toHaveLength(0);
+  });
+});

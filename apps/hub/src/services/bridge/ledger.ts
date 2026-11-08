@@ -22,7 +22,7 @@
  * boundary would replay one organisation's work onto another's card.
  */
 
-import { and, desc, eq, ne } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
 
 import { db } from "../../db/drizzle";
 import { acpRuns } from "../../db/schema/acp";
@@ -279,4 +279,73 @@ export async function dispatchOutcome(key: DispatchKey): Promise<{ outcome: stri
     .from(bridgeDispatches)
     .where(and(scope(key)));
   return rows[0] ?? null;
+}
+
+/**
+ * A run is parked on a permission request a person must answer on the board (charter: "Unanswered
+ * decisions remind, then escalate" §8). Written when the wait starts so it outlives this process.
+ */
+export async function recordPermissionWait(
+  key: DispatchKey,
+  wait: { sessionId: string; requestSeq: number; until: Date },
+): Promise<void> {
+  await db
+    .update(bridgeDispatches)
+    .set({ permissionSessionId: wait.sessionId, permissionRequestSeq: wait.requestSeq, permissionWaitUntil: wait.until, updatedAt: new Date() })
+    .where(scope(key));
+}
+
+/** The wait ended — answered, cancelled, timed out or interrupted. */
+export async function clearPermissionWait(key: DispatchKey): Promise<void> {
+  await db
+    .update(bridgeDispatches)
+    .set({ permissionSessionId: null, permissionRequestSeq: null, permissionWaitUntil: null })
+    .where(scope(key));
+}
+
+/** A permission wait a previous process left behind, as `recoverPermissionWaits` needs it. */
+export interface OpenPermissionWait {
+  key: DispatchKey;
+  leaseEpoch: number;
+  acpRunId: string | null;
+  sessionId: string | null;
+  requestSeq: number | null;
+  until: Date;
+}
+
+/** One agent's runs still marked as waiting on a permission answer. */
+export async function openPermissionWaits(agent: {
+  tenantId: string;
+  externalSource: string;
+  boardId: string;
+  agentKey: string;
+}): Promise<OpenPermissionWait[]> {
+  const rows = await db
+    .select()
+    .from(bridgeDispatches)
+    .where(
+      tenantScope(
+        bridgeDispatches,
+        agent.tenantId,
+        eq(bridgeDispatches.externalSource, agent.externalSource),
+        eq(bridgeDispatches.boardId, agent.boardId),
+        eq(bridgeDispatches.agentKey, agent.agentKey),
+        eq(bridgeDispatches.outcome, "working"),
+        isNotNull(bridgeDispatches.permissionWaitUntil),
+      ),
+    );
+  return rows.map((r) => ({
+    key: {
+      tenantId: r.tenantId,
+      externalSource: r.externalSource,
+      boardId: r.boardId,
+      externalCardId: r.externalCardId,
+      externalRunId: r.externalRunId,
+    },
+    leaseEpoch: r.leaseEpoch,
+    acpRunId: r.acpRunId,
+    sessionId: r.permissionSessionId,
+    requestSeq: r.permissionRequestSeq,
+    until: r.permissionWaitUntil ?? new Date(0),
+  }));
 }

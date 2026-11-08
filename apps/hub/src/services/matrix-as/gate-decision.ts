@@ -451,7 +451,8 @@ export async function settleGateOutcome(
 
     const who = principalId ? ((await deps.displayNameFor?.(principalId)) ?? null) : null;
     const verb = OUTCOME_VERBS[parsed.optionId] ?? parsed.optionId;
-    const body = who ? `${verb} by ${who} — the board has it.` : `${verb} — the board has it.`;
+    const body =
+      OUTCOME_SENTENCES[parsed.optionId] ?? (who ? `${verb} by ${who} — the board has it.` : `${verb} — the board has it.`);
 
     await deps.reply(roomId, body);
 
@@ -483,4 +484,14 @@ const OUTCOME_VERBS: Record<string, string> = {
   approve_manual: "Approved for manual delivery",
   reject: "Rejected",
   request_changes: "Changes requested",
+  expired: "Expired",
+};
+
+/**
+ * Outcomes nobody chose, said as a whole sentence. A subject-bound gate whose subject passed its
+ * `expires_at` is closed by the board as `expired` (charter: "Unanswered decisions remind, then
+ * escalate" §7), and "Expired — the board has it" would read as though someone had answered.
+ */
+const OUTCOME_SENTENCES: Record<string, string> = {
+  expired: "Expired — what this gate approves passed its expiry before anyone approved it, so it can no longer be approved here.",
 };

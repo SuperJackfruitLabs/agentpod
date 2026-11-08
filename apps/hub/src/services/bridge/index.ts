@@ -4,8 +4,11 @@
  */
 export { isBridgeEnabled, loadBridgeConfig } from "./config";
 export type { BridgeConfig } from "./config";
+export { DECISION_KINDS } from "./deliveries";
 export type {
   AttentionPendingDelivery,
+  DecisionKind,
+  DecisionTimeoutDelivery,
   DeliveryPendingDelivery,
   ElicitationPendingDelivery,
   GatePendingDelivery,

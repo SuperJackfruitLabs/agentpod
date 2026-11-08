@@ -309,3 +309,10 @@ async function bridgeRoster(): Promise<Array<{ boardId: string; token: string }>
   const { readEveryBridgeRoster } = await import("../bridge/roster");
   return readEveryBridgeRoster();
 }
+
+/** The questions a board is waiting on now, read with the running sweeper's deps. Throws when none runs. */
+export async function readBoardQuestions(boardId: string): Promise<unknown[]> {
+  const deps = running;
+  if (!deps) throw new Error("no question sweeper is running");
+  return deps.pendingElicitations(boardId);
+}

@@ -129,6 +129,11 @@ export interface GateSweepDeps {
    * called for a board that could not be read.
    */
   onBoardAttention?(boardId: string, waiting: AttentionPendingDelivery[]): Promise<void>;
+  /**
+   * Finish escalations owed to an admin who joined the board room, where a send failed
+   * (`retryEscalationReposts`). Called for a board that answered this pass.
+   */
+  retryJoinReposts?(boardId: string): Promise<unknown>;
 }
 
 /** What the running hub supplies; the rest is built from the bridge's configuration. */
@@ -143,6 +148,7 @@ type SweepRest = Pick<
   | "projectAttention"
   | "settleAttention"
   | "onBoardAttention"
+  | "retryJoinReposts"
 >;
 
 /** Every way `projectGate` can end. Derived, so a new outcome cannot be forgotten here. */
@@ -356,6 +362,9 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
 
     await sweepDeliveries(boardId, tenantId, deps, deliveries);
     await sweepAttention(boardId, tenantId, deps, attention);
+    await deps.retryJoinReposts?.(boardId).catch((err: unknown) =>
+      log.warn("could not retry escalations owed to an admin who joined", { boardId, error: String(err) }),
+    );
   }
 
   const stuck = STUCK.reduce((n, status) => n + byStatus[status], 0);
@@ -775,4 +784,20 @@ function pushSubscriber(
       log.error("push subscription failed", { error: err instanceof Error ? err.message : String(err) });
     }
   };
+}
+
+/**
+ * What a board is waiting on now — its gates, follow-ups and waiting cards — read with the running
+ * sweeper's own deps, so an escalated card moved below is rebuilt from the same reads the sweep
+ * posts from (`decision-repost.ts`). Throws when no sweeper runs or a read fails.
+ */
+export async function readBoardPending(boardId: string): Promise<unknown[]> {
+  const deps = running;
+  if (!deps) throw new Error("no gate sweeper is running");
+  const [gates, deliveries, attention] = await Promise.all([
+    deps.pendingGates(boardId),
+    deps.pendingDeliveries?.(boardId) ?? [],
+    deps.pendingAttention?.(boardId) ?? [],
+  ]);
+  return [...gates, ...deliveries, ...attention];
 }

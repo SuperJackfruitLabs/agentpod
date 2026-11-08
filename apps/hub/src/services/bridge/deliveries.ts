@@ -51,6 +51,12 @@ export interface GatePendingDelivery {
   approvalSubject?: unknown;
   /** The board's own path to the card, for a subject-bound gate. Not carried: `deep_link` is. */
   reviewUrl?: string | null;
+  /**
+   * When the decision is reminded and escalated, from its stage's timeout (charter: "Unanswered
+   * decisions remind, then escalate" §5): `{ remindAt?, escalateAt? }`, ISO. Absent when no timeout
+   * applies and from a board that predates it. `unknown`: checked before it is carried (`deadlineV2`).
+   */
+  deadline?: unknown;
   ts: string;
 }
 
@@ -104,6 +110,12 @@ export interface ElicitationPendingDelivery {
    * stage, so `cardId`, `runId` and `stageKey` are empty and the room must not link to a card.
    */
   approvalRequestId?: unknown;
+  /**
+   * When the decision is reminded and escalated, from its stage's timeout (charter: "Unanswered
+   * decisions remind, then escalate" §5): `{ remindAt?, escalateAt? }`, ISO. Absent when no timeout
+   * applies and from a board that predates it. `unknown`: checked before it is carried (`deadlineV2`).
+   */
+  deadline?: unknown;
   ts: string;
 }
 
@@ -131,6 +143,12 @@ export interface AttentionPendingDelivery {
   failureCount?: unknown;
   earlierStages?: unknown;
   options: unknown[];
+  /**
+   * When the decision is reminded and escalated, from its stage's timeout (charter: "Unanswered
+   * decisions remind, then escalate" §5): `{ remindAt?, escalateAt? }`, ISO. Absent when no timeout
+   * applies and from a board that predates it. `unknown`: checked before it is carried (`deadlineV2`).
+   */
+  deadline?: unknown;
   ts?: string;
 }
 
@@ -152,5 +170,37 @@ export interface DeliveryPendingDelivery {
   stageKey: string;
   approvalSubject?: unknown;
   options: Array<{ id: string; label: string; meaning?: unknown; needsComment?: unknown; input?: unknown; delivery?: unknown }>;
+  /**
+   * When the decision is reminded and escalated, from its stage's timeout (charter: "Unanswered
+   * decisions remind, then escalate" §5): `{ remindAt?, escalateAt? }`, ISO. Absent when no timeout
+   * applies and from a board that predates it. `unknown`: checked before it is carried (`deadlineV2`).
+   */
+  deadline?: unknown;
+  ts: string;
+}
+
+/** The kinds of decision a stage's timeout applies to (charter: "Unanswered decisions remind, then escalate" §1). */
+export const DECISION_KINDS = ["gate", "question", "delivery", "attention"] as const;
+export type DecisionKind = (typeof DECISION_KINDS)[number];
+
+/**
+ * The body the board pushes on `decision.reminded` and `decision.escalated`: a waiting decision passed
+ * its stage's timeout (charter: "Unanswered decisions remind, then escalate" §2). `decisionId` is the
+ * gate id (gate, delivery), the elicitation id (question) or the wait id (attention). Each is sent at
+ * most once per wait; `remindedAt` rides on the first, `escalatedAt` on the second.
+ */
+export interface DecisionTimeoutDelivery {
+  event: "decision.reminded" | "decision.escalated";
+  boardId: string;
+  boardName?: string | null;
+  cardId: string;
+  cardTitle: string;
+  stageKey: string;
+  stageName?: string | null;
+  decisionKind: DecisionKind;
+  decisionId: string;
+  waitingSince: string;
+  remindedAt?: string;
+  escalatedAt?: string;
   ts: string;
 }

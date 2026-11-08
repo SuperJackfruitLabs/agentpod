@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { PUSH_EVENTS, pushHookUrl, subscribeBoardsToPush } from "./push-subscription";
+import { PUSH_EVENTS, RELAY_PUSH_EVENTS, pushHookUrl, subscribeBoardsToPush } from "./push-subscription";
 
 /**
  * Nobody registered the hub's push subscription — so no board ever pushed a gate.
@@ -49,12 +49,23 @@ describe("subscribing each board to the hub's push", () => {
     expect(sent[0]!.body).toEqual({
       url: `${PUBLIC}/public/bridge/superpipeline/push`,
       token: "shh",
-      events: ["gate.pending", "elicitation.pending", "delivery.pending", "attention.pending"],
+      events: ["gate.pending", "elicitation.pending", "delivery.pending", "attention.pending", "decision.reminded", "decision.escalated"],
     });
   });
 
-  test("subscribes to every event the push route projects, the delivery follow-up included", () => {
-    expect([...PUSH_EVENTS].sort()).toEqual(["attention.pending", "delivery.pending", "elicitation.pending", "gate.pending"]);
+  test("subscribes to every event the push route projects, the delivery follow-up and the timeouts included", () => {
+    expect([...PUSH_EVENTS].sort()).toEqual([
+      "attention.pending",
+      "decision.escalated",
+      "decision.reminded",
+      "delivery.pending",
+      "elicitation.pending",
+      "gate.pending",
+    ]);
+  });
+
+  test("the relay stays on the one event approval requests ride, so a timeout is not delivered twice", () => {
+    expect([...RELAY_PUSH_EVENTS]).toEqual(["elicitation.pending"]);
   });
 
   test("registers nothing without a signing secret — the route would refuse every push", async () => {

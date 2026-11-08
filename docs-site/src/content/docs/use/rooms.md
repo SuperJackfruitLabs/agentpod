@@ -76,7 +76,8 @@ number or in the console, is recorded with the answer, and the card closes where
 **A board room carries more than gates and questions.** A card waiting on a person (blocked,
 failing, not authorised) and a SuperToolkit approval request arrive there too — see
 [Boards](/use/boards/#a-card-waiting-on-you). Answers to them are never passed to an agent as a
-message.
+message. A decision nobody answers in time is reminded and then escalated in the same room, as a
+reply to its card — see [When nobody answers](/use/boards/#when-nobody-answers).
 
 ## Messaging an agent is dispatching it
 
