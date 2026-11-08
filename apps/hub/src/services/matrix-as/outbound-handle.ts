@@ -9,7 +9,7 @@ import { inlinePermissionOptions, noteHubEvent, permissionDecisionKey } from "..
 import { requestedAt } from "../acp";
 import { foldToolUpdate, noteUnmappedKind, PERMISSION_REQUEST_TYPE, permissionRequestContent } from "./activity";
 import { legacyRequestEvents } from "./legacy-events";
-import { harnessPermission, permissionV2Content, type HarnessPermission } from "./permission-wire";
+import { PERMISSION_OUTCOME_TYPE, harnessPermission, permissionV2Content, type HarnessPermission } from "./permission-wire";
 import { flush, scheduleFlush } from "./outbound-flush";
 import { log } from "./outbound-log";
 import { mark, reportError, startTyping, stopTyping } from "./outbound-marks";
@@ -42,10 +42,12 @@ export async function handleEvent(
       return onPermissionRequest(ctx, event);
     case "error":
       return onError(ctx, event);
+    case "permission-answer":
+      return onPermissionAnswer(ctx, event);
     default:
-      // user-prompt and permission-answer are echoes of what already
-      // happened in the room, or of a console action. Repeating them would
-      // make the agent quote the person it is talking to.
+      // user-prompt is an echo of what already happened in the room, or of a
+      // console action. Repeating it would make the agent quote the person it
+      // is talking to. (permission-answer only settles the record, above.)
       return;
   }
 }
@@ -397,6 +399,29 @@ async function sendLegacyRequest(
   // The prose already pushed; this one must not buzz a second time.
   // Only when the prose landed — otherwise this is the question.
   if (proseId) noteHubEvent(legacyId, "companion");
+}
+
+/**
+ * A permission answered anywhere — the console, a board, an editor, or released as the session
+ * ended. The room's record and card are closed with the real outcome, so a request answered in the
+ * console is never swept as expired. Not repeated in words otherwise: the person answered.
+ */
+async function onPermissionAnswer(ctx: RoomContext, event: AcpEvent): Promise<void> {
+  const { agentUser, roomId, deps } = ctx;
+  const records = deps.permissionRecords;
+  if (!records?.settle) return;
+  try {
+    await records.settle(ctx.sessionId, event.payload, {
+      say: (body) => say(ctx, body),
+      sendOutcome: async (content) =>
+        deps.client.sendCustomEvent ? deps.client.sendCustomEvent(agentUser, roomId, PERMISSION_OUTCOME_TYPE, content) : null,
+    });
+  } catch (err) {
+    log.error("could not settle a permission request's record", {
+      sessionId: ctx.sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 async function onError(ctx: RoomContext, event: AcpEvent): Promise<void> {

@@ -1448,17 +1448,24 @@ permissions bind their subject). The permission prose message also carries
 `dev.agentpod.permission.v2` (meanings, scopes and a `harness-permission/v1`
 subject; `apps/hub/src/services/matrix-as/permission-wire.ts`), and each request
 is recorded in `matrix_permission_requests` (migration 0122): its digest, options,
-expiry, and how it closed — `answered` (with `answered_by_principal`), `expired` or
-`cancelled`. The session's `permission-answer` event now names who answered
+expiry, and how it closed — `answered` (with `answered_by_principal` and
+`answered_via`: room, console, board or editor), `expired` or `cancelled`; `claimed`
+is the brief state while one closer (a room answer, the sweep) holds it. An answer
+from any surface closes the record and the room's card (the hub reads the session's
+`permission-answer`), and a session ending closes it as withdrawn. The session's `permission-answer` event now names who answered
 (`answeredBy: {via: room|console|board|editor, …}`), and `answerPermission` refuses
 an option the request did not offer, from every surface. A request unanswered for
 30 minutes is expired by a once-a-minute sweep: the agent gets ACP `cancelled`, the
-room gets a line and `dev.agentpod.permission.outcome.v1`. A typed reply to a
+room gets a line and `dev.agentpod.permission.outcome.v1`; if nothing was still
+parked, it is closed as withdrawn, never posted as expired. A typed number cannot
+allow a request whose card could not show everything, any more than a button can. A typed reply to a
 closed request is refused in the room and never prompted to the agent. Logs:
 `matrix-permissions` (`a permission.answer.v2 was refused` with the reason;
 `a late reply to a closed permission request was not passed to the agent`).
 Pending permissions still do not survive a restart (the ACP session does not);
-their rows are expired by the sweep when their time is up.
+the sweep closes their rows when their time is up. A board that refuses a
+board-dispatched permission's envelope gets it again with only the options that
+reject, so it can never record an approval bound to nothing.
 
 **What never pushes.** The hub's own reactions on a message (👀 working, ✅
 done, ❌ failed) and a turn's activity record (`dev.agentpod.turn.v1`, which is

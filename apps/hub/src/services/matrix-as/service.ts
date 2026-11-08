@@ -52,7 +52,7 @@ import { attachRoomToSession, forgetTurnTrigger, noteTurnTrigger } from "./outbo
 import { createSession, promptSession,
   answerPermission, cancelPermission, sessionIsBusy, whenIdle } from "../acp";
 import { acpSessions } from "../../db/schema/acp";
-import { expirePermissions } from "./permission-answer";
+import { expirePermissions, settleFromSessionEvent } from "./permission-answer";
 import { notePermissionEvent, recordPermissionRequest } from "./permission-records";
 import { PERMISSION_OUTCOME_TYPE } from "./permission-wire";
 import { createLogger } from "../../utils/logger";
@@ -666,7 +666,12 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
         readerFor: readerForRoom,
         nameFor: agentNameForRoom,
         // permission.v2's durable binding: what a room's answer is judged against.
-        permissionRecords: { record: recordPermissionRequest, noteEvent: notePermissionEvent },
+        permissionRecords: {
+          record: recordPermissionRequest,
+          noteEvent: notePermissionEvent,
+          settle: (session, payload, post) =>
+            settleFromSessionEvent(session, payload, { ...post, displayNameFor: (id) => principalLabel(id) }),
+        },
         speak: voiceReplier.speakTurn,
       }),
     noteTrigger: noteTurnTrigger,

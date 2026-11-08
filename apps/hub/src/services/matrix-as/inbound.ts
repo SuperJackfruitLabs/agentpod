@@ -45,7 +45,7 @@ import {
   parsePermissionAnswer,
 } from "./permission-wire";
 import {
-  closeTypedPermission,
+  answerTypedPermission,
   handlePermissionAnswer,
   refuseLatePermissionReply,
   typedPermissionGate,
@@ -634,6 +634,14 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
       return;
     }
 
+    // A recorded request is answered under the same checks as permission.answer.v2 — the preview
+    // rule included — and claimed before the agent is answered (`answerTypedPermission`).
+    if (gate) {
+      const out = await answerTypedPermission(gate, optionId, { roomId: room.roomId, sessionId: waiting.sessionId, answerer }, permissionDeps);
+      log.info("permission answer from a room", { principalId, room: room.roomId, optionId, status: out.status });
+      return;
+    }
+
     try {
       // The station's owner, for the same reason `createSession` takes it:
       // `requireLive` scopes on the session's `user_id`, a Better Auth id.
@@ -647,7 +655,6 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
       // Only after it was accepted: a cleared question plus a failed answer
       // would leave the agent parked with nothing able to release it.
       clearPendingPermission(room.roomId);
-      if (gate) await closeTypedPermission(gate, optionId, answerer, permissionDeps);
       log.info("permission answered from a room", {
         principalId,
         room: room.roomId,

@@ -239,6 +239,27 @@ describe("permission.v2 — expiry", () => {
     expect(await expirePermissions(deps)).toBe(0);
   });
 
+  test("a request with nothing parked is closed as withdrawn, never posted as expired", async () => {
+    const p = must(harnessPermission(SESSION, 24, PAYLOAD, new Date(Date.now() - PERMISSION_TTL_MS - 1000)));
+    await recordPermissionRequest(ROOM, p);
+    await notePermissionEvent(p.requestId, "$perm-prose-24");
+    const { deps, said, outcomes } = rig();
+    expect(await expirePermissions({ ...deps, cancel: async () => false })).toBe(0);
+    expect((await permissionRecord(p.requestId))?.status).toBe("cancelled");
+    expect(outcomes).toEqual([expect.objectContaining({ outcome: "cancelled" })]);
+    expect(said.join(" ")).not.toMatch(/expired/);
+  });
+
+  test("a request an answer has claimed is not swept", async () => {
+    const p = must(harnessPermission(SESSION, 25, PAYLOAD, new Date(Date.now() - PERMISSION_TTL_MS - 1000)));
+    await recordPermissionRequest(ROOM, p);
+    await rawSql`UPDATE matrix_permission_requests SET status = 'claimed' WHERE request_id = ${p.requestId}`;
+    const { deps, cancelled } = rig();
+    expect(await expirePermissions(deps)).toBe(0);
+    expect(cancelled).toEqual([]);
+    expect((await permissionRecord(p.requestId))?.status).toBe("claimed");
+  });
+
   test("a request still within its time is left alone", async () => {
     const p = must(harnessPermission(SESSION, 22, PAYLOAD, new Date()));
     await recordPermissionRequest(ROOM, p);
@@ -335,6 +356,7 @@ describe("permission.v2 against the shared corpus", () => {
       status: "pending" as const,
       optionId: null,
       answeredByPrincipal: null,
+      answeredVia: null,
       closedAt: null,
     };
     const ctx = { roomId: "!room", sessionId: "acps_3f0c" };

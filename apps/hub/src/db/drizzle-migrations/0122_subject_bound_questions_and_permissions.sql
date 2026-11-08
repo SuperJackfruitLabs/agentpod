@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS "matrix_permission_requests" (
   "option_id" text,
   "answered_by_principal" text,
   "answered_by_mxid" text,
+  "answered_via" text,
   "closed_at" timestamp,
   "created_at" timestamp DEFAULT now() NOT NULL,
   CONSTRAINT "matrix_permission_requests_tenant_id_tenants_id_fk"

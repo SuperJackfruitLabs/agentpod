@@ -14,12 +14,16 @@
 import { createLogger } from "../../utils/logger";
 import type { PermissionAnswerer } from "../acp";
 import {
+  asVia,
+  claimPermission,
   closePermission,
   expiredPendingPermissions,
   latestPermissionInRoom,
   permissionRecord,
   promptedSince,
+  releasePermission,
   type PermissionRecord,
+  type PermissionVia,
 } from "./permission-records";
 import {
   PERMISSION_TTL_MS,
@@ -81,6 +85,20 @@ const TEXT: Record<Exclude<PermissionAnswerRefusal, "not-an-answer" | "reference
     "The card could not show everything this would allow, so it cannot be allowed from here. Answer it in the console. Nothing was sent to the agent.",
 };
 
+const WHERE: Record<PermissionVia, string> = { room: "here", console: "in the console", board: "on the board", editor: "in the editor" };
+
+/**
+ * Why a request is no longer answerable, in words — its real reason, so a person who answered in
+ * the console and then typed "1" is told it was answered in the console, not that it expired.
+ */
+export function closedText(r: Pick<PermissionRecord, "status" | "answeredVia">): string {
+  if (r.status === "answered") return `That permission request was already answered ${WHERE[r.answeredVia ?? "room"]}. Nothing was sent to the agent.`;
+  if (r.status === "expired") return TEXT.expired;
+  if (r.status === "cancelled") return "That permission request was withdrawn; the agent is no longer waiting on it. Nothing was sent to the agent.";
+  if (r.status === "claimed") return "That permission request is being answered right now. Nothing was sent to the agent.";
+  return "That permission request is no longer waiting. Nothing was sent to the agent.";
+}
+
 /** The judgement, pure: what the record says about this answer. */
 export function permissionRefusal(
   parsed: ParsedPermissionAnswer,
@@ -115,7 +133,8 @@ export async function handlePermissionAnswer(
     log.warn("a permission.answer.v2 was refused", { requestId: parsed.requestId, optionId: parsed.optionId, reason });
     // A reference that is not the request's message is refused silently, as for a gate: an event
     // quoted from elsewhere must not make the agent speak.
-    if (reason !== "reference-mismatch") await deps.say(TEXT[reason]);
+    if (reason === "not-pending" && record) await deps.say(closedText(record));
+    else if (reason !== "reference-mismatch") await deps.say(TEXT[reason]);
     return { status: "refused", reason };
   }
   return deliver(record, parsed.optionId, ctx, deps);
@@ -132,6 +151,13 @@ async function deliver(
   ctx: PermissionAnswerContext,
   deps: PermissionAnswerDeps,
 ): Promise<PermissionAnswerOutcome> {
+  // Claimed BEFORE the agent is answered, so the expiry sweep (which only takes pending rows)
+  // cannot close it as expired in between and lose who answered.
+  if (!(await claimPermission(record.requestId, deps.now?.() ?? new Date()))) {
+    const now = await permissionRecord(record.requestId);
+    await deps.say(now && now.status !== "pending" ? closedText(now) : TEXT.expired);
+    return { status: "refused", reason: "not-pending" };
+  }
   try {
     await deps.answer(record.sessionId, record.requestSeq, optionId, {
       via: "room",
@@ -139,6 +165,7 @@ async function deliver(
       mxid: ctx.answerer.mxid,
     });
   } catch (err) {
+    await releasePermission(record.requestId);
     const reason = err instanceof Error ? err.message : String(err);
     log.warn("a permission answer from a room was refused by the session", { requestId: record.requestId, error: reason });
     await deps.say(
@@ -147,7 +174,7 @@ async function deliver(
     return { status: "refused", reason: "agent-refused" };
   }
   clearIfPending(record);
-  await closeWithOutcome(record, "selected", optionId, ctx.answerer, deps);
+  await closeWithOutcome(record, "selected", optionId, { ...ctx.answerer, via: "room" }, deps, "claimed");
   return { status: "answered", requestId: record.requestId };
 }
 
@@ -164,19 +191,25 @@ async function closeWithOutcome(
   record: PermissionRecord,
   outcome: PermissionOutcome,
   optionId: string | null,
-  answerer: { principalId: string; mxid: string } | null,
+  answerer: { principalId: string | null; mxid: string | null; via: PermissionVia | null } | null,
   deps: Pick<PermissionAnswerDeps, "say" | "sendOutcome" | "displayNameFor">,
+  from: "pending" | "claimed",
 ): Promise<void> {
   const status = outcome === "selected" ? "answered" : outcome;
-  const closed = await closePermission(record.requestId, {
-    status,
-    ...(optionId ? { optionId } : {}),
-    principalId: answerer?.principalId ?? null,
-    mxid: answerer?.mxid ?? null,
-  });
+  const closed = await closePermission(
+    record.requestId,
+    {
+      status,
+      ...(optionId ? { optionId } : {}),
+      principalId: answerer?.principalId ?? null,
+      mxid: answerer?.mxid ?? null,
+      via: answerer?.via ?? null,
+    },
+    from,
+  );
   if (!closed || record.eventId === null) return;
   try {
-    const who = answerer ? ((await deps.displayNameFor?.(answerer.principalId)) ?? null) : null;
+    const who = answerer?.principalId ? ((await deps.displayNameFor?.(answerer.principalId)) ?? null) : null;
     const label = optionId ? (record.options.find((o) => o.id === optionId)?.label ?? optionId) : null;
     await deps.say(permissionOutcomeText(outcome, label, who));
     await deps.sendOutcome?.(
@@ -206,18 +239,63 @@ export async function typedPermissionGate(
   const now = deps.now?.() ?? new Date();
   if (record.status === "pending" && now.getTime() < record.expiresAt.getTime()) return record;
   clearPendingPermission(roomId);
-  await deps.say(record.status === "pending" ? TEXT.expired : TEXT["not-pending"]);
+  await deps.say(record.status === "pending" ? TEXT.expired : closedText(record));
   return "refused";
 }
 
-/** After a typed answer the session accepted: close the record and the card, naming who answered. */
-export async function closeTypedPermission(
+/**
+ * A typed answer to a recorded request, under the same checks as permission.answer.v2: the option
+ * must be one it offered, an approval is refused when the card could not show everything, and the
+ * row is claimed before the agent is answered, then closed naming who answered.
+ */
+export async function answerTypedPermission(
   record: PermissionRecord,
   optionId: string,
-  answerer: { principalId: string; mxid: string },
+  ctx: PermissionAnswerContext,
+  deps: PermissionAnswerDeps,
+): Promise<PermissionAnswerOutcome> {
+  const option = record.options.find((o) => o.id === optionId);
+  if (!option) {
+    await deps.say(TEXT["bad-option"]);
+    return { status: "refused", reason: "bad-option" };
+  }
+  if (option.meaning === "approve" && !record.previewComplete) {
+    await deps.say(TEXT["preview-incomplete"]);
+    return { status: "refused", reason: "preview-incomplete" };
+  }
+  return deliver(record, optionId, ctx, deps);
+}
+
+/**
+ * A `permission-answer` the session recorded, from any surface — the console, a board, an editor,
+ * the session ending. Closes the room's record and card if nothing else has: a request answered in
+ * the console must not be swept as expired later. A room answer has already claimed its row, so
+ * this does nothing for it.
+ */
+export async function settleFromSessionEvent(
+  sessionId: string,
+  payload: unknown,
   deps: Pick<PermissionAnswerDeps, "say" | "sendOutcome" | "displayNameFor">,
 ): Promise<void> {
-  await closeWithOutcome(record, "selected", optionId, answerer, deps);
+  if (typeof payload !== "object" || payload === null || !("requestSeq" in payload)) return;
+  if ("auto" in payload && payload.auto === true) return;
+  const seq = payload.requestSeq;
+  if (typeof seq !== "number") return;
+  const record = await permissionRecord(permissionRequestId(sessionId, seq));
+  if (!record || record.status !== "pending") return;
+  if ("cancelled" in payload && payload.cancelled === true) {
+    await closeWithOutcome(record, "cancelled", null, null, deps, "pending");
+    return;
+  }
+  const optionId = "optionId" in payload && typeof payload.optionId === "string" ? payload.optionId : null;
+  if (!optionId) return;
+  const by = "answeredBy" in payload && typeof payload.answeredBy === "object" && payload.answeredBy !== null ? payload.answeredBy : {};
+  const pick = (k: string): string | null => {
+    const v: unknown = k in by ? Reflect.get(by, k) : null;
+    return typeof v === "string" ? v : null;
+  };
+  const answerer = { principalId: pick("principalId") ?? pick("userId"), mxid: pick("mxid"), via: asVia(pick("via")) };
+  await closeWithOutcome(record, "selected", optionId, answerer, deps, "pending");
 }
 
 /**
@@ -239,7 +317,7 @@ export async function refuseLatePermissionReply(
   // The person has talked to the agent since: a number now answers whatever the agent said last.
   if (await promptedSince(latest.sessionId, latest.requestSeq)) return false;
   log.info("a late reply to a closed permission request was not passed to the agent", { roomId, requestId: latest.requestId });
-  await deps.say(latest.status === "pending" || latest.status === "expired" ? TEXT.expired : TEXT["not-pending"]);
+  await deps.say(closedText(latest));
   return true;
 }
 
@@ -253,7 +331,7 @@ const LATE_AFTER_ANSWER_MS = 2 * 60_000;
  * window.
  */
 function withinLateWindow(r: PermissionRecord, now: number): boolean {
-  if (r.status === "pending") return now < r.expiresAt.getTime() + PERMISSION_TTL_MS;
+  if (r.status === "pending" || r.status === "claimed") return now < r.expiresAt.getTime() + PERMISSION_TTL_MS;
   const closed = r.closedAt?.getTime() ?? 0;
   return now - closed < (r.status === "expired" ? PERMISSION_TTL_MS : LATE_AFTER_ANSWER_MS);
 }
@@ -281,18 +359,17 @@ export async function expirePermissions(deps: PermissionExpiryDeps): Promise<num
       ...(deps.sendOutcome ? { sendOutcome: sendIn(deps, record.roomId) } : {}),
     };
     // Claimed first: if an answer got there in the same instant, it owns the outcome.
-    if (!(await claimExpiry(record))) continue;
+    if (!(await claimPermission(record.requestId))) continue;
     clearIfPending(record);
-    try {
-      await deps.cancel(record);
-    } catch (err) {
-      log.warn("an expired permission request could not be released", {
-        requestId: record.requestId,
-        error: err instanceof Error ? err.message : String(err),
-      });
+    if (await cancelled(record, deps)) {
+      await closeWithOutcome(record, "expired", null, null, scoped, "claimed");
+      expired++;
+    } else {
+      // Nothing was parked: the request was settled somewhere this hub did not hear (its session
+      // ended, or it was answered while the room was detached). Not an expiry — the card is
+      // closed as withdrawn.
+      await closeWithOutcome(record, "cancelled", null, null, scoped, "claimed");
     }
-    await postExpiry(record, scoped);
-    expired++;
   }
   return expired;
 }
@@ -302,19 +379,15 @@ function sendIn(deps: Pick<PermissionExpiryDeps, "sendOutcome">, roomId: string)
   return async (content) => deps.sendOutcome?.(roomId, content);
 }
 
-async function claimExpiry(record: PermissionRecord): Promise<boolean> {
-  return closePermission(record.requestId, { status: "expired" });
-}
-
-async function postExpiry(record: PermissionRecord, deps: Pick<PermissionAnswerDeps, "say" | "sendOutcome">): Promise<void> {
-  if (record.eventId === null) return;
+/** Release the parked request as `cancelled`; false when nothing was parked or it could not be done. */
+async function cancelled(record: PermissionRecord, deps: Pick<PermissionExpiryDeps, "cancel">): Promise<boolean> {
   try {
-    await deps.say(permissionOutcomeText("expired", null, null));
-    await deps.sendOutcome?.(permissionOutcomeContent({ ...record, eventId: record.eventId }, "expired", null, null));
+    return await deps.cancel(record);
   } catch (err) {
-    log.warn("an expired permission's receipt could not be posted", {
+    log.warn("an expired permission request could not be released", {
       requestId: record.requestId,
       error: err instanceof Error ? err.message : String(err),
     });
+    return false;
   }
 }

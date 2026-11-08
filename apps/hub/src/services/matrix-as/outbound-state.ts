@@ -20,6 +20,15 @@ export interface OutboundDeps {
   permissionRecords?: {
     record(roomId: string, permission: HarnessPermission): Promise<boolean>;
     noteEvent(requestId: string, eventId: string): Promise<void>;
+    /**
+     * A `permission-answer` the session recorded (any surface, or the session ending): close the
+     * record and the card if nothing else has (`settleFromSessionEvent`).
+     */
+    settle?(
+      sessionId: string,
+      payload: unknown,
+      post: { say(body: string): Promise<unknown>; sendOutcome(content: Record<string, unknown>): Promise<unknown> },
+    ): Promise<void>;
   };
   client: {
     sendText(userId: string, roomId: string, body: string, extra?: Record<string, unknown>): Promise<string | null>;

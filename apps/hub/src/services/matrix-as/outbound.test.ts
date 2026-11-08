@@ -1080,6 +1080,23 @@ describe("a permission request a client can render", () => {
     expect(noted).toEqual([[`${SESSION}:7`, "$evt"]]);
   });
 
+  test("a permission answered anywhere settles the room's record", async () => {
+    const settled: Array<{ sessionId: string; payload: unknown }> = [];
+    const withSettle: OutboundDeps = {
+      ...deps(),
+      permissionRecords: {
+        record: async () => true,
+        noteEvent: async () => {},
+        settle: async (sessionId, payload) => void settled.push({ sessionId, payload }),
+      },
+    };
+    attachRoomToSession(SESSION, ROOM, AGENT, withSettle);
+    emit(permission(7));
+    emit({ sessionId: SESSION, seq: 8, type: "permission-answer", payload: { requestSeq: 7, optionId: "allow" }, createdAt: new Date().toISOString() });
+    await settle();
+    expect(settled).toEqual([{ sessionId: SESSION, payload: { requestSeq: 7, optionId: "allow" } }]);
+  });
+
   test("a failed record still asks the question", async () => {
     const failing: OutboundDeps = {
       ...deps(),

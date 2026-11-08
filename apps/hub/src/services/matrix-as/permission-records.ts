@@ -8,14 +8,15 @@
  * a "1" typed after the request closed is late rather than a prompt.
  */
 
-import { and, desc, eq, gt, lte } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lte } from "drizzle-orm";
 
 import { db } from "../../db/drizzle";
 import { acpEvents } from "../../db/schema/acp";
 import { matrixPermissionRequests, matrixRooms, type MatrixPermissionOption } from "../../db/schema/matrix";
 import type { HarnessPermission } from "./permission-wire";
 
-export type PermissionStatus = "pending" | "answered" | "expired" | "cancelled";
+export type PermissionStatus = "pending" | "claimed" | "answered" | "expired" | "cancelled";
+export type PermissionVia = "room" | "console" | "board" | "editor";
 
 export interface PermissionRecord {
   requestId: string;
@@ -31,11 +32,15 @@ export interface PermissionRecord {
   status: PermissionStatus;
   optionId: string | null;
   answeredByPrincipal: string | null;
+  answeredVia: PermissionVia | null;
   closedAt: Date | null;
 }
 
 const asStatus = (v: string): PermissionStatus =>
-  v === "answered" || v === "expired" || v === "cancelled" ? v : "pending";
+  v === "claimed" || v === "answered" || v === "expired" || v === "cancelled" ? v : "pending";
+
+export const asVia = (v: unknown): PermissionVia | null =>
+  v === "room" || v === "console" || v === "board" || v === "editor" ? v : null;
 
 function toRecord(row: typeof matrixPermissionRequests.$inferSelect): PermissionRecord {
   return {
@@ -52,6 +57,7 @@ function toRecord(row: typeof matrixPermissionRequests.$inferSelect): Permission
     status: asStatus(row.status),
     optionId: row.optionId,
     answeredByPrincipal: row.answeredByPrincipal,
+    answeredVia: asVia(row.answeredVia),
     closedAt: row.closedAt,
   };
 }
@@ -87,7 +93,12 @@ export async function recordPermissionRequest(roomId: string, p: HarnessPermissi
 
 /** The prose message that carries the request: the one event an answer may reference. */
 export async function notePermissionEvent(requestId: string, eventId: string): Promise<void> {
-  await db.update(matrixPermissionRequests).set({ eventId }).where(eq(matrixPermissionRequests.requestId, requestId));
+  // Only the first message: a replayed request event must not re-point the record away from the
+  // card people were shown, or answers to that card would no longer match.
+  await db
+    .update(matrixPermissionRequests)
+    .set({ eventId })
+    .where(and(eq(matrixPermissionRequests.requestId, requestId), isNull(matrixPermissionRequests.eventId)));
 }
 
 export async function permissionRecord(requestId: string): Promise<PermissionRecord | null> {
@@ -111,12 +122,48 @@ export async function latestPermissionInRoom(roomId: string): Promise<Permission
 }
 
 /**
- * Close a request, exactly once: true only for the call that moved it out of `pending`, so two
- * answers — or an answer and the expiry — leave one outcome.
+ * Claim a pending request for one closer (`pending` → `claimed`), so an answer and the expiry
+ * sweep cannot both act on it: true only for the call that took it. `unexpiredAt` makes the claim
+ * also require the request still be within its time (an answer's claim; the sweep's is not).
+ */
+export async function claimPermission(requestId: string, unexpiredAt?: Date): Promise<boolean> {
+  const rows = await db
+    .update(matrixPermissionRequests)
+    .set({ status: "claimed" })
+    .where(
+      and(
+        eq(matrixPermissionRequests.requestId, requestId),
+        eq(matrixPermissionRequests.status, "pending"),
+        ...(unexpiredAt ? [gt(matrixPermissionRequests.expiresAt, unexpiredAt)] : []),
+      ),
+    )
+    .returning({ requestId: matrixPermissionRequests.requestId });
+  return rows.length > 0;
+}
+
+/** Give a claim back (`claimed` → `pending`): the closer could not finish, nothing changed. */
+export async function releasePermission(requestId: string): Promise<void> {
+  await db
+    .update(matrixPermissionRequests)
+    .set({ status: "pending" })
+    .where(and(eq(matrixPermissionRequests.requestId, requestId), eq(matrixPermissionRequests.status, "claimed")));
+}
+
+/**
+ * Close a request, exactly once: true only for the call that moved it out of `from` (`pending`
+ * for a closer that holds no claim, `claimed` for one that does), so two answers — or an answer
+ * and the expiry — leave one outcome.
  */
 export async function closePermission(
   requestId: string,
-  close: { status: Exclude<PermissionStatus, "pending">; optionId?: string; principalId?: string | null; mxid?: string | null },
+  close: {
+    status: "answered" | "expired" | "cancelled";
+    optionId?: string;
+    principalId?: string | null;
+    mxid?: string | null;
+    via?: PermissionVia | null;
+  },
+  from: "pending" | "claimed" = "pending",
 ): Promise<boolean> {
   const rows = await db
     .update(matrixPermissionRequests)
@@ -125,9 +172,10 @@ export async function closePermission(
       optionId: close.optionId ?? null,
       answeredByPrincipal: close.principalId ?? null,
       answeredByMxid: close.mxid ?? null,
+      answeredVia: close.via ?? null,
       closedAt: new Date(),
     })
-    .where(and(eq(matrixPermissionRequests.requestId, requestId), eq(matrixPermissionRequests.status, "pending")))
+    .where(and(eq(matrixPermissionRequests.requestId, requestId), eq(matrixPermissionRequests.status, from)))
     .returning({ requestId: matrixPermissionRequests.requestId });
   return rows.length > 0;
 }

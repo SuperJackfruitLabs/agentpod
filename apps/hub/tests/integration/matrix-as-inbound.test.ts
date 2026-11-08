@@ -17,7 +17,8 @@ import {
 } from "../../src/services/matrix-as/permissions";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { harnessPermission } from "../../src/services/matrix-as/permission-wire";
-import { notePermissionEvent, recordPermissionRequest } from "../../src/services/matrix-as/permission-records";
+import { notePermissionEvent, permissionRecord, recordPermissionRequest } from "../../src/services/matrix-as/permission-records";
+import { answerTypedPermission, settleFromSessionEvent } from "../../src/services/matrix-as/permission-answer";
 
 /**
  * Where a Matrix message becomes work.
@@ -1114,7 +1115,7 @@ describe("permission.v2 answers in a station room", () => {
     await handleRoomMessage(answerV2(), permDeps());
     await handleRoomMessage(answerV2({ option_id: "reject_once" }), permDeps());
     expect(answered.map((a) => a.optionId)).toEqual(["allow_once"]);
-    expect(sent.at(-1)?.body).toMatch(/already settled/);
+    expect(sent.at(-1)?.body).toMatch(/already answered here/);
   });
 
   test("an answer for an earlier session is stale", async () => {
@@ -1185,7 +1186,7 @@ describe("permission.v2 answers in a station room", () => {
     await handleRoomMessage(message(OWNER_MXID, "1"), permDeps());
     expect(answered).toHaveLength(1);
     expect(prompts).toHaveLength(0);
-    expect(sent.at(-1)?.body).toMatch(/already settled/);
+    expect(sent.at(-1)?.body).toMatch(/already answered here/);
 
     await rawSql`
       INSERT INTO acp_events (session_id, tenant_id, seq, type, payload, created_at)
@@ -1194,13 +1195,100 @@ describe("permission.v2 answers in a station room", () => {
     expect(prompts.at(-1)?.text).toBe("1");
   });
 
+  test("a typed number cannot allow on an incomplete preview; a typed reject still goes through", async () => {
+    // Review of #844: the typed path must keep the same checks as permission.answer.v2.
+    const terminal = { ...PAYLOAD, toolCall: { ...PAYLOAD.toolCall, content: [{ type: "terminal", terminalId: "t1" }] } };
+    await project({ payload: terminal });
+    await handleRoomMessage(message(OWNER_MXID, "1"), permDeps());
+    expect(answered).toEqual([]);
+    expect(prompts).toHaveLength(0);
+    expect(sent.at(-1)?.body).toMatch(/console/);
+    expect((await row()).status).toBe("pending");
+    await handleRoomMessage(message(OWNER_MXID, "3"), permDeps());
+    expect(answered.map((a) => a.optionId)).toEqual(["reject_once"]);
+  });
+
+  test("a request the expiry sweep has claimed is not answered, and the answerer is never lost to it", async () => {
+    await project();
+    await rawSql`UPDATE matrix_permission_requests SET status = 'claimed' WHERE request_id = ${`${SESSION}:${SEQ}`}`;
+    await handleRoomMessage(answerV2(), permDeps());
+    expect(answered).toEqual([]);
+    expect(sent.at(-1)?.body).toMatch(/being answered right now/);
+  });
+
+  test("an answer that loses the row to the sweep after it was judged is not delivered", async () => {
+    // The race: judged while pending, then claimed by the expiry sweep before the agent is answered.
+    const p = await project();
+    const snapshot = await permissionRecord(p.requestId);
+    if (!snapshot) throw new Error("recorded");
+    await rawSql`UPDATE matrix_permission_requests SET status = 'claimed' WHERE request_id = ${p.requestId}`;
+    const delivered: string[] = [];
+    const said: string[] = [];
+    const out = await answerTypedPermission(snapshot, "reject_once", { roomId: ROOM, sessionId: SESSION, answerer: { principalId: OWNER_PRINCIPAL, mxid: OWNER_MXID } }, {
+      answer: async (_s, _q, optionId) => void delivered.push(optionId),
+      say: async (b) => said.push(b),
+    });
+    expect(out.status).toBe("refused");
+    expect(delivered).toEqual([]);
+    expect(said[0]).toMatch(/being answered right now/);
+  });
+
+  test("an answer the session refuses gives the claim back, so the request can still be answered", async () => {
+    await project();
+    answerFails = new Error("something went wrong");
+    await handleRoomMessage(answerV2(), permDeps());
+    expect((await row()).status).toBe("pending");
+    answerFails = null;
+    await handleRoomMessage(answerV2(), permDeps());
+    expect((await row()).status).toBe("answered");
+  });
+
+  test("a replayed request does not re-point the record away from the card people saw", async () => {
+    const p = await project();
+    await notePermissionEvent(p.requestId, "$replayed-prose");
+    expect((await row()).event_id).toBe(PROSE);
+    await handleRoomMessage(answerV2(), permDeps());
+    expect(answered).toHaveLength(1);
+  });
+
+  test("a request answered in the console closes the record and the card, and a late '1' says where it was answered", async () => {
+    const p = await project();
+    const said: string[] = [];
+    const outcomes: Array<Record<string, unknown>> = [];
+    await settleFromSessionEvent(SESSION, { requestSeq: SEQ, optionId: "allow_once", answeredBy: { via: "console", userId: OWNER_PRINCIPAL } }, {
+      say: async (b) => said.push(b),
+      sendOutcome: async (c) => outcomes.push(c),
+      displayNameFor: async () => "Owner Person",
+    });
+    const r = await row();
+    expect(r.status).toBe("answered");
+    expect(r.answered_via).toBe("console");
+    expect(r.answered_by_principal).toBe(OWNER_PRINCIPAL);
+    expect(outcomes).toEqual([expect.objectContaining({ request_id: p.requestId, outcome: "selected", option_id: "allow_once", decided_by: "Owner Person" })]);
+    expect(said).toEqual(["Allow once — answered by Owner Person."]);
+    clearPendingPermission(ROOM);
+    await handleRoomMessage(message(OWNER_MXID, "1"), permDeps());
+    expect(prompts).toHaveLength(0);
+    expect(sent.at(-1)?.body).toMatch(/already answered in the console/);
+  });
+
+  test("a request released as its session ended closes as withdrawn, and a room answer's own event changes nothing", async () => {
+    await project();
+    await settleFromSessionEvent(SESSION, { requestSeq: SEQ, cancelled: true }, { say: async () => {}, sendOutcome: async () => {} });
+    expect((await row()).status).toBe("cancelled");
+    // A claimed row (a room answer in flight) is not touched by its own echo.
+    await rawSql`UPDATE matrix_permission_requests SET status = 'claimed' WHERE request_id = ${`${SESSION}:${SEQ}`}`;
+    await settleFromSessionEvent(SESSION, { requestSeq: SEQ, optionId: "allow_once" }, { say: async () => {}, sendOutcome: async () => {} });
+    expect((await row()).status).toBe("claimed");
+  });
+
   test("a request left pending by a restart refuses a matching reply rather than prompting", async () => {
     await project();
     clearPendingPermission(ROOM);
     await handleRoomMessage(message(OWNER_MXID, "Allow once"), permDeps());
     expect(answered).toEqual([]);
     expect(prompts).toHaveLength(0);
-    expect(sent.at(-1)?.body).toMatch(/expired/);
+    expect(sent.at(-1)?.body).toMatch(/no longer waiting/);
     // An ordinary message is still a message.
     await handleRoomMessage(message(OWNER_MXID, "what are you doing?"), permDeps());
     expect(prompts.at(-1)?.text).toBe("what are you doing?");

@@ -400,11 +400,16 @@ export const matrixPermissionRequests = pgTable(
     previewComplete: boolean("preview_complete").notNull(),
     options: jsonb("options").$type<MatrixPermissionOption[]>().notNull(),
     expiresAt: timestamp("expires_at").notNull(),
-    /** `pending`, then exactly one of `answered`, `expired`, `cancelled`. */
+    /**
+     * `pending`; `claimed` while one closer (an answer from the room, the expiry sweep) holds it;
+     * then exactly one of `answered`, `expired`, `cancelled`.
+     */
     status: text("status").notNull().default("pending"),
     optionId: text("option_id"),
     answeredByPrincipal: text("answered_by_principal"),
     answeredByMxid: text("answered_by_mxid"),
+    /** Where it was answered: `room`, `console`, `board` or `editor`. */
+    answeredVia: text("answered_via"),
     closedAt: timestamp("closed_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
