@@ -323,7 +323,11 @@ async function askTheHuman(t: Turn, request: AcpEvent): Promise<PermissionResolu
       // Null means the answer selected nothing the harness offered — free
       // text, or an option from somewhere else. Not a decision, and not a
       // reason to pick one.
-      return optionId === null ? { kind: "unmappable" } : { kind: "answered", optionId };
+      if (optionId === null) return { kind: "unmappable" };
+      const by = question.answer?.answeredBy;
+      return by
+        ? { kind: "answered", optionId, answeredBy: { boardUserId: by, principalId: question.answer?.answeredByPrincipal ?? null } }
+        : { kind: "answered", optionId };
     }
 
     if (t.abortCause) return { kind: "aborted" };
@@ -372,7 +376,15 @@ async function resolvePermission(t: Turn, request: AcpEvent): Promise<TurnEnd | 
     card: key.externalCardId,
     option: outcome.resolution.optionId,
   });
-  await deps.acp.answerPermission(deps.agent.hubUserId, t.session.id, request.seq, outcome.resolution.optionId);
+  // Who answered is recorded on the session's permission-answer (charter 2026-11-07 §6).
+  const by = outcome.resolution.answeredBy;
+  await deps.acp.answerPermission(
+    deps.agent.hubUserId,
+    t.session.id,
+    request.seq,
+    outcome.resolution.optionId,
+    ...(by ? [{ via: "board" as const, principalId: by.principalId, userId: by.boardUserId }] : []),
+  );
   return null;
 }
 

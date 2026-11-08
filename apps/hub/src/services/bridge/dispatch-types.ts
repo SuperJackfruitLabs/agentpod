@@ -64,7 +64,13 @@ export interface AcpPort {
    * interprets which is which, because a bridge that decided what a human's
    * choice "really meant" is the failure this whole path exists to avoid.
    */
-  answerPermission(userId: string, sessionId: string, requestSeq: number, optionId: string): Promise<void>;
+  answerPermission(
+    userId: string,
+    sessionId: string,
+    requestSeq: number,
+    optionId: string,
+    answeredBy?: { via: "board"; principalId: string | null; userId: string | null },
+  ): Promise<void>;
 }
 
 export interface DispatchDeps {
@@ -205,7 +211,8 @@ export type TurnEnd =
 
 /** How a question ended. Only `answered` resumes the harness. */
 export type PermissionResolution =
-  | { kind: "answered"; optionId: string }
+  /** `answeredBy`: the board's user id for the person, and their suite principal when linked. */
+  | { kind: "answered"; optionId: string; answeredBy?: { boardUserId: string; principalId: string | null } }
   /** superpipeline cancelled it: the run ended, the card moved, or it was superseded. */
   | { kind: "cancelled" }
   /** Answered, but with nothing that maps to an option the harness offered. */

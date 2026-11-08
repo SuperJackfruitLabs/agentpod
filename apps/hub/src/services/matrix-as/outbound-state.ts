@@ -7,9 +7,20 @@
 import type { AcpEvent } from "@agentpod/contract";
 import type { ToolRecord } from "./activity";
 import { clearPendingPermission } from "./permissions";
+import type { HarnessPermission } from "./permission-wire";
 import type { SpokenTurn } from "./voice-reply";
 
 export interface OutboundDeps {
+  /**
+   * The durable record of a permission request (`permission-records.ts`): written before the
+   * permission.v2 message is sent, so an answer is judged against it. Optional: a deployment (or a
+   * test) without it projects permission.v2 all the same, and answers fall back to the in-memory
+   * request alone.
+   */
+  permissionRecords?: {
+    record(roomId: string, permission: HarnessPermission): Promise<boolean>;
+    noteEvent(requestId: string, eventId: string): Promise<void>;
+  };
   client: {
     sendText(userId: string, roomId: string, body: string, extra?: Record<string, unknown>): Promise<string | null>;
     sendTyping(userId: string, roomId: string, typing: boolean): Promise<void>;

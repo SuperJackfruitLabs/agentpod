@@ -336,6 +336,39 @@ test("a full turn: trigger, thought, tools, answer, permission pause, more answe
             "session_id": "acps_char_full",
             "title": "write /etc/hosts",
           },
+          "options": [
+            {
+              "id": "allow",
+              "label": "Allow",
+              "meaning": "choose",
+            },
+            {
+              "id": "reject",
+              "label": "Reject",
+              "meaning": "choose",
+            },
+          ],
+          "request_id": "acps_char_full:7",
+          "request_seq": 7,
+          "schema_version": 1,
+          "session_id": "acps_char_full",
+          "subject": {
+            "digest": "e102e704797fbe061b29c13fe1138d7f2b6dad3d6bef0653f709fc25503ec377",
+            "expires_at": "2026-01-01T00:30:00.000Z",
+            "id": "acps_char_full:7",
+            "preview": [
+              {
+                "label": "Tool",
+                "type": "field",
+                "value": "write /etc/hosts",
+              },
+            ],
+            "preview_complete": true,
+            "revision": 1,
+            "schema": "harness-permission/v1",
+          },
+          "suite_event_type": "dev.agentpod.permission.v2",
+          "title": "write /etc/hosts",
         },
         {
           "quiet": 0,
@@ -1644,6 +1677,34 @@ test("failing sends: text throws, the turn record and to-device reject — the r
               "session_id": "acps_char_fail",
               "title": "an action",
             },
+            "options": [
+              {
+                "id": "ok",
+                "label": "OK",
+                "meaning": "choose",
+              },
+            ],
+            "request_id": "acps_char_fail:3",
+            "request_seq": 3,
+            "schema_version": 1,
+            "session_id": "acps_char_fail",
+            "subject": {
+              "digest": "036a2c7f04979e68a8f8666e19e82e00320d7199650d9dbabe8db18f46f44bfb",
+              "expires_at": "2026-01-01T00:30:00.000Z",
+              "id": "acps_char_fail:3",
+              "preview": [
+                {
+                  "label": "Tool",
+                  "type": "field",
+                  "value": "an action",
+                },
+              ],
+              "preview_complete": true,
+              "revision": 1,
+              "schema": "harness-permission/v1",
+            },
+            "suite_event_type": "dev.agentpod.permission.v2",
+            "title": "an action",
           },
           {
             "quiet": 0,

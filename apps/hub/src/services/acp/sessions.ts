@@ -65,7 +65,8 @@ export {
 } from "./gates";
 export { sessionHasLibraryTools } from "./handshake";
 export { SessionNotResumable, createSession, isSessionNotResumable, resumeSession } from "./open";
-export { answerPermission, setMode } from "./permissions";
+export { answerPermission, cancelPermission, setMode } from "./permissions";
+export type { PermissionAnswerer } from "./permissions";
 export { reportTurnError, type TurnErrorReportOutcome } from "./plugin-reports";
 export { promptSession } from "./prompt";
 export {

@@ -71,6 +71,7 @@ export interface AcpSessionService {
     sessionId: string,
     requestSeq: number,
     optionId: string,
+    answeredBy?: { via: "editor"; userId: string },
   ): Promise<void>;
 
   cancelTurn(userId: string, sessionId: string): Promise<void>;
@@ -425,6 +426,7 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
               params.sessionId,
               event.seq,
               optionId,
+              { via: "editor", userId: opts.userId },
             );
           } catch (err) {
             // Exactly two losses are expected, and neither is worth crashing a

@@ -199,7 +199,7 @@ describe("question.v2 with a subject — recorded when posted", () => {
     const d = strict();
     const { deps, sent } = rig();
     expect((await projectElicitation(BOOTSTRAP_TENANT_ID, d, deps)).status).toBe("posted");
-    expect(sent[0]!.extra?.subject).toMatchObject({ id: SUBJECT.id, digest: SUBJECT.digest });
+    expect(sent[0]?.extra?.subject).toMatchObject({ id: SUBJECT.id, digest: SUBJECT.digest });
     const [row] = await db
       .select()
       .from(matrixElicitationEvents)
@@ -410,7 +410,7 @@ describe("the binding reaches the board's answer route", () => {
         baseUrl: "https://board.test",
         mint: async () => "assertion",
         fetch: (async (_url: string, init: RequestInit) => {
-          bodies.push(JSON.parse(String(init.body)));
+          bodies.push(typeof init.body === "string" ? JSON.parse(init.body) : null);
           return new Response("{}", { status: 200 });
         }) as unknown as typeof fetch,
       },

@@ -150,17 +150,17 @@ for (const offer of truncatedCorpus.offers)
     expect(parsed.detail?.files[0]).toHaveProperty("preview_truncated");
     expect(createHash("sha256").update(canonicalSalaamWork(parsed)).digest("hex")).toBe(offer.decision_digest);
   });
+const firstOffer = truncatedCorpus.offers[0]?.decision ?? corpus.decision;
+const stripTruncated = ({ preview_truncated: _cut, ...file }: { preview_truncated?: boolean }) => file;
 test("an offer saved before preview_truncated existed still parses and keeps its digest", () => {
-  const [offer] = truncatedCorpus.offers;
-  const detail = { ...offer!.decision.detail, files: offer!.decision.detail.files.map(({ preview_truncated: _cut, ...f }) => f) };
-  const parsed = SalaamWorkDecision.parse({ ...offer!.decision, detail });
+  const older = { ...firstOffer.detail, files: (firstOffer.detail?.files ?? []).map(stripTruncated) };
+  const parsed = SalaamWorkDecision.parse({ ...firstOffer, detail: older });
   expect(parsed.detail?.files[0]).not.toHaveProperty("preview_truncated");
   expect(createHash("sha256").update(canonicalSalaamWork(parsed)).digest("hex")).toBe(
-    createHash("sha256").update(canonicalSalaamWork({ ...offer!.decision, detail })).digest("hex"),
+    createHash("sha256").update(canonicalSalaamWork({ ...firstOffer, detail: older })).digest("hex"),
   );
 });
 test("preview_truncated must be a boolean", () => {
-  const [offer] = truncatedCorpus.offers;
-  const files = offer!.decision.detail.files.map((f) => ({ ...f, preview_truncated: "yes" }));
-  expect(SalaamWorkDecision.safeParse({ ...offer!.decision, detail: { ...offer!.decision.detail, files } }).success).toBe(false);
+  const files = (firstOffer.detail?.files ?? []).map((f) => ({ ...f, preview_truncated: "yes" }));
+  expect(SalaamWorkDecision.safeParse({ ...firstOffer, detail: { ...firstOffer.detail, files } }).success).toBe(false);
 });

@@ -6,6 +6,7 @@ export { buildAcpAgent } from "./agent";
 export {
   SESSION_BUSY_MESSAGE,
   answerPermission,
+  cancelPermission,
   cancelTurn,
   createSession,
   endSession,
@@ -28,5 +29,6 @@ export {
   subscribe,
   whenIdle,
 } from "./sessions";
+export type { PermissionAnswerer } from "./sessions";
 export { turnErrorCard } from "./turn-error";
 export { webSocketStream } from "./ws-stream";

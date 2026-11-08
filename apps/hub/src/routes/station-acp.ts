@@ -561,7 +561,8 @@ export const stationAcpRoutes = new Hono()
                     userId,
                     sessionId,
                     msg.requestSeq,
-                    msg.optionId
+                    msg.optionId,
+                    { via: "console", userId }
                   );
                   break;
                 case "set-mode":

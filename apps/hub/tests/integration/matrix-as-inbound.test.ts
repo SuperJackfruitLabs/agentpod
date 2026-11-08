@@ -16,6 +16,8 @@ import {
   pendingPermissionFor,
 } from "../../src/services/matrix-as/permissions";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
+import { harnessPermission } from "../../src/services/matrix-as/permission-wire";
+import { notePermissionEvent, recordPermissionRequest } from "../../src/services/matrix-as/permission-records";
 
 /**
  * Where a Matrix message becomes work.
@@ -99,10 +101,12 @@ function depsWithPermissions() {
         userId: string,
         sessionId: string,
         requestSeq: number,
-        optionId: string
+        optionId: string,
+        by?: unknown
       ) => {
         if (answerFails) throw answerFails;
         answered.push({ userId, sessionId, requestSeq, optionId });
+        answeredBy.push(by);
       },
     },
   };
@@ -115,6 +119,7 @@ let answered: Array<{
   optionId: string;
 }> = [];
 let answerFails: Error | null = null;
+let answeredBy: unknown[] = [];
 
 function message(sender: string, body: string, roomId = ROOM) {
   return {
@@ -957,5 +962,247 @@ describe("an inbound room message under the org plane, while the plane is unreac
       restore();
     }
     expect(prompts).toHaveLength(1);
+  });
+});
+
+/**
+ * permission.v2 — AgentPod judging a harness permission answer (charter: "Strict decisions and
+ * harness permissions bind their subject" §5–6). The request is recorded durably with its binding;
+ * a permission.answer.v2 is checked for the session, the sequence, the digest, an offered option,
+ * still pending and unexpired, and the answerer's grant, and who answered is recorded. A late or
+ * stale answer — structured or typed — is refused in the room and never reaches the agent.
+ */
+describe("permission.v2 answers in a station room", () => {
+  const SESSION = "acps_mx_inbound_perm";
+  const SEQ = 11;
+  const PROSE = "$permission-prose";
+  const PAYLOAD = {
+    toolCall: { toolCallId: "tc_1", title: "Run the tests", kind: "execute", rawInput: { command: "bun test" } },
+    options: [
+      { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+      { optionId: "allow_always", name: "Always allow", kind: "allow_always" },
+      { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+    ],
+  };
+  const OPTIONS = PAYLOAD.options.map((o) => ({ optionId: o.optionId, name: o.name }));
+  let customs: Array<{ type: string; content: Record<string, unknown> }> = [];
+  let digest = "";
+
+  function permDeps() {
+    const base = depsWithPermissions();
+    return {
+      ...base,
+      client: {
+        ...base.client,
+        sendCustomEvent: async (_u: string, roomId: string, type: string, content: Record<string, unknown>) => {
+          if (type === "m.room.message") sent.push({ roomId, body: String(content.body) });
+          else customs.push({ type, content });
+          return "$custom";
+        },
+      },
+      displayNameFor: async () => "Owner Person",
+    };
+  }
+
+  async function project(over: { payload?: unknown; requestedAt?: Date } = {}) {
+    const p = harnessPermission(SESSION, SEQ, over.payload ?? PAYLOAD, over.requestedAt ?? new Date());
+    if (!p) throw new Error("the request should be carryable");
+    expect(await recordPermissionRequest(ROOM, p)).toBe(true);
+    await notePermissionEvent(p.requestId, PROSE);
+    notePendingPermission(ROOM, { sessionId: SESSION, requestSeq: SEQ, options: OPTIONS });
+    digest = p.subject.digest;
+    return p;
+  }
+
+  function answerV2(over: Record<string, unknown> = {}) {
+    return {
+      type: "m.room.message",
+      sender: OWNER_MXID,
+      room_id: ROOM,
+      event_id: `$${Math.random().toString(36).slice(2)}`,
+      content: {
+        msgtype: "m.text",
+        body: "Allow once",
+        suite_event_type: "dev.agentpod.permission.answer.v2",
+        request_id: `${SESSION}:${SEQ}`,
+        option_id: "allow_once",
+        subject: { id: `${SESSION}:${SEQ}`, digest },
+        "m.relates_to": { rel_type: "m.reference", event_id: PROSE },
+        ...over,
+      },
+    };
+  }
+
+  const row = async (): Promise<Record<string, unknown>> =>
+    (await rawSql`SELECT * FROM matrix_permission_requests WHERE request_id = ${`${SESSION}:${SEQ}`}`)[0] ?? {};
+
+  beforeEach(async () => {
+    customs = [];
+    await rawSql`DELETE FROM matrix_permission_requests WHERE room_id = ${ROOM}`;
+    await rawSql`
+      INSERT INTO acp_sessions (id, tenant_id, station_id, user_id, mode, status, last_seq, created_at, last_event_at)
+      VALUES (${SESSION}, (SELECT tenant_id FROM stations WHERE id = ${STATION}), ${STATION}, ${OWNER}, 'default', 'waiting', 0, now(), now())`;
+    await rawSql`UPDATE matrix_rooms SET acp_session_id = ${SESSION} WHERE room_id = ${ROOM}`;
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+  });
+
+  afterAll(async () => {
+    await rawSql`DELETE FROM matrix_permission_requests WHERE room_id = ${ROOM}`;
+  });
+
+  test("an offered option with the binding answers the agent, records who answered, and closes the card", async () => {
+    await project();
+    await handleRoomMessage(answerV2(), permDeps());
+    expect(answered).toEqual([{ userId: OWNER, sessionId: SESSION, requestSeq: SEQ, optionId: "allow_once" }]);
+    expect(answeredBy.at(-1)).toEqual({ via: "room", principalId: OWNER_PRINCIPAL, mxid: OWNER_MXID });
+    expect(prompts).toHaveLength(0);
+    const r = await row();
+    expect(r.status).toBe("answered");
+    expect(r.option_id).toBe("allow_once");
+    expect(r.answered_by_principal).toBe(OWNER_PRINCIPAL);
+    expect(pendingPermissionFor(ROOM)).toBeUndefined();
+    expect(customs).toEqual([
+      {
+        type: "dev.agentpod.permission.outcome.v1",
+        content: {
+          suite_event_type: "dev.agentpod.permission.outcome.v1",
+          request_id: `${SESSION}:${SEQ}`,
+          session_id: SESSION,
+          request_seq: SEQ,
+          outcome: "selected",
+          option_id: "allow_once",
+          decided_by: "Owner Person",
+          "m.relates_to": { rel_type: "m.reference", event_id: PROSE },
+        },
+      },
+    ]);
+    expect(sent.at(-1)?.body).toBe("Allow once — answered by Owner Person.");
+  });
+
+  test("a reject goes through the same way", async () => {
+    await project();
+    await handleRoomMessage(answerV2({ option_id: "reject_once" }), permDeps());
+    expect(answered.map((a) => a.optionId)).toEqual(["reject_once"]);
+  });
+
+  const refusals: Array<[string, Record<string, unknown>, RegExp]> = [
+    ["a digest that is not the recorded one", { subject: { id: `${SESSION}:${SEQ}`, digest: "0".repeat(64) } }, /different request/],
+    ["no binding", { subject: undefined }, /did not say which request/],
+    ["an option the request did not offer", { option_id: "allow_everything" }, /not one of this request's options/],
+    ["a request this room never asked", { request_id: `${SESSION}:999`, subject: { id: `${SESSION}:999`, digest: "x" } }, /not a permission request this room/],
+  ];
+  for (const [why, over, words] of refusals) {
+    test(`refused, said in the room, never answered or prompted: ${why}`, async () => {
+      await project();
+      await handleRoomMessage(answerV2(over), permDeps());
+      expect(answered).toEqual([]);
+      expect(prompts).toHaveLength(0);
+      expect(sent.at(-1)?.body).toMatch(words);
+      expect((await row()).status).toBe("pending");
+    });
+  }
+
+  test("an expired request refuses even an offered answer", async () => {
+    await project({ requestedAt: new Date(Date.now() - 31 * 60_000) });
+    await handleRoomMessage(answerV2(), permDeps());
+    expect(answered).toEqual([]);
+    expect(sent.at(-1)?.body).toMatch(/expired/);
+  });
+
+  test("a request already settled refuses a second answer", async () => {
+    await project();
+    await handleRoomMessage(answerV2(), permDeps());
+    await handleRoomMessage(answerV2({ option_id: "reject_once" }), permDeps());
+    expect(answered.map((a) => a.optionId)).toEqual(["allow_once"]);
+    expect(sent.at(-1)?.body).toMatch(/already settled/);
+  });
+
+  test("an answer for an earlier session is stale", async () => {
+    await project();
+    await rawSql`UPDATE matrix_rooms SET acp_session_id = NULL WHERE room_id = ${ROOM}`;
+    await handleRoomMessage(answerV2(), permDeps());
+    expect(answered).toEqual([]);
+    expect(sent.at(-1)?.body).toMatch(/earlier session/);
+  });
+
+  test("an answer whose reference is not the request's message is refused silently", async () => {
+    await project();
+    await handleRoomMessage(answerV2({ "m.relates_to": { rel_type: "m.reference", event_id: "$elsewhere" } }), permDeps());
+    expect(answered).toEqual([]);
+    expect(sent).toHaveLength(0);
+    expect(prompts).toHaveLength(0);
+  });
+
+  test("on an incomplete preview an approval is refused and a reject still goes through", async () => {
+    const terminal = { ...PAYLOAD, toolCall: { ...PAYLOAD.toolCall, content: [{ type: "terminal", terminalId: "t1" }] } };
+    await project({ payload: terminal });
+    await handleRoomMessage(answerV2(), permDeps());
+    expect(answered).toEqual([]);
+    expect(sent.at(-1)?.body).toMatch(/console/);
+    await handleRoomMessage(answerV2({ option_id: "reject_once" }), permDeps());
+    expect(answered.map((a) => a.optionId)).toEqual(["reject_once"]);
+  });
+
+  test("someone whose grant does not cover the agent cannot answer, and nothing is recorded", async () => {
+    await project();
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [OTHER_AGENT], mayGrantReach: false });
+    await handleRoomMessage(answerV2(), permDeps());
+    expect(answered).toEqual([]);
+    expect((await row()).status).toBe("pending");
+  });
+
+  test("a malformed permission answer is never a prompt", async () => {
+    await project();
+    clearPendingPermission(ROOM);
+    await handleRoomMessage(answerV2({ option_id: 42, body: "1" }), permDeps());
+    expect(answered).toEqual([]);
+    expect(prompts).toHaveLength(0);
+  });
+
+  test("a typed number on a request that expired is refused and drops the stale request", async () => {
+    await project({ requestedAt: new Date(Date.now() - 31 * 60_000) });
+    await handleRoomMessage(message(OWNER_MXID, "1"), permDeps());
+    expect(answered).toEqual([]);
+    expect(prompts).toHaveLength(0);
+    expect(sent.at(-1)?.body).toMatch(/expired/);
+    expect(pendingPermissionFor(ROOM)).toBeUndefined();
+  });
+
+  test("a typed answer records who gave it and closes the record", async () => {
+    await project();
+    await handleRoomMessage(message(OWNER_MXID, "3"), permDeps());
+    expect(answered.map((a) => a.optionId)).toEqual(["reject_once"]);
+    expect(answeredBy.at(-1)).toEqual({ via: "room", principalId: OWNER_PRINCIPAL, mxid: OWNER_MXID });
+    const r = await row();
+    expect(r.status).toBe("answered");
+    expect(r.answered_by_principal).toBe(OWNER_PRINCIPAL);
+  });
+
+  test("a late typed number after the request closed is refused, not prompted — until the person talks to the agent again", async () => {
+    await project();
+    await handleRoomMessage(message(OWNER_MXID, "1"), permDeps());
+    expect(answered).toHaveLength(1);
+    await handleRoomMessage(message(OWNER_MXID, "1"), permDeps());
+    expect(answered).toHaveLength(1);
+    expect(prompts).toHaveLength(0);
+    expect(sent.at(-1)?.body).toMatch(/already settled/);
+
+    await rawSql`
+      INSERT INTO acp_events (session_id, tenant_id, seq, type, payload, created_at)
+      VALUES (${SESSION}, (SELECT tenant_id FROM stations WHERE id = ${STATION}), ${SEQ + 5}, 'user-prompt', '{}'::jsonb, now())`;
+    await handleRoomMessage(message(OWNER_MXID, "1"), permDeps());
+    expect(prompts.at(-1)?.text).toBe("1");
+  });
+
+  test("a request left pending by a restart refuses a matching reply rather than prompting", async () => {
+    await project();
+    clearPendingPermission(ROOM);
+    await handleRoomMessage(message(OWNER_MXID, "Allow once"), permDeps());
+    expect(answered).toEqual([]);
+    expect(prompts).toHaveLength(0);
+    expect(sent.at(-1)?.body).toMatch(/expired/);
+    // An ordinary message is still a message.
+    await handleRoomMessage(message(OWNER_MXID, "what are you doing?"), permDeps());
+    expect(prompts.at(-1)?.text).toBe("what are you doing?");
   });
 });

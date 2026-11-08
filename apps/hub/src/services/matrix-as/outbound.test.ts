@@ -1042,6 +1042,50 @@ describe("a permission request a client can render", () => {
     expect(hubEventKind("$custom-1")).toBeUndefined();
   });
 
+  test("the same prose message carries permission.v2, recorded before it is sent", async () => {
+    // Charter 2026-11-07 §5: AgentPod's own envelope beside the v1 card, with a durable binding.
+    const order: string[] = [];
+    const recorded: Array<{ roomId: string; requestId: string; digest: string }> = [];
+    const noted: Array<[string, string]> = [];
+    const { deps: d } = recordingDeps();
+    const withRecords = {
+      ...d,
+      client: { ...d.client, sendText: async (...args: Parameters<typeof d.client.sendText>) => (order.push("send"), d.client.sendText(...args)) },
+      permissionRecords: {
+        record: async (roomId: string, p: { requestId: string; subject: { digest: string } }) => {
+          order.push("record");
+          recorded.push({ roomId, requestId: p.requestId, digest: p.subject.digest });
+          return true;
+        },
+        noteEvent: async (requestId: string, eventId: string) => void noted.push([requestId, eventId]),
+      },
+    };
+    attachRoomToSession(SESSION, ROOM, AGENT, withRecords as unknown as Parameters<typeof attachRoomToSession>[3]);
+
+    emit(permission(7));
+    await settle();
+
+    expect(sent).toHaveLength(1);
+    const extra = sent[0]?.extra ?? {};
+    expect(extra.suite_event_type).toBe("dev.agentpod.permission.v2");
+    expect(extra.request_id).toBe(`${SESSION}:7`);
+    expect((extra.subject as { schema: string }).schema).toBe("harness-permission/v1");
+    expect(extra[PERMISSION_REQUEST_CONTENT_KEY]).toBeDefined();
+    expect(order).toEqual(["record", "send"]);
+    expect(recorded).toEqual([{ roomId: ROOM, requestId: `${SESSION}:7`, digest: (extra.subject as { digest: string }).digest }]);
+    expect(noted).toEqual([[`${SESSION}:7`, "$evt"]]);
+  });
+
+  test("a failed record still asks the question", async () => {
+    const { deps: d } = recordingDeps();
+    const failing = { ...d, permissionRecords: { record: async () => { throw new Error("db down"); }, noteEvent: async () => {} } };
+    attachRoomToSession(SESSION, ROOM, AGENT, failing as unknown as Parameters<typeof attachRoomToSession>[3]);
+    emit(permission(7));
+    await settle();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.body).toContain("Permission needed");
+  });
+
   test("a deployment without sendCustomEvent still asks in words", async () => {
     attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
 

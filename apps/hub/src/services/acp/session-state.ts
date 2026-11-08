@@ -10,6 +10,12 @@ import type { StoredSalaamExecution } from "../../db/schema/acp";
 import type { SalaamCancellationState } from "../salaam";
 import type { AcpWire } from "./transport";
 
+/** A permission request the agent is parked on. */
+export interface ParkedPermission {
+  resolve: (resp: RequestPermissionResponse) => void;
+  optionIds: readonly string[];
+}
+
 export interface CreateSessionInput {
   stationId: string;
   /**
@@ -98,8 +104,11 @@ export interface LiveSession {
   turnEpoch: number;
   /** Did the current turn produce an update the transcript can show? */
   turnProduced: boolean;
-  /** Parked ask-mode permission requests keyed by the request event's seq. */
-  pending: Map<number, (resp: RequestPermissionResponse) => void>;
+  /**
+   * Parked ask-mode permission requests keyed by the request event's seq: how to answer it, and the
+   * option ids it offered — an answer naming any other option is refused (`answerPermission`).
+   */
+  pending: Map<number, ParkedPermission>;
   ended: boolean;
   executionAuthority?: StoredSalaamExecution | null;
   authorityTimer?: ReturnType<typeof setInterval>;
