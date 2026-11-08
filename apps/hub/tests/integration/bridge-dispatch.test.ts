@@ -121,6 +121,7 @@ function fakeAcp(script: () => AcpEvent[], opts: FakeAcpOpts = {}) {
     prompts: [] as string[],
     ended: [] as string[],
     answers: [] as Array<{ requestSeq: number; optionId: string }>,
+    answeredBy: [] as unknown[],
   };
   const emit = (e: AcpEvent) => subs.forEach((fn) => fn(e));
   const port: AcpPort = {
@@ -149,8 +150,9 @@ function fakeAcp(script: () => AcpEvent[], opts: FakeAcpOpts = {}) {
     async endSession(_u, _s, reason) {
       state.ended.push(reason);
     },
-    async answerPermission(_u, _s, requestSeq, optionId) {
+    async answerPermission(_u, _s, requestSeq, optionId, answeredBy) {
       state.answers.push({ requestSeq, optionId });
+      state.answeredBy.push(answeredBy);
       queueMicrotask(() => {
         for (const e of opts.onAnswer?.(optionId) ?? []) emit(e);
       });
@@ -1088,6 +1090,19 @@ describe("a permission request is asked of a human", () => {
     });
     expect(asked.elicitations).toHaveLength(1);
     expect(acp.state.answers.at(-1)?.optionId).toBe("allow_once");
+  });
+
+  test("who answered on the board is recorded with the answer", async () => {
+    // Charter 2026-11-07 §6: the session's permission-answer names the answerer.
+    const asked = askingBoard((q) => {
+      q.status = "answered";
+      q.answer = { option: "allow_once", text: null, answeredBy: "usr_the_human", answeredAt: "2026-01-01T00:00:00.000Z" };
+      Object.assign(q.answer, { answeredByPrincipal: "prn_the_human" });
+    });
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()], { onAnswer: () => [chunk("ok"), idle()] });
+    await runOnce(deps(board.client, acp.port));
+    expect(acp.state.answeredBy).toEqual([{ via: "board", principalId: "prn_the_human", userId: "usr_the_human" }]);
   });
 
   test("the lease is held throughout — the run is never handed back to ask", async () => {

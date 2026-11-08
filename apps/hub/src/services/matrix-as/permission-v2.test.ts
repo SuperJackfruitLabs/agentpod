@@ -342,6 +342,9 @@ describe("permission.v2 against the shared corpus", () => {
     for (const { why, content } of event?.accept ?? []) {
       expect(permissionRefusal(must(parsePermissionAnswer(content)), record, ctx, new Date()), why).toBeNull();
     }
+    // The same request recorded for another room is not this room's to answer.
+    const accepted = event?.accept[0]?.content ?? {};
+    expect(permissionRefusal(must(parsePermissionAnswer(accepted)), { ...record, roomId: "!elsewhere" }, ctx, new Date())).toBe("unknown-request");
     expect(event?.reject.length).toBeGreaterThanOrEqual(3);
     for (const { why, content } of event?.reject ?? []) {
       const parsed = parsePermissionAnswer(content);
