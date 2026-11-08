@@ -44,3 +44,11 @@ export async function tenantForOrg(
   if (!id) throw new Error(`tenant for ${claims.org} neither found nor created`);
   return { ok: true, tenantId: id };
 }
+
+/**
+ * The tenant an org already has here, or null — never created. For a credential the hub holds on a
+ * workspace's behalf (the SuperPipeline relay): it may act only for a workspace this hub knows.
+ */
+export async function existingTenantForOrg(org: string, exec: DbExecutor = db): Promise<string | null> {
+  return find(org, exec);
+}

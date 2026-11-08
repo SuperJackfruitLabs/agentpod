@@ -14,6 +14,8 @@ export { checkBridgeDispatchGrant, ensureBridgeDispatchGrant } from "./dispatch-
 export { attachExecutionReference } from "./execution-reference";
 export { startSuperpipelineBridge } from "./loop";
 export { subscribeBoardsToPush } from "./push-subscription";
+export { RELAY_CREDENTIAL_ENV, createSuperpipelineRelay, readRelayCredential, superpipelineRelayFromEnv } from "./relay";
+export type { SuperpipelineRelay } from "./relay";
 export {
   bridgePlaneCredential,
   createBridgeAgent,

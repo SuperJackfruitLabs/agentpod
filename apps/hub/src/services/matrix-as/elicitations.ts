@@ -502,7 +502,7 @@ export async function answerElicitationAtSuperpipeline(
  */
 export async function postedElicitationsAwaitingOutcome(
   boardId: string,
-): Promise<Array<{ elicitationId: string; roomId: string }>> {
+): Promise<Array<{ elicitationId: string; roomId: string; approvalRequest: boolean }>> {
   const rows = await db
     .select()
     .from(matrixElicitationEvents)
@@ -514,7 +514,7 @@ export async function postedElicitationsAwaitingOutcome(
     );
   return rows
     .filter((r) => !r.eventId.startsWith("pending:"))
-    .map((r) => ({ elicitationId: r.elicitationId, roomId: r.roomId }));
+    .map((r) => ({ elicitationId: r.elicitationId, roomId: r.roomId, approvalRequest: r.approvalRequest }));
 }
 
 /** What a reply in a board room turned out to be. */

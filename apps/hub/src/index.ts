@@ -98,6 +98,7 @@ import { registerEnabledProvisioners } from './services/provisioner/index.ts';
 import { enabledProviders } from './services/provisioner/index.ts';
 import { startNodeSweeper } from './services/sweeper/index.ts';
 import { startSuperpipelineBridge } from './services/bridge/index.ts';
+import { isBridgeEnabled, loadBridgeConfig, superpipelineRelayFromEnv } from './services/bridge/index.ts';
 import { createGracefulShutdown } from './services/hub/index.ts';
 import { httpServerSpans } from './telemetry/http-middleware.ts';
 import { initTelemetry, readTelemetryConfig, shutdownTelemetry } from './telemetry/otel.ts';
@@ -402,6 +403,12 @@ if (matrixBridge) {
   // be posted by two slightly different projections.
   const gateProjection = boardProjectionDeps(matrixBridge);
 
+  // The optional SuperPipeline relay (SUPERPIPELINE_RELAY_CREDENTIAL_FILE): an Accounts service
+  // credential holding approval-requests:relay, so SuperToolkit approval requests reach chat. Used
+  // only for its own workspace's boards; absent, they do not reach chat (logged once).
+  const relayBridge = isBridgeEnabled() ? loadBridgeConfig() : null;
+  const superpipelineRelay = relayBridge ? superpipelineRelayFromEnv(relayBridge.baseUrl) : null;
+
   // POST /public/bridge/superpipeline/push — a board telling us a gate is open.
   //
   // Under /public, not /api, because the caller is a Worker holding a signing
@@ -451,7 +458,7 @@ if (matrixBridge) {
   }, {
     // Each board is told to push its gates and questions here, so they reach the room in seconds
     // and the sweep is the floor it was designed to be rather than the only path.
-    push: { secret: process.env.SUPERPIPELINE_PUSH_SECRET, publicUrl: config.publicUrl },
+    push: { secret: process.env.SUPERPIPELINE_PUSH_SECRET, publicUrl: config.publicUrl, relay: superpipelineRelay },
   });
 
   // The same floor, for an agent's questions. `projectElicitation` is idempotent on
@@ -463,7 +470,7 @@ if (matrixBridge) {
     project: (tenantId, delivery) => projectElicitation(tenantId, delivery, gateProjection),
     postedAwaitingOutcome: postedElicitationsAwaitingOutcome,
     settle: (elicitationId, roomId) => matrixBridge.settleElicitation(elicitationId, roomId),
-  });
+  }, { relay: superpipelineRelay });
 
   // Harness permissions projected into station rooms expire 30 minutes after they were asked
   // (charter: strict decisions and harness permissions bind their subject §5): the agent is told

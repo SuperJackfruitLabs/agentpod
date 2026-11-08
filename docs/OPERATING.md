@@ -1766,6 +1766,17 @@ request`), never offers or carries an approval when no subject could be shown, a
 an agent's question open in the same room before it goes to an approval request. They are not on the
 fleet Live Activity: no question is.
 
+They reach chat only with the **decision relay** (`SUPERPIPELINE_RELAY_CREDENTIAL_FILE`,
+`docs/DEPLOYMENT.md`): SuperPipeline lists and pushes them only to a service holding
+`approval-requests:relay`. With it, each board of the relay's workspace gets a second push config,
+registered by the relay service for `elicitation.pending` only, and the question sweep reads those
+boards' `elicitations/pending` with the relay token. Other workspaces' boards keep their agent
+credential. A relay read that fails is a failed read (nothing is settled), and an agent's read never
+settles a posted approval request, since it cannot list one. Logs: `superpipeline-relay` (`… is
+unset; SuperToolkit approval requests will not reach chat` once at start, `could not exchange the
+relay credential`, `has no tenant on this hub`) and `gate-sweep` (`relay push subscription
+registered`; a refusal is `push subscription refused` with `relay:` in the error).
+
 ### When the agent reports for itself
 
 Give a roster entry an `mcpToken` and its harness gets superpipeline's own MCP tools inside the

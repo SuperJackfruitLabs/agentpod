@@ -42,7 +42,7 @@
 
 import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge";
 import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig } from "../bridge";
-import { subscribeBoardsToPush } from "../bridge";
+import { subscribeBoardsToPush, type SuperpipelineRelay } from "../bridge";
 import { createLogger } from "../../utils/logger";
 import { isGatePending } from "./gates";
 import type { GatePendingDelivery, ProjectionOutcome } from "./gates";
@@ -671,7 +671,7 @@ export function startGateSweeper(
      * board added, rebuilt, or a rotated secret is repaired within one interval. Without it no
      * board pushes and every gate waits for the sweep. See `bridge/push-subscription.ts`.
      */
-    push?: { secret: string | undefined; publicUrl: string };
+    push?: { secret: string | undefined; publicUrl: string; relay?: SuperpipelineRelay | null };
   } = {},
 ): (() => void) | null {
   const config =
@@ -681,7 +681,7 @@ export function startGateSweeper(
   const fetchImpl = opts.fetch ?? fetchAdapter;
   const deps = bridgeGateSweepDeps(config, rest, fetchImpl, opts.roster);
   running = deps;
-  const subscribe = pushSubscriber(config, fetchImpl, opts.roster ?? defaultRoster, opts.push);
+  const subscribe = pushSubscriber(config, fetchImpl, opts.roster ?? defaultRoster, opts.push, rest.tenantIdFor);
   void subscribe();
   const timer = setInterval(() => {
     void subscribe();
@@ -720,6 +720,19 @@ export async function sweepBoardNow(boardId: string): Promise<GateSweepResult | 
 }
 
 /**
+ * The relay's SuperPipeline token for a board, or null: a board this hub does not work belongs to
+ * no tenant, and a board of another workspace never gets the relay's credential.
+ */
+export async function relayTokenForBoard(
+  relay: SuperpipelineRelay,
+  tenantIdFor: (boardId: string) => Promise<string | null>,
+  boardId: string,
+): Promise<string | null> {
+  const tenantId = await tenantIdFor(boardId);
+  return tenantId ? relay.tokenFor(tenantId) : null;
+}
+
+/**
  * One push-subscription pass, logged so an operator can tell "subscribed" from "never tried".
  *
  * Logs a board's subscription when it first succeeds (or recovers), and every refusal — not a
@@ -730,7 +743,8 @@ function pushSubscriber(
   config: BridgeConfig,
   fetchImpl: Fetcher,
   roster: () => Promise<Array<{ boardId: string; token: string }>>,
-  push: { secret: string | undefined; publicUrl: string } | undefined,
+  push: { secret: string | undefined; publicUrl: string; relay?: SuperpipelineRelay | null } | undefined,
+  tenantIdFor: (boardId: string) => Promise<string | null>,
 ): () => Promise<void> {
   if (!push) return async () => {};
   if (!push.secret) {
@@ -738,6 +752,8 @@ function pushSubscriber(
     return async () => {};
   }
   const subscribed = new Set<string>();
+  const relayed = new Set<string>();
+  const relay = push.relay ?? null;
   return async () => {
     try {
       const result = await subscribeBoardsToPush({
@@ -746,10 +762,16 @@ function pushSubscriber(
         secret: push.secret,
         fetch: fetchImpl,
         boards: () => boardCredentials(roster),
+        // The relay's token only for a board of the relay's own workspace (`relay.ts`).
+        ...(relay ? { relayTokenFor: (boardId: string) => relayTokenForBoard(relay, tenantIdFor, boardId) } : {}),
       });
       for (const boardId of result.subscribed) {
         if (!subscribed.has(boardId)) log.info("push subscription registered", { boardId });
         subscribed.add(boardId);
+      }
+      for (const boardId of result.relayed) {
+        if (!relayed.has(boardId)) log.info("relay push subscription registered", { boardId });
+        relayed.add(boardId);
       }
       for (const f of result.failed) {
         subscribed.delete(f.boardId);

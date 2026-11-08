@@ -7,7 +7,7 @@ import {
   providerImageEnvVar,
 } from "./services/runtimes";
 import { resolveDockerDaemon } from "./services/provisioner";
-import { loadBridgeConfig } from "./services/bridge";
+import { RELAY_CREDENTIAL_ENV, loadBridgeConfig, readRelayCredential } from "./services/bridge";
 import { loadOperatorRules } from "./services/evidence";
 import { HubOperatorsConfigError, parseHubOperators } from "./services/hub";
 import { HubHomeOrgConfigError, parseHubHomeOrg } from "./auth/org-plane/hub-home-org";
@@ -168,7 +168,9 @@ export function collectConfigErrors(
   planeErrors: OrgPlaneConfigError[] = orgPlaneConfigErrors(),
   // HUB_OPERATORS (workspace authority spec W3). Injectable for the same reason as planeErrors.
   hubOperators: string | undefined = process.env.HUB_OPERATORS,
-  hubHomeOrgPin: string | undefined = process.env.HUB_HOME_ORG
+  hubHomeOrgPin: string | undefined = process.env.HUB_HOME_ORG,
+  // The optional SuperPipeline relay credential (services/bridge/relay.ts). Injectable likewise.
+  relayCredential: ReturnType<typeof readRelayCredential> = readRelayCredential(process.env)
 ): ValidationError[] {
   const errors: ValidationError[] = [];
   const isProduction = cfg.nodeEnv === "production";
@@ -464,6 +466,10 @@ export function collectConfigErrors(
     if (!(e instanceof HubOperatorsConfigError)) throw e;
     errors.push({ field: "HUB_OPERATORS", message: e.message });
   }
+
+  // A relay credential that is set and unusable refuses the boot: an operator who set it believes
+  // approval requests reach chat, and unset is the only state that means they do not.
+  if (!relayCredential.ok) errors.push({ field: RELAY_CREDENTIAL_ENV, message: relayCredential.message });
 
   // A malformed HUB_HOME_ORG pin refuses the boot (auth/org-plane/hub-home-org.ts).
   try {

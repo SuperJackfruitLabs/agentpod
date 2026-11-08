@@ -16,7 +16,7 @@
  * settle every open question on a timeout.
  */
 import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge";
-import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig } from "../bridge";
+import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig, type SuperpipelineRelay } from "../bridge";
 import { createLogger } from "../../utils/logger";
 import type { ElicitationPendingDelivery } from "./elicitation-card";
 import type { ElicitationProjectionOutcome } from "./elicitations";
@@ -34,10 +34,16 @@ export interface ElicitationSweepDeps {
   tenantIdFor(boardId: string): Promise<string | null>;
   /** What the board is still waiting on, read with the bridge's own token. */
   pendingElicitations(boardId: string): Promise<ElicitationPendingDelivery[]>;
+  /**
+   * The same read, saying whether it could list SuperToolkit approval requests: true when it was
+   * made with the relay's token (`relay.ts`). An agent's read never lists them, so it must not settle
+   * a posted approval request as over. Optional; absent, every read is an agent's.
+   */
+  pendingElicitationsScoped?(boardId: string): Promise<{ elicitations: ElicitationPendingDelivery[]; approvalRequests: boolean }>;
   /** Post the question, exactly once. Idempotent on `elicitation_id`. */
   project(tenantId: string, d: ElicitationPendingDelivery): Promise<ElicitationProjectionOutcome>;
   /** Questions this hub put in a room and has not yet said anything final about. */
-  postedAwaitingOutcome(boardId: string): Promise<Array<{ elicitationId: string; roomId: string }>>;
+  postedAwaitingOutcome(boardId: string): Promise<Array<{ elicitationId: string; roomId: string; approvalRequest?: boolean }>>;
   /** Say in the room that it is over, and claim it so two sweeps leave one line. */
   settle(elicitationId: string, roomId: string): Promise<boolean>;
 }
@@ -86,8 +92,15 @@ export async function sweepElicitations(deps: ElicitationSweepDeps): Promise<Eli
     if (!tenantId) continue;
 
     let pending: ElicitationPendingDelivery[];
+    let approvalRequestsListed = false;
     try {
-      pending = await deps.pendingElicitations(boardId);
+      if (deps.pendingElicitationsScoped) {
+        const read = await deps.pendingElicitationsScoped(boardId);
+        pending = read.elicitations;
+        approvalRequestsListed = read.approvalRequests;
+      } else {
+        pending = await deps.pendingElicitations(boardId);
+      }
     } catch (err) {
       // One unreachable board must not cost every other board its sweep — and must
       // not look like a board with nothing pending, which is the shape that would
@@ -129,6 +142,8 @@ export async function sweepElicitations(deps: ElicitationSweepDeps): Promise<Eli
     const open = new Set(pending.map((p) => p.elicitationId));
     for (const posted of await deps.postedAwaitingOutcome(boardId)) {
       if (open.has(posted.elicitationId)) continue;
+      // An approval request is missing from a list that could not have shown it: not over.
+      if (posted.approvalRequest === true && !approvalRequestsListed) continue;
       try {
         if (await deps.settle(posted.elicitationId, posted.roomId)) result.settled += 1;
       } catch (err) {
@@ -156,6 +171,7 @@ export function bridgeElicitationSweepDeps(
   rest: Pick<ElicitationSweepDeps, "tenantIdFor" | "project" | "postedAwaitingOutcome" | "settle">,
   fetchImpl: Fetcher = fetchAdapter,
   roster: (() => Promise<Array<{ boardId: string; token: string }>>) | undefined = undefined,
+  relay: SuperpipelineRelay | null = null,
 ): ElicitationSweepDeps {
   const tokensForBoards = async () => {
     const map = new Map<string, string>();
@@ -165,9 +181,34 @@ export function bridgeElicitationSweepDeps(
     return map;
   };
 
+  const agentRead = async (boardId: string) => {
+    const token = (await tokensForBoards()).get(boardId);
+    if (!token) throw new Error(`no bridge credential for board ${boardId}`);
+    return new SuperpipelineClient({ baseUrl: config.baseUrl, boardId, token, fetch: fetchImpl }).pendingElicitations();
+  };
+
   return {
     ...rest,
     boards: async () => [...(await tokensForBoards()).keys()],
+    /**
+     * With the relay's token for a board of its own workspace — card questions and approval
+     * requests both — and otherwise the agent's. A relay read that fails is a failed read: falling
+     * back to the agent's would list no approval request and so settle every one as over.
+     */
+    pendingElicitationsScoped: async (boardId) => {
+      const tenantId = relay ? await rest.tenantIdFor(boardId) : null;
+      const relayToken = relay && tenantId ? await relay.tokenFor(tenantId) : null;
+      if (!relayToken) return { elicitations: await agentRead(boardId), approvalRequests: false };
+      // A plane-minted service token, not an agent's `spa_`: carried as the client's resolved credential.
+      const elicitations = await new SuperpipelineClient({
+        baseUrl: config.baseUrl,
+        boardId,
+        token: "",
+        credential: async () => relayToken,
+        fetch: fetchImpl,
+      }).pendingElicitations();
+      return { elicitations, approvalRequests: true };
+    },
     pendingElicitations: async (boardId) => {
       const token = (await tokensForBoards()).get(boardId);
       // No credential is not an empty board. Answering `[]` here would settle every
@@ -201,13 +242,15 @@ export function startElicitationSweeper(
     config?: BridgeConfig | null;
     intervalMs?: number;
     roster?: () => Promise<Array<{ boardId: string; token: string }>>;
+    /** The SuperPipeline relay (`relay.ts`); null or absent, approval requests are not swept. */
+    relay?: SuperpipelineRelay | null;
   } = {},
 ): (() => void) | null {
   const config =
     opts.config !== undefined ? opts.config : isBridgeEnabled() ? loadBridgeConfig() : null;
   if (!config) return null;
 
-  const deps = bridgeElicitationSweepDeps(config, rest, fetchAdapter, opts.roster);
+  const deps = bridgeElicitationSweepDeps(config, rest, fetchAdapter, opts.roster, opts.relay ?? null);
   running = deps;
   const intervalMs = opts.intervalMs ?? ELICITATION_SWEEP_INTERVAL_MS;
   const timer = setInterval(() => {
