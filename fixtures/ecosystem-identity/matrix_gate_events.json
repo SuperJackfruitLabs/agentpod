@@ -1,6 +1,6 @@
 {
   "corpus": "ecosystem-identity/matrix-gate-events",
-  "version": 5,
+  "version": 6,
   "authoredAt": "2026-08-30",
   "authoredFrom": "the gates table in superpipeline apps/api/src/board/board-do.ts, the GateDecision union it resolves against, and charter decisions/2026-08-30-a-gate-closes-over-chat.md",
   "purpose": "A superpipeline approval gate crosses into a Matrix room and a human's answer crosses back. Three codebases must agree on the field names: the board that opens the gate, the Application Service that projects and resolves it, and the client that draws the buttons. A rename in any one of them is a gate that silently never resolves — which reads to the human as a button that does nothing.",
@@ -3119,6 +3119,1251 @@
             "m.relates_to": {
               "rel_type": "m.reference",
               "event_id": "$permissionEventId"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.attention.v2",
+      "direction": "outbound — a card waits on a person",
+      "decidedBy": "charter decisions/2026-11-08-waiting-cards-and-broker-approvals-reach-chat.md §1–2",
+      "sender": "the board's speaker, in the board's room",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content. There is no v1 card for a waiting card, so the prose body stands alone for a client that has never heard of it.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "suite_event_type",
+        "schema_version",
+        "board_id",
+        "card_id",
+        "card_title",
+        "stage_key",
+        "stage_name",
+        "wait_id",
+        "reason",
+        "detail",
+        "summary",
+        "failure_count",
+        "options"
+      ],
+      "notes": {
+        "source": "superpipeline's attention.pending push (and GET /v1/boards/:id/attention/pending), when a card parks for a person for a reason other than a question or a review.",
+        "reason": "repeated-failure | blocked | not-authorised. detail, summary and failure_count are null when the park gave none; never absent.",
+        "wait_id": "wait_<16 hex>, naming this wait. A card that parks again is a new wait and a new message; the answer carries it and the board refuses a stale one (WAIT_CHANGED).",
+        "options": "Only resume_here (approve), resume_at:<stageKey> (choose, one per earlier stage) and archive (reject). Each resume has a required text input of at most 2730 characters (the board's comment limit). Forward moves are never offered from chat. No subject: nothing is frozen.",
+        "body": "What is wrong, the agent's detail fenced, the choices, and where to make them. deep_link is the card on the board, omitted when the hub has no board URL."
+      },
+      "accept": [
+        {
+          "why": "a blocked card with an earlier stage to resume at",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A card is waiting on you — \"Ship the release\" at Build is blocked.\n\nStaging DB down\n\n```\nthe staging database is down\n```\n\n- Resume here\n- Resume at Plan\n- Archive\n\nChoose in an updated app, or [open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40) on the board.",
+            "suite_event_type": "dev.superpipeline.attention.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "card_title": "Ship the release",
+            "stage_key": "build",
+            "stage_name": "Build",
+            "wait_id": "wait_0123456789abcdef",
+            "reason": "blocked",
+            "detail": "the staging database is down",
+            "summary": "Staging DB down",
+            "failure_count": null,
+            "options": [
+              {
+                "id": "resume_here",
+                "label": "Resume here",
+                "meaning": "approve",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should the next attempt do?",
+                  "required": true,
+                  "max_length": 2730
+                }
+              },
+              {
+                "id": "resume_at:plan",
+                "label": "Resume at Plan",
+                "meaning": "choose",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should the next attempt do?",
+                  "required": true,
+                  "max_length": 2730
+                }
+              },
+              {
+                "id": "archive",
+                "label": "Archive",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "a repeated failure at the first stage: no earlier stage, no summary, no link",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A card is waiting on you — \"Plan the release\" at Plan has failed 2 times.\n\n```\nflaky\n```\n\n- Resume here\n- Archive\n\nChoose in an updated app, or open the card on the board.",
+            "suite_event_type": "dev.superpipeline.attention.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b41",
+            "card_title": "Plan the release",
+            "stage_key": "plan",
+            "stage_name": "Plan",
+            "wait_id": "wait_fedcba9876543210",
+            "reason": "repeated-failure",
+            "detail": "flaky",
+            "summary": null,
+            "failure_count": 2,
+            "options": [
+              {
+                "id": "resume_here",
+                "label": "Resume here",
+                "meaning": "approve",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should the next attempt do?",
+                  "required": true,
+                  "max_length": 2730
+                }
+              },
+              {
+                "id": "archive",
+                "label": "Archive",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ]
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "no wait_id: an answer could not name the wait",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A card is waiting on you — \"Ship the release\" at Build is blocked.\n\nStaging DB down\n\n```\nthe staging database is down\n```\n\n- Resume here\n- Resume at Plan\n- Archive\n\nChoose in an updated app, or [open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40) on the board.",
+            "suite_event_type": "dev.superpipeline.attention.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "card_title": "Ship the release",
+            "stage_key": "build",
+            "stage_name": "Build",
+            "reason": "blocked",
+            "detail": "the staging database is down",
+            "summary": "Staging DB down",
+            "failure_count": null,
+            "options": [
+              {
+                "id": "resume_here",
+                "label": "Resume here",
+                "meaning": "approve",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should the next attempt do?",
+                  "required": true,
+                  "max_length": 2730
+                }
+              },
+              {
+                "id": "resume_at:plan",
+                "label": "Resume at Plan",
+                "meaning": "choose",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should the next attempt do?",
+                  "required": true,
+                  "max_length": 2730
+                }
+              },
+              {
+                "id": "archive",
+                "label": "Archive",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "a forward move offered from chat",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A card is waiting on you — \"Ship the release\" at Build is blocked.\n\nStaging DB down\n\n```\nthe staging database is down\n```\n\n- Resume here\n- Resume at Plan\n- Archive\n\nChoose in an updated app, or [open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40) on the board.",
+            "suite_event_type": "dev.superpipeline.attention.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "card_title": "Ship the release",
+            "stage_key": "build",
+            "stage_name": "Build",
+            "wait_id": "wait_0123456789abcdef",
+            "reason": "blocked",
+            "detail": "the staging database is down",
+            "summary": "Staging DB down",
+            "failure_count": null,
+            "options": [
+              {
+                "id": "resume_here",
+                "label": "Resume here",
+                "meaning": "approve",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should the next attempt do?",
+                  "required": true,
+                  "max_length": 2730
+                }
+              },
+              {
+                "id": "resume_at:plan",
+                "label": "Resume at Plan",
+                "meaning": "choose",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should the next attempt do?",
+                  "required": true,
+                  "max_length": 2730
+                }
+              },
+              {
+                "id": "archive",
+                "label": "Archive",
+                "meaning": "reject",
+                "needs_comment": false
+              },
+              {
+                "id": "move_to:ship",
+                "label": "Move to Ship",
+                "meaning": "approve",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "a resume whose instruction is optional",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A card is waiting on you — \"Ship the release\" at Build is blocked.\n\nStaging DB down\n\n```\nthe staging database is down\n```\n\n- Resume here\n- Resume at Plan\n- Archive\n\nChoose in an updated app, or [open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40) on the board.",
+            "suite_event_type": "dev.superpipeline.attention.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "card_title": "Ship the release",
+            "stage_key": "build",
+            "stage_name": "Build",
+            "wait_id": "wait_0123456789abcdef",
+            "reason": "blocked",
+            "detail": "the staging database is down",
+            "summary": "Staging DB down",
+            "failure_count": null,
+            "options": [
+              {
+                "id": "resume_here",
+                "label": "Resume here",
+                "meaning": "approve",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should the next attempt do?",
+                  "required": false,
+                  "max_length": 2730
+                }
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "a resume input in the board's camelCase, not the wire's snake_case",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A card is waiting on you — \"Ship the release\" at Build is blocked.\n\nStaging DB down\n\n```\nthe staging database is down\n```\n\n- Resume here\n- Resume at Plan\n- Archive\n\nChoose in an updated app, or [open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40) on the board.",
+            "suite_event_type": "dev.superpipeline.attention.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "card_title": "Ship the release",
+            "stage_key": "build",
+            "stage_name": "Build",
+            "wait_id": "wait_0123456789abcdef",
+            "reason": "blocked",
+            "detail": "the staging database is down",
+            "summary": "Staging DB down",
+            "failure_count": null,
+            "options": [
+              {
+                "id": "resume_here",
+                "label": "Resume here",
+                "meaning": "approve",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should the next attempt do?",
+                  "required": true,
+                  "maxLength": 2730
+                }
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "a resume input longer than the board takes",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A card is waiting on you — \"Ship the release\" at Build is blocked.\n\nStaging DB down\n\n```\nthe staging database is down\n```\n\n- Resume here\n- Resume at Plan\n- Archive\n\nChoose in an updated app, or [open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40) on the board.",
+            "suite_event_type": "dev.superpipeline.attention.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "card_title": "Ship the release",
+            "stage_key": "build",
+            "stage_name": "Build",
+            "wait_id": "wait_0123456789abcdef",
+            "reason": "blocked",
+            "detail": "the staging database is down",
+            "summary": "Staging DB down",
+            "failure_count": null,
+            "options": [
+              {
+                "id": "resume_here",
+                "label": "Resume here",
+                "meaning": "approve",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "x",
+                  "required": true,
+                  "max_length": 8192
+                }
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40"
+          }
+        },
+        {
+          "why": "a subject on a waiting card: nothing is frozen",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A card is waiting on you — \"Ship the release\" at Build is blocked.\n\nStaging DB down\n\n```\nthe staging database is down\n```\n\n- Resume here\n- Resume at Plan\n- Archive\n\nChoose in an updated app, or [open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_6b40) on the board.",
+            "suite_event_type": "dev.superpipeline.attention.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "card_title": "Ship the release",
+            "stage_key": "build",
+            "stage_name": "Build",
+            "wait_id": "wait_0123456789abcdef",
+            "reason": "blocked",
+            "detail": "the staging database is down",
+            "summary": "Staging DB down",
+            "failure_count": null,
+            "options": [
+              {
+                "id": "resume_here",
+                "label": "Resume here",
+                "meaning": "approve",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should the next attempt do?",
+                  "required": true,
+                  "max_length": 2730
+                }
+              },
+              {
+                "id": "resume_at:plan",
+                "label": "Resume at Plan",
+                "meaning": "choose",
+                "needs_comment": false,
+                "input": {
+                  "kind": "text",
+                  "label": "What should the next attempt do?",
+                  "required": true,
+                  "max_length": 2730
+                }
+              },
+              {
+                "id": "archive",
+                "label": "Archive",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_6b40",
+            "subject": {
+              "id": "x",
+              "digest": "y"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.attention.answer.v2",
+      "direction": "inbound — the human answers a waiting card",
+      "decidedBy": "charter decisions/2026-11-08-waiting-cards-and-broker-approvals-reach-chat.md §2",
+      "sender": "a linked human in the board's room",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content. m.relates_to must be an m.reference to the card's message.",
+      "requiredFields": [
+        "suite_event_type",
+        "board_id",
+        "card_id",
+        "wait_id",
+        "option_id",
+        "m.relates_to"
+      ],
+      "notes": {
+        "judged": "Against the options recorded when the card was posted: the option was offered, a resume's text is non-empty and at most its max_length, and the sender is a linked human. The hub then calls the board as that person: resume_here → POST …/cards/:cardId/resume {comment, expectedWaitId}; resume_at:<key> → the same with toStageKey; archive → POST …/cards/:cardId/archive {expectedWaitId, comment?}. The board judges who may work it, and refuses a stale wait WAIT_CHANGED.",
+        "text": "A resume's instruction (required). On archive, an optional remark carried as the board's comment."
+      },
+      "accept": [
+        {
+          "why": "resume here with an instruction",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Resume here",
+            "suite_event_type": "dev.superpipeline.attention.answer.v2",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "option_id": "resume_here",
+            "text": "The database is back; run the migrations again.",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        },
+        {
+          "why": "resume at an earlier stage",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Resume at Plan",
+            "suite_event_type": "dev.superpipeline.attention.answer.v2",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "option_id": "resume_at:plan",
+            "text": "Re-plan around the outage.",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        },
+        {
+          "why": "archive, with no text",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Archive",
+            "suite_event_type": "dev.superpipeline.attention.answer.v2",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "option_id": "archive",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "a resume with no instruction",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Resume here",
+            "suite_event_type": "dev.superpipeline.attention.answer.v2",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "option_id": "resume_here",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        },
+        {
+          "why": "a resume whose instruction is longer than the board takes",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Resume here",
+            "suite_event_type": "dev.superpipeline.attention.answer.v2",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "option_id": "resume_here",
+            "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        },
+        {
+          "why": "a forward move the card did not offer",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Resume here",
+            "suite_event_type": "dev.superpipeline.attention.answer.v2",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "option_id": "move_to:ship",
+            "text": "The database is back; run the migrations again.",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        },
+        {
+          "why": "a different wait than the one posted",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Resume here",
+            "suite_event_type": "dev.superpipeline.attention.answer.v2",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_ffffffffffffffff",
+            "option_id": "resume_here",
+            "text": "The database is back; run the migrations again.",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        },
+        {
+          "why": "a quoted reply, not a reference",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Resume here",
+            "suite_event_type": "dev.superpipeline.attention.answer.v2",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "option_id": "resume_here",
+            "text": "The database is back; run the migrations again.",
+            "m.relates_to": {
+              "m.in_reply_to": {
+                "event_id": "$attentionEventId"
+              }
+            }
+          }
+        },
+        {
+          "why": "a reference to another message",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Resume here",
+            "suite_event_type": "dev.superpipeline.attention.answer.v2",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "option_id": "resume_here",
+            "text": "The database is back; run the migrations again.",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$someOtherEvent"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.attention.outcome.v1",
+      "direction": "outbound — the receipt that closes a waiting card",
+      "decidedBy": "charter decisions/2026-11-08-waiting-cards-and-broker-approvals-reach-chat.md §2; its own type because gate.outcome.v1 is keyed by gate_id and a wait has no gate",
+      "sender": "the board's speaker, beside a prose receipt",
+      "matrixEventType": "dev.superpipeline.attention.outcome.v1",
+      "discriminator": "The event type, and `suite_event_type` in content.",
+      "requiredFields": [
+        "suite_event_type",
+        "board_id",
+        "card_id",
+        "wait_id",
+        "decision",
+        "decided_by",
+        "m.relates_to"
+      ],
+      "notes": {
+        "decision": "The option taken (resume_here, resume_at:<key>, archive), or settled_elsewhere when the wait ended anywhere but this room: the sweep no longer lists it, or the board answered WAIT_CHANGED.",
+        "decided_by": "The person's label; null when settled elsewhere."
+      },
+      "accept": [
+        {
+          "why": "resumed here",
+          "content": {
+            "suite_event_type": "dev.superpipeline.attention.outcome.v1",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "decision": "resume_here",
+            "decided_by": "fixture-person",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        },
+        {
+          "why": "resumed at an earlier stage",
+          "content": {
+            "suite_event_type": "dev.superpipeline.attention.outcome.v1",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "decision": "resume_at:plan",
+            "decided_by": "fixture-person",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        },
+        {
+          "why": "archived",
+          "content": {
+            "suite_event_type": "dev.superpipeline.attention.outcome.v1",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "decision": "archive",
+            "decided_by": "fixture-person",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        },
+        {
+          "why": "settled elsewhere, naming nobody",
+          "content": {
+            "suite_event_type": "dev.superpipeline.attention.outcome.v1",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "decision": "settled_elsewhere",
+            "decided_by": null,
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "no wait_id: a client cannot tell which wait closed",
+          "content": {
+            "suite_event_type": "dev.superpipeline.attention.outcome.v1",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "decision": "resume_here",
+            "decided_by": "fixture-person",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        },
+        {
+          "why": "no reference to the card's message",
+          "content": {
+            "suite_event_type": "dev.superpipeline.attention.outcome.v1",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "decision": "resume_here",
+            "decided_by": "fixture-person"
+          }
+        },
+        {
+          "why": "the gate outcome's type",
+          "content": {
+            "suite_event_type": "dev.superpipeline.gate.outcome.v1",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "decision": "resume_here",
+            "decided_by": "fixture-person",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        },
+        {
+          "why": "no decision",
+          "content": {
+            "suite_event_type": "dev.superpipeline.attention.outcome.v1",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_6b40",
+            "wait_id": "wait_0123456789abcdef",
+            "decided_by": "fixture-person",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$attentionEventId"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.question.v2",
+      "variant": "approval-request",
+      "direction": "outbound — a SuperToolkit write held for approval, hosted on the board",
+      "decidedBy": "charter decisions/2026-11-08-waiting-cards-and-broker-approvals-reach-chat.md §3–4",
+      "sender": "the board's speaker, in the board's room",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as every question.v2; a board-less one has card_id, run_id and stage_key empty and approval_request_id equal to elicitation_id. The v1 card rides beside it unchanged, with no deep_link.",
+      "requiredFields": [
+        "msgtype",
+        "body",
+        "suite_event_type",
+        "schema_version",
+        "elicitation_id",
+        "board_id",
+        "card_id",
+        "run_id",
+        "stage_key",
+        "card_title",
+        "asked_by",
+        "question",
+        "options",
+        "subject",
+        "approval_request_id"
+      ],
+      "notes": {
+        "subject": "schema stk-capability/v1: the digest of the exact request (service, capability, target, arguments, profile), a 30-minute expiry, and a preview of the service, capability, target, every argument in full, the station and the requesting agent.",
+        "options": "allow_once (approve, once, requires workspace-admin) and deny (reject). No always: that is a policy change. The board refuses allow_once from anyone but a workspace owner or admin (WORKSPACE_ADMIN_REQUIRED), and the requester answering its own request (SEPARATION_OF_DUTIES).",
+        "body": "Says it is a SuperToolkit approval request and shows the preview; never a card, a stage or a link to one."
+      },
+      "accept": [
+        {
+          "why": "an issues.create request with its preview complete",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A SuperToolkit approval request is waiting on a workspace owner or admin.\n\nAllow github issues.create on acme/site?\n\nService: github\n\nCapability: issues.create\n\nTarget: acme/site\n\nArguments:\n```\n{\n  \"title\": \"Flaky login test\",\n  \"labels\": [\"ci\"]\n}\n```\n\nStation: station-7\n\nRequested by: prn_agent_31d0\n\n1. Allow once\n2. Deny\n\nOnly workspace owners and admins can allow this. Allow it in an updated app, which shows exactly what it does. A reply here can only deny it.",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "apr_5d2e9c41",
+            "board_id": "brd_7c1f",
+            "card_id": "",
+            "run_id": "",
+            "stage_key": "",
+            "card_title": "Approval request",
+            "asked_by": "prn_agent_31d0",
+            "question": "Allow github issues.create on acme/site?",
+            "options": [
+              {
+                "id": "allow_once",
+                "label": "Allow once",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "once",
+                "requires": "workspace-admin"
+              },
+              {
+                "id": "deny",
+                "label": "Deny",
+                "meaning": "reject",
+                "needs_comment": false,
+                "scope": "once"
+              }
+            ],
+            "subject": {
+              "id": "stkreq_8f2c",
+              "digest": "sha256:4be1c0de9a7f30b2",
+              "schema": "stk-capability/v1",
+              "revision": 1,
+              "expires_at": "2026-11-08T10:30:00.000Z",
+              "preview": [
+                {
+                  "type": "field",
+                  "label": "Service",
+                  "value": "github"
+                },
+                {
+                  "type": "field",
+                  "label": "Capability",
+                  "value": "issues.create"
+                },
+                {
+                  "type": "field",
+                  "label": "Target",
+                  "value": "acme/site"
+                },
+                {
+                  "type": "text",
+                  "label": "Arguments",
+                  "text": "{\n  \"title\": \"Flaky login test\",\n  \"labels\": [\"ci\"]\n}"
+                },
+                {
+                  "type": "field",
+                  "label": "Station",
+                  "value": "station-7"
+                },
+                {
+                  "type": "field",
+                  "label": "Requested by",
+                  "value": "prn_agent_31d0"
+                }
+              ],
+              "preview_complete": true
+            },
+            "approval_request_id": "apr_5d2e9c41"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "a deep link to a card that does not exist",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A SuperToolkit approval request is waiting on a workspace owner or admin.\n\nAllow github issues.create on acme/site?\n\nService: github\n\nCapability: issues.create\n\nTarget: acme/site\n\nArguments:\n```\n{\n  \"title\": \"Flaky login test\",\n  \"labels\": [\"ci\"]\n}\n```\n\nStation: station-7\n\nRequested by: prn_agent_31d0\n\n1. Allow once\n2. Deny\n\nOnly workspace owners and admins can allow this. Allow it in an updated app, which shows exactly what it does. A reply here can only deny it.",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "apr_5d2e9c41",
+            "board_id": "brd_7c1f",
+            "card_id": "",
+            "run_id": "",
+            "stage_key": "",
+            "card_title": "Approval request",
+            "asked_by": "prn_agent_31d0",
+            "question": "Allow github issues.create on acme/site?",
+            "options": [
+              {
+                "id": "allow_once",
+                "label": "Allow once",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "once",
+                "requires": "workspace-admin"
+              },
+              {
+                "id": "deny",
+                "label": "Deny",
+                "meaning": "reject",
+                "needs_comment": false,
+                "scope": "once"
+              }
+            ],
+            "subject": {
+              "id": "stkreq_8f2c",
+              "digest": "sha256:4be1c0de9a7f30b2",
+              "schema": "stk-capability/v1",
+              "revision": 1,
+              "expires_at": "2026-11-08T10:30:00.000Z",
+              "preview": [
+                {
+                  "type": "field",
+                  "label": "Service",
+                  "value": "github"
+                },
+                {
+                  "type": "field",
+                  "label": "Capability",
+                  "value": "issues.create"
+                },
+                {
+                  "type": "field",
+                  "label": "Target",
+                  "value": "acme/site"
+                },
+                {
+                  "type": "text",
+                  "label": "Arguments",
+                  "text": "{\n  \"title\": \"Flaky login test\",\n  \"labels\": [\"ci\"]\n}"
+                },
+                {
+                  "type": "field",
+                  "label": "Station",
+                  "value": "station-7"
+                },
+                {
+                  "type": "field",
+                  "label": "Requested by",
+                  "value": "prn_agent_31d0"
+                }
+              ],
+              "preview_complete": true
+            },
+            "approval_request_id": "apr_5d2e9c41",
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/"
+          }
+        },
+        {
+          "why": "no approval_request_id",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A SuperToolkit approval request is waiting on a workspace owner or admin.\n\nAllow github issues.create on acme/site?\n\nService: github\n\nCapability: issues.create\n\nTarget: acme/site\n\nArguments:\n```\n{\n  \"title\": \"Flaky login test\",\n  \"labels\": [\"ci\"]\n}\n```\n\nStation: station-7\n\nRequested by: prn_agent_31d0\n\n1. Allow once\n2. Deny\n\nOnly workspace owners and admins can allow this. Allow it in an updated app, which shows exactly what it does. A reply here can only deny it.",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "apr_5d2e9c41",
+            "board_id": "brd_7c1f",
+            "card_id": "",
+            "run_id": "",
+            "stage_key": "",
+            "card_title": "Approval request",
+            "asked_by": "prn_agent_31d0",
+            "question": "Allow github issues.create on acme/site?",
+            "options": [
+              {
+                "id": "allow_once",
+                "label": "Allow once",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "once",
+                "requires": "workspace-admin"
+              },
+              {
+                "id": "deny",
+                "label": "Deny",
+                "meaning": "reject",
+                "needs_comment": false,
+                "scope": "once"
+              }
+            ],
+            "subject": {
+              "id": "stkreq_8f2c",
+              "digest": "sha256:4be1c0de9a7f30b2",
+              "schema": "stk-capability/v1",
+              "revision": 1,
+              "expires_at": "2026-11-08T10:30:00.000Z",
+              "preview": [
+                {
+                  "type": "field",
+                  "label": "Service",
+                  "value": "github"
+                },
+                {
+                  "type": "field",
+                  "label": "Capability",
+                  "value": "issues.create"
+                },
+                {
+                  "type": "field",
+                  "label": "Target",
+                  "value": "acme/site"
+                },
+                {
+                  "type": "text",
+                  "label": "Arguments",
+                  "text": "{\n  \"title\": \"Flaky login test\",\n  \"labels\": [\"ci\"]\n}"
+                },
+                {
+                  "type": "field",
+                  "label": "Station",
+                  "value": "station-7"
+                },
+                {
+                  "type": "field",
+                  "label": "Requested by",
+                  "value": "prn_agent_31d0"
+                }
+              ],
+              "preview_complete": true
+            }
+          }
+        },
+        {
+          "why": "allow_once without requires: workspace-admin",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A SuperToolkit approval request is waiting on a workspace owner or admin.\n\nAllow github issues.create on acme/site?\n\nService: github\n\nCapability: issues.create\n\nTarget: acme/site\n\nArguments:\n```\n{\n  \"title\": \"Flaky login test\",\n  \"labels\": [\"ci\"]\n}\n```\n\nStation: station-7\n\nRequested by: prn_agent_31d0\n\n1. Allow once\n2. Deny\n\nOnly workspace owners and admins can allow this. Allow it in an updated app, which shows exactly what it does. A reply here can only deny it.",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "apr_5d2e9c41",
+            "board_id": "brd_7c1f",
+            "card_id": "",
+            "run_id": "",
+            "stage_key": "",
+            "card_title": "Approval request",
+            "asked_by": "prn_agent_31d0",
+            "question": "Allow github issues.create on acme/site?",
+            "options": [
+              {
+                "id": "allow_once",
+                "label": "Allow once",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "once"
+              },
+              {
+                "id": "deny",
+                "label": "Deny",
+                "meaning": "reject",
+                "needs_comment": false,
+                "scope": "once"
+              }
+            ],
+            "subject": {
+              "id": "stkreq_8f2c",
+              "digest": "sha256:4be1c0de9a7f30b2",
+              "schema": "stk-capability/v1",
+              "revision": 1,
+              "expires_at": "2026-11-08T10:30:00.000Z",
+              "preview": [
+                {
+                  "type": "field",
+                  "label": "Service",
+                  "value": "github"
+                },
+                {
+                  "type": "field",
+                  "label": "Capability",
+                  "value": "issues.create"
+                },
+                {
+                  "type": "field",
+                  "label": "Target",
+                  "value": "acme/site"
+                },
+                {
+                  "type": "text",
+                  "label": "Arguments",
+                  "text": "{\n  \"title\": \"Flaky login test\",\n  \"labels\": [\"ci\"]\n}"
+                },
+                {
+                  "type": "field",
+                  "label": "Station",
+                  "value": "station-7"
+                },
+                {
+                  "type": "field",
+                  "label": "Requested by",
+                  "value": "prn_agent_31d0"
+                }
+              ],
+              "preview_complete": true
+            },
+            "approval_request_id": "apr_5d2e9c41"
+          }
+        },
+        {
+          "why": "a subject of another schema",
+          "content": {
+            "msgtype": "m.text",
+            "body": "A SuperToolkit approval request is waiting on a workspace owner or admin.\n\nAllow github issues.create on acme/site?\n\nService: github\n\nCapability: issues.create\n\nTarget: acme/site\n\nArguments:\n```\n{\n  \"title\": \"Flaky login test\",\n  \"labels\": [\"ci\"]\n}\n```\n\nStation: station-7\n\nRequested by: prn_agent_31d0\n\n1. Allow once\n2. Deny\n\nOnly workspace owners and admins can allow this. Allow it in an updated app, which shows exactly what it does. A reply here can only deny it.",
+            "suite_event_type": "dev.superpipeline.question.v2",
+            "schema_version": 1,
+            "elicitation_id": "apr_5d2e9c41",
+            "board_id": "brd_7c1f",
+            "card_id": "",
+            "run_id": "",
+            "stage_key": "",
+            "card_title": "Approval request",
+            "asked_by": "prn_agent_31d0",
+            "question": "Allow github issues.create on acme/site?",
+            "options": [
+              {
+                "id": "allow_once",
+                "label": "Allow once",
+                "meaning": "approve",
+                "needs_comment": false,
+                "scope": "once",
+                "requires": "workspace-admin"
+              },
+              {
+                "id": "deny",
+                "label": "Deny",
+                "meaning": "reject",
+                "needs_comment": false,
+                "scope": "once"
+              }
+            ],
+            "subject": {
+              "id": "stkreq_8f2c",
+              "digest": "sha256:4be1c0de9a7f30b2",
+              "schema": "salaam-operation/v1",
+              "revision": 1,
+              "expires_at": "2026-11-08T10:30:00.000Z",
+              "preview": [
+                {
+                  "type": "field",
+                  "label": "Service",
+                  "value": "github"
+                },
+                {
+                  "type": "field",
+                  "label": "Capability",
+                  "value": "issues.create"
+                },
+                {
+                  "type": "field",
+                  "label": "Target",
+                  "value": "acme/site"
+                },
+                {
+                  "type": "text",
+                  "label": "Arguments",
+                  "text": "{\n  \"title\": \"Flaky login test\",\n  \"labels\": [\"ci\"]\n}"
+                },
+                {
+                  "type": "field",
+                  "label": "Station",
+                  "value": "station-7"
+                },
+                {
+                  "type": "field",
+                  "label": "Requested by",
+                  "value": "prn_agent_31d0"
+                }
+              ],
+              "preview_complete": true
+            },
+            "approval_request_id": "apr_5d2e9c41"
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.question.answer.v2",
+      "variant": "approval-request",
+      "direction": "inbound — a workspace owner or admin answers a SuperToolkit approval request",
+      "decidedBy": "charter decisions/2026-11-08-waiting-cards-and-broker-approvals-reach-chat.md §4–5",
+      "sender": "a linked human in the board's room",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as every question.answer.v2.",
+      "requiredFields": [
+        "suite_event_type",
+        "elicitation_id",
+        "option_id",
+        "subject",
+        "m.relates_to"
+      ],
+      "notes": {
+        "carried": "Through the elicitation answer route with subject {id, digest}, as the person. The hub never approves: superpipeline judges who may allow it, and SuperToolkit re-checks the digest and expiry before it acts."
+      },
+      "accept": [
+        {
+          "why": "allow once, bound",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Allow once",
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "apr_5d2e9c41",
+            "option_id": "allow_once",
+            "subject": {
+              "id": "stkreq_8f2c",
+              "digest": "sha256:4be1c0de9a7f30b2"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$aprEventId"
+            }
+          }
+        },
+        {
+          "why": "deny, bound",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Deny",
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "apr_5d2e9c41",
+            "option_id": "deny",
+            "subject": {
+              "id": "stkreq_8f2c",
+              "digest": "sha256:4be1c0de9a7f30b2"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$aprEventId"
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "allow once with no binding",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Allow once",
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "apr_5d2e9c41",
+            "option_id": "allow_once",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$aprEventId"
+            }
+          }
+        },
+        {
+          "why": "allow once bound to another digest",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Allow once",
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "apr_5d2e9c41",
+            "option_id": "allow_once",
+            "subject": {
+              "id": "stkreq_8f2c",
+              "digest": "sha256:0000000000000000"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$aprEventId"
+            }
+          }
+        },
+        {
+          "why": "allow always, which is never offered",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Allow once",
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "apr_5d2e9c41",
+            "option_id": "allow_always",
+            "subject": {
+              "id": "stkreq_8f2c",
+              "digest": "sha256:4be1c0de9a7f30b2"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$aprEventId"
+            }
+          }
+        },
+        {
+          "why": "a reference to another message",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Allow once",
+            "suite_event_type": "dev.superpipeline.question.answer.v2",
+            "elicitation_id": "apr_5d2e9c41",
+            "option_id": "allow_once",
+            "subject": {
+              "id": "stkreq_8f2c",
+              "digest": "sha256:4be1c0de9a7f30b2"
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$someOtherEvent"
             }
           }
         }
