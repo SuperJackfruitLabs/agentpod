@@ -8,7 +8,9 @@ import { join } from "node:path";
 
 import { ELICITATION_REQUEST_CONTENT_KEY } from "@agentpod/contract";
 
-import { rawSql } from "../../db/drizzle";
+import { db, rawSql } from "../../db/drizzle";
+import { matrixElicitationEvents } from "../../db/schema/matrix";
+import { eq } from "drizzle-orm";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
 import type { ElicitationPendingDelivery } from "./elicitation-card";
@@ -30,7 +32,7 @@ import {
   questionOptionsV2,
   questionV2Content,
 } from "./question-wire";
-import { handleQuestionAnswer, type QuestionAnswerDeps, type RecordedQuestion } from "./question-answer";
+import { APPROVAL_UNBOUND_TEXT, handleQuestionAnswer, type QuestionAnswerDeps, type RecordedQuestion } from "./question-answer";
 
 /**
  * A SuperToolkit approval request hosted on the board (charter: "Waiting cards and broker approvals
@@ -178,7 +180,7 @@ describe("a board-less approval request — posted in the board's room", () => {
     expect(sent[0]?.extra).not.toHaveProperty("deep_link");
     expect(sent[0]?.extra?.[ELICITATION_REQUEST_CONTENT_KEY]).not.toHaveProperty("deep_link");
     expect(sent[0]?.body).not.toContain("/c/");
-    expect(await recordedQuestion(d.elicitationId)).toMatchObject({ cardId: "", subject: { id: "stkreq_8f2c", digest: DIGEST } });
+    expect(await recordedQuestion(d.elicitationId)).toMatchObject({ approvalRequest: true, subject: { id: "stkreq_8f2c", digest: DIGEST } });
   });
 });
 
@@ -214,7 +216,7 @@ describe("a typed reply to an approval request", () => {
 function recorded(d: ElicitationPendingDelivery, eventId = "$aprEventId"): RecordedQuestion {
   return {
     boardId: d.boardId,
-    cardId: "",
+    approvalRequest: true,
     roomId: ROOM,
     eventId,
     options: questionOptionsV2(d),
@@ -276,6 +278,116 @@ describe("question.answer.v2 on an approval request", () => {
     const { deps, replies } = answerDeps(recorded(APPROVAL_REQUEST), { answer: async () => ({ ok: false, code: "ELICITATION_NOT_PENDING" }) });
     await handleQuestionAnswer({ sender: HUMAN, content: answer() }, ROOM, deps);
     expect(replies).toEqual(["That one is already settled — the board has it."]);
+  });
+});
+
+describe("only a person answers an approval request (review of #845)", () => {
+  const AGENT = { id: "prn_agent_other", kind: "agent" as const };
+
+  test("question.answer.v2 from another agent — even a bound deny — is refused quietly and never sent", async () => {
+    for (const content of [answer({ option_id: "deny", body: "Deny" }), answer()]) {
+      const { deps, answered, replies } = answerDeps(recorded(APPROVAL_REQUEST), { principalForMatrixId: async () => AGENT });
+      expect(await handleQuestionAnswer({ sender: "@agent_other:id.example", content }, ROOM, deps)).toEqual({ status: "refused", reason: "not-human" });
+      expect(answered).toHaveLength(0);
+      expect(replies).toHaveLength(0);
+    }
+  });
+
+  test("an agent's answer to an ordinary question is still the board's to judge", async () => {
+    const { approvalRequest: _a, ...plain } = recorded(APPROVAL_REQUEST);
+    const { deps, answered } = answerDeps(plain, { principalForMatrixId: async () => AGENT });
+    expect((await handleQuestionAnswer({ sender: "@agent_other:id.example", content: answer({ option_id: "deny" }) }, ROOM, deps)).status).toBe("answered");
+    expect(answered).toHaveLength(1);
+  });
+
+  test("a typed reply from another agent is refused quietly and never sent", async () => {
+    await projectElicitation(BOOTSTRAP_TENANT_ID, request(), rig().deps);
+    const { deps, answered, replies } = typedRig({ principalForMatrixId: async () => AGENT });
+    expect(await handleElicitationAnswer({ sender: "@agent_other:id.example", body: "Deny" }, ROOM, deps)).toEqual({ status: "refused", code: "NOT_HUMAN" });
+    expect(answered).toHaveLength(0);
+    expect(replies).toHaveLength(0);
+  });
+});
+
+describe("an approval request with no subject the hub could carry is never allowed (review of #845)", () => {
+  const { approvalSubject: _s, ...bare } = APPROVAL_REQUEST;
+
+  test("allow_once is not offered: not in question.v2, the prose, the v1 card, or what a reply is matched against", async () => {
+    for (const d of [bare, { ...APPROVAL_REQUEST, approvalSubject: { id: "x" } }]) {
+      const c = questionV2Content(boundedQuestion(d));
+      expect((c.options as Array<{ id: string }>).map((o) => o.id)).toEqual(["deny"]);
+      expect(String(c.body)).toContain("1. Deny");
+      expect(String(c.body)).not.toContain("Allow once");
+      expect(String(c.body)).toContain("could not be shown here, so it cannot be allowed");
+    }
+    const d = request({ approvalSubject: undefined });
+    const { deps, sent } = rig();
+    await projectElicitation(BOOTSTRAP_TENANT_ID, d, deps);
+    expect(JSON.stringify(sent[0]?.extra?.[ELICITATION_REQUEST_CONTENT_KEY])).not.toContain("allow_once");
+    const typed = typedRig();
+    expect((await handleElicitationAnswer({ sender: HUMAN, body: "Allow once" }, ROOM, typed.deps)).status).toBe("unmatched");
+    expect(typed.answered).toHaveLength(0);
+  });
+
+  test("an approve on a recorded approval request with no subject is refused in the hub, with the right words", async () => {
+    const q: RecordedQuestion = { ...recorded(APPROVAL_REQUEST), subject: null };
+    const allow = answerDeps(q);
+    expect(await handleQuestionAnswer({ sender: HUMAN, content: answer({ subject: undefined }) }, ROOM, allow.deps)).toEqual({ status: "refused", reason: "approval-unbound" });
+    expect(allow.answered).toHaveLength(0);
+    expect(allow.replies).toEqual([APPROVAL_UNBOUND_TEXT]);
+    const deny = answerDeps(q);
+    expect((await handleQuestionAnswer({ sender: HUMAN, content: answer({ option_id: "deny", subject: undefined }) }, ROOM, deny.deps)).status).toBe("answered");
+  });
+
+  test("a typed approve, or a v1 button, on such a row is refused locally — not sent unbound", async () => {
+    const d = request({ approvalSubject: undefined });
+    await projectElicitation(BOOTSTRAP_TENANT_ID, d, rig().deps);
+    // A row recorded with allow_once regardless (as a client's v1 card could still send it).
+    await db
+      .update(matrixElicitationEvents)
+      .set({ optionsJson: JSON.stringify([{ id: "allow_once", label: "Allow once" }, { id: "deny", label: "Deny" }]) })
+      .where(eq(matrixElicitationEvents.elicitationId, d.elicitationId));
+    const { deps, answered, replies } = typedRig();
+    expect(await handleElicitationAnswer({ sender: HUMAN, body: "allow_once" }, ROOM, deps)).toEqual({ status: "refused", code: "APPROVAL_UNBOUND" });
+    expect(answered).toHaveLength(0);
+    expect(replies).toEqual([APPROVAL_UNBOUND_TEXT]);
+  });
+});
+
+describe("one test of what an approval request is (review of #845)", () => {
+  test("an apr_ id with a card still records as an approval request, and its receipt says so", async () => {
+    const d = request({ cardId: "crd_odd" });
+    await projectElicitation(BOOTSTRAP_TENANT_ID, d, rig().deps);
+    expect(await recordedQuestion(d.elicitationId)).toMatchObject({ approvalRequest: true });
+  });
+});
+
+describe("a typed reply goes to the agent's question, not a newer approval request (review of #845)", () => {
+  test("a 2 meant for the agent reaches the agent's question; alone, the approval request takes a typed deny", async () => {
+    const asked: ElicitationPendingDelivery = {
+      ...request(),
+      elicitationId: `elc_apr_${RUN}_${++n}`,
+      cardId: "crd_51d0",
+      cardTitle: "Upgrade the build image",
+      runId: "run_12",
+      stageKey: "build",
+      question: "Which image?",
+      options: [
+        { id: "alpine", label: "Alpine" },
+        { id: "debian", label: "Debian" },
+      ],
+      approvalSubject: undefined,
+      approvalRequestId: undefined,
+    };
+    await projectElicitation(BOOTSTRAP_TENANT_ID, asked, rig().deps);
+    const apr = request();
+    await projectElicitation(BOOTSTRAP_TENANT_ID, apr, rig().deps);
+    const typed = typedRig();
+    expect(await handleElicitationAnswer({ sender: HUMAN, body: "2" }, ROOM, typed.deps)).toEqual({ status: "answered", elicitationId: asked.elicitationId });
+    expect(typed.answered[0]).toMatchObject({ elicitationId: asked.elicitationId, option: "debian" });
+    const deny = typedRig();
+    expect(await handleElicitationAnswer({ sender: HUMAN, body: "2" }, ROOM, deny.deps)).toEqual({ status: "answered", elicitationId: apr.elicitationId });
+    expect(deny.answered[0]).toMatchObject({ option: "deny" });
   });
 });
 

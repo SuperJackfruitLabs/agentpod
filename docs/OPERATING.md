@@ -1760,7 +1760,10 @@ elsewhere`).
 **SuperToolkit approval requests** arrive on `elicitation.pending` with an empty card and an
 `apr_…` id, and are posted and answered like any subject-bound question — the room shows the
 request's preview, never a card link. superpipeline refuses `allow_once` from anyone but a workspace
-owner or admin (`WORKSPACE_ADMIN_REQUIRED`), which the room says in words. They are not on the
+owner or admin (`WORKSPACE_ADMIN_REQUIRED`), which the room says in words. The hub carries only a
+person's answer to one (an agent's is dropped, logged `a non-human principal tried to answer an approval
+request`), never offers or carries an approval when no subject could be shown, and a typed reply goes to
+an agent's question open in the same room before it goes to an approval request. They are not on the
 fleet Live Activity: no question is.
 
 ### When the agent reports for itself

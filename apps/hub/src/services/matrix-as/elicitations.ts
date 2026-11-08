@@ -35,6 +35,7 @@ import {
   boundedQuestion,
   questionFreeTextV2,
   questionOptionsV2,
+  isApprovalRequest,
   questionSubjectV2,
   questionV2Content,
 } from "./question-wire";
@@ -42,6 +43,7 @@ import { matchPermissionAnswer, unmatchedAnswerText } from "./permissions";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
 import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plane/assertion";
 import {
+  APPROVAL_UNBOUND_TEXT,
   SUBJECT_REFUSAL_TEXT,
   subjectRefusal,
   type RecordedQuestion,
@@ -195,6 +197,7 @@ export async function projectElicitation(
       approvalSubjectDigest: subject?.digest ?? null,
       approvalSubjectPreviewComplete: subject ? subject.preview_complete : null,
       approvalSubjectExpiresAt: subject ? expiryOf(subject.expires_at) : null,
+      approvalRequest: isApprovalRequest(d),
     })
     .onConflictDoNothing({ target: matrixElicitationEvents.elicitationId })
     .returning({ elicitationId: matrixElicitationEvents.elicitationId });
@@ -262,6 +265,8 @@ export interface OpenQuestion {
   meanings: ReadonlyMap<string, string>;
   /** The subject a typed reply would be bound to; null when the question has none. */
   subject: RecordedSubject | null;
+  /** A SuperToolkit approval request: a person's answer only, never an unbound approval. */
+  approvalRequest: boolean;
 }
 
 /** An ISO expiry as a time, or null when it is absent or unreadable — the board still judges it. */
@@ -311,9 +316,13 @@ export async function openQuestionInRoom(roomId: string): Promise<OpenQuestion |
         isNull(matrixElicitationEvents.outcomePostedAt),
       ),
     );
-  const live = rows
+  const open = rows
     .filter((r) => !r.eventId.startsWith("pending:"))
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+    .toSorted((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  // A typed reply is meant for an agent's question whenever one is open: an approval request posted
+  // after it must not capture the "2" its asker was waiting for. An approval request is answered by
+  // typing only when it is all the room has open.
+  const live = open.find((r) => !r.approvalRequest) ?? open[0];
   if (!live) return null;
   let options: Array<{ id: string; label: string }> = [];
   try {
@@ -332,6 +341,7 @@ export async function openQuestionInRoom(roomId: string): Promise<OpenQuestion |
     options,
     meanings: new Map((live.optionsV2 ?? []).map((o) => [o.id, o.meaning])),
     subject: recordedSubjectOf(live),
+    approvalRequest: live.approvalRequest,
   };
 }
 
@@ -343,7 +353,6 @@ export async function recordedQuestion(elicitationId: string): Promise<RecordedQ
   const [row] = await db
     .select({
       boardId: matrixElicitationEvents.boardId,
-      cardId: matrixElicitationEvents.cardId,
       roomId: matrixElicitationEvents.roomId,
       eventId: matrixElicitationEvents.eventId,
       options: matrixElicitationEvents.optionsV2,
@@ -352,6 +361,7 @@ export async function recordedQuestion(elicitationId: string): Promise<RecordedQ
       approvalSubjectDigest: matrixElicitationEvents.approvalSubjectDigest,
       approvalSubjectPreviewComplete: matrixElicitationEvents.approvalSubjectPreviewComplete,
       approvalSubjectExpiresAt: matrixElicitationEvents.approvalSubjectExpiresAt,
+      approvalRequest: matrixElicitationEvents.approvalRequest,
     })
     .from(matrixElicitationEvents)
     .where(eq(matrixElicitationEvents.elicitationId, elicitationId))
@@ -359,7 +369,7 @@ export async function recordedQuestion(elicitationId: string): Promise<RecordedQ
   if (!row || row.eventId.startsWith("pending:")) return null;
   return {
     boardId: row.boardId,
-    cardId: row.cardId,
+    approvalRequest: row.approvalRequest,
     roomId: row.roomId,
     eventId: row.eventId,
     options: row.options,
@@ -590,6 +600,21 @@ export async function handleElicitationAnswer(
     log.warn("answer from a sender this hub cannot resolve", { roomId, sender: event.sender });
     return { status: "refused", code: "UNRESOLVED_SENDER" };
   }
+  if (open.approvalRequest && identity.kind !== "human") {
+    // Quietly, as on every other surface: only a person's answer to an approval request is carried.
+    log.warn("a non-human principal tried to answer an approval request", {
+      roomId,
+      sender: event.sender,
+      principalId: identity.id,
+      elicitationId: open.elicitationId,
+    });
+    return { status: "refused", code: "NOT_HUMAN" };
+  }
+  if (open.approvalRequest && !open.subject && open.meanings.get(matched) !== "reject") {
+    // No subject was carried, so nothing showed what this would allow: only a decline goes on.
+    await deps.reply(roomId, APPROVAL_UNBOUND_TEXT);
+    return { status: "refused", code: "APPROVAL_UNBOUND" };
+  }
 
   // A question bound to a subject (a strict decision, a board-dispatched harness permission): a
   // typed reply never approves it — the person typed against prose that does not show what is
@@ -625,7 +650,7 @@ export async function handleElicitationAnswer(
   });
 
   const chosen = open.options.find((o) => o.id === matched);
-  return reportAnswer(result, open.elicitationId, chosen?.label ?? matched, roomId, deps, { approvalRequest: open.cardId === "" });
+  return reportAnswer(result, open.elicitationId, chosen?.label ?? matched, roomId, deps, { approvalRequest: open.approvalRequest });
 }
 
 /** Said when a typed reply (or a v1 card's button) tries to approve a subject-bound question. */

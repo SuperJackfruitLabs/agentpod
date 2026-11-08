@@ -85,10 +85,15 @@ function optionBytes(o: ElicitationPendingDelivery["options"][number]): number {
  * budget are not listed (the card's link still reaches them on the board).
  */
 export function boundedQuestion(d: ElicitationPendingDelivery): ElicitationPendingDelivery {
+  // An approval request whose subject could not be carried — absent, or not one this hub can
+  // re-bound — shows nobody what an approval would allow, so only its declining options are listed:
+  // the prose, the v1 card, question.v2 and what a typed reply is matched against all lose the rest.
+  const declinesOnly = isApprovalRequest(d) && questionSubjectV2(d) === null;
   const options: ElicitationPendingDelivery["options"] = [];
   let used = 0;
   for (const raw of d.options) {
     if (raw.id.length > OPTION_ID_MAX) continue;
+    if (declinesOnly && raw.meaning !== "reject") continue;
     const label = cutToBytes(raw.label, LABEL_BYTES);
     const o = label === raw.label ? raw : { ...raw, label };
     const cost = optionBytes(o);
@@ -208,8 +213,11 @@ function approvalRequestProse(d: ElicitationPendingDelivery): string {
   const head = "A SuperToolkit approval request is waiting on a workspace owner or admin.";
   const asked = d.question.trim();
   const preview = subject ? previewMarkdown(subject.preview) : "";
-  const shown =
-    subject && !subject.preview_complete ? "The request could not be shown in full here, so it cannot be allowed from this room." : "";
+  const shown = !subject
+    ? "The request could not be shown here, so it cannot be allowed from this room."
+    : !subject.preview_complete
+      ? "The request could not be shown in full here, so it cannot be allowed from this room."
+      : "";
   const numbered = d.options.map((o, i) => `${i + 1}. ${o.label}`).join("\n");
   return [head, asked, preview, shown, numbered, APPROVAL_REQUEST_NOTE].filter((part) => part !== "").join("\n\n");
 }

@@ -93,10 +93,13 @@ export async function projectAttention(
       tenantId,
       roomId: found.roomId,
       // Replaced with the real id below; a `pending:` row is taken, and is nobody's answerable event.
-      eventId: `pending:${d.boardId}:${d.cardId}:${d.waitId}`,
+      // JSON, so ids containing `:` cannot make two waits' placeholders collide on the unique index.
+      eventId: `pending:${JSON.stringify([d.boardId, d.cardId, d.waitId])}`,
       options: attentionOptionsV2(d),
     })
-    .onConflictDoNothing()
+    .onConflictDoNothing({
+      target: [matrixAttentionEvents.boardId, matrixAttentionEvents.cardId, matrixAttentionEvents.waitId],
+    })
     .returning({ waitId: matrixAttentionEvents.waitId });
   if (claimed.length === 0) return { status: "already" };
 

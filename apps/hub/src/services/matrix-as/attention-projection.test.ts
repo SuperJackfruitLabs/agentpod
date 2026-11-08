@@ -129,6 +129,21 @@ describe("a waiting card is posted into its board's room", () => {
     expect(await rawSql`SELECT 1 FROM matrix_attention_events WHERE wait_id = ${d.waitId}`).toHaveLength(0);
   });
 
+  test("two waits whose ids contain ':' never share a placeholder while both are being sent", async () => {
+    const first = waiting({ cardId: `x:${RUN}`, waitId: "w" });
+    const second = waiting({ boardId: BOARD, cardId: "x", waitId: `${RUN}:w` });
+    let inner: string | undefined;
+    const { deps } = rig({
+      sendText: async () => {
+        // The second wait is projected while the first is still `pending:`.
+        inner ??= (await projectAttention(BOOTSTRAP_TENANT_ID, second, rig().deps)).status;
+        return `$attention-${RUN}-${++events}`;
+      },
+    });
+    expect((await projectAttention(BOOTSTRAP_TENANT_ID, first, deps)).status).toBe("posted");
+    expect(inner).toBe("posted");
+  });
+
   test("held, with no row, until a human has joined the room", async () => {
     const d = waiting();
     const { deps, sent } = rig({ humanJoined: async () => false });

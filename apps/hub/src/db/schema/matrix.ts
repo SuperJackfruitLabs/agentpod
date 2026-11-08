@@ -309,6 +309,12 @@ export const matrixElicitationEvents = pgTable(
     approvalSubjectPreviewComplete: boolean("approval_subject_preview_complete"),
     approvalSubjectExpiresAt: timestamp("approval_subject_expires_at"),
     /**
+     * A SuperToolkit approval request (`isApprovalRequest`): only a person may answer it, an approval
+     * is refused when no subject was carried, and a typed reply reaches it only when no agent's
+     * question is open in the room too.
+     */
+    approvalRequest: boolean("approval_request").notNull().default(false),
+    /**
      * When this hub said in the room that the board accepted an answer.
      *
      * The claim that stops a second receipt: an answer delivered twice — a double tap,
