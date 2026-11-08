@@ -1067,36 +1067,32 @@ describe("a permission request is asked of a human", () => {
     expect(asked.elicitations[0]!.options).toHaveLength(2);
   });
 
-  test("a board that refuses the envelope is asked again without it, once — the person is still asked", async () => {
-    // Charter 2026-11-07 §7. A board without per-option meanings ignores the extra keys; one that
-    // understands them and refuses (INVALID_APPROVAL_SUBJECT / INVALID_ELICITATION) must not lose
-    // the question.
-    const asked = askingBoard(answers("allow_once"), (path, body) =>
-      path.endsWith("/activities") && elicitationParameter(body)?.subject !== undefined
-        ? { status: 400, body: boardError("INVALID_APPROVAL_SUBJECT") }
-        : null,
-    );
-    const board = fakeBoard(asked.handler);
-    const acp = fakeAcp(() => [permissionRequest()], { onAnswer: () => [chunk("412 tests passed."), idle()] });
+  for (const code of ["INVALID_APPROVAL_SUBJECT", "INVALID_ELICITATION"]) {
+    test(`a board that refuses the envelope (${code}) is asked again once, decline-only — never an unbound approval`, async () => {
+      // Charter 2026-11-07 §7. A board without per-option meanings ignores the extra keys; one that
+      // refuses them knows the envelope, so reposting it unbound would let it accept an approval
+      // bound to nothing. The person is still asked, and can decline from the board.
+      const asked = askingBoard(answers("reject_once"), (path, body) =>
+        path.endsWith("/activities") && elicitationParameter(body)?.subject !== undefined
+          ? { status: 400, body: boardError(code) }
+          : null,
+      );
+      const board = fakeBoard(asked.handler);
+      const acp = fakeAcp(() => [permissionRequest()], { onAnswer: () => [chunk("ok"), idle()] });
 
-    await runOnce(deps(board.client, acp.port));
+      await runOnce(deps(board.client, acp.port));
 
-    const elicitations = board.calls
-      .filter((c) => c.path.endsWith("/activities"))
-      .map((c) => elicitationParameter(c.body))
-      .filter((p) => p !== null);
-    expect(elicitations).toHaveLength(2);
-    expect(elicitations[0]?.subject).toBeDefined();
-    expect(elicitations[1]).toEqual({
-      requestSeq: expect.any(Number),
-      options: [
-        { name: "allow_once", title: "Yes, run it" },
-        { name: "reject_once", title: "No, don't" },
-      ],
+      const elicitations = board.calls
+        .filter((c) => c.path.endsWith("/activities"))
+        .map((c) => elicitationParameter(c.body))
+        .filter((p) => p !== null);
+      expect(elicitations).toHaveLength(2);
+      expect(elicitations[0]?.subject).toBeDefined();
+      expect(elicitations[1]).toEqual({ requestSeq: expect.any(Number), options: [{ name: "reject_once", title: "No, don't" }] });
+      expect(asked.elicitations).toHaveLength(1);
+      expect(acp.state.answers.at(-1)?.optionId).toBe("reject_once");
     });
-    expect(asked.elicitations).toHaveLength(1);
-    expect(acp.state.answers.at(-1)?.optionId).toBe("allow_once");
-  });
+  }
 
   test("who answered on the board is recorded with the answer", async () => {
     // Charter 2026-11-07 §6: the session's permission-answer names the answerer.

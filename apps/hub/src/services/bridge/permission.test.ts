@@ -16,7 +16,7 @@ import {
   selectedOptionId,
   toBoardOptions,
   toMeaningfulBoardOptions,
-  withoutEnvelope,
+  withoutApprovals,
 } from "./permission";
 import { harnessPermissionSubject } from "../acp";
 
@@ -157,14 +157,14 @@ describe("a board-dispatched permission carries its meanings and subject (charte
     expect(listed.preview_complete).toBe(false);
   });
 
-  test("without the envelope, the question is exactly what was posted before", () => {
+  test("the fallback for a board that refused the envelope keeps only the options that reject — never an unbound approval", () => {
     const activity = {
       type: "elicitation",
       body: "q",
       parameter: { requestSeq: 4, options: toMeaningfulBoardOptions(OFFERED), subject: boardPermissionSubject("acps_x", 4, PAYLOAD, null) },
     };
-    expect(withoutEnvelope(activity)).toEqual({ type: "elicitation", body: "q", parameter: { requestSeq: 4, options: toBoardOptions(OFFERED) } });
-    expect(withoutEnvelope({ type: "elicitation", parameter: { requestSeq: 4, options: toBoardOptions(OFFERED) } })).toBeNull();
-    expect(withoutEnvelope({ type: "thought", body: "x" })).toBeNull();
+    expect(withoutApprovals(activity)).toEqual({ type: "elicitation", body: "q", parameter: { requestSeq: 4, options: [{ name: "reject_once", title: "No" }] } });
+    expect(withoutApprovals({ type: "elicitation", parameter: { requestSeq: 4, options: toBoardOptions(OFFERED) } })).toBeNull();
+    expect(withoutApprovals({ type: "thought", body: "x" })).toBeNull();
   });
 });

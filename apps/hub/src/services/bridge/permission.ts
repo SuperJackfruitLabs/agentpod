@@ -125,16 +125,23 @@ export function boardPermissionSubject(sessionId: string, requestSeq: number, pa
 }
 
 /**
- * The same elicitation without the envelope: options as `{name, title}` and no subject — exactly
- * what was posted before boards took meanings. Null for any activity that carried no envelope.
- * Used once, when a board refuses the envelope: the question still reaches the person, as it did
- * before, rather than being lost.
+ * The same elicitation with every option that could approve removed, and no envelope: only the
+ * options that reject, as `{name, title}`. Null for any activity that carried no envelope.
+ *
+ * Used once, when a board that understands the envelope refuses it (`isEnvelopeRefusal`). Reposting
+ * the whole question unbound would let the board accept an approval bound to nothing — exactly what
+ * the subject exists to prevent — so the person is still asked, but can only decline from the board;
+ * an approval goes through the room or the console, where the request is shown in full.
  */
-export function withoutEnvelope<A extends { type: string; parameter?: unknown }>(activity: A): (Omit<A, "parameter"> & { parameter: unknown }) | null {
+export function withoutApprovals<A extends { type: string; parameter?: unknown }>(activity: A): (Omit<A, "parameter"> & { parameter: unknown }) | null {
   if (activity.type !== "elicitation") return null;
   const p = activity.parameter;
   if (typeof p !== "object" || p === null || !("subject" in p) || !("options" in p) || !Array.isArray(p.options)) return null;
-  const options = toBoardOptions(p.options.map((o: unknown) => (typeof o === "object" && o !== null && "name" in o ? { optionId: o.name, name: "title" in o ? o.title : undefined } : null)));
+  const options: BoardOption[] = [];
+  for (const o of p.options) {
+    if (typeof o !== "object" || o === null || !("meaning" in o) || o.meaning !== "reject") continue;
+    if ("name" in o && typeof o.name === "string" && "title" in o && typeof o.title === "string") options.push({ name: o.name, title: o.title });
+  }
   const requestSeq = "requestSeq" in p ? p.requestSeq : undefined;
   return { ...activity, parameter: { requestSeq, options } };
 }
