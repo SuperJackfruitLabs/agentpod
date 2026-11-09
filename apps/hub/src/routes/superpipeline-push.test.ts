@@ -442,3 +442,78 @@ describe("an approval on a quorum gate short of its quorum", () => {
     expect(handled).toHaveLength(0);
   });
 });
+
+describe("a held approval released or pulled back", () => {
+  const RELEASED = {
+    event: "decision.released",
+    boardId: "brd_7c1f",
+    cardId: "crd_9a22",
+    gateId: "gate_4e8b",
+    decision: "approve",
+    releaseAt: "2026-11-16T09:00:00.000Z",
+    releasedAt: "2026-11-16T09:03:00.000Z",
+    outcome: "released",
+  };
+  const PULLED = {
+    event: "decision.pulled_back",
+    boardId: "brd_7c1f",
+    cardId: "crd_9a22",
+    gateId: "gate_4e8b",
+    pulledBackBy: "prn_rakesh",
+    at: "2026-11-16T08:40:00.000Z",
+    comment: "wrong image",
+  };
+
+  test("each is handed to its path, and says what became of it", async () => {
+    const released: unknown[] = [];
+    const pulled: unknown[] = [];
+    const d = deps({
+      handleDecisionReleased: async (body) => {
+        released.push(body);
+        return { status: "sent" };
+      },
+      handleDecisionPulledBack: async (body) => {
+        pulled.push(body);
+        return { status: "duplicate" };
+      },
+    });
+    for (const [body, status] of [
+      [RELEASED, "sent"],
+      [PULLED, "duplicate"],
+    ] as const) {
+      const raw = JSON.stringify(body);
+      const res = await post(d, raw, await sign(SECRET, raw));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, status });
+    }
+    expect(released).toEqual([RELEASED]);
+    expect(pulled).toEqual([PULLED]);
+  });
+
+  test("one this hub cannot act on is acknowledged and goes nowhere", async () => {
+    const handled: unknown[] = [];
+    const d = deps({
+      handleDecisionReleased: async (body) => {
+        handled.push(body);
+        return { status: "sent" };
+      },
+      handleDecisionPulledBack: async (body) => {
+        handled.push(body);
+        return { status: "sent" };
+      },
+    });
+    for (const bad of [
+      { ...RELEASED, outcome: "maybe" },
+      { ...RELEASED, releasedAt: "soon" },
+      { ...RELEASED, boardId: "" },
+      { ...PULLED, comment: "" },
+      { ...PULLED, pulledBackBy: null },
+    ]) {
+      const raw = JSON.stringify(bad);
+      const res = await post(d, raw, await sign(SECRET, raw));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, ignored: true });
+    }
+    expect(handled).toHaveLength(0);
+  });
+});

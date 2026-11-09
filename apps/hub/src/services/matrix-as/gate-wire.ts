@@ -9,6 +9,7 @@ import { type GateRequestCard } from "@agentpod/contract";
 import { z } from "zod";
 import { deadlineField } from "./decision-timeout-wire";
 import { quorumField } from "./gate-quorum-wire";
+import { releaseField, releaseSentence, releaseV2 } from "./gate-release-wire";
 import type { GatePendingDelivery } from "../bridge";
 
 export const GATE_EVENT_TYPE = "dev.superpipeline.gate.v1";
@@ -439,6 +440,14 @@ export function previewMarkdown(preview: GatePreviewBlock[]): string {
  * asterisks — because charter decision 3 is that a person approves bytes they can see.
  */
 export function gateV2ProseBody(d: GatePendingDelivery, link?: string): string {
+  // An approval that would wait says so before anyone approves (charter 2026-11-09, an approval may
+  // wait for its release time §7), as its own paragraph; nothing changes for a gate nothing holds.
+  const body = gateV2ProseBodyWithoutRelease(d, link);
+  const release = releaseV2(d.release);
+  return release ? `${body}\n\n${releaseSentence(release)}` : body;
+}
+
+function gateV2ProseBodyWithoutRelease(d: GatePendingDelivery, link?: string): string {
   const variants = gateVariantsV2(d);
   if (variants) return variantsProseBody(d, variants, link);
   const subject = gateSubjectV2(d);
@@ -477,6 +486,9 @@ export function gateV2Content(d: GatePendingDelivery, deepLink?: string): Record
     // A quorum gate's progress (charter 2026-11-09, more than one approver §7); nothing on a gate
     // that passes on one approval, so its gate.v2 is unchanged.
     ...quorumField(d.quorum),
+    // What would hold an approval (charter 2026-11-09, an approval may wait for its release time
+    // §7); nothing on a gate nothing holds, so its gate.v2 is unchanged.
+    ...releaseField(d.release),
     ...deadlineField(d.deadline),
     ...(deepLink ? { deep_link: deepLink } : {}),
   };

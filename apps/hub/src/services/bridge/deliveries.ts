@@ -63,6 +63,12 @@ export interface GatePendingDelivery {
    * and from a board that predates it. `unknown`: checked before it is carried (`quorumV2`).
    */
   quorum?: unknown;
+  /**
+   * What would hold an approval of this gate before it acts (charter 2026-11-09, an approval may
+   * wait for its release time §7): `{ holdForMinutes?, notBefore? }`. Absent when nothing holds it
+   * and from a board that predates it. `unknown`: checked before it is carried (`releaseV2`).
+   */
+  release?: unknown;
   ts: string;
 }
 
@@ -83,6 +89,39 @@ export interface GateApprovalRecordedDelivery {
     from: "deciders" | "admins";
     approvals: Array<{ principalId: string; at: string; variantId?: string }>;
   };
+}
+
+/**
+ * The body the board pushes on `decision.released`: a held approval reached its release time and
+ * acted, or was blocked (charter 2026-11-09, an approval may wait for its release time §5-7).
+ * Checked by `isDecisionReleased` before it is believed.
+ */
+export interface DecisionReleasedDelivery {
+  event: "decision.released";
+  boardId: string;
+  cardId: string;
+  gateId: string;
+  decision: string;
+  releaseAt: string;
+  releasedAt: string;
+  outcome: "released" | "blocked";
+  /** Why a release was blocked; only on `outcome: "blocked"`. */
+  reason?: string;
+}
+
+/**
+ * The body the board pushes on `decision.pulled_back`: a held approval was pulled back before its
+ * release time, as request changes (charter 2026-11-09 §4). `pulledBackBy` is a principal id, never
+ * carried into a room. Checked by `isDecisionPulledBack` before it is believed.
+ */
+export interface DecisionPulledBackDelivery {
+  event: "decision.pulled_back";
+  boardId: string;
+  cardId: string;
+  gateId: string;
+  pulledBackBy: string;
+  at: string;
+  comment: string;
 }
 
 /** The body the board pushes on `elicitation.pending`. */

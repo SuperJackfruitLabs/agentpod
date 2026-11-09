@@ -37,6 +37,10 @@ export const PUSH_EVENTS = [
   // An approval on a quorum gate short of its quorum (charter: "A gate may need more than one
   // approver" §7): the hub replies to the gate's card with who approved and how many more.
   "gate.approval_recorded",
+  // A held approval acted at its release time, or was pulled back before it (charter: "An approval
+  // may wait for its release time" §7): the hub replies to the gate's card with what became of it.
+  "decision.released",
+  "decision.pulled_back",
 ] as const;
 
 export function pushHookUrl(publicUrl: string): string {

@@ -36,7 +36,14 @@ import { handleDecisionTimeout, isDecisionTimeout } from "../services/matrix-as"
 import type { DecisionNoticeDeps, DecisionNoticeOutcome } from "../services/matrix-as";
 import { handleGateApprovalRecorded, isGateApprovalRecorded } from "../services/matrix-as";
 import type { GateProgressOutcome } from "../services/matrix-as";
-import type { DecisionTimeoutDelivery, GateApprovalRecordedDelivery } from "../services/bridge";
+import { handleDecisionPulledBack, handleDecisionReleased, isDecisionPulledBack, isDecisionReleased } from "../services/matrix-as";
+import type { GateHoldOutcome } from "../services/matrix-as";
+import type {
+  DecisionPulledBackDelivery,
+  DecisionReleasedDelivery,
+  DecisionTimeoutDelivery,
+  GateApprovalRecordedDelivery,
+} from "../services/bridge";
 
 const log = createLogger("superpipeline-push");
 
@@ -63,6 +70,10 @@ export interface SuperpipelinePushDeps extends GateProjectionDeps {
   displayNameFor?(principalId: string): Promise<string | null>;
   /** Test seam: what a quorum gate's recorded approval does. Defaults to `handleGateApprovalRecorded`. */
   handleGateApprovalRecorded?(d: GateApprovalRecordedDelivery): Promise<GateProgressOutcome>;
+  /** Test seam: what a held approval's release does. Defaults to `handleDecisionReleased`. */
+  handleDecisionReleased?(d: DecisionReleasedDelivery): Promise<GateHoldOutcome>;
+  /** Test seam: what a held approval's pull-back does. Defaults to `handleDecisionPulledBack`. */
+  handleDecisionPulledBack?(d: DecisionPulledBackDelivery): Promise<GateHoldOutcome>;
 }
 
 const enc = new TextEncoder();
@@ -202,6 +213,26 @@ export function createSuperpipelinePushRoutes(deps: SuperpipelinePushDeps) {
         ? await deps.handleGateApprovalRecorded(body)
         : await handleGateApprovalRecorded(body, deps);
       log.info("quorum gate approval handled", { gateId: body.gateId, status: outcome.status });
+      return c.json({ ok: true, status: outcome.status }, 200);
+    }
+
+    /**
+     * A held approval released at its release time, or pulled back before it (charter: "An approval
+     * may wait for its release time" §7): a reply to the gate card this hub posted. One tenant or
+     * nobody, as for progress (`gate-hold.ts`). Disjoint from the others by `event`.
+     */
+    if (isDecisionReleased(body)) {
+      const outcome = deps.handleDecisionReleased
+        ? await deps.handleDecisionReleased(body)
+        : await handleDecisionReleased(body, deps);
+      log.info("held approval release handled", { gateId: body.gateId, outcome: body.outcome, status: outcome.status });
+      return c.json({ ok: true, status: outcome.status }, 200);
+    }
+    if (isDecisionPulledBack(body)) {
+      const outcome = deps.handleDecisionPulledBack
+        ? await deps.handleDecisionPulledBack(body)
+        : await handleDecisionPulledBack(body, deps);
+      log.info("held approval pull-back handled", { gateId: body.gateId, status: outcome.status });
       return c.json({ ok: true, status: outcome.status }, 200);
     }
 

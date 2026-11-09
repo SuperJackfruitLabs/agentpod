@@ -243,9 +243,9 @@ function wellFormedNotice(c: Record<string, unknown>, type: string, at: string):
   );
 }
 
-describe("decision timeouts against the shared corpus (version 7, carried in 9)", () => {
-  test("the corpus is version 9", () => {
-    expect(corpus.version).toBe(9);
+describe("decision timeouts against the shared corpus (version 7, carried in 10)", () => {
+  test("the corpus is version 10", () => {
+    expect(corpus.version).toBe(10);
   });
 
   test("the hub's four envelopes with a deadline are exactly what the corpus accepts", () => {

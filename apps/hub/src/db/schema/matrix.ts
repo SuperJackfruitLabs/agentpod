@@ -630,6 +630,31 @@ export const matrixGateApprovals = pgTable(
 );
 
 /**
+ * A held approval's release or pull-back this hub replied to the gate's card with (charter
+ * 2026-11-09, an approval may wait for its release time §7), once per gate and notice. Claimed
+ * before the reply is sent and given back when the send fails, so a redelivered `decision.released`
+ * or `decision.pulled_back` posts nothing twice and a failed one is posted on the board's retry.
+ */
+export const matrixGateHoldNotices = pgTable(
+  "matrix_gate_hold_notices",
+  {
+    gateId: text("gate_id").notNull(),
+    /** `released` | `pulled_back`. */
+    notice: text("notice").notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    /** The reply's own event, once sent. */
+    eventId: text("event_id"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.gateId, t.notice] }),
+    index("matrix_gate_hold_notices_tenant_id_idx").on(t.tenantId),
+  ],
+);
+
+/**
  * A reminder or an escalation this hub posted in reply to a waiting card (charter: "Unanswered
  * decisions remind, then escalate" §2-3), once per decision and notice.
  *

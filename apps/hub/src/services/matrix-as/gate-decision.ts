@@ -14,6 +14,7 @@ import {
   GATE_OUTCOME_TYPE,
   isGateOptionId,
 } from "./gate-wire";
+import { heldTail, heldUntilOf } from "./gate-release-wire";
 
 const log = createLogger("matrix-gates");
 
@@ -53,7 +54,9 @@ export type DecisionRefusal =
   /** superpipeline: a quorum gate this person has already approved (`QUORUM_ALREADY_APPROVED`). */
   | "quorum-already-approved"
   /** superpipeline: on a quorum gate, this person's approval does not count (`APPROVAL_DECIDER_NOT_ALLOWED`). */
-  | "decider-not-allowed";
+  | "decider-not-allowed"
+  /** superpipeline: the approval would be released after its subject expires (`APPROVAL_RELEASE_AFTER_EXPIRY`). */
+  | "release-after-expiry";
 
 export interface GateDecisionEvent {
   sender: string;
@@ -227,7 +230,14 @@ export interface GateDecisionDeps {
   readGate?(
     boardId: string,
     gateId: string,
-  ): Promise<{ status: string; decision: string | null; decidedBy: string | null; chosen?: { id: string; label: string } | null } | null>;
+  ): Promise<{
+    status: string;
+    decision: string | null;
+    decidedBy: string | null;
+    chosen?: { id: string; label: string } | null;
+    /** A held approval's release time (charter 2026-11-09, an approval may wait), named in the receipt. */
+    heldUntil?: string | null;
+  } | null>;
 }
 
 /**
@@ -384,6 +394,17 @@ async function refusalForCode(
     return { status: "refused", reason: "decider-not-allowed" };
   }
 
+  // An approval that could never act (charter 2026-11-09, an approval may wait for its release time
+  // §5): the board recorded nothing, and the person is owed the reason rather than silence.
+  if (code === "APPROVAL_RELEASE_AFTER_EXPIRY") {
+    log.info("superpipeline refused an approval that would be released after its subject expires", { gateId });
+    await deps.reply(
+      roomId,
+      "That can't be approved: it would go ahead only after what it approves has expired. Nothing has changed.",
+    );
+    return { status: "refused", reason: "release-after-expiry" };
+  }
+
   log.warn("superpipeline refused a decision", { gateId, code });
   return { status: "refused", reason: "unknown-gate" };
 }
@@ -526,24 +547,33 @@ export async function handleGateDecision(
     // more approvers. When the board can be read and says the gate is still pending, the approval was
     // recorded, not passed: nothing is said or claimed, and the board's progress push or the sweep
     // speaks for it. An unreadable gate keeps the behaviour every single-approval gate has.
+    //
+    // The same read says whether a resolved approval is held until its release time (charter
+    // 2026-11-09, an approval may wait), which the receipt then names.
+    let heldUntil: string | null = null;
     if (approving || parsed.optionId === "approve") {
-      const still = await stillPending(projection.boardId, parsed.gateId, deps);
-      if (still) return { status: "recorded" };
+      const read = await readBack(projection.boardId, parsed.gateId, deps);
+      if (read?.status === "pending") return { status: "recorded" };
+      if (read?.status === "resolved") heldUntil = heldUntilOf(read.heldUntil);
     }
-    await postOutcomeReceipt(roomId, parsed, principal.id, projection, deps, approving && chosen ? chosen : null);
+    await postOutcomeReceipt(roomId, parsed, principal.id, projection, deps, approving && chosen ? chosen : null, heldUntil);
     return { status: "resolved" };
   }
 
   return refusalForCode(result.code, parsed.gateId, event.sender, roomId, deps, projection.quorum ?? null);
 }
 
-/** True only when the board can be read and says the gate is still pending; anything else is false. */
-async function stillPending(boardId: string, gateId: string, deps: Pick<GateDecisionDeps, "readGate">): Promise<boolean> {
-  if (!deps.readGate) return false;
+/** The board's read of a gate after an approval, or null when it cannot be had. */
+async function readBack(
+  boardId: string,
+  gateId: string,
+  deps: Pick<GateDecisionDeps, "readGate">,
+): Promise<Awaited<ReturnType<NonNullable<GateDecisionDeps["readGate"]>>>> {
+  if (!deps.readGate) return null;
   try {
-    return (await deps.readGate(boardId, gateId))?.status === "pending";
+    return await deps.readGate(boardId, gateId);
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -584,6 +614,7 @@ async function settleQuorumApproval(
       decision: gate.decision,
       decidedBy: gate.decidedBy ?? principalId,
       chosen: gate.chosen ?? chosen,
+      heldUntil: heldUntilOf(gate.heldUntil),
     },
     roomId,
     projection,
@@ -611,9 +642,16 @@ async function postOutcomeReceipt(
   projection: { boardId: string; eventId: string; proseEventId?: string | null },
   deps: GateDecisionDeps,
   chosen: { id: string; label: string } | null,
+  heldUntil: string | null,
 ): Promise<void> {
   await settleGateOutcome(
-    { gateId: parsed.gateId, decision: parsed.optionId, decidedBy: principalId, ...(chosen ? { chosen } : {}) },
+    {
+      gateId: parsed.gateId,
+      decision: parsed.optionId,
+      decidedBy: principalId,
+      ...(chosen ? { chosen } : {}),
+      ...(heldUntil ? { heldUntil } : {}),
+    },
     roomId,
     projection,
     deps,
@@ -640,6 +678,11 @@ export async function settleGateOutcome(
     decidedBy: string | null;
     /** The variant an approval chose, on a variant gate, when it is known. */
     chosen?: { id: string; label: string } | null;
+    /**
+     * A held approval's release time (charter 2026-11-09, an approval may wait for its release
+     * time §7): the receipt says it goes ahead then, unless pulled back, and carries `held_until`.
+     */
+    heldUntil?: string | null;
   },
   roomId: string,
   projection: { boardId: string; eventId: string; proseEventId?: string | null },
@@ -652,8 +695,9 @@ export async function settleGateOutcome(
 
     const who = principalId ? ((await deps.displayNameFor?.(principalId)) ?? null) : null;
     const verb = outcomeVerb(parsed.optionId, decided.chosen ?? null);
-    const body =
-      OUTCOME_SENTENCES[parsed.optionId] ?? (who ? `${verb} by ${who} — the board has it.` : `${verb} — the board has it.`);
+    const heldUntil = heldUntilOf(decided.heldUntil);
+    const tail = heldUntil ? heldTail(heldUntil) : "the board has it.";
+    const body = OUTCOME_SENTENCES[parsed.optionId] ?? (who ? `${verb} by ${who} — ${tail}` : `${verb} — ${tail}`);
 
     await deps.reply(roomId, body);
 
@@ -666,6 +710,7 @@ export async function settleGateOutcome(
       decision: parsed.optionId,
       decided_by: who,
       ...(decided.chosen ? { chosen_variant: { id: decided.chosen.id, label: decided.chosen.label } } : {}),
+      ...(heldUntil ? { held_until: heldUntil } : {}),
       "m.relates_to": { rel_type: "m.reference", event_id: projection.eventId },
     });
   } catch (err) {
