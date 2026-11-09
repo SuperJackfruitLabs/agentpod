@@ -522,11 +522,29 @@ export async function handleGateDecision(
     if (projection.quorum && (approving || parsed.optionId === "approve")) {
       return settleQuorumApproval(roomId, parsed, principal.id, projection, deps, approving && chosen ? chosen : null);
     }
+    // A gate this hub projected before it carried quorums has no stored quorum and may still need
+    // more approvers. When the board can be read and says the gate is still pending, the approval was
+    // recorded, not passed: nothing is said or claimed, and the board's progress push or the sweep
+    // speaks for it. An unreadable gate keeps the behaviour every single-approval gate has.
+    if (approving || parsed.optionId === "approve") {
+      const still = await stillPending(projection.boardId, parsed.gateId, deps);
+      if (still) return { status: "recorded" };
+    }
     await postOutcomeReceipt(roomId, parsed, principal.id, projection, deps, approving && chosen ? chosen : null);
     return { status: "resolved" };
   }
 
   return refusalForCode(result.code, parsed.gateId, event.sender, roomId, deps, projection.quorum ?? null);
+}
+
+/** True only when the board can be read and says the gate is still pending; anything else is false. */
+async function stillPending(boardId: string, gateId: string, deps: Pick<GateDecisionDeps, "readGate">): Promise<boolean> {
+  if (!deps.readGate) return false;
+  try {
+    return (await deps.readGate(boardId, gateId))?.status === "pending";
+  } catch {
+    return false;
+  }
 }
 
 /**

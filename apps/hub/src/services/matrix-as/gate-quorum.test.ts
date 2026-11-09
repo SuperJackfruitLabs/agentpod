@@ -321,12 +321,29 @@ describe("an approval the board recorded short of the quorum", () => {
     expect(d.replies).toEqual(["Rejected by rakesh — the board has it."]);
   });
 
-  test("a gate with no stored quorum is unchanged: no read, the outcome at once", async () => {
-    const d = deps({}, null);
+  test("a gate with no stored quorum the board says resolved: the outcome at once", async () => {
+    const d = deps({ readGate: async () => ({ status: "resolved", decision: "approve", decidedBy: "prn_second", chosen: null }) }, null);
     expect(await run(answer(), d)).toEqual({ status: "resolved" });
-    expect(d.reads).toHaveLength(0);
     expect(d.replies).toEqual(["Approved by rakesh — the board has it."]);
     expect(d.marked).toEqual(["gate_6e19"]);
+  });
+
+  test("a gate projected before quorums, still pending at the board: recorded, nothing said or claimed", async () => {
+    // A quorum gate this hub posted before it carried quorums has none stored; the board's read is
+    // what tells an approval recorded from one that passed the gate.
+    const d = deps({}, null);
+    expect(await run(answer(), d)).toEqual({ status: "recorded" });
+    expect(d.replies).toHaveLength(0);
+    expect(d.outcomes).toHaveLength(0);
+    expect(d.marked).toHaveLength(0);
+  });
+
+  test("a gate with no stored quorum the board cannot read keeps the single-approval behaviour", async () => {
+    for (const readGate of [undefined, async () => null, async () => Promise.reject(new Error("board down"))]) {
+      const d = deps({ readGate }, null);
+      expect(await run(answer(), d)).toEqual({ status: "resolved" });
+      expect(d.replies).toEqual(["Approved by rakesh — the board has it."]);
+    }
   });
 });
 
