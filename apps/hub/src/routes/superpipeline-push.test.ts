@@ -517,3 +517,87 @@ describe("a held approval released or pulled back", () => {
     expect(handled).toHaveLength(0);
   });
 });
+
+describe("a machine check failed or overridden", () => {
+  const FAILED = {
+    event: "check.failed",
+    boardId: "brd_7c1f",
+    cardId: "crd_9a22",
+    cardTitle: "Ship it",
+    arrivalId: "arr_1",
+    stageKey: "review",
+    check: { name: "build", provider: "ci", status: "failed", detail: "lint: failure", url: "https://forge.example/runs/1" },
+    returnedTo: "build",
+  };
+  const OVERRIDDEN = {
+    event: "check.overridden",
+    boardId: "brd_7c1f",
+    cardId: "crd_9a22",
+    cardTitle: "Ship it",
+    arrivalId: "arr_1",
+    stageKey: "review",
+    check: { name: "build", provider: "ci", status: "overridden" },
+    by: "prn_rakesh",
+    comment: "the runner is flaky",
+    at: "2026-11-09T12:10:00.000Z",
+  };
+
+  test("each is handed to its path, and says what became of it", async () => {
+    const failed: unknown[] = [];
+    const overridden: unknown[] = [];
+    const d = deps({
+      handleCheckFailed: async (body) => {
+        failed.push(body);
+        return { status: "sent" };
+      },
+      handleCheckOverridden: async (body) => {
+        overridden.push(body);
+        return { status: "duplicate" };
+      },
+    });
+    for (const [body, status] of [
+      [FAILED, "sent"],
+      [{ ...FAILED, returnedTo: null }, "sent"],
+      [OVERRIDDEN, "duplicate"],
+    ] as const) {
+      const raw = JSON.stringify(body);
+      const res = await post(d, raw, await sign(SECRET, raw));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, status });
+    }
+    expect(failed).toEqual([FAILED, { ...FAILED, returnedTo: null }]);
+    expect(overridden).toEqual([OVERRIDDEN]);
+  });
+
+  test("one this hub cannot act on is acknowledged and goes nowhere", async () => {
+    const handled: unknown[] = [];
+    const d = deps({
+      handleCheckFailed: async (body) => {
+        handled.push(body);
+        return { status: "sent" };
+      },
+      handleCheckOverridden: async (body) => {
+        handled.push(body);
+        return { status: "sent" };
+      },
+    });
+    for (const bad of [
+      { ...FAILED, check: { ...FAILED.check, status: "passed" } },
+      { ...FAILED, check: { ...FAILED.check, name: "ci/build" } },
+      { ...FAILED, check: { ...FAILED.check, provider: "cost" } },
+      { ...FAILED, returnedTo: 4 },
+      { ...FAILED, cardId: "" },
+      { ...FAILED, arrivalId: "" },
+      { ...OVERRIDDEN, comment: "  " },
+      { ...OVERRIDDEN, at: "now" },
+      { ...OVERRIDDEN, by: "" },
+      { ...OVERRIDDEN, check: { ...OVERRIDDEN.check, status: "failed" } },
+    ]) {
+      const raw = JSON.stringify(bad);
+      const res = await post(d, raw, await sign(SECRET, raw));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, ignored: true });
+    }
+    expect(handled).toHaveLength(0);
+  });
+});

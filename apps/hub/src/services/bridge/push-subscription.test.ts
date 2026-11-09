@@ -49,13 +49,15 @@ describe("subscribing each board to the hub's push", () => {
     expect(sent[0]!.body).toEqual({
       url: `${PUBLIC}/public/bridge/superpipeline/push`,
       token: "shh",
-      events: ["gate.pending", "elicitation.pending", "delivery.pending", "attention.pending", "decision.reminded", "decision.escalated", "gate.approval_recorded", "decision.released", "decision.pulled_back"],
+      events: ["gate.pending", "elicitation.pending", "delivery.pending", "attention.pending", "decision.reminded", "decision.escalated", "gate.approval_recorded", "decision.released", "decision.pulled_back", "check.failed", "check.overridden"],
     });
   });
 
-  test("subscribes to every event the push route projects, the delivery follow-up, the timeouts, quorum progress and holds included", () => {
+  test("subscribes to every event the push route projects, the delivery follow-up, the timeouts, quorum progress, holds and checks included", () => {
     expect([...PUSH_EVENTS].sort()).toEqual([
       "attention.pending",
+      "check.failed",
+      "check.overridden",
       "decision.escalated",
       "decision.pulled_back",
       "decision.released",

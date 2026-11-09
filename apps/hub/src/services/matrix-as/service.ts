@@ -47,7 +47,14 @@ import {
 import { handleQuestionAnswer } from "./question-answer";
 import { handleDeliveryAnswer, settleDeliveryOutcome } from "./delivery-answer";
 import { claimDeliveryOutcome, recordedDelivery } from "./delivery-projection";
-import { answerAttentionAtSuperpipeline, pullBackAtSuperpipeline, updateDeliveryAtSuperpipeline } from "./gate-resolve";
+import {
+  answerAttentionAtSuperpipeline,
+  overrideCheckAtSuperpipeline,
+  pullBackAtSuperpipeline,
+  updateDeliveryAtSuperpipeline,
+} from "./gate-resolve";
+import { handleCheckOverride } from "./check-override";
+import { recordedChecksCard } from "./checks-waiting";
 import { handleGatePullBack } from "./gate-pull-back";
 import { handleAttentionAnswer, settleAttentionOutcome } from "./attention-answer";
 import { claimAttentionOutcome, recordedAttention, type WaitKey } from "./attention-projection";
@@ -672,6 +679,23 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     : undefined;
 
   /**
+   * A machine check overridden from chat (check.override.v2, charter 2026-11-09: a gate may be decided
+   * by checks §5): carried to the board as the person who sent it. Success says nothing here; the
+   * board's `check.overridden` push says it in the room.
+   */
+  const checkOverrides = superpipelineBaseUrl
+    ? {
+        handle: async (event: { sender: string; content: Record<string, unknown> }, roomId: string) =>
+          handleCheckOverride(event, roomId, {
+            principalForMatrixId,
+            recordedChecksCard,
+            override: (input) => overrideCheckAtSuperpipeline(input, { baseUrl: superpipelineBaseUrl, mint: mintForBoard }),
+            reply: replyInRoom,
+          }),
+      }
+    : undefined;
+
+  /**
    * An agent's reply, spoken (`voice-reply.ts`): after a turn ends with text,
    * when the station's speech settings say so — the console's station and
    * hub settings, then SPEECH_* env. Bridge-mode stations only; runs after
@@ -702,6 +726,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     deliveries,
     attention,
     pullBacks,
+    checkOverrides,
     client: speakingClient,
     // Voice notes to text, looked up per voice note for the room's station:
     // its own setting, then the hub's (both in the console), then the

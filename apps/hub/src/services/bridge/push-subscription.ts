@@ -41,6 +41,10 @@ export const PUSH_EVENTS = [
   // may wait for its release time" §7): the hub replies to the gate's card with what became of it.
   "decision.released",
   "decision.pulled_back",
+  // A machine check failed and returned the card, or an owner or admin overrode one (charter: "A
+  // gate may be decided by checks" §7): the hub says it in the board's room.
+  "check.failed",
+  "check.overridden",
 ] as const;
 
 export function pushHookUrl(publicUrl: string): string {

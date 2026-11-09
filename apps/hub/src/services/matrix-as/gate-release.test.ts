@@ -570,8 +570,8 @@ describe("an approval that waits, against the shared corpus", () => {
   const pullBackEntry = entry(GATE_PULL_BACK_V2_SUITE_TYPE);
   const decision = entry(GATE_DECISION_V2_SUITE_TYPE);
 
-  test("version 10", () => {
-    expect(corpus.version).toBe(10);
+  test("version 11", () => {
+    expect(corpus.version).toBe(11);
   });
 
   test("the hub's gate.v2 for each held gate is exactly what the corpus accepts", () => {

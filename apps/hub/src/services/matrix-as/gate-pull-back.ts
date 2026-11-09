@@ -76,6 +76,18 @@ export function pullBackRefusalText(code: string): string {
       return "Only someone who may decide this gate, or a workspace owner or admin, can pull it back. Nothing has changed.";
     case "SEPARATION_OF_DUTIES":
       return "You produced this work, so you can't pull back its approval. Nothing has changed.";
+    default:
+      return boardCallRefusalText(code);
+  }
+}
+
+/**
+ * What a refusal any person-carried board call can meet becomes in the room: a comment the board did
+ * not take, an identity or assertion that failed, a board out of reach, or a code this hub does not
+ * know. Shared with a check's override (`check-override.ts`).
+ */
+export function boardCallRefusalText(code: string): string {
+  switch (code) {
     case "INVALID_COMMENT":
       return "The board did not take that comment: it needs a short one saying why. Nothing has changed.";
     case "IDENTITY_UNAVAILABLE":

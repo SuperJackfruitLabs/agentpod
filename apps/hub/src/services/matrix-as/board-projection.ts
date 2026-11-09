@@ -20,7 +20,7 @@ import {
 import { readBoardQuestions, sweepElicitationBoardNow } from "./elicitation-sweep";
 import { noteGatePosted } from "./fleet-gates";
 import { noteAttentionPosted } from "./fleet-attention";
-import { readBoardPending, sweepBoardNow } from "./gate-sweep";
+import { readBoardCardChecks, readBoardPending, sweepBoardNow } from "./gate-sweep";
 import type { MatrixBridge } from "./service";
 import { repostEscalationsOnJoin, type DecisionNoticeDeps } from "./decision-notices";
 import { workspaceAdminMatrixIds } from "./workspace-admins";
@@ -107,6 +107,8 @@ export function boardProjectionDeps(bridge: Pick<MatrixBridge, "client" | "confi
       const [cards, questions] = await Promise.all([readBoardPending(boardId), readBoardQuestions(boardId)]);
       return [...cards, ...questions];
     },
+    /** A card's checks as the board reads them, for the card an escalation of overdue checks posts. */
+    checksForCard: (boardId: string, cardId: string) => readBoardCardChecks(boardId, cardId),
     /** A posted gate is a pending decision on each of the board's humans' fleet card. */
     onPosted: (
       d: Parameters<typeof noteGatePosted>[0],
