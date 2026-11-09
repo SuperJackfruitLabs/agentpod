@@ -113,6 +113,17 @@ refused with a reply saying it is still waiting for others, and an approval from
 not count for that gate is refused with a reply saying why. One rejection or request for changes
 still ends the gate at once. The delivery is manual unless everyone who approved chose automatic.
 
+**An approval may wait for its release time.** A workspace owner or admin can set a stage to hold
+its approvals for a cooling-off period (5 minutes to 7 days), and a post can say it must not go out
+before a set time. The gate then says so before anyone approves ("If approved, it goes ahead after
+Mon 16 Nov, 09:00 UTC"). An approval is recorded at once but does not act until that time: the
+room's receipt says "Approved by rakesh — goes ahead after … unless pulled back", and nothing is
+posted or advanced until then. Until it acts, anyone who may decide the gate, or a workspace owner
+or admin, can **pull it back** with a comment, from the app or on the board; that sends the work back
+for changes, and the room replies "Pulled back by … — returned for changes: …". When the time comes
+the room replies "Released — it went ahead." or, if what was approved changed or expired meanwhile,
+"Did not go ahead: …". Pulling back after it went ahead is refused, and nobody can move the time.
+
 ## A card waiting on you
 
 A card also stops on a person when its agent keeps failing, says it is **blocked**, or is **not
