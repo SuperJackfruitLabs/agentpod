@@ -40,6 +40,7 @@ import { parseGateDecision } from "./gates";
 import { parseQuestionAnswer } from "./question-answer";
 import { parseDeliveryAnswer } from "./delivery-answer";
 import { parseAttentionAnswer } from "./attention-answer";
+import { GATE_PULL_BACK_V2_SUITE_TYPE } from "./gate-release-wire";
 import {
   PERMISSION_OUTCOME_TYPE,
   isPermissionAnswerMarked,
@@ -131,6 +132,13 @@ export interface InboundDeps {
   };
   /** An answer to a waiting card (`dev.superpipeline.attention.answer.v2`): resume or archive it. */
   attention?: {
+    handle(event: { sender: string; content: Record<string, unknown> }, roomId: string): Promise<unknown>;
+  };
+  /**
+   * A held approval pulled back (`dev.superpipeline.gate.pull_back.v2`, charter 2026-11-09: an
+   * approval may wait for its release time). Optional, for the reason `gates` is.
+   */
+  pullBacks?: {
     handle(event: { sender: string; content: Record<string, unknown> }, roomId: string): Promise<unknown>;
   };
   client: {
@@ -448,6 +456,12 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
   }
   if (deps.attention && event.content && parseAttentionAnswer(event.content)) {
     await deps.attention.handle({ sender: event.sender, content: event.content }, event.room_id);
+    return;
+  }
+  // A pull-back answers the board too, never the agent, for the same reasons and in the same place.
+  // Matched by its marker alone, so a malformed one is refused there rather than read as a prompt.
+  if (deps.pullBacks && event.content?.suite_event_type === GATE_PULL_BACK_V2_SUITE_TYPE) {
+    await deps.pullBacks.handle({ sender: event.sender, content: event.content }, event.room_id);
     return;
   }
 

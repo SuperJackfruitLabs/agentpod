@@ -51,6 +51,7 @@ import type { DeliveryProjectionOutcome } from "./delivery-projection";
 import { isAttentionPending, type AttentionPendingDelivery } from "./attention-wire";
 import type { AttentionProjectionOutcome, WaitKey } from "./attention-projection";
 import { relayTokenForBoard, type TenantsForBoard } from "./relay-scope";
+import { heldUntilOf } from "./gate-release-wire";
 
 const log = createLogger("gate-sweep");
 
@@ -83,7 +84,13 @@ export interface GateSweepDeps {
   decisionFor?(
     boardId: string,
     gateId: string,
-  ): Promise<{ decision: string; decidedBy: string | null; chosen?: { id: string; label: string } | null } | null>;
+  ): Promise<{
+    decision: string;
+    decidedBy: string | null;
+    chosen?: { id: string; label: string } | null;
+    /** A held approval's release time, named in the receipt (charter 2026-11-09, an approval may wait). */
+    heldUntil?: string | null;
+  } | null>;
   /**
    * The board's read of one gate, whatever its status, or null when it cannot be read. What an
    * approval of a quorum gate is checked against (`readBoardGate`): accepted is not resolved.
@@ -91,13 +98,23 @@ export interface GateSweepDeps {
   readGate?(
     boardId: string,
     gateId: string,
-  ): Promise<{ status: string; decision: string | null; decidedBy: string | null; chosen: { id: string; label: string } | null } | null>;
-  /** Post the outcome receipt and claim it, so two sweeps leave one line. `chosen` names a variant chosen. */
+  ): Promise<{
+    status: string;
+    decision: string | null;
+    decidedBy: string | null;
+    chosen: { id: string; label: string } | null;
+    heldUntil?: string | null;
+  } | null>;
+  /**
+   * Post the outcome receipt and claim it, so two sweeps leave one line. `chosen` names a variant
+   * chosen; `heldUntil` the release time of a held approval.
+   */
   settleOutcome?(
     gateId: string,
     decision: string,
     decidedBy: string | null,
     chosen?: { id: string; label: string } | null,
+    heldUntil?: string | null,
   ): Promise<boolean>;
   /**
    * What a board said it is still waiting on, every pass it answered. The
@@ -358,7 +375,9 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
         // alone: posting "resolved" without the outcome would be inventing one, and a room that
         // says a gate was decided but not how is worse than one that still asks.
         if (!decided) continue;
-        if (await deps.settleOutcome?.(posted.gateId, decided.decision, decided.decidedBy, decided.chosen ?? null)) {
+        if (
+          await deps.settleOutcome?.(posted.gateId, decided.decision, decided.decidedBy, decided.chosen ?? null, decided.heldUntil ?? null)
+        ) {
           settled++;
           log.info("settled a room card for a gate decided elsewhere", {
             gateId: posted.gateId,
@@ -640,7 +659,11 @@ export function bridgeGateSweepDeps(
       // Only a RESOLVED gate settles a card. A gate that is somehow neither pending nor resolved
       // is a shape this hub does not model, and guessing at it would put a wrong word in a room.
       if (!g || g.status !== "resolved" || !g.decision) return null;
-      return { decision: g.decision, decidedBy: g.decidedBy, chosen: g.chosen };
+      // A held approval pulled back before this hub closed its card (charter 2026-11-09, an approval
+      // may wait for its release time §4) went back for rework: the card reads as changes requested,
+      // by whoever pulled it back, never as an approval that will act.
+      if (g.pulledBack) return { decision: "request_changes", decidedBy: g.pulledBack.by, chosen: null };
+      return { decision: g.decision, decidedBy: g.decidedBy, chosen: g.chosen, heldUntil: heldUntilOf(g.heldUntil) };
     },
   };
 }
@@ -832,6 +855,12 @@ export async function readBoardPending(boardId: string): Promise<unknown[]> {
 export async function readBoardGate(
   boardId: string,
   gateId: string,
-): Promise<{ status: string; decision: string | null; decidedBy: string | null; chosen: { id: string; label: string } | null } | null> {
+): Promise<{
+  status: string;
+  decision: string | null;
+  decidedBy: string | null;
+  chosen: { id: string; label: string } | null;
+  heldUntil?: string | null;
+} | null> {
   return (await running?.readGate?.(boardId, gateId)) ?? null;
 }

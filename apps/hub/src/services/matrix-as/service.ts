@@ -47,7 +47,8 @@ import {
 import { handleQuestionAnswer } from "./question-answer";
 import { handleDeliveryAnswer, settleDeliveryOutcome } from "./delivery-answer";
 import { claimDeliveryOutcome, recordedDelivery } from "./delivery-projection";
-import { answerAttentionAtSuperpipeline, updateDeliveryAtSuperpipeline } from "./gate-resolve";
+import { answerAttentionAtSuperpipeline, pullBackAtSuperpipeline, updateDeliveryAtSuperpipeline } from "./gate-resolve";
+import { handleGatePullBack } from "./gate-pull-back";
 import { handleAttentionAnswer, settleAttentionOutcome } from "./attention-answer";
 import { claimAttentionOutcome, recordedAttention, type WaitKey } from "./attention-projection";
 import { ATTENTION_OUTCOME_TYPE } from "./attention-wire";
@@ -209,6 +210,8 @@ export interface MatrixBridge {
     decision: string,
     decidedBy: string | null,
     chosen?: { id: string; label: string } | null,
+    /** A held approval's release time, which the receipt names (charter 2026-11-09, an approval may wait). */
+    heldUntil?: string | null,
   ): Promise<boolean>;
   /**
    * Close a delivery follow-up's room card when the board no longer owes it — a link recorded on
@@ -647,6 +650,28 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     : undefined;
 
   /**
+   * A held approval pulled back from chat (gate.pull_back.v2, charter 2026-11-09: an approval may
+   * wait for its release time §4): carried to the board as the person who sent it. Success says
+   * nothing here; the board's `decision.pulled_back` push replies to the gate's card.
+   */
+  const pullBacks = superpipelineBaseUrl
+    ? {
+        handle: async (event: { sender: string; content: Record<string, unknown> }, roomId: string) =>
+          handleGatePullBack(event, roomId, {
+            principalForMatrixId,
+            recordedGate: async (gateId: string) => {
+              const p = await projectionForGate(gateId);
+              return p
+                ? { tenantId: p.tenantId, boardId: p.boardId, roomId: p.roomId, eventId: p.eventId, proseEventId: p.proseEventId }
+                : null;
+            },
+            pullBack: (input) => pullBackAtSuperpipeline(input, { baseUrl: superpipelineBaseUrl, mint: mintForBoard }),
+            reply: replyInRoom,
+          }),
+      }
+    : undefined;
+
+  /**
    * An agent's reply, spoken (`voice-reply.ts`): after a turn ends with text,
    * when the station's speech settings say so — the console's station and
    * hub settings, then SPEECH_* env. Bridge-mode stations only; runs after
@@ -676,6 +701,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     questions,
     deliveries,
     attention,
+    pullBacks,
     client: speakingClient,
     // Voice notes to text, looked up per voice note for the room's station:
     // its own setting, then the hub's (both in the console), then the
@@ -788,7 +814,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       });
     },
 
-    settleGate: async (gateId, decision, decidedBy, chosen) => {
+    settleGate: async (gateId, decision, decidedBy, chosen, heldUntil) => {
       const [row] = await db
         .select()
         .from(matrixGateEvents)
@@ -799,7 +825,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       if (!row) return false;
 
       await settleGateOutcome(
-        { gateId, decision, decidedBy, chosen: chosen ?? null },
+        { gateId, decision, decidedBy, chosen: chosen ?? null, heldUntil: heldUntil ?? null },
         row.roomId,
         { boardId: row.boardId, eventId: row.eventId, proseEventId: row.proseEventId },
         {

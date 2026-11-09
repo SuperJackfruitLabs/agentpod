@@ -1,6 +1,6 @@
 {
   "corpus": "ecosystem-identity/matrix-gate-events",
-  "version": 9,
+  "version": 10,
   "authoredAt": "2026-08-30",
   "authoredFrom": "the gates table in superpipeline apps/api/src/board/board-do.ts, the GateDecision union it resolves against, and charter decisions/2026-08-30-a-gate-closes-over-chat.md",
   "purpose": "A superpipeline approval gate crosses into a Matrix room and a human's answer crosses back. Three codebases must agree on the field names: the board that opens the gate, the Application Service that projects and resolves it, and the client that draws the buttons. A rename in any one of them is a gate that silently never resolves — which reads to the human as a button that does nothing.",
@@ -6231,6 +6231,693 @@
           "httpStatus": 403,
           "from": "deciders",
           "said": "Your approval does not count for this gate: it needs approvals from its named deciders. Nothing has changed."
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.v2",
+      "variant": "release",
+      "direction": "outbound — the board asks for an approval that would wait before it acts",
+      "decidedBy": "charter decisions/2026-11-09-an-approval-may-wait-for-its-release-time.md §7",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as for the entry without a variant; `release` sits beside the options.",
+      "requiredFields": [
+        "suite_event_type",
+        "options",
+        "release"
+      ],
+      "notes": {
+        "release": "{ hold_for_minutes?, not_before? }: hold_for_minutes the stage's holdFor, a whole number from 5 to 10080; not_before the subject's own not-before time (on a variant gate before the choice, the earliest of the variants'), an ISO time. At least one is present. snake_case, from the board's camelCase release on gate.pending. The release time is the later of not_before and the approval's time plus hold_for_minutes, fixed when the gate resolves.",
+        "prose": "The body adds one paragraph: \"If approved, it goes ahead after <time>.\", \"If approved, it waits <duration> before it goes ahead.\", or both joined (\"…after <time>, and no sooner than <duration> after the approval.\"). Times are written in UTC and say so (\"Mon 16 Nov, 09:00 UTC\"); a client renders not_before in the reader's zone itself.",
+        "absent": "A gate nothing holds carries no release key and no extra paragraph, so its gate.v2 is byte-identical to before.",
+        "malformed": "A release with either half malformed is not carried at all, rather than in part: a card that named a time while a garbled hold kept the approval longer would be saying something false. superpipeline still holds the approval."
+      },
+      "accept": [
+        {
+          "why": "a stage that holds approvals for 30 minutes, on a subject that must not go out before Monday 09:00",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)\n\nIf approved, it goes ahead after Mon 16 Nov, 09:00 UTC, and no sooner than 30 minutes after the approval.",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "release": {
+              "hold_for_minutes": 30,
+              "not_before": "2026-11-16T09:00:00.000Z"
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        },
+        {
+          "why": "a cooling-off period alone",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)\n\nIf approved, it waits 30 minutes before it goes ahead.",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "release": {
+              "hold_for_minutes": 30
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        },
+        {
+          "why": "an embargo alone",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)\n\nIf approved, it goes ahead after Mon 16 Nov, 09:00 UTC.",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "release": {
+              "not_before": "2026-11-16T09:00:00.000Z"
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "hold_for_minutes below 5",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "release": {
+              "hold_for_minutes": 4
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        },
+        {
+          "why": "hold_for_minutes above 7 days",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "release": {
+              "hold_for_minutes": 10081
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        },
+        {
+          "why": "hold_for_minutes not a whole number",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "release": {
+              "hold_for_minutes": 30.5
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        },
+        {
+          "why": "not_before not an ISO time",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "release": {
+              "not_before": "next Monday 09:00"
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        },
+        {
+          "why": "a good not_before beside a bad hold is not carried in part",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "release": {
+              "hold_for_minutes": 0,
+              "not_before": "2026-11-16T09:00:00.000Z"
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        },
+        {
+          "why": "neither half",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "release": {},
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.outcome.v1",
+      "variant": "release",
+      "direction": "outbound — the receipt for an approval that is recorded but has not acted yet",
+      "decidedBy": "charter decisions/2026-11-09-an-approval-may-wait-for-its-release-time.md §3, §7",
+      "sender": "the board room's speaker",
+      "matrixEventType": "dev.superpipeline.gate.outcome.v1",
+      "discriminator": "As the entry without a variant.",
+      "requiredFields": [
+        "suite_event_type",
+        "gate_id",
+        "board_id",
+        "decision",
+        "decided_by",
+        "held_until",
+        "m.relates_to"
+      ],
+      "notes": {
+        "held_until": "The release time, from the board's heldUntil on the resolved gate (ISO). Present only while the approval is held when the receipt is posted; an approval that acts at once is unchanged.",
+        "prose": "Beside it: \"Approved by rakesh — goes ahead after Mon 16 Nov, 09:00 UTC unless pulled back.\" The card stays open for a Pull back until decision.released or decision.pulled_back follows.",
+        "pulledBackFirst": "A held approval pulled back before this hub posted its receipt (answered on the web and caught by the gate sweep) is closed as request_changes, decided_by whoever pulled it back, with no held_until."
+      },
+      "accept": [
+        {
+          "why": "an approval held until its release time",
+          "said": "Approved by rakesh — goes ahead after Mon 16 Nov, 09:00 UTC unless pulled back.",
+          "content": {
+            "suite_event_type": "dev.superpipeline.gate.outcome.v1",
+            "gate_id": "gate_6e19",
+            "board_id": "brd_7c1f",
+            "decision": "approve",
+            "decided_by": "rakesh",
+            "held_until": "2026-11-16T09:00:00.000Z",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "reject": []
+    },
+    {
+      "suiteEventType": "dev.agentpod.decision.released.v2",
+      "variant": "release",
+      "direction": "outbound — a held approval reached its release time",
+      "decidedBy": "charter decisions/2026-11-09-an-approval-may-wait-for-its-release-time.md §5-7",
+      "sender": "the board room's speaker",
+      "matrixEventType": "dev.agentpod.decision.released.v2",
+      "requiredFields": [
+        "suite_event_type",
+        "schema_version",
+        "gate_id",
+        "board_id",
+        "card_id",
+        "outcome",
+        "released_at",
+        "m.relates_to"
+      ],
+      "notes": {
+        "when": "Posted for each decision.released superpipeline pushes, at most once per gate however often it is delivered.",
+        "outcome": "`released`: the approval acted (the card advanced, or a manual delivery's follow-up began). `blocked`: it was checked again at its release time and did not act; `reason` says why and the card is blocked on the board.",
+        "prose": "Beside it, an m.text in reply to the gate's card: \"Released — it went ahead.\" or \"Did not go ahead: <reason>.\"",
+        "relation": "m.reference to the gate's own event, as the outcome receipt does, so a client knows which card to mark."
+      },
+      "accept": [
+        {
+          "why": "released",
+          "said": "Released — it went ahead.",
+          "content": {
+            "suite_event_type": "dev.agentpod.decision.released.v2",
+            "schema_version": 1,
+            "gate_id": "gate_6e19",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "outcome": "released",
+            "released_at": "2026-11-16T09:03:00.000Z",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "blocked at its release time",
+          "said": "Did not go ahead: the approved subject changed before the release time.",
+          "content": {
+            "suite_event_type": "dev.agentpod.decision.released.v2",
+            "schema_version": 1,
+            "gate_id": "gate_6e19",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "outcome": "blocked",
+            "released_at": "2026-11-16T09:03:00.000Z",
+            "reason": "the approved subject changed before the release time",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "reject": []
+    },
+    {
+      "suiteEventType": "dev.agentpod.decision.pulled_back.v2",
+      "variant": "release",
+      "direction": "outbound — a held approval was pulled back before its release time",
+      "decidedBy": "charter decisions/2026-11-09-an-approval-may-wait-for-its-release-time.md §4, §7",
+      "sender": "the board room's speaker",
+      "matrixEventType": "dev.agentpod.decision.pulled_back.v2",
+      "requiredFields": [
+        "suite_event_type",
+        "schema_version",
+        "gate_id",
+        "board_id",
+        "card_id",
+        "pulled_back_by",
+        "comment",
+        "at",
+        "m.relates_to"
+      ],
+      "notes": {
+        "when": "Posted for each decision.pulled_back superpipeline pushes, however the pull-back was made (from chat or on the web), at most once per gate.",
+        "pulled_back_by": "The person's handle, never an mxid or a principal id; null when this hub cannot name them.",
+        "meaning": "The approval acts as request changes: the card returned for rework, and its next submission opens a new gate. A client draws the gate's card as returned for changes and withdraws Pull back.",
+        "prose": "Beside it, an m.text in reply to the gate's card: \"Pulled back by rakesh — returned for changes: <comment>\"."
+      },
+      "accept": [
+        {
+          "why": "pulled back with a comment",
+          "said": "Pulled back by rakesh — returned for changes: wrong image",
+          "content": {
+            "suite_event_type": "dev.agentpod.decision.pulled_back.v2",
+            "schema_version": 1,
+            "gate_id": "gate_6e19",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "pulled_back_by": "rakesh",
+            "comment": "wrong image",
+            "at": "2026-11-16T08:40:00.000Z",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "reject": []
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.pull_back.v2",
+      "variant": "release",
+      "direction": "inbound — a person pulls a held approval back",
+      "decidedBy": "charter decisions/2026-11-09-an-approval-may-wait-for-its-release-time.md §4, §7",
+      "sender": "the human's own Matrix session",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as for a decision.",
+      "requiredFields": [
+        "suite_event_type",
+        "schema_version",
+        "gate_id",
+        "comment",
+        "m.relates_to"
+      ],
+      "notes": {
+        "relation": "m.reference to the gate's event (either the gate's own event or its prose), in the room the gate was posted in. m.in_reply_to is not accepted.",
+        "carried": "Carried to superpipeline's pull-back route as the person, as a decision is. Success posts nothing from the answer itself: the board's decision.pulled_back push is what replies, once.",
+        "comment": "Required. Without one the Application Service refuses with the sentence in `said`, after checking who sent it, and nothing reaches the board.",
+        "boardRefusals": "What superpipeline refuses a pull-back with, and the sentence the Application Service says in the room."
+      },
+      "accept": [
+        {
+          "why": "a decider pulls back with a comment",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Pulled back: wrong image",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.pull_back.v2",
+            "gate_id": "gate_6e19",
+            "comment": "wrong image",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "no comment",
+          "said": "Pulling back an approval needs a comment saying why. Nothing has changed.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Pulled back",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.pull_back.v2",
+            "gate_id": "gate_6e19",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "a blank comment",
+          "said": "Pulling back an approval needs a comment saying why. Nothing has changed.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Pulled back",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.pull_back.v2",
+            "gate_id": "gate_6e19",
+            "comment": "   ",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "boardRefusals": [
+        {
+          "code": "APPROVAL_RELEASED",
+          "httpStatus": 409,
+          "said": "Too late to pull back: this approval has already gone ahead. Nothing has changed."
+        },
+        {
+          "code": "GATE_NOT_HELD",
+          "httpStatus": 409,
+          "said": "There is nothing to pull back: this approval is not waiting for its release time. Nothing has changed."
+        },
+        {
+          "code": "APPROVAL_DECIDER_NOT_ALLOWED",
+          "httpStatus": 403,
+          "said": "Only someone who may decide this gate, or a workspace owner or admin, can pull it back. Nothing has changed."
+        },
+        {
+          "code": "SEPARATION_OF_DUTIES",
+          "httpStatus": 403,
+          "said": "You produced this work, so you can't pull back its approval. Nothing has changed."
+        },
+        {
+          "code": "INVALID_COMMENT",
+          "httpStatus": 400,
+          "said": "The board did not take that comment: it needs a short one saying why. Nothing has changed."
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.decision.v2",
+      "variant": "release",
+      "direction": "inbound — an approval of a gate whose release time would fall after its subject expires",
+      "decidedBy": "charter decisions/2026-11-09-an-approval-may-wait-for-its-release-time.md §5",
+      "sender": "the human's own Matrix session",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content.",
+      "requiredFields": [
+        "suite_event_type",
+        "gate_id",
+        "option_id",
+        "m.relates_to"
+      ],
+      "notes": {
+        "shape": "Unchanged: an approval of a gate that holds is an ordinary decision.v2.",
+        "held": "Accepted and held: the outcome receipt names the release time (the gate.outcome.v1 entry with this variant), read back from the board's heldUntil.",
+        "boardRefusals": "An approval that could never act is refused and nothing is recorded; the sentence the Application Service says in the room."
+      },
+      "accept": [
+        {
+          "why": "an approval of a held gate",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approved",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.decision.v2",
+            "gate_id": "gate_6e19",
+            "option_id": "approve",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "reject": [],
+      "boardRefusals": [
+        {
+          "code": "APPROVAL_RELEASE_AFTER_EXPIRY",
+          "httpStatus": 409,
+          "said": "That can't be approved: it would go ahead only after what it approves has expired. Nothing has changed."
         }
       ]
     }

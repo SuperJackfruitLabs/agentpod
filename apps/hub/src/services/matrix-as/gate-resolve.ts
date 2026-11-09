@@ -54,6 +54,23 @@ export async function resolveGateAtSuperpipeline(
 }
 
 /**
+ * Pull a held approval back at superpipeline before its release time — **as the person who sent
+ * the pull-back** (charter: "An approval may wait for its release time" §4). A person-only route,
+ * judged like a decision on the gate, so the same per-answer assertion as `resolveGateAtSuperpipeline`.
+ */
+export async function pullBackAtSuperpipeline(
+  input: { boardId: string; gateId: string; comment: string; principalId: string; senderMxid: string },
+  deps: BoardCallDeps,
+): Promise<{ ok: true } | { ok: false; code: string }> {
+  return postToBoardAsPrincipal(
+    `/v1/boards/${encodeURIComponent(input.boardId)}/gates/${encodeURIComponent(input.gateId)}/pull-back`,
+    { comment: input.comment },
+    input,
+    deps,
+  );
+}
+
+/**
  * Record a manual delivery's live link, or switch it to automatic delivery, at superpipeline —
  * **as the human who answered the follow-up** (charter: "The decision envelope covers questions
  * and follow-ups" §3). The same assertion, minted per answer, for the reason

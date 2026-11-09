@@ -8,6 +8,8 @@ export { DECISION_KINDS } from "./deliveries";
 export type {
   AttentionPendingDelivery,
   DecisionKind,
+  DecisionPulledBackDelivery,
+  DecisionReleasedDelivery,
   DecisionTimeoutDelivery,
   DeliveryPendingDelivery,
   ElicitationPendingDelivery,

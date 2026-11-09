@@ -413,8 +413,8 @@ describe("variant gates against the shared corpus", () => {
   const decision = entry(GATE_DECISION_V2_SUITE_TYPE);
   const outcome = entry(GATE_OUTCOME_TYPE);
 
-  test("version 8, carried in 9", () => {
-    expect(corpus.version).toBe(9);
+  test("version 8, carried in 10", () => {
+    expect(corpus.version).toBe(10);
   });
 
   test("the hub's gate.v2 for a variant gate is exactly what the corpus accepts", () => {
@@ -488,10 +488,10 @@ describe("decided on the board: the sweep reads which variant was chosen", () =>
       { id: "thread", label: "With the thread", status: "active", chosen: true },
     ];
     const chosen = await reading({ status: "resolved", decision: "approve_automatic", decidedBy: "prn_person", variants }).decisionFor?.("brd_7c1f", "gate_5d72");
-    expect(chosen).toEqual({ decision: "approve_automatic", decidedBy: "prn_person", chosen: { id: "thread", label: "With the thread" } });
+    expect(chosen).toEqual({ decision: "approve_automatic", decidedBy: "prn_person", chosen: { id: "thread", label: "With the thread" }, heldUntil: null });
     for (const v of [undefined, "nonsense", [{ id: "thread", label: "With the thread", chosen: "yes" }], [{ id: 4, label: "x", chosen: true }]]) {
       const plain = await reading({ status: "resolved", decision: "reject", decidedBy: "prn_person", variants: v }).decisionFor?.("brd_7c1f", "gate_5d72");
-      expect(plain).toEqual({ decision: "reject", decidedBy: "prn_person", chosen: null });
+      expect(plain).toEqual({ decision: "reject", decidedBy: "prn_person", chosen: null, heldUntil: null });
     }
   });
 
@@ -509,6 +509,6 @@ describe("decided on the board: the sweep reads which variant was chosen", () =>
         return true;
       },
     });
-    expect(settled).toEqual([["gate_5d72", "approve_manual", "prn_person", { id: "short", label: "Short" }]]);
+    expect(settled).toEqual([["gate_5d72", "approve_manual", "prn_person", { id: "short", label: "Short" }, null]]);
   });
 });

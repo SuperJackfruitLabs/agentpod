@@ -520,14 +520,35 @@ export class SuperpipelineClient {
     decidedBy: string | null;
     /** On a variant gate, the variant an approval chose (`variants[].chosen`); null otherwise. */
     chosen: { id: string; label: string } | null;
+    /**
+     * A held approval's release time, as the board wrote it (charter 2026-11-09, an approval may wait
+     * for its release time); null when nothing holds it. Checked as a time where it is said.
+     */
+    heldUntil: string | null;
+    /** Who pulled a held approval back, when it was (a principal id, never said in a room); null otherwise. */
+    pulledBack: { by: string } | null;
   } | null> {
     try {
       const res = (await this.send("GET", `/v1/boards/${this.boardId}/gates/${encodeURIComponent(gateId)}`)) as {
-        gate?: { status?: string; decision?: string | null; decidedBy?: string | null; variants?: unknown };
+        gate?: {
+          status?: string;
+          decision?: string | null;
+          decidedBy?: string | null;
+          variants?: unknown;
+          heldUntil?: unknown;
+          pulledBack?: unknown;
+        };
       };
       const g = res.gate;
       if (!g || typeof g.status !== "string") return null;
-      return { status: g.status, decision: g.decision ?? null, decidedBy: g.decidedBy ?? null, chosen: chosenVariantOf(g.variants) };
+      return {
+        status: g.status,
+        decision: g.decision ?? null,
+        decidedBy: g.decidedBy ?? null,
+        chosen: chosenVariantOf(g.variants),
+        heldUntil: typeof g.heldUntil === "string" ? g.heldUntil : null,
+        pulledBack: pulledBackOf(g.pulledBack),
+      };
     } catch {
       return null;
     }
@@ -638,6 +659,12 @@ export class SuperpipelineClient {
   release(lease: RunLease): Promise<unknown> {
     return this.verb(lease, "release");
   }
+}
+
+/** A read's `pulledBack: { by, at, comment }`, kept to who; null when absent or not that shape. */
+function pulledBackOf(v: unknown): { by: string } | null {
+  if (typeof v !== "object" || v === null || !("by" in v)) return null;
+  return typeof v.by === "string" && v.by !== "" ? { by: v.by } : null;
 }
 
 /**
