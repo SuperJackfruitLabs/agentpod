@@ -124,14 +124,20 @@ const titled = (title: string | null) => (title ? ` on “${cut(title.trim(), TI
 
 // ── check.failed ─────────────────────────────────────────────────────────────
 
+/** The identifiers both check pushes carry: board, card, the check set's arrival, its stage, and the card's title. */
+function checkPushIdentified(v: object): boolean {
+  if (!boundedId(field(v, "boardId")) || !boundedId(field(v, "cardId")) || !boundedId(field(v, "stageKey"))) return false;
+  return boundedId(field(v, "arrivalId")) && typeof field(v, "cardTitle") === "string";
+}
+
 /**
  * Is this a `check.failed` this hub can act on? Used on the signed push, because authenticated is not
- * checked: the identifiers present, the check well formed and failed, its detail and link strings when
- * present, and `returnedTo` a stage or null.
+ * checked: the identifiers present (the arrival among them) and the title a string, the check well
+ * formed and failed, its detail and link strings when present, and `returnedTo` a stage or null.
  */
 export function isCheckFailed(v: unknown): v is CheckFailedDelivery {
   if (!isRecord(v) || field(v, "event") !== "check.failed") return false;
-  if (!boundedId(field(v, "boardId")) || !boundedId(field(v, "cardId")) || !boundedId(field(v, "stageKey"))) return false;
+  if (!checkPushIdentified(v)) return false;
   const check = field(v, "check");
   if (!isRecord(check) || !isCheckName(field(check, "name")) || !isProvider(field(check, "provider"))) return false;
   if (field(check, "status") !== "failed") return false;
@@ -190,7 +196,7 @@ export function checkFailedContent(d: CheckFailedDelivery, cardTitle: string | n
  */
 export function isCheckOverridden(v: unknown): v is CheckOverriddenDelivery {
   if (!isRecord(v) || field(v, "event") !== "check.overridden") return false;
-  if (!boundedId(field(v, "boardId")) || !boundedId(field(v, "cardId")) || !boundedId(field(v, "stageKey"))) return false;
+  if (!checkPushIdentified(v)) return false;
   const check = field(v, "check");
   if (!isRecord(check) || !isCheckName(field(check, "name")) || !isProvider(field(check, "provider"))) return false;
   if (field(check, "status") !== "overridden") return false;

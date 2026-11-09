@@ -67,6 +67,8 @@ const FAILED: CheckFailedDelivery = {
   event: "check.failed",
   boardId: "brd_7c1f",
   cardId: "crd_8a40",
+  cardTitle: "Ship the release",
+  arrivalId: "arr_5d02",
   stageKey: "review",
   check: { name: "build", provider: "ci", status: "failed", detail: "lint: failure", url: "https://forge.example/acme/app/actions/runs/413" },
   returnedTo: "build",
@@ -76,6 +78,8 @@ const OVERRIDDEN: CheckOverriddenDelivery = {
   event: "check.overridden",
   boardId: "brd_7c1f",
   cardId: "crd_8a40",
+  cardTitle: "Ship the release",
+  arrivalId: "arr_5d02",
   stageKey: "review",
   check: { name: "quality", provider: "verdict", status: "overridden" },
   by: "prn_rakesh",
@@ -138,6 +142,7 @@ describe("check.failed and check.overridden are checked before they are believed
   test("well-formed pushes are", () => {
     expect(isCheckFailed(FAILED)).toBe(true);
     expect(isCheckFailed({ ...FAILED, returnedTo: null })).toBe(true);
+    expect(isCheckFailed({ ...FAILED, cardTitle: "" })).toBe(true);
     expect(isCheckFailed({ ...FAILED, check: { name: "build", provider: "ci", status: "failed" } })).toBe(true);
     expect(isCheckOverridden(OVERRIDDEN)).toBe(true);
   });
@@ -149,6 +154,10 @@ describe("check.failed and check.overridden are checked before they are believed
       { ...FAILED, boardId: "" },
       { ...FAILED, cardId: 4 },
       { ...FAILED, stageKey: undefined },
+      { ...FAILED, arrivalId: "" },
+      { ...FAILED, arrivalId: undefined },
+      { ...FAILED, cardTitle: undefined },
+      { ...FAILED, cardTitle: 7 },
       { ...FAILED, check: null },
       { ...FAILED, check: { ...FAILED.check, status: "passed" } },
       { ...FAILED, check: { ...FAILED.check, name: "a/b" } },
@@ -164,6 +173,8 @@ describe("check.failed and check.overridden are checked before they are believed
       { ...OVERRIDDEN, event: "check.failed" },
       { ...OVERRIDDEN, check: { ...OVERRIDDEN.check, status: "passed" } },
       { ...OVERRIDDEN, by: "" },
+      { ...OVERRIDDEN, arrivalId: 3 },
+      { ...OVERRIDDEN, cardTitle: null },
       { ...OVERRIDDEN, at: "yesterday" },
       { ...OVERRIDDEN, comment: "  " },
       { ...OVERRIDDEN, comment: undefined },
@@ -442,7 +453,6 @@ describe("a gate decided by checks, against the shared corpus", () => {
       said?: string;
       content: Record<string, unknown>;
       push?: unknown;
-      cardTitle?: string | null;
       who?: string | null;
       replyTo?: string;
     }>;
@@ -487,20 +497,21 @@ describe("a gate decided by checks, against the shared corpus", () => {
 
   test("a failed check's notice is exactly what the corpus accepts, returned and not", () => {
     expect(failed?.accept).toHaveLength(2);
-    for (const { why, push, cardTitle, replyTo, said, content } of failed?.accept ?? []) {
+    for (const { why, push, replyTo, said, content } of failed?.accept ?? []) {
       expect(isCheckFailed(push), why).toBe(true);
       if (!isCheckFailed(push)) continue;
-      expect(checkFailedContent(push, cardTitle ?? null, replyTo), why).toEqual(content);
-      expect(checkFailedBody(push, cardTitle ?? null), why).toBe(said ?? "");
+      const title = push.cardTitle === "" ? null : push.cardTitle;
+      expect(checkFailedContent(push, title, replyTo), why).toEqual(content);
+      expect(checkFailedBody(push, title), why).toBe(said ?? "");
     }
   });
 
   test("an override's notice is exactly what the corpus accepts", () => {
-    for (const { why, push, who, cardTitle, replyTo, said, content } of overridden?.accept ?? []) {
+    for (const { why, push, who, replyTo, said, content } of overridden?.accept ?? []) {
       expect(isCheckOverridden(push), why).toBe(true);
       if (!isCheckOverridden(push)) continue;
-      expect(checkOverriddenContent(push, who ?? null, cardTitle ?? null, replyTo), why).toEqual(content);
-      expect(checkOverriddenBody(push, who ?? null, cardTitle ?? null), why).toBe(said ?? "");
+      expect(checkOverriddenContent(push, who ?? null, push.cardTitle, replyTo), why).toEqual(content);
+      expect(checkOverriddenBody(push, who ?? null, push.cardTitle), why).toBe(said ?? "");
     }
     expect(overridden?.accept).toHaveLength(1);
   });

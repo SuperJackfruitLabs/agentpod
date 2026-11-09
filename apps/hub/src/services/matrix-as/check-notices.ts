@@ -17,16 +17,15 @@
  * the card. A failure that sent the card back closes that checks.waiting card: its checks are over,
  * and the next arrival's are new.
  *
- * **Once.** A push is at-least-once and carries no arrival id. Each notice is claimed
- * (`matrix_check_notices`) on the card, the notice, the check and a digest of what the push says,
- * before anything is sent, and given back when the send fails: a redelivery (byte for byte the same)
- * posts nothing twice and the board's retry of a failed one posts it. A failure worded exactly like an
- * earlier one is said again once that claim is older than `REPEAT_AFTER_MS`, far past the board's
- * retries (five, over under three minutes), so a second arrival failing the same way is not silenced.
+ * **Once per arrival.** A push is at-least-once. Each notice is claimed (`matrix_check_notices`) on the
+ * board, the card, the check set's arrival, the notice and the check, before anything is sent, and
+ * given back when the send fails: a redelivery posts nothing twice (nor while the first is still being
+ * sent), the board's retry of a failed one posts it, and the same check failing again on the card's
+ * next arrival is said again, however alike the words.
+ *
+ * **The card's title** comes with the push; an empty one falls back to what this hub recorded.
  */
-import { createHash } from "node:crypto";
-
-import { and, desc, eq, isNotNull, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 
 import { db } from "../../db/drizzle";
 import { matrixCheckNotices, matrixChecksWaiting, matrixDecisionNotices } from "../../db/schema/matrix";
@@ -47,9 +46,6 @@ import type { TenantsForBoard } from "./relay-scope";
 
 const log = createLogger("matrix-check-notices");
 
-/** How long a claim stands against an identical push before the same words may be said again. */
-export const REPEAT_AFTER_MS = 30 * 60_000;
-
 export interface CheckNoticeDeps {
   sendText(userId: string, roomId: string, body: string, extra?: Record<string, unknown>): Promise<string | null>;
   /** The structured half, beside the prose. Absent: only the prose is posted. */
@@ -68,17 +64,11 @@ type Notice = "failed" | "overridden";
 
 const posted = (eventId: string | null | undefined): eventId is string => !!eventId && !eventId.startsWith("pending:");
 
-/** What the push says, as one digest: the redelivery of a push is the same bytes, so the same digest. */
-function digestOf(parts: unknown): string {
-  return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
-}
-
 /** Act on a `check.failed`. Throws on a send failure, so the push is retried. */
 export async function handleCheckFailed(d: CheckFailedDelivery, deps: CheckNoticeDeps): Promise<CheckNoticeOutcome> {
   // Checked by the route already; checked again so nothing below trusts the wire's spelling.
   if (!isCheckFailed(d)) return { status: "malformed" };
-  const digest = digestOf([d.stageKey, d.check.provider, d.check.detail ?? null, d.check.url ?? null, d.returnedTo]);
-  return sayInRoom(d, "failed", digest, deps, async (cardTitle, replyTo) => ({
+  return sayInRoom(d, "failed", deps, async (cardTitle, replyTo) => ({
     body: checkFailedBody(d, cardTitle),
     eventType: CHECK_FAILED_TYPE,
     content: checkFailedContent(d, cardTitle, replyTo ?? undefined),
@@ -90,8 +80,7 @@ export async function handleCheckFailed(d: CheckFailedDelivery, deps: CheckNotic
 /** Act on a `check.overridden`. Throws on a send failure, so the push is retried. */
 export async function handleCheckOverridden(d: CheckOverriddenDelivery, deps: CheckNoticeDeps): Promise<CheckNoticeOutcome> {
   if (!isCheckOverridden(d)) return { status: "malformed" };
-  const digest = digestOf([d.stageKey, d.check.provider, d.by, d.at, d.comment]);
-  return sayInRoom(d, "overridden", digest, deps, async (cardTitle, replyTo) => {
+  return sayInRoom(d, "overridden", deps, async (cardTitle, replyTo) => {
     const who = await nameOf(d.by, deps);
     return {
       body: checkOverriddenBody(d, who, cardTitle),
@@ -111,9 +100,8 @@ interface Said {
 
 /** The shared half: find the room, claim the notice, say it, then the structured event. */
 async function sayInRoom(
-  d: { boardId: string; cardId: string; stageKey: string; check: { name: string } },
+  d: { boardId: string; cardId: string; cardTitle: string; arrivalId: string; stageKey: string; check: { name: string } },
   notice: Notice,
-  digest: string,
   deps: CheckNoticeDeps,
   compose: (cardTitle: string | null, replyTo: string | null) => Promise<Said>,
 ): Promise<CheckNoticeOutcome> {
@@ -130,33 +118,30 @@ async function sayInRoom(
   const key = {
     boardId: d.boardId,
     cardId: d.cardId,
+    arrivalId: d.arrivalId,
     notice,
     checkName: d.check.name,
-    digest,
   };
   const claimKey = and(
     eq(matrixCheckNotices.boardId, key.boardId),
     eq(matrixCheckNotices.cardId, key.cardId),
+    eq(matrixCheckNotices.arrivalId, key.arrivalId),
     eq(matrixCheckNotices.notice, key.notice),
     eq(matrixCheckNotices.checkName, key.checkName),
-    eq(matrixCheckNotices.digest, key.digest),
   );
-  // A fresh claim, or one taken over from an identical notice said long ago (never from one still
-  // being sent, whose event id is not yet recorded).
+  // Claimed once, held while it is sent and after: only a failed send gives it back.
   const [claimed] = await db
     .insert(matrixCheckNotices)
     .values({ ...key, tenantId, roomId: room.roomId })
-    .onConflictDoUpdate({
-      target: [matrixCheckNotices.boardId, matrixCheckNotices.cardId, matrixCheckNotices.notice, matrixCheckNotices.checkName, matrixCheckNotices.digest],
-      set: { createdAt: new Date(), eventId: null, tenantId, roomId: room.roomId },
-      setWhere: and(isNotNull(matrixCheckNotices.eventId), lt(matrixCheckNotices.createdAt, new Date(Date.now() - REPEAT_AFTER_MS))),
-    })
+    .onConflictDoNothing()
     .returning({ boardId: matrixCheckNotices.boardId });
   if (!claimed) return { status: "duplicate" };
 
   try {
     const waiting = await openWaitingCard(tenantId, d, room.roomId);
-    const said = await compose(waiting?.cardTitle ?? (await knownTitle(tenantId, d.boardId, d.cardId)), waiting?.eventId ?? null);
+    const pushed = d.cardTitle.trim();
+    const title = pushed !== "" ? pushed : (waiting?.cardTitle ?? (await knownTitle(tenantId, d.boardId, d.cardId)));
+    const said = await compose(title, waiting?.eventId ?? null);
     const eventId = await deps.sendText(
       room.speakerMxid,
       room.roomId,
@@ -216,9 +201,8 @@ async function openWaitingCard(
 }
 
 /**
- * The card's title, when this hub has heard it: the push carries none, and the board's card read is
- * not one this hub's credential reaches. A reminder or escalation about the card names it. Null
- * otherwise, and the sentence leaves it out.
+ * The card's title from this hub's own records, for a push whose title is empty: a reminder or
+ * escalation about the card names it. Null otherwise, and the sentence leaves it out.
  */
 async function knownTitle(tenantId: string, boardId: string, cardId: string): Promise<string | null> {
   const [row] = await db

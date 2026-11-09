@@ -1,21 +1,20 @@
 -- A gate may be decided by checks (charter, 2026-11-09).
 --
--- Each `check.failed` and `check.overridden` this hub said in a board's room, once: claimed before it
--- is sent and given back when the send fails, so a redelivered push posts nothing twice and the
--- board's retry of a failed one posts it. The push carries no arrival id, so the claim is keyed by
--- the card, the event, the check and a digest of what the push says; `created_at` lets a failure
--- worded exactly like an earlier one, long after it, be said again (`check-notices.ts`).
+-- Each `check.failed` and `check.overridden` this hub said in a board's room, once per check set's
+-- arrival, notice and check: claimed before it is sent and given back when the send fails, so a
+-- redelivered push posts nothing twice, the board's retry of a failed one posts it, and the same
+-- check failing on the card's next arrival is said again (`check-notices.ts`).
 CREATE TABLE IF NOT EXISTS "matrix_check_notices" (
   "board_id" text NOT NULL,
   "card_id" text NOT NULL,
+  "arrival_id" text NOT NULL,
   "notice" text NOT NULL,
   "check_name" text NOT NULL,
-  "digest" text NOT NULL,
   "tenant_id" text NOT NULL,
   "room_id" text NOT NULL,
   "event_id" text,
   "created_at" timestamp DEFAULT now() NOT NULL,
-  CONSTRAINT "matrix_check_notices_pk" PRIMARY KEY ("board_id", "card_id", "notice", "check_name", "digest"),
+  CONSTRAINT "matrix_check_notices_pk" PRIMARY KEY ("board_id", "card_id", "arrival_id", "notice", "check_name"),
   CONSTRAINT "matrix_check_notices_tenant_id_tenants_id_fk"
     FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE restrict
 );--> statement-breakpoint

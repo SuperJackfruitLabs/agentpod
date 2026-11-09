@@ -136,13 +136,15 @@ export type CheckStatus = "pending" | "passed" | "failed" | "overridden";
 
 /**
  * The body the board pushes on `check.failed`: a check on a card's arrival at a stage failed, and the
- * card went back to `returnedTo` (null: it could not go back and waits for a person). Carries no
- * arrival id and no card title. Checked by `isCheckFailed` before it is believed.
+ * card went back to `returnedTo` (null: it could not go back and waits for a person). `arrivalId`
+ * names the check set, `cardTitle` the card. Checked by `isCheckFailed` before it is believed.
  */
 export interface CheckFailedDelivery {
   event: "check.failed";
   boardId: string;
   cardId: string;
+  cardTitle: string;
+  arrivalId: string;
   stageKey: string;
   check: { name: string; provider: CheckProvider; status: "failed"; detail?: string; url?: string };
   returnedTo: string | null;
@@ -157,6 +159,8 @@ export interface CheckOverriddenDelivery {
   event: "check.overridden";
   boardId: string;
   cardId: string;
+  cardTitle: string;
+  arrivalId: string;
   stageKey: string;
   check: { name: string; provider: CheckProvider; status: "overridden" };
   by: string;

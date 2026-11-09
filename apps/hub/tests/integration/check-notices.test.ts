@@ -17,7 +17,7 @@ import { matrixBoardRooms } from "../../src/db/schema/board-rooms";
 import { matrixCheckNotices, matrixChecksWaiting, matrixDecisionNotices, matrixEscalationInvites } from "../../src/db/schema/matrix";
 import { BOOTSTRAP_TENANT_ID, tenants } from "../../src/db/schema/tenants";
 import type { CheckFailedDelivery, CheckOverriddenDelivery, DecisionTimeoutDelivery } from "../../src/services/bridge";
-import { REPEAT_AFTER_MS, handleCheckFailed, handleCheckOverridden, type CheckNoticeDeps } from "../../src/services/matrix-as/check-notices";
+import { handleCheckFailed, handleCheckOverridden, type CheckNoticeDeps } from "../../src/services/matrix-as/check-notices";
 import { handleCheckOverride } from "../../src/services/matrix-as/check-override";
 import { recordedChecksCard } from "../../src/services/matrix-as/checks-waiting";
 import { CHECKS_WAITING_TYPE, CHECK_FAILED_TYPE, CHECK_OVERRIDDEN_TYPE, CHECK_OVERRIDE_V2_SUITE_TYPE } from "../../src/services/matrix-as/checks-wire";
@@ -36,10 +36,13 @@ const ADMIN = "@admin:test";
 const OTHER_TENANT = "fleet_checks_other";
 const BOARDS = [BOARD, OTHER_BOARD];
 
+// An empty title, as a board may send: the notices fall back to what this hub recorded.
 const failed = (over: Partial<CheckFailedDelivery> = {}): CheckFailedDelivery => ({
   event: "check.failed",
   boardId: BOARD,
   cardId: CARD,
+  cardTitle: "",
+  arrivalId: ARRIVAL,
   stageKey: "review",
   check: { name: "build", provider: "ci", status: "failed", detail: "lint: failure", url: "https://forge.example/runs/413" },
   returnedTo: "build",
@@ -50,6 +53,8 @@ const overridden = (over: Partial<CheckOverriddenDelivery> = {}): CheckOverridde
   event: "check.overridden",
   boardId: BOARD,
   cardId: CARD,
+  cardTitle: "",
+  arrivalId: ARRIVAL,
   stageKey: "review",
   check: { name: "quality", provider: "verdict", status: "overridden" },
   by: "prn_rakesh",
@@ -138,10 +143,6 @@ afterAll(async () => {
   await db.delete(tenants).where(eq(tenants.id, OTHER_TENANT));
 });
 
-/** Make this board's check notices `minutes` old. */
-const age = async (minutes: number) =>
-  db.update(matrixCheckNotices).set({ createdAt: new Date(Date.now() - minutes * 60_000) }).where(eq(matrixCheckNotices.boardId, BOARD));
-
 /** A checks.waiting card this hub posted for the card, as an escalation leaves it. */
 async function waitingCard(over: Partial<typeof matrixChecksWaiting.$inferInsert> = {}) {
   await db.insert(matrixChecksWaiting).values({
@@ -201,26 +202,26 @@ describe("a failed check", () => {
     expect(events).toHaveLength(1);
   });
 
-  test("another check, or another failure of the same check, is its own notice", async () => {
+  test("another check on the arrival is its own notice; the same check, however worded, is not", async () => {
     const { deps, texts } = rig();
     await handleCheckFailed(failed(), deps);
     expect(await handleCheckFailed(failed({ check: { name: "lint", provider: "ci", status: "failed" } }), deps)).toEqual({ status: "sent" });
     expect(await handleCheckFailed(failed({ check: { name: "build", provider: "ci", status: "failed", detail: "test: failure" } }), deps)).toEqual({
-      status: "sent",
+      status: "duplicate",
     });
-    expect(texts).toHaveLength(3);
+    expect(texts).toHaveLength(2);
   });
 
-  test("the same words long after the first are said again: a later arrival failing the same way", async () => {
+  test("the same failure on the card's next arrival is said again; on the same arrival it is not", async () => {
     const { deps, texts } = rig();
-    await handleCheckFailed(failed(), deps);
-    // Within the board's retries and well past them, but inside half an hour: still a redelivery.
-    await age(29);
-    expect(await handleCheckFailed(failed(), deps)).toEqual({ status: "duplicate" });
-    await age(31);
     expect(await handleCheckFailed(failed(), deps)).toEqual({ status: "sent" });
+    expect(await handleCheckFailed(failed(), deps)).toEqual({ status: "duplicate" });
+    expect(await handleCheckFailed(failed({ arrivalId: "arr_checks02" }), deps)).toEqual({ status: "sent" });
+    expect(await handleCheckFailed(failed({ arrivalId: "arr_checks02" }), deps)).toEqual({ status: "duplicate" });
     expect(texts).toHaveLength(2);
-    expect(REPEAT_AFTER_MS).toBe(30 * 60_000);
+    expect(texts[1]?.body).toBe(texts[0]?.body);
+    const rows = await db.select().from(matrixCheckNotices).where(eq(matrixCheckNotices.boardId, BOARD));
+    expect(rows.map((r) => r.arrivalId).toSorted()).toEqual([ARRIVAL, "arr_checks02"]);
   });
 
   test("a claim still being sent is never taken over, however old", async () => {
@@ -233,6 +234,14 @@ describe("a failed check", () => {
       .where(eq(matrixCheckNotices.boardId, BOARD));
     expect(await handleCheckFailed(failed(), deps)).toEqual({ status: "duplicate" });
     expect(texts).toHaveLength(1);
+  });
+
+  test("names the card from the push, before anything this hub recorded", async () => {
+    await waitingCard({ cardTitle: "An older title" });
+    const { deps, texts, events } = rig();
+    await handleCheckFailed(failed({ cardTitle: " Ship it now " }), deps);
+    expect(texts[0]?.body.startsWith("CI check “build” failed on “Ship it now” — returned for changes.")).toBe(true);
+    expect(events[0]?.content.card_title).toBe("Ship it now");
   });
 
   test("a send that fails gives the claim back, so the board's retry posts it", async () => {

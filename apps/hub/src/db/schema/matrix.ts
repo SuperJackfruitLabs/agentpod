@@ -656,20 +656,20 @@ export const matrixGateHoldNotices = pgTable(
 
 /**
  * A `check.failed` or `check.overridden` this hub said in a board's room (charter 2026-11-09, a gate
- * may be decided by checks §7), once. Claimed before it is sent and given back when the send fails.
- * The push carries no arrival id, so the key is the card, the notice, the check and a digest of what
- * the push says (a redelivery says it byte for byte); `createdAt` lets an identical failure long
- * after the first be said again (`check-notices.ts`).
+ * may be decided by checks §7), once per check set's arrival, notice and check. Claimed before it is
+ * sent and given back when the send fails, so a redelivery posts nothing twice and the same check
+ * failing on the card's next arrival is said again (`check-notices.ts`).
  */
 export const matrixCheckNotices = pgTable(
   "matrix_check_notices",
   {
     boardId: text("board_id").notNull(),
     cardId: text("card_id").notNull(),
+    /** The board's id of the check set (the card's arrival at the stage). */
+    arrivalId: text("arrival_id").notNull(),
     /** `failed` | `overridden`. */
     notice: text("notice").notNull(),
     checkName: text("check_name").notNull(),
-    digest: text("digest").notNull(),
     tenantId: text("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
@@ -679,7 +679,7 @@ export const matrixCheckNotices = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [
-    primaryKey({ columns: [t.boardId, t.cardId, t.notice, t.checkName, t.digest] }),
+    primaryKey({ columns: [t.boardId, t.cardId, t.arrivalId, t.notice, t.checkName] }),
     index("matrix_check_notices_tenant_id_idx").on(t.tenantId),
   ],
 );

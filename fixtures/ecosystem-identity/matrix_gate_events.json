@@ -7402,8 +7402,8 @@
         "returned_to"
       ],
       "notes": {
-        "when": "Posted for each check.failed superpipeline pushes, once however often it is delivered. The push carries no arrival id: a failure worded exactly like one said within the last 30 minutes is a redelivery and says nothing.",
-        "card_title": "Present when this hub has heard the card's title (a reminder or escalation of it, or its checks.waiting card); the push carries none.",
+        "when": "Posted for each check.failed superpipeline pushes, once per arrival (arrivalId) and check however often it is delivered; the same check failing again on the card's next arrival is posted again.",
+        "card_title": "From the push's cardTitle; an empty one falls back to a title this hub recorded (a reminder or escalation of the card, or its checks.waiting card), and is left out when there is none.",
         "check": "{ name, provider, status: 'failed', detail?, url? }: detail trimmed to 300 characters; url only when https.",
         "returned_to": "The stage the card went back to; null when it could not go back and waits for a person (its failed check may then be overridden).",
         "prose": "Beside it, an m.text: \"CI check “build” failed on “<card title>” — returned for changes.\" (\"Verdict check …\" for a verdict; \"— it could not go back and waits for a person.\" when returned_to is null; the title left out when unknown; \" [Open the result](<url>)\" when there is one).",
@@ -7416,6 +7416,8 @@
             "event": "check.failed",
             "boardId": "brd_7c1f",
             "cardId": "crd_8a40",
+            "cardTitle": "Ship the release",
+            "arrivalId": "arr_5d02",
             "stageKey": "review",
             "check": {
               "name": "build",
@@ -7426,7 +7428,6 @@
             },
             "returnedTo": "build"
           },
-          "cardTitle": "Ship the release",
           "said": "CI check “build” failed on “Ship the release” — returned for changes. [Open the result](https://forge.example/acme/app/actions/runs/413)",
           "content": {
             "suite_event_type": "dev.agentpod.check.failed.v2",
@@ -7451,6 +7452,8 @@
             "event": "check.failed",
             "boardId": "brd_7c1f",
             "cardId": "crd_8a40",
+            "cardTitle": "",
+            "arrivalId": "arr_5d02",
             "stageKey": "review",
             "check": {
               "name": "quality",
@@ -7460,7 +7463,6 @@
             },
             "returnedTo": null
           },
-          "cardTitle": null,
           "replyTo": "$checksWaitingEventId",
           "said": "Verdict check “quality” failed — it could not go back and waits for a person.",
           "content": {
@@ -7504,7 +7506,7 @@
         "at"
       ],
       "notes": {
-        "when": "Posted for each check.overridden superpipeline pushes, however the override was made (from chat or on the web), once.",
+        "when": "Posted for each check.overridden superpipeline pushes, however the override was made (from chat or on the web), once per arrival and check.",
         "overridden_by": "The person's handle, never an mxid or a principal id; null when this hub cannot name them.",
         "prose": "Beside it, an m.text: \"Verdict check “quality” on “<card title>” overridden by rakesh: <comment>\".",
         "relation": "As for check.failed: a reply to the open checks.waiting card for the card and stage when there is one, standalone otherwise."
@@ -7516,6 +7518,8 @@
             "event": "check.overridden",
             "boardId": "brd_7c1f",
             "cardId": "crd_8a40",
+            "cardTitle": "Ship the release",
+            "arrivalId": "arr_5d02",
             "stageKey": "review",
             "check": {
               "name": "quality",
@@ -7527,7 +7531,6 @@
             "at": "2026-11-09T12:10:00.000Z"
           },
           "who": "rakesh",
-          "cardTitle": "Ship the release",
           "replyTo": "$checksWaitingEventId",
           "said": "Verdict check “quality” on “Ship the release” overridden by rakesh: the grader is down; read it myself",
           "content": {
