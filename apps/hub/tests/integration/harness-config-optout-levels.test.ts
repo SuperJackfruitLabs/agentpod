@@ -500,6 +500,42 @@ describe("the opt-out routes: PUT/DELETE/GET /api/fleet/config/opt-out", () => {
   );
 
   test(
+    "PUT asks a node the broker can reach even before the gateway's status write lands",
+    async () => {
+      // The gateway registers a socket with the connection manager BEFORE it
+      // writes `nodes.status = 'online'`. Pin the row in that window: the
+      // broker can ask this node, Postgres does not yet say so. The route
+      // used to read Postgres and refuse with 400 "no reachable node".
+      const server = Bun.serve({ fetch: routeTestApp.fetch, websocket, port: 0 });
+      const baseUrl = `http://localhost:${server.port}`;
+      try {
+        const stationKey = "cfgoptlvl-route-window-station";
+        const { nodeId, nodeSecret } = await setUpRouteStation("cfgoptlvl-route-window-host", stationKey);
+        if (server.port === undefined) throw new Error("test server has no port");
+        const fake = await connectRouteFakeNode(server.port, nodeId, nodeSecret);
+        await rawSql`UPDATE nodes SET status = 'offline' WHERE id = ${nodeId}`;
+
+        const putRes = await routeAppFetch(baseUrl, "/api/fleet/config/opt-out", {
+          method: "PUT",
+          token: ROUTE_USER,
+          body: { settingId: ROUTE_SETTING_A, optedOut: true, stationKey },
+        });
+        expect({ status: putRes.status, body: putRes.status === 204 ? null : await putRes.text() }).toEqual({
+          status: 204,
+          body: null,
+        });
+        expect(fake.asked).toContain("config.settings");
+
+        fake.ws.close();
+        await new Promise((r) => setTimeout(r, 100));
+      } finally {
+        server.stop(true);
+      }
+    },
+    20_000,
+  );
+
+  test(
     "PUT works at node level too, filtered by ?nodeId=",
     async () => {
       const server = Bun.serve({ fetch: routeTestApp.fetch, websocket, port: 0 });

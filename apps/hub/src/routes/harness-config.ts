@@ -65,9 +65,9 @@ import {
 import { db } from "../db/drizzle";
 import { declaredHarnessConfig } from "../db/schema/harness-config";
 import { stations } from "../db/schema/stations";
-import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
 import * as broker from "../services/broker";
+import { connectionManager } from "../services/broker";
 import { getStation, type StationRow } from "../services/stations";
 import {
   declare,
@@ -98,10 +98,16 @@ async function manageableStations(tenantId: string): Promise<StationRow[]> {
   );
 }
 
-/** Node ids this tenant's nodes table currently records as online. */
-async function onlineNodeIds(tenantId: string): Promise<Set<string>> {
-  const allNodes = await db.select().from(nodes).where(tenantScope(nodes, tenantId));
-  return new Set(allNodes.filter((n) => n.status === "online").map((n) => n.id));
+/**
+ * Whether the broker can reach `nodeId` right now: the connection manager,
+ * the same registry `broker.request` sends through, never `nodes.status`.
+ * The gateway registers a socket BEFORE it writes `status = 'online'`, so in
+ * that window a Postgres read refused a node the broker could already ask —
+ * `PUT /fleet/config/opt-out` answered 400 "no reachable node" for a node
+ * that was connected. The row is a record for display, not the route.
+ */
+function isReachable(nodeId: string): boolean {
+  return connectionManager.isOnline(nodeId);
 }
 
 /**
@@ -170,11 +176,10 @@ async function verifySettingKnown(
   // question. A 30-profile Hermes host made that 30 identical `config.settings`
   // calls for one id, and one online-but-hung node could hold a single `PUT`
   // for 30 × the broker timeout.
-  const online = await onlineNodeIds(tenantId);
   const askedPairs = new Set<string>();
   let askedAny = false;
   for (const station of candidates) {
-    if (!online.has(station.nodeId)) continue;
+    if (!isReachable(station.nodeId)) continue;
     const pair = `${station.nodeId}\u0000${station.harness}`;
     if (askedPairs.has(pair)) continue;
     askedPairs.add(pair);
@@ -395,7 +400,6 @@ export const harnessConfigRoutes = new Hono()
 
     const tenantId = user.tenantId;
     const manageable = await manageableStations(tenantId);
-    const online = await onlineNodeIds(tenantId);
 
     // One representative station per (node, harness) pair — the registry is
     // the harness's, not the station's, so asking twice for the same pair
@@ -413,7 +417,7 @@ export const harnessConfigRoutes = new Hono()
     const unreachableNodes = new Set<string>();
 
     for (const station of representatives) {
-      if (!online.has(station.nodeId)) {
+      if (!isReachable(station.nodeId)) {
         unreachableNodes.add(station.nodeId);
         continue;
       }
