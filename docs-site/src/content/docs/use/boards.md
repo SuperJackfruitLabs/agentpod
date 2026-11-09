@@ -104,6 +104,15 @@ not be shown in full here cannot be chosen from the room — choose it on the bo
 phone's Lock Screen and a reply by number never approve any version: they can only send the set back,
 and say where to choose. Once a version is approved, the room's receipt names it.
 
+**A gate may need more than one approver.** A workspace owner or admin can set a stage to need two
+to five approvals — from the stage's deciders, or from the workspace's owners and admins — before
+its gate passes. Each approval short of that is said in the room as a reply to the gate, for example
+"Approved by asha — 1 of 2. Waiting for 1 more.", and the gate stays open; the approval that reaches
+the number passes it, and the room's receipt says so. Each person counts once: approving again is
+refused with a reply saying it is still waiting for others, and an approval from someone who does
+not count for that gate is refused with a reply saying why. One rejection or request for changes
+still ends the gate at once. The delivery is manual unless everyone who approved chose automatic.
+
 ## A card waiting on you
 
 A card also stops on a person when its agent keeps failing, says it is **blocked**, or is **not
