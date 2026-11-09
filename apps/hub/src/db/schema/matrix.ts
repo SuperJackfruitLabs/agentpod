@@ -510,6 +510,16 @@ export interface MatrixGateVariant {
   expires_at: string | null;
 }
 
+/**
+ * A quorum gate's progress (charter 2026-11-09, more than one approver), snake_case as gate.v2
+ * carries it: how many approvals it needs, from whom, and those the board has recorded so far.
+ */
+export interface MatrixGateQuorum {
+  required: number;
+  from: "deciders" | "admins";
+  approvals: Array<{ principal_id: string; at: string; variant_id?: string }>;
+}
+
 export const matrixGateEvents = pgTable(
   "matrix_gate_events",
   {
@@ -572,6 +582,13 @@ export const matrixGateEvents = pgTable(
      * gate that is not a choice, and for one whose variants could not be carried.
      */
     approvalVariants: jsonb("approval_variants").$type<MatrixGateVariant[]>(),
+    /**
+     * A quorum gate's quorum, as projected and then as each `gate.approval_recorded` reported it
+     * (charter 2026-11-09, more than one approver). Present: an approving answer that the board
+     * accepted is not taken as the gate passing until the board's read says it is resolved. Null
+     * for a gate that passes on one approval.
+     */
+    approvalQuorum: jsonb("approval_quorum").$type<MatrixGateQuorum>(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [
@@ -584,6 +601,32 @@ export const matrixGateEvents = pgTable(
      */
     uniqueIndex("matrix_gate_events_event_idx").on(t.eventId),
   ]
+);
+
+/**
+ * An approval on a quorum gate this hub posted progress for (charter 2026-11-09, more than one
+ * approver), once per gate and person. Claimed before the progress is sent and given back when the
+ * send fails, so a redelivered `gate.approval_recorded` posts nothing twice and a failed one is
+ * posted on the board's retry.
+ */
+export const matrixGateApprovals = pgTable(
+  "matrix_gate_approvals",
+  {
+    gateId: text("gate_id").notNull(),
+    principalId: text("principal_id").notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    /** When the board recorded the approval (ISO), as it sent it. */
+    approvedAt: text("approved_at").notNull(),
+    /** The progress reply's own event, once sent. */
+    eventId: text("event_id"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.gateId, t.principalId] }),
+    index("matrix_gate_approvals_tenant_id_idx").on(t.tenantId),
+  ],
 );
 
 /**

@@ -11,6 +11,7 @@ export type {
   DecisionTimeoutDelivery,
   DeliveryPendingDelivery,
   ElicitationPendingDelivery,
+  GateApprovalRecordedDelivery,
   GatePendingDelivery,
 } from "./deliveries";
 export { checkBridgeDispatchGrant, ensureBridgeDispatchGrant } from "./dispatch-grant";

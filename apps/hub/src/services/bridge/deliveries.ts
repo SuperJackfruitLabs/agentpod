@@ -57,7 +57,32 @@ export interface GatePendingDelivery {
    * applies and from a board that predates it. `unknown`: checked before it is carried (`deadlineV2`).
    */
   deadline?: unknown;
+  /**
+   * A quorum gate's progress (charter 2026-11-09, more than one approver): `{ required, from,
+   * approvals: [{ principalId, at, variantId? }] }`. Absent on a gate that passes on one approval
+   * and from a board that predates it. `unknown`: checked before it is carried (`quorumV2`).
+   */
+  quorum?: unknown;
   ts: string;
+}
+
+/**
+ * The body the board pushes on `gate.approval_recorded`: an approval on a quorum gate that did not
+ * yet reach it (charter 2026-11-09, more than one approver §7). The gate is still pending; the
+ * approval that reaches the quorum resolves it and sends no `gate.approval_recorded`. Checked by
+ * `isGateApprovalRecorded` before it is believed.
+ */
+export interface GateApprovalRecordedDelivery {
+  event: "gate.approval_recorded";
+  boardId: string;
+  cardId: string;
+  gateId: string;
+  approval: { principalId: string; at: string; variantId?: string };
+  quorum: {
+    required: number;
+    from: "deciders" | "admins";
+    approvals: Array<{ principalId: string; at: string; variantId?: string }>;
+  };
 }
 
 /** The body the board pushes on `elicitation.pending`. */

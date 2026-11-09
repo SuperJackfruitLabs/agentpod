@@ -8,6 +8,7 @@
 import { type GateRequestCard } from "@agentpod/contract";
 import { z } from "zod";
 import { deadlineField } from "./decision-timeout-wire";
+import { quorumField } from "./gate-quorum-wire";
 import type { GatePendingDelivery } from "../bridge";
 
 export const GATE_EVENT_TYPE = "dev.superpipeline.gate.v1";
@@ -473,6 +474,9 @@ export function gateV2Content(d: GatePendingDelivery, deepLink?: string): Record
     ...(d.handoffSummary ? { handoff_summary: cutToBytes(d.handoffSummary, HANDOFF_SUMMARY_BYTES) } : {}),
     options: gateOptionsV2(d),
     ...(subject ? { subject } : {}),
+    // A quorum gate's progress (charter 2026-11-09, more than one approver §7); nothing on a gate
+    // that passes on one approval, so its gate.v2 is unchanged.
+    ...quorumField(d.quorum),
     ...deadlineField(d.deadline),
     ...(deepLink ? { deep_link: deepLink } : {}),
   };

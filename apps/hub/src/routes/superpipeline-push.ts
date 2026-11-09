@@ -34,7 +34,9 @@ import { isAttentionPending, projectAttention } from "../services/matrix-as";
 import type { AttentionProjectionDeps } from "../services/matrix-as";
 import { handleDecisionTimeout, isDecisionTimeout } from "../services/matrix-as";
 import type { DecisionNoticeDeps, DecisionNoticeOutcome } from "../services/matrix-as";
-import type { DecisionTimeoutDelivery } from "../services/bridge";
+import { handleGateApprovalRecorded, isGateApprovalRecorded } from "../services/matrix-as";
+import type { GateProgressOutcome } from "../services/matrix-as";
+import type { DecisionTimeoutDelivery, GateApprovalRecordedDelivery } from "../services/bridge";
 
 const log = createLogger("superpipeline-push");
 
@@ -57,6 +59,10 @@ export interface SuperpipelinePushDeps extends GateProjectionDeps {
   workspaceAdmins?: DecisionNoticeDeps["workspaceAdmins"];
   /** Test seam: what a reminder or escalation does. Defaults to `handleDecisionTimeout`. */
   handleDecisionTimeout?(d: DecisionTimeoutDelivery): Promise<DecisionNoticeOutcome>;
+  /** How to name an approver in a quorum gate's progress reply: their handle, never an mxid. */
+  displayNameFor?(principalId: string): Promise<string | null>;
+  /** Test seam: what a quorum gate's recorded approval does. Defaults to `handleGateApprovalRecorded`. */
+  handleGateApprovalRecorded?(d: GateApprovalRecordedDelivery): Promise<GateProgressOutcome>;
 }
 
 const enc = new TextEncoder();
@@ -182,6 +188,20 @@ export function createSuperpipelinePushRoutes(deps: SuperpipelinePushDeps) {
         ? await deps.handleDecisionTimeout(body)
         : await handleDecisionTimeout(body, deps);
       log.info("decision timeout handled", { event: body.event, decisionId: body.decisionId, status: outcome.status });
+      return c.json({ ok: true, status: outcome.status }, 200);
+    }
+
+    /**
+     * An approval on a quorum gate short of its quorum (charter: "A gate may need more than one
+     * approver" §7): a progress reply to the gate card this hub posted. The board picks its tenant
+     * by the reminder's rule (one tenant or nobody, `gate-progress.ts`), so no `tenantIdFor` here.
+     * Disjoint from the others by `event`.
+     */
+    if (isGateApprovalRecorded(body)) {
+      const outcome = deps.handleGateApprovalRecorded
+        ? await deps.handleGateApprovalRecorded(body)
+        : await handleGateApprovalRecorded(body, deps);
+      log.info("quorum gate approval handled", { gateId: body.gateId, status: outcome.status });
       return c.json({ ok: true, status: outcome.status }, 200);
     }
 

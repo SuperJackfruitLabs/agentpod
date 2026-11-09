@@ -5,7 +5,7 @@
  * Split out of `gates.ts`, which re-exports it.
  */
 
-import type { MatrixGateVariant } from "../../db/schema/matrix";
+import type { MatrixGateQuorum, MatrixGateVariant } from "../../db/schema/matrix";
 import { createLogger } from "../../utils/logger";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
 import {
@@ -49,7 +49,11 @@ export type DecisionRefusal =
   /** superpipeline: the binding names no subject of the gate, or one no longer active. */
   | "subject-mismatch"
   /** superpipeline: the approved subject has expired. */
-  | "subject-expired";
+  | "subject-expired"
+  /** superpipeline: a quorum gate this person has already approved (`QUORUM_ALREADY_APPROVED`). */
+  | "quorum-already-approved"
+  /** superpipeline: on a quorum gate, this person's approval does not count (`APPROVAL_DECIDER_NOT_ALLOWED`). */
+  | "decider-not-allowed";
 
 export interface GateDecisionEvent {
   sender: string;
@@ -172,6 +176,12 @@ export interface GateDecisionDeps {
     subjectPreviewComplete?: boolean | null;
     /** A variant gate's variants as projected (charter 2026-11-09); null when it is not a choice. */
     variants?: ReadonlyArray<MatrixGateVariant> | null;
+    /**
+     * A quorum gate's quorum as last recorded (charter 2026-11-09, more than one approver); null
+     * when the gate passes on one approval. Present: an accepted approval is not taken as the gate
+     * passing until `readGate` says it is resolved.
+     */
+    quorum?: MatrixGateQuorum | null;
   } | null>;
   /**
    * Resolve the gate at superpipeline **as `principalId`**, never as this service.
@@ -209,6 +219,15 @@ export interface GateDecisionDeps {
   displayNameFor?(principalId: string): Promise<string | null>;
   /** Remember that a receipt was posted, so a repeated decision cannot post a second. */
   markOutcomePosted?(gateId: string): Promise<boolean>;
+  /**
+   * The board's read of a gate (`GET …/gates/:gateId`), or null when it cannot be read. Asked only
+   * after an approval of a quorum gate was accepted, because accepted is not passed: an approval
+   * short of the quorum leaves the gate pending. Absent or failing: the gate sweep settles it.
+   */
+  readGate?(
+    boardId: string,
+    gateId: string,
+  ): Promise<{ status: string; decision: string | null; decidedBy: string | null; chosen?: { id: string; label: string } | null } | null>;
 }
 
 /**
@@ -300,7 +319,8 @@ async function refusalForCode(
   gateId: string,
   sender: string,
   roomId: string,
-  deps: Pick<GateDecisionDeps, "reply">
+  deps: Pick<GateDecisionDeps, "reply">,
+  quorum: MatrixGateQuorum | null,
 ): Promise<{ status: "refused"; reason: DecisionRefusal }> {
   if (code === "GATE_NOT_PENDING") {
     // Answered on the board, or a double tap on a slow connection. Not
@@ -345,6 +365,25 @@ async function refusalForCode(
     return { status: "refused", reason: "subject-expired" };
   }
 
+  // A quorum gate (charter 2026-11-09, more than one approver): said in the room, because a person
+  // who approved and saw nothing happen would approve again. Only a quorum gate's refusal of who
+  // decides is said here; on any other gate it stays as it was.
+  if (code === "QUORUM_ALREADY_APPROVED") {
+    log.info("superpipeline refused a second approval by the same person", { gateId });
+    await deps.reply(roomId, "You have already approved this; it is waiting for other approvers. Nothing has changed.");
+    return { status: "refused", reason: "quorum-already-approved" };
+  }
+  if (code === "APPROVAL_DECIDER_NOT_ALLOWED" && quorum) {
+    log.info("superpipeline refused an approval that does not count toward a quorum", { gateId, from: quorum.from });
+    await deps.reply(
+      roomId,
+      quorum.from === "admins"
+        ? "This gate needs approvals from the workspace's owners and admins, so your approval does not count here. Nothing has changed."
+        : "Your approval does not count for this gate: it needs approvals from its named deciders. Nothing has changed.",
+    );
+    return { status: "refused", reason: "decider-not-allowed" };
+  }
+
   log.warn("superpipeline refused a decision", { gateId, code });
   return { status: "refused", reason: "unknown-gate" };
 }
@@ -360,7 +399,7 @@ export async function handleGateDecision(
   event: GateDecisionEvent,
   roomId: string,
   deps: GateDecisionDeps
-): Promise<{ status: "resolved" } | { status: "refused"; reason: DecisionRefusal }> {
+): Promise<{ status: "resolved" } | { status: "recorded" } | { status: "refused"; reason: DecisionRefusal }> {
   const parsed = parseGateDecision(event.content);
   if (!parsed) return { status: "refused", reason: "not-a-decision" };
 
@@ -478,11 +517,61 @@ export async function handleGateDecision(
   });
 
   if (result.ok) {
+    // A quorum gate (charter 2026-11-09, more than one approver): the board accepting an approval is
+    // not the gate passing. Only what the board's read says decides whether there is an outcome.
+    if (projection.quorum && (approving || parsed.optionId === "approve")) {
+      return settleQuorumApproval(roomId, parsed, principal.id, projection, deps, approving && chosen ? chosen : null);
+    }
     await postOutcomeReceipt(roomId, parsed, principal.id, projection, deps, approving && chosen ? chosen : null);
     return { status: "resolved" };
   }
 
-  return refusalForCode(result.code, parsed.gateId, event.sender, roomId, deps);
+  return refusalForCode(result.code, parsed.gateId, event.sender, roomId, deps, projection.quorum ?? null);
+}
+
+/**
+ * After an approval of a quorum gate was accepted: read the gate back and post the outcome only when
+ * the board says it resolved — with the board's decision, which the delivery rule may have made
+ * manual although this person chose automatic. Still pending: nothing is said here; the board's
+ * `gate.approval_recorded` carries the progress (`gate-progress.ts`). A read that fails leaves the
+ * outcome to the gate sweep, which settles every posted gate the board reports resolved.
+ */
+async function settleQuorumApproval(
+  roomId: string,
+  parsed: ParsedGateDecision,
+  principalId: string,
+  projection: { boardId: string; eventId: string; proseEventId?: string | null },
+  deps: GateDecisionDeps,
+  chosen: { id: string; label: string } | null,
+): Promise<{ status: "resolved" } | { status: "recorded" }> {
+  let gate: Awaited<ReturnType<NonNullable<GateDecisionDeps["readGate"]>>> = null;
+  try {
+    gate = (await deps.readGate?.(projection.boardId, parsed.gateId)) ?? null;
+  } catch (err) {
+    log.warn("could not read a quorum gate back after an approval; the sweep settles it", {
+      gateId: parsed.gateId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  if (!gate || gate.status !== "resolved" || !gate.decision) {
+    log.info("an approval of a quorum gate was recorded; the gate is not resolved", {
+      gateId: parsed.gateId,
+      status: gate?.status ?? "unread",
+    });
+    return { status: "recorded" };
+  }
+  await settleGateOutcome(
+    {
+      gateId: parsed.gateId,
+      decision: gate.decision,
+      decidedBy: gate.decidedBy ?? principalId,
+      chosen: gate.chosen ?? chosen,
+    },
+    roomId,
+    projection,
+    deps,
+  );
+  return { status: "resolved" };
 }
 
 /**

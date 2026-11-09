@@ -413,8 +413,8 @@ describe("variant gates against the shared corpus", () => {
   const decision = entry(GATE_DECISION_V2_SUITE_TYPE);
   const outcome = entry(GATE_OUTCOME_TYPE);
 
-  test("version 8", () => {
-    expect(corpus.version).toBe(8);
+  test("version 8, carried in 9", () => {
+    expect(corpus.version).toBe(9);
   });
 
   test("the hub's gate.v2 for a variant gate is exactly what the corpus accepts", () => {
