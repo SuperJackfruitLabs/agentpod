@@ -34,6 +34,9 @@ export const PUSH_EVENTS = [
   // escalate" §2): the hub replies to the card it posted, and on escalation invites the admins.
   "decision.reminded",
   "decision.escalated",
+  // An approval on a quorum gate short of its quorum (charter: "A gate may need more than one
+  // approver" §7): the hub replies to the gate's card with who approved and how many more.
+  "gate.approval_recorded",
 ] as const;
 
 export function pushHookUrl(publicUrl: string): string {

@@ -883,6 +883,13 @@
       "when": 1792580400015,
       "tag": "0125_gate_variants",
       "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1792580400016,
+      "tag": "0126_gate_quorum",
+      "breakpoints": true
     }
   ]
 }

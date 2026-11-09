@@ -8,6 +8,7 @@
  * and `projectElicitation` enforce it only when handed `humanJoined`, so the wiring here
  * is the one place it could silently disappear. `board-projection.test.ts` holds it.
  */
+import { principalLabel } from "../../auth/org-plane/principals";
 import { createLogger } from "../../utils/logger";
 import {
   boardForHumanJoin,
@@ -99,6 +100,8 @@ export function boardProjectionDeps(bridge: Pick<MatrixBridge, "client" | "confi
      */
     invite: (asUserId: string, roomId: string, invitee: string) => client.invite(asUserId, roomId, invitee),
     workspaceAdmins: workspaceAdminMatrixIds,
+    /** How a quorum gate's progress reply names an approver: their handle, never an mxid. */
+    displayNameFor: (principalId: string) => principalLabel(principalId),
     /** What a board waits on now, so an escalated card can be moved below for an admin who joined. */
     pendingOnBoard: async (boardId: string) => {
       const [cards, questions] = await Promise.all([readBoardPending(boardId), readBoardQuestions(boardId)]);

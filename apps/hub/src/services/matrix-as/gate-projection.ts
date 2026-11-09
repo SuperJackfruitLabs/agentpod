@@ -25,6 +25,7 @@ import {
   gateV2Content,
   gateVariantsV2,
 } from "./gate-wire";
+import { quorumV2 } from "./gate-quorum-wire";
 
 const log = createLogger("matrix-gates");
 
@@ -193,6 +194,8 @@ async function claimGate(tenantId: string, d: GatePendingDelivery, roomId: strin
           preview_complete: v.subject.preview_complete,
           expires_at: v.subject.expires_at,
         })) ?? null,
+      // What gate.v2 carries, exactly: an approving answer short of it is not a passed gate.
+      approvalQuorum: quorumV2(d.quorum),
     })
     .onConflictDoNothing({ target: matrixGateEvents.gateId })
     .returning({ gateId: matrixGateEvents.gateId });

@@ -84,6 +84,14 @@ export interface GateSweepDeps {
     boardId: string,
     gateId: string,
   ): Promise<{ decision: string; decidedBy: string | null; chosen?: { id: string; label: string } | null } | null>;
+  /**
+   * The board's read of one gate, whatever its status, or null when it cannot be read. What an
+   * approval of a quorum gate is checked against (`readBoardGate`): accepted is not resolved.
+   */
+  readGate?(
+    boardId: string,
+    gateId: string,
+  ): Promise<{ status: string; decision: string | null; decidedBy: string | null; chosen: { id: string; label: string } | null } | null>;
   /** Post the outcome receipt and claim it, so two sweeps leave one line. `chosen` names a variant chosen. */
   settleOutcome?(
     gateId: string,
@@ -619,6 +627,12 @@ export function bridgeGateSweepDeps(
       return rows;
     },
 
+    readGate: async (boardId, gateId) => {
+      const token = (await tokensForBoards()).get(boardId);
+      if (!token) return null;
+      return new SuperpipelineClient({ baseUrl: config.baseUrl, boardId, token, fetch: fetchImpl }).gate(gateId);
+    },
+
     decisionFor: async (boardId, gateId) => {
       const token = (await tokensForBoards()).get(boardId);
       if (!token) return null;
@@ -808,4 +822,16 @@ export async function readBoardPending(boardId: string): Promise<unknown[]> {
     deps.pendingAttention?.(boardId) ?? [],
   ]);
   return [...gates, ...deliveries, ...attention];
+}
+
+/**
+ * One gate as its board reports it now, read with the running sweeper's own credential, or null
+ * when no sweeper runs or the board cannot be read. Asked after an approval of a quorum gate was
+ * accepted (`gate-decision.ts`), because only the board knows whether that approval passed it.
+ */
+export async function readBoardGate(
+  boardId: string,
+  gateId: string,
+): Promise<{ status: string; decision: string | null; decidedBy: string | null; chosen: { id: string; label: string } | null } | null> {
+  return (await running?.readGate?.(boardId, gateId)) ?? null;
 }

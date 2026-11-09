@@ -1,6 +1,6 @@
 {
   "corpus": "ecosystem-identity/matrix-gate-events",
-  "version": 8,
+  "version": 9,
   "authoredAt": "2026-08-30",
   "authoredFrom": "the gates table in superpipeline apps/api/src/board/board-do.ts, the GateDecision union it resolves against, and charter decisions/2026-08-30-a-gate-closes-over-chat.md",
   "purpose": "A superpipeline approval gate crosses into a Matrix room and a human's answer crosses back. Three codebases must agree on the field names: the board that opens the gate, the Application Service that projects and resolves it, and the client that draws the buttons. A rename in any one of them is a gate that silently never resolves — which reads to the human as a button that does nothing.",
@@ -5822,6 +5822,417 @@
         }
       ],
       "reject": []
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.v2",
+      "variant": "quorum",
+      "direction": "outbound — the board asks for more than one approval",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-need-more-than-one-approver.md §7",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as for the entry without a variant; `quorum` sits beside the options.",
+      "requiredFields": [
+        "suite_event_type",
+        "options",
+        "quorum"
+      ],
+      "notes": {
+        "quorum": "{ required, from, approvals: [{ principal_id, at, variant_id? }] }: required a whole number from 2 to 5; from \"deciders\" or \"admins\"; approvals the ones recorded so far, oldest first, each person at most once, at most 32. variant_id only on a variant gate. snake_case, from the board's camelCase quorum on gate.pending.",
+        "absent": "A gate that passes on one approval carries no quorum key at all, so its gate.v2 is byte-identical to before.",
+        "malformed": "A quorum that is not well formed is not carried: the Application Service omits the field rather than carry junk, and the gate then reads as one that passes on one approval, which superpipeline still judges.",
+        "client": "Hides approval from someone who has already approved and says how many more are needed. An older client shows the gate as before; superpipeline counts its answer once and refuses a second."
+      },
+      "accept": [
+        {
+          "why": "a gate needing two of the workspace's owners and admins, one already recorded",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "quorum": {
+              "required": 2,
+              "from": "admins",
+              "approvals": [
+                {
+                  "principal_id": "prn_first",
+                  "at": "2026-11-09T10:00:00.000Z"
+                }
+              ]
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "required below 2: a gate that passes on one approval carries no quorum",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "quorum": {
+              "required": 1,
+              "from": "admins",
+              "approvals": []
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        },
+        {
+          "why": "required above 5",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "quorum": {
+              "required": 6,
+              "from": "admins",
+              "approvals": []
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        },
+        {
+          "why": "from is neither deciders nor admins",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "quorum": {
+              "required": 2,
+              "from": "everyone",
+              "approvals": []
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        },
+        {
+          "why": "an approval with no time",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "quorum": {
+              "required": 2,
+              "from": "admins",
+              "approvals": [
+                {
+                  "principal_id": "prn_first"
+                }
+              ]
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        },
+        {
+          "why": "the same person counted twice",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `release`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "release",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "quorum": {
+              "required": 3,
+              "from": "deciders",
+              "approvals": [
+                {
+                  "principal_id": "prn_first",
+                  "at": "2026-11-09T10:00:00.000Z"
+                },
+                {
+                  "principal_id": "prn_first",
+                  "at": "2026-11-09T10:00:00.000Z"
+                }
+              ]
+            },
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.agentpod.gate.progress.v2",
+      "variant": "quorum",
+      "direction": "outbound — an approval was recorded and the gate still waits for more",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-need-more-than-one-approver.md §7",
+      "sender": "the board room's speaker",
+      "matrixEventType": "dev.agentpod.gate.progress.v2",
+      "requiredFields": [
+        "suite_event_type",
+        "gate_id",
+        "board_id",
+        "approval",
+        "quorum",
+        "m.relates_to"
+      ],
+      "notes": {
+        "when": "Posted for each gate.approval_recorded superpipeline pushes: an approval short of the quorum. The approval that reaches it resolves the gate and is closed by gate.outcome.v1, with no progress event.",
+        "prose": "Beside it, an m.text in reply to the gate's card: \"Approved by rakesh — 1 of 2. Waiting for 1 more.\"; on a variant gate the variant is named (\"Approved \\\"Short\\\" by …\") and chosen_variant { id, label } is set.",
+        "relation": "m.reference to the gate's own event, as the outcome receipt does, so a client knows which card's count to update.",
+        "once": "At most once per gate and person, however often the push is delivered."
+      },
+      "accept": [
+        {
+          "why": "the first of two approvals",
+          "content": {
+            "suite_event_type": "dev.agentpod.gate.progress.v2",
+            "schema_version": 1,
+            "gate_id": "gate_6e19",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "approved_by": "rakesh",
+            "approval": {
+              "principal_id": "prn_first",
+              "at": "2026-11-09T10:00:00.000Z"
+            },
+            "quorum": {
+              "required": 2,
+              "from": "admins",
+              "approvals": [
+                {
+                  "principal_id": "prn_first",
+                  "at": "2026-11-09T10:00:00.000Z"
+                }
+              ]
+            },
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "reject": []
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.decision.v2",
+      "variant": "quorum",
+      "direction": "inbound — one of several approvals a quorum gate needs",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-need-more-than-one-approver.md §2-3",
+      "sender": "the human's own Matrix session",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content.",
+      "requiredFields": [
+        "suite_event_type",
+        "gate_id",
+        "option_id",
+        "m.relates_to"
+      ],
+      "notes": {
+        "shape": "Unchanged: an approval of a quorum gate is an ordinary decision.v2, carried to superpipeline as the person.",
+        "shortOfQuorum": "superpipeline answers 200 and the gate stays pending. The Application Service then posts no outcome: it reads the gate back and closes the card only when the read says resolved, with the read's decision (manual unless every approver chose automatic). A read that fails leaves the outcome to the gate sweep.",
+        "boardRefusals": "What superpipeline refuses a quorum approval with, and the sentence the Application Service says in the room."
+      },
+      "accept": [
+        {
+          "why": "a second admin approving",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approved",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.gate.decision.v2",
+            "gate_id": "gate_6e19",
+            "option_id": "approve",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "reject": [],
+      "boardRefusals": [
+        {
+          "code": "QUORUM_ALREADY_APPROVED",
+          "httpStatus": 409,
+          "said": "You have already approved this; it is waiting for other approvers. Nothing has changed."
+        },
+        {
+          "code": "APPROVAL_DECIDER_NOT_ALLOWED",
+          "httpStatus": 403,
+          "from": "admins",
+          "said": "This gate needs approvals from the workspace's owners and admins, so your approval does not count here. Nothing has changed."
+        },
+        {
+          "code": "APPROVAL_DECIDER_NOT_ALLOWED",
+          "httpStatus": 403,
+          "from": "deciders",
+          "said": "Your approval does not count for this gate: it needs approvals from its named deciders. Nothing has changed."
+        }
+      ]
     }
   ]
 }

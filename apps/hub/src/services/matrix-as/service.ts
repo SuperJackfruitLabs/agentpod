@@ -34,6 +34,7 @@ import {
   GATE_OUTCOME_TYPE,
   settleGateOutcome,
 } from "./gates";
+import { readBoardGate } from "./gate-sweep";
 import { assertPrincipal, type AssertionSubject } from "../../auth/org-plane/assertion";
 import { resolveMatrixId } from "../matrix";
 import { boardRoomFor } from "./board-room";
@@ -517,6 +518,8 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
               const speaker = await roomSpeakerFor(roomId, cfg.domain);
               return speaker ? speakingClient.sendText(speaker, roomId, body) : null;
             },
+            // A quorum gate: whether an accepted approval passed it is the board's to say.
+            readGate: (boardId: string, gateId: string) => readBoardGate(boardId, gateId),
           });
           // Answered: off the fleet Live Activity at once. A gate answered on the
           // board instead leaves with the next sweep (`fleet-gates.ts`).

@@ -1288,6 +1288,7 @@ describe("the reads", () => {
           "eventId": "$gate-gate_<run>_8-2",
           "options": null,
           "proseEventId": "$prose-gate_<run>_8-1",
+          "quorum": null,
           "roomId": "!gchar-board-<run>:id.agentpod.dev",
           "subjectDigest": null,
           "subjectId": null,

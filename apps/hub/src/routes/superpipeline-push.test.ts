@@ -394,3 +394,51 @@ describe("a decision that passed its stage's timeout", () => {
     expect(handled).toHaveLength(0);
   });
 });
+
+describe("an approval on a quorum gate short of its quorum", () => {
+  const RECORDED = {
+    event: "gate.approval_recorded",
+    boardId: "brd_7c1f",
+    cardId: "crd_9a22",
+    gateId: "gate_4e8b",
+    approval: { principalId: "prn_first", at: "2026-11-09T10:00:00.000Z" },
+    quorum: { required: 2, from: "admins", approvals: [{ principalId: "prn_first", at: "2026-11-09T10:00:00.000Z" }] },
+  };
+
+  test("is handed to the progress path, and says what became of it", async () => {
+    const handled: unknown[] = [];
+    const d = deps({
+      handleGateApprovalRecorded: async (body) => {
+        handled.push(body);
+        return { status: "sent" };
+      },
+    });
+    const raw = JSON.stringify(RECORDED);
+    const res = await post(d, raw, await sign(SECRET, raw));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, status: "sent" });
+    expect(handled).toEqual([RECORDED]);
+  });
+
+  test("one this hub cannot act on is acknowledged and goes nowhere", async () => {
+    const handled: unknown[] = [];
+    const d = deps({
+      handleGateApprovalRecorded: async (body) => {
+        handled.push(body);
+        return { status: "sent" };
+      },
+    });
+    for (const bad of [
+      { ...RECORDED, quorum: { ...RECORDED.quorum, required: 9 } },
+      { ...RECORDED, boardId: "" },
+      // The two halves disagree: the approval is not among the recorded ones.
+      { ...RECORDED, approval: { principalId: "prn_other", at: "2026-11-09T10:00:00.000Z" } },
+    ]) {
+      const raw = JSON.stringify(bad);
+      const res = await post(d, raw, await sign(SECRET, raw));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, ignored: true });
+    }
+    expect(handled).toHaveLength(0);
+  });
+});

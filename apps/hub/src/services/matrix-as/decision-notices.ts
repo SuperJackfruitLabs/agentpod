@@ -103,10 +103,13 @@ async function defaultTenantsForBoard(boardId: string): Promise<string[]> {
   return tenantsForBoard(boardId);
 }
 
-/** The one tenant a board belongs to here, or why there is none. */
-async function soleTenant(
+/**
+ * The one tenant a board belongs to here, or why there is none. Shared with a quorum gate's progress
+ * (`gate-progress.ts`), which a push carries with no tenant either.
+ */
+export async function soleTenant(
   boardId: string,
-  deps: DecisionNoticeDeps,
+  deps: { tenantsForBoard?: TenantsForBoard },
 ): Promise<{ tenantId: string } | { status: "unknown-board" | "ambiguous-board" }> {
   const tenants = await (deps.tenantsForBoard ?? defaultTenantsForBoard)(boardId);
   if (tenants.length === 1 && tenants[0]) return { tenantId: tenants[0] };
@@ -118,7 +121,8 @@ async function soleTenant(
   return { status: "ambiguous-board" };
 }
 
-async function boardRoomOf(boardId: string, tenantId: string) {
+/** A board's room, when it is this tenant's. */
+export async function boardRoomOf(boardId: string, tenantId: string) {
   const [room] = await db.select().from(matrixBoardRooms).where(eq(matrixBoardRooms.boardId, boardId)).limit(1);
   return room && room.tenantId === tenantId ? room : null;
 }
