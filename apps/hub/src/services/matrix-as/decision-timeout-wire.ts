@@ -99,6 +99,7 @@ const WAITING_FOR: Record<DecisionKind, string> = {
   question: "an answer",
   delivery: "its live link",
   attention: "a person",
+  checks: "its checks",
 };
 
 /** Cut to `max` characters, marking the cut. `gate-wire`'s, restated so that file can import this one. */
@@ -121,11 +122,13 @@ function noticeBody(d: DecisionTimeoutDelivery, link?: string): string {
 
 /**
  * The notice: an `m.text` in reply to the waiting card's own message, with the `suite_event_type`
- * marker and the fields a client renders it from. Pinned by the shared fixture.
+ * marker and the fields a client renders it from. Pinned by the shared fixture. `cardEventId` null:
+ * there is no card to reply to (a reminder of overdue checks, charter 2026-11-09, a gate may be
+ * decided by checks §4), and the notice stands alone.
  */
 export function decisionNoticeContent(
   d: DecisionTimeoutDelivery,
-  cardEventId: string,
+  cardEventId: string | null,
   deepLink?: string,
 ): Record<string, unknown> {
   const escalated = d.event === "decision.escalated";
@@ -141,6 +144,6 @@ export function decisionNoticeContent(
     waiting_since: d.waitingSince,
     ...(escalated ? { escalated_at: noticeAt(d) } : { reminded_at: noticeAt(d) }),
     ...(escalated && deepLink ? { deep_link: deepLink } : {}),
-    "m.relates_to": { "m.in_reply_to": { event_id: cardEventId } },
+    ...(cardEventId ? { "m.relates_to": { "m.in_reply_to": { event_id: cardEventId } } } : {}),
   };
 }

@@ -71,6 +71,25 @@ export async function pullBackAtSuperpipeline(
 }
 
 /**
+ * Override a machine check at superpipeline — **as the person who sent the override from chat**
+ * (charter: "A gate may be decided by checks" §5). The board judges who may (a workspace owner or
+ * admin by the role in the verified token, never the producer of the work), so the same per-answer
+ * assertion as `resolveGateAtSuperpipeline`: carried as this service it would be refused, or worse,
+ * attributed to nobody.
+ */
+export async function overrideCheckAtSuperpipeline(
+  input: { boardId: string; cardId: string; checkName: string; comment: string; principalId: string; senderMxid: string },
+  deps: BoardCallDeps,
+): Promise<{ ok: true } | { ok: false; code: string }> {
+  return postToBoardAsPrincipal(
+    `/v1/boards/${encodeURIComponent(input.boardId)}/cards/${encodeURIComponent(input.cardId)}/checks/${encodeURIComponent(input.checkName)}/override`,
+    { comment: input.comment },
+    input,
+    deps,
+  );
+}
+
+/**
  * Record a manual delivery's live link, or switch it to automatic delivery, at superpipeline —
  * **as the human who answered the follow-up** (charter: "The decision envelope covers questions
  * and follow-ups" §3). The same assertion, minted per answer, for the reason

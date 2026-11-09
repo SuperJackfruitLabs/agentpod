@@ -614,6 +614,25 @@ export class SuperpipelineClient {
     return [];
   }
 
+  /**
+   * A card's machine checks, as the board reads them now — `GET …/cards/:cardId/checks` (charter
+   * 2026-11-09, a gate may be decided by checks §7): the checks of the card's latest arrival at a
+   * stage with checks, or null when it never reached one. `checks` stays `unknown[]`: the caller
+   * re-checks each before it is carried. A throw from `send` stays a throw, so an unreadable board
+   * is never read as "no checks".
+   */
+  async cardChecks(cardId: string): Promise<{ stageKey: string; status: string; checks: unknown[] } | null> {
+    const res = await this.send("GET", `/v1/boards/${this.boardId}/cards/${encodeURIComponent(cardId)}/checks`);
+    if (typeof res !== "object" || res === null || !("checks" in res)) return null;
+    const view: unknown = res.checks;
+    if (typeof view !== "object" || view === null) return null;
+    const stageKey: unknown = Reflect.get(view, "stageKey");
+    const status: unknown = Reflect.get(view, "status");
+    const checks: unknown = Reflect.get(view, "checks");
+    if (typeof stageKey !== "string" || typeof status !== "string" || !Array.isArray(checks)) return null;
+    return { stageKey, status, checks };
+  }
+
   private verb(lease: RunLease, action: string, extra: Record<string, unknown> = {}): Promise<unknown> {
     return this.send("POST", `/v1/boards/${this.boardId}/runs/${lease.runId}/${action}`, {
       leaseEpoch: lease.leaseEpoch,

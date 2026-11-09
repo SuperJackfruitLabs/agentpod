@@ -7,6 +7,10 @@ export type { BridgeConfig } from "./config";
 export { DECISION_KINDS } from "./deliveries";
 export type {
   AttentionPendingDelivery,
+  CheckFailedDelivery,
+  CheckOverriddenDelivery,
+  CheckProvider,
+  CheckStatus,
   DecisionKind,
   DecisionPulledBackDelivery,
   DecisionReleasedDelivery,

@@ -39,6 +39,7 @@ import { decisionNoticeContent, noticeAt } from "./decision-timeout-wire";
 import { boardLink } from "./gate-wire";
 import type { TenantsForBoard } from "./relay-scope";
 import { moveCardBelow, type CardRepostDeps } from "./decision-repost";
+import { checksWaitingCardFor, moveChecksCardBelow, postChecksWaitingCard, readWaitingChecks, type ChecksForCard } from "./checks-waiting";
 
 const log = createLogger("matrix-decision-notices");
 /** How the homeserver refuses inviting a member (Synapse: 403 "… is already in the room."). */
@@ -52,6 +53,11 @@ export interface DecisionNoticeDeps extends CardRepostDeps {
   workspaceAdmins?(tenantId: string): Promise<string[]>;
   /** Every tenant that knows a board. Defaults to `tenantsForBoard`. */
   tenantsForBoard?: TenantsForBoard;
+  /**
+   * The board's read of a card's checks, listed on the card an escalation of overdue checks posts
+   * (`checks-waiting.ts`). Absent: such an escalation posts its notice alone.
+   */
+  checksForCard?: ChecksForCard;
 }
 
 export type DecisionNoticeOutcome =
@@ -74,6 +80,8 @@ async function cardEventFor(
   kind: DecisionKind,
   decisionId: string,
 ): Promise<CardEvent | null> {
+  // A check set has no card of its own until an escalation posts its checks.waiting card.
+  if (kind === "checks") return checksWaitingCardFor(tenantId, boardId, cardId, decisionId);
   const row = await (async () => {
     if (kind === "gate") {
       const [r] = await db.select().from(matrixGateEvents).where(eq(matrixGateEvents.gateId, decisionId)).limit(1);
@@ -175,28 +183,34 @@ export async function handleDecisionTimeout(d: DecisionTimeoutDelivery, deps: De
   if ("status" in sole) return sole;
   const { tenantId } = sole;
 
-  const card = await cardEventFor(tenantId, d.boardId, d.cardId, d.decisionKind, d.decisionId);
-  if (!card) {
-    log.info("a decision timed out on a card this hub never posted; nothing to reply to", {
-      event: d.event,
-      boardId: d.boardId,
-      decisionKind: d.decisionKind,
-      decisionId: d.decisionId,
-    });
-    return { status: "unknown-card" };
+  // A check set waits before any gate opens (charter 2026-11-09, a gate may be decided by checks §4):
+  // there is no card to reply to, so its reminder stands alone and its escalation posts one.
+  const checks = d.decisionKind === "checks";
+  const card = checks ? null : await cardEventFor(tenantId, d.boardId, d.cardId, d.decisionKind, d.decisionId);
+  if (!checks) {
+    if (!card) {
+      log.info("a decision timed out on a card this hub never posted; nothing to reply to", {
+        event: d.event,
+        boardId: d.boardId,
+        decisionKind: d.decisionKind,
+        decisionId: d.decisionId,
+      });
+      return { status: "unknown-card" };
+    }
+    if (!card.open) return { status: "settled" };
   }
-  if (!card.open) return { status: "settled" };
 
   const room = await boardRoomOf(d.boardId, tenantId);
-  if (!room || room.roomId !== card.roomId) {
+  if (!room || (card && room.roomId !== card.roomId)) {
     log.warn("a timed-out decision's card is not in its board's room; not replying", { boardId: d.boardId, decisionId: d.decisionId });
     return { status: "no-room" };
   }
 
   const escalated = d.event === "decision.escalated";
   // Read before anything is claimed: a plane that cannot be read throws, and the retried push
-  // finds nothing claimed.
+  // finds nothing claimed. The board's read of the checks too, for the card an escalation posts.
   const admins = escalated ? ((await deps.workspaceAdmins?.(tenantId)) ?? []) : [];
+  const waitingChecks = checks && escalated ? await readWaitingChecks(d, deps) : null;
 
   const notice = escalated ? "escalated" : "reminded";
   const [claimed] = await db
@@ -212,7 +226,7 @@ export async function handleDecisionTimeout(d: DecisionTimeoutDelivery, deps: De
       stageKey: d.stageKey,
       stageName: typeof d.stageName === "string" ? d.stageName : null,
       roomId: room.roomId,
-      cardEventId: card.eventId,
+      cardEventId: card?.eventId ?? null,
       waitingSince: d.waitingSince,
       noticedAt: noticeAt(d),
     })
@@ -228,8 +242,11 @@ export async function handleDecisionTimeout(d: DecisionTimeoutDelivery, deps: De
   );
   try {
     const invited = escalated ? await inviteAdmins(admins, room, deps) : 0;
-    const eventId = await sendNotice(d, card.eventId, room, deps);
-    await db.update(matrixDecisionNotices).set({ eventId }).where(noticeKey);
+    // Overdue checks escalate with a card listing them, which the notice replies to, so a client can
+    // offer Override (charter 2026-11-09 §5, §7).
+    const replyTo = waitingChecks ? await postChecksWaitingCard(d, tenantId, room, waitingChecks, deps) : (card?.eventId ?? null);
+    const eventId = await sendNotice(d, replyTo, room, deps);
+    await db.update(matrixDecisionNotices).set({ eventId, cardEventId: replyTo }).where(noticeKey);
     log.info(escalated ? "a decision escalated to the workspace admins" : "a decision reminded", {
       boardId: d.boardId,
       decisionKind: d.decisionKind,
@@ -246,7 +263,7 @@ export async function handleDecisionTimeout(d: DecisionTimeoutDelivery, deps: De
 
 async function sendNotice(
   d: DecisionTimeoutDelivery,
-  cardEventId: string,
+  cardEventId: string | null,
   room: { roomId: string; speakerMxid: string },
   deps: DecisionNoticeDeps,
 ): Promise<string | null> {
@@ -345,7 +362,13 @@ async function repostForInvite(invite: Invite, deps: DecisionNoticeDeps): Promis
     if (!claimed) continue;
     try {
       // The card moves once per join: a retry after a notice that failed does not post it again.
-      if (!n.cardMovedAt || n.cardMovedAt < joinedAt) {
+      if ((!n.cardMovedAt || n.cardMovedAt < joinedAt) && kind === "checks") {
+        // A check set's card lists its checks, read fresh for it alone (`checks-waiting.ts`).
+        const target = { boardId: n.boardId, cardId: n.cardId, decisionId: n.decisionId, stageKey: n.stageKey, stageName: n.stageName };
+        if ((await moveChecksCardBelow(target, n.tenantId, room, deps)) === "moved") {
+          await db.update(matrixDecisionNotices).set({ cardMovedAt: new Date() }).where(noticeKey);
+        }
+      } else if (!n.cardMovedAt || n.cardMovedAt < joinedAt) {
         // One fresh read for the whole pass, and only when there is something to move.
         pending.read ??= readPending(invite.boardId, deps);
         const fresh = await pending.read;

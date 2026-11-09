@@ -1,6 +1,6 @@
 {
   "corpus": "ecosystem-identity/matrix-gate-events",
-  "version": 10,
+  "version": 11,
   "authoredAt": "2026-08-30",
   "authoredFrom": "the gates table in superpipeline apps/api/src/board/board-do.ts, the GateDecision union it resolves against, and charter decisions/2026-08-30-a-gate-closes-over-chat.md",
   "purpose": "A superpipeline approval gate crosses into a Matrix room and a human's answer crosses back. Three codebases must agree on the field names: the board that opens the gate, the Application Service that projects and resolves it, and the client that draws the buttons. A rename in any one of them is a gate that silently never resolves — which reads to the human as a button that does nothing.",
@@ -6918,6 +6918,877 @@
           "code": "APPROVAL_RELEASE_AFTER_EXPIRY",
           "httpStatus": 409,
           "said": "That can't be approved: it would go ahead only after what it approves has expired. Nothing has changed."
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.superpipeline.gate.v2",
+      "variant": "checks",
+      "direction": "outbound — the board asks for an approval once the stage's machine checks have passed",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-be-decided-by-checks.md §2, §7",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as for the entry without a variant; `checks` sits beside the options.",
+      "requiredFields": [
+        "suite_event_type",
+        "options",
+        "checks"
+      ],
+      "notes": {
+        "checks": "[{ name, provider, status, url? }] from the board's gate.pending checks: 1 to 5, names unique, 1–40 characters without surrounding spaces or \"/\"; provider ci | verdict; status pending | passed | failed | overridden (by the time a gate opens for people every check is passed or overridden). url only when it is an https address with a host; any other url is dropped and the check kept.",
+        "prose": "The body adds one paragraph after the sentence and before any release line: \"Checks: <name> (<CI|verdict>) <✓|overridden|failed|pending>, ….\"",
+        "absent": "A gate whose stage has no checks carries no checks key and no extra paragraph, so its gate.v2 is byte-identical to before.",
+        "malformed": "A list with any entry malformed, more than 5, two of one name, or empty is not carried at all, rather than in part. superpipeline still decided the checks."
+      },
+      "accept": [
+        {
+          "why": "three checks passed or overridden before the gate opened",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)\n\nChecks: build (CI) ✓, quality (verdict) ✓, claims (verdict) overridden.",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "review",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "checks": [
+              {
+                "name": "build",
+                "provider": "ci",
+                "status": "passed",
+                "url": "https://forge.example/acme/app/actions/runs/412"
+              },
+              {
+                "name": "quality",
+                "provider": "verdict",
+                "status": "passed"
+              },
+              {
+                "name": "claims",
+                "provider": "verdict",
+                "status": "overridden"
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "an empty list",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "review",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40",
+            "checks": []
+          }
+        },
+        {
+          "why": "more than 5 checks",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "review",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40",
+            "checks": [
+              {
+                "name": "c0",
+                "provider": "ci",
+                "status": "passed"
+              },
+              {
+                "name": "c1",
+                "provider": "ci",
+                "status": "passed"
+              },
+              {
+                "name": "c2",
+                "provider": "ci",
+                "status": "passed"
+              },
+              {
+                "name": "c3",
+                "provider": "ci",
+                "status": "passed"
+              },
+              {
+                "name": "c4",
+                "provider": "ci",
+                "status": "passed"
+              },
+              {
+                "name": "c5",
+                "provider": "ci",
+                "status": "passed"
+              }
+            ]
+          }
+        },
+        {
+          "why": "a name with a slash (it is a path segment of the override route)",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "review",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40",
+            "checks": [
+              {
+                "name": "ci/build",
+                "provider": "ci",
+                "status": "passed"
+              }
+            ]
+          }
+        },
+        {
+          "why": "a name longer than 40 characters",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "review",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40",
+            "checks": [
+              {
+                "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "provider": "ci",
+                "status": "passed"
+              }
+            ]
+          }
+        },
+        {
+          "why": "a name with surrounding spaces",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "review",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40",
+            "checks": [
+              {
+                "name": " build",
+                "provider": "ci",
+                "status": "passed"
+              }
+            ]
+          }
+        },
+        {
+          "why": "an unknown provider",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "review",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40",
+            "checks": [
+              {
+                "name": "cost",
+                "provider": "cost",
+                "status": "passed"
+              }
+            ]
+          }
+        },
+        {
+          "why": "an unknown status",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "review",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40",
+            "checks": [
+              {
+                "name": "build",
+                "provider": "ci",
+                "status": "skipped"
+              }
+            ]
+          }
+        },
+        {
+          "why": "two checks of one name",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approval needed — \"Ship the release\" at stage `review`. Approve, request changes, or reject. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.gate.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "gate_id": "gate_6e19",
+            "stage_key": "review",
+            "return_stage_key": "build",
+            "card_title": "Ship the release",
+            "produced_by": "agt_31d0",
+            "prompt": "Approve \"Ship the release\"?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve",
+                "meaning": "approve",
+                "needs_comment": false
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes",
+                "meaning": "revise",
+                "needs_comment": true
+              },
+              {
+                "id": "reject",
+                "label": "Reject",
+                "meaning": "reject",
+                "needs_comment": false
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40",
+            "checks": [
+              {
+                "name": "build",
+                "provider": "ci",
+                "status": "passed"
+              },
+              {
+                "name": "build",
+                "provider": "verdict",
+                "status": "passed"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "suiteEventType": "dev.agentpod.check.failed.v2",
+      "variant": "checks",
+      "direction": "outbound — a machine check failed and the card went back (or could not)",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-be-decided-by-checks.md §3, §7",
+      "sender": "the board room's speaker",
+      "matrixEventType": "dev.agentpod.check.failed.v2",
+      "requiredFields": [
+        "suite_event_type",
+        "schema_version",
+        "board_id",
+        "card_id",
+        "stage_key",
+        "check",
+        "returned_to"
+      ],
+      "notes": {
+        "when": "Posted for each check.failed superpipeline pushes, once however often it is delivered. The push carries no arrival id: a failure worded exactly like one said within the last 30 minutes is a redelivery and says nothing.",
+        "card_title": "Present when this hub has heard the card's title (a reminder or escalation of it, or its checks.waiting card); the push carries none.",
+        "check": "{ name, provider, status: 'failed', detail?, url? }: detail trimmed to 300 characters; url only when https.",
+        "returned_to": "The stage the card went back to; null when it could not go back and waits for a person (its failed check may then be overridden).",
+        "prose": "Beside it, an m.text: \"CI check “build” failed on “<card title>” — returned for changes.\" (\"Verdict check …\" for a verdict; \"— it could not go back and waits for a person.\" when returned_to is null; the title left out when unknown; \" [Open the result](<url>)\" when there is one).",
+        "relation": "No gate card exists for a check (checks run before the gate opens), so the prose stands alone. When this hub posted a checks.waiting card for the same card and stage that is still open, the prose replies to it (m.in_reply_to) and this event carries an m.reference to it; a failure that returned the card closes that card."
+      },
+      "accept": [
+        {
+          "why": "a CI check failed and the card went back",
+          "push": {
+            "event": "check.failed",
+            "boardId": "brd_7c1f",
+            "cardId": "crd_8a40",
+            "stageKey": "review",
+            "check": {
+              "name": "build",
+              "provider": "ci",
+              "status": "failed",
+              "detail": "lint: failure",
+              "url": "https://forge.example/acme/app/actions/runs/413"
+            },
+            "returnedTo": "build"
+          },
+          "cardTitle": "Ship the release",
+          "said": "CI check “build” failed on “Ship the release” — returned for changes. [Open the result](https://forge.example/acme/app/actions/runs/413)",
+          "content": {
+            "suite_event_type": "dev.agentpod.check.failed.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "card_title": "Ship the release",
+            "stage_key": "review",
+            "check": {
+              "name": "build",
+              "provider": "ci",
+              "status": "failed",
+              "detail": "lint: failure",
+              "url": "https://forge.example/acme/app/actions/runs/413"
+            },
+            "returned_to": "build"
+          }
+        },
+        {
+          "why": "a verdict failed, the card could not go back, its title unknown, replying to the open checks.waiting card",
+          "push": {
+            "event": "check.failed",
+            "boardId": "brd_7c1f",
+            "cardId": "crd_8a40",
+            "stageKey": "review",
+            "check": {
+              "name": "quality",
+              "provider": "verdict",
+              "status": "failed",
+              "detail": "0.62 is under 0.8"
+            },
+            "returnedTo": null
+          },
+          "cardTitle": null,
+          "replyTo": "$checksWaitingEventId",
+          "said": "Verdict check “quality” failed — it could not go back and waits for a person.",
+          "content": {
+            "suite_event_type": "dev.agentpod.check.failed.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "stage_key": "review",
+            "check": {
+              "name": "quality",
+              "provider": "verdict",
+              "status": "failed",
+              "detail": "0.62 is under 0.8"
+            },
+            "returned_to": null,
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$checksWaitingEventId"
+            }
+          }
+        }
+      ],
+      "reject": []
+    },
+    {
+      "suiteEventType": "dev.agentpod.check.overridden.v2",
+      "variant": "checks",
+      "direction": "outbound — a workspace owner or admin passed a check by hand",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-be-decided-by-checks.md §5, §7",
+      "sender": "the board room's speaker",
+      "matrixEventType": "dev.agentpod.check.overridden.v2",
+      "requiredFields": [
+        "suite_event_type",
+        "schema_version",
+        "board_id",
+        "card_id",
+        "stage_key",
+        "check",
+        "overridden_by",
+        "comment",
+        "at"
+      ],
+      "notes": {
+        "when": "Posted for each check.overridden superpipeline pushes, however the override was made (from chat or on the web), once.",
+        "overridden_by": "The person's handle, never an mxid or a principal id; null when this hub cannot name them.",
+        "prose": "Beside it, an m.text: \"Verdict check “quality” on “<card title>” overridden by rakesh: <comment>\".",
+        "relation": "As for check.failed: a reply to the open checks.waiting card for the card and stage when there is one, standalone otherwise."
+      },
+      "accept": [
+        {
+          "why": "overridden from the checks.waiting card",
+          "push": {
+            "event": "check.overridden",
+            "boardId": "brd_7c1f",
+            "cardId": "crd_8a40",
+            "stageKey": "review",
+            "check": {
+              "name": "quality",
+              "provider": "verdict",
+              "status": "overridden"
+            },
+            "by": "prn_rakesh",
+            "comment": "the grader is down; read it myself",
+            "at": "2026-11-09T12:10:00.000Z"
+          },
+          "who": "rakesh",
+          "cardTitle": "Ship the release",
+          "replyTo": "$checksWaitingEventId",
+          "said": "Verdict check “quality” on “Ship the release” overridden by rakesh: the grader is down; read it myself",
+          "content": {
+            "suite_event_type": "dev.agentpod.check.overridden.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "card_title": "Ship the release",
+            "stage_key": "review",
+            "check": {
+              "name": "quality",
+              "provider": "verdict",
+              "status": "overridden"
+            },
+            "overridden_by": "rakesh",
+            "comment": "the grader is down; read it myself",
+            "at": "2026-11-09T12:10:00.000Z",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$checksWaitingEventId"
+            }
+          }
+        }
+      ],
+      "reject": []
+    },
+    {
+      "suiteEventType": "dev.agentpod.checks.waiting.v2",
+      "variant": "checks",
+      "direction": "outbound — a card's checks are overdue and escalated to the workspace's owners and admins",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-be-decided-by-checks.md §4, §5, §7",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content.",
+      "requiredFields": [
+        "suite_event_type",
+        "schema_version",
+        "board_id",
+        "card_id",
+        "card_title",
+        "stage_key",
+        "checks"
+      ],
+      "notes": {
+        "when": "Posted when decision.escalated arrives with decision_kind checks, once per check set, before the escalation notice, which replies to it. The checks are the board's read now (GET …/cards/:cardId/checks), carried as gate.v2 carries them; when the card's checks are over or cannot be offered, no card is posted and the notice stands alone.",
+        "override": "A client offers Override, to workspace owners and admins, on each check pending or failed. An override (dev.superpipeline.check.override.v2) must reference this event.",
+        "joined": "An admin the escalation invited cannot read a card posted before they joined: their join posts it again from a fresh read, and the earlier copy is told it moved and no longer counts."
+      },
+      "accept": [
+        {
+          "why": "a CI check passed and a verdict still pending past the stage's timeout",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Checks overdue on “Ship the release” at Review: build (CI) ✓, quality (verdict) pending. A workspace owner or admin may override a check, with a comment. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.agentpod.checks.waiting.v2",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "card_title": "Ship the release",
+            "stage_key": "review",
+            "checks": [
+              {
+                "name": "build",
+                "provider": "ci",
+                "status": "passed",
+                "url": "https://forge.example/acme/app/actions/runs/412"
+              },
+              {
+                "name": "quality",
+                "provider": "verdict",
+                "status": "pending"
+              }
+            ],
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40"
+          }
+        }
+      ],
+      "reject": []
+    },
+    {
+      "suiteEventType": "dev.superpipeline.decision.escalated.v1",
+      "variant": "checks",
+      "direction": "outbound — a card's checks are still pending after its stage's escalation time",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-be-decided-by-checks.md §4",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as for the entry with variant deadline.",
+      "requiredFields": [
+        "suite_event_type",
+        "decision_kind",
+        "decision_id",
+        "m.relates_to"
+      ],
+      "notes": {
+        "decision": "decision_kind checks; decision_id the board's arrival id of the check set.",
+        "relation": "In reply to the checks.waiting card posted for it (or standalone when none could be posted)."
+      },
+      "accept": [
+        {
+          "why": "overdue checks escalated",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Escalated to workspace admins after 3 h: \"Ship the release\" is still waiting for its checks at Review. [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_8a40)",
+            "suite_event_type": "dev.superpipeline.decision.escalated.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "decision_kind": "checks",
+            "decision_id": "arr_5d02",
+            "waiting_since": "2026-11-09T09:00:00.000Z",
+            "escalated_at": "2026-11-09T12:00:00.000Z",
+            "deep_link": "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40",
+            "m.relates_to": {
+              "m.in_reply_to": {
+                "event_id": "$checksWaitingEventId"
+              }
+            }
+          }
+        }
+      ],
+      "reject": []
+    },
+    {
+      "suiteEventType": "dev.superpipeline.decision.reminded.v1",
+      "variant": "checks",
+      "direction": "outbound — a card's checks are still pending after its stage's reminder time",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-be-decided-by-checks.md §4",
+      "sender": "the board room's speaker",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content.",
+      "requiredFields": [
+        "suite_event_type",
+        "decision_kind",
+        "decision_id"
+      ],
+      "notes": {
+        "relation": "No m.relates_to: nothing is posted for checks before an escalation, so a reminder stands alone."
+      },
+      "accept": [
+        {
+          "why": "overdue checks reminded",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Still waiting: \"Ship the release\" has waited 1 h for its checks.",
+            "suite_event_type": "dev.superpipeline.decision.reminded.v1",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "decision_kind": "checks",
+            "decision_id": "arr_5d02",
+            "waiting_since": "2026-11-09T09:00:00.000Z",
+            "reminded_at": "2026-11-09T10:00:00.000Z"
+          }
+        }
+      ],
+      "reject": []
+    },
+    {
+      "suiteEventType": "dev.superpipeline.check.override.v2",
+      "variant": "checks",
+      "direction": "inbound — a workspace owner or admin overrides a check from chat",
+      "decidedBy": "charter decisions/2026-11-09-a-gate-may-be-decided-by-checks.md §5, §7",
+      "sender": "the human's own Matrix session",
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, as for a decision.",
+      "requiredFields": [
+        "suite_event_type",
+        "schema_version",
+        "board_id",
+        "card_id",
+        "check_name",
+        "comment",
+        "m.relates_to"
+      ],
+      "notes": {
+        "relation": "m.reference to a checks.waiting card this hub posted (its current copy), in the room it was posted in, for the same board_id and card_id. m.in_reply_to is not accepted. Anything else is ignored and nothing is said.",
+        "carried": "Carried to superpipeline's override route (POST /v1/boards/:boardId/cards/:cardId/checks/:check_name/override { comment }) as the person, as a decision is. Agents and unlinked senders are ignored. Success posts nothing from the answer itself: the board's check.overridden push is what is said, once.",
+        "comment": "Required. Without one the Application Service refuses with the sentence in `said`, after checking who sent it, and nothing reaches the board.",
+        "boardRefusals": "What superpipeline refuses an override with, and the sentence the Application Service says in the room."
+      },
+      "accept": [
+        {
+          "why": "an admin overrides a pending verdict with a comment",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Override quality: the grader is down; read it myself",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.check.override.v2",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "check_name": "quality",
+            "comment": "the grader is down; read it myself",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$checksWaitingEventId"
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "no comment",
+          "said": "Overriding a check needs a comment saying why. Nothing has changed.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Override quality",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.check.override.v2",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "check_name": "quality",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$checksWaitingEventId"
+            }
+          }
+        },
+        {
+          "why": "a blank comment",
+          "said": "Overriding a check needs a comment saying why. Nothing has changed.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Override quality",
+            "schema_version": 1,
+            "suite_event_type": "dev.superpipeline.check.override.v2",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_8a40",
+            "check_name": "quality",
+            "comment": "   ",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$checksWaitingEventId"
+            }
+          }
+        }
+      ],
+      "boardRefusals": [
+        {
+          "code": "CHECK_OVERRIDE_NOT_ALLOWED",
+          "httpStatus": 403,
+          "said": "Only a workspace owner or admin can override a check. Nothing has changed."
+        },
+        {
+          "code": "SEPARATION_OF_DUTIES",
+          "httpStatus": 403,
+          "said": "You produced this work, so you can't override a check on it. Nothing has changed."
+        },
+        {
+          "code": "CHECK_NOT_OPEN",
+          "httpStatus": 409,
+          "said": "That check can't be overridden now: it already passed or was overridden, or the card has moved on. Nothing has changed."
+        },
+        {
+          "code": "CHECK_NOT_FOUND",
+          "httpStatus": 404,
+          "said": "There is no check by that name waiting on this card. Nothing has changed."
+        },
+        {
+          "code": "INVALID_COMMENT",
+          "httpStatus": 400,
+          "said": "The board did not take that comment: it needs a short one saying why. Nothing has changed."
         }
       ]
     }

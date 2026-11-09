@@ -10,6 +10,8 @@ import { z } from "zod";
 import { deadlineField } from "./decision-timeout-wire";
 import { quorumField } from "./gate-quorum-wire";
 import { releaseField, releaseSentence, releaseV2 } from "./gate-release-wire";
+import { checksField, checksSentence, checksV2 } from "./checks-wire";
+import { isHttpsUrl } from "./safe-url";
 import type { GatePendingDelivery } from "../bridge";
 
 export const GATE_EVENT_TYPE = "dev.superpipeline.gate.v1";
@@ -442,9 +444,13 @@ export function previewMarkdown(preview: GatePreviewBlock[]): string {
 export function gateV2ProseBody(d: GatePendingDelivery, link?: string): string {
   // An approval that would wait says so before anyone approves (charter 2026-11-09, an approval may
   // wait for its release time §7), as its own paragraph; nothing changes for a gate nothing holds.
+  // The checks that ran before it opened, as one line (charter 2026-11-09, a gate may be decided by
+  // checks §7); nothing changes for a gate on a stage without checks.
+  const checks = checksV2(d.checks);
   const body = gateV2ProseBodyWithoutRelease(d, link);
+  const withChecks = checks ? `${body}\n\n${checksSentence(checks)}` : body;
   const release = releaseV2(d.release);
-  return release ? `${body}\n\n${releaseSentence(release)}` : body;
+  return release ? `${withChecks}\n\n${releaseSentence(release)}` : withChecks;
 }
 
 function gateV2ProseBodyWithoutRelease(d: GatePendingDelivery, link?: string): string {
@@ -489,6 +495,9 @@ export function gateV2Content(d: GatePendingDelivery, deepLink?: string): Record
     // What would hold an approval (charter 2026-11-09, an approval may wait for its release time
     // §7); nothing on a gate nothing holds, so its gate.v2 is unchanged.
     ...releaseField(d.release),
+    // The checks that ran before this gate opened (charter 2026-11-09, a gate may be decided by
+    // checks §7); nothing on a gate whose stage has none, so its gate.v2 is unchanged.
+    ...checksField(d.checks),
     ...deadlineField(d.deadline),
     ...(deepLink ? { deep_link: deepLink } : {}),
   };
@@ -621,16 +630,7 @@ export function optionInputV2(raw: unknown): OptionInputV2 | undefined {
 /** Why typed input cannot be carried; every value is a refusal. */
 export type InputRefusal = "input-required" | "text-too-long" | "url-invalid";
 
-/** Is this an absolute `https://` address with a host? */
-export function isHttpsUrl(v: string): boolean {
-  if (!/^https:\/\/[^\s<>]+$/.test(v)) return false;
-  try {
-    const u = new URL(v);
-    return u.protocol === "https:" && u.hostname !== "";
-  } catch {
-    return false;
-  }
-}
+export { isHttpsUrl };
 
 /**
  * Why `text` is not an answer this input takes, or null when it is. Blank is empty. A `url` input

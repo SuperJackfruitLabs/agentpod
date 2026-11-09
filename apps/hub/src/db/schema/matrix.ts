@@ -655,6 +655,66 @@ export const matrixGateHoldNotices = pgTable(
 );
 
 /**
+ * A `check.failed` or `check.overridden` this hub said in a board's room (charter 2026-11-09, a gate
+ * may be decided by checks §7), once. Claimed before it is sent and given back when the send fails.
+ * The push carries no arrival id, so the key is the card, the notice, the check and a digest of what
+ * the push says (a redelivery says it byte for byte); `createdAt` lets an identical failure long
+ * after the first be said again (`check-notices.ts`).
+ */
+export const matrixCheckNotices = pgTable(
+  "matrix_check_notices",
+  {
+    boardId: text("board_id").notNull(),
+    cardId: text("card_id").notNull(),
+    /** `failed` | `overridden`. */
+    notice: text("notice").notNull(),
+    checkName: text("check_name").notNull(),
+    digest: text("digest").notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    roomId: text("room_id").notNull(),
+    /** The notice's own event, once sent. */
+    eventId: text("event_id"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.boardId, t.cardId, t.notice, t.checkName, t.digest] }),
+    index("matrix_check_notices_tenant_id_idx").on(t.tenantId),
+  ],
+);
+
+/**
+ * The checks.waiting card an escalation of overdue checks posted (charter 2026-11-09, a gate may be
+ * decided by checks §4, §7), once per check set (`decisionId`, the board's arrival id). What an
+ * override from chat must reference, and what is posted again for an admin who joins later.
+ */
+export const matrixChecksWaiting = pgTable(
+  "matrix_checks_waiting",
+  {
+    boardId: text("board_id").notNull(),
+    decisionId: text("decision_id").notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    cardId: text("card_id").notNull(),
+    cardTitle: text("card_title").notNull(),
+    stageKey: text("stage_key").notNull(),
+    roomId: text("room_id").notNull(),
+    /** The card's own event, once sent; moved when it is posted again for an admin who joined. */
+    eventId: text("event_id"),
+    /** When a failed check sent the card back, so this card no longer stands for its checks. */
+    closedAt: timestamp("closed_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.boardId, t.decisionId] }),
+    index("matrix_checks_waiting_tenant_id_idx").on(t.tenantId),
+    index("matrix_checks_waiting_event_id_idx").on(t.eventId),
+  ],
+);
+
+/**
  * A reminder or an escalation this hub posted in reply to a waiting card (charter: "Unanswered
  * decisions remind, then escalate" §2-3), once per decision and notice.
  *
@@ -667,7 +727,7 @@ export const matrixDecisionNotices = pgTable(
   "matrix_decision_notices",
   {
     boardId: text("board_id").notNull(),
-    /** `gate` | `question` | `delivery` | `attention`. */
+    /** `gate` | `question` | `delivery` | `attention` | `checks`. */
     decisionKind: text("decision_kind").notNull(),
     /** The gate id (gate, delivery), elicitation id (question) or wait id (attention). */
     decisionId: text("decision_id").notNull(),
@@ -681,8 +741,11 @@ export const matrixDecisionNotices = pgTable(
     stageKey: text("stage_key").notNull(),
     stageName: text("stage_name"),
     roomId: text("room_id").notNull(),
-    /** The waiting card's own message, which the notice replies to. */
-    cardEventId: text("card_event_id").notNull(),
+    /**
+     * The waiting card's own message, which the notice replies to. Null for a reminder of overdue
+     * checks, which has no card to reply to (charter 2026-11-09, a gate may be decided by checks §4).
+     */
+    cardEventId: text("card_event_id"),
     /** The board's times, as it sent them (ISO). */
     waitingSince: text("waiting_since").notNull(),
     noticedAt: text("noticed_at").notNull(),

@@ -106,6 +106,12 @@ export interface GateSweepDeps {
     heldUntil?: string | null;
   } | null>;
   /**
+   * The board's read of a card's machine checks, or null when there is no credential for the board.
+   * Throws when the board cannot be read. What an escalation of overdue checks lists
+   * (`readBoardCardChecks`, charter 2026-11-09, a gate may be decided by checks).
+   */
+  readChecks?(boardId: string, cardId: string): Promise<{ stageKey: string; status: string; checks: unknown[] } | null>;
+  /**
    * Post the outcome receipt and claim it, so two sweeps leave one line. `chosen` names a variant
    * chosen; `heldUntil` the release time of a held approval.
    */
@@ -652,6 +658,12 @@ export function bridgeGateSweepDeps(
       return new SuperpipelineClient({ baseUrl: config.baseUrl, boardId, token, fetch: fetchImpl }).gate(gateId);
     },
 
+    readChecks: async (boardId, cardId) => {
+      const token = (await tokensForBoards()).get(boardId);
+      if (!token) return null;
+      return new SuperpipelineClient({ baseUrl: config.baseUrl, boardId, token, fetch: fetchImpl }).cardChecks(cardId);
+    },
+
     decisionFor: async (boardId, gateId) => {
       const token = (await tokensForBoards()).get(boardId);
       if (!token) return null;
@@ -863,4 +875,16 @@ export async function readBoardGate(
   heldUntil?: string | null;
 } | null> {
   return (await running?.readGate?.(boardId, gateId)) ?? null;
+}
+
+/**
+ * A card's machine checks as its board reads them now, with the running sweeper's own credential, or
+ * null when no sweeper runs or there is no credential for the board. Throws when the board cannot be
+ * read, so an escalation of overdue checks is retried rather than posted without them.
+ */
+export async function readBoardCardChecks(
+  boardId: string,
+  cardId: string,
+): Promise<{ stageKey: string; status: string; checks: unknown[] } | null> {
+  return (await running?.readChecks?.(boardId, cardId)) ?? null;
 }

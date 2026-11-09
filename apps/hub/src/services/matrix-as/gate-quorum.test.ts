@@ -398,8 +398,8 @@ describe("quorum gates against the shared corpus", () => {
   const progress = entry(GATE_PROGRESS_TYPE);
   const decision = entry(GATE_DECISION_V2_SUITE_TYPE);
 
-  test("version 10 (quorum entries since 9)", () => {
-    expect(corpus.version).toBe(10);
+  test("version 11 (quorum entries since 9)", () => {
+    expect(corpus.version).toBe(11);
   });
 
   test("the hub's gate.v2 for a quorum gate is exactly what the corpus accepts", () => {

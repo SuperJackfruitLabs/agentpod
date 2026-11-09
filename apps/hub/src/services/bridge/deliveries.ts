@@ -69,6 +69,12 @@ export interface GatePendingDelivery {
    * and from a board that predates it. `unknown`: checked before it is carried (`releaseV2`).
    */
   release?: unknown;
+  /**
+   * The checks that ran before this gate opened (charter 2026-11-09, a gate may be decided by checks
+   * §7): `[{ name, provider, status, url? }]`. Absent when the stage has none and from a board that
+   * predates them. `unknown`: checked before it is carried (`checksV2`).
+   */
+  checks?: unknown;
   ts: string;
 }
 
@@ -122,6 +128,40 @@ export interface DecisionPulledBackDelivery {
   pulledBackBy: string;
   at: string;
   comment: string;
+}
+
+/** A check's provider and status, as the board names them (charter 2026-11-09, a gate may be decided by checks §1). */
+export type CheckProvider = "ci" | "verdict";
+export type CheckStatus = "pending" | "passed" | "failed" | "overridden";
+
+/**
+ * The body the board pushes on `check.failed`: a check on a card's arrival at a stage failed, and the
+ * card went back to `returnedTo` (null: it could not go back and waits for a person). Carries no
+ * arrival id and no card title. Checked by `isCheckFailed` before it is believed.
+ */
+export interface CheckFailedDelivery {
+  event: "check.failed";
+  boardId: string;
+  cardId: string;
+  stageKey: string;
+  check: { name: string; provider: CheckProvider; status: "failed"; detail?: string; url?: string };
+  returnedTo: string | null;
+}
+
+/**
+ * The body the board pushes on `check.overridden`: a workspace owner or admin passed a check by hand
+ * (charter 2026-11-09 §5). `by` is a principal id (or the board's local id), never carried into a
+ * room. Checked by `isCheckOverridden` before it is believed.
+ */
+export interface CheckOverriddenDelivery {
+  event: "check.overridden";
+  boardId: string;
+  cardId: string;
+  stageKey: string;
+  check: { name: string; provider: CheckProvider; status: "overridden" };
+  by: string;
+  comment: string;
+  at: string;
 }
 
 /** The body the board pushes on `elicitation.pending`. */
@@ -243,15 +283,19 @@ export interface DeliveryPendingDelivery {
   ts: string;
 }
 
-/** The kinds of decision a stage's timeout applies to (charter: "Unanswered decisions remind, then escalate" §1). */
-export const DECISION_KINDS = ["gate", "question", "delivery", "attention"] as const;
+/**
+ * The kinds of decision a stage's timeout applies to (charter: "Unanswered decisions remind, then
+ * escalate" §1). `checks` is a card's check set waiting on its machine checks (charter 2026-11-09, a
+ * gate may be decided by checks §4); its decision id is the arrival's id.
+ */
+export const DECISION_KINDS = ["gate", "question", "delivery", "attention", "checks"] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 
 /**
  * The body the board pushes on `decision.reminded` and `decision.escalated`: a waiting decision passed
  * its stage's timeout (charter: "Unanswered decisions remind, then escalate" §2). `decisionId` is the
- * gate id (gate, delivery), the elicitation id (question) or the wait id (attention). Each is sent at
- * most once per wait; `remindedAt` rides on the first, `escalatedAt` on the second.
+ * gate id (gate, delivery), the elicitation id (question), the wait id (attention) or the check set's
+ * arrival id (checks). Each is sent at most once per wait; `remindedAt` rides on the first, `escalatedAt` on the second.
  */
 export interface DecisionTimeoutDelivery {
   event: "decision.reminded" | "decision.escalated";

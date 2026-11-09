@@ -38,7 +38,11 @@ import { handleGateApprovalRecorded, isGateApprovalRecorded } from "../services/
 import type { GateProgressOutcome } from "../services/matrix-as";
 import { handleDecisionPulledBack, handleDecisionReleased, isDecisionPulledBack, isDecisionReleased } from "../services/matrix-as";
 import type { GateHoldOutcome } from "../services/matrix-as";
+import { handleCheckFailed, handleCheckOverridden, isCheckFailed, isCheckOverridden } from "../services/matrix-as";
+import type { CheckNoticeOutcome } from "../services/matrix-as";
 import type {
+  CheckFailedDelivery,
+  CheckOverriddenDelivery,
   DecisionPulledBackDelivery,
   DecisionReleasedDelivery,
   DecisionTimeoutDelivery,
@@ -64,6 +68,8 @@ export interface SuperpipelinePushDeps extends GateProjectionDeps {
   invite?: DecisionNoticeDeps["invite"];
   /** A tenant's workspace owners and admins, as Matrix ids (`boardProjectionDeps`). */
   workspaceAdmins?: DecisionNoticeDeps["workspaceAdmins"];
+  /** A card's checks as the board reads them, listed when overdue checks escalate (`boardProjectionDeps`). */
+  checksForCard?: DecisionNoticeDeps["checksForCard"];
   /** Test seam: what a reminder or escalation does. Defaults to `handleDecisionTimeout`. */
   handleDecisionTimeout?(d: DecisionTimeoutDelivery): Promise<DecisionNoticeOutcome>;
   /** How to name an approver in a quorum gate's progress reply: their handle, never an mxid. */
@@ -74,6 +80,10 @@ export interface SuperpipelinePushDeps extends GateProjectionDeps {
   handleDecisionReleased?(d: DecisionReleasedDelivery): Promise<GateHoldOutcome>;
   /** Test seam: what a held approval's pull-back does. Defaults to `handleDecisionPulledBack`. */
   handleDecisionPulledBack?(d: DecisionPulledBackDelivery): Promise<GateHoldOutcome>;
+  /** Test seam: what a failed check does. Defaults to `handleCheckFailed`. */
+  handleCheckFailed?(d: CheckFailedDelivery): Promise<CheckNoticeOutcome>;
+  /** Test seam: what an overridden check does. Defaults to `handleCheckOverridden`. */
+  handleCheckOverridden?(d: CheckOverriddenDelivery): Promise<CheckNoticeOutcome>;
 }
 
 const enc = new TextEncoder();
@@ -233,6 +243,22 @@ export function createSuperpipelinePushRoutes(deps: SuperpipelinePushDeps) {
         ? await deps.handleDecisionPulledBack(body)
         : await handleDecisionPulledBack(body, deps);
       log.info("held approval pull-back handled", { gateId: body.gateId, status: outcome.status });
+      return c.json({ ok: true, status: outcome.status }, 200);
+    }
+
+    /**
+     * A machine check failed and returned the card, or was overridden (charter: "A gate may be decided
+     * by checks" §7): a line in the board's room. One tenant or nobody, as for a reminder
+     * (`check-notices.ts`). Disjoint from the others by `event`.
+     */
+    if (isCheckFailed(body)) {
+      const outcome = deps.handleCheckFailed ? await deps.handleCheckFailed(body) : await handleCheckFailed(body, deps);
+      log.info("failed check handled", { boardId: body.boardId, cardId: body.cardId, check: body.check.name, status: outcome.status });
+      return c.json({ ok: true, status: outcome.status }, 200);
+    }
+    if (isCheckOverridden(body)) {
+      const outcome = deps.handleCheckOverridden ? await deps.handleCheckOverridden(body) : await handleCheckOverridden(body, deps);
+      log.info("overridden check handled", { boardId: body.boardId, cardId: body.cardId, check: body.check.name, status: outcome.status });
       return c.json({ ok: true, status: outcome.status }, 200);
     }
 

@@ -41,6 +41,7 @@ import { parseQuestionAnswer } from "./question-answer";
 import { parseDeliveryAnswer } from "./delivery-answer";
 import { parseAttentionAnswer } from "./attention-answer";
 import { GATE_PULL_BACK_V2_SUITE_TYPE } from "./gate-release-wire";
+import { CHECK_OVERRIDE_V2_SUITE_TYPE } from "./checks-wire";
 import {
   PERMISSION_OUTCOME_TYPE,
   isPermissionAnswerMarked,
@@ -139,6 +140,13 @@ export interface InboundDeps {
    * approval may wait for its release time). Optional, for the reason `gates` is.
    */
   pullBacks?: {
+    handle(event: { sender: string; content: Record<string, unknown> }, roomId: string): Promise<unknown>;
+  };
+  /**
+   * A machine check overridden (`dev.superpipeline.check.override.v2`, charter 2026-11-09: a gate may
+   * be decided by checks). Optional, for the reason `gates` is.
+   */
+  checkOverrides?: {
     handle(event: { sender: string; content: Record<string, unknown> }, roomId: string): Promise<unknown>;
   };
   client: {
@@ -462,6 +470,11 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
   // Matched by its marker alone, so a malformed one is refused there rather than read as a prompt.
   if (deps.pullBacks && event.content?.suite_event_type === GATE_PULL_BACK_V2_SUITE_TYPE) {
     await deps.pullBacks.handle({ sender: event.sender, content: event.content }, event.room_id);
+    return;
+  }
+  // So does a check's override: the board decides it, and a malformed one is refused there too.
+  if (deps.checkOverrides && event.content?.suite_event_type === CHECK_OVERRIDE_V2_SUITE_TYPE) {
+    await deps.checkOverrides.handle({ sender: event.sender, content: event.content }, event.room_id);
     return;
   }
 
