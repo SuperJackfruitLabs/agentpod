@@ -124,6 +124,17 @@ for changes, and the room replies "Pulled back by … — returned for changes: 
 the room replies "Released — it went ahead." or, if what was approved changed or expired meanwhile,
 "Did not go ahead: …". Pulling back after it went ahead is refused, and nobody can move the time.
 
+**A gate may be decided by checks.** A workspace owner or admin can give a stage up to five
+machine checks: CI on the card's linked pull request, or a verdict on its latest run. The checks run
+before anyone is asked. While they run the card waits on the stage and nothing is posted; once every
+check has passed, the gate opens as usual and lists them ("Checks: build (CI) ✓, quality (verdict)
+✓."). A check that fails sends the card back for changes, and the board's room says so ("CI check
+“build” failed on “Ship it” — returned for changes."). Checks still pending past the stage's
+timeout are reminded and then escalated like any decision: the workspace's owners and admins are
+invited, and a card lists the checks so they can **override** one, with a comment, from the app or
+on the board. The room then says who overrode which check and why. Agents never override, and
+whoever produced the work cannot override a check on it.
+
 ## A card waiting on you
 
 A card also stops on a person when its agent keeps failing, says it is **blocked**, or is **not
