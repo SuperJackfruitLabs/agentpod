@@ -3,6 +3,8 @@ package descriptor
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -49,12 +51,22 @@ func TestHandlerDetect_EmptyWhenNoDescriptors(t *testing.T) {
 	}
 }
 
-func TestHandlerFsList_RoutesToDescriptor(t *testing.T) {
+// rootedWith is a rooted fake whose workspace holds one file, file.txt, saying "hello".
+func rootedWith(t *testing.T) *rootedFake {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return &rootedFake{fakeDescriptor: fakeDescriptor{harness: "fake"}, root: root}
+}
+
+func TestHandlerFsList_ListsTheWorkspace(t *testing.T) {
 	reg := NewRegistry()
-	reg.Register(&fakeDescriptor{harness: "fake"})
+	reg.Register(rootedWith(t))
 
 	h := NewHandler(reg)
-	params := json.RawMessage(`{"key":"fake:s1","path":"/workspace"}`)
+	params := json.RawMessage(`{"key":"fake:s1","path":"."}`)
 	result, streamed, err := h.Handle(context.Background(), "fs.list", params, nil)
 	if err != nil {
 		t.Fatalf("fs.list: %v", err)
@@ -76,7 +88,7 @@ func TestHandlerFsList_RoutesToDescriptor(t *testing.T) {
 
 func TestHandlerFsRead_ReturnsContentAndEncoding(t *testing.T) {
 	reg := NewRegistry()
-	reg.Register(&fakeDescriptor{harness: "fake"})
+	reg.Register(rootedWith(t))
 
 	h := NewHandler(reg)
 	params := json.RawMessage(`{"key":"fake:s1","path":"file.txt","maxBytes":1048576}`)

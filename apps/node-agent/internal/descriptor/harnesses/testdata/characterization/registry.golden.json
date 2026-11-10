@@ -432,22 +432,7 @@
         "streamed": false
       },
       "fs.list": {
-        "result": [
-          {
-            "name": "logs",
-            "path": "logs",
-            "type": "dir",
-            "size": null,
-            "modified": null
-          },
-          {
-            "name": "profiles",
-            "path": "profiles",
-            "type": "dir",
-            "size": null,
-            "modified": null
-          }
-        ],
+        "result": [],
         "streamed": false
       },
       "logs.tail": {
@@ -534,20 +519,6 @@
       },
       "fs.list": {
         "result": [
-          {
-            "name": ".env",
-            "path": ".env",
-            "type": "file",
-            "size": 41,
-            "modified": "<mtime>"
-          },
-          {
-            "name": "config.yaml",
-            "path": "config.yaml",
-            "type": "file",
-            "size": 50,
-            "modified": "<mtime>"
-          },
           {
             "name": "session.md",
             "path": "session.md",

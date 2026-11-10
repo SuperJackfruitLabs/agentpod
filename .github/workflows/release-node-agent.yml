@@ -1,5 +1,18 @@
 name: Release node-agent
 
+# A `v*` tag on main publishes the node-agent and fleet binaries, install.sh, install-fleet.sh,
+# the systemd unit and SHA256SUMS as one GitHub release.
+#
+# Every node updates itself from `releases/latest` and verifies the binary against that release's
+# SHA256SUMS, so a release missing an architecture or its sums bricks fleet updates. The release
+# is therefore built as a DRAFT and published only by the last job, after every build succeeded
+# and every expected asset, the sums included, is present and verified. A failed run leaves a
+# draft nobody updates from; rerun its failed jobs, or dispatch this workflow with the same tag,
+# to finish it.
+#
+# Manual dispatch rebuilds an existing tag only: it checks out that tag (never the branch it was
+# dispatched from), stamps the tag as the version, and refuses a release that is already
+# published. Both modes refuse a tag whose commit is not on main, as release-hub.yml does.
 on:
   push:
     tags:
@@ -7,20 +20,78 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (e.g. v0.1.0)"
-        required: false
+        description: "Existing tag to build into its draft release (e.g. v0.1.0). It must be on main and not yet published."
+        required: true
 
 permissions:
   contents: write
 
+# One run per tag at a time, so two runs never write the same draft.
+concurrency:
+  group: release-node-agent-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  prepare:
+    name: Check the tag and open the draft
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      sha: ${{ steps.main.outputs.sha }}
+    steps:
+      - name: Resolve the tag
+        id: tag
+        env:
+          # Through the environment, never interpolated into the script.
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$TAG' is not a release tag (vMAJOR.MINOR.PATCH)"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the tag
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - name: The tag is on main
+        id: main
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::$TAG ($sha) is not on main; only a commit on main is released"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Open the draft release, or refuse a published one
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo missing)
+          case "$draft" in
+            missing)
+              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "$TAG" --generate-notes ;;
+            true)
+              echo "Building into the draft an earlier run left." ;;
+            *)
+              echo "::error::$TAG is already published; a published release is never rebuilt. Release a new tag instead."
+              exit 1 ;;
+          esac
+
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: prepare
     runs-on: ubuntu-latest
     strategy:
-      # Don't let one arch's transient runner failure cancel the others and skip
-      # the dependent SHA256SUMS/static-asset jobs (which produced an incomplete
-      # release on v0.1.7, needing a manual `gh run rerun --failed`).
+      # One arch's transient failure must not cancel the others: the draft keeps what succeeded,
+      # and rerunning the failed job completes it. Nothing is published until `publish` passes.
       fail-fast: false
       matrix:
         include:
@@ -34,8 +105,10 @@ jobs:
             goarch: arm64
 
     steps:
-      - name: Checkout
+      - name: Checkout the tagged commit
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -48,29 +121,30 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           for cmd in agentpod-node agentpod-fleet; do
             go build \
               -trimpath \
-              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
-              -o ${cmd}-${{ matrix.goos }}-${{ matrix.goarch }} \
-              ./cmd/${cmd}
+              -ldflags "-s -w -X main.version=${TAG}" \
+              -o "${cmd}-${GOOS}-${GOARCH}" \
+              "./cmd/${cmd}"
           done
 
-      - name: Upload binary to release (retry x3)
+      - name: Upload binaries to the draft (retry x3)
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         working-directory: apps/node-agent
         run: |
-          # Create the release once (first arch to get here wins; races are benign).
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes || true
+          # --clobber replaces only this draft's own assets: prepare refused a published release.
           ok=0
           for i in 1 2 3; do
             if gh release upload "$TAG" \
-                "agentpod-node-${{ matrix.goos }}-${{ matrix.goarch }}" \
-                "agentpod-fleet-${{ matrix.goos }}-${{ matrix.goarch }}" \
+                "agentpod-node-${GOOS}-${GOARCH}" \
+                "agentpod-fleet-${GOOS}-${GOARCH}" \
                 --repo "$GITHUB_REPOSITORY" --clobber; then
               ok=1; break
             fi
@@ -81,23 +155,20 @@ jobs:
 
   static-assets:
     name: Upload static release assets
+    needs: prepare
     runs-on: ubuntu-latest
-    needs: build
-    # Run even when an arch failed — a partial release must still carry
-    # install.sh/.service (and sha256sums below needs this job).
-    if: ${{ !cancelled() }}
 
     steps:
-      - name: Checkout
+      - name: Checkout the tagged commit
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
-      - name: Upload static assets to release (retry x3)
+      - name: Upload static assets to the draft (retry x3)
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes || true
           ok=0
           for i in 1 2 3; do
             if gh release upload "$TAG" \
@@ -112,42 +183,92 @@ jobs:
           done
           [ "$ok" = 1 ]
 
-  sha256sums:
-    name: Publish SHA256SUMS
+  publish:
+    name: Verify and publish
+    # Runs only when every build and the static assets succeeded (no `if: !cancelled()`): a
+    # release missing anything stays a draft.
+    needs: [prepare, build, static-assets]
     runs-on: ubuntu-latest
-    needs: static-assets
-    if: ${{ !cancelled() }}
 
     steps:
-      - name: Download all release assets
+      - name: Download the draft's assets
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          TAG="${{ inputs.tag || github.ref_name }}"
           mkdir -p release-assets
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir release-assets
 
-      - name: Compute SHA256SUMS
+      - name: Every expected asset is present, and the binaries carry the tag
+        working-directory: release-assets
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          cd release-assets
-          sha256sum * > SHA256SUMS
-          cat SHA256SUMS
+          # The names apps/node-agent/internal/selfupdate and scripts/install.sh fetch.
+          expected="install.sh install-fleet.sh agentpod-node.service"
+          for os in linux darwin; do
+            for arch in amd64 arm64; do
+              expected="$expected agentpod-node-$os-$arch agentpod-fleet-$os-$arch"
+            done
+          done
+          missing=0
+          for f in $expected; do
+            if [ ! -s "$f" ]; then echo "::error::missing or empty asset: $f"; missing=1; fi
+          done
+          [ "$missing" = 0 ]
+          chmod +x agentpod-node-linux-amd64 agentpod-fleet-linux-amd64
+          ./agentpod-node-linux-amd64 version | grep -F "agentpod-node ${TAG} "
+          ./agentpod-fleet-linux-amd64 version | grep -F "agentpod-fleet ${TAG} "
+          echo "$expected" > ../expected-assets
 
-      - name: Upload SHA256SUMS to release (retry x3)
+      - name: Compute SHA256SUMS over the expected assets
+        working-directory: release-assets
+        run: |
+          # shellcheck disable=SC2046 # one word per asset name, none with spaces
+          sha256sum $(cat ../expected-assets) > ../SHA256SUMS
+          cat ../SHA256SUMS
+
+      - name: Upload SHA256SUMS to the draft (retry x3)
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           ok=0
           for i in 1 2 3; do
-            if gh release upload "$TAG" release-assets/SHA256SUMS \
-                --repo "$GITHUB_REPOSITORY" --clobber; then
+            if gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber; then
               ok=1; break
             fi
             echo "upload attempt $i failed; retrying in $((i * 10))s"
             sleep $((i * 10))
           done
           [ "$ok" = 1 ]
+
+      - name: The draft serves what the sums say
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          # Read everything back from the release itself, as a node would, and check it.
+          rm -rf verify && mkdir verify
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir verify
+          cd verify
+          cmp SHA256SUMS ../SHA256SUMS
+          sha256sum -c SHA256SUMS
+          [ "$(wc -l < SHA256SUMS)" -eq "$(wc -w < ../expected-assets)" ]
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          # Latest only when no published release is newer: rebuilding an older tag must not
+          # move the fleet backwards.
+          newest=$( { gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases \
+                        --limit 200 --json tagName --jq '.[].tagName'; echo "$TAG"; } | sort -V | tail -n 1)
+          latest=false
+          [ "$newest" = "$TAG" ] && latest=true
+          echo "Publishing $TAG (latest: $latest)"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"
 
   # The Fly pin job used to live here, and it is gone on purpose.
   #

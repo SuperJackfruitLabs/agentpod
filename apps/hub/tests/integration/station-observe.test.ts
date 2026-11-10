@@ -99,7 +99,9 @@ const fakeFileContent = {
 const testApp = new Hono()
   .use("/api/*", async (c, next) => {
     const userId = c.req.header("X-Test-User-Id") ?? "anonymous";
-    c.set("user", { id: userId, authType: "api_key" , tenantId: "fleet_00000000000000000000", workspaceRole: "admin" } satisfies AuthUser);
+    // A plain member when the test says so; an admin otherwise (adopting is an admin's).
+    const workspaceRole = c.req.header("X-Test-Role") === "member" ? "member" : "admin";
+    c.set("user", { id: userId, authType: "api_key" , tenantId: "fleet_00000000000000000000", workspaceRole } satisfies AuthUser);
     return next();
   })
   .route("/public/nodes", gatewayRoutes)
@@ -135,7 +137,7 @@ async function connectFakeNode(
   serverPort: number | undefined,
   nodeId: string,
   nodeSecret: string,
-  overrides?: { fsRead?: unknown; fsListError?: string }
+  overrides?: { fsRead?: unknown; fsListError?: string; seen?: string[] }
 ): Promise<WebSocket> {
   const ws = new WebSocket(
     `ws://localhost:${serverPort}/public/nodes/gateway`,
@@ -153,6 +155,7 @@ async function connectFakeNode(
     const msg = JSON.parse(String(e.data));
 
     if (msg.type === "req") {
+      if (msg.verb === "fs.read" || msg.verb === "fs.list") overrides?.seen?.push(`${msg.verb} ${msg.params?.path}`);
       switch (msg.verb) {
         case "detect":
           ws.send(
@@ -559,6 +562,56 @@ test(
         error: "salaam: station filesystem access is not enabled",
         code: "node_failed",
       });
+
+      ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  15_000
+);
+
+test(
+  "a member is refused a station's secret files, and the node is never asked for them",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+
+    try {
+      const { token } = await mintEnrollmentToken(TEST_USER, BOOTSTRAP_TENANT_ID);
+      const { nodeId, nodeSecret } = await enrollNode(token, {
+        hostname: "observe-denied-host",
+        os: "linux",
+        arch: "amd64",
+        cpuCount: 2,
+      });
+
+      // A node that would read anything it is asked for: an old node, before its own guard.
+      const seen: string[] = [];
+      const ws = await connectFakeNode(server.port, nodeId, nodeSecret, { seen });
+      const station = await adoptStation(baseUrl, nodeId, TEST_USER);
+      const member = { "X-Test-User-Id": TEST_USER, "X-Test-Role": "member" };
+
+      for (const path of [".env", "home/me/.ssh/id_ed25519", ".git/config", "app/.env.local", ".ENV", "a\\.ssh\\id_rsa"]) {
+        const res = await fetch(`${baseUrl}/api/stations/${station.id}/file?path=${encodeURIComponent(path)}`, { headers: member });
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({ code: "path_denied" });
+      }
+      for (const path of [".ssh", ".git", "home/me/.ssh/"]) {
+        const res = await fetch(`${baseUrl}/api/stations/${station.id}/files?path=${encodeURIComponent(path)}`, { headers: member });
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({ code: "path_denied" });
+      }
+      expect(seen).toEqual([]);
+
+      // Ordinary browsing still reaches the node.
+      const list = await fetch(`${baseUrl}/api/stations/${station.id}/files?path=.`, { headers: member });
+      expect(list.status).toBe(200);
+      const read = await fetch(`${baseUrl}/api/stations/${station.id}/file?path=docs%2Fplan.md`, { headers: member });
+      expect(read.status).toBe(200);
+      expect(await read.text()).toBe("hello");
+      expect(seen).toEqual(["fs.list .", "fs.read docs/plan.md"]);
 
       ws.close();
       await new Promise((r) => setTimeout(r, 100));

@@ -248,8 +248,9 @@ func runCmd() {
 			if err != nil {
 				return nil, false, err
 			}
-			content, _, truncated, err := d.ReadFile(key, path, maxBytes)
-			return content, truncated, err
+			// The guarded read the file browser uses: no denied, private or out-of-root file
+			// becomes an agent's picture.
+			return descriptor.GuardedReadFile(d, key, path, maxBytes)
 		},
 		Login: func(profileDir string) (gateway.MatrixLogin, error) {
 			c, err := descriptor.MatrixCredentialsFromEnv(profileDir)

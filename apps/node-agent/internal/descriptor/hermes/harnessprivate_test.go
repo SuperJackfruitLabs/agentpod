@@ -72,3 +72,35 @@ func TestHermesRootAndProfileKeepHarnessFilesPrivate(t *testing.T) {
 		t.Errorf("walking a private folder is refused: %v", err)
 	}
 }
+
+// The console's file browser reads without an offset and lists folders, for every workspace
+// member. A profile's .env holds its model keys and Matrix password, so neither may reach it.
+func TestHermesFileBrowserNeverServesTheProfileSecrets(t *testing.T) {
+	home := filepath.Join(t.TempDir(), ".hermes")
+	writeTree(t, filepath.Join(home, "profiles", "kai"), ".env", "auth.json", "config.yaml", ".ssh/id_ed25519", "docs/plan.md", "SOUL.md")
+	reg := descriptor.NewRegistry()
+	reg.Register(NewHermes(home))
+
+	for _, p := range []string{".env", "auth.json", "config.yaml", ".ssh/id_ed25519"} {
+		if _, err := handle(t, reg, "fs.read", fmt.Sprintf(`{"key":"hermes:kai","path":%q}`, p)); !errors.Is(err, descriptor.ErrDenied) {
+			t.Errorf("a whole-file read of %s must be refused: %v", p, err)
+		}
+	}
+	if _, err := handle(t, reg, "fs.list", `{"key":"hermes:kai","path":".ssh"}`); !errors.Is(err, descriptor.ErrDenied) {
+		t.Errorf("listing .ssh must be refused: %v", err)
+	}
+	res, err := handle(t, reg, "fs.list", `{"key":"hermes:kai","path":"."}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range res.([]descriptor.FsEntry) {
+		names = append(names, e.Name)
+	}
+	if got := fmt.Sprint(names); got != "[SOUL.md docs]" {
+		t.Errorf("the profile lists only the user's files: %s", got)
+	}
+	if _, err := handle(t, reg, "fs.read", `{"key":"hermes:kai","path":"SOUL.md"}`); err != nil {
+		t.Errorf("an ordinary file still reads: %v", err)
+	}
+}

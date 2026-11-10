@@ -26,7 +26,7 @@ import { resolveTenantId } from "../auth/tenant";
 import { requireWorkspaceAdmin } from "../auth/workspace-authority";
 import * as broker from "../services/broker";
 import { connectionManager } from "../services/broker";
-import { VERB_RESULTS } from "@agentpod/contract";
+import { VERB_RESULTS, deniedStationPath } from "@agentpod/contract";
 import { sniffImage } from "../utils/sniff-image";
 import {
   adoptStations,
@@ -38,6 +38,17 @@ import {
 
 /** The most a console file read may ask for: an image preview, not a download. */
 const FILE_READ_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * A 403 for a path on the station file denylist (keys, credentials, a harness's token files),
+ * or null. Every workspace member may browse a station's files, so the hub refuses these before
+ * it asks the node: a node that predates its own guard would otherwise read them.
+ */
+function refuseDeniedPath(path: string) {
+  const rule = deniedStationPath(path);
+  if (!rule) return null;
+  return { error: `${path} is not served: it matches the denylist (${rule})`, code: "path_denied" } as const;
+}
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -202,7 +213,7 @@ export const stationRoutes = new Hono()
    * GET /api/stations/:stationId/files?path=<rel>
    *
    * Lists files/directories at the given path on the station's node.
-   * Returns 404 if the station is not in the caller's workspace.
+   * Returns 404 if the station is not in the caller's workspace, 403 for a denylisted path.
    * Returns 503 if the node is offline or times out, 424 if it fails or returns invalid data.
    */
   .get(
@@ -216,6 +227,8 @@ export const stationRoutes = new Hono()
       if (!station) {
         return c.json({ error: "Not Found" }, 404);
       }
+      const denied = refuseDeniedPath(path);
+      if (denied) return c.json(denied, 403);
 
       const result = await broker.request(station.nodeId, "fs.list", {
         key: station.stationKey,
@@ -241,7 +254,7 @@ export const stationRoutes = new Hono()
    * application/octet-stream; utf8 content is returned as text/plain.
    * Sets X-Truncated: true when the node reports the file was capped.
    *
-   * Returns 404 if the station is not in the caller's workspace.
+   * Returns 404 if the station is not in the caller's workspace, 403 for a denylisted path.
    * Returns 503 if the node is offline or times out, 424 if it fails or returns invalid data.
    */
   .get(
@@ -264,6 +277,8 @@ export const stationRoutes = new Hono()
       if (!station) {
         return c.json({ error: "Not Found" }, 404);
       }
+      const denied = refuseDeniedPath(path);
+      if (denied) return c.json(denied, 403);
 
       const result = await broker.request(station.nodeId, "fs.read", {
         key: station.stationKey,

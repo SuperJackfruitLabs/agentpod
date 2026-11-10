@@ -397,6 +397,9 @@ func (m *museDescriptor) ListDir(key, rel string) ([]descriptor.FsEntry, error) 
 	return result, nil
 }
 
+// WorkspaceRoot is the root the guarded file reads serve (descriptor.WorkspaceRooter).
+func (m *museDescriptor) WorkspaceRoot(key string) (string, error) { return m.workspacePathForKey(key) }
+
 // ReadFile reads up to maxBytes from rel within the station's workspace.
 func (m *museDescriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, string, bool, error) {
 	wsPath, err := m.workspacePathForKey(key)
