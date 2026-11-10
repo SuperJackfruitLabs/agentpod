@@ -1743,6 +1743,17 @@ journalctl -u agentpod-hub | grep 'gate projected'      # a push arriving, secon
 Until 2026-10-07 no board was ever subscribed — superpipeline accepted the registration from a
 person only — so every gate came by sweep.
 
+**A third door, the suite's event relay.** A SuperPipeline deployment with `RELAY_URL` and
+`RELAY_TOKEN` also publishes each `gate.pending` to the relay (NATS JetStream), which delivers it to
+`$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/events`, signed with
+`TREATY_RELAY_DELIVERY_SECRET` (`x-treaty-signature`). Without the secret the route answers 503. It
+hands the gate to the same projection as the push, idempotent on the gate id, so a gate that arrives
+by both doors is posted once. The log says which door posted it:
+
+```bash
+journalctl -u agentpod-hub | grep 'gate projected' | grep -o 'via[^,}]*'   # push or event-relay
+```
+
 **Cards waiting on a person** (charter: waiting cards and broker approvals reach chat). A card
 parked for `repeated-failure`, `blocked` or `not-authorised` is pushed as `attention.pending` and
 listed at `GET /v1/boards/:id/attention/pending`; the hub posts `dev.superpipeline.attention.v2`

@@ -219,6 +219,9 @@ importers:
       '@opentelemetry/sdk-trace-base':
         specifier: ^2.11.0
         version: 2.11.0(@opentelemetry/api@1.9.1)
+      '@superjackfruitlabs/treaty-cloudevents':
+        specifier: 0.0.6
+        version: 0.0.6
       '@trpc/client':
         specifier: ^11.19.0
         version: 11.19.0(@trpc/server@11.19.0(typescript@5.9.3))(typescript@5.9.3)
@@ -2237,6 +2240,9 @@ packages:
 
   '@superjackfruitlabs/treaty-ecosystem-identity@0.0.2':
     resolution: {integrity: sha512-52RhUdq6WVFYHgiKvpjGqZsaRcA9vWeTIPPwLV66bPoXcjM7fODxg/tZ6s96DOOTGAO1IwkbkqOthsHD+ctgSA==}
+
+  '@superjackfruitlabs/treaty-cloudevents@0.0.6':
+    resolution: {integrity: sha512-+I0C/1M2Y1qoCTm7Pw0ovlJNamdVt8QDtM6KWurN0n46bO1JeQE1OxLxEVugIZ2ZxSbEZfY//1uAzjDsqZ7PgQ==}
 
   '@sveltejs/acorn-typescript@1.0.13':
     resolution: {integrity: sha512-wgKggnhZVL9Bfx1OaKKTrYY9BFRk6C8UAkQNUcIv1+llzYrIqy+RZm5HPKzn0NpEBvTVhTqB4kQyllZywsRBRQ==}
@@ -7929,6 +7935,8 @@ snapshots:
     transitivePeerDependencies:
       - '@internationalized/date'
       - '@sveltejs/kit'
+
+  '@superjackfruitlabs/treaty-cloudevents@0.0.6': {}
 
   '@superjackfruitlabs/treaty-ecosystem-identity@0.0.2': {}
 

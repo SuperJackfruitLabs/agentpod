@@ -42,6 +42,7 @@ services:
       # network; MATRIX_AS_TOKEN and MATRIX_HS_TOKEN are in env/hub/hub.env, generated on the box).
       # The Superpipeline bridge is on, against staging Superpipeline only: it claims cards for the staging workspace's rostered agents (fleet bridge add).
       # SUPERPIPELINE_PUSH_SECRET is in env/hub/hub.env, generated on the box.
+      # TREATY_RELAY_DELIVERY_SECRET (the event relay's deliveries) is too: estate provision/310-staging-relay.sh.
       ENABLE_DOCKER_PROVISIONING: "false"
       ENABLE_MODAL_PROVISIONING: "false"
       ENABLE_FLY_PROVISIONING: "false"
