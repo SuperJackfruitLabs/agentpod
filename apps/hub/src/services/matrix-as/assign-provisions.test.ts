@@ -55,9 +55,9 @@ import { agentsAdminRouter } from "../../routes/agents-admin";
 import { onProvisionStation, onStationsAdopted } from "../stations/hooks";
 import { provisionStation } from "./provision";
 import { roomForStation } from "./station-room";
-import { projectGate } from "./gates";
+import { projectGate } from "../board-chat/gates";
 import { bridgeUserId } from "../matrix/names";
-import type { GatePendingDelivery } from "./gates";
+import type { GatePendingDelivery } from "../board-chat/gates";
 import { forgetPrincipals } from "../../../tests/helpers/principals";
 
 const DOMAIN = "id.agentpod.dev";

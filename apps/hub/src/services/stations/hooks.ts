@@ -111,7 +111,7 @@ export async function stationReportedMatrixId(
  * — `onStationsAdopted` fires before there is an occupant, and
  * `matrix-as/provision.ts` returns early for a bridge-mode station with none — so a
  * console-created agent had no room, its gates resolved to `no-room`, and
- * `matrix-as/gate-sweep.ts` does not count that status. Silent, and permanent until
+ * `board-chat/gate-sweep.ts` does not count that status. Silent, and permanent until
  * somebody restarted the hub.
  */
 type Provisioner = (stationId: string) => Promise<void>;

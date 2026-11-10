@@ -39,7 +39,7 @@ import {
   questionSubjectV2,
   questionV2Content,
 } from "./question-wire";
-import { matchPermissionAnswer, unmatchedAnswerText } from "./permissions";
+import { matchPermissionAnswer, unmatchedAnswerText } from "./reply-options";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
 import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plane/assertion";
 import {

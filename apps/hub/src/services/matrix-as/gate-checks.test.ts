@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { CheckFailedDelivery, CheckOverriddenDelivery, DecisionTimeoutDelivery } from "../bridge";
-import { GATE_V2_SUITE_TYPE, gateV2Content, type GatePendingDelivery } from "./gates";
+import { GATE_V2_SUITE_TYPE, gateV2Content, type GatePendingDelivery } from "../board-chat/gates";
 import {
   CHECKS_WAITING_TYPE,
   CHECK_FAILED_TYPE,
@@ -18,16 +18,16 @@ import {
   isCheckFailed,
   isCheckOverridden,
   parseCheckOverride,
-} from "./checks-wire";
+} from "../board-chat/checks-wire";
 import {
   CHECK_OVERRIDE_COMMENT_REQUIRED_TEXT,
   checkOverrideRefusalText,
   handleCheckOverride,
   type CheckOverrideDeps,
   type CheckOverrideRefusal,
-} from "./check-override";
-import { DECISION_ESCALATED_SUITE_TYPE, DECISION_REMINDED_SUITE_TYPE, decisionNoticeContent, isDecisionTimeout } from "./decision-timeout-wire";
-import { overrideCheckAtSuperpipeline } from "./gate-resolve";
+} from "../board-chat/check-override";
+import { DECISION_ESCALATED_SUITE_TYPE, DECISION_REMINDED_SUITE_TYPE, decisionNoticeContent, isDecisionTimeout } from "../board-chat/decision-timeout-wire";
+import { overrideCheckAtSuperpipeline } from "../board-chat/gate-resolve";
 import { handleRoomMessage, type InboundDeps } from "./inbound";
 
 /**

@@ -22,24 +22,20 @@
 import { Hono } from "hono";
 
 import { createLogger } from "../utils/logger";
-import {
-  isGatePending,
-  projectGate,
-  type GateProjectionDeps,
-} from "../services/matrix-as";
-import { isApprovalRequest, isElicitationPending } from "../services/matrix-as";
-import { projectElicitation } from "../services/matrix-as";
-import { isDeliveryPending, projectDelivery } from "../services/matrix-as";
-import { isAttentionPending, projectAttention } from "../services/matrix-as";
-import type { AttentionProjectionDeps } from "../services/matrix-as";
-import { handleDecisionTimeout, isDecisionTimeout } from "../services/matrix-as";
-import type { DecisionNoticeDeps, DecisionNoticeOutcome } from "../services/matrix-as";
-import { handleGateApprovalRecorded, isGateApprovalRecorded } from "../services/matrix-as";
-import type { GateProgressOutcome } from "../services/matrix-as";
-import { handleDecisionPulledBack, handleDecisionReleased, isDecisionPulledBack, isDecisionReleased } from "../services/matrix-as";
-import type { GateHoldOutcome } from "../services/matrix-as";
-import { handleCheckFailed, handleCheckOverridden, isCheckFailed, isCheckOverridden } from "../services/matrix-as";
-import type { CheckNoticeOutcome } from "../services/matrix-as";
+import { isGatePending, projectGate, type GateProjectionDeps } from "../services/board-chat";
+import { isApprovalRequest, isElicitationPending } from "../services/board-chat";
+import { projectElicitation } from "../services/board-chat";
+import { isDeliveryPending, projectDelivery } from "../services/board-chat";
+import { isAttentionPending, projectAttention } from "../services/board-chat";
+import type { AttentionProjectionDeps } from "../services/board-chat";
+import { handleDecisionTimeout, isDecisionTimeout } from "../services/board-chat";
+import type { DecisionNoticeDeps, DecisionNoticeOutcome } from "../services/board-chat";
+import { handleGateApprovalRecorded, isGateApprovalRecorded } from "../services/board-chat";
+import type { GateProgressOutcome } from "../services/board-chat";
+import { handleDecisionPulledBack, handleDecisionReleased, isDecisionPulledBack, isDecisionReleased } from "../services/board-chat";
+import type { GateHoldOutcome } from "../services/board-chat";
+import { handleCheckFailed, handleCheckOverridden, isCheckFailed, isCheckOverridden } from "../services/board-chat";
+import type { CheckNoticeOutcome } from "../services/board-chat";
 import type {
   CheckFailedDelivery,
   CheckOverriddenDelivery,

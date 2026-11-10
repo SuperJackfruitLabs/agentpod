@@ -15,8 +15,8 @@ import { matrixBoardRooms } from "../../src/db/schema/board-rooms";
 import { matrixGateEvents, matrixGateHoldNotices } from "../../src/db/schema/matrix";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import type { DecisionPulledBackDelivery, DecisionReleasedDelivery } from "../../src/services/bridge";
-import { handleDecisionPulledBack, handleDecisionReleased, type GateHoldDeps } from "../../src/services/matrix-as/gate-hold";
-import { DECISION_PULLED_BACK_TYPE, DECISION_RELEASED_TYPE } from "../../src/services/matrix-as/gate-release-wire";
+import { handleDecisionPulledBack, handleDecisionReleased, type GateHoldDeps } from "../../src/services/board-chat/gate-hold";
+import { DECISION_PULLED_BACK_TYPE, DECISION_RELEASED_TYPE } from "../../src/services/board-chat/gate-release-wire";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
 const BOARD = "brd_hold000000000001";

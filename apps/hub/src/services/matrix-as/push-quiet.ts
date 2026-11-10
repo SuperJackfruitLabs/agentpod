@@ -31,7 +31,7 @@
  * costs nothing.
  */
 
-import type { MatrixClient } from "./client";
+import type { MatrixClient } from "../matrix";
 import { TURN_ACTIVITY_TYPE } from "./activity";
 import { beginQuietSend, noteHubEvent } from "../push";
 

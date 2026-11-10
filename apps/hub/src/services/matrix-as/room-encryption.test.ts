@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { createMatrixClient } from "./client";
+import { createMatrixClient } from "../matrix/client";
 
 /**
  * A station's room is created encrypted.

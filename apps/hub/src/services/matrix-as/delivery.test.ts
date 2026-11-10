@@ -10,21 +10,21 @@ import {
   deliveryV2Content,
   isDeliveryPending,
   type DeliveryPendingDelivery,
-} from "./delivery-wire";
+} from "../board-chat/delivery-wire";
 import {
   handleDeliveryAnswer,
   parseDeliveryAnswer,
   type DeliveryAnswerDeps,
   type DeliveryAnswerRefusal,
   type RecordedDelivery,
-} from "./delivery-answer";
-import { updateDeliveryAtSuperpipeline } from "./gate-resolve";
-import { settleGateOutcome } from "./gate-decision";
-import { GATE_OUTCOME_TYPE } from "./gate-wire";
-import { deliveryOutcomeContent } from "./delivery-wire";
-import { settleDeliveryOutcome } from "./delivery-answer";
+} from "../board-chat/delivery-answer";
+import { updateDeliveryAtSuperpipeline } from "../board-chat/gate-resolve";
+import { settleGateOutcome } from "../board-chat/gate-decision";
+import { GATE_OUTCOME_TYPE } from "../board-chat/gate-wire";
+import { deliveryOutcomeContent } from "../board-chat/delivery-wire";
+import { settleDeliveryOutcome } from "../board-chat/delivery-answer";
 import { handleRoomMessage, type InboundDeps } from "./inbound";
-import { QUESTION_ANSWER_V2_SUITE_TYPE } from "./question-wire";
+import { QUESTION_ANSWER_V2_SUITE_TYPE } from "../board-chat/question-wire";
 
 /**
  * delivery.v2 — the follow-up a post approved for manual delivery owes (charter: "The decision

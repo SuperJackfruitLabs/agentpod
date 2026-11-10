@@ -18,7 +18,7 @@ import { SuperpipelineApiError, SuperpipelineClient, isForeignRun, isLeaseSupers
 import { context, trace } from "@opentelemetry/api";
 import { tracer } from "../../telemetry/otel";
 import { useTestTelemetry } from "../../../tests/helpers/telemetry";
-import type { GatePendingDelivery } from "../matrix-as/gates";
+import type { GatePendingDelivery } from "../board-chat/gates";
 
 const TOKEN = `spa_${"a1b2c3d4".repeat(6)}`;
 const BOARD = "brd_9c1d4e5f6a7b8c9d";

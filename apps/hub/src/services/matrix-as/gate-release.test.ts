@@ -12,7 +12,7 @@ import {
   handleGateDecision,
   type GateDecisionDeps,
   type GatePendingDelivery,
-} from "./gates";
+} from "../board-chat/gates";
 import {
   DECISION_PULLED_BACK_TYPE,
   DECISION_RELEASED_TYPE,
@@ -28,10 +28,10 @@ import {
   releaseV2,
   releasedBody,
   releasedContent,
-} from "./gate-release-wire";
-import { PULL_BACK_COMMENT_REQUIRED_TEXT, handleGatePullBack, type PullBackDeps, type PullBackRefusal } from "./gate-pull-back";
-import { bridgeGateSweepDeps, sweepGates } from "./gate-sweep";
-import { pullBackAtSuperpipeline } from "./gate-resolve";
+} from "../board-chat/gate-release-wire";
+import { PULL_BACK_COMMENT_REQUIRED_TEXT, handleGatePullBack, type PullBackDeps, type PullBackRefusal } from "../board-chat/gate-pull-back";
+import { bridgeGateSweepDeps, sweepGates } from "../board-chat/gate-sweep";
+import { pullBackAtSuperpipeline } from "../board-chat/gate-resolve";
 import { handleRoomMessage, type InboundDeps } from "./inbound";
 
 /**

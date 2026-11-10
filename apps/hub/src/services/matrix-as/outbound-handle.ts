@@ -8,7 +8,7 @@ import { PERMISSION_REQUEST_CONTENT_KEY, type AcpEvent } from "@agentpod/contrac
 import { inlinePermissionOptions, noteHubEvent, permissionDecisionKey } from "../push";
 import { requestedAt } from "../acp";
 import { foldToolUpdate, noteUnmappedKind, PERMISSION_REQUEST_TYPE, permissionRequestContent } from "./activity";
-import { legacyRequestEvents } from "./legacy-events";
+import { legacyRequestEvents } from "../board-chat";
 import { PERMISSION_OUTCOME_TYPE, harnessPermission, permissionV2Content, type HarnessPermission } from "./permission-wire";
 import { flush, scheduleFlush } from "./outbound-flush";
 import { log } from "./outbound-log";

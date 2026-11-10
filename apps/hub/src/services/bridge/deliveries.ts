@@ -3,8 +3,8 @@
  * a gate waiting on a reviewer and an agent's question waiting on an answer.
  *
  * Wire shapes only. They live with the bridge, which reads them off the board, so that the
- * bridge never reaches up into the Matrix appservice that posts them (`matrix-as/gates.ts`
- * and `matrix-as/elicitation-card.ts` re-export them and hold the rules about them).
+ * bridge never reaches up into the board chat that posts them (`board-chat/gates.ts`
+ * and `board-chat/elicitation-card.ts` re-export them and hold the rules about them).
  */
 
 /** The body superpipeline pushes on `gate.pending`. */

@@ -14,12 +14,12 @@ import {
   decisionNoticeContent,
   isDecisionTimeout,
   waitedFor,
-} from "./decision-timeout-wire";
-import { gateV2Content, gateEventContent } from "./gate-wire";
-import { settleGateOutcome } from "./gate-decision";
-import { questionV2Content } from "./question-wire";
-import { deliveryV2Content } from "./delivery-wire";
-import { attentionV2Content } from "./attention-wire";
+} from "../board-chat/decision-timeout-wire";
+import { gateV2Content, gateEventContent } from "../board-chat/gate-wire";
+import { settleGateOutcome } from "../board-chat/gate-decision";
+import { questionV2Content } from "../board-chat/question-wire";
+import { deliveryV2Content } from "../board-chat/delivery-wire";
+import { attentionV2Content } from "../board-chat/attention-wire";
 import * as C from "./testdata/decision-timeouts-corpus";
 import type { AttentionPendingDelivery, DecisionTimeoutDelivery, DeliveryPendingDelivery, ElicitationPendingDelivery, GatePendingDelivery } from "../bridge";
 

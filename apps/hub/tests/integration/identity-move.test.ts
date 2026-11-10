@@ -56,9 +56,9 @@ const planeMatrixIds = (principalId: string) =>
   [...fakePlane.identities]
     .filter(([k, v]) => v === principalId && k.startsWith("matrix\u0000"))
     .map(([k]) => k.slice("matrix\u0000".length));
-import { createMatrixClient, type MatrixClient } from "../../src/services/matrix-as/client";
+import { createMatrixClient, type MatrixClient } from "../../src/services/matrix/client";
 import { bridgeLocalpart, bridgeUserId, stationSpeaker } from "../../src/services/matrix/names";
-import { projectGate, type GatePendingDelivery } from "../../src/services/matrix-as/gates";
+import { projectGate, type GatePendingDelivery } from "../../src/services/board-chat/gates";
 import {
   moveInProgress,
   moveState,

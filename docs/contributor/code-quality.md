@@ -144,7 +144,7 @@ module is a folder whose `index.ts` is its public entry point:
 | | `broker` | the broker (request/stream correlation) and the connection manager of the node gateway |
 | | `control` | the control pair's switch, and who may change what an agent is (grant reach) |
 | | `hub` | the hub process itself: hub operators and their config, admin counts, graceful shutdown |
-| | `matrix` | pure Matrix vocabulary shared below the appservice: station Matrix names, a principal's Matrix id, Matrix identity, Matrix credentials, attachment helpers |
+| | `matrix` | Matrix shared below the appservice: the homeserver client, station Matrix names, a principal's Matrix id, Matrix identity, Matrix credentials, attachment helpers |
 | | `speech` | speech-to-text and text-to-speech clients and per-station settings |
 | 2 | `forge` | an agent's forge account and the key a station pushes with |
 | | `harness-config` | declared harness settings and applying them to a station |
@@ -162,7 +162,8 @@ module is a folder whose `index.ts` is its public entry point:
 | 8 | `org-plane` | agent placement on the organization plane |
 | | `push` | the Matrix push gateway and the fleet Live Activity |
 | 9 | `bridge` | the superpipeline bridge |
-| 10 | `matrix-as` | the Matrix appservice |
+| 10 | `board-chat` | board work in chat: gates, questions, deliveries, attention and checks projected into board rooms, the answers back to superpipeline, and their sweeps |
+| 11 | `matrix-as` | the Matrix appservice: agents puppeted into Matrix, station rooms, inbound and outbound turns, identity moves |
 
 The four-entry cycle Phase 1 left (`acp-sessions`, `bridge`, `matrix-as`, `org-plane`) went the
 first of the three ways listed for the hub's layers: pure code moved down. Matrix naming and the
@@ -170,6 +171,13 @@ attachment helpers left the appservice for `matrix`, so `org-plane` and `acp` no
 into `matrix-as`; the two wire shapes the bridge reads off a board (`GatePendingDelivery`,
 `ElicitationPendingDelivery`) moved into `bridge/deliveries.ts`, so the bridge no longer imports
 the appservice at all.
+
+`board-chat` sits below `matrix-as` so it can leave the hub. It is the part of the Matrix
+appservice that serves boards rather than agents, and it is planned to move into a service of
+its own beside the homeserver. Agent puppeting stays in `matrix-as` and calls down into it.
+`board-chat` never imports `matrix-as`, and the tier order above makes that a failing test
+rather than a rule to remember. What it needs from the running bridge is the `BoardChatBridge`
+interface it declares.
 
 **Go:** [`apps/node-agent/internal/archtest/size_test.go`](../../apps/node-agent/internal/archtest/size_test.go),
 run by `go test ./...`. It holds shipped files over 1,000 lines (`oversizeFiles`) and packages
@@ -202,7 +210,8 @@ files in the module, named by the surface they came from:
 | `bridge` | `dispatch.ts`, `salaam-dispatch.ts` | `dispatch-*` (types, grant, readiness, prompt, run, turn, work, exits) and `salaam-dispatch-*` (plan, start, drive, drivers, settle, release, resume, expired, stopped, proofs, log) |
 | `forge-api` | `station-forge-api.ts` | `grant-*`, one file per step of a grant's life (create, claim, mint, deliver, verify, rotate, revoke, policy, transition) and its shared types and rows |
 | `runtimes` | `runtimes.ts` | one file per lifecycle verb (`create`, `start`, `stop`, `destroy`, `reprovision`, `rotation`, `probe`), the reads, the rows, the unobserved and auto-adopt sweeps |
-| `matrix-as` | `gates.ts`, `outbound.ts` | `gate-*` (wire, projection, decision, resolve, reads, sweep) and `outbound-*` (state, send, streams, flush, handle, marks, payloads, log) |
+| `board-chat` | `gates.ts` | `gate-*` (wire, projection, decision, resolve, reads, sweep) |
+| `matrix-as` | `outbound.ts` | `outbound-*` (state, send, streams, flush, handle, marks, payloads, log) |
 
 A new file in one of these modules goes beside its siblings with the same prefix. Import a
 piece from inside the module; from outside, import the module's `index.ts`.

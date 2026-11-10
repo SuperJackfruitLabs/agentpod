@@ -19,7 +19,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { db } from "../../src/db/drizzle";
 import { matrixGateEvents } from "../../src/db/schema/matrix";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
-import { projectGate, type GatePendingDelivery, type GateProjectionDeps } from "../../src/services/matrix-as/gates";
+import { projectGate, type GatePendingDelivery, type GateProjectionDeps } from "../../src/services/board-chat/gates";
 
 const ROOM = "!board-join:id.agentpod.dev";
 const SPEAKER = "@agent_superpipeline:id.agentpod.dev";

@@ -11,7 +11,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { db } from "../../src/db/drizzle";
 import { matrixGateEvents } from "../../src/db/schema/matrix";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
-import { projectGate, projectionForGate, type GatePendingDelivery } from "../../src/services/matrix-as/gates";
+import { projectGate, projectionForGate, type GatePendingDelivery } from "../../src/services/board-chat/gates";
 
 const delivery = (gateId: string): GatePendingDelivery => ({
   event: "gate.pending",

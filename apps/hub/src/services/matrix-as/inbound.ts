@@ -27,7 +27,7 @@ import { OrgPlaneError } from "../../auth/org-plane/client";
 import { getGrant, grantAllowsPrincipal } from "../../auth/org-plane/grants";
 import { isControlPairEnforced } from "../control";
 import { bridgeUserId } from "../matrix";
-import { boardRoomFor } from "./board-room";
+import { boardRoomFor } from "../board-chat";
 import { principalHandle } from "../../auth/org-plane/principals";
 import {
   clearPendingPermission,
@@ -36,12 +36,12 @@ import {
   unmatchedAnswerText,
 } from "./permissions";
 import { createLogger } from "../../utils/logger";
-import { parseGateDecision } from "./gates";
-import { parseQuestionAnswer } from "./question-answer";
-import { parseDeliveryAnswer } from "./delivery-answer";
-import { parseAttentionAnswer } from "./attention-answer";
-import { GATE_PULL_BACK_V2_SUITE_TYPE } from "./gate-release-wire";
-import { CHECK_OVERRIDE_V2_SUITE_TYPE } from "./checks-wire";
+import { parseGateDecision } from "../board-chat";
+import { parseQuestionAnswer } from "../board-chat";
+import { parseDeliveryAnswer } from "../board-chat";
+import { parseAttentionAnswer } from "../board-chat";
+import { GATE_PULL_BACK_V2_SUITE_TYPE } from "../board-chat";
+import { CHECK_OVERRIDE_V2_SUITE_TYPE } from "../board-chat";
 import {
   PERMISSION_OUTCOME_TYPE,
   isPermissionAnswerMarked,
