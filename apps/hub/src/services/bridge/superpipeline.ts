@@ -17,7 +17,7 @@
  *    honest reimplementation, because it looks like a dependency.
  * 2. **The suite has already decided against a shared package.** A published
  *    package couples two deploy pipelines with very different cadences;
- *    `fixtures/ecosystem-identity/` exists precisely so the two repos agree
+ *    treaty's `fixtures/ecosystem-identity/` exists precisely so the two repos agree
  *    through a checked corpus instead. Adding the coupling here would contradict
  *    the mechanism this repo already runs in CI.
  * 3. **Its run verbs return the raw response.** `heartbeat`/`activity`/

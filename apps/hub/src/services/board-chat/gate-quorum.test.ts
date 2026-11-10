@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import type { MatrixGateQuorum } from "../../db/schema/matrix";
 import {
@@ -28,7 +27,7 @@ import {
  * A gate may need more than one approver (charter → `decisions/2026-11-09-a-gate-may-need-more-than-one-approver.md`).
  * The hub carries the quorum on gate.v2, says each approval short of it in the room, and does not
  * say "Approved — the board has it" for an approval the board recorded without passing the gate.
- * Pinned against `fixtures/ecosystem-identity/matrix_gate_events.json` (`variant: "quorum"`).
+ * Pinned against treaty's `fixtures/ecosystem-identity/matrix_gate_events.json` (`variant: "quorum"`).
  */
 
 const LINK = "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40";
@@ -387,7 +386,7 @@ describe("quorum gates against the shared corpus", () => {
     boardRefusals?: Array<{ code: string; httpStatus: number; from?: string; said: string }>;
   }
   const parsed: unknown = JSON.parse(
-    readFileSync(join(import.meta.dir, "../../../../../fixtures/ecosystem-identity/matrix_gate_events.json"), "utf8"),
+    readFileSync(Bun.resolveSync("@superjackfruitlabs/treaty-ecosystem-identity/matrix_gate_events.json", import.meta.dir), "utf8"),
   );
   const corpus: { version: number; events: Entry[] } =
     typeof parsed === "object" && parsed !== null && "events" in parsed && "version" in parsed && Array.isArray(parsed.events) && typeof parsed.version === "number"

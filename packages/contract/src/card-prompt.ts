@@ -26,7 +26,7 @@ import { AcpRunId } from "./ids";
  * seam and nobody notices.
  *
  * The rendered text — not just the shape — is pinned by
- * `fixtures/ecosystem-identity/card_prompt.json`, so a peer repo that assembles
+ * treaty's `fixtures/ecosystem-identity/card_prompt.json`, so a peer repo that assembles
  * a card differently fails its own test suite rather than in an agent's
  * behaviour.
  */

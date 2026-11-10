@@ -274,7 +274,6 @@ describe("VoiceReply — an agent's reply, spoken, on its voice message", () => 
 });
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   ELICITATION_REQUEST_CONTENT_KEY,
   ElicitationRequestCard,
@@ -290,7 +289,7 @@ describe("requests embedded in the prose message", () => {
   });
 
   const corpus = JSON.parse(
-    readFileSync(join(import.meta.dir, "../../../fixtures/ecosystem-identity/matrix_gate_events.json"), "utf8")
+    readFileSync(Bun.resolveSync("@superjackfruitlabs/treaty-ecosystem-identity/matrix_gate_events.json", import.meta.dir), "utf8")
   ) as { events: Array<{ suiteEventType: string; accept: Array<{ content: Record<string, unknown> }>; reject: Array<{ why: string; content: Record<string, unknown> }> }> };
   const gate = corpus.events.find((e) => e.suiteEventType === "dev.superpipeline.gate.v1")!;
 

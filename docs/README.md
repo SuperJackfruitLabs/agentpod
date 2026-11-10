@@ -19,7 +19,7 @@ document, decide which kind it is first; if you cannot, it is probably the wrong
 in the 2026-08-14 audit had exactly that shape. So: prefer turning a claim into a check over
 rewriting it, and prefer citing `file.ts` over restating what it says.
 
-The model for the first kind is [`fixtures/ecosystem-identity/`](../fixtures/ecosystem-identity/) —
+The model for the first kind is [`fixtures/ecosystem-identity/`](https://github.com/SuperJackfruitLabs/treaty/tree/main/fixtures/ecosystem-identity) (now in treaty) —
 an executable corpus that caught four real cross-repo disagreements on its first run.
 
 ## Runbooks — what an operator reads

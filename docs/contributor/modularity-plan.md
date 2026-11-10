@@ -186,6 +186,6 @@ jobs; the architecture tests run inside `hub` and `node-agent`.
   again (`grep -rn "import.meta" apps/hub/src`).
 - **Stale paths outside the hub.** Comments in the node agent (`internal/descriptor/openclaw/openclaw_config.go`,
   `internal/descriptor/skills.go`, `openclaw/openclaw_config_test.go` since Phase 5), the console (`HarnessConfigPanel.svelte` and its test)
-  and the `mintSource` notes in `fixtures/ecosystem-identity/id_grammar.json` still name the old
+  and the `mintSource` notes in treaty's `fixtures/ecosystem-identity/id_grammar.json` still name the old
   hub service paths. Phase 2 left them so as not to touch the node agent, the console or a shared
   fixture in a hub-only phase; Phase 8 updates them (Phases 5 and 6 may do so in passing).

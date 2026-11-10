@@ -138,7 +138,7 @@ export async function deleteGrant(principalId: string): Promise<void> {
  *
  * The same grammar the hub's writer enforces (`PrincipalId` in
  * `@agentpod/contract`, pinned across both repos by
- * `fixtures/ecosystem-identity/id_grammar.json`). Restated here rather than
+ * treaty's `fixtures/ecosystem-identity/id_grammar.json`). Restated here rather than
  * imported so this module stays free of a runtime dependency for one regex —
  * and the server, not this, remains the authority: a value that gets past this
  * is still refused with a 400.

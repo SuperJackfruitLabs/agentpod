@@ -13,7 +13,7 @@ import {
 /**
  * What a gate looks like on the wire.
  *
- * Pinned against `fixtures/ecosystem-identity/matrix_gate_events.json`, which
+ * Pinned against treaty's `fixtures/ecosystem-identity/matrix_gate_events.json`, which
  * superpipeline and supermessage validate against too. A rename on any of the three
  * sides is a gate that silently never resolves — which reads, to the person who
  * tapped, as a button that did nothing.
@@ -1066,7 +1066,6 @@ describe("gate.v2 — resolving at the board with the subject binding", () => {
 });
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { GATE_REQUEST_CONTENT_KEY } from "@agentpod/contract";
 import { gateRequestCard } from "./gates";
 
@@ -1091,7 +1090,7 @@ function wellFormed(c: Record<string, unknown>): boolean {
  */
 describe("gate.v2 against the shared corpus", () => {
   const corpusText = readFileSync(
-    join(import.meta.dir, "../../../../../fixtures/ecosystem-identity/matrix_gate_events.json"),
+    Bun.resolveSync("@superjackfruitlabs/treaty-ecosystem-identity/matrix_gate_events.json", import.meta.dir),
     "utf8"
   );
   const corpus: unknown = JSON.parse(corpusText);

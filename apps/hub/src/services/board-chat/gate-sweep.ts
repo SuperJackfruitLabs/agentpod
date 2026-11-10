@@ -308,7 +308,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
     for (const gate of gates) {
       if (!isGatePending(gate)) {
         // Loud, because this is the two repositories' contract having drifted
-        // — the thing `fixtures/ecosystem-identity/matrix_gate_events.json`
+        // — the thing treaty's `fixtures/ecosystem-identity/matrix_gate_events.json`
         // exists to catch before it reaches a room.
         log.error("board described a gate in an unknown shape", { boardId });
         continue;
