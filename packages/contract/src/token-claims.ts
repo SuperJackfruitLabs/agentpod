@@ -1,12 +1,12 @@
 /**
- * The organization plane's access-token claims (fixtures/ecosystem-identity/token_claims.json v8).
- * Every product verifies against this one shape. Loose: provider-set claims (client_id, azp, sid)
- * pass through and are ignored.
+ * The organization plane's access-token claims (fixtures/ecosystem-identity/token_claims.json v9).
+ * Every product verifies against this one shape. Loose: a claim it does not name passes through
+ * and is ignored.
  */
 import { z } from "zod";
 import { OrganizationId, PrincipalId } from "./ids";
 
-export const ORG_PLANE_PRODUCTS = ["agentpod", "superpipeline", "supermessage", "superwitness"] as const;
+export const ORG_PLANE_PRODUCTS = ["agentpod", "superpipeline", "supermessage", "superwitness", "superlibrary"] as const;
 
 export const OrgPlaneTokenClaims = z.looseObject({
   iss: z.string().min(1),
@@ -31,6 +31,11 @@ export const OrgPlaneTokenClaims = z.looseObject({
   // carrying a value this contract does not know must still verify. Read it through
   // `workspaceRoleOf`, which answers "member" for anything else — absent included.
   orgRole: z.string().optional(),
+  // Set by the OAuth provider on OAuth access tokens. Named so the schema and the corpus list the
+  // same claims; nothing reads them.
+  client_id: z.string().optional(),
+  azp: z.string().optional(),
+  sid: z.string().optional(),
 });
 export type OrgPlaneTokenClaims = z.infer<typeof OrgPlaneTokenClaims>;
 

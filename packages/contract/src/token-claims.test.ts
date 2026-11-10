@@ -27,9 +27,9 @@ const valid = {
   mayGrantReach: false,
 };
 
-describe("token_claims.json v8 ↔ OrgPlaneTokenClaims", () => {
-  test("the fixture is v8 and no longer issues tenant", () => {
-    expect(fixture.version).toBe(8);
+describe("token_claims.json v9 ↔ OrgPlaneTokenClaims", () => {
+  test("the fixture is v9 and no longer issues tenant", () => {
+    expect(fixture.version).toBe(9);
     expect(fixture.issued.map((c) => c.claim)).not.toContain("tenant");
   });
 

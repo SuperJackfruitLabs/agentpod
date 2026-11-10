@@ -345,6 +345,9 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@superjackfruitlabs/treaty-ecosystem-identity':
+        specifier: 0.0.2
+        version: 0.0.2
       '@types/bun':
         specifier: latest
         version: 1.4.3
@@ -2228,6 +2231,9 @@ packages:
     engines: {node: '>=22'}
     peerDependencies:
       svelte: ^5.56.0
+
+  '@superjackfruitlabs/treaty-ecosystem-identity@0.0.2':
+    resolution: {integrity: sha512-52RhUdq6WVFYHgiKvpjGqZsaRcA9vWeTIPPwLV66bPoXcjM7fODxg/tZ6s96DOOTGAO1IwkbkqOthsHD+ctgSA==}
 
   '@sveltejs/acorn-typescript@1.0.13':
     resolution: {integrity: sha512-wgKggnhZVL9Bfx1OaKKTrYY9BFRk6C8UAkQNUcIv1+llzYrIqy+RZm5HPKzn0NpEBvTVhTqB4kQyllZywsRBRQ==}
@@ -7920,6 +7926,8 @@ snapshots:
     transitivePeerDependencies:
       - '@internationalized/date'
       - '@sveltejs/kit'
+
+  '@superjackfruitlabs/treaty-ecosystem-identity@0.0.2': {}
 
   '@sveltejs/acorn-typescript@1.0.13(acorn@8.18.0)':
     dependencies:

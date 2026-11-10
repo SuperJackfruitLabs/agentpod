@@ -1,5 +1,10 @@
 # Ecosystem identity — shared fixture corpus
 
+> **This corpus now lives in treaty** (`SuperJackfruitLabs/treaty`, `fixtures/ecosystem-identity/`),
+> published as `@superjackfruitlabs/treaty-ecosystem-identity`. This copy stays until AgentPod
+> reads the package; `packages/contract/src/treaty-corpus.test.ts` fails when it differs from the
+> pinned version. Change the corpus in treaty, never here.
+
 Three products need the same identifiers to mean the same thing across a Bun/Postgres hub
 (AgentPod), a Cloudflare Workers/D1 board (superpipeline), and eventually a Rust client. No auth
 or contract *library* can be shared across those runtimes, and a published npm package would
