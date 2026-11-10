@@ -22,7 +22,7 @@
 import { Hono } from "hono";
 
 import { createLogger } from "../utils/logger";
-import { isGatePending, projectGate, type GateProjectionDeps } from "../services/board-chat";
+import { isGatePending, projectGate, type GatePendingDelivery, type GateProjectionDeps } from "../services/board-chat";
 import { isApprovalRequest, isElicitationPending } from "../services/board-chat";
 import { projectElicitation } from "../services/board-chat";
 import { isDeliveryPending, projectDelivery } from "../services/board-chat";
@@ -265,14 +265,28 @@ export function createSuperpipelinePushRoutes(deps: SuperpipelinePushDeps) {
       return c.json({ ok: true, ignored: true }, 200);
     }
 
-    const tenantId = await deps.tenantIdFor(body.boardId);
-    if (!tenantId) {
-      log.warn("push for a board mapped to no fleet", { boardId: body.boardId });
-      return c.json({ error: "unknown board" }, 404);
-    }
-
-    const outcome = await projectGate(tenantId, body, deps);
-    log.info("gate projected", { gateId: body.gateId, status: outcome.status });
-    return c.json({ ok: true, status: outcome.status }, 200);
+    const result = await projectPushedGate(body, deps, "push");
+    return c.json(result.body, result.status);
   });
+}
+
+/**
+ * A pushed gate into its board's room: the one place both doors (the board's direct push, and the
+ * event relay since treaty plan step 7) hand a `gate.pending` to `projectGate`. Idempotent on the
+ * gate id, so the two doors may both deliver the same gate. `via` names the door in the log, which
+ * is how a staging proof tells them apart.
+ */
+export async function projectPushedGate(
+  body: GatePendingDelivery,
+  deps: Pick<SuperpipelinePushDeps, "tenantIdFor"> & GateProjectionDeps,
+  via: "push" | "event-relay",
+): Promise<{ status: 200 | 404; body: Record<string, unknown> }> {
+  const tenantId = await deps.tenantIdFor(body.boardId);
+  if (!tenantId) {
+    log.warn("gate for a board mapped to no fleet", { boardId: body.boardId, via });
+    return { status: 404, body: { error: "unknown board" } };
+  }
+  const outcome = await projectGate(tenantId, body, deps);
+  log.info("gate projected", { gateId: body.gateId, status: outcome.status, via });
+  return { status: 200, body: { ok: true, status: outcome.status } };
 }

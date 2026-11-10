@@ -65,6 +65,7 @@ export const HUB_SECRET_ENV = [
   "SPEECH_API_KEY",
   "SUPERPIPELINE_PUSH_SECRET",
   "TRANSCRIBE_API_KEY",
+  "TREATY_RELAY_DELIVERY_SECRET",
 ] as const;
 
 /** Shorter values are not used: a 6-character secret would redact ordinary words. */

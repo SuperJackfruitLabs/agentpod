@@ -18,6 +18,7 @@ import { securityHeadersMiddleware } from './middleware/security-headers.ts';
 import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
 import { createSuperpipelinePushRoutes } from './routes/superpipeline-push.ts';
+import { createSuperpipelineEventsRoutes } from './routes/superpipeline-events';
 import { projectGate, projectionForGate, tenantForBoard } from './services/board-chat/index.ts';
 import { reconcileBoardGates } from './services/board-chat/index.ts';
 import { matrixIdsForBoardHumans } from './services/board-chat/index.ts';
@@ -425,6 +426,17 @@ if (matrixBridge) {
       ...gateProjection,
       approvalRequestAllowed: async (tenantId, boardId) =>
         superpipelineRelay ? (await relayTokenForBoard(superpipelineRelay, tenantId, boardId)) !== null : false,
+    }),
+  );
+
+  // POST /public/bridge/superpipeline/events — the same gates through the suite's event relay
+  // (treaty plan step 7), signed by the relay. Off (503) without TREATY_RELAY_DELIVERY_SECRET.
+  app.route(
+    '/public',
+    createSuperpipelineEventsRoutes({
+      secret: process.env.TREATY_RELAY_DELIVERY_SECRET,
+      tenantIdFor: tenantForBoard,
+      ...gateProjection,
     }),
   );
 
