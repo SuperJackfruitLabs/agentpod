@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { ELICITATION_REQUEST_CONTENT_KEY } from "@agentpod/contract";
 
@@ -459,7 +458,7 @@ interface CorpusEvent {
 
 function corpusEvent(suiteEventType: string): CorpusEvent | undefined {
   const corpus: unknown = JSON.parse(
-    readFileSync(join(import.meta.dir, "../../../../../fixtures/ecosystem-identity/matrix_gate_events.json"), "utf8"),
+    readFileSync(Bun.resolveSync("@superjackfruitlabs/treaty-ecosystem-identity/matrix_gate_events.json", import.meta.dir), "utf8"),
   );
   const events: CorpusEvent[] =
     typeof corpus === "object" && corpus !== null && "events" in corpus && Array.isArray(corpus.events) ? corpus.events : [];

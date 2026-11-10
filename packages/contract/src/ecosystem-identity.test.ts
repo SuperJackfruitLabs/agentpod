@@ -1,12 +1,13 @@
 /**
  * AgentPod's half of the shared ecosystem-identity fixture corpus.
  *
- * The corpus lives at `fixtures/ecosystem-identity/` — plain JSON, depending on
- * no type from any repo, so superpipeline can check in the *same files* and write the
- * equivalent test in its own runtime. See that directory's README.
+ * The corpus lives in treaty (`fixtures/ecosystem-identity/`), published as
+ * @superjackfruitlabs/treaty-ecosystem-identity — plain JSON, depending on no type from any
+ * repo, so every product pins the same files and writes the equivalent test in its own
+ * runtime. See the README there.
  *
- * Why a fixture corpus rather than a shared package: a published package would
- * couple two deploy pipelines with very different cadences. This repo already
+ * Each repo pins a version of the package and moves when it is ready, so the deploy
+ * pipelines keep their own cadences. This repo already
  * keeps five hand-written Go mirrors honest the same way
  * (apps/node-agent/internal/contractfix), which is the evidence the approach is
  * enough.
@@ -19,7 +20,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ZodType } from "zod";
 
 import {
@@ -44,7 +45,8 @@ import {
 import { Run, RunState, TERMINAL_RUN_STATES, INTERRUPTED_RUN_STATES } from "./run";
 import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt } from "./card-prompt";
 
-const CORPUS_DIR = join(import.meta.dir, "../../../fixtures/ecosystem-identity");
+// The corpus is treaty's, published as @superjackfruitlabs/treaty-ecosystem-identity.
+const CORPUS_DIR = dirname(Bun.resolveSync("@superjackfruitlabs/treaty-ecosystem-identity/id_grammar.json", import.meta.dir));
 
 const readCorpus = <T>(file: string): T =>
   JSON.parse(readFileSync(join(CORPUS_DIR, file), "utf8")) as T;

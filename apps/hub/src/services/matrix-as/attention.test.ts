@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import {
   ATTENTION_ANSWER_V2_SUITE_TYPE,
@@ -577,7 +576,7 @@ interface CorpusEvent {
 }
 
 function corpus(): { version: number; events: CorpusEvent[] } {
-  return JSON.parse(readFileSync(join(import.meta.dir, "../../../../../fixtures/ecosystem-identity/matrix_gate_events.json"), "utf8"));
+  return JSON.parse(readFileSync(Bun.resolveSync("@superjackfruitlabs/treaty-ecosystem-identity/matrix_gate_events.json", import.meta.dir), "utf8"));
 }
 
 const corpusEvent = (t: string) => corpus().events.find((e) => e.suiteEventType === t);

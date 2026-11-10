@@ -1,5 +1,5 @@
 /**
- * The organization plane's access-token claims (fixtures/ecosystem-identity/token_claims.json v9).
+ * The organization plane's access-token claims (treaty's fixtures/ecosystem-identity/token_claims.json v9).
  * Every product verifies against this one shape. Loose: a claim it does not name passes through
  * and is ignored.
  */

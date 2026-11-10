@@ -5,7 +5,6 @@
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import {
   DECISION_ESCALATED_SUITE_TYPE,
@@ -211,7 +210,7 @@ interface CorpusEvent {
   reject: Array<{ why: string; content: Record<string, unknown> }>;
 }
 function readCorpus(): { version: number; events: CorpusEvent[] } {
-  return JSON.parse(readFileSync(join(import.meta.dir, "../../../../../fixtures/ecosystem-identity/matrix_gate_events.json"), "utf8"));
+  return JSON.parse(readFileSync(Bun.resolveSync("@superjackfruitlabs/treaty-ecosystem-identity/matrix_gate_events.json", import.meta.dir), "utf8"));
 }
 const corpus = readCorpus();
 const entry = (t: string, variant?: string) => corpus.events.find((e) => e.suiteEventType === t && e.variant === variant);

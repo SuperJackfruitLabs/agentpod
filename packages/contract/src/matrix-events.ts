@@ -277,7 +277,7 @@ export type GateRequestOption = z.infer<typeof GateRequestOption>;
  *
  * The body of the legacy `dev.superpipeline.gate.v1` event minus its `body`,
  * which the carrying message already has. Pinned field-for-field by
- * `fixtures/ecosystem-identity/matrix_gate_events.json`.
+ * treaty's `fixtures/ecosystem-identity/matrix_gate_events.json`.
  *
  * `schema_version` is a floor, not a literal: the fixture requires a renderer
  * to tolerate a higher minor version by ignoring what it does not know.

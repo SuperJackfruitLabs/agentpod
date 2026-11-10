@@ -22,7 +22,7 @@
  * `run_` collision undone in #308, and doing it deliberately would be worse than
  * doing it by accident. AgentPod's tenant id space is `fleet_<20 hex>`; the
  * reasoning is in packages/contract/src/ids.ts and pinned across both repos by
- * fixtures/ecosystem-identity/id_grammar.json.
+ * treaty's fixtures/ecosystem-identity/id_grammar.json.
  */
 
 import { sql } from "drizzle-orm";

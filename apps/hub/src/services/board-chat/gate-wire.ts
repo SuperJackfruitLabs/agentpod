@@ -48,7 +48,7 @@ export const GATE_OUTCOME_TYPE = "dev.superpipeline.gate.outcome.v1";
  * The only option ids superpipeline resolves against — its `GateDecision`.
  *
  * Mirrored here rather than imported because the two products share no runtime.
- * Pinned by `fixtures/ecosystem-identity/matrix_gate_events.json`, which both
+ * Pinned by treaty's `fixtures/ecosystem-identity/matrix_gate_events.json`, which both
  * repos validate against.
  */
 export const GATE_OPTION_IDS = ["approve", "request_changes", "reject"] as const;

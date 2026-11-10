@@ -3,7 +3,7 @@
  *
  * Was a private const in `services/nodes/enrollment.ts`, which is why `station-registry`
  * grew a second, incompatible shape (a hyphenated UUID that superpipeline's own id
- * schema rejects — see `fixtures/ecosystem-identity/id_grammar.json`,
+ * schema rejects — see treaty's `fixtures/ecosystem-identity/id_grammar.json`,
  * `agentpod.station`). One exported minter is how that stops happening again.
  */
 export const prefixedId = (prefix: string): string =>

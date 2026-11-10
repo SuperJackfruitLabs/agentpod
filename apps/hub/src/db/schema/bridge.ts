@@ -4,7 +4,7 @@
  * **Why this is not more columns on `acp_runs`.** An `acp_runs` row is one
  * prompt-turn on a station — it exists for hand-driven console sessions with no
  * board anywhere, and the shared corpus
- * (`fixtures/ecosystem-identity/run_join_key.json`) pins exactly what its
+ * (treaty's `fixtures/ecosystem-identity/run_join_key.json`) pins exactly what its
  * external pair means. What the bridge needs on top of that is bookkeeping
  * about a *claim*: which board and card it came from, which lease epoch it was
  * granted, which configured agent identity holds it, and — the part that earns

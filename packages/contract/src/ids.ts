@@ -13,7 +13,7 @@ import { z } from "zod";
  * schema, so nothing could notice.
  *
  * Each schema here is pinned by the shared corpus at
- * `fixtures/ecosystem-identity/id_grammar.json`, which both repos check in and
+ * treaty's `fixtures/ecosystem-identity/id_grammar.json`, which both repos check in and
  * test against. Change a grammar here without changing it there and
  * `tests/ecosystem-identity.test.ts` fails.
  *

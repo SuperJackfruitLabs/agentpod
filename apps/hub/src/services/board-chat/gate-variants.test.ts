@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { GATE_REQUEST_CONTENT_KEY } from "@agentpod/contract";
 
 import type { MatrixGateVariant } from "../../db/schema/matrix";
@@ -28,7 +27,7 @@ import {
  * A gate may offer a choice of variants (charter → `decisions/2026-11-09-a-gate-may-offer-a-choice-of-variants.md`).
  * The hub carries every variant, bounds each on its own, and judges an approval as the choice: a
  * binding naming exactly one variant whose preview was shown in full and whose subject has not
- * expired. Pinned against `fixtures/ecosystem-identity/matrix_gate_events.json` (`variant: "choice"`).
+ * expired. Pinned against treaty's `fixtures/ecosystem-identity/matrix_gate_events.json` (`variant: "choice"`).
  */
 
 const POST = "Our next release ships today.";
@@ -401,7 +400,7 @@ describe("variant gates against the shared corpus", () => {
     reject: Array<{ why: string; content: Record<string, unknown> }>;
   }
   const parsed: unknown = JSON.parse(
-    readFileSync(join(import.meta.dir, "../../../../../fixtures/ecosystem-identity/matrix_gate_events.json"), "utf8"),
+    readFileSync(Bun.resolveSync("@superjackfruitlabs/treaty-ecosystem-identity/matrix_gate_events.json", import.meta.dir), "utf8"),
   );
   const corpus: { version: number; events: Entry[] } =
     typeof parsed === "object" && parsed !== null && "events" in parsed && "version" in parsed && Array.isArray(parsed.events) && typeof parsed.version === "number"

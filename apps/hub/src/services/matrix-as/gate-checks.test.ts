@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import type { CheckFailedDelivery, CheckOverriddenDelivery, DecisionTimeoutDelivery } from "../bridge";
 import { GATE_V2_SUITE_TYPE, gateV2Content, type GatePendingDelivery } from "../board-chat/gates";
@@ -34,7 +33,7 @@ import { handleRoomMessage, type InboundDeps } from "./inbound";
  * A gate may be decided by checks (charter → `decisions/2026-11-09-a-gate-may-be-decided-by-checks.md`).
  * The hub carries a gate's checks on gate.v2, says a failed or overridden check in the board's room,
  * posts a checks.waiting card when overdue checks escalate, and carries an override from chat as the
- * person. Pinned against `fixtures/ecosystem-identity/matrix_gate_events.json` (`variant: "checks"`).
+ * person. Pinned against treaty's `fixtures/ecosystem-identity/matrix_gate_events.json` (`variant: "checks"`).
  */
 
 const LINK = "https://superpipeline.dev/b/brd_7c1f/c/crd_8a40";
@@ -460,7 +459,7 @@ describe("a gate decided by checks, against the shared corpus", () => {
     boardRefusals?: Array<{ code: string; httpStatus: number; said: string }>;
   }
   const parsed: unknown = JSON.parse(
-    readFileSync(join(import.meta.dir, "../../../../../fixtures/ecosystem-identity/matrix_gate_events.json"), "utf8"),
+    readFileSync(Bun.resolveSync("@superjackfruitlabs/treaty-ecosystem-identity/matrix_gate_events.json", import.meta.dir), "utf8"),
   );
   const corpus: { version: number; events: Entry[] } =
     typeof parsed === "object" && parsed !== null && "events" in parsed && "version" in parsed && Array.isArray(parsed.events) && typeof parsed.version === "number"

@@ -1,10 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { OrgPlaneTokenClaims, audienceIncludes, workspaceRoleOf } from "./token-claims";
 
 const fixture = JSON.parse(
-  readFileSync(join(import.meta.dir, "..", "..", "..", "fixtures", "ecosystem-identity", "token_claims.json"), "utf8"),
+  readFileSync(Bun.resolveSync("@superjackfruitlabs/treaty-ecosystem-identity/token_claims.json", import.meta.dir), "utf8"),
 ) as {
   version: number;
   issued: Array<{ claim: string; required: boolean }>;

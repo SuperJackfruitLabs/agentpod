@@ -271,6 +271,9 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@superjackfruitlabs/treaty-ecosystem-identity':
+        specifier: 0.0.2
+        version: 0.0.2
       '@types/bun':
         specifier: latest
         version: 1.4.3
