@@ -49,7 +49,7 @@ import {
   redeemCredentialAuthorization,
 } from "../../src/services/matrix/credential";
 import { createStationMatrixCredentialRoutes } from "../../src/routes/station-matrix-credential";
-import { MatrixUserInUse } from "../../src/services/matrix-as/client";
+import { MatrixUserInUse } from "../../src/services/matrix/client";
 import type { IssuedCredentials } from "../../src/routes/station-matrix";
 
 const RUN = crypto.randomUUID().slice(0, 8);

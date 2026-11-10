@@ -6,7 +6,7 @@ import { rawSql } from "../../src/db/drizzle";
 import { setGrant } from "../../src/auth/org-plane/grants";
 import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { createStationMatrixRoutes } from "../../src/routes/station-matrix";
-import { MatrixUserInUse } from "../../src/services/matrix-as/client";
+import { MatrixUserInUse } from "../../src/services/matrix/client";
 import type { PreJoinOutcome } from "../../src/services/matrix-as/identity-move";
 import { moveState, wireConvergenceListener } from "../../src/services/matrix-as/identity-move";
 import { signalNodeToAdopt } from "../../src/services/matrix-as/adopt-signal";

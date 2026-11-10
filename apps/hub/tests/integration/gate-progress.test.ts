@@ -17,10 +17,10 @@ import { matrixBoardRooms } from "../../src/db/schema/board-rooms";
 import { matrixGateApprovals, matrixGateEvents } from "../../src/db/schema/matrix";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import type { GateApprovalRecordedDelivery, GatePendingDelivery } from "../../src/services/bridge";
-import { handleGateApprovalRecorded, type GateProgressDeps } from "../../src/services/matrix-as/gate-progress";
-import { GATE_PROGRESS_TYPE } from "../../src/services/matrix-as/gate-quorum-wire";
-import { projectGate } from "../../src/services/matrix-as/gate-projection";
-import { projectionForGate } from "../../src/services/matrix-as/gate-reads";
+import { handleGateApprovalRecorded, type GateProgressDeps } from "../../src/services/board-chat/gate-progress";
+import { GATE_PROGRESS_TYPE } from "../../src/services/board-chat/gate-quorum-wire";
+import { projectGate } from "../../src/services/board-chat/gate-projection";
+import { projectionForGate } from "../../src/services/board-chat/gate-reads";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
 const BOARD = "brd_quorum0000000001";

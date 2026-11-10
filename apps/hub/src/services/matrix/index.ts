@@ -18,6 +18,14 @@ export {
   mintCredentialAuthorization,
   redeemCredentialAuthorization,
 } from "./credential";
+export {
+  MatrixExclusiveNamespace,
+  MatrixUserInUse,
+  createMatrixClient,
+  isMatrixExclusiveNamespace,
+  isMatrixUserInUse,
+} from "./client";
+export type { MatrixClient, MatrixClientDeps } from "./client";
 export { IDENTITY_UNAVAILABLE_TEXT, resolveMatrixId } from "./identity";
 export {
   BRIDGE_ONLY_REFUSAL,

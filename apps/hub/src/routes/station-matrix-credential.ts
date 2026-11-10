@@ -47,7 +47,7 @@ import { verifyNodeCredential } from "../services/nodes";
 import { principalHandle } from "../auth/org-plane/principals";
 import { redeemCredentialAuthorization } from "../services/matrix";
 import { bridgeLocalpart, isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix";
-import { isMatrixUserInUse } from "../services/matrix-as";
+import { isMatrixUserInUse } from "../services/matrix";
 import type { IssuedCredentials } from "./station-matrix";
 import type { MatrixBridge } from "../services/matrix-as";
 

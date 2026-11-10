@@ -110,6 +110,7 @@ const SERVICE_LAYERS: string[][] = [
   ["acp", "sweeper"],
   ["org-plane", "push"],
   ["bridge"],
+  ["board-chat"],
   ["matrix-as"],
 ];
 

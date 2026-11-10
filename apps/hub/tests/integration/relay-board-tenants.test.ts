@@ -9,7 +9,7 @@ import { db } from "../../src/db/drizzle";
 import { bridgeDispatches } from "../../src/db/schema/bridge";
 import { tenants } from "../../src/db/schema/tenants";
 import { existingTenantForOrg } from "../../src/auth/org-plane/tenant";
-import { tenantsForBoard } from "../../src/services/matrix-as/gate-reads";
+import { tenantsForBoard } from "../../src/services/board-chat/gate-reads";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
 /**

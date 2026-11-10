@@ -22,7 +22,7 @@
  * would keep receiving plaintext from us. So "no" is cached only briefly,
  * and "yes" is permanent.
  */
-import type { MatrixClient } from './client';
+import type { MatrixClient } from '../matrix';
 import type { AgentCrypto } from './crypto';
 import { createLogger } from '../../utils/logger';
 

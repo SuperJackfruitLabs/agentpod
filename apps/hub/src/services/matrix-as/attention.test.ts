@@ -11,7 +11,7 @@ import {
   attentionV2Content,
   isAttentionPending,
   type AttentionPendingDelivery,
-} from "./attention-wire";
+} from "../board-chat/attention-wire";
 import {
   WAIT_CHANGED_TEXT,
   handleAttentionAnswer,
@@ -20,11 +20,11 @@ import {
   type AttentionAnswerDeps,
   type AttentionAnswerRefusal,
   type RecordedAttention,
-} from "./attention-answer";
-import { answerAttentionAtSuperpipeline } from "./gate-resolve";
+} from "../board-chat/attention-answer";
+import { answerAttentionAtSuperpipeline } from "../board-chat/gate-resolve";
 import { handleRoomMessage, type InboundDeps } from "./inbound";
-import { sweepGates, type GateSweepDeps } from "./gate-sweep";
-import type { WaitKey } from "./attention-projection";
+import { sweepGates, type GateSweepDeps } from "../board-chat/gate-sweep";
+import type { WaitKey } from "../board-chat/attention-projection";
 
 /**
  * attention.v2 — a card waiting on a person (charter: "Waiting cards and broker approvals reach

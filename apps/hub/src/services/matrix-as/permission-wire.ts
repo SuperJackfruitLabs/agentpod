@@ -23,9 +23,9 @@ import {
   permissionPreview,
   permissionRequestId,
 } from "../acp";
-import { subjectV2, type GateOptionMeaning, type GateSubjectV2 } from "./gate-wire";
-import { bindingOf, referenceOf } from "./question-answer";
-import type { OptionScope } from "./question-wire";
+import { subjectV2, type GateOptionMeaning, type GateSubjectV2 } from "../board-chat";
+import { bindingOf, referenceOf } from "../board-chat";
+import type { OptionScope } from "../board-chat";
 
 export { HARNESS_PERMISSION_SCHEMA, PERMISSION_TTL_MS, canonicalJson, permissionPreview, permissionRequestId };
 

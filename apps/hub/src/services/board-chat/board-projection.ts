@@ -21,17 +21,28 @@ import { readBoardQuestions, sweepElicitationBoardNow } from "./elicitation-swee
 import { noteGatePosted } from "./fleet-gates";
 import { noteAttentionPosted } from "./fleet-attention";
 import { readBoardCardChecks, readBoardPending, sweepBoardNow } from "./gate-sweep";
-import type { MatrixBridge } from "./service";
+import type { MatrixClient } from "../matrix";
 import { repostEscalationsOnJoin, type DecisionNoticeDeps } from "./decision-notices";
 import { workspaceAdminMatrixIds } from "./workspace-admins";
 
 const log = createLogger("matrix-board-projection");
 
 /**
+ * What board projection needs from the running Matrix bridge: the client it speaks through, and
+ * the homeserver's address, domain and appservice token. Declared here rather than taken from
+ * services/matrix-as, so board chat never depends on agent puppeting. The hub's `MatrixBridge`
+ * satisfies it.
+ */
+export interface BoardChatBridge {
+  client: MatrixClient;
+  config: { domain: string; homeserverUrl: string; asToken: string };
+}
+
+/**
  * The deps every projection takes — push, the gate sweep and the question sweep alike,
  * so a swept post and a pushed one cannot be made by two slightly different projections.
  */
-export function boardProjectionDeps(bridge: Pick<MatrixBridge, "client" | "config">) {
+export function boardProjectionDeps(bridge: BoardChatBridge) {
   const { client, config } = bridge;
   return {
     domain: config.domain,

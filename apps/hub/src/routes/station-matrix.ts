@@ -25,7 +25,7 @@ import { requireIssueCredentials } from "../services/control";
 import { isGrantReachDenied } from "../services/control";
 import { bridgeUserId, bridgeLocalpart } from "../services/matrix";
 import { roomAliasForStation } from "../services/matrix-as";
-import { isMatrixUserInUse } from "../services/matrix-as";
+import { isMatrixUserInUse } from "../services/matrix";
 import { principalHandle } from "../auth/org-plane/principals";
 import { mintCredentialAuthorization, UnknownStationError } from "../services/matrix";
 import { isBridgeOnly, BRIDGE_ONLY_REFUSAL } from "../services/matrix";

@@ -24,8 +24,8 @@ import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { createBridgeAgent, readEveryBridgeRoster } from "../../src/services/bridge/roster";
 import { startSuperpipelineBridge } from "../../src/services/bridge/loop";
 import type { AcpPort } from "../../src/services/bridge/dispatch";
-import { bridgeGateSweepDeps } from "../../src/services/matrix-as/gate-sweep";
-import { bridgeElicitationSweepDeps } from "../../src/services/matrix-as/elicitation-sweep";
+import { bridgeGateSweepDeps } from "../../src/services/board-chat/gate-sweep";
+import { bridgeElicitationSweepDeps } from "../../src/services/board-chat/elicitation-sweep";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const KEY = `coder-${RUN}`;

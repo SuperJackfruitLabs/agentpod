@@ -16,12 +16,12 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { db } from "../../src/db/drizzle";
 import { matrixElicitationEvents } from "../../src/db/schema/matrix";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
-import type { ElicitationPendingDelivery } from "../../src/services/matrix-as/elicitation-card";
+import type { ElicitationPendingDelivery } from "../../src/services/board-chat/elicitation-card";
 import {
   openQuestionInRoom,
   projectElicitation,
   type ElicitationProjectionDeps,
-} from "../../src/services/matrix-as/elicitations";
+} from "../../src/services/board-chat/elicitations";
 
 const ROOM = "!board-elicit-join:id.agentpod.dev";
 const SPEAKER = "@agent_superpipeline:id.agentpod.dev";

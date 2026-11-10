@@ -20,12 +20,15 @@
  * and *Allow always* is exactly the ambiguity that would cause it.
  */
 
+import { matchPermissionAnswer, unmatchedAnswerText } from "../board-chat";
+import type { PermissionOption } from "../board-chat";
 import { clearFleetDecision, permissionDecisionKey } from "../push";
 
-export interface PermissionOption {
-  optionId: string;
-  name: string;
-}
+// Matching a reply to a numbered option is shared with board questions, so it lives in
+// board-chat; it is re-exported here for the permission path that already imports it.
+export { matchPermissionAnswer, unmatchedAnswerText };
+export type { PermissionOption };
+
 
 export interface PendingPermission {
   sessionId: string;
@@ -76,45 +79,6 @@ export function permissionPrompt(title: string, options: PermissionOption[]): st
     `Permission needed: ${title}`,
     "",
     ...lines,
-    "",
-    "Reply with the number, or the option's name.",
-  ].join("\n");
-}
-
-/**
- * The option a reply selects, or null when it selects none.
- *
- * Accepts the position in the list, the option's name, or its id — the three
- * things a reply can unambiguously be. Everything else is null, including
- * anything that merely resembles agreement.
- */
-export function matchPermissionAnswer(
-  reply: string,
-  options: PermissionOption[]
-): string | null {
-  const text = reply.trim().toLowerCase();
-  if (text === "") return null;
-
-  // A bare number, 1-based, as printed.
-  if (/^\d+$/.test(text)) {
-    const index = Number(text) - 1;
-    return options[index]?.optionId ?? null;
-  }
-
-  const byName = options.find((o) => o.name.trim().toLowerCase() === text);
-  if (byName) return byName.optionId;
-
-  const byId = options.find((o) => o.optionId.trim().toLowerCase() === text);
-  return byId?.optionId ?? null;
-}
-
-/** What to say when a reply matched nothing — the options again, not a scolding. */
-export function unmatchedAnswerText(options: PermissionOption[]): string {
-  const names = options.map((o, i) => `${i + 1}. ${o.name}`).join("\n");
-  return [
-    "That is not one of the options, so nothing has been approved.",
-    "",
-    names,
     "",
     "Reply with the number, or the option's name.",
   ].join("\n");

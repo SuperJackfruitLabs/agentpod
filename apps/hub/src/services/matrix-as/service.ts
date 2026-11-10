@@ -18,7 +18,7 @@ import { stations } from "../../db/schema/stations";
 import { matrixGateEvents, matrixRooms } from "../../db/schema/matrix";
 import { matrixIdForPrincipal } from "../matrix";
 import * as broker from "../broker";
-import { createMatrixClient, type MatrixClient } from "./client";
+import { createMatrixClient, type MatrixClient } from "../matrix";
 import { withQuietNotes } from "./push-quiet";
 import { provisionStation, provisionAll, provisionStationForAlias } from "./provision";
 import { handleRoomMessage, retryPendingDecrypts } from "./inbound";
@@ -33,33 +33,33 @@ import {
   roomAgentUser,
   GATE_OUTCOME_TYPE,
   settleGateOutcome,
-} from "./gates";
-import { readBoardGate } from "./gate-sweep";
+} from "../board-chat";
+import { readBoardGate } from "../board-chat";
 import { assertPrincipal, type AssertionSubject } from "../../auth/org-plane/assertion";
 import { resolveMatrixId } from "../matrix";
-import { boardRoomFor } from "./board-room";
+import { boardRoomFor } from "../board-chat";
 import {
   answerElicitationAtSuperpipeline,
   claimElicitationOutcome,
   handleElicitationAnswer,
   recordedQuestion,
-} from "./elicitations";
-import { handleQuestionAnswer } from "./question-answer";
-import { handleDeliveryAnswer, settleDeliveryOutcome } from "./delivery-answer";
-import { claimDeliveryOutcome, recordedDelivery } from "./delivery-projection";
+} from "../board-chat";
+import { handleQuestionAnswer } from "../board-chat";
+import { handleDeliveryAnswer, settleDeliveryOutcome } from "../board-chat";
+import { claimDeliveryOutcome, recordedDelivery } from "../board-chat";
 import {
   answerAttentionAtSuperpipeline,
   overrideCheckAtSuperpipeline,
   pullBackAtSuperpipeline,
   updateDeliveryAtSuperpipeline,
-} from "./gate-resolve";
-import { handleCheckOverride } from "./check-override";
-import { recordedChecksCard } from "./checks-waiting";
-import { handleGatePullBack } from "./gate-pull-back";
-import { handleAttentionAnswer, settleAttentionOutcome } from "./attention-answer";
-import { claimAttentionOutcome, recordedAttention, type WaitKey } from "./attention-projection";
-import { ATTENTION_OUTCOME_TYPE } from "./attention-wire";
-import { clearAttentionDecision } from "./fleet-attention";
+} from "../board-chat";
+import { handleCheckOverride } from "../board-chat";
+import { recordedChecksCard } from "../board-chat";
+import { handleGatePullBack } from "../board-chat";
+import { handleAttentionAnswer, settleAttentionOutcome } from "../board-chat";
+import { claimAttentionOutcome, recordedAttention, type WaitKey } from "../board-chat";
+import { ATTENTION_OUTCOME_TYPE } from "../board-chat";
+import { clearAttentionDecision } from "../board-chat";
 import { principalById, principalForUser, principalLabel } from "../../auth/org-plane/principals";
 import { attachRoomToSession, forgetTurnTrigger, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
@@ -210,7 +210,7 @@ export interface MatrixBridge {
    * The Matrix path posts this receipt itself when a decision arrives as an event. This is for
    * every other way a gate stops being pending — chiefly superpipeline's own web UI, which
    * resolves the gate there and tells this hub nothing, leaving a room card offering Approve and
-   * Reject for a decision already made. `services/matrix-as/gate-sweep.ts` is the caller.
+   * Reject for a decision already made. `services/board-chat/gate-sweep.ts` is the caller.
    */
   settleGate(
     gateId: string,

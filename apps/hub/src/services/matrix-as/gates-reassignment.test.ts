@@ -46,11 +46,11 @@ import { createPrincipal } from "../../../tests/helpers/principals";
 import { workspaceAdminMiddleware as adminMiddleware } from "../../auth/workspace-authority";
 import { isUserAdmin } from "../../models/admin-users";
 import { agentsAdminRouter } from "../../routes/agents-admin";
-import { projectGate, roomAgentUser } from "./gates";
+import { projectGate, roomAgentUser } from "../board-chat/gates";
 import { roomForStation } from "./station-room";
 import { bridgeUserId, bridgeAlias } from "../matrix/names";
 import { provisionStation } from "./provision";
-import type { GatePendingDelivery } from "./gates";
+import type { GatePendingDelivery } from "../board-chat/gates";
 import { forgetPrincipals } from "../../../tests/helpers/principals";
 
 const RUN = crypto.randomUUID().slice(0, 8);

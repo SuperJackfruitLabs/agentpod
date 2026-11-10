@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, test } from "bun:test";
 
-import type { MatrixClient } from "./client";
+import type { MatrixClient } from "../matrix/client";
 import { TURN_ACTIVITY_TYPE } from "./activity";
 import { withQuietNotes } from "./push-quiet";
 import { _resetHubEventsForTest, hubEventKind, quietSendsInFlight, quietSendsSettled } from "../push/hub-events";
