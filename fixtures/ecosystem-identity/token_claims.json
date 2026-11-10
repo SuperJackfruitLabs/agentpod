@@ -1,8 +1,8 @@
 {
   "corpus": "ecosystem-identity/token-claims",
-  "version": 8,
+  "version": 9,
   "authoredAt": "2026-10-06",
-  "authoredFrom": "v8 (2026-10-06): the issuer moves to the organization plane (accounts/docs/superpowers/specs/2026-10-06-issuer-contract.md). Removed: tenant. Added: org, ent (issued), jti (standard), amr (conditional). aud may be a string or an array. AgentPod's hub keeps minting the v7 shape while ORG_PLANE_* is unset; that legacy shape is pinned by apps/hub/src/auth/testdata/token_claims.v7.json until the hub's issuer is removed. code and two runs: the claim shape was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331), and the control pair moved from reserved to issued when grants became data the issuer can read (principal_grants); `act` added 2026-08-30 when the Application Service gained the ability to assert a human it had never met, on the strength of a Matrix message and a principal_identities row; `mayDispatch` became bare `prn_…` ids matched by equality on 2026-08-30, when an agent became a principal and the two namespaced, pattern-matched forms were deleted rather than deprecated (charter decisions/2026-08-30-an-agent-is-a-principal.md §3); `email`/`email_verified` added 2026-09-20 (agentpod `apps/hub/src/auth/jwt-claims.ts`, `buildTokenPayload`'s conditional spread, and the join it reads from in `apps/hub/src/services/principals.ts`) so superpipeline can resolve or create a local user from a hub token instead of only verifying it carries a real, unnamed principal — part of the suite sign-in programme, task 1 of 2026-09-20-suite-sign-in; `scope` added 2026-10-04 as a conditional claim carrying a grant's read permissions (only `evidence:read`), so superwitness can read evidence from the hub and superpipeline as a service principal (superwitness contract C6); `runs:write` joined the scope vocabulary 2026-10-06 (superwitness app spec §3.4) for the service principal that reports superpipeline's runs to superwitness; `transcripts:read` joined it the same day (superwitness transcripts spec §3.2) for reading session content as evidence; no claim was added or renamed, so the corpus version is unchanged; `orgRole` added 2026-10-22 as a conditional claim (workspace authority spec W1): conditional and tolerant (absent or unknown reads as member), so no existing consumer can break on it and the corpus version is unchanged",
+  "authoredFrom": "v8 (2026-10-06): the issuer moves to the organization plane (accounts/docs/superpowers/specs/2026-10-06-issuer-contract.md). Removed: tenant. Added: org, ent (issued), jti (standard), amr (conditional). aud may be a string or an array. AgentPod's hub keeps minting the v7 shape while ORG_PLANE_* is unset; that legacy shape is pinned by apps/hub/src/auth/testdata/token_claims.v7.json until the hub's issuer is removed. code and two runs: the claim shape was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331), and the control pair moved from reserved to issued when grants became data the issuer can read (principal_grants); `act` added 2026-08-30 when the Application Service gained the ability to assert a human it had never met, on the strength of a Matrix message and a principal_identities row; `mayDispatch` became bare `prn_…` ids matched by equality on 2026-08-30, when an agent became a principal and the two namespaced, pattern-matched forms were deleted rather than deprecated (charter decisions/2026-08-30-an-agent-is-a-principal.md §3); `email`/`email_verified` added 2026-09-20 (agentpod `apps/hub/src/auth/jwt-claims.ts`, `buildTokenPayload`'s conditional spread, and the join it reads from in `apps/hub/src/services/principals.ts`) so superpipeline can resolve or create a local user from a hub token instead of only verifying it carries a real, unnamed principal — part of the suite sign-in programme, task 1 of 2026-09-20-suite-sign-in; `scope` added 2026-10-04 as a conditional claim carrying a grant's read permissions (only `evidence:read`), so superwitness can read evidence from the hub and superpipeline as a service principal (superwitness contract C6); `runs:write` joined the scope vocabulary 2026-10-06 (superwitness app spec §3.4) for the service principal that reports superpipeline's runs to superwitness; `transcripts:read` joined it the same day (superwitness transcripts spec §3.2) for reading session content as evidence; no claim was added or renamed, so the corpus version is unchanged; `orgRole` added 2026-10-22 as a conditional claim (workspace authority spec W1): conditional and tolerant (absent or unknown reads as member), so no existing consumer can break on it and the corpus version is unchanged; v9 (2026-11-10): the corpus moved to treaty and merged with the organization plane's own copy (accounts fixtures/token_claims.json, its v9), which had drifted from this one. From accounts: `superlibrary` in `ent` (its v9), the OAuth-only conditional claims `client_id`, `azp` and `sid` that a consumer ignores, the `removed` list, the reject cases `alg-not-eddsa`, `issuer-with-path`, `missing-ent`, `missing-jti`, `unknown-principalKind` and `lifetime-over-300`, and `examples`, one valid token per kind of caller. accounts' `missing-mayDispatch` is this corpus's `mayDispatch-absent`. Kept from this corpus and missing from accounts' copy: `orgRole`, which accounts mints (src/issuer/claims.ts)",
   "purpose": "One issuer, and every other plane verifies offline against a JWKS (charter decisions/2026-08-15-one-issuer-and-offline-verification.md). The moment a second plane reads a claim, the claim's NAME is a contract: a rename in the hub is a silent authorization failure in superpipeline, which fails in the direction that looks like the caller having no permission. This corpus is what makes that a failing test instead.",
   "howToRead": {
     "issued": "Claims the issuer MUST put in every token, and consumers may rely on. A missing one is a malformed token. NOTE the difference between a claim that is ABSENT and one that is EMPTY: absent means this issuer does not speak the control pair, empty (`[]` / `false`) means this principal is permitted nothing. Reading the first as the second would let an old issuer silently authorise everything.",
@@ -51,7 +51,8 @@
         "agentpod",
         "superpipeline",
         "supermessage",
-        "superwitness"
+        "superwitness",
+        "superlibrary"
       ],
       "meaning": "The products enabled for org. A product not listed answers 403 { error: 'product_not_enabled', org }. A consumer ignores values it does not recognise.",
       "required": true
@@ -145,6 +146,31 @@
     {
       "case": "wildcard-mayDispatch-value",
       "why": "`*` or `prn_*` in mayDispatch. Patterns were deleted on 2026-08-30, not deprecated: a grant is now an enumeration of principal ids, matched by equality, and a wildcard string simply fails that check — it must never be read as 'every agent' or 'every agent of this shape'. `agentpod:*/hermes` reaching a root station that should never have existed is the evidence this removal answers."
+    },
+    {
+      "case": "alg-not-eddsa",
+      "why": "Signed with an algorithm other than EdDSA. Pin the algorithm; a consumer that accepts what the header names can be handed a key of the attacker's choosing."
+    },
+    {
+      "case": "issuer-with-path",
+      "why": "iss must equal the issuer exactly. A prefix match accepts tokens from any path under the issuer's host.",
+      "example": "https://accounts.superjackfruit.com/api/auth"
+    },
+    {
+      "case": "missing-ent",
+      "why": "A token that names no products cannot be checked for product_not_enabled. Refuse it."
+    },
+    {
+      "case": "missing-jti",
+      "why": "jti is required: without it a token cannot be told apart from a replay of another."
+    },
+    {
+      "case": "unknown-principalKind",
+      "why": "principalKind outside human, agent and service. Refuse it rather than reading it as the weakest kind."
+    },
+    {
+      "case": "lifetime-over-300",
+      "why": "exp - iat over 300 seconds. The short lifetime is the revocation story; a consumer refuses a token that outlives it."
     }
   ],
   "conditional": [
@@ -207,6 +233,151 @@
       "meaning": "A human's role in `org`, read from the membership at mint time. Absent for agents and services.",
       "whyItExists": "Workspace authority (agentpod docs/superpowers/specs/2026-10-22-workspace-authority-design.md W1): a product decides what a workspace's owner or admin may do without keeping its own copy of the role.",
       "consumerObligation": "Treat an absent or unrecognised value as `member`, and never refuse a token for carrying one. A demotion takes effect at the next mint (access tokens live 300 s)."
+    },
+    {
+      "claim": "client_id",
+      "type": "string",
+      "required": false,
+      "when": "OAuth tokens",
+      "meaning": "Set by the OAuth provider on OAuth access tokens. A consumer ignores it."
+    },
+    {
+      "claim": "azp",
+      "type": "string",
+      "required": false,
+      "when": "OAuth tokens",
+      "meaning": "Set by the OAuth provider on OAuth access tokens. A consumer ignores it."
+    },
+    {
+      "claim": "sid",
+      "type": "string",
+      "required": false,
+      "when": "OAuth tokens",
+      "meaning": "Set by the OAuth provider on OAuth access tokens. A consumer ignores it."
     }
-  ]
+  ],
+  "removed": [
+    {
+      "claim": "tenant",
+      "since": 8,
+      "replacement": "org"
+    }
+  ],
+  "examples": {
+    "oauth-human": {
+      "iss": "https://accounts.superjackfruit.com",
+      "sub": "prn_0123456789abcdef0123",
+      "aud": [
+        "https://app.superpipeline.dev",
+        "https://accounts.superjackfruit.com/api/auth/oauth2/userinfo"
+      ],
+      "iat": 1791300000,
+      "exp": 1791300300,
+      "jti": "Qs1",
+      "principalKind": "human",
+      "org": "org_00000000000000000000",
+      "ent": [
+        "agentpod",
+        "superpipeline"
+      ],
+      "mayDispatch": [],
+      "mayGrantReach": false,
+      "email": "a@example.test",
+      "email_verified": true,
+      "scope": "openid offline_access",
+      "client_id": "superpipeline-web",
+      "azp": "superpipeline-web",
+      "sid": "s1"
+    },
+    "device-human": {
+      "iss": "https://accounts.superjackfruit.com",
+      "sub": "prn_0123456789abcdef0123",
+      "aud": "https://hub.agentpod.dev",
+      "iat": 1791300000,
+      "exp": 1791300300,
+      "jti": "Qs2",
+      "principalKind": "human",
+      "org": "org_00000000000000000000",
+      "ent": [
+        "agentpod"
+      ],
+      "mayDispatch": [
+        "prn_aaaaaaaaaaaaaaaaaaaa"
+      ],
+      "mayGrantReach": true,
+      "email": "a@example.test",
+      "email_verified": true,
+      "amr": [
+        "device"
+      ]
+    },
+    "service": {
+      "iss": "https://accounts.superjackfruit.com",
+      "sub": "prn_bbbbbbbbbbbbbbbbbbbb",
+      "aud": "https://app.superpipeline.dev",
+      "iat": 1791300000,
+      "exp": 1791300300,
+      "jti": "Qs3",
+      "principalKind": "service",
+      "org": "org_00000000000000000000",
+      "ent": [
+        "superpipeline"
+      ],
+      "mayDispatch": [],
+      "mayGrantReach": false,
+      "scope": "evidence:read",
+      "amr": [
+        "service"
+      ]
+    },
+    "agent": {
+      "iss": "https://accounts.superjackfruit.com",
+      "sub": "prn_aaaaaaaaaaaaaaaaaaaa",
+      "aud": [
+        "https://app.superpipeline.dev",
+        "https://hub.agentpod.dev"
+      ],
+      "iat": 1791300000,
+      "exp": 1791300300,
+      "jti": "Qs4",
+      "principalKind": "agent",
+      "org": "org_00000000000000000000",
+      "ent": [
+        "agentpod",
+        "superpipeline"
+      ],
+      "mayDispatch": [],
+      "mayGrantReach": false,
+      "act": {
+        "sub": "prn_bbbbbbbbbbbbbbbbbbbb"
+      },
+      "amr": [
+        "exchange"
+      ]
+    },
+    "assertion-human": {
+      "iss": "https://accounts.superjackfruit.com",
+      "sub": "prn_0123456789abcdef0123",
+      "aud": "https://app.superpipeline.dev",
+      "iat": 1791300000,
+      "exp": 1791300120,
+      "jti": "Qs5",
+      "principalKind": "human",
+      "org": "org_00000000000000000000",
+      "ent": [
+        "agentpod",
+        "superpipeline"
+      ],
+      "mayDispatch": [],
+      "mayGrantReach": false,
+      "email": "a@example.test",
+      "email_verified": true,
+      "act": {
+        "sub": "prn_bbbbbbbbbbbbbbbbbbbb"
+      },
+      "amr": [
+        "assertion"
+      ]
+    }
+  }
 }

@@ -7,5 +7,5 @@
   "exports": { ".": "./src/index.ts" },
   "scripts": { "test": "bun test", "typecheck": "tsc --noEmit" },
   "dependencies": { "zod": "^4.6.5" },
-  "devDependencies": { "@types/bun": "latest", "typescript": "~5.9.3" }
+  "devDependencies": { "@superjackfruitlabs/treaty-ecosystem-identity": "0.0.2", "@types/bun": "latest", "typescript": "~5.9.3" }
 }
