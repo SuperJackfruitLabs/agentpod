@@ -202,14 +202,16 @@ var ErrDenied = errors.New("path denied")
 // Errors carry the requested relative path only, never a host path. private lists the
 // harness-private names (HarnessPrivate) to refuse as well.
 func ReadAt(root, rel string, offset, max int64, private ...string) ([]byte, int64, bool, error) {
-	b, size, eof, err := readAt(root, rel, offset, max, private)
+	b, size, eof, err := readAt(root, rel, offset, max, MaxChunk, private)
 	if err != nil {
 		return nil, 0, false, PathErr(rel, "read", err)
 	}
 	return b, size, eof, nil
 }
 
-func readAt(root, rel string, offset, max int64, private []string) ([]byte, int64, bool, error) {
+// readAt is ReadAt with its cap on one read given: MaxChunk for an offset read, MaxWholeRead for
+// a whole-file one (GuardedReadFile).
+func readAt(root, rel string, offset, max, limit int64, private []string) ([]byte, int64, bool, error) {
 	if rule, ok := Denied(rel); ok {
 		return nil, 0, false, fmt.Errorf("%w: %s (%s)", ErrDenied, rel, rule)
 	}
@@ -219,8 +221,8 @@ func readAt(root, rel string, offset, max int64, private []string) ([]byte, int6
 	if offset < 0 {
 		return nil, 0, false, fmt.Errorf("offset must not be negative")
 	}
-	if max <= 0 || max > MaxChunk {
-		max = MaxChunk
+	if max <= 0 || max > limit {
+		max = limit
 	}
 	target, err := fsops.Jail(root, rel)
 	if err != nil {
@@ -266,6 +268,13 @@ func readAt(root, rel string, offset, max int64, private []string) ([]byte, int6
 	if !info.Mode().IsRegular() {
 		return nil, 0, false, fmt.Errorf("%w: %s", errNotRegular, rel)
 	}
+	// The buffer is what the file can still give, not the cap: most reads are small files.
+	if rest := info.Size() - offset; rest < max {
+		max = rest
+		if max < 0 {
+			max = 0
+		}
+	}
 	buf := make([]byte, max)
 	n, err := f.ReadAt(buf, offset)
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -284,7 +293,7 @@ func PathErr(rel, verb string, err error) error {
 	case errors.Is(err, os.ErrNotExist):
 		return fmt.Errorf("%s: not found", rel)
 	}
-	return fmt.Errorf("%s: cannot be %s", rel, map[string]string{"read": "read", "walk": "walked"}[verb])
+	return fmt.Errorf("%s: cannot be %s", rel, map[string]string{"read": "read", "walk": "walked", "list": "listed"}[verb])
 }
 
 // WalkFile is one regular file in a folder manifest. Path is relative to the walked folder;

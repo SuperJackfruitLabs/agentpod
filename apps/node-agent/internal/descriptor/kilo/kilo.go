@@ -349,6 +349,9 @@ func (k *kiloDescriptor) ListDir(key, rel string) ([]descriptor.FsEntry, error) 
 	return result, nil
 }
 
+// WorkspaceRoot is the root the guarded file reads serve (descriptor.WorkspaceRooter).
+func (k *kiloDescriptor) WorkspaceRoot(key string) (string, error) { return k.workspacePathForKey(key) }
+
 // ReadFile reads up to maxBytes from rel within the station's workspace.
 func (k *kiloDescriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, string, bool, error) {
 	wsPath, err := k.workspacePathForKey(key)

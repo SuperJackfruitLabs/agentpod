@@ -2,14 +2,11 @@ package salaamharness
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/hostfs"
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/fsops"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/salaam"
 )
 
@@ -17,8 +14,8 @@ import (
 //
 // Only the workspace, and only reads. The state directory (sessions, transcripts, leases, keys)
 // is never served: it is outside the jail, and when it sits inside the workspace it is
-// harness-private. Paths are resolved the artifact.go way (fsops.Jail, then EvalSymlinks, then
-// os.OpenRoot), not with safeJoin, which does not survive a symlink. The denylist applies too.
+// harness-private. Reads and listings are the guarded ones every station's files go through
+// (descriptor/guardedfs.go): fsops.Jail, then EvalSymlinks, then os.OpenRoot, with the denylist.
 // Errors carry the requested relative path, never a host path.
 
 func (s *salaamDescriptor) workspaceFor(key string) (string, error) {
@@ -40,106 +37,18 @@ func (s *salaamDescriptor) HarnessPrivate(key string) []string {
 	return []string{rel}
 }
 
+// WorkspaceRoot is the root the guarded file reads serve (descriptor.WorkspaceRooter).
+func (s *salaamDescriptor) WorkspaceRoot(key string) (string, error) { return s.workspaceFor(key) }
+
+// ReadFile and ListDir are the guarded reads every station's files go through.
 func (s *salaamDescriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, string, bool, error) {
-	ws, err := s.workspaceFor(key)
-	if err != nil {
-		return nil, "", false, err
-	}
 	if maxBytes <= 0 {
 		maxBytes = hostfs.DefaultMaxBytes
 	}
-	b, _, eof, err := descriptor.ReadAt(ws, rel, 0, maxBytes, s.HarnessPrivate(key)...)
-	if err != nil {
-		return nil, "", false, err
-	}
-	return b, "", !eof, nil
+	b, truncated, err := descriptor.GuardedReadFile(s, key, rel, maxBytes)
+	return b, "", truncated, err
 }
 
 func (s *salaamDescriptor) ListDir(key, rel string) ([]descriptor.FsEntry, error) {
-	ws, err := s.workspaceFor(key)
-	if err != nil {
-		return nil, err
-	}
-	if rel == "" {
-		rel = "."
-	}
-	entries, err := s.listDir(ws, rel, s.HarnessPrivate(key))
-	if err != nil {
-		return nil, descriptor.PathErr(rel, "read", err)
-	}
-	return entries, nil
-}
-
-func (s *salaamDescriptor) listDir(ws, rel string, private []string) ([]descriptor.FsEntry, error) {
-	if rule, ok := descriptor.Denied(rel); ok {
-		return nil, fmt.Errorf("%w: %s (%s)", descriptor.ErrDenied, rel, rule)
-	}
-	if rel != "." && descriptor.PrivateHit(rel, private) {
-		return nil, fmt.Errorf("%w: %s (harness-private)", descriptor.ErrDenied, rel)
-	}
-	target, err := fsops.Jail(ws, rel)
-	if err != nil {
-		return nil, err
-	}
-	root, err := filepath.EvalSymlinks(ws)
-	if err != nil {
-		return nil, err
-	}
-	resolved, err := filepath.EvalSymlinks(target)
-	if err != nil {
-		return nil, err
-	}
-	real, err := filepath.Rel(root, resolved)
-	if err != nil || real == ".." || strings.HasPrefix(real, ".."+string(filepath.Separator)) {
-		return nil, fsops.ErrEscape
-	}
-	if rule, ok := descriptor.Denied(filepath.ToSlash(real)); ok {
-		return nil, fmt.Errorf("%w: %s resolves to %s (%s)", descriptor.ErrDenied, rel, real, rule)
-	}
-	if real != "." && descriptor.PrivateHit(real, private) {
-		return nil, fmt.Errorf("%w: %s resolves to %s (harness-private)", descriptor.ErrDenied, rel, real)
-	}
-	r, err := os.OpenRoot(root)
-	if err != nil {
-		return nil, err
-	}
-	defer r.Close()
-	dir, err := r.Open(real)
-	if err != nil {
-		return nil, err
-	}
-	defer dir.Close()
-	des, err := dir.ReadDir(-1)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]descriptor.FsEntry, 0, len(des))
-	for _, de := range des {
-		p := de.Name()
-		if real != "." {
-			p = filepath.Join(real, de.Name())
-		}
-		if _, denied := descriptor.Denied(filepath.ToSlash(p)); denied || descriptor.PrivateHit(p, private) {
-			continue
-		}
-		e := descriptor.FsEntry{Name: de.Name(), Path: filepath.ToSlash(p), Type: "file"}
-		switch {
-		case de.Type()&os.ModeSymlink != 0:
-			e.Type = "symlink"
-		case de.IsDir():
-			e.Type = "dir"
-		}
-		// An entry the node cannot stat (the workspace has setgid subfolders it may not read)
-		// is still listed, just without size and time: one unreadable entry is not a failure.
-		if info, err := r.Lstat(p); err == nil {
-			mod := info.ModTime().UTC().Format(time.RFC3339)
-			e.Modified = &mod
-			if e.Type == "file" {
-				size := info.Size()
-				e.Size = &size
-			}
-		}
-		out = append(out, e)
-	}
-	return out, nil
+	return descriptor.GuardedListDir(s, key, rel)
 }

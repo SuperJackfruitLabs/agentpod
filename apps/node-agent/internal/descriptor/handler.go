@@ -179,7 +179,8 @@ func handleFsList(reg *Registry, params json.RawMessage) (any, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	entries, err := d.ListDir(p.Key, p.Path)
+	// The guarded listing, never the descriptor's own ListDir (guardedfs.go).
+	entries, err := GuardedListDir(d, p.Key, p.Path)
 	if err != nil {
 		return nil, false, err
 	}
@@ -256,28 +257,17 @@ func handleFsRead(reg *Registry, params json.RawMessage) (any, bool, error) {
 			"truncated": !eof, "offset": *p.Offset, "size": size, "eof": eof,
 		}, false, nil
 	}
-	content, enc, truncated, err := d.ReadFile(p.Key, p.Path, p.MaxBytes)
+	// The guarded read, never the descriptor's own ReadFile (guardedfs.go): the same checks as
+	// the offset read above.
+	content, truncated, err := GuardedReadFile(d, p.Key, p.Path, p.MaxBytes)
 	if err != nil {
 		return nil, false, err
 	}
 
-	// Determine final encoding and string representation.
-	// Descriptors may return an encoding hint; if absent we auto-detect.
-	var contentStr string
-	switch enc {
-	case "utf8":
-		contentStr = string(content)
-	case "base64":
-		contentStr = base64.StdEncoding.EncodeToString(content)
-	default:
-		// Auto-detect: prefer utf8 when valid, fall back to base64.
-		if utf8.Valid(content) {
-			enc = "utf8"
-			contentStr = string(content)
-		} else {
-			enc = "base64"
-			contentStr = base64.StdEncoding.EncodeToString(content)
-		}
+	// utf8 when the bytes are valid utf8, base64 otherwise.
+	enc, contentStr := "utf8", string(content)
+	if !utf8.Valid(content) {
+		enc, contentStr = "base64", base64.StdEncoding.EncodeToString(content)
 	}
 
 	return map[string]any{
