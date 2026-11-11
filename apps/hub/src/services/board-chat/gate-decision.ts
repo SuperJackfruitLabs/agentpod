@@ -13,8 +13,9 @@ import {
   GATE_DECISION_V2_SUITE_TYPE,
   GATE_OUTCOME_TYPE,
   isGateOptionId,
-} from "./gate-wire";
-import { heldTail, heldUntilOf } from "./gate-release-wire";
+  heldTail,
+  heldUntilOf,
+} from "@superjackfruitlabs/treaty-matrix-events";
 
 const log = createLogger("matrix-gates");
 

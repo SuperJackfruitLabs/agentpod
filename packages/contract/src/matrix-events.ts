@@ -117,32 +117,6 @@ export const TurnActivity = z.object({
 export type TurnActivity = z.infer<typeof TurnActivity>;
 
 /**
- * A permission request, structured so a client can render buttons.
- *
- * Sent **beside** the existing prose message, which is unchanged and remains
- * the interop path for every other Matrix client. The answer travels back as an
- * ordinary room message carrying the option's `name`, which
- * `matrix-as/permissions.ts`'s `matchPermissionAnswer` already accepts — which
- * is why structured approvals need no new send path on either side.
- *
- * Four options maximum, because supermessage's `DECISION_MAX_OPTIONS` renders
- * four and silently drops the rest. Enforcing it here means the hub never sends
- * something it knows will be discarded — the cap is applied where it can still
- * be reported rather than where it can only be lost. The prose message is not
- * capped and still lists every option, so a fifth stays answerable by number or
- * name; it just does not get a button.
- */
-export const PermissionRequestEvent = z.object({
-  schema_version: z.literal(1),
-  session_id: z.string(),
-  /** The request's own ACP sequence number — how `answerPermission` addresses it. */
-  request_seq: z.number().int().nonnegative(),
-  title: z.string(),
-  options: z.array(z.object({ option_id: z.string(), name: z.string() })).min(1).max(4),
-});
-export type PermissionRequestEvent = z.infer<typeof PermissionRequestEvent>;
-
-/**
  * A failed turn, structured so a client can draw it: what failed, which model,
  * and each model the harness fell back to.
  *
@@ -232,147 +206,17 @@ export type VoiceReply = z.infer<typeof VoiceReply>;
 
 // ─── Requests that ride on the prose message ─────────────────────────────────
 //
-// A permission request and a superpipeline gate were each sent as TWO events: a
-// prose `m.room.message` and, beside it, a custom event type a client could
-// draw buttons from. That pair costs a phone two pushes for one question in an
-// encrypted room — and in an unencrypted room the custom type matches no push
-// rule at all, so the one event that says "this is a question" is the one a
-// push never carries.
-//
-// So the structured request now rides INSIDE the prose message too, under one
-// namespaced key — the way `TURN_ERROR_CONTENT_KEY` rides on the error notice.
-// One request, one event, one push, and a Notification Service Extension that
-// decrypts it can tell a question from a chat line without a second fetch.
-//
-// The separate custom event is still sent while `AGENTPOD_LEGACY_PERMISSION_EVENTS`
-// is on (the default): clients in the field read it. Both carry the SAME
-// payload, so a client may read either; once every client reads the key, the
-// flag goes off and the custom event stops.
-//
-// Versioning is `schema_version` inside the payload, bumped for additive
-// changes only. A breaking change mints a new key (`…permission.v2`-style)
-// rather than reusing this one.
-
-/**
- * The permission request, embedded in the prose message under this key.
- *
- * The payload is exactly {@link PermissionRequestEvent} — the body of the
- * legacy `dev.agentpod.permission.v1` event — so a client parses both with one
- * schema. Answering is unchanged: an ordinary room message carrying an
- * option's `name` (or its number), matched against the request the hub is
- * holding for that room. Neither which event a client read nor any event id
- * takes part in matching an answer.
- */
-export const PERMISSION_REQUEST_CONTENT_KEY = "dev.agentpod.permission";
-
-/** One option of a superpipeline gate. `id` is superpipeline's `GateDecision`. */
-export const GateRequestOption = z.object({
-  id: z.enum(["approve", "request_changes", "reject"]),
-  label: z.string(),
-});
-export type GateRequestOption = z.infer<typeof GateRequestOption>;
-
-/**
- * A superpipeline approval gate, embedded in the prose message under this key.
- *
- * The body of the legacy `dev.superpipeline.gate.v1` event minus its `body`,
- * which the carrying message already has. Pinned field-for-field by
- * treaty's `fixtures/ecosystem-identity/matrix_gate_events.json`.
- *
- * `schema_version` is a floor, not a literal: the fixture requires a renderer
- * to tolerate a higher minor version by ignoring what it does not know.
- *
- * **Answering references the message that carries this key** — an
- * `m.room.message` with `suite_event_type: "dev.superpipeline.gate.decision.v1"`
- * and `m.relates_to: {rel_type: "m.reference", event_id: <this message's id>}`.
- * The hub accepts a reference to either the carrying message or the legacy
- * custom event while both exist, so a client may answer whichever it drew.
- */
-export const GATE_REQUEST_CONTENT_KEY = "dev.superpipeline.gate";
-
-/**
- * An agent's question, embedded in the prose message under this key.
- *
- * A gate asks a human to approve finished work; this asks a human to unblock a run that
- * has stopped mid-flight. Both are "a person must answer before this card moves", which
- * is why the shape rhymes with {@link GateRequestCard} — and why it is NOT that type.
- *
- * Its own key rather than either neighbour's:
- *
- *  - not `dev.superpipeline.gate`: a gate's `options[].id` is a closed enum of three
- *    decisions, and an elicitation's options are whatever the agent chose to offer.
- *  - not `dev.agentpod.permission`: that payload is addressed by ACP `session_id` and
- *    `request_seq`, which is how `answerPermission` finds its request. An elicitation is
- *    addressed by `elicitation_id` at the board. Reusing the key would have spared every
- *    client a change, at the price of putting false values in the two fields a reader
- *    trusts to address an answer.
- *
- * **Answering does not reference this event.** As with a permission request, the answer
- * is an ordinary room message carrying an option's `id`, its `label`, or its 1-based
- * number as printed in the prose — matched by `matchPermissionAnswer` against the
- * question the hub is holding for that room. That is what makes a question answerable
- * from any Matrix client on the day it ships, with buttons following whenever a client
- * learns to draw this key.
- */
-export const ELICITATION_REQUEST_CONTENT_KEY = "dev.superpipeline.elicitation";
-
-export const ElicitationRequestOption = z.object({ id: z.string().min(1), label: z.string() });
-export type ElicitationRequestOption = z.infer<typeof ElicitationRequestOption>;
-
-export const ElicitationRequestCard = z.object({
-  /** A floor, not a literal: a renderer tolerates a higher version by ignoring it. */
-  schema_version: z.number().int().min(1),
-  board_id: z.string(),
-  card_id: z.string(),
-  /** What an answer is addressed to. Without it the question cannot be answered at all. */
-  elicitation_id: z.string().min(1),
-  run_id: z.string(),
-  stage_key: z.string(),
-  card_title: z.string(),
-  /** The agent that is waiting — and the one identity the board will not let answer. */
-  asked_by: z.string(),
-  /** The question. The carrying message has it as its body too. */
-  prompt: z.string(),
-  /**
-   * **May be empty, and four at most.**
-   *
-   * Empty because an agent can stop on an open question, and a reader needs the card to
-   * exist so it can say where that question is answerable.
-   *
-   * Four because supermessage draws four and silently drops the rest
-   * (`DECISION_MAX_OPTIONS`), which {@link PermissionRequestEvent} already documents.
-   * The sender caps it here, where the drop can still be reported, rather than letting
-   * it happen where it can only be lost — the prose message lists every option numbered,
-   * so a fifth stays answerable by name or number and simply gets no button.
-   *
-   * Unique by id, because answering is by id: two options sharing one would be a
-   * question with an ambiguous answer.
-   */
-  options: z
-    .array(ElicitationRequestOption)
-    .max(4)
-    .refine((opts) => new Set(opts.map((o) => o.id)).size === opts.length, "duplicate option ids"),
-  deep_link: z.string().optional(),
-});
-export type ElicitationRequestCard = z.infer<typeof ElicitationRequestCard>;
-
-export const GateRequestCard = z.object({
-  schema_version: z.number().int().min(1),
-  board_id: z.string(),
-  card_id: z.string(),
-  gate_id: z.string().min(1),
-  stage_key: z.string(),
-  return_stage_key: z.string(),
-  card_title: z.string(),
-  produced_by: z.string(),
-  prompt: z.string(),
-  handoff_summary: z.string().optional(),
-  // Unique by id: resolution is by id, so two `approve` entries are ambiguous.
-  options: z
-    .array(GateRequestOption)
-    .min(1)
-    .max(3)
-    .refine((opts) => new Set(opts.map((o) => o.id)).size === opts.length, "duplicate option ids"),
-  deep_link: z.string().optional(),
-});
-export type GateRequestCard = z.infer<typeof GateRequestCard>;
+// The permission request (`dev.agentpod.permission`, and its legacy `.v1` event), the gate card
+// (`dev.superpipeline.gate`) and the question card (`dev.superpipeline.elicitation`) are the
+// board-room contract and live in treaty with every other board-room event. Re-exported here so
+// the hub, the agent and the console keep one import.
+export {
+  ELICITATION_REQUEST_CONTENT_KEY,
+  ElicitationRequestCard,
+  ElicitationRequestOption,
+  GATE_REQUEST_CONTENT_KEY,
+  GateRequestCard,
+  GateRequestOption,
+  PERMISSION_REQUEST_CONTENT_KEY,
+  PermissionRequestEvent,
+} from "@superjackfruitlabs/treaty-matrix-events";

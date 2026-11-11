@@ -21,9 +21,8 @@ import { db } from "../../db/drizzle";
 import { matrixChecksWaiting } from "../../db/schema/matrix";
 import { createLogger } from "../../utils/logger";
 import type { DecisionTimeoutDelivery } from "../bridge";
-import { checksV2, checksWaitingContent, type CheckV2 } from "./checks-wire";
+import { checksV2, checksWaitingContent, type CheckV2, boardLink } from "@superjackfruitlabs/treaty-matrix-events";
 import { MOVED_BELOW_TEXT, SETTLED_ABOVE_TEXT } from "./decision-repost";
-import { boardLink } from "./gate-wire";
 
 const log = createLogger("matrix-checks-waiting");
 

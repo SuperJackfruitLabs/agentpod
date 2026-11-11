@@ -27,7 +27,7 @@ import {
   releaseV2,
   releasedBody,
   releasedContent,
-} from "../board-chat/gate-release-wire";
+} from "@superjackfruitlabs/treaty-matrix-events";
 import { PULL_BACK_COMMENT_REQUIRED_TEXT, handleGatePullBack, type PullBackDeps, type PullBackRefusal } from "../board-chat/gate-pull-back";
 import { bridgeGateSweepDeps, sweepGates } from "../board-chat/gate-sweep";
 import { pullBackAtSuperpipeline } from "../board-chat/gate-resolve";

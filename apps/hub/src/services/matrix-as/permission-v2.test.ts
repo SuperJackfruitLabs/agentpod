@@ -17,16 +17,14 @@ import { expirePermissions, permissionRefusal } from "./permission-answer";
 import { notePermissionEvent, permissionRecord, recordPermissionRequest } from "./permission-records";
 import {
   HARNESS_PERMISSION_SCHEMA,
-  PERMISSION_TTL_MS,
   PERMISSION_V2_SUITE_TYPE,
-  canonicalJson,
-  harnessPermission,
   parsePermissionAnswer,
   permissionOptionsV2,
-  permissionPreview,
   permissionOutcomeContent,
   permissionV2Content,
-} from "./permission-wire";
+} from "@superjackfruitlabs/treaty-matrix-events";
+import { PERMISSION_TTL_MS, canonicalJson, permissionPreview } from "../acp";
+import { harnessPermission } from "./harness-permission";
 import { clearPendingPermission, notePendingPermission, pendingPermissionFor, permissionPrompt } from "./permissions";
 
 /**

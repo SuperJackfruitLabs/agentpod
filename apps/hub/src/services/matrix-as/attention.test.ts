@@ -10,7 +10,7 @@ import {
   attentionV2Content,
   isAttentionPending,
   type AttentionPendingDelivery,
-} from "../board-chat/attention-wire";
+} from "@superjackfruitlabs/treaty-matrix-events";
 import {
   WAIT_CHANGED_TEXT,
   handleAttentionAnswer,

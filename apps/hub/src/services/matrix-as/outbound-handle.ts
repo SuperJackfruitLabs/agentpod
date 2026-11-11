@@ -9,7 +9,8 @@ import { inlinePermissionOptions, noteHubEvent, permissionDecisionKey } from "..
 import { requestedAt } from "../acp";
 import { foldToolUpdate, noteUnmappedKind, PERMISSION_REQUEST_TYPE, permissionRequestContent } from "./activity";
 import { legacyRequestEvents } from "../board-chat";
-import { PERMISSION_OUTCOME_TYPE, harnessPermission, permissionV2Content, type HarnessPermission } from "./permission-wire";
+import { PERMISSION_OUTCOME_TYPE, permissionV2Content, type HarnessPermission } from "@superjackfruitlabs/treaty-matrix-events";
+import { harnessPermission } from "./harness-permission";
 import { flush, scheduleFlush } from "./outbound-flush";
 import { log } from "./outbound-log";
 import { mark, reportError, startTyping, stopTyping } from "./outbound-marks";

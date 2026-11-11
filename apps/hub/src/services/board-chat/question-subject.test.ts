@@ -31,7 +31,7 @@ import {
   questionOptionsV2,
   questionSubjectV2,
   questionV2Content,
-} from "./question-wire";
+} from "@superjackfruitlabs/treaty-matrix-events";
 import { handleQuestionAnswer, type QuestionAnswerDeps, type RecordedQuestion } from "./question-answer";
 
 /**

@@ -36,8 +36,8 @@
  * This file is the service's surface: it re-exports what the rest of the hub (through
  * `index.ts`) and the tests use, from the files that hold each concern.
  *
- *   gate-wire        event types, option ids, `isGatePending`, the prose and the event content
- *                    (v1, and gate.v2: options as offered, the subject and its preview)
+ *   (treaty)         event types, option ids, `isGatePending`, the prose and the event content
+ *                    (v1, and gate.v2): `@superjackfruitlabs/treaty-matrix-events`
  *   gate-projection  `projectGate`: the claim, the held-for-a-join answer, the sends
  *   gate-decision    the way back: parsing a decision, acting on it, the outcome receipt
  *   gate-resolve     resolving at superpipeline as the human, with a minted assertion
@@ -64,8 +64,11 @@ export {
   isGateOptionId,
   isGatePending,
   isVariantGate,
-} from "./gate-wire";
-export type { GateOptionId, GateOptionV2, GateSubjectV2, GateVariantV2 } from "./gate-wire";
+  type GateOptionId,
+  type GateOptionV2,
+  type GateSubjectV2,
+  type GateVariantV2,
+} from "@superjackfruitlabs/treaty-matrix-events";
 export { projectGate } from "./gate-projection";
 export type { GateProjectionDeps, ProjectionOutcome } from "./gate-projection";
 export { handleGateDecision, parseGateDecision, settleGateOutcome } from "./gate-decision";

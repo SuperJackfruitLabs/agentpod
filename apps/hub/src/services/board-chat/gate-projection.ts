@@ -24,8 +24,8 @@ import {
   gateSubjectV2,
   gateV2Content,
   gateVariantsV2,
-} from "./gate-wire";
-import { quorumV2 } from "./gate-quorum-wire";
+  quorumV2,
+} from "@superjackfruitlabs/treaty-matrix-events";
 
 const log = createLogger("matrix-gates");
 

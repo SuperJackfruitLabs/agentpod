@@ -16,8 +16,9 @@ import {
   SWITCH_TO_AUTOMATIC,
   deliveryOutcomeContent,
   type DeliveryOutcomeDecision,
-} from "./delivery-wire";
-import { inputRefusal, type InputRefusal } from "./gate-wire";
+  inputRefusal,
+  type InputRefusal,
+} from "@superjackfruitlabs/treaty-matrix-events";
 import { referenceOf } from "./question-answer";
 
 const log = createLogger("matrix-deliveries");

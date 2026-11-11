@@ -7,7 +7,7 @@
 import type { AcpEvent } from "@agentpod/contract";
 import type { ToolRecord } from "./activity";
 import { clearPendingPermission } from "./permissions";
-import type { HarnessPermission } from "./permission-wire";
+import type { HarnessPermission } from "@superjackfruitlabs/treaty-matrix-events";
 import type { SpokenTurn } from "./voice-reply";
 
 export interface OutboundDeps {

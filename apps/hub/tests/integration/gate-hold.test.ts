@@ -16,7 +16,7 @@ import { matrixGateEvents, matrixGateHoldNotices } from "../../src/db/schema/mat
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import type { DecisionPulledBackDelivery, DecisionReleasedDelivery } from "../../src/services/bridge";
 import { handleDecisionPulledBack, handleDecisionReleased, type GateHoldDeps } from "../../src/services/board-chat/gate-hold";
-import { DECISION_PULLED_BACK_TYPE, DECISION_RELEASED_TYPE } from "../../src/services/board-chat/gate-release-wire";
+import { DECISION_PULLED_BACK_TYPE, DECISION_RELEASED_TYPE } from "@superjackfruitlabs/treaty-matrix-events";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
 const BOARD = "brd_hold000000000001";

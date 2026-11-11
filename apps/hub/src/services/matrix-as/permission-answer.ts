@@ -25,14 +25,13 @@ import {
   type PermissionRecord,
   type PermissionVia,
 } from "./permission-records";
+import { PERMISSION_TTL_MS, permissionRequestId } from "../acp";
 import {
-  PERMISSION_TTL_MS,
   permissionOutcomeContent,
   permissionOutcomeText,
-  permissionRequestId,
   type ParsedPermissionAnswer,
   type PermissionOutcome,
-} from "./permission-wire";
+} from "@superjackfruitlabs/treaty-matrix-events";
 import { clearPendingPermission, matchPermissionAnswer, pendingPermissionFor } from "./permissions";
 
 const log = createLogger("matrix-permissions");

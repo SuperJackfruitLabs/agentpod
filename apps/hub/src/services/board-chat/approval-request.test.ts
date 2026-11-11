@@ -30,7 +30,7 @@ import {
   isApprovalRequest,
   questionOptionsV2,
   questionV2Content,
-} from "./question-wire";
+} from "@superjackfruitlabs/treaty-matrix-events";
 import { APPROVAL_UNBOUND_TEXT, handleQuestionAnswer, type QuestionAnswerDeps, type RecordedQuestion } from "./question-answer";
 
 /**

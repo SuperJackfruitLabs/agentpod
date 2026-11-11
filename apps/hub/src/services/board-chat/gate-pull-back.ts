@@ -14,7 +14,7 @@
 
 import { createLogger } from "../../utils/logger";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
-import { PULL_BACK_COMMENT_MAX_BYTES, parsePullBack, pullBackCommentFits } from "./gate-release-wire";
+import { PULL_BACK_COMMENT_MAX_BYTES, parsePullBack, pullBackCommentFits } from "@superjackfruitlabs/treaty-matrix-events";
 
 const log = createLogger("matrix-gate-pull-back");
 

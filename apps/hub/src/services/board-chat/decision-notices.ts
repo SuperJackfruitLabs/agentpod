@@ -35,8 +35,7 @@ import {
 } from "../../db/schema/matrix";
 import { createLogger } from "../../utils/logger";
 import { DECISION_KINDS, type DecisionKind, type DecisionTimeoutDelivery } from "../bridge";
-import { decisionNoticeContent, noticeAt } from "./decision-timeout-wire";
-import { boardLink } from "./gate-wire";
+import { decisionNoticeContent, noticeAt, boardLink } from "@superjackfruitlabs/treaty-matrix-events";
 import type { TenantsForBoard } from "./relay-scope";
 import { moveCardBelow, type CardRepostDeps } from "./decision-repost";
 import { checksWaitingCardFor, moveChecksCardBelow, postChecksWaitingCard, readWaitingChecks, type ChecksForCard } from "./checks-waiting";

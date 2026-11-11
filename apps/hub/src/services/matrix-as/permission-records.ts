@@ -13,7 +13,7 @@ import { and, desc, eq, gt, isNull, lte } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { acpEvents } from "../../db/schema/acp";
 import { matrixPermissionRequests, matrixRooms, type MatrixPermissionOption } from "../../db/schema/matrix";
-import type { HarnessPermission } from "./permission-wire";
+import type { HarnessPermission } from "@superjackfruitlabs/treaty-matrix-events";
 
 export type PermissionStatus = "pending" | "claimed" | "answered" | "expired" | "cancelled";
 export type PermissionVia = "room" | "console" | "board" | "editor";

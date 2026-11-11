@@ -16,7 +16,7 @@ import {
   pendingPermissionFor,
 } from "../../src/services/matrix-as/permissions";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
-import { harnessPermission } from "../../src/services/matrix-as/permission-wire";
+import { harnessPermission } from "../../src/services/matrix-as/harness-permission";
 import { notePermissionEvent, permissionRecord, recordPermissionRequest } from "../../src/services/matrix-as/permission-records";
 import { answerTypedPermission, settleFromSessionEvent } from "../../src/services/matrix-as/permission-answer";
 
