@@ -1090,9 +1090,9 @@ describe("a permission request a client can render", () => {
       permissionRecords: { record: async (_roomId, p) => (recorded.push(p.requestId), true), noteEvent: async () => {} },
     };
     attachRoomToSession(SESSION, ROOM, AGENT, withRecords);
-    const long = (s: string) => s.repeat(201);
     const request = permission(7);
-    emit({ ...request, payload: { ...request.payload, options: [{ optionId: long("a"), name: "Allow" }, { optionId: long("r"), name: "Reject" }] } });
+    const options = [{ optionId: "a".repeat(201), name: "Allow" }, { optionId: "r".repeat(201), name: "Reject" }];
+    emit({ ...request, payload: { ...request.payload, options } });
     await settle();
 
     expect(sent).toHaveLength(1);
@@ -1100,7 +1100,7 @@ describe("a permission request a client can render", () => {
     expect(extra.suite_event_type).toBeUndefined();
     expect(extra.options).toBeUndefined();
     expect(recorded).toEqual([]);
-    expect((extra[PERMISSION_REQUEST_CONTENT_KEY] as PermissionRequestEvent).options.map((o) => o.name)).toEqual(["Allow", "Reject"]);
+    expect(extra[PERMISSION_REQUEST_CONTENT_KEY]).toMatchObject({ options: [{ name: "Allow" }, { name: "Reject" }] });
     expect(sent[0]?.body).toContain("1. Allow");
     expect(sent[0]?.body).toContain("Reply with the number");
     expect(pendingPermissionFor(ROOM)?.options.map((o) => o.name)).toEqual(["Allow", "Reject"]);
