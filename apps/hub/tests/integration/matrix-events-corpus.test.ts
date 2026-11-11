@@ -57,7 +57,8 @@ async function route(content: Record<string, unknown>): Promise<Handler[]> {
       took.push(h);
     },
   });
-  const deps: InboundDeps = {
+  // Only the board handlers: a message none of them takes stops at the room lookup, before the rest.
+  const deps = {
     domain: "id.agentpod.dev",
     gates: spy("gates"),
     questions: spy("questions"),
@@ -65,7 +66,7 @@ async function route(content: Record<string, unknown>): Promise<Handler[]> {
     attention: spy("attention"),
     pullBacks: spy("pullBacks"),
     checkOverrides: spy("checkOverrides"),
-  };
+  } as unknown as InboundDeps;
   // A message no board handler takes goes on to be read as chat; this room is nobody's, so it stops there.
   await handleRoomMessage({ type: "m.room.message", room_id: ROOM, sender: SENDER, event_id: "$corpus", content }, deps);
   return took;
