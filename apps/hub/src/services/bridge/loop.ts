@@ -150,6 +150,13 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
         return;
       }
 
+      if (result.status === "blocked") {
+        log("the card cannot run as written; it waits on a person", {
+          run: result.externalRunId,
+          reason: result.reason,
+        });
+      }
+
       if (result.status === "idle") {
         await sleep(opts.pollMs ?? DEFAULT_POLL_MS, controller.signal);
         continue;

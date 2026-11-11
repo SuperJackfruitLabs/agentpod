@@ -1146,7 +1146,7 @@ test("startSalaamWork: a startup failure before a session releases the claim and
   `);
 });
 
-test("startSalaamWork: a second driver on the same run is turned away; a card without a plan is released", async () => {
+test("startSalaamWork: a second driver on the same run is turned away; a card without a plan is blocked, once", async () => {
   const r = await newRun();
   let open: (() => void) | undefined;
   const gate = new Promise<void>((resolve) => (open = resolve));
@@ -1169,8 +1169,8 @@ test("startSalaamWork: a second driver on the same run is turned away; a card wi
       },
       "first": {
         "externalRunId": "<run>",
-        "reason": "Error: Strict Salaam work requires an explicit spec.salaam plan",
-        "status": "released",
+        "reason": "This card has no spec.salaam plan. A Salaam station runs only cards whose spec carries salaam: { version: 1, plan }. Add one, then resume the card.",
+        "status": "blocked",
       },
       "second": {
         "externalRunId": "<run>",
@@ -1186,14 +1186,36 @@ test("startSalaamWork: a second driver on the same run is turned away; a card wi
           },
         },
         {
-          "board": "POST /runs/<run>/release",
+          "board": "POST /runs/<run>/block",
           "body": {
             "leaseEpoch": 1,
+            "reason": "This card has no spec.salaam plan. A Salaam station runs only cards whose spec carries salaam: { version: 1, plan }. Add one, then resume the card.",
           },
         },
       ],
     }
   `);
+});
+
+test("startSalaamWork: a card without a plan whose block the board refuses is handed back", async () => {
+  // The block is the improvement; the release is the floor. A board that will not take the block
+  // must still get its claim back, or the card waits out the 15-minute reclaim instead.
+  const r = await newRun();
+  const noPlan: RunContext = { ...r.live, card: { id: r.cardId, title: "Proof" } };
+  const d = deps(r, {
+    route: async (method, path) => {
+      if (method === "GET" && path === `/runs/${r.runId}`) return { ok: true, data: noPlan };
+      if (method === "POST" && path === `/runs/${r.runId}/block`) return { ok: false, data: { error: "refused" } };
+      return null;
+    },
+  });
+  const result = await startSalaamWork(d, r.claim);
+  expect(result.status).toBe("released");
+  expect(r.trace.map((e) => ("board" in e ? e.board : null)).filter(Boolean)).toEqual([
+    `GET /runs/${r.runId}`,
+    `POST /runs/${r.runId}/block`,
+    `POST /runs/${r.runId}/release`,
+  ]);
 });
 
 const STOPS: [string, Entry[], Record<string, Answer>, Partial<DispatchDeps>][] = [

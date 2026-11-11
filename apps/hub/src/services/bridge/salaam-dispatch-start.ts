@@ -8,7 +8,7 @@ import type { DispatchDeps, DispatchResult } from "./dispatch-types";
 import { markReleased, openDispatch } from "./ledger";
 import { driveSalaamWork } from "./salaam-dispatch-drive";
 import { exclusively } from "./salaam-dispatch-drivers";
-import { planFrom } from "./salaam-dispatch-plan";
+import { isSalaamPlanRefused, planFrom } from "./salaam-dispatch-plan";
 import { reserveSalaamWork } from "./salaam-work";
 import type { ClaimedWork } from "./superpipeline";
 
@@ -74,6 +74,7 @@ async function startClaimedSalaamWork(
     );
     return driveSalaamWork(deps, claim.runId, session, spans);
   } catch (error) {
+    if (!session && isSalaamPlanRefused(error)) return await blockUnrunnable(deps, claim, error);
     if (!session) return await releaseUnopened(deps, claim, error);
     // An opened session may have durable ownership; preserve it for exact recovery.
     return {
@@ -82,6 +83,30 @@ async function startClaimedSalaamWork(
       reason: String(error),
     };
   }
+}
+
+/**
+ * A card this station cannot run as written (no valid `spec.salaam` plan): no retry can fix it, so
+ * handing the claim back would be claimed straight back, forever (staging, 2026-11-10: 230 times in
+ * two hours). The card is blocked instead — parked on a person, with the reason in words they can
+ * act on — and runs again once someone adds the plan and resumes it. Nothing was opened, so there is
+ * no ledger row to write. If the board refuses the block, the claim is handed back as before.
+ */
+async function blockUnrunnable(
+  deps: DispatchDeps,
+  claim: ClaimedWork,
+  error: Error,
+): Promise<DispatchResult> {
+  try {
+    await deps.client.block(claim, error.message);
+  } catch (blockError) {
+    (deps.log ?? (() => {}))("the card could not be blocked; handing the claim back", {
+      run: claim.runId,
+      error: String(blockError),
+    });
+    return await releaseUnopened(deps, claim, error);
+  }
+  return { status: "blocked", externalRunId: claim.runId, reason: error.message };
 }
 
 /** A startup that failed before any session: the claim is handed back, and the ledger says

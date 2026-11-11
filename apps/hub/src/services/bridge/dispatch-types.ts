@@ -153,6 +153,11 @@ export type DispatchStatus =
   | "not-ready"
   /** Claimed, never started, handed straight back. The card is claimable again. */
   | "released"
+  /**
+   * Claimed, never started, and parked on a person: the card cannot run as written (a Salaam card
+   * with no valid plan). Not `released` — the same card would be refused on every claim.
+   */
+  | "blocked"
   /** A prior run's output was reported; the harness was not started. */
   | "replayed"
   /** Worked and reported. */
