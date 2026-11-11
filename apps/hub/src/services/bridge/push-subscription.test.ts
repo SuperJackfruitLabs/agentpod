@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { PUSH_EVENTS, RELAY_PUSH_EVENTS, pushHookUrl, subscribeBoardsToPush } from "./push-subscription";
+import { PUSH_EVENTS, RELAY_PUSH_EVENTS, pushEventsFor, pushHookUrl, subscribeBoardsToPush } from "./push-subscription";
 
 /**
  * Nobody registered the hub's push subscription — so no board ever pushed a gate.
@@ -103,6 +103,27 @@ describe("subscribing each board to the hub's push", () => {
 
     expect(result.subscribed).toEqual(["brd_two"]);
     expect(result.failed.map((f) => f.boardId)).toEqual(["brd_one"]);
+  });
+
+  test("with the event relay delivering gates, the push leaves gate.pending out and keeps the rest", async () => {
+    const { sent, fetchImpl } = recordingFetch();
+    await subscribeBoardsToPush({
+      baseUrl: BASE,
+      publicUrl: PUBLIC,
+      secret: "shh",
+      gatesByEventRelay: true,
+      fetch: fetchImpl,
+      boards: async () => new Map([["brd_one", "spa_one"]]),
+    });
+
+    const events = sent[0]?.body.events;
+    expect(events).not.toContain("gate.pending");
+    expect(events).toEqual(PUSH_EVENTS.filter((e) => e !== "gate.pending"));
+  });
+
+  test("a hub on its own, with no event relay, still gets its gates by push", () => {
+    expect(pushEventsFor(false)).toContain("gate.pending");
+    expect(pushEventsFor(false)).toEqual([...PUSH_EVENTS]);
   });
 
   test("the hook URL tolerates a trailing slash on the public URL", () => {
