@@ -14,7 +14,9 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 
 /**
  * A permission request off a session event, as permission.v2 carries it; null when the subject
- * cannot be carried (it then gets the v1 card alone, as before). `requestedAt` starts the expiry.
+ * cannot be carried, or when no option has an id permission.v2 can carry (the contract wants one
+ * to twenty). Either way the room then gets the prose and the v1 card alone, as before.
+ * `requestedAt` starts the expiry.
  */
 export function harnessPermission(
   sessionId: string,
@@ -26,6 +28,8 @@ export function harnessPermission(
   // Re-bounded by gate.v2's own helper: the same bounds, the same byte budget, the same rule.
   const subject = subjectV2({ ...raw.subject, expiresAt: raw.subject.expires_at, previewComplete: raw.subject.preview_complete });
   if (!subject) return null;
+  const options = permissionOptionsV2(raw.options);
+  if (options.length === 0) return null;
   const tc = isRecord(raw.toolCall) ? raw.toolCall : {};
   return {
     requestId: subject.id,
@@ -33,7 +37,7 @@ export function harnessPermission(
     requestSeq,
     title: typeof tc.title === "string" && tc.title !== "" ? tc.title : "an action",
     toolKind: typeof tc.kind === "string" && tc.kind !== "" ? tc.kind : null,
-    options: permissionOptionsV2(raw.options),
+    options,
     subject,
     expiresAt: new Date(requestedAt.getTime() + PERMISSION_TTL_MS),
   };

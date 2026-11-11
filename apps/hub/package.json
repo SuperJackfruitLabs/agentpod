@@ -52,7 +52,7 @@
     "@opentelemetry/sdk-metrics": "^2.11.0",
     "@opentelemetry/sdk-trace-base": "^2.11.0",
     "@superjackfruitlabs/treaty-cloudevents": "0.0.6",
-    "@superjackfruitlabs/treaty-matrix-events": "0.0.9",
+    "@superjackfruitlabs/treaty-matrix-events": "0.0.10",
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
     "@types/dockerode": "^4.0.1",

@@ -1080,6 +1080,32 @@ describe("a permission request a client can render", () => {
     expect(noted).toEqual([[`${SESSION}:7`, "$evt"]]);
   });
 
+  test("no option permission.v2 can carry: no permission.v2, the room still asks by number", async () => {
+    // treaty-matrix-events 0.0.10: a permission.v2 carries one to twenty options, and every
+    // reader refuses an empty list. Ids over 200 characters are dropped from it, so this
+    // request has none to carry; the prose and the v1 card still offer both options.
+    const recorded: string[] = [];
+    const withRecords: OutboundDeps = {
+      ...deps(),
+      permissionRecords: { record: async (_roomId, p) => (recorded.push(p.requestId), true), noteEvent: async () => {} },
+    };
+    attachRoomToSession(SESSION, ROOM, AGENT, withRecords);
+    const request = permission(7);
+    const options = [{ optionId: "a".repeat(201), name: "Allow" }, { optionId: "r".repeat(201), name: "Reject" }];
+    emit({ ...request, payload: { ...request.payload, options } });
+    await settle();
+
+    expect(sent).toHaveLength(1);
+    const extra = sent[0]?.extra ?? {};
+    expect(extra.suite_event_type).toBeUndefined();
+    expect(extra.options).toBeUndefined();
+    expect(recorded).toEqual([]);
+    expect(extra[PERMISSION_REQUEST_CONTENT_KEY]).toMatchObject({ options: [{ name: "Allow" }, { name: "Reject" }] });
+    expect(sent[0]?.body).toContain("1. Allow");
+    expect(sent[0]?.body).toContain("Reply with the number");
+    expect(pendingPermissionFor(ROOM)?.options.map((o) => o.name)).toEqual(["Allow", "Reject"]);
+  });
+
   test("a permission answered anywhere settles the room's record", async () => {
     const settled: Array<{ sessionId: string; payload: unknown }> = [];
     const withSettle: OutboundDeps = {

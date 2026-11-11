@@ -69,6 +69,14 @@ describe("permission.v2 — the wire", () => {
     ]);
   });
 
+  test("a request with no option permission.v2 can carry has no permission.v2", () => {
+    // The contract wants one to twenty options; an id over 200 characters cannot be carried.
+    const uncarried = { ...PAYLOAD, options: [{ optionId: "x".repeat(201), name: "Allow", kind: "allow_once" }] };
+    expect(harnessPermission(SESSION, 4, uncarried, AT)).toBeNull();
+    expect(harnessPermission(SESSION, 4, { ...PAYLOAD, options: [] }, AT)).toBeNull();
+    expect(must(harnessPermission(SESSION, 4, PAYLOAD, AT)).options).toHaveLength(4);
+  });
+
   test("the digest is sha256 of the canonical {session_id, request_seq, tool_call, options}, over the full request", () => {
     const p = harnessPermission(SESSION, 4, PAYLOAD, AT);
     const expected = createHash("sha256")
