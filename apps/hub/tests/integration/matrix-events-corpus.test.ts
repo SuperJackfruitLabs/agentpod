@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import corpus from "@superjackfruitlabs/treaty-matrix-events/examples.json" with { type: "json" };
+import { readFileSync } from "node:fs";
 import {
   CHECK_OVERRIDE_V2_SUITE_TYPE,
   GATE_PULL_BACK_V2_SUITE_TYPE,
@@ -27,7 +27,11 @@ import { handleQuestionAnswer } from "../../src/services/board-chat/question-ans
  */
 
 type Case = { why: string; refusedBy: "schema" | "unique" | "recorded"; body: Record<string, unknown> };
-const schemas = (corpus as unknown as { schemas: Record<string, { valid: Record<string, Record<string, unknown>>; invalid: Case[] }> }).schemas;
+// Read, not imported: a typed import of the whole corpus is a literal type the compiler chokes on.
+const corpus: unknown = JSON.parse(
+  readFileSync(Bun.resolveSync("@superjackfruitlabs/treaty-matrix-events/examples.json", import.meta.dir), "utf8"),
+);
+const schemas = (corpus as { schemas: Record<string, { valid: Record<string, Record<string, unknown>>; invalid: Case[] }> }).schemas;
 
 const ROOM = "!corpus:id.agentpod.dev";
 const SENDER = "@someone:id.agentpod.dev";
@@ -203,16 +207,19 @@ test("the corpus covers every answer type the hub routes", () => {
   }
 });
 
+/** One type's cases; the coverage test above fails first if a type is missing. */
+const casesOf = (type: string) => schemas[type] ?? { valid: {}, invalid: [] };
+
 for (const [type, handler] of Object.entries(ROUTED)) {
   describe(type, () => {
-    for (const [label, content] of Object.entries(schemas[type]!.valid)) {
+    for (const [label, content] of Object.entries(casesOf(type).valid)) {
       test(`reaches ${handler} alone, which carries it to the board once: ${label}`, async () => {
         expect(await route(content)).toEqual([handler]);
         expect(await acts(handler, content)).toBe(1);
       });
     }
 
-    for (const c of schemas[type]!.invalid.filter((c) => c.refusedBy !== "recorded")) {
+    for (const c of casesOf(type).invalid.filter((k) => k.refusedBy !== "recorded")) {
       test(`is never carried to the board (${c.refusedBy}): ${c.why}`, async () => {
         const took = await route(c.body);
         // Refused by the routing parse, or routed to its own handler and refused there.
@@ -224,7 +231,7 @@ for (const [type, handler] of Object.entries(ROUTED)) {
 }
 
 describe("dev.agentpod.permission.answer.v2", () => {
-  for (const [label, content] of Object.entries(schemas["dev.agentpod.permission.answer.v2"]!.valid)) {
+  for (const [label, content] of Object.entries(casesOf("dev.agentpod.permission.answer.v2").valid)) {
     test(`is an agent's answer, never a board's: ${label}`, async () => {
       expect(isPermissionAnswerMarked(content)).toBe(true);
       expect(await route(content)).toEqual([]);

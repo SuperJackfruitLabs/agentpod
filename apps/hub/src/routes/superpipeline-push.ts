@@ -23,18 +23,25 @@ import { Hono } from "hono";
 
 import { createLogger } from "../utils/logger";
 import { isGatePending, projectGate, type GatePendingDelivery, type GateProjectionDeps } from "../services/board-chat";
-import { isApprovalRequest, isElicitationPending } from "../services/board-chat";
+import { isElicitationPending } from "../services/board-chat";
+import { isApprovalRequest } from "@superjackfruitlabs/treaty-matrix-events";
 import { projectElicitation } from "../services/board-chat";
-import { isDeliveryPending, projectDelivery } from "../services/board-chat";
-import { isAttentionPending, projectAttention } from "../services/board-chat";
+import { projectDelivery } from "../services/board-chat";
+import { isDeliveryPending } from "@superjackfruitlabs/treaty-matrix-events";
+import { projectAttention } from "../services/board-chat";
+import { isAttentionPending } from "@superjackfruitlabs/treaty-matrix-events";
 import type { AttentionProjectionDeps } from "../services/board-chat";
-import { handleDecisionTimeout, isDecisionTimeout } from "../services/board-chat";
+import { handleDecisionTimeout } from "../services/board-chat";
+import { isDecisionTimeout } from "@superjackfruitlabs/treaty-matrix-events";
 import type { DecisionNoticeDeps, DecisionNoticeOutcome } from "../services/board-chat";
-import { handleGateApprovalRecorded, isGateApprovalRecorded } from "../services/board-chat";
+import { handleGateApprovalRecorded } from "../services/board-chat";
+import { isGateApprovalRecorded } from "@superjackfruitlabs/treaty-matrix-events";
 import type { GateProgressOutcome } from "../services/board-chat";
-import { handleDecisionPulledBack, handleDecisionReleased, isDecisionPulledBack, isDecisionReleased } from "../services/board-chat";
+import { handleDecisionPulledBack, handleDecisionReleased } from "../services/board-chat";
+import { isDecisionPulledBack, isDecisionReleased } from "@superjackfruitlabs/treaty-matrix-events";
 import type { GateHoldOutcome } from "../services/board-chat";
-import { handleCheckFailed, handleCheckOverridden, isCheckFailed, isCheckOverridden } from "../services/board-chat";
+import { handleCheckFailed, handleCheckOverridden } from "../services/board-chat";
+import { isCheckFailed, isCheckOverridden } from "@superjackfruitlabs/treaty-matrix-events";
 import type { CheckNoticeOutcome } from "../services/board-chat";
 import type {
   CheckFailedDelivery,

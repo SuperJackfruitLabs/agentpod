@@ -4,25 +4,6 @@
  */
 export { boardProjectionDeps, joinWake, withJoinWake } from "./board-projection";
 export { matrixIdsForBoardHumans } from "./board-room";
-export {
-  isAttentionPending,
-  isApprovalRequest,
-  isDecisionTimeout,
-  isDeliveryPending,
-  isGateApprovalRecorded,
-  isDecisionPulledBack,
-  isDecisionReleased,
-  isCheckFailed,
-  isCheckOverridden,
-  ATTENTION_OUTCOME_TYPE,
-  CHECK_OVERRIDE_V2_SUITE_TYPE,
-  GATE_PULL_BACK_V2_SUITE_TYPE,
-  GATE_OUTCOME_TYPE,
-  subjectV2,
-  type GateOptionMeaning,
-  type GateSubjectV2,
-  type OptionScope,
-} from "@superjackfruitlabs/treaty-matrix-events";
 export { projectAttention, recordedAttention } from "./attention-projection";
 export type { AttentionProjectionDeps } from "./attention-projection";
 export { reconcileBoardAttention } from "./fleet-attention";

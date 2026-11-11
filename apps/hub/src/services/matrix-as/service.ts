@@ -25,15 +25,8 @@ import { handleRoomMessage, retryPendingDecrypts } from "./inbound";
 import type { InboundEvent } from "./inbound";
 import { transcriberFor } from "../speech";
 import { clearFleetDecision, gateDecisionKey } from "../push";
-import {
-  handleGateDecision,
-  parseGateDecision,
-  projectionForGate,
-  resolveGateAtSuperpipeline,
-  roomAgentUser,
-  GATE_OUTCOME_TYPE,
-  settleGateOutcome,
-} from "../board-chat";
+import { handleGateDecision, parseGateDecision, projectionForGate, resolveGateAtSuperpipeline, roomAgentUser, settleGateOutcome } from "../board-chat";
+import { GATE_OUTCOME_TYPE } from "@superjackfruitlabs/treaty-matrix-events";
 import { readBoardGate } from "../board-chat";
 import { assertPrincipal, type AssertionSubject } from "../../auth/org-plane/assertion";
 import { resolveMatrixId } from "../matrix";
@@ -58,7 +51,7 @@ import { recordedChecksCard } from "../board-chat";
 import { handleGatePullBack } from "../board-chat";
 import { handleAttentionAnswer, settleAttentionOutcome } from "../board-chat";
 import { claimAttentionOutcome, recordedAttention, type WaitKey } from "../board-chat";
-import { ATTENTION_OUTCOME_TYPE } from "../board-chat";
+import { ATTENTION_OUTCOME_TYPE } from "@superjackfruitlabs/treaty-matrix-events";
 import { clearAttentionDecision } from "../board-chat";
 import { principalById, principalForUser, principalLabel } from "../../auth/org-plane/principals";
 import { attachRoomToSession, forgetTurnTrigger, noteTurnTrigger } from "./outbound";
