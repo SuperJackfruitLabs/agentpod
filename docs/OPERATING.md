@@ -1756,7 +1756,12 @@ person only — so every gate came by sweep.
 `$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/events`, signed with
 `TREATY_RELAY_DELIVERY_SECRET` (`x-treaty-signature`). Without the secret the route answers 503. It
 hands the gate to the same projection as the push, idempotent on the gate id, so a gate that arrives
-by both doors is posted once. The log says which door posted it:
+by both doors is posted once. **With the secret set, the relay is the only door for gates:** the
+hub's push subscription leaves `gate.pending` out (it logs `gates reach chat through the event relay;
+the push subscription leaves gate.pending out` at start), and every other event still comes by push.
+SuperPipeline replaces a board's config on each sweep's registration, so the change reaches every
+board within five minutes of a restart. If the relay is down, gates wait for the sweep (≤ 5 min). A
+hub with no relay secret keeps getting gates by push. The log says which door posted a gate:
 
 ```bash
 journalctl -u agentpod-hub | grep 'gate projected' | grep -o 'via[^,}]*'   # push or event-relay

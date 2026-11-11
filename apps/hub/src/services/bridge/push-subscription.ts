@@ -47,6 +47,17 @@ export const PUSH_EVENTS = [
   "check.overridden",
 ] as const;
 
+/**
+ * What a board's own config subscribes to. With the suite's event relay delivering gates to this
+ * hub (`TREATY_RELAY_DELIVERY_SECRET` set), `gate.pending` comes through the relay alone and is left
+ * out here (treaty plan, retiring the direct gate push; proven relay-only on 2026-11-11). Without
+ * one, which is a hub on its own, the push stays the way gates arrive. Either way the five-minute
+ * sweep stays the floor beneath both.
+ */
+export function pushEventsFor(gatesByEventRelay: boolean): string[] {
+  return gatesByEventRelay ? PUSH_EVENTS.filter((event) => event !== "gate.pending") : [...PUSH_EVENTS];
+}
+
 export function pushHookUrl(publicUrl: string): string {
   return `${publicUrl.replace(/\/+$/, "")}/public/bridge/superpipeline/push`;
 }
@@ -57,6 +68,8 @@ export interface SubscribeOptions {
   publicUrl: string;
   /** `SUPERPIPELINE_PUSH_SECRET`. Unset means the route refuses every push, so nothing is registered. */
   secret: string | undefined;
+  /** Gates reach this hub through the suite's event relay, so the push leaves `gate.pending` out. */
+  gatesByEventRelay?: boolean;
   fetch: Fetcher;
   /** Board → the credential to register it with (the same one the sweep reads it with). */
   boards: () => Promise<Map<string, string>>;
@@ -94,7 +107,7 @@ export async function subscribeBoardsToPush(opts: SubscribeOptions): Promise<Sub
       await new SuperpipelineClient({ baseUrl: opts.baseUrl, boardId, token, fetch: opts.fetch }).registerPushConfig({
         url,
         token: opts.secret,
-        events: [...PUSH_EVENTS],
+        events: pushEventsFor(opts.gatesByEventRelay ?? false),
       });
       result.subscribed.push(boardId);
     } catch (err) {

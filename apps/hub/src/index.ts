@@ -477,7 +477,13 @@ if (matrixBridge) {
   }, {
     // Each board is told to push its gates and questions here, so they reach the room in seconds
     // and the sweep is the floor it was designed to be rather than the only path.
-    push: { secret: process.env.SUPERPIPELINE_PUSH_SECRET, publicUrl: config.publicUrl, relay: superpipelineRelay },
+    push: {
+      secret: process.env.SUPERPIPELINE_PUSH_SECRET,
+      publicUrl: config.publicUrl,
+      // The event relay delivers gates here (the /events route above), so the push stops carrying them.
+      gatesByEventRelay: (process.env.TREATY_RELAY_DELIVERY_SECRET ?? "").trim() !== "",
+      relay: superpipelineRelay,
+    },
   });
 
   // The same floor, for an agent's questions. `projectElicitation` is idempotent on
