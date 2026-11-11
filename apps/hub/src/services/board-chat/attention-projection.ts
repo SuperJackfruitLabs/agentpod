@@ -1,6 +1,6 @@
 /**
  * Posting a waiting card into its board room, exactly once per wait, and the reads its answer
- * needs. The I/O half; `attention-wire.ts` holds the pure half.
+ * needs. The I/O half; `@superjackfruitlabs/treaty-matrix-events` holds the pure half.
  *
  * A near-mirror of `projectDelivery` on purpose: the claim in `matrix_attention_events` is taken
  * BEFORE the send, so push, the board's redelivery and the sweep — all meant to overlap — post one
@@ -15,8 +15,7 @@ import { db } from "../../db/drizzle";
 import { matrixAttentionEvents } from "../../db/schema/matrix";
 import { createLogger } from "../../utils/logger";
 import { noteHubEvent } from "../push";
-import { boardLink } from "./gate-wire";
-import { attentionOptionsV2, attentionV2Content, type AttentionPendingDelivery } from "./attention-wire";
+import { boardLink, attentionOptionsV2, attentionV2Content, type AttentionPendingDelivery } from "@superjackfruitlabs/treaty-matrix-events";
 import type { RecordedAttention } from "./attention-answer";
 
 const log = createLogger("matrix-attention");

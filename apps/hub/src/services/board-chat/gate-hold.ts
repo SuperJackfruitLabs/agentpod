@@ -32,7 +32,7 @@ import {
   pulledBackContent,
   releasedBody,
   releasedContent,
-} from "./gate-release-wire";
+} from "@superjackfruitlabs/treaty-matrix-events";
 import type { TenantsForBoard } from "./relay-scope";
 
 const log = createLogger("matrix-gate-hold");

@@ -13,7 +13,7 @@
 import { fleetSink, gateDecisionKey, noteFleet } from "../push";
 import { inlineGateOptions, type DecisionRecord } from "../push";
 import type { GatePendingDelivery } from "./gates";
-import { isVariantGate } from "./gate-wire";
+import { isVariantGate } from "@superjackfruitlabs/treaty-matrix-events";
 
 export interface PostedGate {
   roomId: string;

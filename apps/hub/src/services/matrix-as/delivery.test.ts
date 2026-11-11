@@ -9,7 +9,10 @@ import {
   deliveryV2Content,
   isDeliveryPending,
   type DeliveryPendingDelivery,
-} from "../board-chat/delivery-wire";
+  GATE_OUTCOME_TYPE,
+  deliveryOutcomeContent,
+  QUESTION_ANSWER_V2_SUITE_TYPE,
+} from "@superjackfruitlabs/treaty-matrix-events";
 import {
   handleDeliveryAnswer,
   parseDeliveryAnswer,
@@ -19,11 +22,8 @@ import {
 } from "../board-chat/delivery-answer";
 import { updateDeliveryAtSuperpipeline } from "../board-chat/gate-resolve";
 import { settleGateOutcome } from "../board-chat/gate-decision";
-import { GATE_OUTCOME_TYPE } from "../board-chat/gate-wire";
-import { deliveryOutcomeContent } from "../board-chat/delivery-wire";
 import { settleDeliveryOutcome } from "../board-chat/delivery-answer";
 import { handleRoomMessage, type InboundDeps } from "./inbound";
-import { QUESTION_ANSWER_V2_SUITE_TYPE } from "../board-chat/question-wire";
 
 /**
  * delivery.v2 — the follow-up a post approved for manual delivery owes (charter: "The decision

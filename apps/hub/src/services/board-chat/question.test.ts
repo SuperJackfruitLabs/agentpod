@@ -12,7 +12,7 @@ import {
   questionFreeTextV2,
   questionOptionsV2,
   questionV2Content,
-} from "./question-wire";
+} from "@superjackfruitlabs/treaty-matrix-events";
 import {
   handleQuestionAnswer,
   parseQuestionAnswer,

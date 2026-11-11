@@ -67,7 +67,7 @@ import { createSession, promptSession,
 import { acpSessions } from "../../db/schema/acp";
 import { expirePermissions, settleFromSessionEvent } from "./permission-answer";
 import { notePermissionEvent, recordPermissionRequest } from "./permission-records";
-import { PERMISSION_OUTCOME_TYPE } from "./permission-wire";
+import { PERMISSION_OUTCOME_TYPE } from "@superjackfruitlabs/treaty-matrix-events";
 import { createLogger } from "../../utils/logger";
 import { bridgeModeOnly } from "./bridge-agents";
 import { createAgentCrypto, feedAgents, type AgentCrypto } from "./crypto";

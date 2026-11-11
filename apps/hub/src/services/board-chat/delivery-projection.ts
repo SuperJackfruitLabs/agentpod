@@ -1,6 +1,6 @@
 /**
  * Posting a delivery follow-up into its gate's board room, exactly once, and the reads its answer
- * needs. The I/O half; `delivery-wire.ts` holds the pure half.
+ * needs. The I/O half; `@superjackfruitlabs/treaty-matrix-events` holds the pure half.
  *
  * A near-mirror of `projectGate` on purpose: the claim in `matrix_delivery_events` is taken BEFORE
  * the send, so push, the board's redelivery and the sweep — all meant to overlap — post one
@@ -15,8 +15,13 @@ import { db } from "../../db/drizzle";
 import { matrixDeliveryEvents } from "../../db/schema/matrix";
 import { createLogger } from "../../utils/logger";
 import { noteHubEvent } from "../push";
-import { boardLink } from "./gate-wire";
-import { deliveryOptionsV2, deliverySubjectV2, deliveryV2Content, type DeliveryPendingDelivery } from "./delivery-wire";
+import {
+  boardLink,
+  deliveryOptionsV2,
+  deliverySubjectV2,
+  deliveryV2Content,
+  type DeliveryPendingDelivery,
+} from "@superjackfruitlabs/treaty-matrix-events";
 import type { RecordedDelivery } from "./delivery-answer";
 
 const log = createLogger("matrix-deliveries");

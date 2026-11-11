@@ -8,7 +8,7 @@ import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { rawSql } from "../../db/drizzle";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
-import { DELIVERY_V2_SUITE_TYPE, type DeliveryPendingDelivery } from "./delivery-wire";
+import { DELIVERY_V2_SUITE_TYPE, type DeliveryPendingDelivery } from "@superjackfruitlabs/treaty-matrix-events";
 import {
   claimDeliveryOutcome,
   projectDelivery,

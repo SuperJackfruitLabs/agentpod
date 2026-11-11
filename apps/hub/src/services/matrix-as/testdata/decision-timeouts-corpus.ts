@@ -1,7 +1,7 @@
 /**
  * The inputs behind the shared corpus's decision-timeout entries (fixture version 7): one waiting
  * decision of each kind with a deadline, the expired gate's receipt, and the two notices. The hub's
- * own output for these is what the corpus accepts (`decision-timeout-wire.test.ts`).
+ * own output for these is what the corpus accepts (`decision-timeout-wire.test.ts`, against `@superjackfruitlabs/treaty-matrix-events`).
  */
 import type {
   AttentionPendingDelivery,

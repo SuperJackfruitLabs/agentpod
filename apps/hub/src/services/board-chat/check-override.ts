@@ -15,7 +15,7 @@
 
 import { createLogger } from "../../utils/logger";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
-import { CHECK_OVERRIDE_COMMENT_MAX_BYTES, checkOverrideCommentFits, parseCheckOverride } from "./checks-wire";
+import { CHECK_OVERRIDE_COMMENT_MAX_BYTES, checkOverrideCommentFits, parseCheckOverride } from "@superjackfruitlabs/treaty-matrix-events";
 import type { RecordedChecksCard } from "./checks-waiting";
 import { boardCallRefusalText } from "./gate-pull-back";
 

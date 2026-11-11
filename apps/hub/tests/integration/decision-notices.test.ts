@@ -22,12 +22,16 @@ import {
 import { BOOTSTRAP_TENANT_ID, tenants } from "../../src/db/schema/tenants";
 import { tenantForOrg } from "../../src/auth/org-plane/tenant";
 import { MAX_REPOST_ATTEMPTS, handleDecisionTimeout, repostEscalationsOnJoin, retryEscalationReposts, type DecisionNoticeDeps } from "../../src/services/board-chat/decision-notices";
-import { DECISION_ESCALATED_SUITE_TYPE } from "../../src/services/board-chat/decision-timeout-wire";
+import {
+  DECISION_ESCALATED_SUITE_TYPE,
+  GATE_DECISION_SUITE_TYPE,
+  GATE_V2_SUITE_TYPE,
+  gateOptionsV2,
+  attentionOptionsV2,
+} from "@superjackfruitlabs/treaty-matrix-events";
 import { workspaceAdminMatrixIds } from "../../src/services/board-chat/workspace-admins";
 import type { AttentionPendingDelivery, DecisionTimeoutDelivery, GatePendingDelivery } from "../../src/services/bridge";
 import { MOVED_BELOW_TEXT, SETTLED_ABOVE_TEXT } from "../../src/services/board-chat/decision-repost";
-import { GATE_DECISION_SUITE_TYPE, GATE_V2_SUITE_TYPE, gateOptionsV2 } from "../../src/services/board-chat/gate-wire";
-import { attentionOptionsV2 } from "../../src/services/board-chat/attention-wire";
 import { handleGateDecision, type GateDecisionDeps } from "../../src/services/board-chat/gate-decision";
 import { projectionForGate } from "../../src/services/board-chat/gate-reads";
 import { ensurePgMigrations } from "../helpers/pg-migrations";

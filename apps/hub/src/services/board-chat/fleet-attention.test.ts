@@ -14,7 +14,7 @@ import {
   noteAttentionPosted,
   reconcileBoardAttention,
 } from "./fleet-attention";
-import type { AttentionPendingDelivery } from "./attention-wire";
+import type { AttentionPendingDelivery } from "@superjackfruitlabs/treaty-matrix-events";
 
 const HUMAN = "@person:id.example";
 

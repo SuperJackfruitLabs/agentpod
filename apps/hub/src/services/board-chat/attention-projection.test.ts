@@ -8,7 +8,7 @@ import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { rawSql } from "../../db/drizzle";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
-import { ATTENTION_V2_SUITE_TYPE, type AttentionPendingDelivery } from "./attention-wire";
+import { ATTENTION_V2_SUITE_TYPE, type AttentionPendingDelivery } from "@superjackfruitlabs/treaty-matrix-events";
 import {
   claimAttentionOutcome,
   postedAttentionAwaitingOutcome,

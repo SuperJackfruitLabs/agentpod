@@ -38,7 +38,7 @@ import {
   isApprovalRequest,
   questionSubjectV2,
   questionV2Content,
-} from "./question-wire";
+} from "@superjackfruitlabs/treaty-matrix-events";
 import { matchPermissionAnswer, unmatchedAnswerText } from "./reply-options";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
 import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plane/assertion";

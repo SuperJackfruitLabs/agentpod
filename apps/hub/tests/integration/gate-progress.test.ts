@@ -18,7 +18,7 @@ import { matrixGateApprovals, matrixGateEvents } from "../../src/db/schema/matri
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import type { GateApprovalRecordedDelivery, GatePendingDelivery } from "../../src/services/bridge";
 import { handleGateApprovalRecorded, type GateProgressDeps } from "../../src/services/board-chat/gate-progress";
-import { GATE_PROGRESS_TYPE } from "../../src/services/board-chat/gate-quorum-wire";
+import { GATE_PROGRESS_TYPE } from "@superjackfruitlabs/treaty-matrix-events";
 import { projectGate } from "../../src/services/board-chat/gate-projection";
 import { projectionForGate } from "../../src/services/board-chat/gate-reads";
 import { ensurePgMigrations } from "../helpers/pg-migrations";

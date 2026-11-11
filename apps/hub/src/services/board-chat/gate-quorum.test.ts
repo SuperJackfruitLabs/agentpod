@@ -21,7 +21,7 @@ import {
   gateProgressContent,
   isGateApprovalRecorded,
   quorumV2,
-} from "./gate-quorum-wire";
+} from "@superjackfruitlabs/treaty-matrix-events";
 
 /**
  * A gate may need more than one approver (charter → `decisions/2026-11-09-a-gate-may-need-more-than-one-approver.md`).

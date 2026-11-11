@@ -20,9 +20,15 @@ import type { CheckFailedDelivery, CheckOverriddenDelivery, DecisionTimeoutDeliv
 import { handleCheckFailed, handleCheckOverridden, type CheckNoticeDeps } from "../../src/services/board-chat/check-notices";
 import { handleCheckOverride } from "../../src/services/board-chat/check-override";
 import { recordedChecksCard } from "../../src/services/board-chat/checks-waiting";
-import { CHECKS_WAITING_TYPE, CHECK_FAILED_TYPE, CHECK_OVERRIDDEN_TYPE, CHECK_OVERRIDE_V2_SUITE_TYPE } from "../../src/services/board-chat/checks-wire";
+import {
+  CHECKS_WAITING_TYPE,
+  CHECK_FAILED_TYPE,
+  CHECK_OVERRIDDEN_TYPE,
+  CHECK_OVERRIDE_V2_SUITE_TYPE,
+  DECISION_ESCALATED_SUITE_TYPE,
+  DECISION_REMINDED_SUITE_TYPE,
+} from "@superjackfruitlabs/treaty-matrix-events";
 import { handleDecisionTimeout, repostEscalationsOnJoin, type DecisionNoticeDeps } from "../../src/services/board-chat/decision-notices";
-import { DECISION_ESCALATED_SUITE_TYPE, DECISION_REMINDED_SUITE_TYPE } from "../../src/services/board-chat/decision-timeout-wire";
 import { MOVED_BELOW_TEXT } from "../../src/services/board-chat/decision-repost";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 

@@ -3,7 +3,7 @@
  * subject: charter → "Strict decisions and harness permissions bind their subject" §5.
  *
  * The pure, surface-free half, shared by the two places a request leaves the hub: a station room
- * (permission.v2, `matrix-as/permission-wire.ts`) and a board (the bridge's elicitation post,
+ * (permission.v2, `matrix-as/harness-permission.ts`) and a board (the bridge's elicitation post,
  * `bridge/coalesce.ts`). Both must agree on what each option means, on the digest, and on what the
  * person is shown — so it is defined once, here, where the request comes from.
  */

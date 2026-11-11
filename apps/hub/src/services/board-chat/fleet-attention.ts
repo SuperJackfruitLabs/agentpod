@@ -9,8 +9,7 @@
  */
 
 import { attentionDecisionKey, clearFleetDecision, fleetSink, noteFleet, type DecisionRecord } from "../push";
-import { cutToBytes } from "./gate-wire";
-import type { AttentionPendingDelivery } from "./attention-wire";
+import { cutToBytes, type AttentionPendingDelivery } from "@superjackfruitlabs/treaty-matrix-events";
 import type { WaitKey } from "./attention-projection";
 
 export interface PostedAttention {

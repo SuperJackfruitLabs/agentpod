@@ -46,12 +46,16 @@ import { subscribeBoardsToPush, type SuperpipelineRelay } from "../bridge";
 import { createLogger } from "../../utils/logger";
 import { isGatePending } from "./gates";
 import type { GatePendingDelivery, ProjectionOutcome } from "./gates";
-import { isDeliveryPending, type DeliveryPendingDelivery } from "./delivery-wire";
+import {
+  isDeliveryPending,
+  type DeliveryPendingDelivery,
+  isAttentionPending,
+  type AttentionPendingDelivery,
+  heldUntilOf,
+} from "@superjackfruitlabs/treaty-matrix-events";
 import type { DeliveryProjectionOutcome } from "./delivery-projection";
-import { isAttentionPending, type AttentionPendingDelivery } from "./attention-wire";
 import type { AttentionProjectionOutcome, WaitKey } from "./attention-projection";
 import { relayTokenForBoard, type TenantsForBoard } from "./relay-scope";
-import { heldUntilOf } from "./gate-release-wire";
 
 const log = createLogger("gate-sweep");
 

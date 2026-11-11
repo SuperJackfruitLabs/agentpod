@@ -6,6 +6,6 @@
   "types": "./src/index.ts",
   "exports": { ".": "./src/index.ts" },
   "scripts": { "test": "bun test", "typecheck": "tsc --noEmit" },
-  "dependencies": { "zod": "^4.6.5" },
+  "dependencies": { "@superjackfruitlabs/treaty-matrix-events": "0.0.9", "zod": "^4.6.5" },
   "devDependencies": { "@superjackfruitlabs/treaty-ecosystem-identity": "0.0.2", "@types/bun": "latest", "typescript": "~5.9.3" }
 }

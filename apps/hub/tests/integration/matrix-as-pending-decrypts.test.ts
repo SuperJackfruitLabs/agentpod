@@ -4,7 +4,7 @@ import { rawSql } from "../../src/db/drizzle";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { handleRoomMessage, retryPendingDecrypts, type InboundDeps, type InboundEvent } from "../../src/services/matrix-as/inbound";
 import { PENDING_MAX, PENDING_TTL_MS } from "../../src/services/matrix-as/pending-decrypts";
-import { GATE_DECISION_V2_SUITE_TYPE } from "../../src/services/board-chat/gate-wire";
+import { GATE_DECISION_V2_SUITE_TYPE } from "@superjackfruitlabs/treaty-matrix-events";
 
 /**
  * An encrypted event that arrives before its key waits in the database, not in memory.

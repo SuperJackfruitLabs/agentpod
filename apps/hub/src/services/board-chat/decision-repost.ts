@@ -39,12 +39,30 @@ import type {
   ElicitationPendingDelivery,
   GatePendingDelivery,
 } from "../bridge";
-import { attentionOptionsV2, attentionV2Content, isAttentionPending } from "./attention-wire";
-import { deliveryOptionsV2, deliverySubjectV2, deliveryV2Content, isDeliveryPending } from "./delivery-wire";
+import {
+  attentionOptionsV2,
+  attentionV2Content,
+  isAttentionPending,
+  deliveryOptionsV2,
+  deliverySubjectV2,
+  deliveryV2Content,
+  isDeliveryPending,
+  GATE_EVENT_TYPE,
+  boardLink,
+  gateEventContent,
+  gateOptionsV2,
+  gateRequestCard,
+  gateSubjectV2,
+  gateV2Content,
+  gateVariantsV2,
+  isGatePending,
+  boundedQuestion,
+  questionOptionsV2,
+  questionSubjectV2,
+  questionV2Content,
+} from "@superjackfruitlabs/treaty-matrix-events";
 import { ELICITATION_REQUEST_CONTENT_KEY, elicitationRequestCard, isElicitationPending } from "./elicitation-card";
-import { GATE_EVENT_TYPE, boardLink, gateEventContent, gateOptionsV2, gateRequestCard, gateSubjectV2, gateV2Content, gateVariantsV2, isGatePending } from "./gate-wire";
 import { legacyRequestEvents } from "./legacy-events";
-import { boundedQuestion, questionOptionsV2, questionSubjectV2, questionV2Content } from "./question-wire";
 
 const log = createLogger("matrix-decision-repost");
 

@@ -1454,7 +1454,8 @@ decision may reference either the prose or the legacy event.
 **Permissions are recorded and expire** (charter: strict decisions and harness
 permissions bind their subject). The permission prose message also carries
 `dev.agentpod.permission.v2` (meanings, scopes and a `harness-permission/v1`
-subject; `apps/hub/src/services/matrix-as/permission-wire.ts`), and each request
+subject; the envelope is treaty's `@superjackfruitlabs/treaty-matrix-events`, the hub's half
+`apps/hub/src/services/matrix-as/harness-permission.ts`), and each request
 is recorded in `matrix_permission_requests` (migration 0122): its digest, options,
 expiry, and how it closed — `answered` (with `answered_by_principal` and
 `answered_via`: room, console, board or editor), `expired` or `cancelled`; `claimed`

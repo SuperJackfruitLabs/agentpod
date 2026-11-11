@@ -17,8 +17,8 @@ import {
   SETTLED_ELSEWHERE,
   attentionAction,
   attentionOutcomeContent,
-} from "./attention-wire";
-import { inputRefusal } from "./gate-wire";
+  inputRefusal,
+} from "@superjackfruitlabs/treaty-matrix-events";
 import { referenceOf } from "./question-answer";
 import type { WaitKey } from "./attention-projection";
 

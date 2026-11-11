@@ -13,8 +13,7 @@
 import { createLogger } from "../../utils/logger";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
 import { reportAnswer, type ElicitationAnswerDeps } from "./elicitations";
-import { inputRefusal } from "./gate-wire";
-import { QUESTION_ANSWER_V2_SUITE_TYPE } from "./question-wire";
+import { inputRefusal, QUESTION_ANSWER_V2_SUITE_TYPE } from "@superjackfruitlabs/treaty-matrix-events";
 
 const log = createLogger("matrix-elicitations");
 

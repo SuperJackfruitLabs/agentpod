@@ -43,11 +43,7 @@ import { parseDeliveryAnswer } from "../board-chat";
 import { parseAttentionAnswer } from "../board-chat";
 import { GATE_PULL_BACK_V2_SUITE_TYPE } from "../board-chat";
 import { CHECK_OVERRIDE_V2_SUITE_TYPE } from "../board-chat";
-import {
-  PERMISSION_OUTCOME_TYPE,
-  isPermissionAnswerMarked,
-  parsePermissionAnswer,
-} from "./permission-wire";
+import { PERMISSION_OUTCOME_TYPE, isPermissionAnswerMarked, parsePermissionAnswer } from "@superjackfruitlabs/treaty-matrix-events";
 import {
   answerTypedPermission,
   handlePermissionAnswer,

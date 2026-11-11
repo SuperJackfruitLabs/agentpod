@@ -40,7 +40,7 @@ import {
   checkOverriddenContent,
   isCheckFailed,
   isCheckOverridden,
-} from "./checks-wire";
+} from "@superjackfruitlabs/treaty-matrix-events";
 import { boardRoomOf, soleTenant } from "./decision-notices";
 import type { TenantsForBoard } from "./relay-scope";
 
