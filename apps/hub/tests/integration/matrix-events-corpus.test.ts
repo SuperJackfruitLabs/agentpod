@@ -27,11 +27,12 @@ import { handleQuestionAnswer } from "../../src/services/board-chat/question-ans
  */
 
 type Case = { why: string; refusedBy: "schema" | "unique" | "recorded"; body: Record<string, unknown> };
+type Corpus = { schemas: Record<string, { valid: Record<string, Record<string, unknown>>; invalid: Case[] }> };
 // Read, not imported: a typed import of the whole corpus is a literal type the compiler chokes on.
-const corpus: unknown = JSON.parse(
+const corpus: Corpus = JSON.parse(
   readFileSync(Bun.resolveSync("@superjackfruitlabs/treaty-matrix-events/examples.json", import.meta.dir), "utf8"),
 );
-const schemas = (corpus as { schemas: Record<string, { valid: Record<string, Record<string, unknown>>; invalid: Case[] }> }).schemas;
+const schemas = corpus.schemas;
 
 const ROOM = "!corpus:id.agentpod.dev";
 const SENDER = "@someone:id.agentpod.dev";
@@ -47,7 +48,6 @@ const ROUTED: Record<string, Handler> = {
   [CHECK_OVERRIDE_V2_SUITE_TYPE]: "checkOverrides",
 };
 type Handler = "gates" | "questions" | "deliveries" | "attention" | "pullBacks" | "checkOverrides";
-const HANDLERS: Handler[] = ["gates", "questions", "deliveries", "attention", "pullBacks", "checkOverrides"];
 
 /** Where one message went: the board handlers that took it, in order. */
 async function route(content: Record<string, unknown>): Promise<Handler[]> {
@@ -57,7 +57,15 @@ async function route(content: Record<string, unknown>): Promise<Handler[]> {
       took.push(h);
     },
   });
-  const deps = { domain: "id.agentpod.dev", ...Object.fromEntries(HANDLERS.map((h) => [h, spy(h)])) } as unknown as InboundDeps;
+  const deps: InboundDeps = {
+    domain: "id.agentpod.dev",
+    gates: spy("gates"),
+    questions: spy("questions"),
+    deliveries: spy("deliveries"),
+    attention: spy("attention"),
+    pullBacks: spy("pullBacks"),
+    checkOverrides: spy("checkOverrides"),
+  };
   // A message no board handler takes goes on to be read as chat; this room is nobody's, so it stops there.
   await handleRoomMessage({ type: "m.room.message", room_id: ROOM, sender: SENDER, event_id: "$corpus", content }, deps);
   return took;
@@ -65,9 +73,11 @@ async function route(content: Record<string, unknown>): Promise<Handler[]> {
 
 /** The reference an answer carries, or null. */
 function referenceIn(content: Record<string, unknown>): string | null {
-  const rel = content["m.relates_to"] as { rel_type?: unknown; event_id?: unknown } | undefined;
-  return rel?.rel_type === "m.reference" && typeof rel.event_id === "string" ? rel.event_id : null;
+  const rel = content["m.relates_to"];
+  if (!isRecord(rel)) return null;
+  return rel.rel_type === "m.reference" && typeof rel.event_id === "string" ? rel.event_id : null;
 }
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown, fallback: string) => (typeof v === "string" ? v : fallback);
 
 /**
@@ -79,7 +89,8 @@ const str = (v: unknown, fallback: string) => (typeof v === "string" ? v : fallb
  */
 function recordFor(handler: Handler, content: Record<string, unknown>, posted: string) {
   const eventId = referenceIn(content) ?? posted;
-  const subject = content.subject as { id?: string; digest?: string } | undefined;
+  const bound = isRecord(content.subject) ? content.subject : {};
+  const subject = { id: typeof bound.id === "string" ? bound.id : undefined, digest: typeof bound.digest === "string" ? bound.digest : undefined };
   const option = typeof content.option_id === "string" ? content.option_id : null;
   switch (handler) {
     case "gates": {
@@ -94,7 +105,7 @@ function recordFor(handler: Handler, content: Record<string, unknown>, posted: s
           content.suite_event_type === "dev.superpipeline.gate.decision.v2" && option
             ? [{ id: option, meaning, needs_comment: option === "request_changes" }]
             : null,
-        subjectId: subject?.id ?? null,
+        subjectId: subject.id ?? null,
         subjectPreviewComplete: true,
         variants: null,
         quorum: null,
@@ -117,7 +128,7 @@ function recordFor(handler: Handler, content: Record<string, unknown>, posted: s
             ]
           : null,
         freeText: option ? null : { max_length: 2000 },
-        subject: subject?.id && subject.digest ? { id: subject.id, digest: subject.digest, previewComplete: true, expiresAt: null } : null,
+        subject: subject.id && subject.digest ? { id: subject.id, digest: subject.digest, previewComplete: true, expiresAt: null } : null,
       };
     case "deliveries":
       return {
@@ -146,6 +157,8 @@ function recordFor(handler: Handler, content: Record<string, unknown>, posted: s
       return { tenantId: "tnt_corpus", boardId: "brd_corpus", roomId: ROOM, eventId, proseEventId: null };
     case "checkOverrides":
       return { tenantId: "tnt_corpus", boardId: str(content.board_id, "brd_corpus"), cardId: str(content.card_id, "crd_corpus"), roomId: ROOM, eventId };
+    default:
+      throw new Error(`no record for ${String(handler satisfies never)}`);
   }
 }
 
