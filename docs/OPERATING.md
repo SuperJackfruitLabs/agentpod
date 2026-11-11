@@ -1902,6 +1902,13 @@ next attempt), the session is ended, and the row is `abandoned` with a reason na
 A board that cannot be reached keeps the row for the next cycle. Log: `ended a permission wait a
 restart cut short`.
 
+**A card a Salaam station cannot run is blocked, once.** A strict Salaam station runs only cards
+whose spec carries `salaam: { version: 1, plan }`. A card without one, or with an invalid plan, is
+blocked on the board (it waits on a person, with the reason) instead of being handed back, since
+the same card would be refused on every claim. Add or fix the plan and resume the card (`supi
+resume`). No session opened, so no ledger row is written. Log: `the card cannot run as written; it
+waits on a person`. If the board refuses the block, the claim is handed back as before.
+
 ### Reading `bridge_dispatches`
 
 There is no API for the ledger — Postgres is the read path. One row per claimed run, keyed
