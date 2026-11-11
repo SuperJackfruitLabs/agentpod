@@ -18,6 +18,15 @@ export const PENDING_TTL_MS = 5 * 60_000;
 /** At most this many wait; a room whose keys never come must not grow the table without end. */
 export const PENDING_MAX = 200;
 
+/** The event a parked row holds: the shape `inbound.ts` reads (its `InboundEvent`). */
+export interface ParkedInboundEvent {
+  type: string;
+  sender: string;
+  room_id?: string;
+  event_id?: string;
+  content?: Record<string, unknown>;
+}
+
 export interface ParkedEvent {
   eventId: string;
   roomId: string;
@@ -68,4 +77,22 @@ export async function claim(eventId: string): Promise<boolean> {
     .where(eq(matrixPendingDecrypts.eventId, eventId))
     .returning({ eventId: matrixPendingDecrypts.eventId });
   return removed.length > 0;
+}
+
+/** A parked row back into the event it was; null for a row that does not hold one. */
+export function parkedEvent(raw: Record<string, unknown>): ParkedInboundEvent | null {
+  const { type, sender, room_id, event_id, content } = raw;
+  if (typeof type !== "string" || typeof sender !== "string") return null;
+  return {
+    ...raw,
+    type,
+    sender,
+    ...(typeof room_id === "string" ? { room_id } : {}),
+    ...(typeof event_id === "string" ? { event_id } : {}),
+    ...(isRecord(content) ? { content } : {}),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

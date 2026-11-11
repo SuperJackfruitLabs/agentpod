@@ -36,7 +36,7 @@ import {
   unmatchedAnswerText,
 } from "./permissions";
 import { createLogger } from "../../utils/logger";
-import { claim, park, PENDING_TTL_MS, waiting as waitingForKeys } from "./pending-decrypts";
+import { claim, park, parkedEvent, PENDING_TTL_MS, waiting as waitingForKeys } from "./pending-decrypts";
 import { parseGateDecision } from "../board-chat";
 import { parseQuestionAnswer } from "../board-chat";
 import { parseDeliveryAnswer } from "../board-chat";
@@ -382,24 +382,6 @@ async function remember(event: InboundEvent): Promise<void> {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-}
-
-/** A parked row back into the event it was; null for a row that does not hold one. */
-function parkedEvent(raw: Record<string, unknown>): InboundEvent | null {
-  const { type, sender, room_id, event_id, content } = raw;
-  if (typeof type !== "string" || typeof sender !== "string") return null;
-  return {
-    ...raw,
-    type,
-    sender,
-    ...(typeof room_id === "string" ? { room_id } : {}),
-    ...(typeof event_id === "string" ? { event_id } : {}),
-    ...(isRecord(content) ? { content } : {}),
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
