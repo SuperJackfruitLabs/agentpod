@@ -460,7 +460,19 @@ export async function retryPendingDecrypts(deps: InboundDeps): Promise<void> {
       roomId: row.roomId,
       waitedMs,
     });
-    await handleRoomMessage(plain, deps);
+    // At most once, deliberately: the row is taken before the message is handled, which is what
+    // stops two retries acting on it twice. The price is that a handler that throws here loses
+    // the message, so that is said, by event id, rather than left silent.
+    try {
+      await handleRoomMessage(plain, deps);
+    } catch (err) {
+      log.error("a message decrypted after waiting for its key failed to be handled; it is lost", {
+        eventId: row.eventId,
+        roomId: row.roomId,
+        sender: plain.sender,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }
 

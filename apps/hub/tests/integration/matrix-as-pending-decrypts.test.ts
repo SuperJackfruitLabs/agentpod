@@ -121,6 +121,29 @@ describe("a board-room event that arrives before its key", () => {
     expect(after.handled).toHaveLength(1);
   });
 
+  test("a handler that throws loses only that message, and the retry carries on", async () => {
+    await handleRoomMessage(encrypted("$late-7"), depsWith(new Map()).deps);
+    await handleRoomMessage(encrypted("$late-8"), depsWith(new Map()).deps);
+
+    const after = depsWith(
+      new Map([
+        ["$late-7", decision("gate_throws")],
+        ["$late-8", decision("gate_after")],
+      ]),
+    );
+    const gates = after.deps.gates;
+    after.deps.gates = {
+      handle: async (event, roomId) => {
+        if (event.content.gate_id === "gate_throws") throw new Error("boom");
+        return gates?.handle(event, roomId);
+      },
+    };
+    await retryPendingDecrypts(after.deps);
+
+    expect(after.handled.map((h) => h.gateId)).toEqual(["gate_after"]);
+    expect(await parkedIds()).toEqual([]);
+  });
+
   test("two retries at once act on it once", async () => {
     await handleRoomMessage(encrypted("$late-3"), depsWith(new Map()).deps);
 
