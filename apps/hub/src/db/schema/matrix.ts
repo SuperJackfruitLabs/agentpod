@@ -25,6 +25,28 @@ export const matrixAsTransactions = pgTable("matrix_as_transactions", {
 });
 
 /**
+ * Encrypted room events that arrived before the key that opens them.
+ *
+ * A room key travels as a to-device message and the event in the room, and either can land
+ * first. The event waits here and is tried again whenever new keys arrive. It was held in memory
+ * until 2026-11-11, so a hub restart dropped whatever was waiting, without a word, after the
+ * homeserver had been told the transaction was applied: a gate approved from chat in that window
+ * never reached the board. Held here, a restart is only a pause.
+ *
+ * The event is stored as the homeserver sent it, still encrypted.
+ */
+export const matrixPendingDecrypts = pgTable(
+  "matrix_pending_decrypts",
+  {
+    eventId: text("event_id").primaryKey(),
+    roomId: text("room_id").notNull(),
+    event: jsonb("event").$type<Record<string, unknown>>().notNull(),
+    firstSeenAt: timestamp("first_seen_at").notNull().defaultNow(),
+  },
+  (t) => [index("matrix_pending_decrypts_first_seen_at_idx").on(t.firstSeenAt)],
+);
+
+/**
  * Which room belongs to which station, and the conversation running in it.
  *
  * Keyed by room id because that is what an inbound event carries. The alias is

@@ -42,6 +42,7 @@ import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
 import {
   matrixAsTransactions,
+  matrixPendingDecrypts,
   matrixAttentionEvents,
   matrixDecisionNotices,
   matrixDeliveryEvents,
@@ -239,6 +240,16 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "tenants their rooms do. Scoping this would mean asking which tenant a retry belongs to " +
       "before reading what is in it, which is backwards, and would let one tenant's replay " +
       "re-deliver another's.",
+  },
+
+  matrix_pending_decrypts: {
+    table: matrixPendingDecrypts,
+    reason:
+      "Encrypted events the homeserver delivered before their room key, kept still encrypted " +
+      "until the key arrives. Like `matrix_as_transactions` it holds envelopes, not facts about a " +
+      "tenant: which tenant an event belongs to is its room's, and that is decided when it can be " +
+      "read, by the same path as any other event. Read only by the retry, which lists every row; " +
+      "no route reads it.",
   },
 
   live_activity_tokens: {
