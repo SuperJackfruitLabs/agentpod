@@ -775,6 +775,16 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     displayNameFor: (principalId: string) => principalLabel(principalId),
   };
 
+  // Whatever a restart left waiting for its key: tried once now, then on every transaction that
+  // carries keys. Not awaited, so a slow read never holds the hub's boot.
+  if (crypto) {
+    retryPendingDecrypts(inboundDeps).catch((err) =>
+      log.error("could not retry the messages waiting for their keys", {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+
   return {
     client: speakingClient,
     config: cfg,

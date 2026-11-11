@@ -36,6 +36,7 @@ import {
   unmatchedAnswerText,
 } from "./permissions";
 import { createLogger } from "../../utils/logger";
+import { claim, park, PENDING_TTL_MS, waiting as waitingForKeys } from "./pending-decrypts";
 import { parseGateDecision } from "../board-chat";
 import { parseQuestionAnswer } from "../board-chat";
 import { parseDeliveryAnswer } from "../board-chat";
@@ -298,7 +299,7 @@ async function asPlaintext(
   if (board) {
     const plainBoard = await deps.decrypt(event.room_id, board.speakerMxid, event);
     if (!plainBoard) {
-      if (!retrying) remember(event);
+      if (!retrying) await remember(event);
       return null;
     }
     // Same shape as the station path below, and for the same reason: the envelope
@@ -327,7 +328,7 @@ async function asPlaintext(
 
   const plain = await deps.decrypt(event.room_id, bridgeUserId(handle, deps.domain), event);
   if (!plain) {
-    if (!retrying) remember(event);
+    if (!retrying) await remember(event);
     return null;
   }
 
@@ -352,24 +353,53 @@ async function asPlaintext(
  * is what happened on the first real encrypted message sent to an agent: it
  * decrypted perfectly when asked again, and the station never saw it.
  *
- * So an undecryptable event waits here and is tried again whenever new keys
- * arrive, which `onCryptoTransaction` signals. Bounded in both directions: an
- * event that stays unreadable is dropped after `PENDING_TTL_MS` with one
- * warning, and the map cannot outgrow `PENDING_MAX` — a room whose keys we
- * genuinely lack must not become a memory leak that also hides newer failures.
+ * So an undecryptable event waits (`pending-decrypts.ts`) and is tried again
+ * whenever new keys arrive, which `onCryptoTransaction` signals, and once when
+ * the hub starts. **It waits in the database.** The second version kept it in
+ * memory, so a restart before the key arrived lost it without a word, after the
+ * homeserver had been told it was delivered: on 2026-11-11 a gate approved from
+ * chat across a hub restart never reached the board, and nothing was logged.
+ * Bounded in both directions: an event that stays unreadable is dropped after
+ * `PENDING_TTL_MS` with one warning, and at most `PENDING_MAX` wait.
  */
-const pending = new Map<string, { event: InboundEvent; first: number }>();
-const PENDING_TTL_MS = 5 * 60_000;
-const PENDING_MAX = 200;
-
-function remember(event: InboundEvent): void {
+async function remember(event: InboundEvent): Promise<void> {
   const id = event.event_id;
-  if (!id || pending.has(id)) return;
-  if (pending.size >= PENDING_MAX) {
-    const oldest = pending.keys().next().value;
-    if (oldest) pending.delete(oldest);
+  if (!id || !event.room_id) return;
+  try {
+    if (await park(id, event.room_id, { ...event })) {
+      // One line per parked event, so a message waiting on its key is never invisible.
+      log.info("a message cannot be decrypted yet; it waits for its key", {
+        eventId: id,
+        roomId: event.room_id,
+        sender: event.sender,
+      });
+    }
+  } catch (err) {
+    log.error("could not park a message that cannot be decrypted yet; it is lost", {
+      eventId: id,
+      roomId: event.room_id,
+      sender: event.sender,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
-  pending.set(id, { event, first: Date.now() });
+}
+
+/** A parked row back into the event it was; null for a row that does not hold one. */
+function parkedEvent(raw: Record<string, unknown>): InboundEvent | null {
+  const { type, sender, room_id, event_id, content } = raw;
+  if (typeof type !== "string" || typeof sender !== "string") return null;
+  return {
+    ...raw,
+    type,
+    sender,
+    ...(typeof room_id === "string" ? { room_id } : {}),
+    ...(typeof event_id === "string" ? { event_id } : {}),
+    ...(isRecord(content) ? { content } : {}),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -398,34 +428,37 @@ async function voiceServiceFor(
  * Try the waiting messages again, now that more keys are in hand.
  *
  * Called after each transaction's crypto half, which is the only moment new
- * keys can have arrived.
+ * keys can have arrived, and once at boot for whatever a restart left waiting.
+ * An event is handled only by the call that takes it off the list, so two
+ * retries running at once never act on it twice.
  */
 export async function retryPendingDecrypts(deps: InboundDeps): Promise<void> {
-  if (pending.size === 0) return;
-
-  for (const [id, held] of [...pending]) {
-    if (Date.now() - held.first > PENDING_TTL_MS) {
-      pending.delete(id);
+  const held = await waitingForKeys();
+  for (const row of held) {
+    const waitedMs = Date.now() - row.firstSeenAt.getTime();
+    const event = parkedEvent(row.event);
+    if (!event || waitedMs > PENDING_TTL_MS) {
+      if (!(await claim(row.eventId))) continue;
       // The one line worth an operator's attention: an agent that cannot read
       // a message is indistinguishable, from the outside, from an agent that
       // is ignoring one.
       log.warn("gave up decrypting a message for an agent", {
-        eventId: id,
-        roomId: held.event.room_id,
-        sender: held.event.sender,
-        waitedMs: Date.now() - held.first,
+        eventId: row.eventId,
+        roomId: row.roomId,
+        sender: event?.sender,
+        waitedMs,
       });
       continue;
     }
 
-    const plain = await asPlaintext(held.event, deps, { retrying: true });
+    const plain = await asPlaintext(event, deps, { retrying: true });
     if (!plain) continue;
+    if (!(await claim(row.eventId))) continue;
 
-    pending.delete(id);
     log.info("decrypted a message once its key arrived", {
-      eventId: id,
-      roomId: held.event.room_id,
-      waitedMs: Date.now() - held.first,
+      eventId: row.eventId,
+      roomId: row.roomId,
+      waitedMs,
     });
     await handleRoomMessage(plain, deps);
   }

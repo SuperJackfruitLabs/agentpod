@@ -1027,6 +1027,14 @@ must be restored together. With both gone, delete the agent's crypto store
 directory and let it log in afresh; its old encrypted history stays unreadable
 and only new messages recover.
 
+**A message that arrives before its key waits in `matrix_pending_decrypts`.** A room key and the
+event it opens can land in either order. The hub logs `a message cannot be decrypted yet; it
+waits for its key`, keeps the still-encrypted event in that table, and tries it again whenever new
+keys arrive and once at boot, logging `decrypted a message once its key arrived` when it can.
+After five minutes it gives up with `gave up decrypting a message for an agent`. At most 200 wait.
+Until 2026-11-11 the wait was in memory, so a hub restart lost a gate decision whose key was late,
+silently. A restart is now only a pause.
+
 ### 7b-ter. Why MSC4190 is off
 
 `io.element.msc4190` lets an appservice create a device for a virtual user

@@ -37,7 +37,7 @@
   "unicorn(no-instanceof-builtins)": 1,
   "unicorn(no-invalid-fetch-options)": 3,
   "unicorn(no-useless-fallback-in-spread)": 8,
-  "unicorn(no-useless-spread)": 9,
+  "unicorn(no-useless-spread)": 8,
   "unicorn(prefer-add-event-listener)": 141,
   "unicorn(prefer-string-starts-ends-with)": 5,
   "unicorn(require-post-message-target-origin)": 3,
