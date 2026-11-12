@@ -109,6 +109,7 @@ import { initTelemetry, readTelemetryConfig, shutdownTelemetry } from './telemet
 import { mcpUnauthorized, resolveMcpCaller } from './mcp/auth.ts';
 import { handleMcpRequest } from './mcp/server.ts';
 import { createBridgeRosterRoute } from './routes/bridge-roster.ts';
+import { createCapabilityCatalogRoute } from './routes/capability-catalog.ts';
 import { createMatrixBridge, matrixBridgeConfig, startMatrixBridge } from './services/matrix-as/index.ts';
 import { onStationsAdopted, onProvisionStation } from './services/stations/index.ts';
 import { preJoinNewIdentity, moveState, wireConvergenceListener } from './services/matrix-as/index.ts';
@@ -285,6 +286,8 @@ const app = new Hono()
 
   /** Superlibrary's roster read: its own service-token auth, so ahead of `authMiddleware` like `/mcp`. */
   .route('/', createBridgeRosterRoute())
+  /** The capability catalog and registry for services (CATALOG_READERS), ahead of `authMiddleware` for the same reason. */
+  .route('/', createCapabilityCatalogRoute())
 
   .use('/api/*', authMiddleware)
   .use('/api/*', csrfMiddleware)

@@ -101,7 +101,7 @@ const KNOWN_BACK_EDGES: string[] = [];
  * A new module must be placed here; docs/contributor/code-quality.md says what each one holds.
  */
 const SERVICE_LAYERS: string[][] = [
-  ["audit", "broker", "control", "hub", "matrix", "speech"],
+  ["audit", "broker", "catalog", "control", "hub", "matrix", "speech"],
   ["forge", "harness-config", "provisioner", "salaam"],
   ["forge-api"],
   ["stations"],
