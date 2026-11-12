@@ -20,7 +20,7 @@ is missing from that list.
 - Self-contained changes go straight to `main` once the suites for whatever you touched pass locally.
 - Anything you want CI to prove *before* it lands — or that deserves a second look — goes on a short-lived branch and a PR. Dependabot updates land this way by default. Branch protection requires the head to be up to date with `main`, so rebase before merging.
 - `develop` is no longer the integration branch. It remains as a historical ref; don't branch from it.
-- Tagging `v*` on `main` triggers `release-node-agent.yml`, which publishes the node-agent binaries, `install.sh`, the systemd unit, and `SHA256SUMS` as release assets. A release missing any asset breaks node-agent self-update, which verifies against `SHA256SUMS` — check the release is complete before announcing it.
+- Tagging `v*` on `main` runs the shared release workflow (`release.yml`, settings in `.github/release-config.json`), which deploys the hub and console and publishes the node-agent and fleet binaries, `install.sh`, `install-fleet.sh`, the systemd unit, and `SHA256SUMS` as release assets. A release missing any asset breaks node-agent self-update, which verifies against `SHA256SUMS` — check the release is complete before announcing it.
 
 > **If a second contributor appears, go back to `develop` → PR → `main`.** The required checks are already configured for it; only this section changes.
 

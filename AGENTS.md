@@ -48,6 +48,6 @@ than answering from memory.
 - **Hub DB tests need Postgres:** the pgvector container on `:5434` and the explicit `DATABASE_URL` in [`CLAUDE.md`](CLAUDE.md). A run without it is not a pass.
 - **CI pins Bun** (`bun-version` in `ci.yml`). Local Bun may differ and behave differently (exit listeners, for one); check `bun --version` before trusting a local result.
 - **`apps/hub/typecheck-known-red-tests.txt`** holds the known-red test typecheck errors with exact counts. A rise fails, and so does an unrecorded fall: update the file when you fix one.
-- **A `v*` tag deploys the hub and console to production** (`release-hub.yml`) and publishes node-agent binaries. Only the operator tags.
+- **A `v*` tag deploys the hub and console to production and publishes the node-agent binaries** through the suite's shared release workflow (`.github/workflows/release.yml` and `.github/release/`, synced byte-identical from the suite's release kit: change them there, never here; settings in `.github/release-config.json`, scripts in `deploy/release/`). It needs main's `ci.yml` run to have passed for the tag's commit. Only the operator tags.
 - **The Claude CI files are synced copies.** `.github/claude/claude-ci.mjs` and the `claude-review`/`claude-triage` workflows come from the suite's shared kit; change them there, not here. The advisory PR review follows [`REVIEW.md`](REVIEW.md).
 
