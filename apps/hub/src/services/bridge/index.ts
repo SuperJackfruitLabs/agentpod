@@ -39,3 +39,5 @@ export { traceDeliveryEvidence } from "./salaam-trace";
 export { bridgeReadiness } from "./station-readiness";
 export { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./superpipeline";
 export type { Fetcher } from "./superpipeline";
+export { isWorkAvailable, onWorkAvailable, wakeBoard } from "./work-wake";
+export type { WorkAvailableDelivery } from "./work-wake";

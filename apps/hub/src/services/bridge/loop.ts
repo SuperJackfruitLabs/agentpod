@@ -21,6 +21,7 @@ import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { runOnce, type AcpPort, type DispatchResult } from "./dispatch";
 import { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./superpipeline";
 import { createLogger } from "../../utils/logger";
+import { onWorkAvailable } from "./work-wake";
 
 /** How long to wait after a claim that found nothing. */
 const DEFAULT_POLL_MS = 5_000;
@@ -38,6 +39,14 @@ export interface AgentLoopOptions {
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   onFault?: (result: DispatchResult) => void;
   log?: (message: string, meta?: Record<string, unknown>) => void;
+  /**
+   * Subscribe to "work is ready on this loop's board" (`work-wake.ts`); returns the unsubscribe.
+   * A wake ends the idle poll early, so a fresh card is claimed at once rather than after the
+   * poll. Only the idle wait: a backoff after an error or an unready station is never cut short.
+   * A wake that lands while a cycle runs skips the next idle wait once, since the claim it made
+   * may have raced the card. Absent: the poll alone, as before.
+   */
+  wake?: (wake: () => void) => () => void;
 }
 
 export interface LoopHandle {
@@ -75,6 +84,31 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
   const log = opts.log ?? (() => {});
   const controller = new AbortController();
   const handover = new AbortController();
+  // The idle wait in progress, so a wake can end it; a wake with none in progress is remembered.
+  let idleWait: AbortController | null = null;
+  let wokenMidCycle = false;
+  const unsubscribe = opts.wake?.(() => {
+    if (idleWait) idleWait.abort();
+    else wokenMidCycle = true;
+  });
+  const idle = async (): Promise<void> => {
+    if (wokenMidCycle) {
+      wokenMidCycle = false;
+      return;
+    }
+    const wait = new AbortController();
+    const stop = () => wait.abort();
+    controller.signal.addEventListener("abort", stop, { once: true });
+    idleWait = wait;
+    try {
+      await sleep(opts.pollMs ?? DEFAULT_POLL_MS, wait.signal);
+    } finally {
+      idleWait = null;
+      controller.signal.removeEventListener("abort", stop);
+    }
+    // A wake that ended this wait is spent; one that came during the cycle before it is, too.
+    wokenMidCycle = false;
+  };
 
   const done = (async () => {
     let cycle = 0;
@@ -158,7 +192,7 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
       }
 
       if (result.status === "idle") {
-        await sleep(opts.pollMs ?? DEFAULT_POLL_MS, controller.signal);
+        await idle();
         continue;
       }
 
@@ -176,7 +210,7 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
         await sleep(opts.backoffMs ?? DEFAULT_BACKOFF_MS, controller.signal);
       }
     }
-  })();
+  })().finally(() => unsubscribe?.());
 
   return {
     done,
@@ -306,6 +340,7 @@ export async function startSuperpipelineBridge(
             mcpUrl,
           }),
         log: (m, meta) => log(m, { agent: agent.key, ...meta }),
+        wake: (fn) => onWorkAvailable(agent.boardId, fn),
       });
       live.set(loopKey(agent), { handle, revision: agent.revision });
       log("claiming", describe(config, baseUrl));

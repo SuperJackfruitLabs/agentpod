@@ -19,7 +19,7 @@
  * public write endpoint.
  */
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 
 import { createLogger } from "../utils/logger";
 import { isGatePending, projectGate, type GatePendingDelivery, type GateProjectionDeps } from "../services/board-chat";
@@ -52,6 +52,7 @@ import type {
   DecisionTimeoutDelivery,
   GateApprovalRecordedDelivery,
 } from "../services/bridge";
+import { isWorkAvailable, wakeBoard } from "../services/bridge";
 
 const log = createLogger("superpipeline-push");
 
@@ -88,6 +89,8 @@ export interface SuperpipelinePushDeps extends GateProjectionDeps {
   handleCheckFailed?(d: CheckFailedDelivery): Promise<CheckNoticeOutcome>;
   /** Test seam: what an overridden check does. Defaults to `handleCheckOverridden`. */
   handleCheckOverridden?(d: CheckOverriddenDelivery): Promise<CheckNoticeOutcome>;
+  /** Test seam: wake a board's claim loops on `work.available`. Defaults to the bridge's `wakeBoard`. */
+  wakeBoard?(boardId: string): number;
 }
 
 const enc = new TextEncoder();
@@ -114,30 +117,53 @@ async function signatureMatches(secret: string, raw: string, header: string): Pr
   return diff === 0;
 }
 
+/**
+ * A signed delivery's parsed body, or the refusal to send instead. Fails closed with no secret;
+ * reads the bytes once, verifies those, and only then parses them.
+ */
+async function signedBody(secret: string | undefined, c: Context): Promise<{ body: unknown } | { refusal: Response }> {
+  if (!secret) {
+    log.warn("push rejected: no signing secret configured");
+    return { refusal: c.json({ error: "not configured" }, 503) };
+  }
+  const signature = c.req.header("X-Superpipeline-Signature");
+  if (!signature) return { refusal: c.json({ error: "unsigned" }, 401) };
+  const raw = await c.req.text();
+  if (!(await signatureMatches(secret, raw, signature))) {
+    log.warn("push rejected: bad signature", { bytes: raw.length });
+    return { refusal: c.json({ error: "bad signature" }, 401) };
+  }
+  try {
+    return { body: JSON.parse(raw) };
+  } catch {
+    // A retry does not fix malformed JSON, so this is terminal on purpose.
+    return { refusal: c.json({ error: "invalid json" }, 400) };
+  }
+}
+
 export function createSuperpipelinePushRoutes(deps: SuperpipelinePushDeps) {
-  return new Hono().post("/bridge/superpipeline/push", async (c) => {
-    if (!deps.secret) {
-      log.warn("push rejected: no signing secret configured");
-      return c.json({ error: "not configured" }, 503);
-    }
-
-    const signature = c.req.header("X-Superpipeline-Signature");
-    if (!signature) return c.json({ error: "unsigned" }, 401);
-
-    // Read the bytes once, verify those, and only then parse them.
-    const raw = await c.req.text();
-    if (!(await signatureMatches(deps.secret, raw, signature))) {
-      log.warn("push rejected: bad signature", { bytes: raw.length });
-      return c.json({ error: "bad signature" }, 401);
-    }
-
-    let body: unknown;
-    try {
-      body = JSON.parse(raw);
-    } catch {
-      // A retry does not fix malformed JSON, so this is terminal on purpose.
-      return c.json({ error: "invalid json" }, 400);
-    }
+  return new Hono()
+  /**
+   * POST /public/bridge/superpipeline/work — a board saying a card one of this hub's agents can
+   * claim is ready (`work.available`). Its own door, because each rostered agent registers its own
+   * config here (`push-subscription.ts`) and a config is keyed by agent and url: sharing the chat
+   * door's url would overwrite a board's chat subscription. Every idle loop on the board claims at
+   * once; the board decides which card, if any, each one gets. 200 whether or not a loop was
+   * waiting, since a retry would wake nothing more.
+   */
+  .post("/bridge/superpipeline/work", async (c) => {
+    const signed = await signedBody(deps.secret, c);
+    if ("refusal" in signed) return signed.refusal;
+    if (!isWorkAvailable(signed.body)) return c.json({ ok: true, ignored: true }, 200);
+    const boardId = signed.body.boardId;
+    const woken = deps.wakeBoard ? deps.wakeBoard(boardId) : wakeBoard(boardId);
+    log.info("work available; claim loops woken", { boardId: signed.body.boardId, woken });
+    return c.json({ ok: true, woken }, 200);
+  })
+  .post("/bridge/superpipeline/push", async (c) => {
+    const signed = await signedBody(deps.secret, c);
+    if ("refusal" in signed) return signed.refusal;
+    const body = signed.body;
 
     // A board whose chat has moved out of this hub (`moved-boards.ts`): nothing it pushes is posted
     // here. 200, so the board does not retry what this hub will never post.

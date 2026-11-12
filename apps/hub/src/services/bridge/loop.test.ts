@@ -330,3 +330,78 @@ describe("bridgeLogLevel", () => {
     expect(bridgeLogLevel("claiming")).toBe("info");
   });
 });
+
+/** A sleep that waits until its signal aborts, recording each wait's length. */
+function wakeableSleep() {
+  const waits: number[] = [];
+  const sleep = (ms: number, signal: AbortSignal) =>
+    new Promise<void>((resolve) => {
+      waits.push(ms);
+      if (signal.aborted) return resolve();
+      signal.addEventListener("abort", () => resolve(), { once: true });
+    });
+  return { waits, sleep };
+}
+function wakeSource() {
+  let wake: (() => void) | null = null;
+  let unsubscribed = false;
+  return {
+    subscribe: (fn: () => void) => {
+      wake = fn;
+      return () => {
+        unsubscribed = true;
+      };
+    },
+    fire: () => wake?.(),
+    get unsubscribed() {
+      return unsubscribed;
+    },
+  };
+}
+const settle = async () => {
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+};
+
+/**
+ * A board's `work.available` ends the idle poll early (`work-wake.ts`), so a fresh card is claimed
+ * at once. The poll stays as the floor; backoffs are never cut short.
+ */
+describe("a wake ends the idle wait", () => {
+  test("an idle loop claims again as soon as it is woken, not after the poll", async () => {
+    const s = scripted();
+    const w = wakeSource();
+    const { sleep } = wakeableSleep();
+    const loop = startAgentLoop({ run: s.run, sleep, pollMs: 60_000, wake: w.subscribe });
+    await settle();
+    expect(s.calls.length).toBe(1); // claimed once, now waiting out a minute-long poll
+    w.fire();
+    await settle();
+    expect(s.calls.length).toBe(2);
+    await loop.stop();
+    expect(w.unsubscribed).toBe(true);
+  });
+
+  test("without a wake the loop waits out the poll", async () => {
+    const s = scripted();
+    const w = wakeSource();
+    const { sleep } = wakeableSleep();
+    const loop = startAgentLoop({ run: s.run, sleep, pollMs: 60_000, wake: w.subscribe });
+    await settle();
+    expect(s.calls.length).toBe(1);
+    await loop.stop();
+  });
+
+  test("a wake during a backoff does not cut it short", async () => {
+    const notReady: DispatchResult = { status: "not-ready", reason: "station offline" };
+    const s = scripted(notReady);
+    const w = wakeSource();
+    const { sleep, waits } = wakeableSleep();
+    const loop = startAgentLoop({ run: s.run, sleep, pollMs: 5, backoffMs: 30_000, wake: w.subscribe });
+    await settle();
+    expect(waits).toEqual([30_000]);
+    w.fire();
+    await settle();
+    expect(s.calls.length).toBe(1);
+    await loop.stop();
+  });
+});

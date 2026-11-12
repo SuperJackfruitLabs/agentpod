@@ -817,6 +817,7 @@ function pushSubscriber(
   }
   const subscribed = new Set<string>();
   const relayed = new Set<string>();
+  const working = new Set<string>();
   const relay = push.relay ?? null;
   return async () => {
     try {
@@ -832,6 +833,9 @@ function pushSubscriber(
           for (const boardId of boards.keys()) if (isBoardMoved(boardId)) boards.delete(boardId);
           return boards;
         },
+        // Every rostered agent, so its loop wakes when its board has work for it. Not filtered by a
+        // moved chat: the agents still claim here.
+        agents: roster,
         // The relay's token only for a board of the relay's own workspace (`relay.ts`).
         ...(relay
           ? {
@@ -848,6 +852,10 @@ function pushSubscriber(
       for (const boardId of result.relayed) {
         if (!relayed.has(boardId)) log.info("relay push subscription registered", { boardId });
         relayed.add(boardId);
+      }
+      for (const boardId of result.working) {
+        if (!working.has(boardId)) log.info("work.available subscription registered", { boardId });
+        working.add(boardId);
       }
       for (const f of result.failed) {
         subscribed.delete(f.boardId);
