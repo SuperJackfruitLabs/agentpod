@@ -17,6 +17,9 @@ install -d -m 700 ~/.ssh
 printf '%s\n' "$PROD_SSH_KEY" > ~/.ssh/prod && chmod 600 ~/.ssh/prod
 printf '%s\n' "$PROD_KNOWN_HOSTS" > ~/.ssh/known_hosts
 ssh -i ~/.ssh/prod -o BatchMode=yes "root@$PROD_HOST" agentpod "$TAG"
+# The host key is not needed again: nothing below (dependency scripts included) sees it.
+rm -f ~/.ssh/prod
+unset PROD_SSH_KEY PROD_KNOWN_HOSTS
 
 # The console waits for a hub that passes its smoke.
 i=0
@@ -28,8 +31,9 @@ done
 
 command -v pnpm >/dev/null 2>&1 ||
   npm install --global --ignore-scripts "pnpm@$(node -p "require('./package.json').packageManager.split('@')[1].split('+')[0]")"
-pnpm install --frozen-lockfile
-(cd apps/console && PUBLIC_HUB_URL=https://hub.agentpod.dev pnpm build)
+# Dependency scripts and the build never see the Cloudflare or GitHub token.
+env -u CLOUDFLARE_API_TOKEN -u GH_TOKEN pnpm install --frozen-lockfile
+(cd apps/console && env -u CLOUDFLARE_API_TOKEN -u GH_TOKEN PUBLIC_HUB_URL=https://hub.agentpod.dev pnpm build)
 # Not a secret: it is in every dashboard URL. Naming the account stops wrangler looking it up
 # through /memberships, which a Pages-scoped token may not read.
 export CLOUDFLARE_ACCOUNT_ID=88acd85618f099112eadc9374996b9f7
