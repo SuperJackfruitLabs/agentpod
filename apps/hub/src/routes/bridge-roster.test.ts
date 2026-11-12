@@ -109,7 +109,7 @@ test("each enabled row carries its station's readiness; a disabled row's station
       return id === "stn_c" ? { ready: false, reason: "node offline" } : { ready: true, reason: null };
     },
   });
-  expect(asked.sort()).toEqual(["stn_a", "stn_c"]);
+  expect(asked.toSorted()).toEqual(["stn_a", "stn_c"]);
   expect(entries).toEqual([
     { ...ROW, ready: true, reason: null },
     { ...ROW, key: "off", stationId: "stn_b", enabled: false, ready: false, reason: "the roster entry is disabled" },
