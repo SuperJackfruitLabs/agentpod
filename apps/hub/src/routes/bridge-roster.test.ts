@@ -1,7 +1,17 @@
 import { expect, test } from "bun:test";
-import { createBridgeRosterRoute } from "./bridge-roster";
+import { boardRosterWithReadiness, createBridgeRosterRoute, type BoardRosterEntry } from "./bridge-roster";
 
 const READER = "prn_0000000000000000c0b3";
+const ENTRY: BoardRosterEntry = {
+  key: "notes-b1",
+  stationId: "stn_00000000000000c1",
+  principalId: "prn_000000000000000000a2",
+  enabled: true,
+  busy: false,
+  lastDispatchedAt: "2026-11-12T10:00:00.000Z",
+  ready: true,
+  reason: null,
+};
 function app(kind = "service", sub = READER, token = true) {
   return createBridgeRosterRoute({
     verify: async () =>
@@ -15,6 +25,7 @@ function app(kind = "service", sub = READER, token = true) {
       tenantId === "tnt_1" && id === "stn_00000000000000c1"
         ? { id, key: "notes-station", owner: "prn_000000000000000000a1" }
         : null,
+    boardRoster: async (tenantId, boardId) => (tenantId === "tnt_1" && boardId === "brd_00000000000000b1" ? [ENTRY] : []),
   });
 }
 const get = (a: ReturnType<typeof app>, prn: string, authorization: string | null = "Bearer x.y.z") =>
@@ -65,4 +76,43 @@ test("the station read refuses an unlisted service, a person and an agent", asyn
 });
 test("a malformed station id is 400", async () => {
   expect((await station(app(), "not a station")).status).toBe(400);
+});
+
+const roster = (a: ReturnType<typeof app>, boardId: string, authorization: string | null = "Bearer x.y.z") =>
+  a.request(`/api/bridge/boards/${boardId}/roster`, { headers: authorization ? { authorization } : {} });
+
+test("a listed service reads a board's roster, in its own tenant", async () => {
+  const r = await roster(app(), "brd_00000000000000b1");
+  expect(r.status).toBe(200);
+  expect(await r.json()).toEqual({ boardId: "brd_00000000000000b1", agents: [ENTRY] });
+  const none = await roster(app(), "brd_00000000000000b2");
+  expect(await none.json()).toEqual({ boardId: "brd_00000000000000b2", agents: [] });
+});
+test("the board roster refuses an unlisted service, a person and an agent", async () => {
+  expect((await roster(app("service", "prn_0000000000000000c0b9"), "brd_00000000000000b1")).status).toBe(403);
+  expect((await roster(app("human"), "brd_00000000000000b1")).status).toBe(403);
+  expect((await roster(app("agent"), "brd_00000000000000b1")).status).toBe(403);
+  expect((await roster(app(), "brd_00000000000000b1", null)).status).toBe(401);
+  expect((await roster(app("service", READER, false), "brd_00000000000000b1")).status).toBe(401);
+});
+test("a malformed board id is 400", async () => {
+  expect((await roster(app(), "brd_nothex")).status).toBe(400);
+});
+
+const ROW = { key: "k", stationId: "stn_a", principalId: "prn_000000000000000000a2", enabled: true, busy: true, lastDispatchedAt: null };
+test("each enabled row carries its station's readiness; a disabled row's station is not asked", async () => {
+  const asked: string[] = [];
+  const entries = await boardRosterWithReadiness("tnt_1", "brd_00000000000000b1", {
+    rows: async () => [ROW, { ...ROW, key: "off", stationId: "stn_b", enabled: false }, { ...ROW, key: "down", stationId: "stn_c" }],
+    readiness: async (_t, id) => {
+      asked.push(id);
+      return id === "stn_c" ? { ready: false, reason: "node offline" } : { ready: true, reason: null };
+    },
+  });
+  expect(asked.sort()).toEqual(["stn_a", "stn_c"]);
+  expect(entries).toEqual([
+    { ...ROW, ready: true, reason: null },
+    { ...ROW, key: "off", stationId: "stn_b", enabled: false, ready: false, reason: "the roster entry is disabled" },
+    { ...ROW, key: "down", stationId: "stn_c", ready: false, reason: "node offline" },
+  ]);
 });
