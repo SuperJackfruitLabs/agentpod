@@ -12,13 +12,13 @@ import { test, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:te
 import { eq, inArray } from "drizzle-orm";
 
 import { db } from "../../src/db/drizzle";
-import { bridgeAgents } from "../../src/db/schema/bridge";
+import { bridgeAgents, bridgeDispatches } from "../../src/db/schema/bridge";
 import { stations } from "../../src/db/schema/stations";
 import { nodes } from "../../src/db/schema/nodes";
 import { BOOTSTRAP_TENANT_ID as TENANT, tenants } from "../../src/db/schema/tenants";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
-import { rosterBoardsFor, stationOwnerFor } from "../../src/routes/bridge-roster";
+import { boardRosterFor, rosterBoardsFor, stationOwnerFor } from "../../src/routes/bridge-roster";
 import {
   createBridgeAgent,
   deleteBridgeAgent,
@@ -93,6 +93,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await db.delete(bridgeDispatches).where(inArray(bridgeDispatches.stationId, [S1, S2, S3]));
   await db.delete(bridgeAgents).where(inArray(bridgeAgents.stationId, [S1, S2]));
   seen = [];
   restore = setSuperlibraryClientForTests({
@@ -105,6 +106,7 @@ beforeEach(async () => {
 afterEach(() => restore());
 
 afterAll(async () => {
+  await db.delete(bridgeDispatches).where(inArray(bridgeDispatches.stationId, [S1, S2, S3]));
   await db.delete(bridgeAgents).where(inArray(bridgeAgents.stationId, [S1, S2]));
   await db.delete(stations).where(inArray(stations.id, [S1, S2]));
   await db.delete(stations).where(eq(stations.id, S3));
@@ -173,4 +175,49 @@ test("stationOwnerFor reads only the caller's tenant", async () => {
   expect(await stationOwnerFor(OTHER_TENANT, S1)).toBeNull();
   expect(await stationOwnerFor(TENANT, S3)).toBeNull();
   expect(await stationOwnerFor(OTHER_TENANT, S3)).toEqual({ id: S3, key: `${S3}-key`, owner: ownerId });
+});
+
+const dispatch = (runId: string, stationId: string, outcome: string, startedAt: string, tenantId = TENANT) => ({
+  externalSource: "superpipeline",
+  externalRunId: runId,
+  tenantId,
+  boardId: B2,
+  externalCardId: "card_0000000000000001",
+  agentKey: "any",
+  stationId,
+  leaseEpoch: 1,
+  outcome,
+  startedAt: new Date(startedAt),
+  updatedAt: new Date(startedAt),
+});
+
+test("boardRosterFor lists the board's rows with each station's work on any board", async () => {
+  await createBridgeAgent(row("a-b1", B1, S1));
+  await createBridgeAgent(row("o-b1", B1, S2, false));
+  await createBridgeAgent(row("a-b2", B2, S1));
+  // S1 has a run in hand on another board, and took an earlier one; S2's only run is done.
+  await db.insert(bridgeDispatches).values([
+    dispatch("run_roster_1", S1, "reported", "2026-11-12T09:00:00.000Z"),
+    dispatch("run_roster_2", S1, "working", "2026-11-12T10:00:00.000Z"),
+    dispatch("run_roster_3", S2, "reported", "2026-11-12T08:00:00.000Z"),
+    // Another tenant's run on a station id this tenant does not have counts for nobody here.
+    dispatch("run_roster_4", S3, "working", "2026-11-12T11:00:00.000Z", OTHER_TENANT),
+  ]);
+  expect(await boardRosterFor(TENANT, B1)).toEqual([
+    { key: "a-b1", stationId: S1, principalId: AGENT, enabled: true, busy: true, lastDispatchedAt: "2026-11-12T10:00:00.000Z" },
+    { key: "o-b1", stationId: S2, principalId: OTHER, enabled: false, busy: false, lastDispatchedAt: "2026-11-12T08:00:00.000Z" },
+  ]);
+  expect(await boardRosterFor(TENANT, B3)).toEqual([]);
+  expect(await boardRosterFor(OTHER_TENANT, B1)).toEqual([]);
+});
+
+test("a parked run is work in hand; a released, abandoned or reported one is not", async () => {
+  await createBridgeAgent(row("a-b1", B1, S1));
+  await db.insert(bridgeDispatches).values([
+    dispatch("run_roster_5", S1, "released", "2026-11-12T09:00:00.000Z"),
+    dispatch("run_roster_6", S1, "abandoned", "2026-11-12T09:10:00.000Z"),
+  ]);
+  expect((await boardRosterFor(TENANT, B1))[0]?.busy).toBe(false);
+  await db.insert(bridgeDispatches).values(dispatch("run_roster_7", S1, "parked", "2026-11-12T09:20:00.000Z"));
+  expect((await boardRosterFor(TENANT, B1))[0]?.busy).toBe(true);
 });
