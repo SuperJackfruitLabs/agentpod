@@ -10,6 +10,13 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+### Fixed
+- **A board roster no longer calls a station busy for a parked run.** `GET
+  /api/bridge/boards/:boardId/roster` counted `parked` dispatches as work in hand, but #786 parks a
+  revoked strict run precisely so it stops holding the roster, and the bridge goes on claiming on
+  the station. A placement service read such a station as busy for good. Only `working` runs (a
+  run in progress, or one waiting on a permission answer) count now.
+
 ### Changed
 - **The code is restructured into modules, with no change in behaviour** (the modularity work,
   PR #836). The hub's `services/` is 23 modules, each imported through its `index.ts` and
