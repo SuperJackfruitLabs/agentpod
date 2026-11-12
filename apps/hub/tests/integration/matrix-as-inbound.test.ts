@@ -832,15 +832,6 @@ describe("answering a permission request from the room", () => {
   });
 });
 
-/**
- * A plain message in a BOARD room is an answer, not a prompt.
- *
- * A board room has no station — that is the whole point of it: it is spoken by an
- * identity whose keys this hub owns, so it can both encrypt and decrypt there. Until
- * now a message typed into one fell through to the station lookup, found nothing, and
- * was dropped in silence. That is correct for chatter and wrong for the one thing a
- * board room exists to carry back.
- */
 /** Inbound deps with a typed-answer handler and a gate-decision handler, each recording the room it ran for. */
 function boardAnswerers() {
   const typed: Array<{ sender: string; body: string; roomId: string }> = [];
@@ -864,6 +855,15 @@ function boardAnswerers() {
   return { deps: wired, typed, decided };
 }
 
+/**
+ * A plain message in a BOARD room is an answer, not a prompt.
+ *
+ * A board room has no station — that is the whole point of it: it is spoken by an
+ * identity whose keys this hub owns, so it can both encrypt and decrypt there. Until
+ * now a message typed into one fell through to the station lookup, found nothing, and
+ * was dropped in silence. That is correct for chatter and wrong for the one thing a
+ * board room exists to carry back.
+ */
 describe("a message in a board room", () => {
   const BOARD_ROOM = "!board-inbound:id.agentpod.dev";
   const SPEAKER = "@agent_superpipeline:id.agentpod.dev";
