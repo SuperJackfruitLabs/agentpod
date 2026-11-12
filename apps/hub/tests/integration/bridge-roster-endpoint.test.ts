@@ -211,13 +211,19 @@ test("boardRosterFor lists the board's rows with each station's work on any boar
   expect(await boardRosterFor(OTHER_TENANT, B1)).toEqual([]);
 });
 
-test("a parked run is work in hand; a released, abandoned or reported one is not", async () => {
+test("only a working run is work in hand; a parked, released, abandoned or reported one is not", async () => {
   await createBridgeAgent(row("a-b1", B1, S1));
   await db.insert(bridgeDispatches).values([
     dispatch("run_roster_5", S1, "released", "2026-11-12T09:00:00.000Z"),
     dispatch("run_roster_6", S1, "abandoned", "2026-11-12T09:10:00.000Z"),
+    dispatch("run_roster_8", S1, "reported", "2026-11-12T09:15:00.000Z"),
+    // #786: a parked run no longer holds the roster; the bridge claims new work beside it.
+    dispatch("run_roster_7", S1, "parked", "2026-11-12T09:20:00.000Z"),
   ]);
-  expect((await boardRosterFor(TENANT, B1))[0]?.busy).toBe(false);
-  await db.insert(bridgeDispatches).values(dispatch("run_roster_7", S1, "parked", "2026-11-12T09:20:00.000Z"));
+  const [entry] = await boardRosterFor(TENANT, B1);
+  expect(entry?.busy).toBe(false);
+  // Still the last time the station took work.
+  expect(entry?.lastDispatchedAt).toBe("2026-11-12T09:20:00.000Z");
+  await db.insert(bridgeDispatches).values(dispatch("run_roster_9", S1, "working", "2026-11-12T09:30:00.000Z"));
   expect((await boardRosterFor(TENANT, B1))[0]?.busy).toBe(true);
 });

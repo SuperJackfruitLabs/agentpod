@@ -29,10 +29,13 @@ const PRN = /^prn_[0-9a-f]{20}$/;
 const BOARD = /^brd_[0-9a-f]{16}$/;
 
 /**
- * Outcomes that mean a dispatch still has its station's attention: a run in progress, or one parked
- * on a person's answer to a permission request.
+ * Outcomes that mean a dispatch still has its station's attention: a run in progress, including one
+ * waiting on a person's answer to a permission request (still `working`, with a wait deadline).
+ * A `parked` run is not one: #786 parks a revoked strict run that never reported precisely so it no
+ * longer holds the roster and the bridge claims new work on the station, so counting it here would
+ * call a station busy forever while the bridge keeps claiming on it.
  */
-const IN_HAND = ["working", "parked"] as const;
+const IN_HAND = ["working"] as const;
 
 /** How long one station's readiness may take before it counts as not ready. */
 export const ROSTER_READINESS_TIMEOUT_MS = 5_000;
