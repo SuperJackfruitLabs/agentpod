@@ -29,8 +29,8 @@ const DEAD_GRANTS: ForgeGrantState[] = ["revoked", "revoking", "failed"];
 
 /** A managed skill plan's selected generation, or null; tolerant of any other plan shape. */
 function generationOf(plan: unknown): string | null {
-  const after = (plan as { after?: unknown } | null)?.after;
-  const sha = (after as { archiveSHA256?: unknown } | null)?.archiveSHA256;
+  const after = typeof plan === "object" && plan !== null && "after" in plan ? plan.after : null;
+  const sha = typeof after === "object" && after !== null && "archiveSHA256" in after ? after.archiveSHA256 : null;
   return typeof sha === "string" ? sha : null;
 }
 

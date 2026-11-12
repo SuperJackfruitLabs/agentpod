@@ -22,12 +22,10 @@ const ROW: StationCapabilities = {
   credentials: [],
 };
 
-function app(kind = "service", sub = READER, token = true) {
+function app(kind: "service" | "human" | "agent" = "service", sub = READER, token = true) {
   return createCapabilityCatalogRoute({
     verify: async () =>
-      token
-        ? ({ ok: true, caller: { sub, principalKind: kind, tenantId: "tnt_1", claims: {} } } as never)
-        : ({ ok: false, status: 401 } as never),
+      token ? { ok: true, caller: { sub, principalKind: kind, tenantId: "tnt_1" } } : { ok: false, status: 401 },
     readers: () => [READER],
     catalog: async (tenantId) => (tenantId === "tnt_1" ? [ENTRY] : []),
     stations: async (tenantId, only) =>

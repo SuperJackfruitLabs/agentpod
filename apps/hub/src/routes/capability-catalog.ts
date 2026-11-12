@@ -15,7 +15,7 @@
  */
 import { Hono, type Context } from "hono";
 
-import { verifyPlaneBearer } from "../auth/hub-token";
+import { verifyPlaneBearer, type PlaneBearerResult, type PlaneCaller } from "../auth/hub-token";
 import {
   catalogFrom,
   stationCapabilities,
@@ -26,8 +26,13 @@ import {
 
 const STATION = /^[A-Za-z0-9_-]{1,100}$/;
 
+/** What the route reads of a verified bearer: `verifyPlaneBearer`'s answer, narrowed. */
+type Verified =
+  | { ok: true; caller: Pick<PlaneCaller, "sub" | "principalKind" | "tenantId"> }
+  | Exclude<PlaneBearerResult, { ok: true }>;
+
 export interface CapabilityCatalogDeps {
-  verify: (token: string) => ReturnType<typeof verifyPlaneBearer>;
+  verify: (token: string) => Promise<Verified>;
   readers: () => string[];
   catalog: (tenantId: string) => Promise<CatalogEntry[]>;
   stations: (tenantId: string, only?: string[]) => Promise<StationCapabilities[]>;

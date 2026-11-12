@@ -12,10 +12,11 @@ process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "capability-catalog-t
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { eq, inArray } from "drizzle-orm";
 
-import { db } from "../../src/db/drizzle";
+import { db, rawSql } from "../../src/db/drizzle";
 import { acpRuns, acpSessions } from "../../src/db/schema/acp";
 import { bridgeAgents } from "../../src/db/schema/bridge";
-import { stationForgeApiGrants } from "../../src/db/schema/forge-api-grants";
+import type { ForgeApiProvider } from "@agentpod/contract";
+import { stationForgeApiGrants, type ForgeGrantState } from "../../src/db/schema/forge-api-grants";
 import { nodes, provisionedRuntimes } from "../../src/db/schema/nodes";
 import { skillArtifacts, skillOperations, trustedSkillReleaseArtifacts, trustedSkillReleases } from "../../src/db/schema/skills";
 import { stations } from "../../src/db/schema/stations";
@@ -73,15 +74,16 @@ const runtime = (id: string, status: "online" | "destroyed", runtimeName: string
 const fingerprint = (model: string, reportedBy: "harness" | "hub") => ({
   harness: "salaam", harness_version: "0.0.7", model, profile: "default", skill_release: "", reported_by: reportedBy,
 });
-const op = (id: string, profile: string, sha: string | null, artifactId: string | null, updatedAt: Date, state = "applied") => ({
-  id, tenantId: TENANT, userId, stationId: S_BOX, nodeId: BOX_NODE, stationKey: `${S_BOX}-key`, harness: "codex", profile,
-  kind: "managed" as const, action: (artifactId ? "install" : "rollback") as "install" | "rollback", artifactId,
-  state: state as "applied", plan: { after: sha === null ? null : { generation: id, archiveSHA256: sha, bundleDigest: sha } } as never,
-  updatedAt,
-});
-const grant = (id: string, provider: string, state: string) => ({
+/** A managed skill operation, written as SQL: its plan holds only the generation the reads look at. */
+const op = (id: string, profile: string, sha: string | null, artifactId: string | null, updatedAt: Date, state = "applied") => {
+  const plan = JSON.stringify({ after: sha === null ? null : { generation: id, archiveSHA256: sha, bundleDigest: sha } });
+  return rawSql`
+    INSERT INTO skill_operations (id, tenant_id, user_id, station_id, node_id, station_key, harness, profile, kind, action, artifact_id, state, plan, created_at, updated_at)
+    VALUES (${id}, ${TENANT}, ${userId}, ${S_BOX}, ${BOX_NODE}, ${`${S_BOX}-key`}, 'codex', ${profile}, 'managed', ${artifactId ? "install" : "rollback"}, ${artifactId}, ${state}, ${plan}::jsonb, ${updatedAt.toISOString()}, ${updatedAt.toISOString()})`;
+};
+const grant = (id: string, provider: ForgeApiProvider, state: ForgeGrantState) => ({
   id, tenantId: TENANT, stationId: S_BOX, stationIdSnapshot: S_BOX, provider, instance: `https://${provider}.example.test`,
-  mode: "minted", account: "agent-x", repositories: ["org/repo"], preset: "read", state, generation: 1, createdBy: userId,
+  mode: "minted" as const, account: "agent-x", repositories: ["org/repo"], preset: "read" as const, state, generation: 1, createdBy: userId,
   ...(state === "revoked" ? { revokedAt: new Date() } : {}),
 });
 
@@ -117,14 +119,12 @@ beforeAll(async () => {
   ]);
   await db.insert(trustedSkillReleases).values({ id: RELEASE, tenantId: TENANT, userId, version: "0.3.0", profile: "engineering", recordDigest: "1".repeat(64), record: {} });
   await db.insert(trustedSkillReleaseArtifacts).values({ releaseId: RELEASE, tenantId: TENANT, userId, artifactId: ART_RELEASED, harness: "codex", bundleDigest: "2".repeat(64) });
-  await db.insert(skillOperations).values([
-    op(OP_ENG, "engineering", SHA_RELEASED, ART_RELEASED, ago(20)),
-    op(OP_OPS, "ops", SHA_UPLOADED, ART_UPLOADED, ago(20)),
-    // "ops" was rolled back to nothing afterwards: no generation is in place.
-    op(OP_BACK, "ops", null, null, ago(10)),
-    // A failed attempt is not an applied one.
-    op(OP_FAIL, "design", SHA_UPLOADED, ART_UPLOADED, ago(5), "conflict"),
-  ]);
+  await op(OP_ENG, "engineering", SHA_RELEASED, ART_RELEASED, ago(20));
+  await op(OP_OPS, "ops", SHA_UPLOADED, ART_UPLOADED, ago(20));
+  // "ops" was rolled back to nothing afterwards: no generation is in place.
+  await op(OP_BACK, "ops", null, null, ago(10));
+  // A failed attempt is not an applied one.
+  await op(OP_FAIL, "design", SHA_UPLOADED, ART_UPLOADED, ago(5), "conflict");
   await db.insert(bridgeAgents).values([
     { tenantId: TENANT, key: "catalog-box", boardId: "brd_00000000000ca7b1", stationId: S_BOX, tokenEncrypted: "x", mcpTokenEncrypted: "y" },
     { tenantId: TENANT, key: "catalog-host-off", boardId: "brd_00000000000ca7b1", stationId: S_HOST, tokenEncrypted: "x", mcpTokenEncrypted: "y", enabled: false },
@@ -133,7 +133,7 @@ beforeAll(async () => {
     grant(G_GITHUB, "github", "verified"),
     grant(G_FORGEJO, "forgejo", "revoked"),
     grant(G_GITEA, "gitea", "delivered"),
-  ] as never);
+  ]);
 });
 
 afterAll(cleanup);
