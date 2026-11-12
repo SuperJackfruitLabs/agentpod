@@ -665,3 +665,47 @@ describe("a board whose chat has moved", () => {
     expect(asked).toEqual(["brd_7c1f"]);
   });
 });
+
+/**
+ * A board saying work is ready (`work.available`), through its own signed door: each rostered
+ * agent registers a config there, and the hub wakes that board's idle claim loops.
+ */
+async function postWork(d: SuperpipelinePushDeps, raw: string, signature?: string) {
+  return createSuperpipelinePushRoutes(d).request("/bridge/superpipeline/work", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(signature ? { "X-Superpipeline-Signature": signature } : {}) },
+    body: raw,
+  });
+}
+
+describe("the signed work door", () => {
+  const WORK = { event: "work.available", boardId: "brd_7c1f", cardId: "card_9a22", stageKey: "code", ts: "2026-11-12T00:00:00.000Z" };
+
+  test("wakes the board's loops on a signed work.available", async () => {
+    const woke: string[] = [];
+    const raw = JSON.stringify(WORK);
+    const res = await postWork(deps({ wakeBoard: (b) => (woke.push(b), 2) }), raw, await sign(SECRET, raw));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, woken: 2 });
+    expect(woke).toEqual(["brd_7c1f"]);
+  });
+
+  test("wakes nothing on an unsigned, wrongly signed or unconfigured delivery", async () => {
+    const woke: string[] = [];
+    const wakeBoard = (b: string) => (woke.push(b), 1);
+    const raw = JSON.stringify(WORK);
+    expect((await postWork(deps({ wakeBoard }), raw)).status).toBe(401);
+    expect((await postWork(deps({ wakeBoard }), raw, await sign("not-the-secret", raw))).status).toBe(401);
+    expect((await postWork(deps({ wakeBoard, secret: undefined }), raw, await sign(SECRET, raw))).status).toBe(503);
+    expect(woke).toEqual([]);
+  });
+
+  test("acknowledges any other event without waking anything", async () => {
+    const woke: string[] = [];
+    const raw = JSON.stringify(DELIVERY);
+    const res = await postWork(deps({ wakeBoard: (b) => (woke.push(b), 1) }), raw, await sign(SECRET, raw));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ignored: true });
+    expect(woke).toEqual([]);
+  });
+});

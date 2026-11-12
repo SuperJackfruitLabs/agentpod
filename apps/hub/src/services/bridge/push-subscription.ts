@@ -62,6 +62,18 @@ export function pushHookUrl(publicUrl: string): string {
   return `${publicUrl.replace(/\/+$/, "")}/public/bridge/superpipeline/push`;
 }
 
+/**
+ * Where a board says work is ready (`work.available`). A url of its own: superpipeline keys a config
+ * by agent and url, and each rostered agent registers one here, so on the chat url it would replace
+ * the board's chat subscription whenever that agent's credential is the one the board registers with.
+ */
+export function workHookUrl(publicUrl: string): string {
+  return `${publicUrl.replace(/\/+$/, "")}/public/bridge/superpipeline/work`;
+}
+
+/** What each rostered agent subscribes to on the work url. */
+export const WORK_PUSH_EVENTS = ["work.available"] as const;
+
 export interface SubscribeOptions {
   baseUrl: string;
   /** This hub's public origin — where superpipeline must be able to reach the push route. */
@@ -73,6 +85,13 @@ export interface SubscribeOptions {
   fetch: Fetcher;
   /** Board → the credential to register it with (the same one the sweep reads it with). */
   boards: () => Promise<Map<string, string>>;
+  /**
+   * Every rostered agent's board and credential. Each registers its own `work.available` config on
+   * the work url with its own credential, so the board pings exactly the agents whose capabilities
+   * a claim would match (superpipeline reads them from the agent's own row), and the hub wakes that
+   * board's loops (`work-wake.ts`). Absent: no work subscription, and loops find work by poll.
+   */
+  agents?: () => Promise<Array<{ boardId: string; token: string }>>;
   /**
    * The relay token for a board (`relay.ts`), or null when the board is not the relay's workspace or
    * there is no relay. With one, the board also gets a push config registered by the relay service
@@ -94,11 +113,13 @@ export interface SubscribeResult {
   subscribed: string[];
   /** Boards that also have the relay's `elicitation.pending` config. */
   relayed: string[];
+  /** Boards with at least one agent subscribed to `work.available`. */
+  working: string[];
   failed: Array<{ boardId: string; error: string }>;
 }
 
 export async function subscribeBoardsToPush(opts: SubscribeOptions): Promise<SubscribeResult> {
-  const result: SubscribeResult = { subscribed: [], relayed: [], failed: [] };
+  const result: SubscribeResult = { subscribed: [], relayed: [], working: [], failed: [] };
   if (!opts.secret) return result;
 
   const url = pushHookUrl(opts.publicUrl);
@@ -130,5 +151,33 @@ export async function subscribeBoardsToPush(opts: SubscribeOptions): Promise<Sub
       result.failed.push({ boardId, error: `relay: ${err instanceof Error ? err.message : String(err)}` });
     }
   }
+  if (opts.agents) await subscribeAgentsToWork(opts, opts.secret, opts.agents, result);
   return result;
+}
+
+/** One `work.available` config per rostered credential on each board (see `SubscribeOptions.agents`). */
+async function subscribeAgentsToWork(
+  opts: SubscribeOptions,
+  secret: string,
+  agents: () => Promise<Array<{ boardId: string; token: string }>>,
+  result: SubscribeResult,
+): Promise<void> {
+  const url = workHookUrl(opts.publicUrl);
+  const seen = new Set<string>();
+  for (const { boardId, token } of await agents()) {
+    // Two rows on one credential are one config; a row with no credential of its own cannot register.
+    if (token === "" || seen.has(`${boardId}\u0000${token}`)) continue;
+    seen.add(`${boardId}\u0000${token}`);
+    try {
+      await new SuperpipelineClient({ baseUrl: opts.baseUrl, boardId, token, fetch: opts.fetch }).registerPushConfig({
+        url,
+        token: secret,
+        events: [...WORK_PUSH_EVENTS],
+      });
+      if (!result.working.includes(boardId)) result.working.push(boardId);
+    } catch (err) {
+      // One agent refused must not leave the others unsubscribed; its loop still polls.
+      result.failed.push({ boardId, error: `work: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
 }

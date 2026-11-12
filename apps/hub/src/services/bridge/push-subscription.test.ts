@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { PUSH_EVENTS, RELAY_PUSH_EVENTS, pushEventsFor, pushHookUrl, subscribeBoardsToPush } from "./push-subscription";
+import { PUSH_EVENTS, RELAY_PUSH_EVENTS, pushEventsFor, pushHookUrl, subscribeBoardsToPush, workHookUrl } from "./push-subscription";
 
 /**
  * Nobody registered the hub's push subscription — so no board ever pushed a gate.
@@ -39,7 +39,7 @@ describe("subscribing each board to the hub's push", () => {
         ]),
     });
 
-    expect(result).toEqual({ subscribed: ["brd_one", "brd_two"], relayed: [], failed: [] });
+    expect(result).toEqual({ subscribed: ["brd_one", "brd_two"], relayed: [], working: [], failed: [] });
     expect(sent.map((s) => [s.method, s.url, s.auth])).toEqual([
       ["POST", `${BASE}/v1/boards/brd_one/push-configs`, "Bearer spa_one"],
       ["POST", `${BASE}/v1/boards/brd_two/push-configs`, "Bearer spa_two"],
@@ -84,7 +84,7 @@ describe("subscribing each board to the hub's push", () => {
     });
 
     expect(sent).toHaveLength(0);
-    expect(result).toEqual({ subscribed: [], relayed: [], failed: [] });
+    expect(result).toEqual({ subscribed: [], relayed: [], working: [], failed: [] });
   });
 
   test("one board refusing does not stop the others", async () => {
@@ -146,7 +146,7 @@ describe("the relay's own push config, for approval requests", () => {
         ]),
       relayTokenFor: async (boardId) => (boardId === "brd_one" ? "relay.jwt.token" : null),
     });
-    expect(result).toEqual({ subscribed: ["brd_one", "brd_two"], relayed: ["brd_one"], failed: [] });
+    expect(result).toEqual({ subscribed: ["brd_one", "brd_two"], relayed: ["brd_one"], working: [], failed: [] });
     expect(sent.map((s) => [s.url, s.auth, s.body.events])).toEqual([
       [`${BASE}/v1/boards/brd_one/push-configs`, "Bearer spa_one", [...PUSH_EVENTS]],
       [`${BASE}/v1/boards/brd_one/push-configs`, "Bearer relay.jwt.token", ["elicitation.pending"]],
@@ -188,5 +188,74 @@ describe("the relay's own push config, for approval requests", () => {
       },
     });
     expect(refused).toBe(1);
+  });
+});
+
+/**
+ * Each rostered agent subscribes to `work.available` with its own credential, on a url of its own,
+ * so the board pings exactly the agents a claim would match and the chat subscription is untouched.
+ */
+describe("each rostered agent's work subscription", () => {
+  test("registers work.available once per credential per board, on the work url, signed with the secret", async () => {
+    const { sent, fetchImpl } = recordingFetch();
+    const result = await subscribeBoardsToPush({
+      baseUrl: BASE,
+      publicUrl: PUBLIC,
+      secret: "shh",
+      fetch: fetchImpl,
+      boards: async () => new Map([["brd_one", "spa_one"]]),
+      agents: async () => [
+        { boardId: "brd_one", token: "spa_one" },
+        { boardId: "brd_one", token: "spa_two" },
+        { boardId: "brd_one", token: "spa_two" },
+        { boardId: "brd_one", token: "" },
+      ],
+    });
+    expect(result).toEqual({ subscribed: ["brd_one"], relayed: [], working: ["brd_one"], failed: [] });
+    const work = sent.filter((s) => s.body.url === workHookUrl(PUBLIC));
+    expect(work.map((s) => s.auth)).toEqual(["Bearer spa_one", "Bearer spa_two"]);
+    for (const s of work) expect(s.body).toEqual({ url: `${PUBLIC}/public/bridge/superpipeline/work`, token: "shh", events: ["work.available"] });
+    // The chat subscription stays on its own url with its own events.
+    expect(sent.filter((s) => s.body.url === pushHookUrl(PUBLIC))).toHaveLength(1);
+    expect(workHookUrl(PUBLIC)).not.toBe(pushHookUrl(PUBLIC));
+  });
+
+  test("one agent refused leaves the others subscribed", async () => {
+    const { fetchImpl } = recordingFetch();
+    let n = 0;
+    const flaky = async (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => {
+      if (init.headers.Authorization === "Bearer spa_bad") {
+        n++;
+        return { status: 403, ok: false, json: async () => ({ error: "nope" }) };
+      }
+      return fetchImpl(url, init);
+    };
+    const result = await subscribeBoardsToPush({
+      baseUrl: BASE,
+      publicUrl: PUBLIC,
+      secret: "shh",
+      fetch: flaky,
+      boards: async () => new Map(),
+      agents: async () => [
+        { boardId: "brd_one", token: "spa_bad" },
+        { boardId: "brd_two", token: "spa_good" },
+      ],
+    });
+    expect(n).toBe(1);
+    expect(result.working).toEqual(["brd_two"]);
+    expect(result.failed.map((f) => f.boardId)).toEqual(["brd_one"]);
+  });
+
+  test("registers nothing without the signing secret", async () => {
+    const { sent, fetchImpl } = recordingFetch();
+    await subscribeBoardsToPush({
+      baseUrl: BASE,
+      publicUrl: PUBLIC,
+      secret: undefined,
+      fetch: fetchImpl,
+      boards: async () => new Map(),
+      agents: async () => [{ boardId: "brd_one", token: "spa_one" }],
+    });
+    expect(sent).toEqual([]);
   });
 });
