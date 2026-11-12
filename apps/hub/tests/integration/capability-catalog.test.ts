@@ -15,7 +15,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db, rawSql } from "../../src/db/drizzle";
 import { acpRuns, acpSessions } from "../../src/db/schema/acp";
 import { bridgeAgents } from "../../src/db/schema/bridge";
-import type { ForgeApiProvider } from "@agentpod/contract";
+import { CatalogResponse, CatalogStationsResponse, type ForgeApiProvider } from "@agentpod/contract";
 import { stationForgeApiGrants, type ForgeGrantState } from "../../src/db/schema/forge-api-grants";
 import { nodes, provisionedRuntimes } from "../../src/db/schema/nodes";
 import { skillArtifacts, skillOperations, trustedSkillReleaseArtifacts, trustedSkillReleases } from "../../src/db/schema/skills";
@@ -177,6 +177,9 @@ test("the registry row and the catalog read from those facts", async () => {
   expect(box.isolation).toEqual({ level: "sandbox", runtime: "runsc", proof: "installed" });
   expect(box.model).toEqual({ id: "kimi-k2", proof: "declared" });
   expect(box.credentials.map((c) => c.name)).toEqual(["forge:gitea", "forge:github"]);
+  // What the reads build is what the contract says the routes answer.
+  expect(() => CatalogStationsResponse.parse({ stations: facts.map(stationCapabilities) })).not.toThrow();
+  expect(() => CatalogResponse.parse({ entries: catalogFrom(facts) })).not.toThrow();
   const ids = catalogFrom(facts).map((e) => e.id);
   expect(ids).toEqual([
     "cli:stk",

@@ -12,70 +12,27 @@
  * handle to one.
  */
 
-/** What kind of thing a catalog entry is. */
-export const CATALOG_KINDS = ["skill", "mcp", "cli", "harness", "service"] as const;
-export type CatalogKind = (typeof CATALOG_KINDS)[number];
+import {
+  CatalogKind as CatalogKindSchema,
+  CatalogProof,
+  IsolationLevel as IsolationLevelSchema,
+  type CatalogEntry,
+  type IsolationLevel,
+  type StationCapabilities,
+  type StationCredential,
+  type StationTool,
+} from "@agentpod/contract";
 
-/**
- * How a registry fact is known, strongest first:
- * - `probed`: something checked it works (a harness reported it in a real run, a broker grant was verified);
- * - `installed`: AgentPod put it there (adopted, provisioned, applied, delivered);
- * - `declared`: someone said so, and nothing has checked it.
- */
-export const PROOFS = ["probed", "installed", "declared"] as const;
+export type { CatalogEntry, IsolationLevel, StationCapabilities, StationCredential, StationTool };
+export type CatalogKind = (typeof CATALOG_KINDS)[number];
 export type Proof = (typeof PROOFS)[number];
 
-/**
- * How strongly a station's harness is kept from the machine it runs on, weakest first:
- * - `host`: on an enrolled machine as the node's own user, with no runtime AgentPod provisioned;
- * - `container`: in a container AgentPod provisioned, sharing the host's kernel;
- * - `sandbox`: behind a kernel boundary of its own (gVisor, or a microVM).
- */
-export const ISOLATION_LEVELS = ["host", "container", "sandbox"] as const;
-export type IsolationLevel = (typeof ISOLATION_LEVELS)[number];
-
-/** One thing that exists in the workspace. */
-export interface CatalogEntry {
-  /** `<kind>:<name>`, e.g. `harness:hermes`, `skill:engineering`, `mcp:superpipeline`. */
-  id: string;
-  kind: CatalogKind;
-  name: string;
-  /** The newest version seen on any station; null when none was reported. */
-  version: string | null;
-  /** Where it comes from: `agentpod`, `supertoolkit`, `superpipeline`, `trusted-release`, `upload`, `harness`. */
-  source: string;
-  /** An SPDX id when known; null means nobody has checked, not that it has none. */
-  licence: string | null;
-  /** The names of the credentials it needs, never the credentials. */
-  credentials: string[];
-}
-
-export interface StationTool {
-  /** A catalog entry's id. */
-  id: string;
-  proof: Proof;
-}
-
-export interface StationCredential {
-  /** `forge:<provider>`: a forge the station's broker holds a grant for. */
-  name: string;
-  /** The forge instance (base URL) the grant is for. */
-  instance: string;
-  proof: Proof;
-}
-
-/** One station's row in the registry. */
-export interface StationCapabilities {
-  stationId: string;
-  /** The agent occupying the station; null for a station with no agent. */
-  principalId: string | null;
-  harness: string;
-  isolation: { level: IsolationLevel; runtime: string | null; proof: Proof };
-  /** The model the station's harness last ran with; null when no run has reported one. */
-  model: { id: string; proof: Proof } | null;
-  tools: StationTool[];
-  credentials: StationCredential[];
-}
+/** The shapes are the contract's (`packages/contract/src/capability-catalog.ts`). */
+export const CATALOG_KINDS = CatalogKindSchema.options;
+/** Strongest first. */
+export const PROOFS = CatalogProof.options;
+/** Weakest first. */
+export const ISOLATION_LEVELS = IsolationLevelSchema.options;
 
 /** What the hub knows about one station, read from its own tables, before it is shaped. */
 export interface StationFacts {

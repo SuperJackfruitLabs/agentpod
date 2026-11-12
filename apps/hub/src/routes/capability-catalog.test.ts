@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { catalogReaders, createCapabilityCatalogRoute } from "./capability-catalog";
+import { CatalogResponse, CatalogStationsResponse, StationCapabilities as StationRow } from "@agentpod/contract";
 import type { CatalogEntry, StationCapabilities } from "../services/catalog";
 
 const READER = "prn_0000000000000000c0b3";
@@ -36,11 +37,12 @@ const get = (a: ReturnType<typeof app>, path: string, authorization: string | nu
   a.request(path, { headers: authorization ? { authorization } : {} });
 
 test("a listed service reads the catalog, every station, and one station", async () => {
-  expect(await (await get(app(), "/api/catalog")).json()).toEqual({ entries: [ENTRY] });
-  expect(await (await get(app(), "/api/catalog/stations")).json()).toEqual({ stations: [ROW] });
+  // Every answer is the contract's shape (packages/contract/src/capability-catalog.ts).
+  expect(CatalogResponse.parse(await (await get(app(), "/api/catalog")).json())).toEqual({ entries: [ENTRY] });
+  expect(CatalogStationsResponse.parse(await (await get(app(), "/api/catalog/stations")).json())).toEqual({ stations: [ROW] });
   const one = await get(app(), `/api/catalog/stations/${ROW.stationId}`);
   expect(one.status).toBe(200);
-  expect(await one.json()).toEqual(ROW);
+  expect(StationRow.parse(await one.json())).toEqual(ROW);
 });
 
 test("a station not in the caller's workspace is 404; a malformed id is 400", async () => {
