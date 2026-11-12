@@ -45,3 +45,5 @@ export * from "./execution-evidence";
 export * from "./salaam-operator-settlement";
 
 export * from "./paths";
+
+export * from "./capability-catalog";

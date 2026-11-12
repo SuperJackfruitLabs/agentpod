@@ -142,6 +142,7 @@ module is a folder whose `index.ts` is its public entry point:
 |---|---|---|
 | 1 | `audit` | the station audit log |
 | | `broker` | the broker (request/stream correlation) and the connection manager of the node gateway |
+| | `catalog` | the capability catalog (what exists in a workspace) and the per-station registry (who has it, with proof), read from the hub's own tables |
 | | `control` | the control pair's switch, and who may change what an agent is (grant reach) |
 | | `hub` | the hub process itself: hub operators and their config, admin counts, graceful shutdown |
 | | `matrix` | Matrix shared below the appservice: the homeserver client, station Matrix names, a principal's Matrix id, Matrix identity, Matrix credentials, attachment helpers |
