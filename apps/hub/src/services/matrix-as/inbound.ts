@@ -28,6 +28,7 @@ import { getGrant, grantAllowsPrincipal } from "../../auth/org-plane/grants";
 import { isControlPairEnforced } from "../control";
 import { bridgeUserId } from "../matrix";
 import { boardRoomFor } from "../board-chat";
+import { movedBoardOfRoom } from "../board-chat";
 import { principalHandle } from "../../auth/org-plane/principals";
 import {
   clearPendingPermission,
@@ -460,6 +461,17 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
 
   if (event.type !== "m.room.message") return;
   if (!event.room_id) return;
+
+  // The old room of a board whose chat has moved out of this hub (`moved-boards.ts`): nothing said
+  // here is acted on, so a stale card cannot resolve a decision the new room already carries.
+  const movedBoard = await movedBoardOfRoom(event.room_id, boardRoomFor);
+  if (movedBoard) {
+    log.info("message in the old room of a board whose chat has moved; ignored", {
+      boardId: movedBoard,
+      roomId: event.room_id,
+    });
+    return;
+  }
 
   // ── A decision, before anything else ──────────────────────────────────────
   //

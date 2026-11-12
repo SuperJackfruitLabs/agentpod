@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { GATE_DECISION_V2_SUITE_TYPE } from "@superjackfruitlabs/treaty-matrix-events";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
@@ -840,6 +841,29 @@ describe("answering a permission request from the room", () => {
  * was dropped in silence. That is correct for chatter and wrong for the one thing a
  * board room exists to carry back.
  */
+/** Inbound deps with a typed-answer handler and a gate-decision handler, each recording the room it ran for. */
+function boardAnswerers() {
+  const typed: Array<{ sender: string; body: string; roomId: string }> = [];
+  const decided: string[] = [];
+  const wired: ReturnType<typeof deps> & {
+    elicitations?: { handle(e: { sender: string; body: string }, roomId: string): Promise<unknown> };
+    gates?: { handle(e: unknown, roomId: string): Promise<unknown> };
+  } = deps();
+  wired.elicitations = {
+    handle: async (e, roomId) => {
+      typed.push({ ...e, roomId });
+      return { status: "answered" };
+    },
+  };
+  wired.gates = {
+    handle: async (_e, roomId) => {
+      decided.push(roomId);
+      return { status: "resolved" };
+    },
+  };
+  return { deps: wired, typed, decided };
+}
+
 describe("a message in a board room", () => {
   const BOARD_ROOM = "!board-inbound:id.agentpod.dev";
   const SPEAKER = "@agent_superpipeline:id.agentpod.dev";
@@ -888,6 +912,41 @@ describe("a message in a board room", () => {
     // `elicitations` absent: the message is dropped as it always was, with nothing
     // thrown. This is the path every deployment without a board takes.
     await handleRoomMessage(message(OWNER_MXID, "hello", BOARD_ROOM), deps());
+  });
+
+  /**
+   * The board's chat has moved out of this hub (BOARD_CHAT_MOVED_BOARDS, `moved-boards.ts`): its old
+   * room still holds cards, and an answer to one must not resolve a decision the new room carries.
+   */
+  describe("whose chat has moved", () => {
+    const before = process.env.BOARD_CHAT_MOVED_BOARDS;
+    afterEach(() => {
+      if (before === undefined) delete process.env.BOARD_CHAT_MOVED_BOARDS;
+      else process.env.BOARD_CHAT_MOVED_BOARDS = before;
+    });
+
+    const decision = {
+      ...message(OWNER_MXID, "Approve", BOARD_ROOM),
+      content: { msgtype: "m.text", body: "Approve", suite_event_type: GATE_DECISION_V2_SUITE_TYPE, gate_id: "gate_old", option_id: "approve" },
+    };
+
+    test("an answer in its old room is ignored, a typed one and a decision alike", async () => {
+      process.env.BOARD_CHAT_MOVED_BOARDS = "brd_inbound_test";
+      const { deps: d, typed, decided } = boardAnswerers();
+      await handleRoomMessage(message(OWNER_MXID, "2", BOARD_ROOM), d);
+      await handleRoomMessage(decision, d);
+      expect(typed).toEqual([]);
+      expect(decided).toEqual([]);
+    });
+
+    test("another board's move leaves this room answered as before", async () => {
+      process.env.BOARD_CHAT_MOVED_BOARDS = "brd_somewhere_else";
+      const { deps: d, typed, decided } = boardAnswerers();
+      await handleRoomMessage(message(OWNER_MXID, "2", BOARD_ROOM), d);
+      await handleRoomMessage(decision, d);
+      expect(typed).toEqual([{ sender: OWNER_MXID, body: "2", roomId: BOARD_ROOM }]);
+      expect(decided).toEqual([BOARD_ROOM]);
+    });
   });
 });
 

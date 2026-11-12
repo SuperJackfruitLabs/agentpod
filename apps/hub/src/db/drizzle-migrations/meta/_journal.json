@@ -911,6 +911,13 @@
       "when": 1792580400019,
       "tag": "0129_pending_decrypts",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1792580400020,
+      "tag": "0130_board_chat_moved_notice",
+      "breakpoints": true
     }
   ]
 }

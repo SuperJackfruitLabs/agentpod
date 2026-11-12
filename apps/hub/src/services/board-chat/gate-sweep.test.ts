@@ -14,7 +14,7 @@
  * that already has one, and the two would eventually disagree.
  */
 
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 
 import { bridgeGateSweepDeps, startGateSweeper, sweepBoardNow, sweepGates, type GateSweepDeps } from "./gate-sweep";
 import type { GatePendingDelivery, ProjectionOutcome } from "./gates";
@@ -843,5 +843,57 @@ describe("the sweep settles follow-ups the board no longer owes", () => {
     });
     expect((await sweepGates(f.deps)).deliveries.settled).toBe(0);
     expect(settled).toEqual([]);
+  });
+});
+
+describe("a board whose chat has moved", () => {
+  const before = process.env.BOARD_CHAT_MOVED_BOARDS;
+  afterEach(() => {
+    if (before === undefined) delete process.env.BOARD_CHAT_MOVED_BOARDS;
+    else process.env.BOARD_CHAT_MOVED_BOARDS = before;
+  });
+
+  test("is not swept here; another board still is", async () => {
+    process.env.BOARD_CHAT_MOVED_BOARDS = "brd_moved";
+    const pending: string[] = [];
+    const f = fake({
+      boards: async () => ["brd_moved", "brd_one"],
+      onBoardPending: async (boardId) => void pending.push(boardId),
+    });
+    await sweepGates(f.deps);
+    expect(f.asked).toEqual(["brd_one"]);
+    expect(f.offered).toEqual(["gate_1"]);
+    expect(pending).toEqual(["brd_one"]);
+  });
+
+  test("is not subscribed to push; another board still is", async () => {
+    process.env.BOARD_CHAT_MOVED_BOARDS = "brd_moved";
+    const config: Parameters<typeof bridgeGateSweepDeps>[0] = { baseUrl: "https://board.test", source: "superpipeline" };
+    const posted: string[] = [];
+    let resolveFirst: (() => void) | undefined;
+    const first = new Promise<void>((r) => (resolveFirst = r));
+    const fetchImpl = async (url: string, init: { method: string }) => {
+      if (init.method === "POST") {
+        posted.push(url);
+        resolveFirst?.();
+      }
+      return { status: 201, ok: true, json: async () => ({ configId: "push_1" }) };
+    };
+    const stop = startGateSweeper(
+      { tenantIdFor: async () => null, project: async () => ({ status: "already" }) },
+      {
+        config,
+        intervalMs: 3_600_000,
+        fetch: fetchImpl,
+        push: { secret: "shh", publicUrl: "https://hub.test" },
+        roster: async () => [
+          { boardId: "brd_moved", token: "spa_moved" },
+          { boardId: "brd_one", token: "spa_one" },
+        ],
+      },
+    );
+    await first;
+    stop?.();
+    expect(posted).toEqual(["https://board.test/v1/boards/brd_one/push-configs"]);
   });
 });

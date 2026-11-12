@@ -30,6 +30,7 @@ import { projectDelivery } from './services/board-chat/index.ts';
 import { projectAttention, reconcileBoardAttention, recordedAttention } from './services/board-chat/index.ts';
 import { relayTokenForBoard } from './services/board-chat/index.ts';
 import { retryEscalationReposts } from './services/board-chat/index.ts';
+import { startMovedBoardNotices } from './services/board-chat/index.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
 // Node gateway WebSocket routes
@@ -502,6 +503,10 @@ if (matrixBridge) {
   // `cancelled` rather than left parked, and the card is closed. Checked every minute; unref'd so
   // it never holds the process open.
   setInterval(() => void matrixBridge.expirePermissions(), 60_000).unref();
+
+  // A board whose chat has moved out of this hub (BOARD_CHAT_MOVED_BOARDS) is told so once in its
+  // old room, by the board's speaker. Nothing runs while no board has moved.
+  startMovedBoardNotices((userId, roomId, body) => gateProjection.sendText(userId, roomId, body));
 
   app.route(
     '/_matrix/app/v1',

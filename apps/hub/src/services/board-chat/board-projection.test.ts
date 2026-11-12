@@ -131,3 +131,28 @@ describe("src/index.ts", () => {
     expect(source).toMatch(/withJoinWake\([^;]*joinWake\(gateProjection\)\)/);
   });
 });
+
+describe("a human joining the old room of a board whose chat has moved", () => {
+  const before = process.env.BOARD_CHAT_MOVED_BOARDS;
+  afterEach(() => {
+    if (before === undefined) delete process.env.BOARD_CHAT_MOVED_BOARDS;
+    else process.env.BOARD_CHAT_MOVED_BOARDS = before;
+  });
+  const joinEvent = { type: "m.room.member", sender: HUMAN, state_key: HUMAN, room_id: ROOM, content: { membership: "join" } };
+
+  test("wakes nothing for the moved board, and still wakes another board", async () => {
+    process.env.BOARD_CHAT_MOVED_BOARDS = "brd_moved";
+    const woken: string[] = [];
+    const wake = (boardId: string) =>
+      wakeHeldOnJoin(joinEvent, {
+        lookup: async () => ({ boardId, speakerMxid: SPEAKER }),
+        sweepGates: async (b) => void woken.push(`gates:${b}`),
+        sweepElicitations: async (b) => void woken.push(`questions:${b}`),
+        repostEscalations: async (b) => void woken.push(`reposts:${b}`),
+      });
+    await wake("brd_moved");
+    expect(woken).toEqual([]);
+    await wake("brd_one");
+    expect(new Set(woken)).toEqual(new Set(["gates:brd_one", "questions:brd_one", "reposts:brd_one"]));
+  });
+});

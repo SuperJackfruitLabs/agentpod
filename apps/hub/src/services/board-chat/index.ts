@@ -43,3 +43,4 @@ export { legacyRequestEvents } from "./legacy-events";
 export { bindingOf, handleQuestionAnswer, parseQuestionAnswer, referenceOf } from "./question-answer";
 export { matchPermissionAnswer, unmatchedAnswerText } from "./reply-options";
 export type { PermissionOption } from "./reply-options";
+export { MOVED_BOARDS_ENV, MovedBoardsConfigError, isBoardMoved, movedBoardOfRoom, parseMovedBoards, startMovedBoardNotices } from "./moved-boards";
