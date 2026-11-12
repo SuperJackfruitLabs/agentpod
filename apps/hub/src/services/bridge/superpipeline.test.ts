@@ -14,7 +14,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { SuperpipelineApiError, SuperpipelineClient, isForeignRun, isLeaseSuperseded, pathTemplate } from "./superpipeline";
+import { SuperpipelineApiError, SuperpipelineClient, isForeignRun, isLeaseSuperseded, isTransientBoardError, pathTemplate } from "./superpipeline";
 import { context, trace } from "@opentelemetry/api";
 import { tracer } from "../../telemetry/otel";
 import { useTestTelemetry } from "../../../tests/helpers/telemetry";
@@ -224,6 +224,22 @@ describe("SuperpipelineClient — 403 and 409 are different facts", () => {
     const err = (await client.activity(work, { type: "thought" }).catch((e) => e)) as SuperpipelineApiError;
     expect(err.message).toContain("activities");
     expect(err.message).toContain("no active lease for this run");
+  });
+});
+
+describe("SuperpipelineClient — a board that did not answer for itself", () => {
+  test("a 5xx or a timeout is transient; a refusal never is", async () => {
+    for (const status of [500, 502, 503, 504]) {
+      const { client } = fakeBoard(() => ({ status, body: null }));
+      expect(isTransientBoardError(await client.heartbeat(work).catch((e) => e))).toBe(true);
+    }
+    for (const [status, code] of [[409, "STALE_LEASE"], [403, "NOT_RUN_OWNER"], [401, null], [404, null], [429, null]] as const) {
+      const { client } = fakeBoard(() => ({ status, body: code ? boardError(code, "refused") : null }));
+      expect(isTransientBoardError(await client.heartbeat(work).catch((e) => e))).toBe(false);
+    }
+    expect(isTransientBoardError(new DOMException("timed out", "TimeoutError"))).toBe(true);
+    expect(isTransientBoardError(Error("Strict work renewal unavailable"))).toBe(false);
+    expect(isTransientBoardError(null)).toBe(false);
   });
 });
 

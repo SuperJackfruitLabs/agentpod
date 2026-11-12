@@ -26,10 +26,10 @@ import { SALAAM_RERUN_ALLOWANCE, planFrom } from "./salaam-dispatch-plan";
 import { parkStrictRun } from "./salaam-dispatch-stopped";
 import { observeWithLease } from "./salaam-observation";
 import { livePublisher } from "./salaam-publish-live";
-import { reportSalaamCompletion } from "./salaam-report";
+import { acknowledgeTakenReport, reportSalaamCompletion } from "./salaam-report";
 import { forwardSalaamWorkTrace } from "./salaam-trace";
 import { reserveSalaamWork, deliverSalaamWork } from "./salaam-work";
-import type { ClaimedWork } from "./superpipeline";
+import { isTransientBoardError, type ClaimedWork } from "./superpipeline";
 
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -63,18 +63,29 @@ function canRenew(acp: AcpPort): acp is RenewingPort {
 }
 type Admitted = Awaited<ReturnType<typeof deliverSalaamWork>>;
 
-/** A board lease failure (stale or foreign) means the work must stop. */
+/** Waits between heartbeat attempts while the board does not answer for itself (5xx, timeout). */
+const HEARTBEAT_RETRY_MS = [1_000, 2_000, 4_000];
+
+/** A board lease failure (stale or foreign) means the work must stop. A board that did not answer
+ * for itself (a redeploy's 502) is asked again with backoff, and if it still does not answer the
+ * error is thrown without stopping: it says nothing about the lease, so the session is kept. */
 async function heartbeat(d: Drive, claim: { runId: string; leaseEpoch: number }) {
-  try {
-    await d.deps.client.heartbeat(claim);
-  } catch (error) {
-    if (
-      ["STALE_LEASE", "NOT_RUN_OWNER"].includes(
-        String((error as { code?: unknown })?.code),
+  const waits = d.deps.heartbeatRetryMs ?? HEARTBEAT_RETRY_MS;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await d.deps.client.heartbeat(claim);
+      return;
+    } catch (error) {
+      if (
+        ["STALE_LEASE", "NOT_RUN_OWNER"].includes(
+          String((error as { code?: unknown })?.code),
+        )
       )
-    )
-      d.mustStop = true;
-    throw error;
+        d.mustStop = true;
+      if (d.mustStop || !isTransientBoardError(error) || attempt >= waits.length) throw error;
+      hop("heartbeat retry", { run: claim.runId, attempt: attempt + 1, error: String(error) });
+      await sleep(waits[attempt] ?? 0);
+    }
   }
 }
 
@@ -82,6 +93,13 @@ async function renew(h: Held) {
   const { deps, runId, sessionId, execution } = h;
   try {
     await heartbeat(h, { runId, leaseEpoch: execution.binding.run.epoch });
+  } catch (error) {
+    // Staging, 2026-11-12: a SuperPipeline redeploy's 502 here ended a reporting session, and
+    // the run could never report again. Only a lease the board refused stops the work.
+    if (!isTransientBoardError(error)) h.mustStop = true;
+    throw error;
+  }
+  try {
     if (!deps.acp.renewExecution) throw Error("Strict work renewal unavailable");
     await deps.acp.renewExecution(
       deps.agent.hubUserId,
@@ -171,18 +189,18 @@ async function holdSession(d: Drive): Promise<StoredSalaamExecution | DispatchRe
         externalRunId: runId,
         reason: "Strict session is waiting for its station node to reconnect",
       };
-    if (held === "gone") {
-      const parked = await parkGone(d, execution);
-      if (parked) return parked;
-    }
+    if (held === "gone") return parkGone(d, execution);
   }
   return execution;
 }
 
 /** A gone session: its Salaam work stopped and the session ended (a failed step, an end).
- * Re-driving it can only renew a dead session forever; with no report intent it is parked like
- * a revoked run. Null when it has a report intent, which the report path keeps. */
-async function parkGone(d: Drive, execution: StoredSalaamExecution): Promise<DispatchResult | null> {
+ * Re-driving it can only renew a dead session forever, so it is never driven again: a report the
+ * board already took (its reply was lost) is acknowledged from the board's own record, and any
+ * other run is parked like a revoked run. A saved report intent cannot be sent from a gone
+ * session (a report needs a fresh protected completion), so it is parked too. A board that does
+ * not answer for itself throws, and the next cycle asks again. Never null. */
+async function parkGone(d: Drive, execution: StoredSalaamExecution): Promise<DispatchResult> {
   const { deps, runId, sessionId } = d;
   const [owner] = await db
     .select({ id: salaamWorkOwners.requestId })
@@ -194,16 +212,21 @@ async function parkGone(d: Drive, execution: StoredSalaamExecution): Promise<Dis
         .from(salaamWorkReports)
         .where(eq(salaamWorkReports.workRequestId, owner.id))
     : [];
-  if (intent) return null;
-  const reason =
-    "Strict session ended before report intent; explicit original-run reconciliation required";
+  if (intent && (await acknowledgeTakenReport(sessionId, deps.agent.hubUserId, deps.client)))
+    return { status: "reported", externalRunId: runId };
+  const reason = intent
+    ? "Strict session ended after its report intent and before the board took the report; explicit original-run reconciliation required"
+    : "Strict session ended before report intent; explicit original-run reconciliation required";
   const parked = await parkStrictRun(
     deps,
     runId,
     execution.binding.run.epoch,
     reason,
-    "This run's session ended before it could report (its work stopped). It needs " +
-      "operator review; nothing was completed or settled automatically.",
+    intent
+      ? "This run's session ended while it was reporting, before the board took the report. " +
+          "It needs operator review; nothing was completed or settled automatically."
+      : "This run's session ended before it could report (its work stopped). It needs " +
+          "operator review; nothing was completed or settled automatically.",
   );
   return {
     status: "failed",

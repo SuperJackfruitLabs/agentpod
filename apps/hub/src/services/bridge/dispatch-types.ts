@@ -87,6 +87,8 @@ export interface DispatchDeps {
   /** Strict Salaam publication; tests replace it, production uses livePublisher. */
   salaamPublish?: (completion: Infer<typeof SalaamWorkCompletion>) => Promise<SalaamPublication>;
   heartbeatMs?: number;
+  /** Waits between a strict run's heartbeat attempts while the board answers 5xx (default 1s, 2s, 4s). */
+  heartbeatRetryMs?: readonly number[];
   turnTimeoutMs?: number;
   /** Overrides the agent's own `permissionWaitMs`. A test seam. */
   permissionWaitMs?: number;
