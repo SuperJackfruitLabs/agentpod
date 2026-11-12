@@ -3,6 +3,8 @@
 All notable changes to AgentPod are documented in this file.
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [Semantic Versioning](https://semver.org/).
+Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — YYYY-MM-DD`
+(`sh .github/release/prep-release.sh vX.Y.Z`), and the release notes quote that section.
 
 ---
 
@@ -35,7 +37,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 - Fixes found while rebuilding the console and checking every page with an accessibility sweep, among them: an open file's tab in Files had its close button nested inside the tab, which screen readers cannot reach (Delete now closes the focused tab, and the cross stays for the pointer); the rendered Markdown preview could not be scrolled from the keyboard; on a phone many buttons, links, radio buttons and checkboxes were smaller than a fingertip; and the Cleanup list's checkboxes could only be hit on the box itself, not on their row.
 
-## v0.1.22 - 2026-08-12
+## v0.1.22 — 2026-08-12
 
 **Posture** — `apn scan`'s findings become fleet-visible, and, more urgently, become correct. Checking the scanner against real machines found it grading them **A** without opening the files it claimed to check.
 
@@ -61,7 +63,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
-## v0.1.21 - 2026-08-11
+## v0.1.21 — 2026-08-11
 
 **Changesets** — see what an agent changed in a station's workspace without SSHing to the machine. Uncommitted edits, untracked files, and commits not yet on a base, in the console's new Changes tab.
 
@@ -87,7 +89,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
-## v0.1.20 - 2026-08-11
+## v0.1.20 — 2026-08-11
 
 **Doors** — reach a station from any ACP editor. `apn acp` makes a station on another machine look like a local agent to Zed, JetBrains, or anything else that speaks the Agent Client Protocol, including machines behind NAT or CGNAT, because the node dials out.
 
@@ -107,7 +109,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
-## v0.1.19 - 2026-08-11
+## v0.1.19 — 2026-08-11
 
 `apn scan` — a security check for the agent runtimes on a machine, needing no hub, no account and no network.
 
@@ -129,7 +131,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
-## v0.1.13 - 2026-08-08
+## v0.1.13 — 2026-08-08
 
 `apn` service CLI: status/stop/start/restart/logs, `service install`/`uninstall`, a grouped help system, and a thinner installer.
 
@@ -149,7 +151,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
-## v0.1.12 - 2026-08-08
+## v0.1.12 — 2026-08-08
 
 macOS installer rootless improvements and launchd-native update restart.
 

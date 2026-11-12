@@ -1,0 +1,16 @@
+{
+  "product": "AgentPod",
+  "ci_workflow": "ci.yml",
+  "go_mod": "apps/node-agent/go.mod",
+  "build_at_tag": true,
+  "build_command": "sh deploy/release/build.sh",
+  "assets": [
+    "apps/node-agent/dist/agentpod-*",
+    "apps/node-agent/scripts/install.sh",
+    "apps/node-agent/scripts/install-fleet.sh",
+    "apps/node-agent/deploy/agentpod-node.service"
+  ],
+  "secrets": ["CLOUDFLARE_API_TOKEN"],
+  "deploy": "deploy/release/deploy.sh",
+  "smoke": { "script": "deploy/release/smoke.sh", "retries": 6, "delay_s": 10 }
+}

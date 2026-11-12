@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main, develop, redesign/fleet-console]
   # Run CI against an arbitrary ref on demand. This is not a convenience: the
-  # Fly-pin PR that release-node-agent.yml opens is created with GITHUB_TOKEN,
+  # Fly-pin PR that release-node-agent.yml used to open was created with GITHUB_TOKEN,
   # and a PR opened by that token cannot trigger `pull_request` workflows, so
   # its required checks would sit at "Expected" forever and the PR could never
   # merge. `workflow_dispatch` is the documented exception to that rule, and the
@@ -331,7 +331,7 @@ jobs:
         run: node scripts/lint-go.mjs
   # Every push to main puts the hub on the staging plane (staging-hub.agentpod.dev) at once; the
   # PR's required checks already ran the tests. Production moves only on a `v*` tag
-  # (release-hub.yml). The key can only run /usr/local/sbin/staging-deploy (`<product> <sha>`),
+  # (release.yml, deploy/release/deploy.sh). The key can only run /usr/local/sbin/staging-deploy (`<product> <sha>`),
   # and the deploy ends with deploy/smoke.sh against the staging issuer.
   deploy-hub-staging:
     name: deploy hub (staging)

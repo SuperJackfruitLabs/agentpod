@@ -823,8 +823,8 @@ overhead depending on syscall frequency.
 
 ## 6. Console — build + deploy to Cloudflare Pages
 
-> **agentpod.dev itself deploys from CI, on a release tag.** The `deploy-console` job in
-> `.github/workflows/release-hub.yml` runs after the hub's deploy for the same `v*` tag, builds with
+> **agentpod.dev itself deploys from CI, on a release tag.** The release workflow's deploy
+> (`deploy/release/deploy.sh`) ships the console after the hub's deploy for the same `v*` tag, builds with
 > `PUBLIC_HUB_URL=https://hub.agentpod.dev` and uploads to the `agentpod-console` project. A push
 > to `main` builds and tests the console and deploys it to staging (`staging-console.agentpod.dev`),
 > never to production. The steps below are for a deployment on your own domain.
