@@ -24,6 +24,7 @@ import { readBoardCardChecks, readBoardPending, sweepBoardNow } from "./gate-swe
 import type { MatrixClient } from "../matrix";
 import { repostEscalationsOnJoin, type DecisionNoticeDeps } from "./decision-notices";
 import { workspaceAdminMatrixIds } from "./workspace-admins";
+import { isBoardMoved } from "./moved-boards";
 
 const log = createLogger("matrix-board-projection");
 
@@ -160,7 +161,8 @@ const defaultWake: WakeDeps = {
  */
 export async function wakeHeldOnJoin(event: MembershipEvent, deps: WakeDeps = defaultWake): Promise<void> {
   const boardId = await boardForHumanJoin(event, deps.lookup);
-  if (!boardId) return;
+  // A board whose chat has moved out of this hub has nothing held here to wake (`moved-boards.ts`).
+  if (!boardId || isBoardMoved(boardId)) return;
   const who = event.state_key ?? event.sender;
   const results = await Promise.allSettled([
     deps.sweepGates(boardId),

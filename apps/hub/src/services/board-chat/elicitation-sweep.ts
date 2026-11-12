@@ -19,6 +19,7 @@ import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge";
 import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig, type SuperpipelineRelay } from "../bridge";
 import { SuperpipelineApiError } from "../bridge";
 import { relayTokenForBoard, type TenantsForBoard } from "./relay-scope";
+import { isBoardMoved } from "./moved-boards";
 import { createLogger } from "../../utils/logger";
 import type { ElicitationPendingDelivery } from "./elicitation-card";
 import type { ElicitationProjectionOutcome } from "./elicitations";
@@ -94,6 +95,8 @@ export async function sweepElicitations(deps: ElicitationSweepDeps): Promise<Eli
   };
 
   for (const boardId of await deps.boards()) {
+    // A board whose chat has moved out of this hub is not swept here (`moved-boards.ts`).
+    if (isBoardMoved(boardId)) continue;
     const tenantId = await deps.tenantIdFor(boardId);
     if (!tenantId) continue;
 

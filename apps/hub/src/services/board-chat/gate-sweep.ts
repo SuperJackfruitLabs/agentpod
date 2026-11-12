@@ -56,6 +56,7 @@ import {
 import type { DeliveryProjectionOutcome } from "./delivery-projection";
 import type { AttentionProjectionOutcome, WaitKey } from "./attention-projection";
 import { relayTokenForBoard, type TenantsForBoard } from "./relay-scope";
+import { isBoardMoved } from "./moved-boards";
 
 const log = createLogger("gate-sweep");
 
@@ -285,6 +286,8 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
   const attention: GateSweepResult["attention"] = { checked: 0, projected: 0, stuck: 0, settled: 0, failedBoards: [] };
 
   for (const boardId of await deps.boards()) {
+    // A board whose chat has moved out of this hub is not swept here (`moved-boards.ts`).
+    if (isBoardMoved(boardId)) continue;
     const tenantId = await deps.tenantIdFor(boardId);
     if (!tenantId) continue;
 
@@ -823,7 +826,12 @@ function pushSubscriber(
         secret: push.secret,
         gatesByEventRelay: push.gatesByEventRelay ?? false,
         fetch: fetchImpl,
-        boards: () => boardCredentials(roster),
+        // A board whose chat has moved out of this hub is not subscribed to push here.
+        boards: async () => {
+          const boards = await boardCredentials(roster);
+          for (const boardId of boards.keys()) if (isBoardMoved(boardId)) boards.delete(boardId);
+          return boards;
+        },
         // The relay's token only for a board of the relay's own workspace (`relay.ts`).
         ...(relay
           ? {

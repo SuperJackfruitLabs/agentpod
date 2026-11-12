@@ -1768,6 +1768,17 @@ hub with no relay secret keeps getting gates by push. The log says which door po
 journalctl -u agentpod-hub | grep 'gate projected' | grep -o 'via[^,}]*'   # push or event-relay
 ```
 
+**A board whose chat has moved.** Board chat is moving to a separate communication service one board
+at a time, and exactly one path serves a board. `BOARD_CHAT_MOVED_BOARDS` (comma-separated
+SuperPipeline board ids; a malformed entry refuses the boot) lists the boards this hub no longer
+serves. For each: nothing pushed or relayed for it is posted (both routes answer 200
+`{"status":"moved"}`, so neither retries), it is not swept and not subscribed to push, a join in its
+old room wakes nothing, and any answer typed or sent in its old room is logged and ignored, so a
+stale card cannot resolve a decision twice. The hub asks the other service nothing. Once, the board's
+old room is told that its chat has moved (recorded in `matrix_board_rooms.moved_notice_at`; a failed
+send is tried again every five minutes). Unset, every board is served here as before. To move a
+board back, remove it from the list and restart; the old notice stays in the room.
+
 **Cards waiting on a person** (charter: waiting cards and broker approvals reach chat). A card
 parked for `repeated-failure`, `blocked` or `not-authorised` is pushed as `attention.pending` and
 listed at `GET /v1/boards/:id/attention/pending`; the hub posts `dev.superpipeline.attention.v2`

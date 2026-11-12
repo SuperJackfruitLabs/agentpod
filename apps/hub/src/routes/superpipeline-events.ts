@@ -16,7 +16,7 @@
 import { Hono } from "hono";
 import { CloudEventError, fromBinary, verifyDelivery, SIGNATURE_HEADER } from "@superjackfruitlabs/treaty-cloudevents";
 import { createLogger } from "../utils/logger";
-import { isGatePending, type GatePendingDelivery, type GateProjectionDeps } from "../services/board-chat";
+import { isBoardMoved, isGatePending, type GatePendingDelivery, type GateProjectionDeps } from "../services/board-chat";
 import { projectPushedGate, type SuperpipelinePushDeps } from "./superpipeline-push";
 
 const log = createLogger("superpipeline-events");
@@ -62,6 +62,11 @@ export function createSuperpipelineEventsRoutes(deps: SuperpipelineEventsDeps) {
     if (!isGatePending(body)) {
       log.warn("a gate.pending event whose data is not a gate", { id });
       return c.json({ error: "not a gate" }, 422);
+    }
+    // A board whose chat has moved out of this hub (`moved-boards.ts`): 200, so the relay does not retry.
+    if (isBoardMoved(body.boardId)) {
+      log.info("gate for a board whose chat has moved; not posted", { id, boardId: body.boardId });
+      return c.json({ ok: true, status: "moved" }, 200);
     }
     const result = deps.project ? await deps.project(body) : await projectPushedGate(body, deps, "event-relay");
     return c.json(result.body, result.status);

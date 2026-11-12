@@ -24,6 +24,7 @@ import { Hono } from "hono";
 import { createLogger } from "../utils/logger";
 import { isGatePending, projectGate, type GatePendingDelivery, type GateProjectionDeps } from "../services/board-chat";
 import { isElicitationPending } from "../services/board-chat";
+import { isBoardMoved } from "../services/board-chat";
 import { isApprovalRequest } from "@superjackfruitlabs/treaty-matrix-events";
 import { projectElicitation } from "../services/board-chat";
 import { projectDelivery } from "../services/board-chat";
@@ -136,6 +137,14 @@ export function createSuperpipelinePushRoutes(deps: SuperpipelinePushDeps) {
     } catch {
       // A retry does not fix malformed JSON, so this is terminal on purpose.
       return c.json({ error: "invalid json" }, 400);
+    }
+
+    // A board whose chat has moved out of this hub (`moved-boards.ts`): nothing it pushes is posted
+    // here. 200, so the board does not retry what this hub will never post.
+    const boardId = typeof body === "object" && body !== null && "boardId" in body ? body.boardId : undefined;
+    if (typeof boardId === "string" && isBoardMoved(boardId)) {
+      log.info("push for a board whose chat has moved; not posted", { boardId });
+      return c.json({ ok: true, status: "moved" }, 200);
     }
 
     /**

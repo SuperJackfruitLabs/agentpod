@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
 import { createSuperpipelinePushRoutes, type SuperpipelinePushDeps } from "./superpipeline-push";
 
@@ -599,5 +599,69 @@ describe("a machine check failed or overridden", () => {
       expect(await res.json()).toEqual({ ok: true, ignored: true });
     }
     expect(handled).toHaveLength(0);
+  });
+});
+
+/**
+ * A board whose chat has moved out of this hub (BOARD_CHAT_MOVED_BOARDS, `moved-boards.ts`): exactly
+ * one path serves a board, so nothing pushed for it is posted here. 200, so the board does not retry.
+ */
+describe("a board whose chat has moved", () => {
+  const before = process.env.BOARD_CHAT_MOVED_BOARDS;
+  afterEach(() => {
+    if (before === undefined) delete process.env.BOARD_CHAT_MOVED_BOARDS;
+    else process.env.BOARD_CHAT_MOVED_BOARDS = before;
+  });
+
+  const bodies = [
+    DELIVERY,
+    ELICITATION,
+    { event: "attention.pending", boardId: "brd_7c1f", cardId: "crd_9a22", waitId: "w_1" },
+    { event: "delivery.pending", boardId: "brd_7c1f", gateId: "gate_4e8b" },
+    { event: "decision.escalated", boardId: "brd_7c1f", decisionKind: "gate", decisionId: "gate_4e8b" },
+    { event: "check.failed", boardId: "brd_7c1f", cardId: "crd_9a22" },
+  ];
+
+  test("gets nothing posted, whatever was pushed for it", async () => {
+    process.env.BOARD_CHAT_MOVED_BOARDS = "brd_other, brd_7c1f";
+    const touched: string[] = [];
+    const d = deps({
+      tenantIdFor: async (boardId) => {
+        touched.push(`tenant:${boardId}`);
+        return "fleet_00000000000000000001";
+      },
+      handleDecisionTimeout: async () => {
+        touched.push("timeout");
+        return { status: "sent", invited: 0 };
+      },
+      handleCheckFailed: async () => {
+        touched.push("check");
+        return { status: "sent" };
+      },
+    });
+    for (const body of bodies) {
+      const raw = JSON.stringify(body);
+      const res = await post(d, raw, await sign(SECRET, raw));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, status: "moved" });
+    }
+    expect(touched).toEqual([]);
+    expect(d.projected).toEqual([]);
+  });
+
+  test("another board's gate is still posted", async () => {
+    process.env.BOARD_CHAT_MOVED_BOARDS = "brd_other";
+    const asked: string[] = [];
+    const d = deps({
+      tenantIdFor: async (boardId) => {
+        asked.push(boardId);
+        return null;
+      },
+    });
+    const raw = JSON.stringify(DELIVERY);
+    const res = await post(d, raw, await sign(SECRET, raw));
+    // Reached the projection's tenant lookup: this board is still the hub's.
+    expect(res.status).toBe(404);
+    expect(asked).toEqual(["brd_7c1f"]);
   });
 });

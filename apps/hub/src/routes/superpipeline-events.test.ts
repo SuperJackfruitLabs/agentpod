@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { signDelivery, toBinary } from "@superjackfruitlabs/treaty-cloudevents";
 
 import type { GatePendingDelivery } from "../services/board-chat";
@@ -111,5 +111,29 @@ describe("the event relay's door", () => {
     expect((await deliver(d, { data: { event: "gate.pending" } })).status).toBe(422);
     expect((await deliver(d, { data: "not json" })).status).toBe(422);
     expect(projected).toEqual([]);
+  });
+});
+
+describe("a gate for a board whose chat has moved", () => {
+  const before = process.env.BOARD_CHAT_MOVED_BOARDS;
+  afterEach(() => {
+    if (before === undefined) delete process.env.BOARD_CHAT_MOVED_BOARDS;
+    else process.env.BOARD_CHAT_MOVED_BOARDS = before;
+  });
+
+  test("is acknowledged as moved and not projected, so the relay does not retry it", async () => {
+    process.env.BOARD_CHAT_MOVED_BOARDS = "brd_7c1f";
+    const { d, projected } = deps();
+    const res = await deliver(d);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, status: "moved" });
+    expect(projected).toEqual([]);
+  });
+
+  test("another board's gate is still projected", async () => {
+    process.env.BOARD_CHAT_MOVED_BOARDS = "brd_elsewhere";
+    const { d, projected } = deps();
+    expect(await (await deliver(d)).json()).toEqual({ ok: true, status: "sent" });
+    expect(projected.map((g) => g.gateId)).toEqual(["gate_4e8b"]);
   });
 });

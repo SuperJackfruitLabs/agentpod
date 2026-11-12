@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
 import type { ElicitationPendingDelivery } from "./elicitation-card";
 import {
@@ -368,5 +368,28 @@ describe("approval requests and the relay", () => {
     await sweepElicitations(deps);
     expect(scopedFor).toEqual(["fleet_a"]);
     expect(projectedInto).toEqual(["fleet_a"]);
+  });
+});
+
+describe("a board whose chat has moved", () => {
+  const before = process.env.BOARD_CHAT_MOVED_BOARDS;
+  afterEach(() => {
+    if (before === undefined) delete process.env.BOARD_CHAT_MOVED_BOARDS;
+    else process.env.BOARD_CHAT_MOVED_BOARDS = before;
+  });
+
+  test("is not swept here; another board still is", async () => {
+    process.env.BOARD_CHAT_MOVED_BOARDS = "brd_moved";
+    const read: string[] = [];
+    const { deps, projected } = rig({
+      boards: async () => ["brd_moved", BOARD],
+      pendingElicitations: async (boardId) => {
+        read.push(boardId);
+        return [question(`elc_${boardId}`)];
+      },
+    });
+    await sweepElicitations(deps);
+    expect(read).toEqual([BOARD]);
+    expect(projected).toEqual([`elc_${BOARD}`]);
   });
 });

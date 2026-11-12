@@ -53,6 +53,11 @@ export const matrixBoardRooms = pgTable(
      * makes the backfill happen on a room's next gate rather than in a migration.
      */
     name: text("name"),
+    /**
+     * When this hub said in the room that the board's chat has moved (`moved-boards.ts`). Null
+     * until then; claimed before the notice is sent and given back when the send fails.
+     */
+    movedNoticeAt: timestamp("moved_notice_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [index("matrix_board_rooms_tenant_id_idx").on(t.tenantId)],

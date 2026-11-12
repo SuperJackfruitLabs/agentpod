@@ -11,6 +11,7 @@ import { RELAY_CREDENTIAL_ENV, loadBridgeConfig, readRelayCredential } from "./s
 import { loadOperatorRules } from "./services/evidence";
 import { HubOperatorsConfigError, parseHubOperators } from "./services/hub";
 import { HubHomeOrgConfigError, parseHubHomeOrg } from "./auth/org-plane/hub-home-org";
+import { MOVED_BOARDS_ENV, MovedBoardsConfigError, parseMovedBoards } from "./services/board-chat";
 import { orgPlaneConfigErrors, type OrgPlaneConfigError } from "./auth/org-plane/config";
 
 export interface ValidationError {
@@ -170,7 +171,9 @@ export function collectConfigErrors(
   hubOperators: string | undefined = process.env.HUB_OPERATORS,
   hubHomeOrgPin: string | undefined = process.env.HUB_HOME_ORG,
   // The optional SuperPipeline relay credential (services/bridge/relay.ts). Injectable likewise.
-  relayCredential: ReturnType<typeof readRelayCredential> = readRelayCredential(process.env)
+  relayCredential: ReturnType<typeof readRelayCredential> = readRelayCredential(process.env),
+  // BOARD_CHAT_MOVED_BOARDS (services/board-chat/moved-boards.ts). Injectable likewise.
+  movedBoards: string | undefined = process.env[MOVED_BOARDS_ENV]
 ): ValidationError[] {
   const errors: ValidationError[] = [];
   const isProduction = cfg.nodeEnv === "production";
@@ -477,6 +480,15 @@ export function collectConfigErrors(
   } catch (e) {
     if (!(e instanceof HubHomeOrgConfigError)) throw e;
     errors.push({ field: "HUB_HOME_ORG", message: e.message });
+  }
+
+  // A malformed list of moved boards refuses the boot: a board id mistyped there would keep its chat
+  // on two paths at once, which is the one thing the list exists to prevent.
+  try {
+    parseMovedBoards(movedBoards);
+  } catch (e) {
+    if (!(e instanceof MovedBoardsConfigError)) throw e;
+    errors.push({ field: MOVED_BOARDS_ENV, message: e.message });
   }
 
   return errors;
