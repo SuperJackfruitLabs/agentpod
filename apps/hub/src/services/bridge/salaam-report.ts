@@ -18,7 +18,7 @@ type SalaamWorkCompletionValue = Infer<typeof SalaamWorkCompletion>;
 import { workDigest } from "../salaam";
 import { validateSalaamAuthority } from "../salaam";
 import * as broker from "../broker";
-import type { SuperpipelineClient, RunContext } from "./superpipeline";
+import { isTransientBoardError, type SuperpipelineClient, type RunContext } from "./superpipeline";
 import type { SalaamPublication } from "./salaam-publish";
 const same = (a: unknown, b: unknown) =>
   canonicalSalaamWork(a) === canonicalSalaamWork(b);
@@ -134,21 +134,63 @@ export function strictHandoff(
     verification: verification(requestId, completion),
   };
 }
+/** The board's own record says it completed this run with exactly this saved report. */
+function boardTook(run: ReturnType<typeof checkRun>, intent: typeof salaamWorkReports.$inferSelect) {
+  const verdict = run.completion as { met?: unknown; outcome?: unknown } | null;
+  return (
+    run.status === "ended" &&
+    run.outcome === "completed" &&
+    verdict?.met === true &&
+    verdict.outcome === "pass" &&
+    same(run.handoff, intent.handoff) &&
+    workDigest(intent.handoff) === intent.handoffDigest
+  );
+}
+/**
+ * For a session that is gone: true once a report the board already took (its reply was lost) is
+ * acknowledged from the board's record, sending nothing. False when the board does not hold this
+ * report, which a gone session can never send. Throws only when the board did not answer for
+ * itself, so a 502 is asked about again rather than read as an answer.
+ */
+export async function acknowledgeTakenReport(
+  sessionId: string,
+  userId: string,
+  client: Pick<SuperpipelineClient, "context">,
+): Promise<boolean> {
+  let o: Awaited<ReturnType<typeof owner>>;
+  try {
+    o = await owner(sessionId, userId);
+  } catch {
+    return false;
+  }
+  const [intent] = await db
+    .select()
+    .from(salaamWorkReports)
+    .where(eq(salaamWorkReports.workRequestId, o.work.requestId));
+  if (!intent) return false;
+  let context: RunContext;
+  try {
+    context = await client.context(o.execution.binding.run.id);
+  } catch (error) {
+    if (isTransientBoardError(error)) throw error;
+    return false;
+  }
+  try {
+    checkIntent(o, intent);
+    if (!boardTook(checkRun(o, context), intent)) return false;
+  } catch {
+    return false;
+  }
+  await acknowledge(o, intent, context);
+  return true;
+}
 async function acknowledge(
   o: Awaited<ReturnType<typeof owner>>,
   intent: typeof salaamWorkReports.$inferSelect,
   context: RunContext,
 ) {
-  const run = checkRun(o, context),
-    verdict = run.completion as { met?: unknown; outcome?: unknown } | null;
-  if (
-    run.status !== "ended" ||
-    run.outcome !== "completed" ||
-    verdict?.met !== true ||
-    verdict.outcome !== "pass" ||
-    !same(run.handoff, intent.handoff) ||
-    workDigest(intent.handoff) !== intent.handoffDigest
-  )
+  const run = checkRun(o, context);
+  if (!boardTook(run, intent))
     throw Error("Original run completion conflicts with saved report intent");
   await db.transaction(async (tx) => {
     const [current] = await tx

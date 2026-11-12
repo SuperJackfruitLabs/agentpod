@@ -30,9 +30,10 @@ import * as broker from "../../src/services/broker/broker";
 import { fakePlane } from "../helpers/fake-plane";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import corpus from "../../../../packages/contract/src/fixtures/salaam-work-payload-v1.json";
-import type {
-  ClaimedWork,
-  RunContext,
+import {
+  SuperpipelineApiError,
+  type ClaimedWork,
+  type RunContext,
 } from "../../src/services/bridge/superpipeline";
 const hex = () => crypto.randomUUID().replaceAll("-", "").slice(0, 20);
 const tenantId = "fleet_" + hex(),
@@ -1043,6 +1044,102 @@ test("strict resumed task drives private bounded progression and verified report
   } finally {
     mock.mockRestore();
   }
+});
+
+// Staging, 2026-11-12 (run_311df3060d024189): a SuperPipeline redeploy answered the report's
+// heartbeat with 502, and the drive ended the session for it ("Strict work stopped: … heartbeat
+// failed with 502"). A 5xx says nothing about the lease: it is retried, and never ends the session.
+const heartbeat502 = () =>
+  new SuperpipelineApiError(502, `/v1/boards/${board}/runs/${run}/heartbeat`, null, `POST /v1/boards/${board}/runs/${run}/heartbeat failed with 502`);
+/** A drive whose heartbeats answer 502 once the work has succeeded, while `failing()` says so. */
+async function driveThrough502(failing: () => boolean) {
+    const { work, completion } = await reportFixture();
+    const ended: string[] = [];
+    let heartbeats = 0,
+      reporting = false;
+    let live: RunContext = { ...context, run: { ...context.run, handoff: null, completion: null } };
+    const replies: Record<string, unknown> = {
+      "salaam.work-progress": {
+        version: 1,
+        request_id: work.requestId,
+        work_request_id: work.requestId,
+        task_id: completion.task_id,
+        plan_revision: 1,
+        binding_digest: completion.binding_digest,
+      },
+      "salaam.work-status": { ...completion, state: "succeeded", auto_enabled: false },
+      "salaam.work-completion": completion,
+    };
+    const mock = spyOn(broker, "request").mockImplementation(async (_node, verb) => {
+      if (!(verb in replies)) throw Error("Unexpected private verb: " + verb);
+      if (verb === "salaam.work-status") reporting = true;
+      return { ok: true, data: replies[verb] };
+    });
+    const deps = {
+      tenantId,
+      source: "superpipeline",
+      salaamPublish: async () => publication,
+      heartbeatRetryMs: [0, 0, 0],
+      agent: { key: "proof", boardId: board, stationId: station, hubUserId: user },
+      client: {
+        context: async () => live,
+        heartbeat: async () => {
+          heartbeats++;
+          if (reporting && failing()) throw heartbeat502();
+        },
+        completeVerified: async (_lease: unknown, handoff: unknown) => {
+          live = {
+            ...live,
+            run: { ...live.run, status: "ended", outcome: "completed", handoff, completion: { met: true, outcome: "pass" } },
+          };
+          return { ok: true };
+        },
+        claim: async () => {
+          throw Error("new claim forbidden");
+        },
+        activity: async () => ({ accepted: true }),
+      },
+      acp: {
+        strictWork: async () => ({ required: true, version: 1 }),
+        renewExecution: async () => {},
+        endSession: async (_u: string, _s: string, reason: string) => {
+          ended.push(reason);
+        },
+        promptSession: async () => {
+          throw Error("generic prompt forbidden");
+        },
+      },
+    } as unknown as DispatchDeps;
+    return { deps, ended, mock, heartbeats: () => heartbeats };
+}
+describe("a SuperPipeline 502 on a strict run's heartbeat", () => {
+  test("one that clears within the retries is retried, and the run reports", async () => {
+    let fails = 2;
+    const { deps, ended, mock, heartbeats } = await driveThrough502(() => fails-- > 0);
+    try {
+      expect(await runOnce(deps)).toMatchObject({ status: "reported" });
+      expect(ended).toEqual(["Strict work reported"]);
+      expect(heartbeats()).toBeGreaterThan(2);
+    } finally {
+      mock.mockRestore();
+    }
+  });
+  test("one that outlasts the retries fails this drive but keeps the session, and the next drive reports", async () => {
+    let down = true;
+    const { deps, ended, mock } = await driveThrough502(() => down);
+    try {
+      const first = await runOnce(deps);
+      expect(first).toMatchObject({ status: "failed" });
+      expect(String(first?.reason)).toContain("502");
+      expect(ended).toEqual([]);
+      expect((await db.select().from(bridgeDispatches).where(eq(bridgeDispatches.externalRunId, run)))[0]?.outcome).toBe("working");
+      down = false;
+      expect(await runOnce(deps)).toMatchObject({ status: "reported" });
+      expect(ended).toEqual(["Strict work reported"]);
+    } finally {
+      mock.mockRestore();
+    }
+  });
 });
 
 test("strict work posts each tool step to the card once, as card actions, while it runs", async () => {
@@ -2508,7 +2605,7 @@ describe("resume parks a revoked unreported run and skips settled ones", () => {
     await reportFixture();
     const activities: unknown[] = [];
     const deps = depsWith(activities);
-    const mock = spyOn(broker, "request").mockImplementation(async () => ({ ok: false, error: "fixture" }) as never);
+    const mock = spyOn(broker, "request").mockImplementation(async () => ({ ok: false, error: "fixture" }));
     try {
       const result = await resumeSalaamWork(deps);
       expect(result).not.toBeNull();
@@ -2598,8 +2695,37 @@ test("a strict question carries the decision's readable detail to the producer a
 // A strict run whose Salaam work stopped and whose session ended (run_84d49db766224895: a provider
 // 429 failed its only step) was re-driven every 30s with "Session not found or not active". It is
 // parked like the revoked case: once, surfaced once, and the roster claims again.
+import { strictHandoff } from "../../src/services/bridge/salaam-report";
+/** A saved (prepared) report intent for the fixture's work, as a reporting run leaves it. */
+async function savedIntent(completion: unknown, workRequestId: string) {
+  const requestId = crypto.randomUUID();
+  const handoff = strictHandoff(requestId, completion);
+  await db.insert(salaamWorkReports).values({
+    workRequestId,
+    tenantId,
+    requestId,
+    completion,
+    handoff,
+    handoffDigest: workDigest(handoff),
+    state: "prepared",
+  });
+  return handoff;
+}
+/** End and revoke the fixture's session, as the drive's endSession does; returns the undo. */
+async function revokeSession() {
+  const [original] = await db.select().from(acpSessions).where(eq(acpSessions.id, session));
+  if (!original?.executionAuthority) throw Error("missing authority");
+  const authority = structuredClone(original.executionAuthority);
+  authority.state = "revoked";
+  await db.update(acpSessions).set({ status: "ended", executionAuthority: authority }).where(eq(acpSessions.id, session));
+  return () =>
+    db
+      .update(acpSessions)
+      .set({ status: original.status, executionAuthority: original.executionAuthority })
+      .where(eq(acpSessions.id, session));
+}
 describe("a strict run whose session is gone is parked, not re-driven", () => {
-  function depsWith(activities: unknown[], held: "live" | "waiting" | "gone") {
+  function depsWith(activities: unknown[], held: "live" | "waiting" | "gone", read: () => Promise<RunContext> = async () => context) {
     return {
       tenantId,
       source: "superpipeline",
@@ -2607,7 +2733,7 @@ describe("a strict run whose session is gone is parked, not re-driven", () => {
       agent: { key: "proof", boardId: board, stationId: station, hubUserId: user },
       acp: { ensureStrictSession: async () => held, renewExecution: async () => { throw Error("Session not found or not active."); } },
       client: {
-        context: async () => context,
+        context: read,
         heartbeat: async () => ({}),
         activity: async (_lease: unknown, a: unknown) => {
           activities.push(a);
@@ -2634,24 +2760,72 @@ describe("a strict run whose session is gone is parked, not re-driven", () => {
       await db.update(bridgeDispatches).set({ outcome: "working", reason: null }).where(eq(bridgeDispatches.externalRunId, run));
     }
   });
-  test("gone with a saved report intent is not parked: the report path keeps it", async () => {
+  // Staging, 2026-11-12 (run_311df3060d024189): the session ended after its report intent was saved,
+  // so no fresh completion could ever be read; every cycle re-drove it with "Session not found or
+  // not active", its dispatch stayed `working` and the station's only slot stayed held.
+  async function withGoneIntent(
+    boardRun: (handoff: unknown) => RunContext["run"] | Error,
+    check: (deps: DispatchDeps, activities: unknown[]) => Promise<void>,
+  ) {
     const { work, completion } = await reportFixture();
-    await db.insert(salaamWorkReports).values({
-      workRequestId: work.requestId,
-      tenantId,
-      requestId: crypto.randomUUID(),
-      completion,
-      handoff: { historical: true },
-      handoffDigest: "a".repeat(64),
-      state: "prepared",
+    const handoff = await savedIntent(completion, work.requestId);
+    const restore = await revokeSession();
+    const activities: unknown[] = [];
+    const deps = depsWith(activities, "gone", async () => {
+      const read = boardRun(handoff);
+      if (read instanceof Error) throw read;
+      return { ...context, run: read };
     });
     try {
-      await resumeSalaamWork(depsWith([], "gone")).catch(() => null);
-      expect((await dispatchRow()).outcome).not.toBe("parked");
+      await check(deps, activities);
     } finally {
+      await restore();
       await db.delete(salaamWorkReports).where(eq(salaamWorkReports.workRequestId, work.requestId));
-      await db.update(bridgeDispatches).set({ outcome: "working", reason: null }).where(eq(bridgeDispatches.externalRunId, run));
+      await db.update(bridgeDispatches).set({ outcome: "working", reason: null, result: null }).where(eq(bridgeDispatches.externalRunId, run));
     }
+  }
+  test("gone after its report intent, the board still working: parked once, then no longer re-driven", async () => {
+    await withGoneIntent(
+      () => ({ ...context.run, handoff: null, completion: null }),
+      async (deps, activities) => {
+        const first = await resumeSalaamWork(deps);
+        expect(first).toMatchObject({ status: "failed" });
+        expect(String(first?.reason)).toContain("ended after its report intent");
+        expect((await dispatchRow()).outcome).toBe("parked");
+        expect(activities).toHaveLength(1);
+        expect(await resumeSalaamWork(deps)).toBeNull();
+        expect(activities).toHaveLength(1);
+      },
+    );
+  });
+  test("gone after its report intent, the board run ended some other way (card moved): parked, not re-driven", async () => {
+    await withGoneIntent(
+      () => ({ ...context.run, status: "ended", outcome: "cancelled", handoff: null, completion: null }),
+      async (deps) => {
+        expect(String((await resumeSalaamWork(deps))?.reason)).toContain("ended after its report intent");
+        expect((await dispatchRow()).outcome).toBe("parked");
+        expect(await resumeSalaamWork(deps)).toBeNull();
+      },
+    );
+  });
+  test("gone after its report intent, the board already took the report (a lost reply): reported from the board's record", async () => {
+    await withGoneIntent(
+      (handoff) => ({ ...context.run, status: "ended", outcome: "completed", handoff, completion: { met: true, outcome: "pass" } }),
+      async (deps, activities) => {
+        expect(await resumeSalaamWork(deps)).toMatchObject({ status: "reported", externalRunId: run });
+        expect((await dispatchRow()).outcome).toBe("reported");
+        expect(activities).toHaveLength(0);
+      },
+    );
+  });
+  test("gone after its report intent, the board unreachable (502): nothing is parked, the next cycle asks again", async () => {
+    await withGoneIntent(
+      () => new SuperpipelineApiError(502, `/v1/boards/${board}/runs/${run}`, null, "GET failed with 502"),
+      async (deps) => {
+        expect(await resumeSalaamWork(deps)).toMatchObject({ status: "failed" });
+        expect((await dispatchRow()).outcome).toBe("working");
+      },
+    );
   });
 });
 

@@ -252,6 +252,16 @@ export function isForeignRun(err: unknown): boolean {
 }
 
 /**
+ * The board did not answer for itself: a 5xx (a redeploy's gateway 502, a crash) or a call that
+ * timed out. It says nothing about the lease, so it is retried and never ends work by itself; a
+ * lease that really lapsed answers STALE_LEASE once the board is back.
+ */
+export function isTransientBoardError(err: unknown): boolean {
+  if (err instanceof SuperpipelineApiError) return err.status >= 500;
+  return err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+}
+
+/**
  * The board refused a question's decision envelope — a per-option meaning or scope, or the
  * `harness-permission/v1` subject. A board without per-option meanings ignores both keys (it reads
  * an option's name and title only), so this is a board that understands them and disagreed.

@@ -1934,6 +1934,21 @@ the same card would be refused on every claim. Add or fix the plan and resume th
 resume`). No session opened, so no ledger row is written. Log: `the card cannot run as written; it
 waits on a person`. If the board refuses the block, the claim is handed back as before.
 
+**A board that does not answer does not end a strict run.** A Salaam run heartbeats its board
+lease before every renewal. A 5xx or a timed-out call (a SuperPipeline redeploy answers 502) says
+nothing about the lease: the heartbeat is retried after 1, 2 and 4 seconds, and if the board is
+still down the drive fails with the session kept, so the next cycle drives the same run again.
+Only a lease the board refuses (`STALE_LEASE`, `NOT_RUN_OWNER`) stops the work and ends the
+session. Log: `salaam work: heartbeat retry`.
+
+**A strict run whose session is gone is never re-driven.** Once its session has ended, a run
+cannot read a fresh protected completion, so it can never report. On the next cycle the bridge
+reads the board: a report the board already took (its reply was lost) is acknowledged from the
+board's record and the row reads `reported`; anything else (no report intent yet, a saved intent
+the board never took, or a card someone moved) is settled when Salaam proves its effects, and
+otherwise `parked` for an operator, with the card told once. A board that does not answer leaves
+the row `working` for the next cycle. Log: `salaam work: parked`.
+
 ### Reading `bridge_dispatches`
 
 There is no API for the ledger — Postgres is the read path. One row per claimed run, keyed
@@ -1946,6 +1961,7 @@ There is no API for the ledger — Postgres is the read path. One row per claime
 | `reported` | the board knows; nothing left to replay |
 | `released` | the claim was handed back **before any ACP session opened**, so the workspace cannot have been touched. Unpenalised |
 | `abandoned` | the run stopped *after* it started — a permission question that went unanswered, a turn timeout, a failure, or a release the board refused. The workspace may hold partial work, so nothing is replayed |
+| `parked` | a strict Salaam run that can no longer be driven (its execution revoked or its session gone before the board took a report), kept for operator reconciliation. It no longer holds the roster's concurrency, and its settlement is offered again every 10 minutes |
 
 `released` vs `abandoned` is the distinction worth keeping straight: it is the only record of
 whether a workspace was touched, and `acp_run_id` cannot carry it (that column is only written
