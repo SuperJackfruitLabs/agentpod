@@ -24,6 +24,19 @@ is missing from that list.
 
 > **If a second contributor appears, go back to `develop` → PR → `main`.** The required checks are already configured for it; only this section changes.
 
+## Docs move with the code
+
+Two checks hold the docs to the code:
+
+- **Completeness** (`apps/hub/tests/unit/docs-claims.test.ts`, in the `hub` job). Every hub route,
+  setting, Matrix or relay event type and push event must be named in a current doc (`docs-site/`,
+  the runbooks in `docs/`, a README) or listed in `docs/undocumented-baseline.json`. The list only
+  shrinks: document something on it and the test asks you to take it off.
+- **Docs touched?** (`.github/workflows/docs-touched.yml`, rules in `scripts/docs-touched.mjs`). A PR
+  that changes a public-surface file (hub routes, settings, MCP tools, push subscriptions, the
+  contract package, the CLIs) must change a doc too, or carry the `no-docs-needed` label when
+  nothing a reader sees changed. Adding to the baseline does not count as a doc.
+
 ## Commit style
 
 Conventional-commit prefixes, scoped by area — match `git log`:
