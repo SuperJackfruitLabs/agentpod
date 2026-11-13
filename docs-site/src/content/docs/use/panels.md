@@ -104,7 +104,8 @@ Where a station has a chat identity, talking to the agent is messaging it. See
 
 ## Skills
 
-What this station actually has, and the review screen for installing something. Present, eligible
+What this station actually has (`POST /api/stations/:id/skills/inventory`, which needs the
+`skills.inventory` capability), and the review screen for installing something. Present, eligible
 and loaded are reported as separate observations rather than inferred from each other — see
 [Managed skills](/use/skills/).
 

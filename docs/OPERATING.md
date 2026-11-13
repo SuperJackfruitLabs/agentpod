@@ -1777,7 +1777,8 @@ journalctl -u agentpod-hub | grep 'claim loops woken'                         # 
 **A third door, the suite's event relay.** A SuperPipeline deployment with `RELAY_URL` and
 `RELAY_TOKEN` also publishes each `gate.pending` to the relay (NATS JetStream), which delivers it to
 `$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/events`, signed with
-`TREATY_RELAY_DELIVERY_SECRET` (`x-treaty-signature`). Without the secret the route answers 503. It
+`TREATY_RELAY_DELIVERY_SECRET` (`x-treaty-signature`), as a CloudEvent of type
+`com.superjackfruit.superpipeline.gate.pending.v1`. Without the secret the route answers 503. It
 hands the gate to the same projection as the push, idempotent on the gate id, so a gate that arrives
 by both doors is posted once. **With the secret set, the relay is the only door for gates:** the
 hub's push subscription leaves `gate.pending` out (it logs `gates reach chat through the event relay;
