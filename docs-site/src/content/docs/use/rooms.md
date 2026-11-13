@@ -67,7 +67,11 @@ into an instruction. Once you have talked to the agent again, a number is an ord
 
 **Updated apps show what you are allowing.** The same message also carries the request in full for
 apps that understand it: the tool, its command, each file change and the files it touches, with
-buttons that say what each option does (*allow once*, *always*, *reject*). Such an answer is bound
+buttons that say what each option does (*allow once*, *always*, *reject*). The card, the answer and
+the receipt that closes it are Treaty's
+[permission card](https://treaty.superjackfruit.com/matrix/permissions/agentpod-permission-v2/),
+[permission answer](https://treaty.superjackfruit.com/matrix/permissions/agentpod-permission-answer-v2/) and
+[permission outcome](https://treaty.superjackfruit.com/matrix/permissions/agentpod-permission-outcome-v1/). Such an answer is bound
 to exactly the request you saw — if the agent asked something else since, it is refused. When the
 card could not show everything (a very long change, a terminal), nothing in the room can allow it —
 not a button, and not a typed number either; answer in the console. Whoever answers, by button, by

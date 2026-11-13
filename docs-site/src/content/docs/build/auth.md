@@ -6,6 +6,9 @@ description: Where a token comes from, how to present it, what the hub checks, a
 The hub **issues nothing**. Tokens come from the organization plane, the account service at
 `https://accounts.superjackfruit.com`, and every product, the hub included, verifies them offline
 against the plane's published key set rather than calling back to ask whether a token is good.
+The claims every product checks, and the ids it accepts, are pinned in Treaty's
+[identity corpus](https://treaty.superjackfruit.com/packages/ecosystem-identity/) (`token_claims.json`, `id_grammar.json`), which
+AgentPod's tests run against.
 
 A hub tells you which issuer it trusts:
 
