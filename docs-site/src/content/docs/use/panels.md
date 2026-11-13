@@ -1,6 +1,6 @@
 ---
 title: What you can do to a station
-description: The panels — files, logs, terminal, config, health, lifecycle, cleanup, changesets, skills, voice and activity — and what each one requires.
+description: The panels — files, logs, terminal, config, health, lifecycle, cleanup, changesets, skills, timeline, approval rules, voice and activity — and what each one requires.
 ---
 
 Open an adopted station in the console and you get a set of panels. Which ones appear
@@ -17,10 +17,12 @@ Several operations are gated on a capability the station declares:
 | `lifecycle` | Start, stop, restart |
 | `cleanup` | Planning and applying a disk reclaim |
 | `changeset` | Reading the working-tree diff |
+| `skills.inventory` | Reading what skills the station has |
 
 A request for a capability the station has not declared is refused **at the hub, without
-contacting the node**. Reading is not gated this way — the read paths are available
-wherever the station supports them.
+contacting the node**. Other reads are not gated this way: files, logs, config and health are
+available wherever the station supports them. Two reads are: the changeset and the skill
+inventory.
 
 ## Files
 
@@ -105,6 +107,41 @@ Where a station has a chat identity, talking to the agent is messaging it. See
 What this station actually has, and the review screen for installing something. Present, eligible
 and loaded are reported as separate observations rather than inferred from each other — see
 [Managed skills](/use/skills/).
+
+## Timeline
+
+On a **Salaam** station, the board runs it has driven, newest first (up to 20). Open one for its
+checkpoints, which Salaam derives from the run's own recorded writes, and open a checkpoint for
+what restoring it would change.
+
+```
+GET  /api/stations/:id/timeline
+GET  /api/stations/:id/timeline/:sessionId/checkpoints
+GET  /api/stations/:id/timeline/:sessionId/checkpoints/:checkpointId/diff
+POST /api/stations/:id/timeline/:sessionId/checkpoints/:checkpointId/restore   {restoreDigest}
+```
+
+Restore is a workspace owner's or admin's, and only for a run that has **ended**: never automatic,
+never while it runs. The request carries the digest the diff showed, and Salaam refuses any other,
+so the approval binds that checkpoint, the current tree and every file change. It restores files
+only; nothing re-runs afterwards. Reading a diff carries file contents off the station, so it is
+written to the audit trail; listing is not.
+
+## Approval rules
+
+On a **Salaam** station's settings, one standing rule: **Always allow workspace writes**. With it
+on, board work by the station's agent writes files in its workspace without asking each time.
+Deletes, hidden files, commands and network still ask.
+
+```
+GET    /api/stations/:id/approval-rules             the live rules (any workspace member)
+POST   /api/stations/:id/approval-rules             {"scope": "workspace-write"}
+DELETE /api/stations/:id/approval-rules/:ruleId
+```
+
+Setting and revoking are a workspace owner's or admin's. A rule belongs to the station's current
+agent, so a station with no agent cannot have one (409), and setting it twice returns the rule that
+is already live. A revocation reaches a run in flight at its next lease renewal.
 
 ## Plugins
 
