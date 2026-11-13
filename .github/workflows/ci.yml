@@ -35,6 +35,7 @@ jobs:
     outputs:
       app: ${{ steps.plan.outputs.app }}
       landing: ${{ steps.plan.outputs.landing }}
+      docs: ${{ steps.plan.outputs.docs }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -50,20 +51,29 @@ jobs:
               - '.github/**'
             landing:
               - 'apps/landing/**'
+            docs:
+              - 'docs-site/**'
       - id: plan
         env:
           EVENT: ${{ github.event_name }}
           APP: ${{ steps.filter.outputs.app }}
           WORKFLOWS: ${{ steps.filter.outputs.workflows }}
           LANDING: ${{ steps.filter.outputs.landing }}
+          DOCS: ${{ steps.filter.outputs.docs }}
         run: |
           app=false
           case "$EVENT" in push|pull_request) ;; *) app=true ;; esac
           if [ "$APP" = true ] || [ "$WORKFLOWS" = true ]; then app=true; fi
           landing=$LANDING
           if [ "$app" = true ]; then landing=true; fi
-          { echo "app=$app"; echo "landing=$landing"; } >> "$GITHUB_OUTPUT"
-          echo "app=$app landing=$landing"
+          # The docs site builds when it changed, when a workflow did, or on a manual run. Its
+          # claims are checked by docs-claims.test.ts in the hub job, which a docs-only change
+          # also runs (docs-site/ is not landing-only).
+          docs=false
+          if [ "$DOCS" = true ] || [ "$WORKFLOWS" = true ]; then docs=true; fi
+          case "$EVENT" in push|pull_request) ;; *) docs=true ;; esac
+          { echo "app=$app"; echo "landing=$landing"; echo "docs=$docs"; } >> "$GITHUB_OUTPUT"
+          echo "app=$app landing=$landing docs=$docs"
 
   contract:
     name: contract
@@ -420,15 +430,51 @@ jobs:
         working-directory: cloudflare/worker-v2
         run: npx vitest run
 
+  # The documentation site's build, on every pull request and push that touches docs-site/.
+  # deploy-docs below builds it again on main, but only after the merge: before this job a
+  # page or config that broke the Astro build was found by the deploy, never by the PR.
+  # The same steps as deploy-docs up to the build; see there for why each one is needed.
+  docs-site:
+    name: docs-site
+    needs: [changes]
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+
+      - name: Install dependencies
+        working-directory: docs-site
+        run: npm ci
+
+      - name: Stand in for the console's generated tsconfig
+        run: |
+          mkdir -p apps/console/.svelte-kit
+          [ -f apps/console/.svelte-kit/tsconfig.json ] || echo '{}' > apps/console/.svelte-kit/tsconfig.json
+
+      - name: Build
+        working-directory: docs-site
+        run: npm run build
+
   # The published documentation site, to Cloudflare Pages at docs.agentpod.dev.
   #
   # npm and a package-lock, following the precedent the `worker` job above already
   # sets: docs-site sits outside the pnpm workspace (apps/*, packages/*), so copying
   # the pnpm setup the hub and console jobs use would find no lockfile.
   #
-  # Gated on `hub`, which is where the docs-claims test lives — the check that these
-  # pages name no MCP tool, apn command or gated capability the code does not have.
-  # Publishing a page that lies is worse than not publishing it.
+  # Gated on `hub`, which is where the docs-claims test lives: the check that these pages
+  # name no MCP tool, apn or fleet command, gated capability or page link the code does not
+  # have, and that every hub route, setting and event is documented or in
+  # docs/undocumented-baseline.json. Publishing a page that lies is worse than not
+  # publishing it. The build itself is checked on every pull request by `docs-site` below.
   #
   # Requires a CLOUDFLARE_API_TOKEN repo secret with Cloudflare Pages: Edit, and a
   # Pages project named `agentpod-docs`. One-time setup is in docs-site/README.md.
@@ -451,8 +497,9 @@ jobs:
         with:
           # Astro 7 refuses to start below 22.12 ("Node.js v20.20.2 is not
           # supported by Astro!"). The other jobs stay on 20; only this one
-          # builds the docs site. It never runs on a pull request, so a PR
-          # going green says nothing about it — that is how 20 survived here.
+          # and docs-site build the docs site. This one never ran on a pull
+          # request, so a PR going green said nothing about it; that is how 20
+          # survived here, and why docs-site now builds on every docs PR.
           node-version: 22
           cache: npm
           cache-dependency-path: docs-site/package-lock.json

@@ -459,13 +459,39 @@ that has not opted in constructs nothing, opens no session and makes no request.
 operation — reading the ledger, spotting a halted loop — is
 [docs/OPERATING.md → The superpipeline bridge](./OPERATING.md#8-the-superpipeline-bridge).
 
-Two variables, both required together:
+Two variables turn it on, and both are required together; the rest are optional:
 
 | Variable | Meaning |
 |---|---|
 | `ENABLE_SUPERPIPELINE_BRIDGE` | The gate. `isBridgeEnabled()` compares against the **literal lowercase `true`** — `1`, `TRUE` and `yes` are off. Boot validation uses the looser `getEnvBool`, so `=1` is the one value that passes validation *and* starts nothing. |
 | `SUPERPIPELINE_BASE_URL` | Origin of the superpipeline deployment, e.g. `https://superpipeline.dev`. Trailing slashes are stripped. |
 | `SUPERPIPELINE_RELAY_CREDENTIAL_FILE` | Optional. A file holding one line `svc_<20 hex>:<secret>`: an Accounts service credential with the `approval-requests:relay` scope. Set and unreadable or malformed refuses the boot; unset means SuperToolkit approval requests do not reach chat (logged once at start). See "The decision relay". |
+| `SUPERPIPELINE_PUSH_SECRET` | Optional, and needs the Matrix bridge. The HMAC key a board signs its pushes with (`X-Superpipeline-Signature`). With it, the hub registers each board's push config itself, and pushes arrive at `POST /public/bridge/superpipeline/push` (gates, questions and the rest) and `POST /public/bridge/superpipeline/work` (`work.available`). Unset, nothing is registered, both routes answer 503, gates come by the five-minute sweep and work by the 5 s poll. |
+| `TREATY_RELAY_DELIVERY_SECRET` | Optional, and needs the Matrix bridge. The key the suite's event relay signs deliveries to `POST /public/bridge/superpipeline/events` with. Set, the relay is the only door for `gate.pending` and the push subscription leaves it out; unset, that route answers 503. |
+| `SUPERPIPELINE_BOARD_URL` | Optional. The board web app's origin. A card posted in a room then links to `<url>/b/<board>/c/<card>`; unset, cards carry no link. |
+| `BOARD_CHAT_MOVED_BOARDS` | Optional. Comma-separated SuperPipeline board ids whose chat has moved to another service: nothing is posted for them here and answers in their old rooms are ignored. A malformed entry refuses the boot. See [OPERATING.md → A board whose chat has moved](./OPERATING.md#8-the-superpipeline-bridge). |
+
+### Services that read the hub
+
+Two allowlists, each a comma-separated list of organization-plane **service** principal ids. Both
+are read on every request, so a change needs no restart; unset, no service may read. People and
+agents are refused either way. What each read answers is on the docs site:
+[Reads for services](https://docs.agentpod.dev/build/services/) and
+[Capability catalog](https://docs.agentpod.dev/build/catalog/).
+
+| Variable | Opens |
+|---|---|
+| `ROSTER_READERS` | `GET /api/bridge/boards/:boardId/roster`, `GET /api/bridge/stations/:id` and `GET /api/bridge/principals/:prn/boards`: the bridge roster, for a placement service and for Superlibrary |
+| `CATALOG_READERS` | `GET /api/catalog`, `GET /api/catalog/stations` and `GET /api/catalog/stations/:id`: what exists in the workspace and which station has it |
+
+### Other settings
+
+| Variable | Meaning |
+|---|---|
+| `PORT` | The port the hub listens on. Default `3001`. |
+| `SALAAM_IDLE_END_MINUTES` | Minutes an interactive Salaam session may sit with no activity before the hub ends it. Default `15`; anything not a positive number is the default. The session stays resumable. |
+| `SUPERLIBRARY_APP_URL` | Where a Library item is shown, for the links a strict run's work record carries. Default: `SUPERLIBRARY_URL`. |
+| `PUBLIC_SUPERLIBRARY_URL` | The console's, at build time, not the hub's: Superlibrary's base URL. Default `https://app.superlibrary.dev`. |
 
 ### The decision relay (SuperToolkit approval requests)
 

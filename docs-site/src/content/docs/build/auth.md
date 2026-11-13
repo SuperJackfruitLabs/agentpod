@@ -125,16 +125,18 @@ The claims it then reads:
 | `principalKind` | `human`, `agent` or `service`. |
 | `org` | The workspace, an `org_` id: the person's active workspace, or the one that owns the agent or service. The hub maps it to its own tenant, creating that tenant the first time it sees a valid token for an enabled workspace. |
 | `ent` | The products enabled for that workspace. |
-| `scope` | On an agent's or a service's exchange token, its grant scopes. On a person's browser token it is the OAuth scope string and is never read as a grant. |
+| `scope` | On an agent's or a service's exchange token, its grant scopes: `evidence:read`, `runs:write` or `transcripts:read` (see [Reads for services](/build/services/)). On a person's browser token it is the OAuth scope string and is never read as a grant. |
 | `amr` | How an exchange token was obtained: `device`, `exchange`, `service` or `assertion`. Absent on browser tokens; the hub never requires it. |
 | `act` | `{ "sub": "prn_…" }` when a service minted the token for another principal. An agent's token names the hub's service here. |
 | `mayDispatch` | The agents this principal may dispatch, as bare `prn_` ids. |
 | `mayGrantReach` | Whether this principal may grant reach: act on a station's behalf, such as handing its agent a credential, for stations its `mayDispatch` covers. |
 | `email`, `email_verified` | For people. |
 
-**The principal kind is load-bearing.** The operator API takes people only. `/mcp` admits agents
-and services too, because serving agents is its whole purpose, and offers each a different tool
-set.
+**The principal kind is load-bearing.** The operator API takes people only. A few doors take
+agents and services instead, and check what each may do themselves: `/mcp`, because serving agents
+is its whole purpose, offers each kind a different tool set; `/api/catalog/*` and `/api/bridge/*`
+admit the services their reader settings list; `/api/evidence/*` admits agents and services whose
+grant holds the read's scope. They are listed in [Reads for services](/build/services/).
 
 ### Dispatch authority
 
@@ -171,5 +173,6 @@ automation on a hub you run.
 
 - [fleet reference](/reference/fleet/): `fleet login`, `whoami`, `logout` and `devices`
 - [MCP tools](/build/mcp/): what a token opens
+- [Reads for services](/build/services/): the doors for agents and services, and the scopes they need
 - [apn and fleet](/use/cli/): the two credentials, and why they never mix
 - [Dispatch and grants](/use/grants/): who may send an agent a message, and answer for it

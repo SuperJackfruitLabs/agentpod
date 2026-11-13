@@ -15,8 +15,18 @@
  * you which. It can only tell you they disagree.
  */
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  constList,
+  currentDocs,
+  docLines,
+  envVars,
+  hubRoutes,
+  matrixTypes,
+  nameNamed,
+  routeNamed,
+} from "../helpers/docs-surface";
 
 const REPO = join(import.meta.dir, "../../../..");
 const SITE = join(REPO, "docs-site/src/content/docs");
@@ -317,4 +327,92 @@ describe("published docs", () => {
       }
     }
   });
+});
+
+// ─── Completeness: the code's surface is in the docs, or in the baseline ────────
+//
+// Everything above reads one way: what a page claims must exist. Nothing read the other way, so a
+// route, a setting or an event could ship with no page at all, and the 2026-11-13 audit found 80
+// routes, 27 settings and 5 push events in no current doc. This is the other direction.
+//
+// The surface is read from the code by the TypeScript parser (tests/helpers/docs-surface.ts):
+// the routes by following the Hono mounts from src/index.ts, the settings from every env read,
+// the Matrix and relay event types from the strings the hub and the contract define, the push
+// events from the bridge's subscription lists. The Go binaries' commands, flags and settings are
+// held the same way by their own reference tests (cmd/agentpod-fleet, cmd/agentpod-node). "Documented" means named in a current doc: the published site,
+// the runbooks in docs/ (never the dated specs, plans and audits) or a README. A route needs its
+// method and its path on one line; a name needs to appear as a whole token.
+//
+// What is not documented today is listed in docs/undocumented-baseline.json. It is a ratchet, and
+// it fails both ways: something undocumented that is not in the list fails (document it), and
+// something in the list that is now documented, or gone from the code, fails too (take it out).
+// The list can only shrink. `DOCS_BASELINE=write bun test tests/unit/docs-claims.test.ts` rewrites
+// it from the code; a reviewer then sees every name it adds.
+
+describe("the docs name the whole surface (ratchet)", () => {
+  const BASELINE = join(REPO, "docs/undocumented-baseline.json");
+  const SURFACES = ["routes", "env", "events", "push"] as const;
+  type Surface = (typeof SURFACES)[number];
+  const docs = currentDocs();
+  const lines = docLines(docs);
+  const text = [...docs.values()].join("\n");
+
+  const surfaces: Record<Surface, { items: Map<string, string>; named: (item: string) => boolean; min: number }> = {
+    routes: (() => {
+      const routes = hubRoutes();
+      const byKey = new Map(routes.map((r) => [`${r.method} ${r.path}`, r]));
+      return {
+        items: new Map(routes.map((r) => [`${r.method} ${r.path}`, r.at])),
+        named: (key: string) => {
+          const route = byKey.get(key);
+          return route !== undefined && routeNamed(route, lines);
+        },
+        min: 150,
+      };
+    })(),
+    env: { items: envVars(["apps/hub/src", "apps/console/src"]), named: (n: string) => nameNamed(n, text), min: 80 },
+    events: { items: matrixTypes(["apps/hub/src", "packages/contract/src"]), named: (n: string) => nameNamed(n, text), min: 5 },
+    push: {
+      items: new Map(
+        (["PUSH_EVENTS", "WORK_PUSH_EVENTS", "RELAY_PUSH_EVENTS"] as const).flatMap((list) =>
+          constList("apps/hub/src/services/bridge/push-subscription.ts", list).map(
+            (e) => [e, `push-subscription.ts ${list}`] as const,
+          ),
+        ),
+      ),
+      named: (n: string) => nameNamed(n, text),
+      min: 10,
+    },
+  };
+
+  const undocumented = (s: Surface) =>
+    [...surfaces[s].items.keys()].filter((item) => !surfaces[s].named(item)).toSorted();
+
+  if (process.env.DOCS_BASELINE === "write") {
+    const out = Object.fromEntries(SURFACES.map((s) => [s, undocumented(s)]));
+    writeFileSync(BASELINE, `${JSON.stringify(out, null, 2)}\n`);
+  }
+  const parsedBaseline: unknown = JSON.parse(readFileSync(BASELINE, "utf8"));
+  const recorded = typeof parsedBaseline === "object" && parsedBaseline !== null ? Object.entries(parsedBaseline) : [];
+  const baselineOf = (s: Surface): string[] => {
+    const value: unknown = recorded.find(([key]) => key === s)?.[1];
+    return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+  };
+
+  for (const s of SURFACES) {
+    test(`${s}: everything is documented or in the baseline, and the baseline only shrinks`, () => {
+      const { items, named, min } = surfaces[s];
+      // Guards the vacuous pass: a parse that found nothing would leave nothing undocumented.
+      expect(items.size, `${s} read from the code`).toBeGreaterThan(min);
+      const listed = new Set(baselineOf(s));
+      const missing = undocumented(s)
+        .filter((item) => !listed.has(item))
+        .map((item) => `${item} (${items.get(item)})`);
+      expect(missing, `${s} with no current doc: name each in docs-site/ or docs/`).toEqual([]);
+      const nowDocumented = [...listed].filter((item) => items.has(item) && named(item));
+      expect(nowDocumented, `${s} documented now: remove from docs/undocumented-baseline.json`).toEqual([]);
+      const gone = [...listed].filter((item) => !items.has(item));
+      expect(gone, `${s} no longer in the code: remove from docs/undocumented-baseline.json`).toEqual([]);
+    });
+  }
 });

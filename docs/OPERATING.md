@@ -701,9 +701,9 @@ docker buildx build --platform linux/amd64 \
 
 It also stamps the source commit as an image label, which a hand-built tag records nowhere. The commands above remain accurate for building locally when iterating on a Dockerfile.
 
-**Which node-agent a Fly image carries is resolved by the workflow, not pinned in the repo.** The Fly images bake in a *released* binary (verified against `SHA256SUMS`) rather than compiling one the way the Modal images do, so they need a version — and the workflow resolves the latest release at build time, passes it as `--build-arg AGENTPOD_VERSION=…`, and then asserts the pushed image reports that version. A Fly publish therefore always ships the newest agent, with no Dockerfile edit to remember. Leave the optional `node_agent_version` input blank for that; set it only to publish an older release on purpose. The input and the check apply to `fly`/`fly-pi` only — a Modal-only publish never reads them. (Before this, both Fly Dockerfiles hardcoded `v0.1.22` while the fleet ran `v0.1.24`, so a merged node-agent fix could not reach a Fly station at all: issue #290. CI now fails when those `ARG` defaults — which is what a hand-build uses — fall behind the latest release.)
+**Which node-agent a Fly image carries is resolved by the workflow, not pinned in the repo.** The Fly images bake in a *released* binary (verified against `SHA256SUMS`) rather than compiling one the way the Modal images do, so they need a version — and the workflow resolves the latest release at build time, passes it as `--build-arg AGENTPOD_VERSION=…`, and then asserts the pushed image reports that version. A Fly publish therefore always ships the newest agent, with no Dockerfile edit to remember. Leave the optional `node_agent_version` input blank for that; set it only to publish an older release on purpose. The input and the check apply to `fly`/`fly-pi` only — a Modal-only publish never reads them. (Before this, both Fly Dockerfiles hardcoded `v0.1.22` while the fleet ran `v0.1.24`, so a merged node-agent fix could not reach a Fly station at all: issue #290.)
 
-**You do not open the bump PR by hand.** Cutting a release runs `release-node-agent.yml`'s `fly-pin` job, which moves both `ARG` defaults onto the tag it just released and opens `chore/fly-pin-<tag>` against `main` for you; merge it and the guard is satisfied. It is a no-op when the pin is already there, and it refuses to move the pin onto a release whose linux binaries or `SHA256SUMS` never uploaded. If that PR's required checks sit at *Expected* rather than running, dispatch them: `gh workflow run ci.yml --ref chore/fly-pin-<tag>` (a PR opened by `GITHUB_TOKEN` cannot trigger `pull_request` workflows, so the job dispatches CI itself — this is the manual fallback if that dispatch failed).
+**There is nothing to bump after a release.** The Dockerfile's `ARG AGENTPOD_VERSION` default, which is what a hand-build uses, is empty, so a hand-build downloads the latest release; pass `--build-arg AGENTPOD_VERSION=<tag>` to pin one. The CI guard on that default and the bot-opened `chore/fly-pin-<tag>` PR were removed (#471), and `release-node-agent.yml` is gone (#865): releases are cut by `release.yml`. Why the pin went is in [`fly/node-image/README.md`](../fly/node-image/README.md).
 
 To sanity-check a built image before pushing, run its entrypoint test against a bind mount standing in for the Volume:
 
@@ -1584,9 +1584,13 @@ journalctl -u agentpod-hub -n 50 --no-pager | grep push-gateway
 
 ## 8. The superpipeline bridge
 
-The bridge lets this hub **claim work from a superpipeline board** and run it on a station. It is
-outbound-only: it adds no HTTP route, opens no port, and nothing about a hub with it off is
-different from a hub built before it existed. See
+The bridge lets this hub **claim work from a superpipeline board** and run it on a station. It
+claims by calling the board; the board calls back through three signed routes under `/public`,
+mounted only when a Matrix bridge is configured: `POST /public/bridge/superpipeline/work`
+(`work.available`, below), `POST /public/bridge/superpipeline/push` (gates, questions and the rest,
+below) and `POST /public/bridge/superpipeline/events` (the event relay, below). The first two are
+signed with `SUPERPIPELINE_PUSH_SECRET`, the third with `TREATY_RELAY_DELIVERY_SECRET`; each answers
+503 when its secret is unset. A hub with the bridge off claims nothing. See
 [DEPLOYMENT.md → superpipeline bridge](./DEPLOYMENT.md#superpipeline-bridge) for the two variables
 and the roster table behind them.
 
@@ -1723,7 +1727,7 @@ None of these are configurable — they are constants in `services/bridge/`:
 
 | Interval | Value | When |
 |---|---|---|
-| poll | 5s | after a cycle that found nothing to claim |
+| poll | 5s | after a cycle that found nothing to claim; a `work.available` push ends the wait early (below) |
 | backoff | 30s | after a thrown cycle, and after `not-ready` or `released` — claim/release/claim is not a fix |
 | heartbeat | 60s | while a card is being worked (superpipeline reclaims an unheartbeated run at 15 min) |
 | turn timeout | 30 min | one prompt turn; on expiry the run is failed on the board and the session ended |
@@ -1737,9 +1741,10 @@ signal. A lost lease (409 `STALE_LEASE`) is *not* a halt; it is ordinary and the
 
 Each board the roster names is subscribed to the hub's signed push route
 (`$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/push`, events `gate.pending`,
-`elicitation.pending`, `delivery.pending`, `attention.pending`, `decision.reminded` and
-`decision.escalated`, signed with
-`SUPERPIPELINE_PUSH_SECRET`) by the gate sweeper — at hub start and
+`elicitation.pending`, `delivery.pending`, `attention.pending`, `decision.reminded`,
+`decision.escalated`, `gate.approval_recorded`, `decision.released`, `decision.pulled_back`,
+`check.failed` and `check.overridden`, signed with
+`SUPERPIPELINE_PUSH_SECRET`; the list is `PUSH_EVENTS` in `services/bridge/push-subscription.ts`) by the gate sweeper — at hub start and
 again every five minutes, with the board's first rostered credential. Registration is an upsert, so
 the refresh repairs a rebuilt board or a rotated secret. Nothing to run by hand:
 
@@ -1752,10 +1757,28 @@ journalctl -u agentpod-hub | grep 'gate projected'      # a push arriving, secon
 Until 2026-10-07 no board was ever subscribed — superpipeline accepted the registration from a
 person only — so every gate came by sweep.
 
+**Work arrives by push too; the poll is the floor.** On the same start-and-every-five-minutes
+refresh, each rostered agent registers its own push config on its board, with its own credential,
+for `work.available` only, at `$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/work` (signed
+with `SUPERPIPELINE_PUSH_SECRET`). A separate url because superpipeline keys a config by agent and
+url, so sharing the gate url would replace the board's chat subscription. When a board pushes
+`work.available` (a card created, advanced, released, reclaimed or unblocked), every idle loop on
+that board ends its 5s poll and claims at once; the board still decides which card each gets. The
+route answers 200 `{"ok":true,"woken":<n>}` whether or not a loop was waiting. A wake never cuts a
+30s backoff short, and a wake that lands mid-cycle skips the next idle wait once. The poll stays
+underneath for a lost push or a hub with no public URL. A board whose chat has moved (below) is
+still subscribed for work: its agents still claim here.
+
+```bash
+journalctl -u agentpod-hub | grep 'work.available subscription registered'   # once per board
+journalctl -u agentpod-hub | grep 'claim loops woken'                         # a push arriving
+```
+
 **A third door, the suite's event relay.** A SuperPipeline deployment with `RELAY_URL` and
 `RELAY_TOKEN` also publishes each `gate.pending` to the relay (NATS JetStream), which delivers it to
 `$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/events`, signed with
-`TREATY_RELAY_DELIVERY_SECRET` (`x-treaty-signature`). Without the secret the route answers 503. It
+`TREATY_RELAY_DELIVERY_SECRET` (`x-treaty-signature`), as a CloudEvent of type
+`com.superjackfruit.superpipeline.gate.pending.v1`. Without the secret the route answers 503. It
 hands the gate to the same projection as the push, idempotent on the gate id, so a gate that arrives
 by both doors is posted once. **With the secret set, the relay is the only door for gates:** the
 hub's push subscription leaves `gate.pending` out (it logs `gates reach chat through the event relay;

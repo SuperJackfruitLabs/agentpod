@@ -1,0 +1,48 @@
+name: docs-touched
+
+# A pull request that changes the public surface (hub routes, settings, MCP tools, push
+# subscriptions, the wire contract, the CLIs) must change docs-site/, docs/ or a README, or carry
+# the `no-docs-needed` label. Which paths count, and why, is in scripts/docs-touched.mjs.
+#
+# Its own workflow, not a job in ci.yml: adding or removing the label must re-run this check, and
+# the `labeled`/`unlabeled` types on ci.yml would re-run the whole suite for a label.
+on:
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+
+concurrency:
+  group: docs-touched-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  docs-touched:
+    name: docs-touched
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The merge base with the target branch has to be in the clone for the diff.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # The check's own cases first, so a broken rule fails under its own name.
+      - name: Test the check
+        run: node --test scripts/docs-touched.test.mjs
+
+      - name: Docs touched?
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # The labels as the event carries them, so adding one is read on the re-run it triggers.
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: node scripts/docs-touched.mjs

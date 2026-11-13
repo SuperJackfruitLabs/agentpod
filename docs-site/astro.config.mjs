@@ -112,6 +112,7 @@ export default defineConfig({
             { label: 'MCP tools', slug: 'build/mcp' },
             { label: 'Authentication', slug: 'build/auth' },
             { label: 'Capability catalog', slug: 'build/catalog' },
+            { label: 'Reads for services', slug: 'build/services' },
           ],
         },
       ],
