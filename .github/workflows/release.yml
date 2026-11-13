@@ -204,7 +204,9 @@ jobs:
           cache: false
       - name: Named secrets
         env:
-          KIT_SECRETS: ${{ toJSON(secrets) }}
+          # Each secret the kit supports, by name (kit.sh SUPPORTED_SECRETS). The whole secrets
+          # context is never expanded; kit.sh exports only the ones the config names.
+          KIT_SECRET_CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: sh "$KIT"/kit.sh secrets .github/release-config.json
       - name: Publish
         run: sh .github/release/publish.sh
@@ -391,7 +393,9 @@ jobs:
       # `secrets` in the config: those secrets, by name, for the deploy, smoke and rollback.
       - name: Named secrets
         env:
-          KIT_SECRETS: ${{ toJSON(secrets) }}
+          # Each secret the kit supports, by name (kit.sh SUPPORTED_SECRETS). The whole secrets
+          # context is never expanded; kit.sh exports only the ones the config names.
+          KIT_SECRET_CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: sh "$KIT"/kit.sh secrets "$CONFIG"
       # The deploy is the .github/release/deploy.sh hook, or `deploy` {"ssh_command": "<door>"}: the
       # production host's forced-command key, run as `ssh <ssh_user>@$PROD_HOST <door> <tag>`. The
@@ -537,7 +541,9 @@ jobs:
           (cd release-dist && sha256sum --check SHA256SUMS)
       - name: Named secrets
         env:
-          KIT_SECRETS: ${{ toJSON(secrets) }}
+          # Each secret the kit supports, by name (kit.sh SUPPORTED_SECRETS). The whole secrets
+          # context is never expanded; kit.sh exports only the ones the config names.
+          KIT_SECRET_CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: sh "$KIT"/kit.sh secrets .github/release-config.json
       - name: Publish
         run: RELEASE_DIST="$PWD/release-dist" sh .github/release/publish.sh

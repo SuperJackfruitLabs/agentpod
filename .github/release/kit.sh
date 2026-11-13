@@ -13,8 +13,10 @@
 #       never runs a string read out of the config.
 #   kit.sh secrets <release-config.json>
 #       Exports the secrets the config names in "secrets" to the following steps of the job
-#       ($GITHUB_ENV). Reads every secret, as JSON, from KIT_SECRETS (the workflow passes
-#       toJSON(secrets)) and exports only the named ones. A named secret that is not set fails.
+#       ($GITHUB_ENV), under their own names. The workflow maps each secret the kit supports
+#       (SUPPORTED_SECRETS below) by name into its "Named secrets" steps as KIT_SECRET_<name>, and
+#       never expands the whole secrets context. A name outside the list, or a named secret that
+#       is not set, fails.
 #   kit.sh material <tag> <dir>
 #       Writes the summary's material for <tag> into <dir>: changelog-section.md (the tag's
 #       section of CHANGELOG.md, or main's when the tag's file has none), commit-log.txt
@@ -29,6 +31,21 @@
 set -eu
 
 die() { echo "::error::$*" >&2; exit 1; }
+
+# The secrets a config may name. Each one is mapped by name, as KIT_SECRET_<name>, in every
+# "Named secrets" step of release.yml (the kit's tests check the two agree). Supporting another
+# secret means adding it here and to those steps, in the kit, and syncing it.
+SUPPORTED_SECRETS='CLOUDFLARE_API_TOKEN'
+
+# Fails unless every name in the config's "secrets" is one the kit supports.
+check_secret_names() {
+  for n in $(jq -r '.secrets[]? // empty' "$1"); do
+    case " $SUPPORTED_SECRETS " in
+      *" $n "*) ;;
+      *) die "release-config.json names the secret '$n', which the release kit does not pass through; it supports: $SUPPORTED_SECRETS. Add it to the kit (kit.sh SUPPORTED_SECRETS and each Named secrets step of release.yml) and sync it" ;;
+    esac
+  done
+}
 
 # Each key that used to hold a command or a script path, and the fixed hook file replacing it.
 old_keys() {
@@ -82,6 +99,7 @@ case "$cmd" in
     if jq -e '.secrets and ((.secrets | type) != "array" or any(.secrets[]; type != "string"))' "$c" >/dev/null; then
       die "secrets is a list of secret names"
     fi
+    check_secret_names "$c"
     if has deploy.sh && jq -e '.deploy' "$c" >/dev/null; then die "deploy: $hooks/deploy.sh or deploy.ssh_command, not both"; fi
     if has rollback.sh && jq -e '.rollback' "$c" >/dev/null; then die "rollback: $hooks/rollback.sh or rollback.ssh_command, not both"; fi
     if has smoke.sh && jq -e '.smoke.url' "$c" >/dev/null; then die "smoke: $hooks/smoke.sh or smoke.url, not both"; fi
@@ -104,14 +122,15 @@ case "$cmd" in
     names=$(jq -r '.secrets[]? // empty' "$config")
     [ -n "$names" ] || { echo "no named secrets"; exit 0; }
     out=${GITHUB_ENV:?GITHUB_ENV is not set}
-    all=${KIT_SECRETS:-}
-    [ -n "$all" ] || all='{}'
     for n in $names; do
       case "$n" in
         '' | [0-9]* | *[!A-Za-z0-9_]* | GITHUB_* | ACTIONS_* | RUNNER_*)
           die "release-config.json names '$n' as a secret; want a plain secret name" ;;
       esac
-      v=$(printf '%s' "$all" | jq -r --arg n "$n" '.[$n] // empty')
+    done
+    check_secret_names "$config"
+    for n in $names; do
+      v=$(printenv "KIT_SECRET_$n" || true)
       [ -n "$v" ] || die "the secret $n that release-config.json names is not set for this repository, its organisation or the job's environment"
       d="KIT_EOF_$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
       { printf '%s<<%s\n' "$n" "$d"; printf '%s\n' "$v"; printf '%s\n' "$d"; } >> "$out"
