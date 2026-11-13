@@ -2225,7 +2225,7 @@ packages:
 
   '@superjackfruit/frontdoor@file:apps/landing/vendor/superjackfruit-frontdoor-0.0.12.tgz':
     resolution: {integrity: sha512-XJfALhXl3cdCmmq/tIg0D4riQrT/bTbCZVTy3rc64V527nmp0wbFPwZRuKTIyuBq0rYzgKtKlIn+QYfjKG4IkA==, tarball: file:apps/landing/vendor/superjackfruit-frontdoor-0.0.12.tgz}
-    version: 0.0.11
+    version: 0.0.12
     peerDependencies:
       '@superjackfruit/vibekit': '>=0.0.14 <0.1.0'
       astro: '>=5.0.0'
