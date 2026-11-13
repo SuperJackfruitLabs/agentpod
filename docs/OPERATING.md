@@ -1584,9 +1584,13 @@ journalctl -u agentpod-hub -n 50 --no-pager | grep push-gateway
 
 ## 8. The superpipeline bridge
 
-The bridge lets this hub **claim work from a superpipeline board** and run it on a station. It is
-outbound-only: it adds no HTTP route, opens no port, and nothing about a hub with it off is
-different from a hub built before it existed. See
+The bridge lets this hub **claim work from a superpipeline board** and run it on a station. It
+claims by calling the board; the board calls back through three signed routes under `/public`,
+mounted only when a Matrix bridge is configured: `POST /public/bridge/superpipeline/work`
+(`work.available`, below), `POST /public/bridge/superpipeline/push` (gates, questions and the rest,
+below) and `POST /public/bridge/superpipeline/events` (the event relay, below). The first two are
+signed with `SUPERPIPELINE_PUSH_SECRET`, the third with `TREATY_RELAY_DELIVERY_SECRET`; each answers
+503 when its secret is unset. A hub with the bridge off claims nothing. See
 [DEPLOYMENT.md → superpipeline bridge](./DEPLOYMENT.md#superpipeline-bridge) for the two variables
 and the roster table behind them.
 
@@ -1723,7 +1727,7 @@ None of these are configurable — they are constants in `services/bridge/`:
 
 | Interval | Value | When |
 |---|---|---|
-| poll | 5s | after a cycle that found nothing to claim |
+| poll | 5s | after a cycle that found nothing to claim; a `work.available` push ends the wait early (below) |
 | backoff | 30s | after a thrown cycle, and after `not-ready` or `released` — claim/release/claim is not a fix |
 | heartbeat | 60s | while a card is being worked (superpipeline reclaims an unheartbeated run at 15 min) |
 | turn timeout | 30 min | one prompt turn; on expiry the run is failed on the board and the session ended |
@@ -1737,9 +1741,10 @@ signal. A lost lease (409 `STALE_LEASE`) is *not* a halt; it is ordinary and the
 
 Each board the roster names is subscribed to the hub's signed push route
 (`$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/push`, events `gate.pending`,
-`elicitation.pending`, `delivery.pending`, `attention.pending`, `decision.reminded` and
-`decision.escalated`, signed with
-`SUPERPIPELINE_PUSH_SECRET`) by the gate sweeper — at hub start and
+`elicitation.pending`, `delivery.pending`, `attention.pending`, `decision.reminded`,
+`decision.escalated`, `gate.approval_recorded`, `decision.released`, `decision.pulled_back`,
+`check.failed` and `check.overridden`, signed with
+`SUPERPIPELINE_PUSH_SECRET`; the list is `PUSH_EVENTS` in `services/bridge/push-subscription.ts`) by the gate sweeper — at hub start and
 again every five minutes, with the board's first rostered credential. Registration is an upsert, so
 the refresh repairs a rebuilt board or a rotated secret. Nothing to run by hand:
 
@@ -1751,6 +1756,23 @@ journalctl -u agentpod-hub | grep 'gate projected'      # a push arriving, secon
 `push subscription skipped` means the secret is unset and every gate waits for the sweep (≤ 5 min).
 Until 2026-10-07 no board was ever subscribed — superpipeline accepted the registration from a
 person only — so every gate came by sweep.
+
+**Work arrives by push too; the poll is the floor.** On the same start-and-every-five-minutes
+refresh, each rostered agent registers its own push config on its board, with its own credential,
+for `work.available` only, at `$MANAGEMENT_API_PUBLIC_URL/public/bridge/superpipeline/work` (signed
+with `SUPERPIPELINE_PUSH_SECRET`). A separate url because superpipeline keys a config by agent and
+url, so sharing the gate url would replace the board's chat subscription. When a board pushes
+`work.available` (a card created, advanced, released, reclaimed or unblocked), every idle loop on
+that board ends its 5s poll and claims at once; the board still decides which card each gets. The
+route answers 200 `{"ok":true,"woken":<n>}` whether or not a loop was waiting. A wake never cuts a
+30s backoff short, and a wake that lands mid-cycle skips the next idle wait once. The poll stays
+underneath for a lost push or a hub with no public URL. A board whose chat has moved (below) is
+still subscribed for work: its agents still claim here.
+
+```bash
+journalctl -u agentpod-hub | grep 'work.available subscription registered'   # once per board
+journalctl -u agentpod-hub | grep 'claim loops woken'                         # a push arriving
+```
 
 **A third door, the suite's event relay.** A SuperPipeline deployment with `RELAY_URL` and
 `RELAY_TOKEN` also publishes each `gate.pending` to the relay (NATS JetStream), which delivers it to

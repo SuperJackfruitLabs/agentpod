@@ -9,8 +9,19 @@ work on is a different job in a different plane, which is what
 
 The bridge joins them: the hub can **claim work from a board** and run it on a station.
 
-It is outbound-only. It adds no route, opens no port, and a hub with it off is indistinguishable
-from one built before it existed.
+The bridge claims by calling the board. The board calls back through three signed doors under
+`/public`, each refused without a valid signature:
+
+| door | what arrives | signed with |
+|---|---|---|
+| `POST /public/bridge/superpipeline/work` | `work.available`: a card one of this hub's agents could claim is ready | `SUPERPIPELINE_PUSH_SECRET` |
+| `POST /public/bridge/superpipeline/push` | gates, questions, follow-ups, waiting cards and their reminders and outcomes | `SUPERPIPELINE_PUSH_SECRET` |
+| `POST /public/bridge/superpipeline/events` | `gate.pending` from the suite's [event relay](https://treaty.superjackfruit.com/relay/) | `TREATY_RELAY_DELIVERY_SECRET` |
+
+The three exist only on a hub with a Matrix bridge configured. The hub registers the push
+subscriptions with each board itself, with the board's own credential, so there is nothing to set
+up on the board. With the push secret unset, nothing is registered and the first two doors answer
+503; the relay door answers 503 without its own secret.
 
 ## The roster
 
@@ -46,10 +57,21 @@ configurable:
 
 | | |
 |---|---|
-| poll | every 5s after a cycle that found nothing |
+| poll | every 5s after a cycle that found nothing, unless the board says work is ready first |
 | backoff | 30s after a failed cycle — claim, release, claim is not a fix |
 | heartbeat | every 60s while a card is being worked, against the board's 15-minute reclaim |
 | turn timeout | 30 minutes for one prompt turn; on expiry the run is failed **on the board** rather than left hanging |
+
+**Work is claimed when it appears.** Each roster entry subscribes, with its own credential, to the
+board's `work.available` push. When a card it could claim appears (created, advanced, released,
+reclaimed or unblocked), every idle loop on that board ends its wait and claims at once; the board
+still decides which card, if any, each one gets. The poll stays underneath as the floor, for a lost
+push or a hub the board cannot reach. A wake never cuts a backoff short.
+
+**A board that is briefly down does not end a run.** For a Salaam station's strict run, a heartbeat
+that gets a 5xx or times out (a SuperPipeline redeploy answers 502) is retried after 1, 2 and 4
+seconds, and if the board is still down the run is driven again on the next cycle with its session
+kept. Only a lease the board refuses stops the work.
 
 A lost lease is ordinary — the card was reclaimed, and the loop claims again. One condition halts a
 loop permanently: being told a run belongs to **another** agent. That means two things believe they
@@ -94,6 +116,12 @@ its [decision](https://treaty.superjackfruit.com/matrix/answers/superpipeline-ga
 [question card](https://treaty.superjackfruit.com/matrix/cards/superpipeline-question-v2/) and its
 [answer](https://treaty.superjackfruit.com/matrix/answers/superpipeline-question-answer-v2/), and the
 [receipt](https://treaty.superjackfruit.com/matrix/receipts/superpipeline-gate-outcome-v1/) that closes a decided gate.
+
+**A board whose chat has moved.** Board chat is moving to a separate communication service, one
+board at a time, and exactly one path serves a board. A board listed in the hub's
+`BOARD_CHAT_MOVED_BOARDS` setting is no longer served here: nothing pushed or relayed for it is
+posted, its old room is told once that its chat has moved, and any answer typed in that room is
+ignored, so a stale card cannot decide anything twice.
 
 **Buttons only.** A question whose agent offered no options cannot be answered from the room, and
 the room says where it can be answered rather than pretending.
