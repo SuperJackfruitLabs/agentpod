@@ -1,7 +1,10 @@
 # Shared release workflow for the SuperJackfruit suite. Master copy: the suite's release kit.
 # Every product carries this file byte-identical at .github/workflows/release.yml, plus the
 # shared scripts under .github/release/. Everything product-specific is in
-# .github/release-config.json. Do not edit a product's copy; change the master and sync it.
+# .github/release-config.json (settings, never commands) and in the product's own hook scripts at
+# fixed paths: .github/release/{ci-check,check,build,publish,deploy,smoke,rollback}.sh, each run
+# only when the file exists. The workflow never runs a command string read out of the config.
+# Do not edit a product's copy of this file; change the master and sync it.
 name: Release
 
 on:
@@ -62,8 +65,8 @@ jobs:
           ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0
           persist-credentials: false
-      # The kit's scripts come from this workflow's own commit (the tag on a push, main on a
-      # dispatch), never from an older tag's tree, and live outside the product's checkout.
+      # The kit's scripts come from this workflow's own commit (the tag on a push, the dispatched
+      # ref on a dispatch) and live outside the product's checkout.
       - name: The kit's scripts, from this workflow's commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -80,31 +83,9 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Read release config
         id: config
-        run: |
-          test -f .github/release-config.json || { echo "::error::no .github/release-config.json"; exit 1; }
-          c=.github/release-config.json
-          jq -e '.product and (.ci_workflow or .ci.forge or .ci.check_command)' "$c" >/dev/null ||
-            { echo "::error::release-config.json needs product, and ci_workflow or ci"; exit 1; }
-          if jq -e '.artifact and (.ci_workflow | not)' "$c" >/dev/null; then
-            echo "::error::artifact needs ci_workflow: only a GitHub CI run uploads builds"; exit 1
-          fi
-          if jq -e '.publish and ((.publish.script and .publish.environment) | not)' "$c" >/dev/null; then
-            echo "::error::publish needs script and environment"; exit 1
-          fi
-          if jq -e '.secrets and ((.secrets | type) != "array" or any(.secrets[]; type != "string"))' "$c" >/dev/null; then
-            echo "::error::secrets is a list of secret names"; exit 1
-          fi
-          go=$(jq -r '.go_mod // empty' "$c")
-          if [ -n "$go" ]; then [ -f "$go" ] || { echo "::error::go_mod $go does not exist"; exit 1; }
-          elif [ -f go.mod ]; then go=go.mod; fi
-          {
-            echo "product=$(jq -r .product "$c")"
-            echo "publish=$(jq -r 'if .publish then "true" else "false" end' "$c")"
-            echo "publish_after_release=$(jq -r '.publish.after_release // false' "$c")"
-            echo "publish_environment=$(jq -r '.publish.environment // empty' "$c")"
-            echo "check=$(jq -r 'if .check then "true" else "false" end' "$c")"
-            echo "go_mod=$go"
-          } >> "$GITHUB_OUTPUT"
+        # Refuses a config that still names a command or a script path (a tag cut before hooks
+        # were fixed files): release a new tag from a main that has the hook scripts.
+        run: sh "$KIT"/kit.sh config .github/release-config.json
       # fetch-depth 0 already brought origin/main. A second fetch would need credentials, which
       # checkout does not keep, and a private repository refuses it.
       - name: Tag commit is on main
@@ -148,34 +129,34 @@ jobs:
           echo "run_attempt=${run#* }" >> "$GITHUB_OUTPUT"
           echo "main CI run ${run% *} (attempt ${run#* }) passed for $SHA"
       - name: Set up Node for the checks at the tag (the repo's .nvmrc)
-        if: (steps.ci.outputs.source == 'tag' || steps.config.outputs.check == 'true') && hashFiles('.nvmrc') != ''
+        if: (steps.ci.outputs.source == 'tag' || hashFiles('.github/release/check.sh') != '') && hashFiles('.nvmrc') != ''
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
       - name: Set up Bun for the checks at the tag
-        if: (steps.ci.outputs.source == 'tag' || steps.config.outputs.check == 'true') && hashFiles('.bun-version') != ''
+        if: (steps.ci.outputs.source == 'tag' || hashFiles('.github/release/check.sh') != '') && hashFiles('.bun-version') != ''
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
       - name: Set up Go for the checks at the tag
-        if: (steps.ci.outputs.source == 'tag' || steps.config.outputs.check == 'true') && steps.config.outputs.go_mod != ''
+        if: (steps.ci.outputs.source == 'tag' || hashFiles('.github/release/check.sh') != '') && steps.config.outputs.go_mod != ''
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ steps.config.outputs.go_mod }}
           cache: false
       - name: Check at the tag (main's CI result could not be read)
         if: steps.ci.outputs.source == 'tag'
-        run: sh -c "$(jq -r '.ci.check_command' .github/release-config.json)"
+        run: sh .github/release/ci-check.sh
       # The check sees main CI's run (empty for a forge-primary product) and a read-only token, so
       # it can inspect that run's artifacts and their attestations.
       - name: The product's own release check
-        if: steps.config.outputs.check == 'true'
+        if: hashFiles('.github/release/check.sh') != ''
         env:
           RELEASE_SHA: ${{ steps.commit.outputs.sha }}
           CI_RUN_ID: ${{ steps.ci.outputs.run_id }}
           CI_RUN_ATTEMPT: ${{ steps.ci.outputs.run_attempt }}
           GH_TOKEN: ${{ github.token }}
-        run: sh -c "$(jq -r '.check' .github/release-config.json)"
+        run: sh .github/release/check.sh
 
   publish:
     name: Publish ${{ needs.gate.outputs.product }} ${{ inputs.tag || github.ref_name }}
@@ -193,8 +174,8 @@ jobs:
         with:
           ref: ${{ needs.gate.outputs.sha }}
           persist-credentials: false
-      # The kit's scripts come from this workflow's own commit (the tag on a push, main on a
-      # dispatch), never from an older tag's tree, and live outside the product's checkout.
+      # The kit's scripts come from this workflow's own commit (the tag on a push, the dispatched
+      # ref on a dispatch) and live outside the product's checkout.
       - name: The kit's scripts, from this workflow's commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -226,7 +207,7 @@ jobs:
           KIT_SECRETS: ${{ toJSON(secrets) }}
         run: sh "$KIT"/kit.sh secrets .github/release-config.json
       - name: Publish
-        run: sh "$(jq -r '.publish.script' .github/release-config.json)"
+        run: sh .github/release/publish.sh
 
   release:
     name: Release ${{ needs.gate.outputs.product }} ${{ inputs.tag || github.ref_name }}
@@ -252,8 +233,8 @@ jobs:
           ref: ${{ needs.gate.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
-      # The kit's scripts come from this workflow's own commit (the tag on a push, main on a
-      # dispatch), never from an older tag's tree, and live outside the product's checkout.
+      # The kit's scripts come from this workflow's own commit (the tag on a push, the dispatched
+      # ref on a dispatch) and live outside the product's checkout.
       - name: The kit's scripts, from this workflow's commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -270,16 +251,16 @@ jobs:
           node-version: 22
 
       # `artifact` names main CI's build: {sha} is the commit, {attempt} the run attempt that
-      # passed. A name with * fetches every matching artifact (a CI matrix), merged.
+      # passed. A name with * fetches every matching artifact (a CI matrix), merged. Without one,
+      # a .github/release/build.sh hook builds at the tag.
       - name: Which build to ship
         id: plan
         env:
           ATTEMPT: ${{ needs.gate.outputs.run_attempt }}
         run: |
           artifact=$(jq -r '.artifact // empty' "$CONFIG" | sed "s/{sha}/$RELEASE_SHA/g; s/{attempt}/$ATTEMPT/g")
-          build=$(jq -r '.build_at_tag // false' "$CONFIG")
           case "$artifact" in
-            '') if [ "$build" = true ]; then echo "mode=build"; else echo "mode=none"; fi ;;
+            '') if [ -f .github/release/build.sh ]; then echo "mode=build"; else echo "mode=none"; fi ;;
             *'*'*) echo "mode=pattern" ;;
             *) echo "mode=artifact" ;;
           esac >> "$GITHUB_OUTPUT"
@@ -316,7 +297,7 @@ jobs:
         if: steps.plan.outputs.mode == 'build'
         run: |
           mkdir -p release-dist
-          sh -c "$(jq -r '.build_command' "$CONFIG")"
+          sh .github/release/build.sh
           # Asset entries are globs on purpose. One that matches nothing fails the release.
           for p in $(jq -r '.assets[]? // empty' "$CONFIG"); do
             # shellcheck disable=SC2086
@@ -412,9 +393,10 @@ jobs:
         env:
           KIT_SECRETS: ${{ toJSON(secrets) }}
         run: sh "$KIT"/kit.sh secrets "$CONFIG"
-      # `deploy` is a script, or {"ssh_command": "<door>"}: the production host's forced-command
-      # key, run as `ssh <ssh_user>@$PROD_HOST <door> <tag>`. Scripts see the same PROD_* values,
-      # TAG, RELEASE_SHA, CI_RUN_ID (main CI's run, for its other artifacts) and GH_TOKEN.
+      # The deploy is the .github/release/deploy.sh hook, or `deploy` {"ssh_command": "<door>"}: the
+      # production host's forced-command key, run as `ssh <ssh_user>@$PROD_HOST <door> <tag>`. The
+      # hook sees the same PROD_* values, TAG, RELEASE_SHA, CI_RUN_ID (main CI's run, for its other
+      # artifacts), RELEASE_DIST and GH_TOKEN.
       - name: Deploy
         id: deploy
         env:
@@ -423,13 +405,14 @@ jobs:
           PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          if [ -f .github/release/deploy.sh ]; then
+            echo "deployed=true" >> "$GITHUB_OUTPUT"
+            RELEASE_DIST="$PWD/release-dist" sh .github/release/deploy.sh
+            exit 0
+          fi
           kind=$(jq -r '.deploy | type' "$CONFIG")
           if [ "$kind" = null ]; then echo "no deploy step for this product"; exit 0; fi
           echo "deployed=true" >> "$GITHUB_OUTPUT"
-          if [ "$kind" = string ]; then
-            RELEASE_DIST="$PWD/release-dist" sh "$(jq -r .deploy "$CONFIG")"
-            exit 0
-          fi
           door=$(jq -r '.deploy.ssh_command // empty' "$CONFIG")
           [ -n "$door" ] || { echo "::error::deploy needs a script or ssh_command"; exit 1; }
           [ -n "$PROD_HOST" ] && [ -n "$PROD_SSH_KEY" ] && [ -n "$PROD_KNOWN_HOSTS" ] ||
@@ -443,7 +426,8 @@ jobs:
         id: smoke
         if: steps.deploy.outputs.deployed == 'true'
         run: |
-          script=$(jq -r '.smoke.script // empty' "$CONFIG")
+          script=
+          [ -f .github/release/smoke.sh ] && script=.github/release/smoke.sh
           url=$(jq -r '.smoke.url // empty' "$CONFIG")
           tries=$(jq -r '.smoke.retries // 20' "$CONFIG")
           delay=$(jq -r '.smoke.delay_s // 10' "$CONFIG")
@@ -464,9 +448,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           kind=$(jq -r '.rollback | type' "$CONFIG")
-          if [ "$kind" = null ]; then echo "::error::the release failed and no rollback is configured"; exit 1; fi
-          if [ "$kind" = string ]; then
-            PREVIOUS_TAG="$PREV" sh "$(jq -r .rollback "$CONFIG")"
+          if [ -f .github/release/rollback.sh ]; then
+            PREVIOUS_TAG="$PREV" sh .github/release/rollback.sh
+          elif [ "$kind" = null ]; then
+            echo "::error::the release failed and no rollback is configured"; exit 1
           else
             door=$(jq -r '.rollback.ssh_command // empty' "$CONFIG")
             [ -n "$door" ] && [ -n "$PREV" ] || { echo "::error::no ssh_command or no previous tag to roll back to"; exit 1; }
@@ -516,8 +501,8 @@ jobs:
         with:
           ref: ${{ needs.gate.outputs.sha }}
           persist-credentials: false
-      # The kit's scripts come from this workflow's own commit (the tag on a push, main on a
-      # dispatch), never from an older tag's tree, and live outside the product's checkout.
+      # The kit's scripts come from this workflow's own commit (the tag on a push, the dispatched
+      # ref on a dispatch) and live outside the product's checkout.
       - name: The kit's scripts, from this workflow's commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -555,7 +540,7 @@ jobs:
           KIT_SECRETS: ${{ toJSON(secrets) }}
         run: sh "$KIT"/kit.sh secrets .github/release-config.json
       - name: Publish
-        run: RELEASE_DIST="$PWD/release-dist" sh "$(jq -r '.publish.script' .github/release-config.json)"
+        run: RELEASE_DIST="$PWD/release-dist" sh .github/release/publish.sh
 
   # workflow_dispatch with summary_only: rewrites the Summary section of an existing release's
   # notes and changes nothing else.

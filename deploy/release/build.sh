@@ -1,5 +1,5 @@
 #!/bin/sh
-# The release's build (`build_command` in .github/release-config.json), run at the tag: the
+# The release's build (the .github/release/build.sh hook), run at the tag: the
 # node-agent and fleet binaries for linux and darwin, amd64 and arm64, with the tag stamped in.
 # Nodes update themselves from releases/latest and check each binary against SHA256SUMS, so a
 # release must carry all eight: the loop builds every one or fails, and the workflow refuses an

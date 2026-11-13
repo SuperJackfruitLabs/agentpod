@@ -1,5 +1,5 @@
 #!/bin/sh
-# The release's production deploy (`deploy` in .github/release-config.json), in the order people
+# The release's production deploy (the .github/release/deploy.sh hook), in the order people
 # need: the hub first, then the console that calls it, so a console never reaches people ahead of
 # its hub.
 #
