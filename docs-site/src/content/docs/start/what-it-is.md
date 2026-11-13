@@ -87,6 +87,10 @@ decisions that work stops on come back to a room where you can answer them. That
 between two planes rather than one plane growing into the other — see
 [Working a board](/use/boards/).
 
+**Contracts: [Treaty](https://treaty.superjackfruit.com).** The board events the hub receives through the
+[event relay](https://treaty.superjackfruit.com/relay/), the [chat cards](https://treaty.superjackfruit.com/matrix/) it posts and reads, and the
+[identity corpus](https://treaty.superjackfruit.com/packages/ecosystem-identity/) its token checks are tested against are Treaty's.
+
 ## Next
 
 - [Enroll your first node](/start/first-node/) — a machine in the fleet in about five minutes

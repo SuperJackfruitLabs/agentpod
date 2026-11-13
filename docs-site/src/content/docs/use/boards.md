@@ -84,6 +84,16 @@ Two rules worth knowing:
 
 Questions reach a room by push where the board is configured for it, and by a reconciliation sweep
 otherwise — so a board that has not been reconfigured is served late rather than not at all.
+A gate also reaches the hub through the suite's [event relay](https://treaty.superjackfruit.com/relay/) as a
+[`gate.pending`](https://treaty.superjackfruit.com/events/gate-pending-v1/) event, whose signature the hub checks before it reads
+the body ([how a subscriber verifies](https://treaty.superjackfruit.com/relay/#verifying-a-delivery)). A gate delivered both ways
+is posted once.
+
+What crosses the room is [Treaty](https://treaty.superjackfruit.com)'s: the [gate card](https://treaty.superjackfruit.com/matrix/cards/superpipeline-gate-v2/) and
+its [decision](https://treaty.superjackfruit.com/matrix/answers/superpipeline-gate-decision-v2/), the
+[question card](https://treaty.superjackfruit.com/matrix/cards/superpipeline-question-v2/) and its
+[answer](https://treaty.superjackfruit.com/matrix/answers/superpipeline-question-answer-v2/), and the
+[receipt](https://treaty.superjackfruit.com/matrix/receipts/superpipeline-gate-outcome-v1/) that closes a decided gate.
 
 **Buttons only.** A question whose agent offered no options cannot be answered from the room, and
 the room says where it can be answered rather than pretending.
@@ -106,7 +116,8 @@ and say where to choose. Once a version is approved, the room's receipt names it
 
 **A gate may need more than one approver.** A workspace owner or admin can set a stage to need two
 to five approvals — from the stage's deciders, or from the workspace's owners and admins — before
-its gate passes. Each approval short of that is said in the room as a reply to the gate, for example
+its gate passes. Each approval short of that is said in the room as a reply to the gate
+([gate progress](https://treaty.superjackfruit.com/matrix/notices/agentpod-gate-progress-v2/)), for example
 "Approved by asha — 1 of 2. Waiting for 1 more.", and the gate stays open; the approval that reaches
 the number passes it, and the room's receipt says so. Each person counts once: approving again is
 refused with a reply saying it is still waiting for others, and an approval from someone who does
@@ -120,8 +131,9 @@ Mon 16 Nov, 09:00 UTC"). An approval is recorded at once but does not act until 
 room's receipt says "Approved by rakesh — goes ahead after … unless pulled back", and nothing is
 posted or advanced until then. Until it acts, anyone who may decide the gate, or a workspace owner
 or admin, can **pull it back** with a comment, from the app or on the board; that sends the work back
-for changes, and the room replies "Pulled back by … — returned for changes: …". When the time comes
-the room replies "Released — it went ahead." or, if what was approved changed or expired meanwhile,
+for changes, and the room replies "Pulled back by … — returned for changes: …"
+([pulled back](https://treaty.superjackfruit.com/matrix/notices/agentpod-decision-pulled-back-v2/)). When the time comes
+the room replies "Released — it went ahead." ([released](https://treaty.superjackfruit.com/matrix/notices/agentpod-decision-released-v2/)) or, if what was approved changed or expired meanwhile,
 "Did not go ahead: …". Pulling back after it went ahead is refused, and nobody can move the time.
 
 **A gate may be decided by checks.** A workspace owner or admin can give a stage up to five
@@ -131,14 +143,18 @@ check has passed, the gate opens as usual and lists them ("Checks: build (CI) �
 ✓."). A check that fails sends the card back for changes, and the board's room says so ("CI check
 “build” failed on “Ship it” — returned for changes."). Checks still pending past the stage's
 timeout are reminded and then escalated like any decision: the workspace's owners and admins are
-invited, and a card lists the checks so they can **override** one, with a comment, from the app or
-on the board. The room then says who overrode which check and why. Agents never override, and
+invited, and a card ([checks waiting](https://treaty.superjackfruit.com/matrix/cards/agentpod-checks-waiting-v2/)) lists the
+checks so they can **override** one ([the override](https://treaty.superjackfruit.com/matrix/answers/superpipeline-check-override-v2/)), with a comment, from the app or
+on the board. The room then says who overrode which check and why. Both lines are Treaty notices:
+[check failed](https://treaty.superjackfruit.com/matrix/notices/agentpod-check-failed-v2/) and
+[check overridden](https://treaty.superjackfruit.com/matrix/notices/agentpod-check-overridden-v2/). Agents never override, and
 whoever produced the work cannot override a check on it.
 
 ## A card waiting on you
 
 A card also stops on a person when its agent keeps failing, says it is **blocked**, or is **not
-authorised** to go on. That reaches the board's room too, as its own card: what is wrong, what the
+authorised** to go on. That reaches the board's room too, as its own card
+([the waiting card](https://treaty.superjackfruit.com/matrix/cards/superpipeline-attention-v2/)): what is wrong, what the
 agent said, and three choices.
 
 - **Resume here** — with a required instruction for the next attempt.
@@ -150,6 +166,8 @@ gates, which deserves the board. Your answer goes to the board as you, and names
 were shown — if the card was resumed, archived or moved on the board meanwhile, or now waits on
 something else, the board refuses it, nothing changes, and the room says so. A card that parks again
 arrives as a new card. Whoever settles it, here or on the board, the card in the room closes.
+The answer is an [attention answer](https://treaty.superjackfruit.com/matrix/answers/superpipeline-attention-answer-v2/), and the
+card closes by its [outcome](https://treaty.superjackfruit.com/matrix/receipts/superpipeline-attention-outcome-v1/).
 
 An older app shows the card as text with a link to the board; an updated app shows the buttons.
 
@@ -161,9 +179,10 @@ card. The board keeps the clock; nothing is ever approved, rejected or resumed b
 
 - **Each card says when.** A gate, question, follow-up or waiting card with a timeout carries its
   deadline, so an updated app can show "escalates in 3 h".
-- **The reminder** is a short reply to the card in the board room: *Still waiting: "Launch post"
+- **The reminder** ([decision reminded](https://treaty.superjackfruit.com/matrix/notices/superpipeline-decision-reminded-v1/)) is a
+  short reply to the card in the board room: *Still waiting: "Launch post"
   has waited 3 h for an approval.* Once per decision.
-- **The escalation** invites the workspace's **owners and admins** — as your workspace's Accounts
+- **The escalation** ([decision escalated](https://treaty.superjackfruit.com/matrix/notices/superpipeline-decision-escalated-v1/)) invites the workspace's **owners and admins** — as your workspace's Accounts
   settings list them, and only those who have linked a Matrix account — into the board room, then
   replies to the card: *Escalated to workspace admins after 6 h …*, with a link to the card. Once per
   decision. An invited admin sees what the room sees and answers like anyone in it; the board judges

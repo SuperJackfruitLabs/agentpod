@@ -71,7 +71,8 @@ for SuperLibrary, because that is when `agentpod_link_artifact` exists:
 2. Link files it produces with `agentpod_link_artifact`, from its own workspace only, and attach the url to its card with `superpipeline_add_reference`.
 3. Never publish through gists, pastebins or personal accounts.
 
-The card prompt states the third rule on every card, whether the agent reports for itself or the bridge reports for it. It names `agentpod_link_artifact`
+The card prompt ([pinned in Treaty's identity corpus](https://treaty.superjackfruit.com/packages/ecosystem-identity/) as
+`card_prompt.json`) states the third rule on every card, whether the agent reports for itself or the bridge reports for it. It names `agentpod_link_artifact`
 and `library_search` only when the prompt's `libraryTools` is true.
 
 The bridge requests the node's proxy when available. Tool availability comes from the node's
