@@ -2,8 +2,9 @@
 # The release tag gate for a product whose CI runs on a forge (Forgejo or Gitea), not on GitHub.
 # It reads the forge's commit status for the tag's commit and passes only when the configured
 # status context is `success`. When the status cannot be read, or the forge has no status with
-# that context for the commit, and the config names `ci.check_command`, it asks the workflow to
-# run that command at the tag instead. A status that is failing or still pending never falls back.
+# that context for the commit, and the product has a ci-check hook (.github/release/ci-check.sh,
+# next to the config), it asks the workflow to run that hook at the tag instead. A status that is
+# failing or still pending never falls back.
 #
 # Usage: ci-gate.sh <release-config.json> <commit-sha>
 # Env:   FORGE_STATUS_TOKEN  optional; a forge token that can read the repository (private repos)
@@ -18,21 +19,27 @@ out=${GITHUB_OUTPUT:-/dev/null}
 forge=$(jq -r '.ci.forge // empty' "$config" | sed 's:/*$::')
 repo=$(jq -r --arg d "${GITHUB_REPOSITORY:-}" '.ci.repo // $d' "$config")
 context=$(jq -r '.ci.context // empty' "$config")
-check=$(jq -r '.ci.check_command // empty' "$config")
+hook=$(dirname "$config")/release/ci-check.sh
+check=
+[ -f "$hook" ] && check=yes
+if jq -e '(.ci | type) == "object" and .ci.check_command != null' "$config" >/dev/null; then
+  echo "::error::ci.check_command is gone: move the command into $hook"
+  exit 1
+fi
 
 fallback() {
   if [ -n "$check" ]; then
-    echo "$1; running ci.check_command at the tag instead"
+    echo "$1; running $hook at the tag instead"
     echo "source=tag" >> "$out"
     exit 0
   fi
-  echo "::error::$1, and the config has no ci.check_command to fall back on"
+  echo "::error::$1, and there is no $hook to fall back on"
   exit 1
 }
 
 if [ -z "$forge" ]; then
-  [ -n "$check" ] || { echo "::error::release-config.json needs ci.forge or ci.check_command"; exit 1; }
-  echo "no forge configured; running ci.check_command at the tag"
+  [ -n "$check" ] || { echo "::error::release-config.json needs ci.forge, or a $hook"; exit 1; }
+  echo "no forge configured; running $hook at the tag"
   echo "source=tag" >> "$out"
   exit 0
 fi
