@@ -1,7 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
-import starlightLlmsTxt from 'starlight-llms-txt';
+import sjlDocs from '@superjackfruit/docs-theme';
 
 export default defineConfig({
   site: 'https://docs.agentpod.dev',
@@ -23,45 +23,29 @@ export default defineConfig({
       description:
         'A fleet and facilities console for agent runtimes. Docs for running a fleet, ' +
         'operating the machines your agents live on, and building against the hub.',
-      // /llms.txt, /llms-full.txt and /llms-small.txt, for agents reading these docs. The
-      // full file carries every page, reference pages included; the small one drops asides
-      // and <details> but keeps every page too, since nothing here is noise.
+      // The suite's docs theme: vibekit's cobalt, the faces, the street, status badges, the footers,
+      // the 404, the edit link and llms.txt. See @superjackfruit/docs-theme's README.
       plugins: [
-        starlightLlmsTxt({
-          projectName: 'AgentPod',
-          description:
-            'AgentPod is a fleet and facilities console for agent runtimes: the console for the ' +
-            'machines your agents live on. It attaches to runtimes you already run, detecting Claude ' +
-            'Code, Codex, OpenCode, Hermes, OpenClaw and Pi in place rather than asking you to ' +
-            'migrate anything. Every node dials out to the hub over a WebSocket, so a laptop behind ' +
-            'NAT works the same as a VPS. From one place you can read a workspace, tail a log, open a ' +
-            'shell and check health on any station; turn on the bridge and each station gets a chat ' +
-            'identity you can message, and managed skills can be verified as actually loaded. The hub ' +
-            'is a Bun service with a Postgres database and the console is a static site, all ' +
-            'self-hosted.',
-          optionalLinks: [
-            { label: 'AgentPod', url: 'https://agentpod.dev', description: 'The product site.' },
-            { label: 'Source', url: 'https://github.com/SuperJackfruitLabs/agentpod', description: 'The AgentPod repository on GitHub.' },
-          ],
+        sjlDocs({
+          product: 'agentpod',
+          status: 'lights on',
+          // /llms.txt, /llms-full.txt and /llms-small.txt, for agents reading these docs.
+          llms: {
+            description:
+              'AgentPod is a fleet and facilities console for agent runtimes: the console for the ' +
+              'machines your agents live on. It attaches to runtimes you already run, detecting Claude ' +
+              'Code, Codex, OpenCode, Hermes, OpenClaw and Pi in place rather than asking you to ' +
+              'migrate anything. Every node dials out to the hub over a WebSocket, so a laptop behind ' +
+              'NAT works the same as a VPS. From one place you can read a workspace, tail a log, open a ' +
+              'shell and check health on any station; turn on the bridge and each station gets a chat ' +
+              'identity you can message, and managed skills can be verified as actually loaded. The hub ' +
+              'is a Bun service with a Postgres database and the console is a static site, all ' +
+              'self-hosted.',
+          },
         }),
       ],
-      // The mark and palette are agentpod.dev's; see src/styles/theme.css for where each
-      // value comes from. Two logo files because an <img> cannot follow the theme's colours.
-      logo: { light: './src/assets/mark-light.svg', dark: './src/assets/mark-dark.svg', alt: '' },
-      customCss: ['./src/styles/theme.css'],
       favicon: '/favicon.svg',
       head: [
-        { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' } },
-        { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: true } },
-        {
-          tag: 'link',
-          attrs: {
-            rel: 'stylesheet',
-            href:
-              'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800' +
-              '&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap',
-          },
-        },
         // Starlight writes og:title, og:description and og:url per page, but no image. The
         // image is agentpod.dev's (apps/landing/og/), by absolute URL.
         { tag: 'meta', attrs: { property: 'og:image', content: 'https://agentpod.dev/og.png' } },
@@ -72,6 +56,7 @@ export default defineConfig({
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/SuperJackfruitLabs/agentpod' },
       ],
+      // The suite's five groups, in the order a reader needs them. No page moved, so no URL changed.
       sidebar: [
         {
           label: 'Start',
@@ -84,7 +69,6 @@ export default defineConfig({
         {
           label: 'Use it',
           items: [
-            { label: 'Nodes', slug: 'use/nodes' },
             { label: 'Stations', slug: 'use/stations' },
             { label: 'What you can do to a station', slug: 'use/panels' },
             { label: 'Managed skills', slug: 'use/skills' },
@@ -94,16 +78,7 @@ export default defineConfig({
             { label: 'Declared harness settings', slug: 'use/config' },
             { label: 'Working a board', slug: 'use/boards' },
             { label: 'Dispatch and grants', slug: 'use/grants' },
-            { label: 'apn and fleet', slug: 'use/cli' },
-            { label: 'Checking for exposure', slug: 'use/scan' },
             { label: 'Attaching an editor', slug: 'use/acp' },
-          ],
-        },
-        {
-          label: 'Reference',
-          items: [
-            { label: 'apn', slug: 'reference/apn' },
-            { label: 'fleet', slug: 'reference/fleet' },
           ],
         },
         {
@@ -113,6 +88,21 @@ export default defineConfig({
             { label: 'Authentication', slug: 'build/auth' },
             { label: 'Capability catalog', slug: 'build/catalog' },
             { label: 'Reads for services', slug: 'build/services' },
+          ],
+        },
+        {
+          label: 'Run it',
+          items: [
+            { label: 'Nodes', slug: 'use/nodes' },
+            { label: 'apn and fleet', slug: 'use/cli' },
+            { label: 'Checking for exposure', slug: 'use/scan' },
+          ],
+        },
+        {
+          label: 'Reference',
+          items: [
+            { label: 'apn', slug: 'reference/apn' },
+            { label: 'fleet', slug: 'reference/fleet' },
           ],
         },
       ],
