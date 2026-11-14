@@ -5,3 +5,5 @@ node_modules/
 # The root .gitignore has a `build/` rule for compiler output. These are docs
 # pages served at /build/*, not build artifacts; without this they vanish silently.
 !src/content/docs/build/
+# The suite docs theme and the tarballs it needs, vendored as SuperDispatch and SuperExchange do.
+!vendor/*.tgz

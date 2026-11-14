@@ -10,8 +10,11 @@
     "check": "astro check"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.42.0",
-    "astro": "^7.3.2",
+    "@astrojs/starlight": "^0.42.11",
+    "@superjackfruit/docs-theme": "file:vendor/superjackfruit-docs-theme-0.0.2.tgz",
+    "@superjackfruit/frontdoor": "file:vendor/superjackfruit-frontdoor-0.0.15.tgz",
+    "@superjackfruit/vibekit": "file:vendor/superjackfruit-vibekit-0.0.16.tgz",
+    "astro": "^7.4.11",
     "starlight-llms-txt": "^0.12.0"
   }
 }

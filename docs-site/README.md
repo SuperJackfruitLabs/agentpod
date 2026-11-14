@@ -6,6 +6,7 @@ The user-facing documentation published at `docs.agentpod.dev`. Astro + Starligh
 npm install
 npm run dev     # local preview
 npm run build   # -> dist/
+npm run check   # astro check; needs `npm i --no-save @astrojs/check typescript` first
 ```
 
 ## Why this is not a pnpm workspace member
@@ -23,6 +24,29 @@ perturbs the tree pnpm builds. Living outside the `apps/*` glob removes the whol
 problem — `pnpm install` and this site's `npm install` cannot interact, in either order.
 
 The site ships nothing any app imports, so it has no claim on their dependency resolution.
+
+## What it wears
+
+**The suite's docs theme**, `@superjackfruit/docs-theme`, vendored under `vendor/` with the
+frontdoor and vibekit tarballs it needs (the same three files SuperDispatch's and SuperExchange's
+docs sites carry; `.gitignore` keeps `vendor/*.tgz`). The whole design config is
+`sjlDocs({ product: 'agentpod', status: 'lights on' })` in `astro.config.mjs`: vibekit's cobalt,
+the suite's faces (self-hosted, so no page fetches a font from Google), the street and the phone
+switcher, status badges, Copy Markdown and every page at `<page>.md`, the suite footer, the 404, the
+edit link and the last-updated date. The home is the theme's `BentoHome`. `src/docs-theme.d.ts`
+types the theme's schema module, which ships as plain JavaScript, so `npm run check` passes under
+`strict`.
+
+The status is **lights on**: in production, still changing. Every `v*` tag releases the hub,
+console and node binaries, and the surface still moves release to release.
+
+**The sidebar uses the suite's groups**: Start, Use it, Build on it, Run it, Reference. The theme
+warns at build time when a top-level group is anything else. Pages keep their folders (`use/nodes`
+sits under Run it), so no URL changed when the groups did.
+
+**For agents**: `/llms.txt`, `/llms-full.txt` and `/llms-small.txt` (`starlight-llms-txt`, through
+the theme, with the description in `astro.config.mjs`). Search is Starlight's Pagefind and the
+sitemap is Starlight's.
 
 ## Claims are checked
 

@@ -2,50 +2,74 @@
 title: Overview
 description: A fleet and facilities console for the machines your agents live on.
 template: splash
-hero:
-  title: The console for the machines your agents live on
-  tagline: Your agents run somewhere. AgentPod is how you see that place, and reach into it.
-  actions:
-    - text: What AgentPod is
-      link: /start/what-it-is/
-      icon: right-arrow
-    - text: Enroll your first node
-      link: /start/first-node/
-      variant: minimal
+status: lights on
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import BentoHome from '@superjackfruit/docs-theme/components/BentoHome.astro';
+import FlowSteps from '@superjackfruit/docs-theme/components/FlowSteps.astro';
+import HeadsUp from '@superjackfruit/docs-theme/components/HeadsUp.astro';
+import JackAside from '@superjackfruit/docs-theme/components/JackAside.astro';
 
-<CardGrid stagger>
-  <Card title="Attach, don't migrate" icon="puzzle">
-    Point AgentPod at agent runtimes you already run. It detects them in place — Claude
-    Code, Codex, OpenCode, Hermes, OpenClaw and Pi — rather than asking you to move
-    anything.
-  </Card>
-  <Card title="Reaches machines you can't" icon="random">
-    Every node dials *out* to the hub over a WebSocket. No inbound ports, no port
-    forwarding, and laptops behind NAT or CGNAT work the same as a VPS.
-  </Card>
-  <Card title="Files, logs, terminal, health" icon="laptop">
-    Read a workspace, tail a log, open a shell, check what's running, plan a cleanup —
-    on any station in the fleet, from one place.
-  </Card>
-  <Card title="Talk to them in a room" icon="comment">
-    Turn on the bridge and every station gets a chat identity of its own. Message it from
-    your phone, send it a voice note, answer its permission questions with a number — and
-    get the provider's own sentence when a turn fails. [The bridge](/use/rooms/)
-  </Card>
-  <Card title="Skills you can prove loaded" icon="approve-check">
-    Install a skill under review, then verify a fresh session actually loaded it. Present,
-    eligible and loaded are separate observations, never inferred from one another.
-    [Managed skills](/use/skills/)
-  </Card>
-  <Card title="Hosting requirements" icon="setting">
-    The hub is a Bun service with a Postgres database, and the console is a static site.
-    Current releases also require configuration and a credential from an external account
-    service that is not public source. Start with a hub you already have access to.
-  </Card>
-</CardGrid>
+<BentoHome
+  claim="The console for the machines your agents live on."
+  sub="Your agents live on a VPS, a laptop, a box under someone's desk. AgentPod puts all of those places in one console: files, logs, terminal and health, a click apart. Every node dials out to the hub, so a laptop behind NAT answers like a server and nobody opens a port. It finds Claude Code, Codex, Hermes and six other harnesses where they already sit, and moves nothing. It doesn't run your agents. It just knows where they live, and whether the lights are on."
+  actions={[
+    { text: 'Your first node', link: '/start/first-node/' },
+    { text: 'What it is', link: '/start/what-it-is/', variant: 'secondary' },
+  ]}
+  quickstart={{
+    command: "u=https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download f=agentpod-node-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && curl -fsSLO $u/$f -O $u/SHA256SUMS && sha256sum --ignore-missing -c SHA256SUMS && chmod +x $f && ./$f scan",
+    label: 'Quick start: check a machine for exposure, no hub needed',
+    note: "Needs only curl and sha256sum (on older macOS, shasum -a 256). It downloads the released node binary for your platform, checks it against SHA256SUMS and runs apn scan: agent listeners bound to every interface, and credential files other users can read. No hub, no account, and nothing written but the file you downloaded. It exits 0 when clean, 1 on warnings and 2 on critical, and a check it cannot make is reported as unknown, never as a pass. To put the machine in a fleet you need a hub: start with Your first node.",
+  }}
+  agent={{ task: 'Then explain how AgentPod would see the agents on my machines, and list what I need before I enroll my first node.' }}
+  ask={{ examples: ['Why does my node show offline?', 'Can it reach a laptop behind NAT?', 'What is the difference between detecting and adopting a station?', 'Does AgentPod run my agents for me?'] }}
+  flowTitle="How a machine becomes a working station (step through it; it waits for you)"
+>
+  <FlowSteps
+    label="Station step"
+    steps={[
+      { label: 'Install', body: 'On the machine, install.sh downloads the node agent for its platform (linux or darwin, amd64 or arm64), installs it and registers a service: a systemd unit on Linux, a LaunchAgent on a Mac. Without root it installs for your user instead.', items: [{ text: 'agentpod-node', card: true }] },
+      { label: 'Enroll', body: 'It enrolls with the hub on a token from the console. A fresh token works once and expires after an hour, and two machines racing on one token cannot both win. Then the node dials out to the hub over a WebSocket and holds it open. Nothing ever dials in.', items: [{ text: 'same token, second machine', out: true }, { text: 'node online', win: true }] },
+      { label: 'Detect', body: 'The hub asks the node what is on it. Nine harness detectors look, from Claude Code and Codex to Hermes and Salaam, and report the stations they find. Detection changes nothing on the machine.', items: [{ text: 'claude-code' }, { text: 'codex' }, { text: 'hermes' }] },
+      { label: 'Adopt', body: "A workspace admin adopts the stations worth managing, and the hub detects again before it trusts the list. A runtime nobody adopts stays none of AgentPod's business: detecting it is not consent to manage it.", items: [{ text: 'hermes · adopted', win: true }, { text: 'codex · left alone', out: true }] },
+      { label: 'Work', body: 'The agent keeps working in its own harness; AgentPod never runs it. Now you can read its workspace, tail its logs, open a terminal and check its health from the console. An operation the station has to declare, the terminal among them, is refused at the hub when it has not.', items: [{ text: 'files · logs · terminal · health', win: true }] },
+    ]}
+  />
+</BentoHome>
 
-These docs are also published as plain text for agents: [`/llms.txt`](/llms.txt) indexes them,
-and [`/llms-full.txt`](/llms-full.txt) is every page in one file.
+## What it gives you
+
+**Attach, don't migrate.** Point AgentPod at agent runtimes you already run. It detects them in
+place (Claude Code, Codex, OpenCode, Hermes, OpenClaw, Pi, Muse Code, Kilo and Salaam) rather than
+asking you to move anything. See [Stations](/use/stations/).
+
+**Reaches machines you can't.** Every node dials *out* to the hub over a WebSocket. No inbound
+ports, no port forwarding, and laptops behind NAT or CGNAT work the same as a VPS. See
+[Concepts](/start/concepts/).
+
+**Files, logs, terminal, health.** Read a workspace, tail a log, open a shell, check what's
+running, plan a cleanup: on any station in the fleet, from one place. See
+[What you can do to a station](/use/panels/).
+
+**Talk to them in a room.** Turn on the bridge and every station gets a chat identity of its own.
+Message it from your phone, send it a voice note, answer its permission questions with a number,
+and get the provider's own sentence when a turn fails. See [The bridge](/use/rooms/).
+
+**Skills you can prove loaded.** Install a skill under review, then verify a fresh session
+actually loaded it. Present, eligible and loaded are separate observations, never inferred from
+one another. See [Managed skills](/use/skills/).
+
+<HeadsUp title="Hosting requirements">
+  The hub is a Bun service with a Postgres database, and the console is a static site. Current
+  releases also require configuration and a credential from an external account service that is
+  not public source. Start with a hub you already have access to.
+</HeadsUp>
+
+<JackAside>
+  I read these docs so you don't have to read all of them at once. Ask me in the box up top, and if
+  the answer isn't in here I'll say so rather than make one up.
+</JackAside>
+
+For agents, the same docs are plain text: [`/llms.txt`](/llms.txt) indexes them, and
+[`/llms-full.txt`](/llms-full.txt) is every page in one file.
