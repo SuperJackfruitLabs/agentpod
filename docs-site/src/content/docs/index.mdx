@@ -40,25 +40,28 @@ import JackAside from '@superjackfruit/docs-theme/components/JackAside.astro';
 
 ## What it gives you
 
-**Attach, don't migrate.** Point AgentPod at agent runtimes you already run. It detects them in
-place (Claude Code, Codex, OpenCode, Hermes, OpenClaw, Pi, Muse Code, Kilo and Salaam) rather than
-asking you to move anything. See [Stations](/use/stations/).
+AgentPod starts from a useful assumption: your agents already live somewhere. We help you bring
+those places into view without turning “adopt a console” into “move the fleet.”
+
+**Attach, don't migrate.** Point AgentPod at agent runtimes you already run. We detect them in
+place (Claude Code, Codex, OpenCode, Hermes, OpenClaw, Pi, Muse Code, Kilo and Salaam), and you
+decide which ones to manage. See [Stations](/use/stations/).
 
 **Reaches machines you can't.** Every node dials *out* to the hub over a WebSocket. No inbound
 ports, no port forwarding, and laptops behind NAT or CGNAT work the same as a VPS. See
 [Concepts](/start/concepts/).
 
 **Files, logs, terminal, health.** Read a workspace, tail a log, open a shell, check what's
-running, plan a cleanup: on any station in the fleet, from one place. See
+running, or review a cleanup plan: you can operate any adopted station from one place. See
 [What you can do to a station](/use/panels/).
 
 **Talk to them in a room.** Turn on the bridge and every station gets a chat identity of its own.
-Message it from your phone, send it a voice note, answer its permission questions with a number,
+You can message it from your phone, send a voice note, answer a permission question with a number,
 and get the provider's own sentence when a turn fails. See [The bridge](/use/rooms/).
 
-**Skills you can prove loaded.** Install a skill under review, then verify a fresh session
-actually loaded it. Present, eligible and loaded are separate observations, never inferred from
-one another. See [Managed skills](/use/skills/).
+**Skills you can prove loaded.** We do not stop at “the file exists.” Install a skill under review,
+then verify that a fresh session actually loaded it. Present, eligible and loaded stay separate
+observations, never convenient guesses. See [Managed skills](/use/skills/).
 
 <HeadsUp title="Hosting requirements">
   The hub is a Bun service with a Postgres database, and the console is a static site. Current
@@ -72,4 +75,5 @@ one another. See [Managed skills](/use/skills/).
 </JackAside>
 
 For agents, the same docs are plain text: [`/llms.txt`](/llms.txt) indexes them, and
-[`/llms-full.txt`](/llms-full.txt) is every page in one file.
+[`/llms-full.txt`](/llms-full.txt) is every page in one file. Pick the path that fits, and we'll
+meet you there.
