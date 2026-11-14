@@ -64,8 +64,8 @@ This prints two blocks: whether the service is installed, enabled and running, a
 the hub is reachable with a valid credential. It exits `0` only if **both** are true, so it
 works directly in a health check or a cron job.
 
-The node should now appear in the console as online. We have proved both halves of the path: the
-local service is running, and the hub accepts its credential.
+The node should now appear in the console as online. If `apn status` exited `0`, we have proved
+both halves of the path: the local service is running, and the hub accepts its credential.
 
 ## 4. See what's on it
 

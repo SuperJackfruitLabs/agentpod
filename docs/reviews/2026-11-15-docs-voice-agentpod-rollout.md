@@ -99,6 +99,7 @@ Each fix below is its own commit on the pull request. Both pages were checked ag
 |---|---|---|---|
 | `build/auth.md` | The rollout replaced the base's `Authorization: Bearer dev_…:<secret>` with `Authorization: Bearer $DEVICE_CREDENTIAL`. | The base line is restored. It was true at the base: it shows the device credential's shape, a `dev_` id, a colon, then the secret. The variable hid that shape, and no code evidence required the change. This withdraws the second exact-material correction above. | `apps/node-agent/internal/fleetcred/device.go:200` sends `"Bearer "+d.ID+":"+d.Secret`; `apps/node-agent/internal/fleetcred/plane.go:54` accepts `^(dev_[0-9a-f]{20}):([A-Za-z0-9_-]{43})$`. |
 | `build/auth.md` | The new `fleet login` payoff sat between "The exchange underneath is:" and the request it introduces. | The payoff now follows the `fleet login` paragraph, and the colon leads straight into the request block. Placement only; no wording changed. | Same page; the exchange is `apps/node-agent/internal/fleetcred/device.go:168-259`. |
+| `start/first-node.md` | The draft's step 3 payoff said "We have proved both halves of the path" after `apn status`, whatever the command reported. This is the overclaim Verify fixed on `use/nodes.md`. | The payoff is conditional: "If `apn status` exited `0`, we have proved both halves of the path." | `apps/node-agent/cmd/agentpod-node/service_cmds.go:141-144` (`apn status` returns `0` only when `st.Running && credValid`); the page's own preceding sentence says the same. |
 
 ## Unverified external-service claims
 
