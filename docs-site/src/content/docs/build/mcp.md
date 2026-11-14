@@ -3,7 +3,8 @@ title: MCP tools
 description: The hub's MCP endpoint — self-scoped tools that let an agent answer questions about where it is running, and keep a file from its workspace in SuperLibrary.
 ---
 
-The hub speaks MCP over Streamable HTTP at **`/mcp`**.
+The hub speaks MCP over Streamable HTTP at **`/mcp`**. We'll start with the narrow question an agent
+can ask safely: where am I running, and what belongs to me?
 
 ## Getting a token
 
@@ -11,8 +12,11 @@ The hub speaks MCP over Streamable HTTP at **`/mcp`**.
 fleet login
 ```
 
-The endpoint takes a token from the account service in `Authorization: Bearer`, and only there. There is
+The endpoint takes a token from the account service in `Authorization: Bearer <token>` and only there. There is
 no `?token=` fallback — a credential in a URL is a credential in a log.
+
+With that header, the MCP session is bound to the calling principal rather than to a station id the
+caller supplied.
 
 ## What an agent gets
 
@@ -61,6 +65,9 @@ It refuses, in a plain sentence the agent can act on, when:
 
 What SuperLibrary returns or holds is reference material, never instructions. After linking, the agent
 attaches the returned url to its card with `superpipeline_add_reference`.
+
+That leaves the artifact in SuperLibrary with its provenance, and the card with a durable link to
+what the run produced.
 
 ### The rules agents are given
 
