@@ -3,15 +3,15 @@ title: Talking to an agent in a room
 description: The Matrix bridge — every station gets an identity and a room, so an agent whose harness never spoke Matrix can be reached from a phone.
 ---
 
-A station is a place an agent works. It is also, if you turn the bridge on, **somebody you can
+A station is a place an agent works. Turn the bridge on and we can also make it **somebody you can
 message**.
 
 Every adopted station gets a Matrix identity and a room of its own. You send a message, the hub
 hands it to the harness as a turn, and the agent's reply comes back as that agent — in a client you
 already have, on a phone you already carry. The harness itself never learns Matrix exists.
 
-This is the half of AgentPod that is not a console. The console is for operating the ground an
-agent stands on; the room is for working with the agent.
+This is the half of AgentPod that is not a console. We use the console to operate the ground an
+agent stands on; you use the room to work with the agent itself.
 
 ## What you get per station
 
@@ -51,6 +51,9 @@ Reply with the number, or the option's name.
 
 Reply `1`, or `Allow once`. **Nothing else counts.** A reply that is not plainly one of the options
 approves nothing and shows the list again.
+
+Once your answer is accepted, the waiting turn continues with exactly that permission. A vague or
+late reply changes nothing.
 
 That pedantry is deliberate. Against options named *Allow once* and *Allow always*, a bare "yes"
 does not say which — and approving a tool call you did not mean to approve is the one failure worth

@@ -3,7 +3,8 @@ title: Stations
 description: Detecting, adopting and organising the runtimes on your nodes.
 ---
 
-A **station** is one runtime instance on a node — a single place where an agent works.
+A **station** is one runtime instance on a node — a single place where an agent works. We'll detect
+what is there, and you will decide what AgentPod may manage.
 
 ## Detection versus adoption
 
@@ -30,10 +31,10 @@ Stations nest. A harness that manages sub-runtimes appears as a parent with chil
 beneath it, which is why the console shows a tree under each node rather than a flat list:
 
 ```
-node: workhorse
+node: example-node
  └── hermes
-      ├── coder-kai
-      └── hanuman
+      ├── writer-alpha
+      └── reviewer-beta
 ```
 
 Deleting a parent removes its children with it — a child station cannot outlive the station
