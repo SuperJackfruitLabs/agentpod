@@ -452,6 +452,29 @@ test("a strict station on an unknown protocol version is not ready, and nothing 
 
 // ─── a card worked start to finish ──────────────────────────────────────────────
 
+test("a turn that idles with a tool call still pending stays open for its own work", async () => {
+  const r = rig({
+    n: 9,
+    acp: {
+      script: (ev) => [
+        ev("agent-update", {
+          sessionUpdate: "tool_call",
+          toolCallId: "background-1",
+          title: "Run background audit",
+          kind: "execute",
+          status: "in_progress",
+        }),
+        ev("state", { status: "idle" }),
+      ],
+    },
+  });
+
+  const outcome = await r.run();
+  expect(outcome.result).toMatchObject({ status: "waiting" });
+  expect(outcome.trace.some((entry) => entry.board?.endsWith("/complete"))).toBe(false);
+  expect(outcome.trace.some((entry) => entry.acp === "endSession")).toBe(false);
+});
+
 test("a full turn: the session open, the prompt, activities, produced before complete, then reported", async () => {
   const r = rig({
     n: 10,
