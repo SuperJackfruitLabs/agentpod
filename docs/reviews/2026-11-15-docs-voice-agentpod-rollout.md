@@ -21,7 +21,7 @@ Status: verify-stage evidence for the 23-page AgentPod docs voice rollout.
 | Concept and reference pages | pass | Warm direct prose was added lightly to the remaining hand-authored pages. Tables, routes, fields, enums, limits, JSON and recovery remain plain. No running gag was added. |
 | Generated references | pass | `reference/apn.md` and `reference/fleet.md` already use direct explanatory prose around exact generated material. They were not hand-edited; the generator equality tests pass. |
 | Candour | pass | Private account-service prerequisites, partial forge-API coverage, same-user isolation, unknown scan results, disabled/missing optional integrations, config races and fail-closed behavior remain explicit. |
-| Exact material | pass | No humour was added to commands, values, tables, warnings, recovery, payloads, generated text or reference output. Placeholder token headers use explicit shell variables rather than redaction marks. |
+| Exact material | pass | No humour was added to commands, values, tables, warnings, recovery, payloads, generated text or reference output. The access-token headers use the `$TOKEN` shell variable. The device exchange keeps the base's literal credential shape, `Bearer dev_…:<secret>` (restored in the final review below). |
 | Vocabulary and privacy | pass | Product casing and `workspace` meaning are unchanged. Personal/internal-looking examples in `use/boards.md` and `use/stations.md` were replaced with obviously synthetic labels. A scan found none of the removed names elsewhere in the 23 pages. |
 | Originality | pass | The narrator, payoffs and guest-list premise are original to AgentPod; no wording, metaphor or joke was copied from SuperDispatch or RedwoodJS. |
 
@@ -75,7 +75,7 @@ Each row covers the commands, flags, routes, settings, defaults, fields, enums, 
 
 ## Corrections
 
-No pre-existing product behavior, command, route, default, field, enum or limit needed a factual rewrite after comparison with the base. Eleven exact/privacy/verification corrections are recorded rather than changed silently; the last six correct overclaims introduced in the draft voice pass:
+No pre-existing product behavior, command, route, default, field, enum or limit needed a factual rewrite after comparison with the base. Eleven exact/privacy/verification corrections were recorded rather than changed silently. The final review below withdrew one of them (the device-credential placeholder), which leaves ten. The last six correct overclaims introduced in the draft voice pass:
 
 | Old material | New material | Evidence |
 |---|---|---|
