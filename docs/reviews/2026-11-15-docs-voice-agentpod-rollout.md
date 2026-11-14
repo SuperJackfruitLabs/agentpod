@@ -80,7 +80,7 @@ No pre-existing product behavior, command, route, default, field, enum or limit 
 | Old material | New material | Evidence |
 |---|---|---|
 | `build/auth.md` used the generic angle-bracket placeholder `Authorization: Bearer <access token>`. | The copyable shell-variable placeholder is `Authorization: Bearer $TOKEN`. | Bearer verification: `apps/hub/src/auth/org-plane/verify.ts:61-169`; guide exact-material rule at the pinned guide revision. |
-| `build/auth.md` mixed a `dev_…` prefix with an angle-bracket secret placeholder in the device-token exchange. | The request uses the explicit synthetic variable `$DEVICE_CREDENTIAL`. | Device exchange client: `apps/node-agent/internal/fleetcred/device.go:168-259`; guide exact-material rule at the pinned guide revision. |
+| `build/auth.md` mixed a `dev_…` prefix with an angle-bracket secret placeholder in the device-token exchange. | ~~The request uses the explicit synthetic variable `$DEVICE_CREDENTIAL`.~~ Withdrawn in the final review (see below): the base line `Bearer dev_…:<secret>` is restored. | Device exchange client: `apps/node-agent/internal/fleetcred/device.go:168-259`; guide exact-material rule at the pinned guide revision. |
 | `build/mcp.md` named the header only as `Authorization: Bearer`, without a placeholder value. | It now says `Authorization: Bearer $TOKEN`. | MCP bearer parser: `apps/hub/src/mcp/auth.ts:1-60`. |
 | `use/boards.md` used two person-like names in example notices. | Both examples use the explicitly synthetic `Reviewer A`. | Voice-guide privacy rule 8 at the pinned guide revision; no behavior or contract text changed. |
 | `use/stations.md` used an internal-looking host plus two agent-like names in the example tree. | The example uses `example-node`, `writer-alpha`, and `reviewer-beta`. | Voice-guide privacy rule 8 at the pinned guide revision; station-tree behavior remains evidenced by `apps/hub/src/services/stations/registry.ts:1-459`. |
@@ -90,6 +90,14 @@ No pre-existing product behavior, command, route, default, field, enum or limit 
 | The draft `use/panels.md` implied that capability gating prevents every later operation failure. | It now makes the narrower guarantee: a panel is absent when its required capability is undeclared. | `apps/hub/src/routes/station-writes.ts:1-244`; `apps/hub/src/services/stations/registry.ts:1-459`. |
 | The draft `use/rooms.md` said any late permission reply “changes nothing,” although a number sent after later conversation can become an ordinary message. | It now says a closed question cannot be approved; the existing ordinary-message boundary remains explicit below it. | `apps/hub/src/services/bridge/permission.ts:1-195`. |
 | The draft `use/voice.md` said configuration alone makes a transcript appear, even though an external transcription request can fail. | It now conditions the payoff on successful transcription. | `apps/hub/src/services/speech/transcription-client.ts:1-176`; `apps/hub/src/services/speech/transcription-settings.ts:1-475`. |
+
+### Final review (pull request)
+
+Each fix below is its own commit on the pull request. Both pages were checked against the base again.
+
+| Page | Old material | New material | Evidence |
+|---|---|---|---|
+| `build/auth.md` | The rollout replaced the base's `Authorization: Bearer dev_…:<secret>` with `Authorization: Bearer $DEVICE_CREDENTIAL`. | The base line is restored. It was true at the base: it shows the device credential's shape, a `dev_` id, a colon, then the secret. The variable hid that shape, and no code evidence required the change. This withdraws the second exact-material correction above. | `apps/node-agent/internal/fleetcred/device.go:200` sends `"Bearer "+d.ID+":"+d.Secret`; `apps/node-agent/internal/fleetcred/plane.go:54` accepts `^(dev_[0-9a-f]{20}):([A-Za-z0-9_-]{43})$`. |
 
 ## Unverified external-service claims
 

@@ -63,7 +63,7 @@ Once you approve the code, this machine has a device credential and later `fleet
 fresh access tokens without asking you to visit the browser again.
 
 ```
-POST /api/token/device        Authorization: Bearer $DEVICE_CREDENTIAL
+POST /api/token/device        Authorization: Bearer dev_…:<secret>
 { "audience": "https://hub.agentpod.dev" }
 
 → { "access_token": "…", "token_type": "Bearer", "expires_in": 300 }
