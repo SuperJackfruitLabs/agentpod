@@ -56,11 +56,11 @@ so it works over SSH too. Approval gives this machine a **device credential** fo
 (the CLI's registered client id). The credential lasts **90 days from its last use**, so a machine
 in regular use stays signed in.
 
-Every later command spends the device credential for a fresh access token without opening a
-browser. The exchange underneath is:
-
 Once you approve the code, this machine has a device credential and later `fleet` commands can get
 fresh access tokens without asking you to visit the browser again.
+
+Every later command spends the device credential for a fresh access token without opening a
+browser. The exchange underneath is:
 
 ```
 POST /api/token/device        Authorization: Bearer dev_…:<secret>
