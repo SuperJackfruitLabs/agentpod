@@ -16,7 +16,15 @@ import { fingerprintWithin, resolveStationFingerprint } from "../evidence";
 import { DEFAULT_PERMISSION_WAIT_MS } from "./config";
 import { boardPermissionSubject, isAutoAnswered, selectedOptionId, withoutApprovals } from "./permission";
 import { isEnvelopeRefusal, isForeignRun, isLeaseSuperseded, type ClaimedWork, type RunElicitation } from "./superpipeline";
-import { clearPermissionWait, recordPermissionWait, startAttempt, type CoalescingCounts, type DispatchKey } from "./ledger";
+import {
+  clearOwnWorkWait,
+  clearPermissionWait,
+  recordOwnWorkWait,
+  recordPermissionWait,
+  startAttempt,
+  type CoalescingCounts,
+  type DispatchKey,
+} from "./ledger";
 import {
   DEFAULT_HEARTBEAT_MS,
   DEFAULT_PERMISSION_POLL_MS,
@@ -44,6 +52,10 @@ export interface Turn {
   attemptStarted: boolean;
   lastSeq: number;
   said: string[];
+  /** Tool calls whose latest ACP state is pending or in progress. */
+  pendingToolCalls: Set<string>;
+  /** The harness has yielded, but this turn is still listening for those calls. */
+  waitingOnOwnWork: boolean;
   /**
    * Requirement 5's two numbers (see the header). Counted here rather than
    * inside the coalescer because the pair only means anything together, and one
@@ -99,6 +111,8 @@ export function newTurn(
     attemptStarted: false,
     lastSeq: 0,
     said: [],
+    pendingToolCalls: new Set<string>(),
+    waitingOnOwnWork: false,
     counts: { eventsReceived: 0, activitiesPosted: 0 },
     unsubscribe: () => {},
     beat: null,
@@ -248,6 +262,23 @@ function onTurnEvent(t: Turn, event: AcpEvent, recording: boolean): void {
   // operator can cross-check against `SELECT count(*) FROM acp_events`.
   t.counts.eventsReceived++;
 
+  if (event.type === "agent-update") {
+    const update = event.payload as { sessionUpdate?: string; toolCallId?: unknown; status?: unknown } | null;
+    if (update?.sessionUpdate === "tool_call" || update?.sessionUpdate === "tool_call_update") {
+      const id = String(update.toolCallId ?? "");
+      const status = String(update.status ?? "");
+      if (id && (status === "pending" || status === "in_progress")) t.pendingToolCalls.add(id);
+      if (id && (status === "completed" || status === "failed" || status === "cancelled")) {
+        t.pendingToolCalls.delete(id);
+        if (t.waitingOnOwnWork && t.pendingToolCalls.size === 0) {
+          t.waitingOnOwnWork = false;
+          queue(t, () => clearOwnWorkWait(t.key));
+          t.settle({ kind: "own-work-ready" });
+        }
+      }
+    }
+  }
+
   if (t.attemptId === null && !t.attemptStarted) {
     t.attemptStarted = true;
     queue(t, () => startTheAttempt(t, event, recording));
@@ -264,7 +295,20 @@ function onTurnEvent(t: Turn, event: AcpEvent, recording: boolean): void {
 
   if (event.type === "state") {
     const status = (event.payload as { status?: string } | null)?.status;
-    if (status === "idle") return t.settle({ kind: "yielded" });
+    if (status === "idle") {
+      if (t.pendingToolCalls.size === 0) return t.settle({ kind: "yielded" });
+      if (!t.waitingOnOwnWork) {
+        t.waitingOnOwnWork = true;
+        const pending = [...t.pendingToolCalls].toSorted();
+        post(t, [{
+          type: "thought",
+          body: `Waiting on its own work: pending tool calls: ${pending.join(", ")}`,
+          ephemeral: false,
+        }]);
+        queue(t, () => recordOwnWorkWait(t.key, pending));
+      }
+      return;
+    }
     if (status === "ended") {
       // oxlint-disable-next-line typescript/no-unnecessary-type-conversion -- a payload from the wire: `reason` is not proven a string
       const reason = String((event.payload as { reason?: string } | null)?.reason ?? "session ended");
@@ -439,6 +483,19 @@ export async function driveTurn(t: Turn, text: string): Promise<TurnEnd> {
     await deps.acp.promptSession(deps.agent.hubUserId, t.session.id, text, { source: 'superpipeline', id: work.runId, epoch: work.leaseEpoch });
     for (;;) {
       end = await awaitSegment(t);
+      if (end.kind === "own-work-ready") {
+        // The completion event and the visible waiting state share the ordered board/ledger queue.
+        // Drain it before beginning the next turn in this same session and run.
+        await t.chain;
+        openSegment(t);
+        await deps.acp.promptSession(
+          deps.agent.hubUserId,
+          t.session.id,
+          "Your background work has finished. Continue from its results and finish the card.",
+          { source: 'superpipeline', id: work.runId, epoch: work.leaseEpoch },
+        );
+        continue;
+      }
       if (end.kind !== "permission-required") break;
       const interrupted = await resolvePermission(t, end.event);
       if (interrupted) {

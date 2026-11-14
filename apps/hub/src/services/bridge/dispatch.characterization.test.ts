@@ -136,7 +136,7 @@ interface RigOpts {
     failCreate?: unknown;
     failPrompt?: string;
     libraryTools?: boolean;
-    script?: (ev: EventMaker) => AcpEvent[];
+    script?: (ev: EventMaker, promptCount: number) => AcpEvent[];
     onAnswer?: (ev: EventMaker, optionId: string) => AcpEvent[];
     strict?: StrictWorkSelection;
     renew?: boolean;
@@ -198,6 +198,7 @@ function rig(o: RigOpts) {
   const subs = new Set<(e: AcpEvent) => void>();
   const emit = (events: AcpEvent[]) => queueMicrotask(() => events.forEach((e) => subs.forEach((fn) => fn(e))));
   const a = o.acp ?? {};
+  let promptCount = 0;
   const port: AcpPort = {
     async stationReady(input) {
       trace.push({ acp: "stationReady", input });
@@ -212,7 +213,7 @@ function rig(o: RigOpts) {
     async promptSession(userId, sessionId, text, run) {
       trace.push({ acp: "promptSession", userId, sessionId, text, run });
       if (a.failPrompt) throw new Error(a.failPrompt);
-      emit(a.script?.(ev) ?? [ev("state", { status: "idle" })]);
+      emit(a.script?.(ev, ++promptCount) ?? [ev("state", { status: "idle" })]);
     },
     subscribe(sessionId, fn) {
       trace.push({ acp: "subscribe", sessionId });
@@ -452,16 +453,80 @@ test("a strict station on an unknown protocol version is not ready, and nothing 
 
 // ─── a card worked start to finish ──────────────────────────────────────────────
 
-test("a turn that idles with a tool call still pending stays open for its own work", async () => {
+test("a turn waiting on its own tool call wakes in the same run when that call completes", async () => {
   const r = rig({
     n: 9,
+    acp: {
+      script: (ev, prompt) => prompt === 1
+        ? [
+            ev("agent-update", {
+              sessionUpdate: "tool_call",
+              toolCallId: "background-1",
+              title: "Run background audit",
+              kind: "execute",
+              status: "in_progress",
+            }),
+            ev("state", { status: "idle" }),
+            ev("agent-update", {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "background-1",
+              status: "completed",
+              rawOutput: "audit complete",
+            }),
+          ]
+        : [chunk(ev, "Finished after the audit."), ev("state", { status: "idle" })],
+    },
+  });
+
+  const outcome = await r.run();
+  expect(outcome.result).toMatchObject({ status: "reported" });
+  expect(outcome.trace.filter((entry) => entry.acp === "promptSession")).toHaveLength(2);
+  expect(outcome.trace.filter((entry) => entry.acp === "createSession")).toHaveLength(1);
+  expect(outcome.trace).toContainEqual(expect.objectContaining({
+    body: expect.objectContaining({ body: "Waiting on its own work: pending tool calls: background-1" }),
+  }));
+  expect(outcome.after).toMatchObject({ rows: [{ outcome: "reported", reason: null }] });
+});
+
+test("a waiting tool call that fails or is cancelled still wakes the agent with its result", async () => {
+  for (const [n, status] of [[5, "failed"], [6, "cancelled"]] as const) {
+    const r = rig({
+      n,
+      acp: {
+        script: (ev, prompt) => prompt === 1
+          ? [
+              ev("agent-update", {
+                sessionUpdate: "tool_call",
+                toolCallId: `background-${status}`,
+                status: "in_progress",
+              }),
+              ev("state", { status: "idle" }),
+              ev("agent-update", {
+                sessionUpdate: "tool_call_update",
+                toolCallId: `background-${status}`,
+                status,
+                rawOutput: `${status} result`,
+              }),
+            ]
+          : [chunk(ev, `Handled ${status}.`), ev("state", { status: "idle" })],
+      },
+    });
+
+    const outcome = await r.run();
+    expect(outcome.result).toMatchObject({ status: "reported" });
+    expect(outcome.trace.filter((entry) => entry.acp === "promptSession")).toHaveLength(2);
+  }
+});
+
+test("a waiting tool call that exceeds the turn ceiling is blocked with the pending work listed", async () => {
+  const r = rig({
+    n: 7,
+    deps: { turnTimeoutMs: 20 },
     acp: {
       script: (ev) => [
         ev("agent-update", {
           sessionUpdate: "tool_call",
-          toolCallId: "background-1",
-          title: "Run background audit",
-          kind: "execute",
+          toolCallId: "background-stuck",
           status: "in_progress",
         }),
         ev("state", { status: "idle" }),
@@ -470,9 +535,17 @@ test("a turn that idles with a tool call still pending stays open for its own wo
   });
 
   const outcome = await r.run();
-  expect(outcome.result).toMatchObject({ status: "waiting" });
+  expect(outcome.result).toMatchObject({
+    status: "blocked",
+    reason: "the run exceeded its waiting-on-own-work limit; pending tool calls: background-stuck",
+  });
+  expect(outcome.trace).toContainEqual(expect.objectContaining({
+    board: expect.stringMatching(/\/block$/),
+    body: expect.objectContaining({
+      reason: "the run exceeded its waiting-on-own-work limit; pending tool calls: background-stuck",
+    }),
+  }));
   expect(outcome.trace.some((entry) => entry.board?.endsWith("/complete"))).toBe(false);
-  expect(outcome.trace.some((entry) => entry.acp === "endSession")).toBe(false);
 });
 
 test("a full turn: the session open, the prompt, activities, produced before complete, then reported", async () => {

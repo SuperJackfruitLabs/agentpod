@@ -159,11 +159,21 @@ async function settleTurn(t: Turn, end: TurnEnd): Promise<DispatchResult> {
   // must never leave `produced` output for the next claimant to replay as success.
   // Partial agent prose is evidence of a failed attempt, not a completion receipt.
   if (end.kind === "timeout" || end.kind === "session-ended") {
-    const reason = end.kind === "timeout" ? "the turn exceeded its time limit" : end.reason;
+    const pending = [...t.pendingToolCalls].toSorted();
+    const ownWorkTimedOut = end.kind === "timeout" && pending.length > 0;
+    const reason = ownWorkTimedOut
+      ? `the run exceeded its waiting-on-own-work limit; pending tool calls: ${pending.join(", ")}`
+      : end.kind === "timeout"
+        ? "the turn exceeded its time limit"
+        : end.reason;
     await markAbandoned(key, reason);
     if (t.attemptId) await endAttempt(t.attemptId, "failed", t.lastSeq);
     await deps.acp.endSession(deps.agent.hubUserId, t.session.id, reason).catch(() => {});
     try {
+      if (ownWorkTimedOut) {
+        await deps.client.block(work, reason);
+        return { status: "blocked", externalRunId: work.runId, attemptId: t.attemptId ?? undefined, reason };
+      }
       await deps.client.fail(work, reason);
       return { status: "failed", externalRunId: work.runId, attemptId: t.attemptId ?? undefined, reason };
     } catch (err) {

@@ -207,6 +207,8 @@ export const SUMMARY_LIMIT = 4_000;
 /** Why a turn stopped, as far as the event stream is concerned. */
 export type TurnEnd =
   | { kind: "yielded" }
+  /** The harness yielded while a tool was in flight, and the last tool has now settled. */
+  | { kind: "own-work-ready" }
   | { kind: "session-ended"; reason: string }
   | { kind: "lease-superseded" }
   | { kind: "foreign-run" }
