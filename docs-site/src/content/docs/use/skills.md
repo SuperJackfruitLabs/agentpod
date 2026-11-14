@@ -4,8 +4,8 @@ description: Knowing what skills a station actually has, installing one under re
 ---
 
 A skill is a package an agent can use. Copying one onto a machine is easy; **establishing that a
-running session loaded it** is the hard part, and it is the part that matters — an agent with a
-skill it did not load behaves exactly like an agent without it.
+running session loaded it** is the hard part. We'll keep those two claims separate, because an agent
+with a skill it did not load behaves exactly like an agent without it.
 
 AgentPod treats that as the whole problem. Nothing here grants a product permission: a skill is a
 capability of an agent's environment, not an authority.
@@ -18,6 +18,9 @@ fleet skills station verify --station <id> --profile <profile>
 
 Inventory asks a station what skills it has and reports each one's name, where it was observed, its
 scope, the digest of its entrypoint, its declared dependencies, and whether anything shadows it.
+
+You now have an inventory tied to a real station and profile, with the evidence behind every
+observation instead of a hopeful “installed.”
 
 The design rule is that **nothing is inferred from anything else**. These are separate
 observations:
@@ -60,11 +63,16 @@ it and your applying it, the apply does not match and does not proceed. This CLI
 into an implicit apply: every mutation returns the hub's reviewed record, and you are expected to
 read it.
 
+After `apply` succeeds, the station has the exact change you inspected — not a newer plan that
+appeared between review and write.
+
 Rolling back is a plan of its own:
 
 ```sh
 fleet skills station rollback-plan --station <id> --profile <profile>
 ```
+
+That gives you a rollback to inspect before anything is undone.
 
 ## Artifacts and releases
 
@@ -79,6 +87,8 @@ fleet skills releases
 An uploaded archive is **validated at admission** rather than at install time, and an artifact is
 immutable once admitted. A release names a set of artifacts, and a release is a record you import
 rather than a thing you edit — so what a cohort was given stays answerable after the fact.
+
+The artifact and release records now give the rollout a fixed input you can identify later.
 
 ## Cohorts and canaries
 
@@ -95,6 +105,8 @@ fleet skills canary apply   --cohort <id> --release <id> --digest <sha256> --sta
 A cohort is **immutable and bound to a release**: you cannot quietly change which stations got
 what. A canary applies that release to one station and verifies the result, so a bad skill is found
 on a station you chose rather than across the fleet.
+
+You now have one verified canary before the rest of the cohort is exposed to the release.
 
 ## Native placement
 
@@ -114,6 +126,9 @@ registration or execution.
 
 Duplicate names across harnesses are **reported, not resolved**. AgentPod does not invent a
 cross-harness precedence rule it would then have to defend.
+
+The verification result now says whether a fresh session loaded the native skill, which is the
+payoff a package manifest alone cannot provide.
 
 ## From the console
 

@@ -3,7 +3,8 @@ title: apn and fleet
 description: Two binaries — the resident node daemon and the client that acts as you — and why their credentials never mix.
 ---
 
-AgentPod ships two command-line binaries. `apn` (`agentpod-node`) is the resident daemon
+AgentPod ships two command-line binaries, and we will keep their jobs sharply separate. `apn`
+(`agentpod-node`) is the resident daemon
 installed on an enrolled host. `fleet` (`agentpod-fleet`) is a separate client you run
 anywhere that is **not** an enrolled node — a laptop, CI, an agent's own workspace.
 
@@ -47,6 +48,8 @@ curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/downlo
 This installs a client only — it enrols nothing and installs no service. `apn` has its own
 installer; see [Enrolling a node](/use/nodes/).
 
+You now have the fleet client without turning this machine into a node.
+
 ## Skill for agents
 
 `fleet` carries a skill for agents inside the binary: what `fleet` is, how to sign in, every
@@ -69,6 +72,9 @@ curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/downlo
 
 `fleet update` refreshes a skill already installed at the default directory, so it does not
 fall behind the binary; it never creates one.
+
+The installed skill now matches the client version that produced it, while a machine without that
+skill stays untouched.
 
 ## Signing in
 
@@ -112,6 +118,9 @@ fleet activity          # recent fleet activity
 
 Set `$AGENTPOD_HUB` to talk to a hub other than the default, and `$AGENTPOD_DEVICE_NAME` to name
 this machine in the device list.
+
+You are now signed in as a principal, and the read commands answer from that principal's authority
+rather than borrowing the node's identity.
 
 ### What `fleet agents` actually answers
 

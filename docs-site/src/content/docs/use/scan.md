@@ -7,7 +7,8 @@ description: apn scan — a local security check for agent runtimes that needs n
 apn scan
 ```
 
-`apn scan` checks the agent runtimes on this host for the two ways they get taken over:
+Let's inspect this machine without enrolling it or sending anything across the network. `apn scan`
+checks the agent runtimes on this host for the two ways they get taken over:
 
 - **a listener bound to every network interface** — an agent's API reachable from outside
   the machine
@@ -36,6 +37,9 @@ Each release publishes `agentpod-node-linux-amd64`, `agentpod-node-linux-arm64`,
 name for this binary; downloaded directly, it keeps the release name. Nothing is written to
 the machine besides the file you downloaded.
 
+You now have a verified release binary and a local exposure report, without adding the machine to a
+fleet or installing a service.
+
 ## Exit codes
 
 | Code | Means |
@@ -50,6 +54,9 @@ That makes it usable directly in cron or CI.
 apn scan --json        # machine-readable
 apn scan --no-color    # plain output for logs
 ```
+
+Your automation can now treat clean, warning and critical results as distinct outcomes instead of
+parsing prose.
 
 ## It does not guess
 

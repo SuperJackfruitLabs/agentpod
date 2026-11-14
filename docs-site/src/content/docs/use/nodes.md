@@ -3,7 +3,8 @@ title: Nodes
 description: Running the node agent day to day — service control, logs, status, updates, and removing a node from the fleet.
 ---
 
-A node runs one background service. These are the commands that manage it.
+A node runs one background service. We'll check it, control it, read its logs, and update it without
+losing sight of which actions affect only the service and which actions change the fleet.
 
 Every command on this page is a **node verb**: it acts on *this machine*. Each also has an
 explicit spelling — `apn status` and `apn node status` are the same command. The bare forms
@@ -22,6 +23,9 @@ stored credential is still valid.
 The exit code is `0` only when the service is running *and* the credential is valid, so
 this drops straight into a health check. Add `--json` for scripts.
 
+You now know that both sides agree: the local service is running, and the hub still accepts this
+machine's credential.
+
 ## Starting and stopping
 
 ```sh
@@ -37,6 +41,8 @@ is worse than no stop at all.
 
 Underneath, macOS uses `launchctl` and Linux uses `systemctl`.
 
+The service is now in the state you asked for, and that state survives the next boot or login.
+
 ## Logs
 
 ```sh
@@ -47,6 +53,9 @@ apn logs -n 200   # last 200 lines
 
 On macOS this reads `~/Library/Logs/agentpod-node.log`. On Linux it hands off to
 `journalctl`.
+
+You are reading the platform's real service log, so the next error you diagnose is the one the
+resident node actually emitted.
 
 ## Installing and removing the service
 
@@ -65,6 +74,9 @@ gets a system unit; macOS always gets a LaunchAgent and **refuses to run as root
 `uninstall` stops, disables and removes the unit. It is idempotent too, and it leaves your
 config and enrollment alone — uninstalling the service does not un-enroll the machine.
 
+After either command, the service definition matches your request while the node's enrollment stays
+intact.
+
 ## Running in the foreground
 
 ```sh
@@ -73,6 +85,8 @@ apn run
 
 This is what the service runs under the hood. Run it directly when you are debugging and
 want the output in front of you.
+
+The node is now running in your terminal, with its output available for the debugging session.
 
 ## Updating
 
@@ -86,6 +100,8 @@ On success the service restarts automatically. If that restart fails, the binary
 already been swapped — the command tells you so and prints how to restart by hand, rather
 than leaving you to guess which half happened.
 
+When the command succeeds, this node is on the latest release and its service is running again.
+
 ## Enrolling again
 
 ```sh
@@ -96,6 +112,9 @@ Falls back to `$AGENTPOD_HUB_URL` and `$AGENTPOD_ENROLL_TOKEN` when the flags ar
 
 Running it on a machine that is already enrolled is a no-op, unless the stored credential
 has stopped being valid or you pass `--force`.
+
+The machine now has a valid enrollment for the hub you named; repeating the command leaves a good
+enrollment alone.
 
 ## Removing a node from the fleet
 
@@ -122,6 +141,9 @@ Two kinds of node are refused, each with the command that does apply:
   you remove it on purpose with `fleet bridge rm <key>`.
 
 The hub records each removal in its admin audit log.
+
+The node is now gone from the fleet and cannot reconnect with its old credential, while its local
+workspace remains exactly where you left it.
 
 ## Next
 
