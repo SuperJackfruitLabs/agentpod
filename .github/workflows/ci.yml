@@ -25,6 +25,11 @@ jobs:
   # landing build (and, on main, its deploy); anything else, including the root lockfile, the
   # workflows themselves, or a manual run, runs it all. A job skipped by its `if` counts as passed
   # for the required checks.
+  #
+  # A pull request whose every changed path is a root README / README.* or under docs/ or
+  # docs-site/ is docs-only (scripts/ci-plan.mjs): it runs the docs lane (docs-site,
+  # docs-claims, docs-reference) and nothing else. Any other path, any doubt (empty diff, missing
+  # merge base, failed diff, classifier error) and every other event keep the plan below unchanged.
   changes:
     name: changes
     runs-on: ubuntu-latest
@@ -36,9 +41,27 @@ jobs:
       app: ${{ steps.plan.outputs.app }}
       landing: ${{ steps.plan.outputs.landing }}
       docs: ${{ steps.plan.outputs.docs }}
+      docs_only: ${{ steps.plan.outputs.docs_only }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # The merge base has to be in the clone for the docs-only diff. Trees only: the diff
+          # reads names, never contents.
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      # Whether this pull request is docs-only, from the git clone rather than the API, so the
+      # path set cannot be truncated. If this step fails at all, docs_only is not 'true' and the
+      # plan below is the one it always was.
+      - name: Docs-only?
+        id: docs
+        continue-on-error: true
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ci-plan.mjs plan
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
@@ -60,6 +83,7 @@ jobs:
           WORKFLOWS: ${{ steps.filter.outputs.workflows }}
           LANDING: ${{ steps.filter.outputs.landing }}
           DOCS: ${{ steps.filter.outputs.docs }}
+          DOCS_ONLY: ${{ steps.docs.outputs.docs_only }}
         run: |
           app=false
           case "$EVENT" in push|pull_request) ;; *) app=true ;; esac
@@ -72,8 +96,14 @@ jobs:
           docs=false
           if [ "$DOCS" = true ] || [ "$WORKFLOWS" = true ]; then docs=true; fi
           case "$EVENT" in push|pull_request) ;; *) docs=true ;; esac
-          { echo "app=$app"; echo "landing=$landing"; echo "docs=$docs"; } >> "$GITHUB_OUTPUT"
-          echo "app=$app landing=$landing docs=$docs"
+          # A docs-only pull request runs the docs lane and nothing else. Only the exact string
+          # 'true' on a pull_request counts; anything else leaves the plan above as it is.
+          docs_only=false
+          if [ "$EVENT" = pull_request ] && [ "$DOCS_ONLY" = true ]; then
+            docs_only=true; app=false; landing=false; docs=true
+          fi
+          { echo "app=$app"; echo "landing=$landing"; echo "docs=$docs"; echo "docs_only=$docs_only"; } >> "$GITHUB_OUTPUT"
+          echo "app=$app landing=$landing docs=$docs docs_only=$docs_only"
 
   contract:
     name: contract
@@ -311,6 +341,11 @@ jobs:
       - name: Lint (ratchet)
         run: node scripts/lint.mjs
 
+      # The docs-only plan and the `check` verdict (scripts/ci-plan.mjs). Any change to them is
+      # not docs-only, so this always runs when they change.
+      - name: Test the CI plan
+        run: node --test scripts/ci-plan.test.mjs
+
   # golangci-lint over the node-agent, pinned, with the same ratchet (scripts/lint-go-baseline.json).
   lint-go:
     name: lint-go
@@ -430,7 +465,8 @@ jobs:
         working-directory: cloudflare/worker-v2
         run: npx vitest run
 
-  # The documentation site's build, on every pull request and push that touches docs-site/.
+  # The documentation site's build, on every pull request and push that touches docs-site/, and
+  # on every docs-only pull request.
   # deploy-docs below builds it again on main, but only after the merge: before this job a
   # page or config that broke the Astro build was found by the deploy, never by the PR.
   # The same steps as deploy-docs up to the build; see there for why each one is needed.
@@ -463,6 +499,91 @@ jobs:
       - name: Build
         working-directory: docs-site
         run: npm run build
+
+  # The docs-claims test, in a lane of its own for docs-only pull requests, which skip `hub`. It
+  # is the same file `hub` runs inside `bun test` (the same install, preload and working
+  # directory): every tool, command, route, setting and event the pages name must exist, and the
+  # completeness ratchet in docs/undocumented-baseline.json must hold. It needs no database. On
+  # every other plan `hub` runs it, so this job is skipped there.
+  docs-claims:
+    name: docs-claims
+    needs: [changes]
+    if: needs.changes.outputs.docs_only == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Docs claims
+        working-directory: apps/hub
+        run: bun test tests/unit/docs-claims.test.ts
+        env:
+          NODE_ENV: test
+
+  # The CLI reference pages (docs-site/.../reference/fleet.md and apn.md) are generated and
+  # checked by Go tests in these two packages, which `node-agent` runs inside `go test ./...`.
+  # Docs-only pull requests skip `node-agent`, so they run the two packages here with the same
+  # flags. On every other plan `node-agent` runs them, so this job is skipped there.
+  docs-reference:
+    name: docs-reference
+    needs: [changes]
+    if: needs.changes.outputs.docs_only == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/node-agent/go.mod
+
+      - name: Reference pages
+        working-directory: apps/node-agent
+        run: go test ./cmd/agentpod-fleet ./cmd/agentpod-node -race
+
+  # The run's verdict (scripts/ci-plan.mjs aggregate): passes only when `changes` succeeded and
+  # every job below ended the way its plan selected it, success if selected and skipped if not.
+  # A failed, cancelled, missing or unplanned job fails it. Not a required check; the required
+  # checks are still the jobs themselves.
+  check:
+    name: check
+    needs: [changes, contract, hub, node-agent, lint-ts, lint-go, console, worker, docs-site, docs-claims, docs-reference, landing]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts
+          persist-credentials: false
+      - name: Aggregate
+        env:
+          EVENT: ${{ github.event_name }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: node scripts/ci-plan.mjs aggregate
 
   # The published documentation site, to Cloudflare Pages at docs.agentpod.dev.
   #
