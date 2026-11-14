@@ -3,9 +3,9 @@ title: Voice notes
 description: Speaking to an agent, and being answered out loud — transcription in, synthesis out, and what each falls back to.
 ---
 
-An agent in a bridged room can be sent a voice note, and can answer with one. Both directions are
-optional, both are configured hub-wide and overridable per station, and neither invents anything
-when it is not configured.
+An agent in a bridged room can receive a voice note and answer with one. We'll keep both directions
+optional, let you override them per station, and never invent a transcript or recording when a
+service is not configured.
 
 ## Sending a voice note
 
@@ -24,6 +24,9 @@ than making you record something. Per station, the station page's **Voice notes*
 *inherit*, *off*, or its own settings.
 
 Anything that speaks OpenAI's `/v1/audio/transcriptions` works, self-hosted or hosted.
+
+When transcription succeeds, your voice note becomes visible text for the agent while the original
+audio stays in the room.
 
 **With nothing configured, a voice note reaches the agent as a note saying it could not be heard.**
 It is not silently dropped and not silently passed through as an empty message — the agent is told
@@ -44,6 +47,8 @@ note.
 
 `voice_in` is the default because it mirrors you: speak to the agent and it speaks back; type and
 it types.
+
+With a mode selected, the station now has a predictable rule for when text also becomes speech.
 
 ### Which voice
 

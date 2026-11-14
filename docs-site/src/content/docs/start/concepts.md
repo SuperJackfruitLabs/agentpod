@@ -3,11 +3,12 @@ title: Concepts
 description: Nodes, stations, harnesses, principals, grants and the hub — the words the rest of the documentation assumes.
 ---
 
-Eight words carry most of AgentPod. They are worth ten minutes.
+Eight words carry most of AgentPod. Give us ten minutes with them now and the rest of the docs will
+feel much lighter.
 
 ## Node
 
-A **machine** in your fleet: a VPS, a laptop, a container, a box under a desk. A node runs
+A **machine** in your fleet: a VPS, a laptop, a container, a box under a desk. Your node runs
 the `agentpod-node` agent, which dials *out* to the hub and holds that connection open.
 
 Nothing ever dials *in* to a node. That is not a detail — it is why a laptop on hotel
@@ -28,7 +29,7 @@ own native interface rather than reinventing it.
 
 ## Station
 
-One **runtime instance** on a node — a single place where an agent works. A station belongs
+One **runtime instance** on a node — a single place where an agent works. We call it a station. It belongs
 to exactly one node and one harness, and carries a station key that is unique within that
 harness.
 
@@ -110,7 +111,8 @@ hub
 ```
 
 A **principal** acts on those stations, bounded by a **grant**. A **harness** is what the station
-is an instance of. With the bridge on, each station also has a **room**.
+is an instance of. With the bridge on, each station also has a **room**. That is the whole map; the
+pages below simply let us zoom in.
 
 ## Next
 

@@ -3,15 +3,16 @@ title: What AgentPod is
 description: A fleet and facilities console for agent runtimes — what it manages, and what it deliberately does not.
 ---
 
-AgentPod manages **the environments AI agents live in**, wherever they run.
+AgentPod manages **the environments AI agents live in**, wherever they run. You keep the harnesses
+and machines you chose; we give you one place to see and operate them.
 
 An agent needs a place to work: a filesystem, a config file, somewhere its logs go, a
-process that can be started and stopped. Once you have more than one agent, on more than
-one machine, that place stops being something you can hold in your head. AgentPod is the
-console for those places.
+process that can be started and stopped. Once you have more than one agent on more than
+one machine, those places stop fitting comfortably in your head. AgentPod is the console
+for them.
 
-It is **attach-first**. You point it at runtimes you already have and it detects them
-where they sit. Nothing moves, and nothing is rewritten to a new format.
+It is **attach-first**. You point it at runtimes you already have; we detect them where
+they sit. Nothing moves, and nothing is rewritten to a new format.
 
 ## What it gives you per runtime
 
@@ -34,14 +35,14 @@ reaches the machine.
 
 ## And a way to talk to them
 
-The console is for operating the ground an agent stands on. The other half of AgentPod is for
-working *with* the agent: turn on the **bridge** and every adopted station gets a chat identity and
+The console is where we operate the ground an agent stands on. The other half of AgentPod is where
+you work *with* the agent: turn on the **bridge** and every adopted station gets a chat identity and
 a room of its own.
 
-You message it from a client you already have. The agent's reply comes back as that agent. It can
-be sent a voice note and answer with one; it asks for permission before running a tool and you
-reply with a number; when a turn fails you get the provider's own sentence rather than silence. The
-harness itself never learns any of this is happening.
+You message it from a client you already have, and the reply comes back as that agent. Send a voice
+note and it can answer with one; when it asks for permission before running a tool, you reply with a
+number; when a turn fails, you get the provider's own sentence rather than silence. The harness
+itself never learns any of this is happening.
 
 See [Talking to an agent in a room](/use/rooms/).
 

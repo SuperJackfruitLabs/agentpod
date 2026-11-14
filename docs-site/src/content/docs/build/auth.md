@@ -10,6 +10,8 @@ The claims every product checks, and the ids it accepts, are pinned in Treaty's
 [identity corpus](https://treaty.superjackfruit.com/packages/ecosystem-identity/) (`token_claims.json`, `id_grammar.json`), which
 AgentPod's tests run against.
 
+We'll follow one token from its issuer to the hub door, then make each refusal legible enough to fix.
+
 A hub tells you which issuer it trusts:
 
 ```
@@ -54,6 +56,9 @@ so it works over SSH too. Approval gives this machine a **device credential** fo
 (the CLI's registered client id). The credential lasts **90 days from its last use**, so a machine
 in regular use stays signed in.
 
+Once you approve the code, this machine has a device credential and later `fleet` commands can get
+fresh access tokens without asking you to visit the browser again.
+
 Every later command spends the device credential for a fresh access token without opening a
 browser. The exchange underneath is:
 
@@ -93,7 +98,7 @@ token naming the station's agent. A suspended agent gets no token.
 Send it as a bearer token:
 
 ```
-Authorization: Bearer <access token>
+Authorization: Bearer $TOKEN
 ```
 
 The operator API also reads `?token=`, because a browser's WebSocket and EventSource cannot set a
@@ -101,6 +106,8 @@ header. `/mcp` and `/api/fleet/dispatchable` take the header only: a credential 
 credential in a log.
 
 Access tokens last **five minutes**. Do not cache one past `exp`; get a fresh one.
+
+With the header in place, the hub can verify the token without putting a credential in the URL.
 
 ## What the hub checks
 

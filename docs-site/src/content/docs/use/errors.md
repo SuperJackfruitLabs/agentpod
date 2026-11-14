@@ -3,8 +3,8 @@ title: When a turn fails
 description: One error shape whichever harness failed, the card a client can draw, and the plugins that recover what ACP drops.
 ---
 
-A model provider runs out of quota. A credential expires. A request is malformed. What should reach
-the room is the provider's own sentence.
+A model provider runs out of quota. A credential expires. A request is malformed. Whatever failed,
+we want you to see the provider's own sentence in the room — not silence, and not a confident guess.
 
 What used to reach it depended entirely on which harness the agent ran. Six harnesses fail six
 different ways over ACP: some reject the prompt with real text in the message, some emit the error
@@ -13,7 +13,8 @@ agent's answer** — and some drop the error entirely and resolve the turn, so t
 agent completed without a reply" while the real reason sits in a log on a machine you are not
 looking at.
 
-AgentPod standardises this itself rather than waiting for six upstreams.
+AgentPod standardises this itself rather than asking you to learn six failure dialects while a turn
+is already broken.
 
 ## One error shape
 

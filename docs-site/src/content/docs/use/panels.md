@@ -3,8 +3,9 @@ title: What you can do to a station
 description: The panels — files, logs, terminal, config, health, lifecycle, cleanup, changesets, skills, timeline, approval rules, voice and activity — and what each one requires.
 ---
 
-Open an adopted station in the console and you get a set of panels. Which ones appear
-depends on what the station declares it can do.
+Open an adopted station in the console and we show you the panels that station declares it can
+support. You do not get a panel for an undeclared capability; which panels appear depends on what
+the station says it can do.
 
 ## Capability gating
 
@@ -76,6 +77,8 @@ POST /api/stations/:id/cleanup/apply    do it
 
 The plan is shown to you first. Nothing on disk is touched until you apply it. Requires the
 `cleanup` capability.
+
+That leaves you with an exact reclaim plan to review before a single file is removed.
 
 ## Changesets
 

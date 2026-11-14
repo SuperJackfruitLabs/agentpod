@@ -5,7 +5,8 @@ description: The SuperPipeline bridge — a hub that claims work from a board an
 
 AgentPod answers "where does this agent live, and is it healthy". Deciding *what* an agent should
 work on is a different job in a different plane, which is what
-[SuperPipeline](https://docs.superpipeline.dev) is for.
+[SuperPipeline](https://docs.superpipeline.dev) is for. Here we'll connect the two without blurring
+their responsibilities.
 
 The bridge joins them: the hub can **claim work from a board** and run it on a station.
 
@@ -146,7 +147,7 @@ and say where to choose. Once a version is approved, the room's receipt names it
 to five approvals — from the stage's deciders, or from the workspace's owners and admins — before
 its gate passes. Each approval short of that is said in the room as a reply to the gate
 ([gate progress](https://treaty.superjackfruit.com/matrix/notices/agentpod-gate-progress-v2/)), for example
-"Approved by asha — 1 of 2. Waiting for 1 more.", and the gate stays open; the approval that reaches
+"Approved by Reviewer A — 1 of 2. Waiting for 1 more.", and the gate stays open; the approval that reaches
 the number passes it, and the room's receipt says so. Each person counts once: approving again is
 refused with a reply saying it is still waiting for others, and an approval from someone who does
 not count for that gate is refused with a reply saying why. One rejection or request for changes
@@ -156,7 +157,7 @@ still ends the gate at once. The delivery is manual unless everyone who approved
 its approvals for a cooling-off period (5 minutes to 7 days), and a post can say it must not go out
 before a set time. The gate then says so before anyone approves ("If approved, it goes ahead after
 Mon 16 Nov, 09:00 UTC"). An approval is recorded at once but does not act until that time: the
-room's receipt says "Approved by rakesh — goes ahead after … unless pulled back", and nothing is
+room's receipt says "Approved by Reviewer A — goes ahead after … unless pulled back", and nothing is
 posted or advanced until then. Until it acts, anyone who may decide the gate, or a workspace owner
 or admin, can **pull it back** with a comment, from the app or on the board; that sends the work back
 for changes, and the room replies "Pulled back by … — returned for changes: …"

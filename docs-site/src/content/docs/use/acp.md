@@ -3,9 +3,9 @@ title: Attaching an editor
 description: Make a station on another machine look like a local agent to any ACP client.
 ---
 
-ACP is the protocol editors speak to coding agents. `apn acp` makes a station on **another
-machine** look like a local agent to any client that speaks it — Zed, JetBrains, anything
-else.
+ACP is the protocol editors speak to coding agents. With `apn acp`, we can make a station on
+**another machine** look local to any client that speaks ACP — Zed, JetBrains, or anything else.
+Your editor keeps its familiar workflow; the agent can stay where it already lives.
 
 ## How it works
 
@@ -22,6 +22,9 @@ apn acp --station <id> --session <id>   # resume a session
 
 `--hub` points at a hub other than the default.
 
+Once the attach command starts, your editor is speaking to that remote station as if it had spawned
+the agent beside you. The hub and node carry the distance; the editor does not have to know it exists.
+
 ## It needs no node
 
 `apn acp` does not assume this machine is enrolled — a laptop can install `apn` purely as a
@@ -32,7 +35,8 @@ exposure](/use/scan/).)
 ## Tokens
 
 Prefer `$AGENTPOD_TOKEN`, which is what `--token` defaults to. A token passed as an
-argument lands in your shell history and in the process list.
+argument lands in your shell history and in the process list. Keeping it in the environment gives
+you the same attachment without leaving the credential in either place.
 
 ## Sessions
 

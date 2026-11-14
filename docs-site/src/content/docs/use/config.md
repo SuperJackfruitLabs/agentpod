@@ -4,10 +4,10 @@ description: Declaring what a harness setting should be, the three policies that
 ---
 
 A harness — Hermes, OpenClaw, Claude Code, Codex, OpenCode, Pi — keeps its own
-configuration, in its own file, in its own shape. AgentPod does not own that file. What it
-can do is let the fleet **declare** what a registered setting should be, write that
-declaration to a station through a reviewed operation, and tell you where each station's
-actual value stands against what was declared.
+configuration, in its own file, in its own shape. AgentPod does not own that file. We can help you
+**declare** what a registered setting should be, write that declaration through a reviewed
+operation, and see where each station's actual value stands against it. We will not turn “desired”
+into “written” while you are looking away.
 
 ## A declaration is not a write
 
@@ -35,6 +35,9 @@ fleet config unset hermes.approvals.mode
 
 removes a declaration. Undeclaring a level that has nothing declared on it is a no-op, not
 an error.
+
+You now have a desired value in the hub — or have removed one — with no station file changed. That
+separation is the foundation for every reviewed write below.
 
 ## Scopes and levels
 
@@ -207,6 +210,9 @@ precedence by hand.
 
 `fleet config drift` only reports states other than `matches`, plus the list of stations it
 could not reach at all — a station it couldn't ask is never silently left out of the total.
+
+The result tells you which declarations need attention and which ones could not be checked, without
+pretending that silence means agreement.
 
 That list is narrower than "every station that is down", and deliberately so. It holds the
 stations that **had something declared for them** and whose node could not be asked. A
@@ -408,6 +414,9 @@ for that operation — it never re-derives anything. `apply` is the only verb th
 it refuses to run without `--plan-digest`: that digest must be the one `plan` printed for
 this operation, so a human reviewed the exact edit being written rather than whatever the
 current plan happens to be by the time `apply` runs.
+
+When `apply` succeeds, the station has the exact edit you inspected. If the document or plan moved
+under us, the write is refused instead of quietly substituting a newer one.
 
 `create` covers a key the document does not have yet, including the case where its whole
 top-level section is absent — the ordinary state of a freshly adopted station whose operator

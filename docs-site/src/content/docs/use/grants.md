@@ -4,8 +4,8 @@ description: Who may send an agent work — read from the signed token, never fr
 ---
 
 Sending an agent a message spends its time. So does approving a tool call for it, and so does
-putting a card in front of it. All three are **dispatch**, and all three ask the same question:
-may this principal dispatch that one?
+putting a card in front of it. We call all three **dispatch**, which lets us ask one question at
+every door: may this principal dispatch that one?
 
 ## The answer is in the token
 
@@ -37,6 +37,9 @@ fleet grants rm <principalId>
 whole shape, and flattening it into flags would mean the CLI modelling a schema the hub owns and
 then disagreeing with it the first time that schema moves. `-` reads stdin, so a grant can be piped
 from whatever produced it.
+
+After `set`, the principal's complete grant is stored as one validated document. After `rm`, no
+grant remains for the hub to interpret.
 
 ## Where a grant is checked
 

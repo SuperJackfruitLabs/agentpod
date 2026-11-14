@@ -3,7 +3,8 @@ title: Capability catalog
 description: A read-only API for services - what exists in a workspace (harnesses, skills, MCP servers, CLIs, brokered services) and what each station has, with how each fact is known.
 ---
 
-The hub answers two questions for a service that places work, such as SuperDispatch:
+The hub answers two questions for a service that places work, such as SuperDispatch. We keep them
+separate so you can tell “this exists somewhere” from “this station can use it”:
 
 - **The catalog: what exists.** Every harness, managed skill profile, MCP server, CLI and brokered
   service that some station in the workspace has.
@@ -11,6 +12,7 @@ The hub answers two questions for a service that places work, such as SuperDispa
   ran with, the catalog entries it can use, and the credential names it can reach.
 
 Answers carry names only. A credential is its name, such as `forge:github`, never a token or a key.
+You can place work from the catalog without turning a capability read into a secret read.
 
 ## Who may read
 

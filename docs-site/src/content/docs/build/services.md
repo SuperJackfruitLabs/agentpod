@@ -3,9 +3,10 @@ title: Reads for services
 description: The doors that take an agent's or a service's token rather than a person's - the bridge roster, run evidence and transcripts - with the setting or grant scope each one needs.
 ---
 
-The operator API takes people only. A handful of reads exist for other products instead: they
-take an organization-plane token for an **agent** or a **service**, verify it themselves (see
-[Authentication](/build/auth/)), and answer only within the caller's workspace.
+The operator API takes people only. Other products still need a few narrow reads, so we give agents
+and services their own doors instead of pretending they are operators. Each door takes an
+organization-plane token, verifies it itself (see [Authentication](/build/auth/)), and answers only
+within the caller's workspace.
 
 | Door | Who may call | Allowed by |
 |---|---|---|
@@ -14,7 +15,8 @@ take an organization-plane token for an **agent** or a **service**, verify it th
 | `/api/bridge/*` | services | the hub's `ROSTER_READERS` setting (below) |
 | `/api/evidence/*` | agents and services | a grant scope on the token (below) |
 
-Nothing here writes, except the one export below.
+Nothing here writes, except the one export below. You can inspect this surface without accidentally
+turning a read integration into fleet administration.
 
 ## The bridge roster
 
