@@ -33,7 +33,7 @@ docs sites carry; `.gitignore` keeps `vendor/*.tgz`). The whole design config is
 `sjlDocs({ product: 'agentpod', status: 'lights on' })` in `astro.config.mjs`: vibekit's cobalt,
 the suite's faces (self-hosted, so no page fetches a font from Google), the street and the phone
 switcher, status badges, Copy Markdown and every page at `<page>.md`, the suite footer, the 404, the
-edit link and the last-updated date. `src/docs-theme.d.ts`
+edit link and the last-updated date. The home is the theme's `BentoHome`. `src/docs-theme.d.ts`
 types the theme's schema module, which ships as plain JavaScript, so `npm run check` passes under
 `strict`.
 
