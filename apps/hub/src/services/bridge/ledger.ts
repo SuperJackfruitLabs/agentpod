@@ -230,6 +230,22 @@ export async function markAbandoned(key: DispatchKey, reason: string): Promise<v
   await setOutcome(key, "abandoned", reason);
 }
 
+/** Make an open run's own background wait inspectable without making it terminal. */
+export async function recordOwnWorkWait(key: DispatchKey, pending: readonly string[]): Promise<void> {
+  await db
+    .update(bridgeDispatches)
+    .set({ outcome: "working", reason: `waiting on its own work: ${pending.join(", ")}`, updatedAt: new Date() })
+    .where(scope(key));
+}
+
+/** The pending work settled and the same run is about to resume. */
+export async function clearOwnWorkWait(key: DispatchKey): Promise<void> {
+  await db
+    .update(bridgeDispatches)
+    .set({ reason: null, updatedAt: new Date() })
+    .where(scope(key));
+}
+
 async function setOutcome(key: DispatchKey, outcome: DispatchOutcome, reason: string | null): Promise<void> {
   await db.update(bridgeDispatches).set({ outcome, reason, updatedAt: new Date() }).where(scope(key));
 }
