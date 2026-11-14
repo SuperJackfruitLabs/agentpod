@@ -111,6 +111,15 @@ The AgentPod base proves its client contract and verifier expectations, but does
 
 The author asked for pinned evidence on card `card_d2b38565e604491c` in comment `cmt_918f66d4af78444a`. Their absence from this repository is not treated as evidence that they are false.
 
+Evidence gathered in the final review on 2026-11-15. The claims stay marked UNVERIFIED for this repository, and the page text is unchanged:
+
+- Discovery paths, checked live: `GET https://accounts.superjackfruit.com/.well-known/openid-configuration`, `/.well-known/oauth-authorization-server` and `/api/auth/jwks` each returned `200 application/json`. The OpenID document names issuer `https://accounts.superjackfruit.com`, `jwks_uri` `https://accounts.superjackfruit.com/api/auth/jwks`, and signing algorithm `EdDSA`.
+- Lifetimes, in the organization-plane service's own source (private, commit `2ffbf18`):
+  - A device credential lives 90 days (`DEVICE_TTL_MS = 90 * 24 * 3600 * 1000`). Every successful exchange moves its expiry to 90 days from that use, which matches "90 days from its last use".
+  - A human assertion token lives 120 seconds (`ASSERTION_TTL_SECONDS = 120`), which matches "two minutes".
+  This proves the source, not the deployed revision.
+- Not checked: the principals and scopes of `/api/token/service` and `/api/token/agent`.
+
 ## Mechanical claims ratchet
 
 No new factual surface was added. The existing ratchet already checks all 23 pages for:
