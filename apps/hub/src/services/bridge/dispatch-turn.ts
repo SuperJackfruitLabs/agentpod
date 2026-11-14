@@ -262,11 +262,12 @@ function onTurnEvent(t: Turn, event: AcpEvent, recording: boolean): void {
   // operator can cross-check against `SELECT count(*) FROM acp_events`.
   t.counts.eventsReceived++;
 
-  if (event.type === "agent-update") {
-    const update = event.payload as { sessionUpdate?: string; toolCallId?: unknown; status?: unknown } | null;
-    if (update?.sessionUpdate === "tool_call" || update?.sessionUpdate === "tool_call_update") {
-      const id = String(update.toolCallId ?? "");
-      const status = String(update.status ?? "");
+  const update: unknown = event.payload;
+  if (event.type === "agent-update" && typeof update === "object" && update !== null) {
+    const kind = "sessionUpdate" in update ? update.sessionUpdate : undefined;
+    if (kind === "tool_call" || kind === "tool_call_update") {
+      const id = "toolCallId" in update && typeof update.toolCallId === "string" ? update.toolCallId : "";
+      const status = "status" in update && typeof update.status === "string" ? update.status : "";
       if (id && (status === "pending" || status === "in_progress")) t.pendingToolCalls.add(id);
       if (id && (status === "completed" || status === "failed" || status === "cancelled")) {
         t.pendingToolCalls.delete(id);
