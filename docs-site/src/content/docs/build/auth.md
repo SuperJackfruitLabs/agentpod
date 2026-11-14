@@ -63,7 +63,7 @@ Once you approve the code, this machine has a device credential and later `fleet
 fresh access tokens without asking you to visit the browser again.
 
 ```
-POST /api/token/device        Authorization: Bearer dev_…:<secret>
+POST /api/token/device        Authorization: Bearer $DEVICE_CREDENTIAL
 { "audience": "https://hub.agentpod.dev" }
 
 → { "access_token": "…", "token_type": "Bearer", "expires_in": 300 }
@@ -98,7 +98,7 @@ token naming the station's agent. A suspended agent gets no token.
 Send it as a bearer token:
 
 ```
-Authorization: Bearer <token>
+Authorization: Bearer $TOKEN
 ```
 
 The operator API also reads `?token=`, because a browser's WebSocket and EventSource cannot set a

@@ -52,8 +52,8 @@ Reply with the number, or the option's name.
 Reply `1`, or `Allow once`. **Nothing else counts.** A reply that is not plainly one of the options
 approves nothing and shows the list again.
 
-Once your answer is accepted, the waiting turn continues with exactly that permission. A vague or
-late reply changes nothing.
+Once your answer is accepted, the waiting turn continues with exactly that permission. A vague
+reply grants nothing, and a reply after the question closes cannot approve it.
 
 That pedantry is deliberate. Against options named *Allow once* and *Allow always*, a bare "yes"
 does not say which — and approving a tool call you did not mean to approve is the one failure worth

@@ -3,9 +3,9 @@ title: What you can do to a station
 description: The panels — files, logs, terminal, config, health, lifecycle, cleanup, changesets, skills, timeline, approval rules, voice and activity — and what each one requires.
 ---
 
-Open an adopted station in the console and we show you the panels that station can honestly
-support. You do not get a hopeful button and a later failure; which panels appear depends on what
-the station declares it can do.
+Open an adopted station in the console and we show you the panels that station declares it can
+support. You do not get a panel for an undeclared capability; which panels appear depends on what
+the station says it can do.
 
 ## Capability gating
 

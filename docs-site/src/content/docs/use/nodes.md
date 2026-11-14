@@ -23,8 +23,8 @@ stored credential is still valid.
 The exit code is `0` only when the service is running *and* the credential is valid, so
 this drops straight into a health check. Add `--json` for scripts.
 
-You now know that both sides agree: the local service is running, and the hub still accepts this
-machine's credential.
+You now know whether both sides agree: the output separates the local service state from the hub's
+answer, and the exit code says whether both checks passed.
 
 ## Starting and stopping
 
@@ -41,7 +41,8 @@ is worse than no stop at all.
 
 Underneath, macOS uses `launchctl` and Linux uses `systemctl`.
 
-The service is now in the state you asked for, and that state survives the next boot or login.
+`start` and `stop` leave the service enabled or disabled for the next boot or login. `restart`
+refreshes the running service without changing that persisted choice.
 
 ## Logs
 
@@ -100,7 +101,8 @@ On success the service restarts automatically. If that restart fails, the binary
 already been swapped — the command tells you so and prints how to restart by hand, rather
 than leaving you to guess which half happened.
 
-When the command succeeds, this node is on the latest release and its service is running again.
+After `--check`, you know whether an update is available and nothing has changed. After an update
+succeeds, this node is on the latest release and its service is running again.
 
 ## Enrolling again
 

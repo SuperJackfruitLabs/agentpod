@@ -12,7 +12,7 @@ can ask safely: where am I running, and what belongs to me?
 fleet login
 ```
 
-The endpoint takes a token from the account service in `Authorization: Bearer <token>` and only there. There is
+The endpoint takes a token from the account service in `Authorization: Bearer $TOKEN` and only there. There is
 no `?token=` fallback — a credential in a URL is a credential in a log.
 
 With that header, the MCP session is bound to the calling principal rather than to a station id the

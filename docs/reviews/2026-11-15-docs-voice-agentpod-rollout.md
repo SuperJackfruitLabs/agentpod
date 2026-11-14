@@ -1,6 +1,6 @@
 # Claims ledger — AgentPod docs voice rollout
 
-Status: draft-stage evidence for the 23-page AgentPod docs voice rollout.
+Status: verify-stage evidence for the 23-page AgentPod docs voice rollout.
 
 ## Immutable revisions and scope
 
@@ -21,7 +21,7 @@ Status: draft-stage evidence for the 23-page AgentPod docs voice rollout.
 | Concept and reference pages | pass | Warm direct prose was added lightly to the remaining hand-authored pages. Tables, routes, fields, enums, limits, JSON and recovery remain plain. No running gag was added. |
 | Generated references | pass | `reference/apn.md` and `reference/fleet.md` already use direct explanatory prose around exact generated material. They were not hand-edited; the generator equality tests pass. |
 | Candour | pass | Private account-service prerequisites, partial forge-API coverage, same-user isolation, unknown scan results, disabled/missing optional integrations, config races and fail-closed behavior remain explicit. |
-| Exact material | pass | No humour was added to commands, values, tables, warnings, recovery, payloads, generated text or reference output. Placeholder token headers were made consistently literal. |
+| Exact material | pass | No humour was added to commands, values, tables, warnings, recovery, payloads, generated text or reference output. Placeholder token headers use explicit shell variables rather than redaction marks. |
 | Vocabulary and privacy | pass | Product casing and `workspace` meaning are unchanged. Personal/internal-looking examples in `use/boards.md` and `use/stations.md` were replaced with obviously synthetic labels. A scan found none of the removed names elsewhere in the 23 pages. |
 | Originality | pass | The narrator, payoffs and guest-list premise are original to AgentPod; no wording, metaphor or joke was copied from SuperDispatch or RedwoodJS. |
 
@@ -75,14 +75,21 @@ Each row covers the commands, flags, routes, settings, defaults, fields, enums, 
 
 ## Corrections
 
-No product behavior, command, route, default, field, enum or limit needed a factual rewrite after comparison with the base. Four exact/privacy corrections are recorded rather than changed silently:
+No pre-existing product behavior, command, route, default, field, enum or limit needed a factual rewrite after comparison with the base. Eleven exact/privacy/verification corrections are recorded rather than changed silently; the last six correct overclaims introduced in the draft voice pass:
 
 | Old material | New material | Evidence |
 |---|---|---|
-| `build/auth.md` used `Authorization: Bearer <access token>`. | The neutral copyable placeholder is `Authorization: Bearer <token>`. | Bearer verification: `apps/hub/src/auth/org-plane/verify.ts:61-169`; guide exact-material rule at the pinned guide revision. |
-| `build/mcp.md` named the header only as `Authorization: Bearer`, without a placeholder value. | It now says `Authorization: Bearer <token>`. | MCP bearer parser: `apps/hub/src/mcp/auth.ts:1-60`. |
+| `build/auth.md` used the generic angle-bracket placeholder `Authorization: Bearer <access token>`. | The copyable shell-variable placeholder is `Authorization: Bearer $TOKEN`. | Bearer verification: `apps/hub/src/auth/org-plane/verify.ts:61-169`; guide exact-material rule at the pinned guide revision. |
+| `build/auth.md` mixed a `dev_…` prefix with an angle-bracket secret placeholder in the device-token exchange. | The request uses the explicit synthetic variable `$DEVICE_CREDENTIAL`. | Device exchange client: `apps/node-agent/internal/fleetcred/device.go:168-259`; guide exact-material rule at the pinned guide revision. |
+| `build/mcp.md` named the header only as `Authorization: Bearer`, without a placeholder value. | It now says `Authorization: Bearer $TOKEN`. | MCP bearer parser: `apps/hub/src/mcp/auth.ts:1-60`. |
 | `use/boards.md` used two person-like names in example notices. | Both examples use the explicitly synthetic `Reviewer A`. | Voice-guide privacy rule 8 at the pinned guide revision; no behavior or contract text changed. |
 | `use/stations.md` used an internal-looking host plus two agent-like names in the example tree. | The example uses `example-node`, `writer-alpha`, and `reviewer-beta`. | Voice-guide privacy rule 8 at the pinned guide revision; station-tree behavior remains evidenced by `apps/hub/src/services/stations/registry.ts:1-459`. |
+| The draft `use/nodes.md` payoff said `apn status` established that both checks passed even when the command reports a failure. | It now says the command shows whether the local and hub checks agree and that its exit code reports whether both passed. | `apps/node-agent/cmd/agentpod-node/service_cmds.go:421-499`. |
+| The draft `use/nodes.md` payoff said any successful update command leaves the node current and restarted, which was false for successful `apn update --check`. | It now distinguishes check-only observation from a successful update and restart. | `apps/node-agent/cmd/agentpod-node/main.go:180-221`; `apps/node-agent/internal/selfupdate/selfupdate.go:105-194`. |
+| The draft `use/nodes.md` grouped `restart` with persistent enable/disable state. | It now says `start` and `stop` persist enablement while `restart` leaves that choice unchanged. | `apps/node-agent/cmd/agentpod-node/service_cmds.go:251-419`; `apps/node-agent/internal/service/service.go:1-131`. |
+| The draft `use/panels.md` implied that capability gating prevents every later operation failure. | It now makes the narrower guarantee: a panel is absent when its required capability is undeclared. | `apps/hub/src/routes/station-writes.ts:1-244`; `apps/hub/src/services/stations/registry.ts:1-459`. |
+| The draft `use/rooms.md` said any late permission reply “changes nothing,” although a number sent after later conversation can become an ordinary message. | It now says a closed question cannot be approved; the existing ordinary-message boundary remains explicit below it. | `apps/hub/src/services/bridge/permission.ts:1-195`. |
+| The draft `use/voice.md` said configuration alone makes a transcript appear, even though an external transcription request can fail. | It now conditions the payoff on successful transcription. | `apps/hub/src/services/speech/transcription-client.ts:1-176`; `apps/hub/src/services/speech/transcription-settings.ts:1-475`. |
 
 ## Unverified external-service claims
 
@@ -118,3 +125,15 @@ The docs-only lane is defined at `.github/workflows/ci.yml:468-562`. The followi
 - `git diff --check origin/main...HEAD`: pass.
 
 An earlier local build invocation put the console tsconfig stand-in under `docs-site/apps/` rather than at the repository root and failed with `Tsconfig not found .../apps/console/.svelte-kit/tsconfig.json`. Repeating the workflow's exact root-relative setup produced the successful result above. The mistaken path is untracked/ignored and is not part of the patch.
+
+## Verify-stage rerun after corrections
+
+Verify independently inspected the 23-page source set and the complete base-to-head diff, checked every ledger citation path/range mechanically (**124 parsed citations, 0 missing paths, 0 ranges past end-of-file**), and corrected the six draft overclaims recorded above. The exact docs-only commands were then rerun on the final tree:
+
+- `npm ci` in `docs-site`: pass — 352 packages added, 353 audited; npm again reported 2 vulnerabilities (1 moderate, 1 high).
+- Root `pnpm install --frozen-lockfile`: pass — all 10 workspace projects, 1,175 packages, lockfile unchanged.
+- Root-relative console tsconfig stand-in plus `npm --prefix docs-site run build`: pass — Astro built **24 pages**, Pagefind indexed **24 HTML files**, and the sitemap was generated; the existing optional-`i18n` warning remained.
+- `NODE_ENV=test bun test tests/unit/docs-claims.test.ts` in `apps/hub`: pass — **12 passed, 0 failed, 1,933 expectations**. The workstation had Bun 1.3.7; CI pins Bun 1.4.2.
+- `go test ./cmd/agentpod-fleet ./cmd/agentpod-node -race` in `apps/node-agent`: pass for both packages. `go` was absent from `PATH`, so Verify invoked the already-downloaded module toolchain at `go1.26.4`; the uncached verification run completed in 152.243s and 59.994s, and the final post-edit rerun was cached.
+- `git diff --check 3850079f0105dc1555863cd6d85806addb2de671...HEAD` plus the uncommitted Verify correction diff: pass.
+- Privacy scan across all 23 page sources for the known removed/internal person, agent, host and station identifiers: 0 matches.

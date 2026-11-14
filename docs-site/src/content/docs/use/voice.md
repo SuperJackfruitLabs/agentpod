@@ -25,8 +25,8 @@ than making you record something. Per station, the station page's **Voice notes*
 
 Anything that speaks OpenAI's `/v1/audio/transcriptions` works, self-hosted or hosted.
 
-Once transcription is configured, your voice note becomes visible text for the agent while the
-original audio stays in the room.
+When transcription succeeds, your voice note becomes visible text for the agent while the original
+audio stays in the room.
 
 **With nothing configured, a voice note reaches the agent as a note saying it could not be heard.**
 It is not silently dropped and not silently passed through as an empty message — the agent is told
