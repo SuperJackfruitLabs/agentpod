@@ -1,0 +1,1021 @@
+{
+  "version": "superbench.cancellation-fixtures.v1",
+  "status": "proposed; wire validation does not prove fencing or deployment",
+  "valid": [
+    {
+      "name": "request-exact-original-target",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "no-effects-cancelled",
+      "kind": "response",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancelled"
+        }
+      }
+    },
+    {
+      "name": "pending-exact-fence",
+      "kind": "response",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancel_requested"
+        }
+      }
+    },
+    {
+      "name": "completion-won",
+      "kind": "response",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "already_completed"
+        }
+      }
+    },
+    {
+      "name": "failure-operation_in_doubt",
+      "kind": "response",
+      "status": 409,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": false,
+        "error": {
+          "code": "operation_in_doubt",
+          "message": "Inspect exact source operation state."
+        }
+      }
+    },
+    {
+      "name": "failure-unavailable",
+      "kind": "response",
+      "status": 503,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": false,
+        "error": {
+          "code": "unavailable",
+          "message": "Inspect exact source operation state."
+        }
+      }
+    },
+    {
+      "name": "failure-forbidden",
+      "kind": "response",
+      "status": 403,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": false,
+        "error": {
+          "code": "forbidden",
+          "message": "Inspect exact source operation state."
+        }
+      }
+    },
+    {
+      "name": "failure-invalid_request",
+      "kind": "response",
+      "status": 400,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": false,
+        "error": {
+          "code": "invalid_request",
+          "message": "Inspect exact source operation state."
+        }
+      }
+    },
+    {
+      "name": "failure-not_found",
+      "kind": "response",
+      "status": 404,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": false,
+        "error": {
+          "code": "not_found",
+          "message": "Inspect exact source operation state."
+        }
+      }
+    },
+    {
+      "name": "failure-conflict",
+      "kind": "response",
+      "status": 409,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": false,
+        "error": {
+          "code": "conflict",
+          "message": "Inspect exact source operation state."
+        }
+      }
+    },
+    {
+      "name": "failure-in_progress",
+      "kind": "response",
+      "status": 409,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": false,
+        "error": {
+          "code": "in_progress",
+          "message": "Inspect exact source operation state."
+        }
+      }
+    },
+    {
+      "name": "failure-operation_failed",
+      "kind": "response",
+      "status": 422,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": false,
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect exact source operation state."
+        }
+      }
+    },
+    {
+      "name": "failure-pending-observation",
+      "kind": "response",
+      "status": 409,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": false,
+        "error": {
+          "code": "operation_in_doubt",
+          "message": "Exact operation remains unresolved."
+        },
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancel_requested"
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "request-missing-target_request_id",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-missing-target_digest",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-forbids-key",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "key": "example"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-forbids-uid",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "uid": 1001
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-forbids-lease_token",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "lease_token": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-forbids-request_id",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request_id": "new-cancel"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-forbids-holder",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "holder": "worker"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-forbids-extra",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "extra": true
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-digest-short",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-digest-uppercase",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-digest-newline",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-digest-nonhex",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-digest-null",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": null
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "response-state-missing",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": null
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-state-unknown",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "stopped"
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-state-timeout",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "expired"
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-forbids-grant",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancelled",
+          "grant": {
+            "lease_token": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-forbids-root_path",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancelled",
+          "root_path": "/private/bench"
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-forbids-uid",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancelled",
+          "uid": 1001
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-forbids-key",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancelled",
+          "key": "example"
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-foreign-target_request_id",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "other-run",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancelled"
+        }
+      },
+      "reason": "target_binding",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-foreign-target_digest",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "state": "cancelled"
+        }
+      },
+      "reason": "target_binding",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-success-wrong-http",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancelled"
+        }
+      },
+      "reason": "http_status",
+      "status": 409,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-error-wrong-http",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": false,
+        "error": {
+          "code": "operation_in_doubt",
+          "message": "Inspect exact source operation state."
+        }
+      },
+      "reason": "http_status",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "success-missing-result",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-new-request-id",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancelled"
+        },
+        "request_id": "new-cancel"
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-unknown-error",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": false,
+        "error": {
+          "code": "unknown",
+          "message": "No."
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "success-with-error",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancelled"
+        },
+        "error": {
+          "code": "conflict",
+          "message": "No."
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-missing-target_request_id",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancelled"
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-missing-target_digest",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "state": "cancelled"
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-missing-state",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "request-wrong-operation",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop_admin",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-wrong-version",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "response-wrong-operation",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop_admin",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancelled"
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "response-wrong-version",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancelled"
+        }
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "request-null-target-id",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": null,
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-newline-target-id",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example\n",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-array",
+      "kind": "request",
+      "body": [
+        {
+          "version": "superbench.v2",
+          "operation": "cancel",
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "reason": "schema"
+    },
+    {
+      "name": "response-null-result",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": null
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "failure-without-error",
+      "kind": "response",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": false
+      },
+      "reason": "schema",
+      "status": 200,
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  ],
+  "lexical": [
+    {
+      "name": "request-duplicate-key",
+      "kind": "request",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"cancel\",\"target_request_id\":\"run-example\",\"target_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"version\":\"superbench.v2\"}"
+    },
+    {
+      "name": "request-escaped-duplicate",
+      "kind": "request",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"cancel\",\"target_request_id\":\"run-example\",\"target_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"\\u0076ersion\":\"superbench.v2\"}"
+    },
+    {
+      "name": "request-trailing",
+      "kind": "request",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"cancel\",\"target_request_id\":\"run-example\",\"target_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"} {}"
+    },
+    {
+      "name": "request-surrogate",
+      "kind": "request",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"cancel\",\"target_request_id\":\"\\ud800\",\"target_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"
+    },
+    {
+      "name": "request-invalid-json",
+      "kind": "request",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"cancel\",\"target_request_id\":\"run-example\",\"target_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""
+    },
+    {
+      "name": "response-duplicate-key",
+      "kind": "response",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"cancel\",\"ok\":true,\"result\":{\"target_request_id\":\"run-example\",\"target_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"state\":\"cancelled\"},\"version\":\"superbench.v2\"}"
+    },
+    {
+      "name": "response-escaped-duplicate",
+      "kind": "response",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"cancel\",\"ok\":true,\"result\":{\"target_request_id\":\"run-example\",\"target_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"state\":\"cancelled\"},\"\\u0076ersion\":\"superbench.v2\"}"
+    },
+    {
+      "name": "response-trailing",
+      "kind": "response",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"cancel\",\"ok\":true,\"result\":{\"target_request_id\":\"run-example\",\"target_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"state\":\"cancelled\"}} {}"
+    },
+    {
+      "name": "response-surrogate",
+      "kind": "response",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"cancel\",\"ok\":true,\"result\":{\"target_request_id\":\"\\ud800\",\"target_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"state\":\"cancelled\"}}"
+    },
+    {
+      "name": "response-invalid-json",
+      "kind": "response",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"cancel\",\"ok\":true,\"result\":{\"target_request_id\":\"run-example\",\"target_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"state\":\"cancelled\"}"
+    }
+  ],
+  "producer_only": [
+    {
+      "name": "cancelled-without-exact-fence-proof",
+      "request": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "target_request_id": "run-example",
+        "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "cancel",
+        "ok": true,
+        "result": {
+          "target_request_id": "run-example",
+          "target_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "cancelled"
+        }
+      },
+      "wire_valid": true,
+      "obligation": "Reject cancelled absent independently recorded no-effect or complete exact-operation fence and revoked continuation; hashes or response bytes cannot supply this proof."
+    }
+  ]
+}

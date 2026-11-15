@@ -1,0 +1,264 @@
+{
+  "version": "superbench.workspace-lifecycle-fixtures.v1",
+  "status": "proposed runtime obligations; plain data does not prove deployment or execution",
+  "scenarios": [
+    {
+      "name": "warm-creation",
+      "response_case": "create-ready",
+      "assertions": [
+        "all sources journaled before checkout",
+        "one initialization owner",
+        "all setup fenced and sealed",
+        "whole generation remotely confirmed",
+        "no held lease or grant on success"
+      ]
+    },
+    {
+      "name": "partial-initialization",
+      "response_case": "create-partial-grant",
+      "assertions": [
+        "later-member failure preserves earlier member work",
+        "grant bound to authenticated creation identity",
+        "status redacts capability"
+      ]
+    },
+    {
+      "name": "exact-recovery",
+      "response_case": "recover-ready",
+      "assertions": [
+        "complete explicit repository allowlist",
+        "exact seal/digest and all pins before registration",
+        "new identity and allocation",
+        "original refs/lease untouched"
+      ]
+    },
+    {
+      "name": "new-owner",
+      "response_case": "lease-held-grant",
+      "assertions": [
+        "refresh only remote tracking",
+        "prepare all members before handoff",
+        "busy cannot disclose another owner"
+      ]
+    },
+    {
+      "name": "execution-release",
+      "response_case": "run-completed-released",
+      "assertions": [
+        "omitted/true checkpoint includes complete checkpoint and release",
+        "same owner throughout preparation and execution"
+      ]
+    },
+    {
+      "name": "execution-retained",
+      "response_case": "run-held-grant",
+      "assertions": [
+        "checkpoint false retains stopped owner",
+        "failure preserves private owner",
+        "supplied token never re-exported"
+      ]
+    },
+    {
+      "name": "setup-completion",
+      "response_case": "setup-completed-released",
+      "assertions": [
+        "selected setup still requires whole-vector completion",
+        "other member proof missing or dirt prevents release"
+      ]
+    },
+    {
+      "name": "pending-publication",
+      "response_case": "checkpoint-pending",
+      "assertions": [
+        "all clean HEADs captured before first push",
+        "retry uses exact pending vector",
+        "partial publication cannot release"
+      ]
+    },
+    {
+      "name": "admin-recovery",
+      "response_case": "stop-admin-recovery-grant",
+      "assertions": [
+        "independently verified successful fence",
+        "continuation stays revoked",
+        "grant permits reconciliation only"
+      ]
+    },
+    {
+      "name": "archive-review",
+      "response_case": "archive-archived",
+      "assertions": [
+        "no held writer",
+        "complete remote checkpoint",
+        "durable freeze intent before modes",
+        "nonrecoverable bytes retained for concrete local review"
+      ]
+    },
+    {
+      "name": "reap-retry",
+      "response_case": "archive-reaped",
+      "assertions": [
+        "local plan and exact digest approval outside socket",
+        "persisted grace",
+        "remaining approved entries only",
+        "exact member registrations only",
+        "quota retirement retry",
+        "source identity and remote refs preserved"
+      ]
+    },
+    {
+      "name": "mixed-status",
+      "response_case": "status-mixed-complete",
+      "assertions": [
+        "all scalar and aggregate records present",
+        "no token/path/URL/private metadata",
+        "oversize global response fails without truncation"
+      ]
+    },
+    {
+      "name": "receipt-replay",
+      "response_case": "create-ready",
+      "assertions": [
+        "UID and canonical body bound",
+        "completed exact response is historical",
+        "interrupted receipt never redispatched",
+        "creation replay cannot return later holder token"
+      ]
+    },
+    {
+      "name": "capacity-reconciliation",
+      "response_case": "error-503-unavailable",
+      "assertions": [
+        "growth reserves at most64KiB response",
+        "receipt exhaustion refuses new growth",
+        "checkpoint release stop archive and local reviewed reap remain available"
+      ]
+    },
+    {
+      "name": "complete-public-lifecycle",
+      "response_case": "status-mixed-complete",
+      "assertions": [
+        "canonical cases are typed templates; runtime substitutes only owned trial identities and actual returned capabilities",
+        "one owner and one allocation span all members",
+        "local reap never appears as a socket operation"
+      ],
+      "steps": [
+        {
+          "request_case": "create-two-members",
+          "response_case": "create-ready",
+          "expect": {
+            "phase": "ready",
+            "held_lease": false,
+            "grant": false,
+            "ready_for_acquisition": true
+          }
+        },
+        {
+          "request_case": "lease",
+          "response_case": "lease-held-grant",
+          "expect": {
+            "phase": "ready",
+            "held_lease": true,
+            "grant": true,
+            "ready_for_acquisition": false
+          }
+        },
+        {
+          "request_case": "run-explicit-stopped-owner",
+          "response_case": "run-reused-retained-success",
+          "expect": {
+            "held_lease": true,
+            "grant": false,
+            "continuation_checked": true
+          }
+        },
+        {
+          "request_case": "checkpoint",
+          "response_case": "checkpoint-complete",
+          "expect": {
+            "pending": false,
+            "all_pins_confirmed": true,
+            "grant": false
+          }
+        },
+        {
+          "request_case": "release",
+          "response_case": "release-complete",
+          "expect": {
+            "held_lease": false,
+            "all_history_released": true
+          }
+        },
+        {
+          "request_case": "setup",
+          "response_case": "setup-completed-released",
+          "expect": {
+            "held_lease": false,
+            "all_member_proofs_current": true
+          }
+        },
+        {
+          "request_case": "archive",
+          "response_case": "archive-archived",
+          "expect": {
+            "phase": "archived",
+            "frozen": true,
+            "grant": false
+          }
+        },
+        {
+          "local_operation": "plan-reap",
+          "expect": {
+            "effects": false,
+            "concrete_tree": true,
+            "nonrecoverable_bytes_visible": true
+          }
+        },
+        {
+          "local_operation": "reap",
+          "response_case": "archive-reaped",
+          "expect": {
+            "exact_digest_approval": true,
+            "phase": "reaped",
+            "remote_refs_preserved": true,
+            "quota_retired": true
+          }
+        },
+        {
+          "request_case": "recover-exact-seal-allowlist",
+          "response_case": "recover-ready",
+          "expect": {
+            "new_identity": true,
+            "new_allocation": true,
+            "original_refs_unchanged": true
+          }
+        },
+        {
+          "request_case": "status",
+          "response_case": "status-mixed-complete",
+          "expect": {
+            "all_scalar_and_aggregate_records": true,
+            "grant": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "original-ref-transfer-availability",
+      "response_case": "status-transferred-source",
+      "assertions": [
+        "A relinquishing or transferred source remains in complete status inventory with transfer_state and ready_for_acquisition=false.",
+        "The source initialization phase remains ready; availability is separate and never reconstructed by clearing a stopped lease.",
+        "No transfer response or historical replay grants a source writer; immutable seals and protected history remain separate evidence.",
+        "The optional response field adds no socket operation, remote authority or suite-consumer acceptance."
+      ]
+    }
+  ],
+  "bindings": {
+    "repository": "owned fixture remotes, never production endpoints",
+    "key": "unique trial key per registration",
+    "lease_token": "exact grant returned to that trial UID; never a holder label",
+    "source": "exact confirmed checkpoint identity from the source trial",
+    "request_id": "stable per trial UID/body; unchanged for replay"
+  }
+}

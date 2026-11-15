@@ -1,0 +1,432 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/SuperJackfruitLabs/treaty/main/schemas/superbench/operation.v2.json",
+  "title": "SuperBench workspace operation v2 (proposed)",
+  "description": "PROPOSED grouped-workspace request contract beside v1. Does not establish deployment, authorization, responses, or runtime conformance. Transport bounds requests to 64 KiB and rejects duplicate keys/trailing documents. Semantic validation requires Unicode scalar strings, ordered unique member names, coordinator membership, credential-free repository identities with a 4096 UTF-8 byte bound, short Git branch names of at most 255 UTF-8 bytes, arguments of at most 8192 UTF-8 bytes, unique effective (repository, task branch) targets with omitted branch resolving to bench/<key>, and recovery source identity in the explicit allowlist. No timeout or lease-token field permits takeover.",
+  "type": "object",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "operation",
+        "key",
+        "checkpoint_repository",
+        "repositories",
+        "initialize",
+        "request_id"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "checkpoint_repository": {
+          "$ref": "#/$defs/repository_name"
+        },
+        "repositories": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/create_member"
+          }
+        },
+        "initialize": {
+          "$ref": "#/$defs/initialize"
+        },
+        "request_id": {
+          "$ref": "#/$defs/request_id"
+        },
+        "quota_bytes": {
+          "$ref": "#/$defs/quota_bytes"
+        },
+        "version": {
+          "const": "superbench.v2"
+        },
+        "operation": {
+          "const": "create"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "operation",
+        "key",
+        "repositories",
+        "source",
+        "initialize",
+        "request_id"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "repositories": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/recover_member"
+          }
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "initialize": {
+          "$ref": "#/$defs/initialize"
+        },
+        "request_id": {
+          "$ref": "#/$defs/request_id"
+        },
+        "quota_bytes": {
+          "$ref": "#/$defs/quota_bytes"
+        },
+        "version": {
+          "const": "superbench.v2"
+        },
+        "operation": {
+          "const": "recover"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "operation"],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "version": {
+          "const": "superbench.v2"
+        },
+        "operation": {
+          "const": "status"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "operation"],
+      "properties": {
+        "version": {
+          "const": "superbench.v2"
+        },
+        "operation": {
+          "const": "host_status"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "operation", "key", "holder", "request_id"],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "holder": {
+          "$ref": "#/$defs/holder"
+        },
+        "request_id": {
+          "$ref": "#/$defs/request_id"
+        },
+        "version": {
+          "const": "superbench.v2"
+        },
+        "operation": {
+          "const": "lease"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "operation",
+        "key",
+        "holder",
+        "arguments",
+        "request_id"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "holder": {
+          "$ref": "#/$defs/holder"
+        },
+        "arguments": {
+          "$ref": "#/$defs/arguments"
+        },
+        "request_id": {
+          "$ref": "#/$defs/request_id"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        },
+        "repository_name": {
+          "$ref": "#/$defs/repository_name"
+        },
+        "lease_token": {
+          "$ref": "#/$defs/lease_token"
+        },
+        "version": {
+          "const": "superbench.v2"
+        },
+        "operation": {
+          "const": "run"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "operation", "key", "holder", "request_id"],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "holder": {
+          "$ref": "#/$defs/holder"
+        },
+        "request_id": {
+          "$ref": "#/$defs/request_id"
+        },
+        "offline": {
+          "$ref": "#/$defs/offline"
+        },
+        "repository_name": {
+          "$ref": "#/$defs/repository_name"
+        },
+        "lease_token": {
+          "$ref": "#/$defs/lease_token"
+        },
+        "version": {
+          "const": "superbench.v2"
+        },
+        "operation": {
+          "const": "setup"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "operation", "key", "lease_token"],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "lease_token": {
+          "$ref": "#/$defs/lease_token"
+        },
+        "version": {
+          "const": "superbench.v2"
+        },
+        "operation": {
+          "const": "checkpoint"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "operation", "key", "lease_token"],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "lease_token": {
+          "$ref": "#/$defs/lease_token"
+        },
+        "version": {
+          "const": "superbench.v2"
+        },
+        "operation": {
+          "const": "release"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "operation", "key", "lease_token"],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "lease_token": {
+          "$ref": "#/$defs/lease_token"
+        },
+        "version": {
+          "const": "superbench.v2"
+        },
+        "operation": {
+          "const": "stop"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "operation", "key"],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "version": {
+          "const": "superbench.v2"
+        },
+        "operation": {
+          "const": "stop_admin"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "operation", "key"],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "version": {
+          "const": "superbench.v2"
+        },
+        "operation": {
+          "const": "archive"
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}(?![\\s\\S])"
+    },
+    "holder": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,199}(?![\\s\\S])"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}(?![\\s\\S])"
+    },
+    "lease_token": {
+      "type": "string",
+      "pattern": "^([a-f0-9]{32}|[a-f0-9]{48})(?![\\s\\S])"
+    },
+    "arguments": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "prefixItems": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        }
+      ],
+      "items": {
+        "type": "string",
+        "maxLength": 8192
+      }
+    },
+    "checkpoint": {
+      "type": "boolean"
+    },
+    "offline": {
+      "type": "boolean"
+    },
+    "repository_name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}(?![\\s\\S])"
+    },
+    "repository_identity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^[^-\\u0000\\r\\n][^\\u0000\\r\\n]*(?![\\s\\S])",
+      "description": "Repository identity. Credential and authorization constraints are validated separately; this value grants no authority."
+    },
+    "short_branch": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "initialize": {
+      "const": true,
+      "type": "boolean"
+    },
+    "quota_bytes": {
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 1125899906842624,
+      "multipleOf": 1024
+    },
+    "create_member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "repository"],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/repository_name"
+        },
+        "repository": {
+          "$ref": "#/$defs/repository_identity"
+        },
+        "branch": {
+          "$ref": "#/$defs/short_branch"
+        },
+        "base": {
+          "$ref": "#/$defs/short_branch"
+        }
+      }
+    },
+    "recover_member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "repository"],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/repository_name"
+        },
+        "repository": {
+          "$ref": "#/$defs/repository_identity"
+        },
+        "branch": {
+          "$ref": "#/$defs/short_branch"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "bench_id", "commit", "manifest_sha256"],
+      "properties": {
+        "repository": {
+          "$ref": "#/$defs/repository_identity"
+        },
+        "bench_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}(?![\\s\\S])"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})(?![\\s\\S])"
+        },
+        "manifest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+        }
+      }
+    }
+  }
+}

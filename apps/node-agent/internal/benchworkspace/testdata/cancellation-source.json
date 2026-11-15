@@ -1,0 +1,27 @@
+{
+  "repository": "https://forge.superjackfruit.com/SuperJackfruitLabs/treaty",
+  "revision": "d578c7e3ed0709cf7d6d38f7545edacab1691201",
+  "status": "PROPOSED; private wire conformance only, no enabled dispatch or fencing proof",
+  "files": {
+    "schemas/superbench/cancel-operation.v2.json": {
+      "local": "cancel-operation.v2.json",
+      "sha256": "0a9df7d69376ff72beb169b910da9788021996eb560b751b21c6ad14abc7f60c"
+    },
+    "schemas/superbench/cancel-response.v2.json": {
+      "local": "cancel-response.v2.json",
+      "sha256": "bf3a59af319d7771f5fb7210d559a487d8cbe3eb04237233c32851c9b3d7a69f"
+    },
+    "fixtures/superbench-api/cancellation.json": {
+      "local": "cancellation.json",
+      "sha256": "78d563d7a63bebe53b549986e42229f1e78d2a9bca6ddf44fbe1dfd4c02fecf9"
+    },
+    "fixtures/superbench-api/source-digests.json": {
+      "local": "source-digests.json",
+      "sha256": "b74531ee1227408cc80a84b22de21ae777f5b5ca97e78842b507dd7479bb618f"
+    },
+    "fixtures/superbench-api/cancellation-lifecycle.json": {
+      "local": "cancellation-lifecycle.json",
+      "sha256": "f964ed03f383e1b54af5a8f8469d51533db10644d53915cf3e4de7e19e74c896"
+    }
+  }
+}

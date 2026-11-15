@@ -16,6 +16,17 @@ import (
 var version = "dev"
 
 func entry(args []string, out, errOut io.Writer) int {
+	if len(args) == 2 {
+		pair := [2]string(args)
+		if superbench.ValidGroupedContextDigest(pair[1]) {
+			os.Clearenv()
+			if err := superbench.ExecuteGroupedWorker(context.Background(), pair[0], pair[1]); err != nil {
+				fmt.Fprintln(errOut, "worker failed; inspect retained ownership and context")
+				return 1
+			}
+			return 0
+		}
+	}
 	if len(args) != 1 {
 		fmt.Fprintln(errOut, "one private context directory required")
 		return 2

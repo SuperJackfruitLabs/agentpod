@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/SuperJackfruitLabs/treaty/main/schemas/superbench/cancel-response.v2.json",
+  "title": "SuperBench operation-bound cancellation response v2 (proposed)",
+  "description": "PROPOSED cap-free cancellation observations, bounded to 64 KiB. Successful response requires exact original target echoes. A cancel_requested acknowledgement is not a fence. cancelled requires independent producer evidence of no admitted effects or complete exact-operation fencing and continuation revocation. Schema-valid bytes never prove those obligations. Generic preparse errors use the existing opaque response envelope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "operation", "ok"],
+  "properties": {
+    "version": {
+      "const": "superbench.v2"
+    },
+    "operation": {
+      "const": "cancel"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_request_id", "target_digest", "state"],
+      "properties": {
+        "target_request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}(?![\\s\\S])"
+        },
+        "target_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+        },
+        "state": {
+          "enum": ["cancel_requested", "cancelled", "already_completed"]
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "enum": [
+            "invalid_request",
+            "forbidden",
+            "not_found",
+            "conflict",
+            "in_progress",
+            "operation_in_doubt",
+            "unavailable",
+            "operation_failed"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "required": ["result"],
+      "properties": {
+        "ok": {
+          "const": true
+        }
+      },
+      "not": {
+        "required": ["error"]
+      }
+    },
+    {
+      "required": ["error"],
+      "properties": {
+        "ok": {
+          "const": false
+        }
+      }
+    }
+  ]
+}

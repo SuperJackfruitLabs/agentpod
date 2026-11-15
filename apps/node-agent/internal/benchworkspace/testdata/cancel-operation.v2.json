@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/SuperJackfruitLabs/treaty/main/schemas/superbench/cancel-operation.v2.json",
+  "title": "SuperBench operation-bound cancellation v2 (proposed)",
+  "description": "PROPOSED explicit extension union with operation.v2.json at POST /v2/operations over a host-local Unix socket. Targets original authenticated peer UID, original request ID and exact canonical typed source request digest. No new cancellation request ID, claimed UID, workspace key or capability. Transport rejects duplicate keys, trailing documents, invalid UTF8, non-scalar Unicode and bodies over 64 KiB. Bytes do not prove cancellation or fencing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "operation", "target_request_id", "target_digest"],
+  "properties": {
+    "version": {
+      "const": "superbench.v2"
+    },
+    "operation": {
+      "const": "cancel"
+    },
+    "target_request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}(?![\\s\\S])"
+    },
+    "target_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+    }
+  }
+}
