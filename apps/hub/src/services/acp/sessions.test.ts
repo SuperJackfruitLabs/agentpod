@@ -60,6 +60,8 @@ import {
 } from "../../../tests/helpers/acp-fake-node";
 import { context, trace } from "@opentelemetry/api";
 import { tracer } from "../../telemetry/otel";
+import { liveById } from "./session-state";
+import { reportTurnError } from "./plugin-reports";
 import { useTestTelemetry } from "../../../tests/helpers/telemetry";
 import { mintEnrollmentToken, enrollNode } from "../nodes/enrollment";
 import { adoptStations } from "../stations/registry";
@@ -1311,6 +1313,10 @@ test(
         const s = await getSession(TEST_USER, row.id);
         return s?.status === "working";
       });
+      // writePrompt marks the row working before the fake receives the
+      // prompt. Wait for its initial update so it cannot arrive after cancel
+      // and legitimately restore working before turn #2 starts.
+      await pollForEvent(row.id, (event) => event.type === "agent-update");
       await cancelTurn(TEST_USER, row.id);
       await pollUntil(async () => {
         const s = await getSession(TEST_USER, row.id);
@@ -2647,6 +2653,13 @@ function krishnaReport(key: { harnessSessionKey?: string; acpSessionId?: string 
 }
 
 const errorEvents = (all: EventLike[]) => all.filter((e) => e.type === "error");
+
+function errorSource(event: EventLike): unknown {
+  const payload = event.payload;
+  return typeof payload === "object" && payload !== null && "source" in payload
+    ? payload.source
+    : undefined;
+}
 const sawSessionKey = (e: EventLike) =>
   e.type === "agent-update" &&
   (e.payload as { sessionUpdate?: string }).sessionUpdate === "session_info_update";
@@ -2904,6 +2917,163 @@ test("a second report after the turn already shows the plugin's error is not pos
     await endSession(TEST_USER, row.id, "cleanup");
     fake.close();
   } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a stale error audit cannot consume the next turn's report or status", async () => {
+  _setTurnErrorGraceMsForTest(1);
+  const { server, fake, station } = await setupRig("acpsess-stale-audit", {
+    stationKey: "acp-stale-audit-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:stale-audit:main",
+  });
+  let sessionId: string | undefined;
+  const release = Promise.withResolvers<void>();
+  let lockTx: Promise<unknown> | undefined;
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    sessionId = row.id;
+    const live = liveById.get(row.id);
+    if (!live) throw new Error("Expected the created session to be live");
+    await promptSession(TEST_USER, row.id, "First turn");
+    await pollUntil(() => fake.agentReceived.some((message) => message.method === "session/prompt"));
+    const locked = Promise.withResolvers<void>();
+    lockTx = rawSql.begin(async (tx) => {
+      await tx`SELECT id FROM station_audit WHERE node_id = ${live.nodeId} AND verb = 'acp.prompt' FOR UPDATE`;
+      locked.resolve();
+      await release.promise;
+    });
+    await locked.promise;
+    fake.releasePrompt();
+    await pollUntil(() => live.turnErrorRecorded);
+    await cancelTurn(TEST_USER, row.id);
+    await promptSession(TEST_USER, row.id, "Second turn");
+    await pollUntil(() => fake.agentReceived.filter((message) => message.method === "session/prompt").length === 2);
+    const epoch = live.turnEpoch;
+    const detail = report("agent:stale-audit:main", "kimi-coding", "k2p6", "Second turn usage limit.").report;
+    expect(reportTurnError(live.nodeId, detail)).toBe("pending");
+    const pending = live.pendingTurnError;
+    release.resolve();
+    await lockTx;
+    await pollForEvent(row.id, (event) => event.type === "error");
+    await live.chain;
+    expect(live.turnEpoch).toBe(epoch);
+    expect(live.turnInFlight).toBe(true);
+    expect(live.status).toBe("working");
+    expect(live.pendingTurnError).toBe(pending);
+    expect(live.turnErrorSource).toBeNull();
+    expect(live.turnErrorPhase).toBeUndefined();
+    fake.releasePrompt();
+    await pollUntil(() => !live.turnInFlight);
+    expect(errorEvents(await eventsFor(row.id)).map((event) => errorSource(event))).toEqual(["acp-stop-reason", "plugin"]);
+  } finally {
+    release.resolve();
+    await lockTx;
+    if (sessionId) await endSession(TEST_USER, sessionId, "cleanup");
+    fake.close();
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("reports held behind the generic error audit follow it exactly once", async () => {
+  _setTurnErrorGraceMsForTest(1);
+  const { server, fake, station } = await setupRig("acpsess-auditing-report", {
+    stationKey: "acp-auditing-report-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:auditing:main",
+  });
+  let sessionId: string | undefined;
+  const release = Promise.withResolvers<void>();
+  let lockTx: Promise<unknown> | undefined;
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    sessionId = row.id;
+    const live = liveById.get(row.id);
+    if (!live) throw new Error("Expected the created session to be live");
+    await promptSession(TEST_USER, row.id, "All good?");
+    await pollUntil(() => fake.agentReceived.some((message) => message.method === "session/prompt"));
+    const locked = Promise.withResolvers<void>();
+    lockTx = rawSql.begin(async (tx) => {
+      await tx`SELECT id FROM station_audit WHERE node_id = ${live.nodeId} AND verb = 'acp.prompt' FOR UPDATE`;
+      locked.resolve();
+      await release.promise;
+    });
+    await locked.promise;
+    fake.releasePrompt();
+    await pollUntil(() => live.turnErrorRecorded);
+    const detail = report("agent:auditing:main", "kimi-coding", "k2p6", "Weekly usage limit reached.").report;
+    const first = reportTurnError(live.nodeId, detail);
+    const second = reportTurnError(live.nodeId, detail);
+    const whileAuditing = errorEvents(await eventsFor(row.id));
+    release.resolve();
+    await lockTx;
+    await pollUntil(() => !live.turnInFlight);
+    await live.chain;
+    expect(first).toBe("pending");
+    expect(second).toBe("merged");
+    expect(whileAuditing).toHaveLength(0);
+    expect(errorEvents(await eventsFor(row.id)).map((event) => errorSource(event))).toEqual(["acp-stop-reason", "plugin"]);
+    expect(reportTurnError(live.nodeId, detail)).toBe("duplicate");
+  } finally {
+    release.resolve();
+    await lockTx;
+    if (sessionId) await endSession(TEST_USER, sessionId, "cleanup");
+    fake.close();
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a report during generic-error finalization follows it exactly once", async () => {
+  _setTurnErrorGraceMsForTest(1);
+  const { server, fake, station } = await setupRig("acpsess-finalizing-report", {
+    stationKey: "acp-finalizing-report-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:finalizing:main",
+  });
+  let unsubscribe: (() => void) | undefined;
+  let sessionId: string | undefined;
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    sessionId = row.id;
+    const live = liveById.get(row.id);
+    if (!live) throw new Error("Expected the created session to be live");
+    const observed = Promise.withResolvers<{
+      inFlight: boolean;
+      settledAt: number;
+      first: string;
+      second: string;
+    }>();
+    unsubscribe = subscribe(row.id, (event) => {
+      if (event.type !== "error" || errorSource(event) !== "acp-stop-reason") return;
+      // fanOut runs inside the error write, before the queued idle write can
+      // finish. The turn still awaits both writes: this is a barrier, not a
+      // sleep hoping to catch the finalization window.
+      const detail = report("agent:finalizing:main", "kimi-coding", "k2p6", "Weekly usage limit reached.").report;
+      observed.resolve({
+        inFlight: live.turnInFlight,
+        settledAt: live.lastTurnSettledAt,
+        first: reportTurnError(live.nodeId, detail),
+        second: reportTurnError(live.nodeId, detail),
+      });
+    });
+    await promptSession(TEST_USER, row.id, "All good?");
+    const outcome = await observed.promise;
+    await live.chain;
+    expect(outcome).toEqual({ inFlight: true, settledAt: 0, first: "late", second: "duplicate" });
+    const errors = errorEvents(await eventsFor(row.id));
+    expect(errors.map((e) => errorSource(e))).toEqual(["acp-stop-reason", "plugin"]);
+    expect(live.turnInFlight).toBe(false);
+    expect(live.lastTurnSettledAt).toBeGreaterThan(0);
+  } finally {
+    unsubscribe?.();
+    if (sessionId) await endSession(TEST_USER, sessionId, "cleanup");
+    fake.close();
     _setTurnErrorGraceMsForTest();
     server.stop(true);
   }

@@ -15,7 +15,7 @@ import { SESSION_BUSY_MESSAGE } from "./busy";
 import { persistEvent, setStatus } from "./events";
 import { nodeReadsLargeFrames } from "./gates";
 import { log } from "./log";
-import { awaitTurnError } from "./plugin-reports";
+import { awaitTurnError, queueTurnErrorFollowup } from "./plugin-reports";
 import { deriveSessionTitle } from "./rows";
 import { renewExecution } from "./salaam-authority";
 import { requireLive, type LiveSession } from "./session-state";
@@ -209,6 +209,7 @@ function beginTurn(
   live.turnProduced = false;
   live.turnInFlight = true;
   live.turnErrorRecorded = false;
+  delete live.turnErrorPhase;
   live.turnErrorSource = null;
   live.pendingTurnError = null;
   live.pendingTurnErrorAt = 0;
@@ -235,6 +236,7 @@ function beginTurn(
       live.lastTurnSettledAt = Date.now();
     },
     recordError: async (error: TurnError) => {
+      if (live.turnErrorRecorded) return;
       if (live.executionAuthority)
         error = {
           ...error,
@@ -243,9 +245,20 @@ function beginTurn(
           localSessionId: live.executionAuthority.sessionId ?? undefined,
         };
       live.turnErrorRecorded = true;
+      live.turnErrorPhase = "audit";
       live.turnErrorSource = error.source;
       await audit.done("error", error.message).catch(() => {});
+      if (live.ended || live.turnEpoch !== epoch) {
+        // The old failure still belongs in history, but its delayed audit
+        // cannot consume a newer turn's report or restore that turn to idle.
+        await persistEvent(live, "error", error).done;
+        return;
+      }
       const { done: errorWritten } = persistEvent(live, "error", error);
+      live.turnErrorPhase = "queued";
+      const pending = live.pendingTurnError;
+      live.pendingTurnError = null;
+      if (pending) queueTurnErrorFollowup(live, pending);
       const { done: idleWritten } = setStatus(
         live,
         live.pendingCancellation && live.pendingCancellation.state !== "confirmed"
