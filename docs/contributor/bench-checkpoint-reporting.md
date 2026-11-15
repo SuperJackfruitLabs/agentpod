@@ -2,7 +2,7 @@
 
 This work follows the proposed charter decision
 `2026-11-15-checkpoint-settlement-needs-a-coordinator-grant.md`. It enables no
-capability, bridge constructor, service grant, stage policy or pilot. The accepted
+capability, installed configuration, service grant, stage policy or pilot. The accepted
 host-local SuperBench contract does not accept this cross-product authority.
 
 The internal Hub source client uses the existing organization issuer's service
@@ -10,7 +10,8 @@ token endpoint and verifies its EdDSA signature, audience, organization, service
 principal, expiry, entitlement and operation scope. The service credential stays
 in the Hub. Source HTTP calls have fixed server-selected origins, no redirects,
 bounded bodies and static errors. A lost admission response is uncertain; it is
-never a reason to run the child again. No settlement route is invoked yet.
+never a reason to run the child again. Settlement transport remains default off
+and uses only the exact retained submission.
 
 Hub `fleet_*` and SuperPipeline `tnt_*` identifiers belong to separate local ID
 spaces. A server-owned profile pins both to the issuer organization; neither a
@@ -58,9 +59,27 @@ results, exact retained start/prepared evidence and server-owned repository
 mapping; arbitrary repository hashes never authorize logical repositories.
 Untrusted child handoff remains text and is not source attestation.
 
-Actual authenticated database/service integration is a separate verification
-gate. The complete Hub broker dispatch/source-admission/report orchestration,
-uncertain-operation cancellation/reconciliation, accepted authority decisions and
-operator provisioning remain required. This checkpoint does not enable the
+An explicitly installed profile now selects the dedicated production port in the
+bridge loop before an ACP claim. It checks the selected enrolled Node's actual
+managed coordinator/worker/registry pins and uses the station-plane issuer client
+without a Salaam readiness requirement. No profile is shipped or installed.
+Immutable SQL phases retain source, execute body, completion and the complete
+settlement before their effects. Only the original successful reservation or
+phase compare-and-set may send Prepare or Execute. Restarts read exact Status;
+an unresolved old attempt blocks a fresh claim and cannot adopt a new owner.
+
+After a lost settlement POST reply, recovery reads the exact historical receipt.
+There is deliberately no automatic settlement resend. Death after retaining
+`submission_pending` but before POST therefore remains parked when the receipt
+is missing, even with a complete retained body. A separately reviewed explicit
+reconciliation operation must establish current source/run/reporter authority
+before replaying that exact idempotent settlement. It must never repeat a child
+or substitute a new report. A cancelled or failed task does not become a pass.
+
+Authenticated database/broker tests and actual managed Node/service execution
+are distinct gates; typed fixture observations do not prove remote fencing.
+The complete deployed Hub/Node/source-admission/report path, uncertain-operation
+cancellation/reconciliation, accepted authority decisions and operator
+provisioning remain required. This checkpoint does not enable the
 Developer Experience pilot or satisfy native laptop preparation. No generic ACP
 fallback or adoption of replacement-owner output is allowed.

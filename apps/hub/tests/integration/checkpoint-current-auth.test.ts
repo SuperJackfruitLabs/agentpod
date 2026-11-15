@@ -136,12 +136,12 @@ test("retained row cannot change identity or rewind phase", async () => {
   await expect(db.update(checkpointDispatches).set({ phase: "reported" }).where(eq(checkpointDispatches.attemptId, attempt.row.attemptId)).execute()).rejects.toThrow();
 });
 
-test.each(["none", "prepare", "execute", "settlement"])("real broker and immutable DB phases recover %s lost reply without redispatch", async (lost) => {
+test.each(["none", "prepare", "execute", "settlement", "before-settlement"])("real broker and immutable DB phases preserve %s uncertainty without redispatch", async (lost) => {
   const selected = parsePendingCheckpointClaim({ ...claim, runId: "run_" + suffix + lost });
   contextClaim = selected;
   const reserved = await reserveCheckpointAttempt(profile, selected, { profile_id: profile.profileKey, prompt: "fixture", timeout_seconds: 60 });
   const completion = await checkpointNodeObservation(reserved.attempt);
-  let prepares = 0, executions = 0, posts = 0, reads = 0;
+  let prepares = 0, executions = 0, posts = 0, reads = 0, sourceGets = 0;
   let prepared = false, completed = false, lostOnce = false;
   let source: CheckpointSource | undefined;
   let receipt: unknown;
@@ -172,6 +172,10 @@ test.each(["none", "prepare", "execute", "settlement"])("real broker and immutab
         source = parseCheckpointSource(parseCheckpointJSON(encode(init.body)));
         return Response.json({ runId: selected.runId, leaseEpoch: selected.leaseEpoch, sourceDigest: await checkpointDigest(source), admittedAt: Date.now() });
       }
+      sourceGets++;
+      // Durable submission_pending has already committed, but no POST has
+      // happened. This is the same retained state as death in that gap.
+      if (lost === "before-settlement" && sourceGets === 3) throw new Error("fixture-before-post");
       return Response.json({ ...source, tenantId: profile.sourceTenantId, policy, policyDigest: selected.policyDigest,
         status: "working", lastHeartbeatMs: Date.now() });
     }
@@ -186,7 +190,10 @@ test.each(["none", "prepare", "execute", "settlement"])("real broker and immutab
       if (lost === "settlement" && !lostOnce) { lostOnce = true; throw new Error("fixture-lost-reply"); }
       return Response.json(receipt);
     }
-    if (address === base + "/checkpoint") { reads++; return Response.json(receipt); }
+    if (address === base + "/checkpoint") {
+      reads++;
+      return receipt ? Response.json(receipt) : Response.json({ error: { code: "CHECKPOINT_RECEIPT_MISSING" } }, { status: 404 });
+    }
     throw new Error("unexpected private orchestration fixture request");
   };
   try {
@@ -196,11 +203,11 @@ test.each(["none", "prepare", "execute", "settlement"])("real broker and immutab
     const retained = await readCheckpointAttempt(tenantId, reserved.attempt.row.attemptId);
     if (!retained) throw new Error("missing retained attempt");
     const final = first.status === "reported" ? first : await driveCheckpointAttempt(retained, client);
-    expect(final.status).toBe("reported");
-    expect(prepares).toBe(1); expect(executions).toBe(1); expect(posts).toBe(1);
-    expect(reads).toBe(lost === "settlement" ? 1 : 0);
+    expect(final.status).toBe(lost === "before-settlement" ? "unreported" : "reported");
+    expect(prepares).toBe(1); expect(executions).toBe(1); expect(posts).toBe(lost === "before-settlement" ? 0 : 1);
+    expect(reads).toBe(lost === "settlement" || lost === "before-settlement" ? 1 : 0);
     const stored = await readCheckpointAttempt(tenantId, reserved.attempt.row.attemptId);
-    expect(stored?.row.phase).toBe("reported");
+    expect(stored?.row.phase).toBe(lost === "before-settlement" ? "submission_pending" : "reported");
     expect(stored?.row.settlementBody).toBe(canonicalCheckpoint(JSON.parse(stored?.row.settlementBody ?? "{}")));
   } finally {
     contextClaim = claim;
