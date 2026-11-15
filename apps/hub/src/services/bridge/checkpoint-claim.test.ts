@@ -180,7 +180,7 @@ test.each([2, 32])("multi-repository policies retain all %i sorted member identi
   })), checkpointRepository: "repo_00" };
   const pending = { ...fixture.pending, policy, policyDigest: checkpointPolicyDigest(policy) };
   expect(parsePendingCheckpointClaim(pending).policy.repositories).toEqual(policy.repositories);
-  expect(() => checkpointPolicyDigest({ ...policy, repositories: [...policy.repositories].reverse() })).toThrow(/Checkpoint/);
+  expect(() => checkpointPolicyDigest({ ...policy, repositories: policy.repositories.toReversed() })).toThrow(/Checkpoint/);
 });
 
 test("more than 32 repositories refuse before dedicated execution", () => {
@@ -188,4 +188,26 @@ test("more than 32 repositories refuse before dedicated execution", () => {
     name: `repo_${String(i).padStart(2, "0")}`, provider: "forge" as const, repository: `example/repo_${i}`,
   })), checkpointRepository: "repo_00" };
   expect(() => checkpointPolicyDigest(policy)).toThrow(/Checkpoint/);
+});
+
+
+test("dedicated checkpoint-only request cannot project an ordinary claim into execution", async () => {
+  const { client, calls } = board(checkpointReply());
+  expect((await client.claim({ ...options, checkpointOnly: true }))?.checkpointClaim).toBeDefined();
+  expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({ ...options, checkpointOnly: true });
+  const ordinary = { ...fixture.claimed, stage: { key: "plain", name: "Plain" } };
+  await expect(board(ordinary).client.claim({ ...options, checkpointOnly: true })).rejects.toThrow(/required/);
+  expect(await board({ claimed: false }).client.claim({ ...options, checkpointOnly: true })).toBeNull();
+});
+
+test.each([null, "true", 1, {}, []])("checkpointOnly must be a strict boolean: %j", async (checkpointOnly) => {
+  const { client, calls } = board(checkpointReply());
+  await expect(Reflect.apply(client.claim.bind(client), client, [{ ...options, checkpointOnly }])).rejects.toThrow(/unsupported/);
+  expect(calls).toHaveLength(0);
+});
+
+test("checkpointOnly true requires the exact protocol before any request", async () => {
+  const { client, calls } = board(checkpointReply());
+  await expect(client.claim({ checkpointOnly: true })).rejects.toThrow(/unsupported/);
+  expect(calls).toHaveLength(0);
 });

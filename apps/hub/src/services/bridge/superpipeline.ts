@@ -42,7 +42,7 @@
  * `SEPARATION_OF_DUTIES` and 409 for `GATE_NOT_PENDING` as well.
  */
 
-import { CHECKPOINT_CLAIM_PROTOCOL, readCheckpointClaim, refuseLegacyCheckpoint, parsePendingCheckpointClaim, validateCheckpointContext, type PendingCheckpointClaim } from "./checkpoint-claim";
+import { CHECKPOINT_CLAIM_PROTOCOL, CheckpointClaimRefused, readCheckpointClaim, refuseLegacyCheckpoint, parsePendingCheckpointClaim, validateCheckpointContext, type PendingCheckpointClaim } from "./checkpoint-claim";
 import type { BoardActivity } from "./coalesce";
 import type { ElicitationPendingDelivery, GatePendingDelivery } from "./deliveries";
 import { context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
@@ -418,9 +418,13 @@ export class SuperpipelineClient {
    * A refusal is an error, never "nothing available": a rejected token that
    * looked like an empty queue would poll forever and report healthy.
    */
-  async claim(opts: { maxConcurrency?: number; profileKey?: string; checkpointProtocol?: typeof CHECKPOINT_CLAIM_PROTOCOL } = {}): Promise<ClaimedWork | null> {
+  async claim(opts: { maxConcurrency?: number; profileKey?: string; checkpointProtocol?: typeof CHECKPOINT_CLAIM_PROTOCOL; checkpointOnly?: boolean } = {}): Promise<ClaimedWork | null> {
     readCheckpointClaim(undefined, opts.checkpointProtocol, this.boardId); // Refuse unsupported opt-in before network effects.
+    if (opts.checkpointOnly !== undefined && (typeof opts.checkpointOnly !== "boolean" ||
+      (opts.checkpointOnly && opts.checkpointProtocol !== CHECKPOINT_CLAIM_PROTOCOL)))
+      throw new CheckpointClaimRefused("unsupported");
     const body: Record<string, unknown> = {};
+    if (opts.checkpointOnly !== undefined) body.checkpointOnly = opts.checkpointOnly;
     if (opts.checkpointProtocol !== undefined) body.checkpointProtocol = opts.checkpointProtocol;
     if (opts.maxConcurrency !== undefined) body.maxConcurrency = opts.maxConcurrency;
     if (opts.profileKey !== undefined) body.profileKey = opts.profileKey;
@@ -438,6 +442,8 @@ export class SuperpipelineClient {
     };
 
     const checkpointClaim = readCheckpointClaim(res, opts.checkpointProtocol, this.boardId);
+    if (opts.checkpointOnly && (res as { claimed?: unknown } | null)?.claimed === true && !checkpointClaim)
+      throw new CheckpointClaimRefused("required");
     if (!res.claimed || !res.runId || res.leaseEpoch === undefined || !res.card) return null;
     return {
       runId: res.runId,

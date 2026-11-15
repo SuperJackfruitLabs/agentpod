@@ -17,12 +17,22 @@ canonical policy agree with the actual response. This is discovery, not source
 admission. Its context read additionally requires the same currently working run,
 card owner and current policy. Policy/DTO hashes confer no grant or fencing proof.
 
-The existing bridge does not opt in. A later dedicated dispatch selector must
-precede ordinary prior-output replay and strict Salaam dispatch, require actual
-versioned worker/coordinator readiness under the current authenticated node and
-control pair, bind the tenant/station/executor/policy, and refuse uncertainty
-without falling back to ACP. Station health or a label cannot supply that
-readiness. The service reporter credential must stay in the hub.
+Production constructors supply no dedicated dispatch port and do not opt in.
+The private selector accepts a trusted internal port only. It captures an immutable
+registry/host/worker target, checks it again after claiming and after reading the
+same current run/policy, and selects dedicated work before ordinary prior-output
+replay or strict Salaam dispatch. It requests `checkpointOnly: true` so unavailable
+ACP cannot strand an ordinary claim or block a standalone worker. Failed or
+uncertain dedicated work remains parked; it never falls back, releases another
+owner, or sends a generic completion. No board credential is passed to the port.
+
+The port is deliberately unwired: a real implementation must verify packaged
+worker/coordinator readiness under the authenticated node, local registry and
+common control pair, then enforce current operation-bound admission at execution
+and settlement. A registry hash, station health, the parser, or an injected test
+callback supplies none of that authority. The Go coordinator's private proposal
+bytes are not a public result DTO and cannot cross this seam. The service reporter
+credential must stay in the hub.
 
 Producer changes land first; consumer acceptance, hosted checks, the actual source
 coordinator crossing, cancellation, immutable settlement and the opt-in pilot are

@@ -6,6 +6,8 @@ import type { DispatchDeps, DispatchResult } from "./dispatch-types";
 import { probeReadiness } from "./dispatch-readiness";
 import { workClaimed } from "./dispatch-work";
 import { recoverPermissionWaits } from "./dispatch-recover";
+import { selectCheckpointDispatch } from "./checkpoint-dispatch";
+import { SuperpipelineApiError } from "./superpipeline";
 
 export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   const { client, acp, agent } = deps;
@@ -17,6 +19,27 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   await recoverPermissionWaits(deps).catch((err: unknown) =>
     log("could not recover permission waits a restart cut short", { error: String(err) }),
   );
+
+  // Dedicated work is selected before ACP probing, Salaam recovery or prior-output replay.
+  let dedicated;
+  try {
+    dedicated = await selectCheckpointDispatch(deps.checkpoint, {
+      tenantId: deps.tenantId, boardId: agent.boardId, stationId: agent.stationId,
+    });
+  } catch { return { status: "not-ready", reason: "Checkpoint target unavailable" }; }
+  if (dedicated) {
+    try {
+      const work = await client.claim({ maxConcurrency: agent.maxConcurrency, profileKey: agent.profileKey,
+        checkpointProtocol: dedicated.protocol, checkpointOnly: true });
+      if (!work) return { status: "idle" };
+      if (!work.checkpointClaim) return { status: "unreported", reason: "Checkpoint dispatch requires reconciliation" };
+      return dedicated.dispatch(client, work.checkpointClaim);
+    } catch (error) {
+      // Preserve the loop's existing definitive credential-refusal halt.
+      if (error instanceof SuperpipelineApiError && (error.status === 401 || error.status === 403)) throw error;
+      return { status: "unreported", reason: "Checkpoint dispatch requires reconciliation" };
+    }
+  }
 
   const strict = await acp.strictWork?.({
     stationId: agent.stationId,
