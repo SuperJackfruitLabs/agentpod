@@ -22,7 +22,7 @@
   "typescript(no-redundant-type-constituents)": 15,
   "typescript(no-unnecessary-boolean-literal-compare)": 11,
   "typescript(no-unnecessary-template-expression)": 1,
-  "typescript(no-unnecessary-type-assertion)": 427,
+  "typescript(no-unnecessary-type-assertion)": 422,
   "typescript(no-unnecessary-type-conversion)": 17,
   "typescript(no-unnecessary-type-parameters)": 7,
   "typescript(no-unsafe-type-assertion)": 1691,

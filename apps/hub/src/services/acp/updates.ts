@@ -30,6 +30,9 @@ export function handleSessionUpdate(
   ) {
     live.turnProduced = true;
     live.lastProducedAt = Date.now();
+    // Hermes can begin a wake turn without a new prompt. The prompt path normally makes the
+    // session working; unsolicited productive updates need to do the same themselves.
+    if (live.status !== "working") setStatus(live, "working");
   }
   const meta = (params.update as { _meta?: unknown })._meta;
   if (meta && typeof meta === "object") {

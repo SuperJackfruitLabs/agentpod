@@ -601,6 +601,40 @@ test(
   20_000
 );
 
+test("an unsolicited productive update moves an idle hub session to working", async () => {
+  const { server, fake, station } = await setupRig("acpsess-unsolicited-wake", {
+    stationKey: "acp-unsolicited-wake",
+  });
+  let sessionId: string | undefined;
+  try {
+    const row = await createSession({
+      tenantId: BOOTSTRAP_TENANT_ID,
+      stationId: station.id,
+      userId: TEST_USER,
+      mode: "full-auto",
+    });
+    sessionId = row.id;
+    expect(row.status).toBe("idle");
+
+    fake.agentWakes("background work finished");
+    await pollForEvent(
+      row.id,
+      (event) => {
+        const payload = event.payload;
+        return event.type === "agent-update" &&
+          typeof payload === "object" && payload !== null &&
+          "messageId" in payload && payload.messageId === "fake-unsolicited-wake";
+      },
+    );
+    await pollUntil(async () => (await getSession(TEST_USER, row.id))?.status === "working");
+    expect((await getSession(TEST_USER, row.id))?.status).toBe("working");
+  } finally {
+    if (sessionId) await endSession(TEST_USER, sessionId, "cleanup").catch(() => {});
+    fake.close();
+    server.stop(true);
+  }
+});
+
 test("promptSession persists an ACP rejection before returning the session to idle", async () => {
   const { server, fake, station } = await setupRig("acpsess-prompt-error", {
     stationKey: "acp-prompt-error-station",

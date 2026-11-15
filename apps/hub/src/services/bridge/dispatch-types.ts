@@ -90,6 +90,10 @@ export interface DispatchDeps {
   /** Waits between a strict run's heartbeat attempts while the board answers 5xx (default 1s, 2s, 4s). */
   heartbeatRetryMs?: readonly number[];
   turnTimeoutMs?: number;
+  /** Quiet window after the last unsolicited background-work update. */
+  ownWorkQuietMs?: number;
+  /** Hard ceiling while a turn waits for Hermes' background-work wake. */
+  ownWorkTimeoutMs?: number;
   /** Overrides the agent's own `permissionWaitMs`. A test seam. */
   permissionWaitMs?: number;
   /** How often the run is re-read while a question is outstanding. */
@@ -199,6 +203,10 @@ export interface DispatchResult {
 export const DEFAULT_HEARTBEAT_MS = 60_000;
 /** A harness that never yields still has to end somewhere. */
 export const DEFAULT_TURN_TIMEOUT_MS = 30 * 60_000;
+/** Hermes wake turns have no end marker, so silence is their terminal signal. */
+export const DEFAULT_OWN_WORK_QUIET_MS = 30_000;
+/** Detached work must never hold a card and station forever. */
+export const DEFAULT_OWN_WORK_TIMEOUT_MS = 30 * 60_000;
 /** How often a run with a question outstanding is re-read. */
 export const DEFAULT_PERMISSION_POLL_MS = 10_000;
 /** How much of what the agent said rides in the handoff. */

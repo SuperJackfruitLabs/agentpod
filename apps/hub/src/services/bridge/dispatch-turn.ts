@@ -27,6 +27,8 @@ import {
 } from "./ledger";
 import {
   DEFAULT_HEARTBEAT_MS,
+  DEFAULT_OWN_WORK_QUIET_MS,
+  DEFAULT_OWN_WORK_TIMEOUT_MS,
   DEFAULT_PERMISSION_POLL_MS,
   DEFAULT_TURN_TIMEOUT_MS,
   type DispatchDeps,
@@ -54,8 +56,20 @@ export interface Turn {
   said: string[];
   /** Tool calls whose latest ACP state is pending or in progress. */
   pendingToolCalls: Set<string>;
+  /** Detached Hermes work inventory inferred from terminal tool results, kept for escalation. */
+  backgroundWork: Map<string, string>;
+  /** Inventory keys that have not yet received an unsolicited Hermes wake. */
+  pendingBackgroundWork: Set<string>;
+  /** Message ids already seen before Hermes begins an unsolicited wake turn. */
+  seenMessageIds: Set<string>;
+  /** Distinct unsolicited wake turns received after end_turn. */
+  wakeMessageIds: Set<string>;
   /** The harness has yielded, but this turn is still listening for those calls. */
   waitingOnOwnWork: boolean;
+  /** The prompted turn ended with detached Hermes work still running. */
+  waitingOnBackgroundWork: boolean;
+  /** At least one unsolicited update has begun the wake turn. */
+  backgroundWakeStarted: boolean;
   /**
    * Requirement 5's two numbers (see the header). Counted here rather than
    * inside the coalescer because the pair only means anything together, and one
@@ -70,6 +84,8 @@ export interface Turn {
   unsubscribe: () => void;
   beat: ReturnType<typeof setInterval> | null;
   timer: ReturnType<typeof setTimeout> | null;
+  ownWorkTimer: ReturnType<typeof setTimeout> | null;
+  quietTimer: ReturnType<typeof setTimeout> | null;
   settle: (end: TurnEnd) => void;
   turn: Promise<TurnEnd>;
   /** Questions this run has already asked. Keeps a poll off an older one. */
@@ -112,11 +128,19 @@ export function newTurn(
     lastSeq: 0,
     said: [],
     pendingToolCalls: new Set<string>(),
+    backgroundWork: new Map<string, string>(),
+    pendingBackgroundWork: new Set<string>(),
+    seenMessageIds: new Set<string>(),
+    wakeMessageIds: new Set<string>(),
     waitingOnOwnWork: false,
+    waitingOnBackgroundWork: false,
+    backgroundWakeStarted: false,
     counts: { eventsReceived: 0, activitiesPosted: 0 },
     unsubscribe: () => {},
     beat: null,
     timer: null,
+    ownWorkTimer: null,
+    quietTimer: null,
     settle: () => {},
     turn: Promise.resolve({ kind: "yielded" }),
     asked: new Set<string>(),
@@ -251,6 +275,109 @@ async function startTheAttempt(t: Turn, event: AcpEvent, recording: boolean): Pr
   }
 }
 
+interface BackgroundMarker {
+  key: string;
+  label: string;
+}
+
+/** Hermes encodes tool results as nested ACP content blocks whose text is JSON. */
+function backgroundMarker(value: unknown, toolCallId: string): BackgroundMarker | null {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text.startsWith("{") && !text.startsWith("[")) return null;
+    try {
+      return backgroundMarker(JSON.parse(text), toolCallId);
+    } catch {
+      return null;
+    }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = backgroundMarker(item, toolCallId);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof value !== "object" || value === null) return null;
+
+  const delegation = "delegation_id" in value && typeof value.delegation_id === "string"
+    ? value.delegation_id
+    : null;
+  if (delegation) return { key: `delegation:${delegation}`, label: `delegated subtask ${delegation}` };
+
+  const mode = "mode" in value ? value.mode : undefined;
+  if (mode === "background") {
+    return { key: `delegation:${toolCallId}`, label: `background delegation ${toolCallId}` };
+  }
+
+  const notify = "notify_on_complete" in value ? value.notify_on_complete : undefined;
+  if (notify === true) {
+    const processId = "session_id" in value && typeof value.session_id === "string"
+      ? value.session_id
+      : toolCallId;
+    return { key: `process:${processId}`, label: `background process ${processId}` };
+  }
+
+  if ("text" in value && typeof value.text === "string") {
+    const found = backgroundMarker(value.text, toolCallId);
+    if (found) return found;
+  }
+
+  const nested = [
+    "content" in value ? value.content : undefined,
+    "rawOutput" in value ? value.rawOutput : undefined,
+    "result" in value ? value.result : undefined,
+  ];
+  for (const candidate of nested) {
+    const found = backgroundMarker(candidate, toolCallId);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Human-readable pending inventory for the board and a hard-ceiling failure. */
+export function ownWorkSummary(t: Turn): string {
+  const tools = [...t.pendingToolCalls].toSorted().map((id) => `tool call ${id}`);
+  const background = [...t.backgroundWork.values()].toSorted();
+  if (background.length === 0) return `pending tool calls: ${[...t.pendingToolCalls].toSorted().join(", ")}`;
+  return `pending work: ${[...background, ...tools].join(", ")}`;
+}
+
+function armBackgroundQuiet(t: Turn): void {
+  if (!t.waitingOnBackgroundWork || !t.backgroundWakeStarted) return;
+  if (t.pendingBackgroundWork.size > 0 || t.pendingToolCalls.size > 0) return;
+  if (t.quietTimer) clearTimeout(t.quietTimer);
+  const quietMs = t.deps.ownWorkQuietMs ?? t.deps.agent.ownWorkQuietMs ?? DEFAULT_OWN_WORK_QUIET_MS;
+  t.quietTimer = setTimeout(() => {
+    t.quietTimer = null;
+    if (t.pendingBackgroundWork.size > 0 || t.pendingToolCalls.size > 0) return;
+    t.waitingOnBackgroundWork = false;
+    if (t.ownWorkTimer) {
+      clearTimeout(t.ownWorkTimer);
+      t.ownWorkTimer = null;
+    }
+    queue(t, () => clearOwnWorkWait(t.key));
+    t.settle({ kind: "yielded" });
+  }, quietMs);
+}
+
+/** One new ACP message id is one Hermes wake turn and settles one detached unit. */
+function observeBackgroundWake(t: Turn, update: object): void {
+  if (!t.waitingOnBackgroundWork) return;
+  const messageId = "messageId" in update && typeof update.messageId === "string" ? update.messageId : null;
+  const newWake = messageId
+    ? !t.seenMessageIds.has(messageId) && !t.wakeMessageIds.has(messageId)
+    : !t.backgroundWakeStarted;
+  if (newWake) {
+    if (messageId) t.wakeMessageIds.add(messageId);
+    t.backgroundWakeStarted = true;
+    t.said = [];
+    const first = t.pendingBackgroundWork.values().next().value;
+    if (typeof first === "string") t.pendingBackgroundWork.delete(first);
+  }
+  armBackgroundQuiet(t);
+}
+
 function onTurnEvent(t: Turn, event: AcpEvent, recording: boolean): void {
   try {
     t.spans.onEvent(event);
@@ -264,6 +391,8 @@ function onTurnEvent(t: Turn, event: AcpEvent, recording: boolean): void {
 
   const update: unknown = event.payload;
   if (event.type === "agent-update" && typeof update === "object" && update !== null) {
+    if (t.waitingOnBackgroundWork) observeBackgroundWake(t, update);
+    else if ("messageId" in update && typeof update.messageId === "string") t.seenMessageIds.add(update.messageId);
     const kind = "sessionUpdate" in update ? update.sessionUpdate : undefined;
     if (kind === "tool_call" || kind === "tool_call_update") {
       const id = "toolCallId" in update && typeof update.toolCallId === "string" ? update.toolCallId : "";
@@ -271,10 +400,17 @@ function onTurnEvent(t: Turn, event: AcpEvent, recording: boolean): void {
       if (id && (status === "pending" || status === "in_progress")) t.pendingToolCalls.add(id);
       if (id && (status === "completed" || status === "failed" || status === "cancelled")) {
         t.pendingToolCalls.delete(id);
-        if (t.waitingOnOwnWork && t.pendingToolCalls.size === 0) {
+        if (!t.waitingOnBackgroundWork && t.waitingOnOwnWork && t.pendingToolCalls.size === 0) {
           t.waitingOnOwnWork = false;
           queue(t, () => clearOwnWorkWait(t.key));
           t.settle({ kind: "own-work-ready" });
+        }
+      }
+      if (kind === "tool_call_update" && status === "completed" && id) {
+        const marker = backgroundMarker(update, id);
+        if (marker) {
+          t.backgroundWork.set(marker.key, marker.label);
+          t.pendingBackgroundWork.add(marker.key);
         }
       }
     }
@@ -297,7 +433,21 @@ function onTurnEvent(t: Turn, event: AcpEvent, recording: boolean): void {
   if (event.type === "state") {
     const status = (event.payload as { status?: string } | null)?.status;
     if (status === "idle") {
-      if (t.pendingToolCalls.size === 0) return t.settle({ kind: "yielded" });
+      if (t.pendingToolCalls.size === 0 && t.pendingBackgroundWork.size === 0) return t.settle({ kind: "yielded" });
+      if (t.pendingBackgroundWork.size > 0) {
+        t.waitingOnBackgroundWork = true;
+        post(t, t.coalescer.flush());
+        const pending = [...t.pendingBackgroundWork, ...t.pendingToolCalls].toSorted();
+        post(t, [{
+          type: "thought",
+          body: `Waiting on its own work: ${ownWorkSummary(t)}`,
+          ephemeral: false,
+        }]);
+        queue(t, () => recordOwnWorkWait(t.key, pending));
+        const timeoutMs = t.deps.ownWorkTimeoutMs ?? t.deps.agent.ownWorkTimeoutMs ?? DEFAULT_OWN_WORK_TIMEOUT_MS;
+        t.ownWorkTimer = setTimeout(() => t.settle({ kind: "timeout" }), timeoutMs);
+        return;
+      }
       if (!t.waitingOnOwnWork) {
         t.waitingOnOwnWork = true;
         const pending = [...t.pendingToolCalls].toSorted();
@@ -319,6 +469,7 @@ function onTurnEvent(t: Turn, event: AcpEvent, recording: boolean): void {
   }
 
   post(t, t.coalescer.push(event));
+  if (t.waitingOnBackgroundWork) armBackgroundQuiet(t);
 }
 
 export function subscribeTurn(t: Turn): void {
@@ -506,6 +657,8 @@ export async function driveTurn(t: Turn, text: string): Promise<TurnEnd> {
     }
   } finally {
     if (t.timer) clearTimeout(t.timer);
+    if (t.ownWorkTimer) clearTimeout(t.ownWorkTimer);
+    if (t.quietTimer) clearTimeout(t.quietTimer);
     if (t.beat) clearInterval(t.beat);
   }
   return end;

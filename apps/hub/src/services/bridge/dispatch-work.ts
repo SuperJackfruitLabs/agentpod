@@ -21,7 +21,7 @@ import {
 import { SUMMARY_LIMIT, type DispatchDeps, type DispatchResult, type TurnEnd } from "./dispatch-types";
 import { assemblePrompt, boardTools } from "./dispatch-prompt";
 import { abort, afterTheBoardWasTold, failStarted, handBack, replay, summarise } from "./dispatch-exits";
-import { driveTurn, newTurn, openSegment, post, startHeartbeat, subscribeTurn, type Turn } from "./dispatch-turn";
+import { driveTurn, newTurn, openSegment, ownWorkSummary, post, startHeartbeat, subscribeTurn, type Turn } from "./dispatch-turn";
 
 /**
  * Who the station runs as. The related section needs it before the session opens, but only
@@ -128,6 +128,8 @@ export async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: 
     return await failStarted(deps, key, work, t.attemptId, t.lastSeq, t.session.id, err);
   } finally {
     if (t.timer) clearTimeout(t.timer);
+    if (t.ownWorkTimer) clearTimeout(t.ownWorkTimer);
+    if (t.quietTimer) clearTimeout(t.quietTimer);
     if (t.beat) clearInterval(t.beat);
     t.unsubscribe();
     // In the `finally`, so the summary is written once for every exit a session
@@ -159,10 +161,10 @@ async function settleTurn(t: Turn, end: TurnEnd): Promise<DispatchResult> {
   // must never leave `produced` output for the next claimant to replay as success.
   // Partial agent prose is evidence of a failed attempt, not a completion receipt.
   if (end.kind === "timeout" || end.kind === "session-ended") {
-    const pending = [...t.pendingToolCalls].toSorted();
-    const ownWorkTimedOut = end.kind === "timeout" && pending.length > 0;
+    const ownWorkTimedOut = end.kind === "timeout" &&
+      (t.pendingToolCalls.size > 0 || t.backgroundWork.size > 0 || t.waitingOnBackgroundWork);
     const reason = ownWorkTimedOut
-      ? `the run exceeded its waiting-on-own-work limit; pending tool calls: ${pending.join(", ")}`
+      ? `the run exceeded its waiting-on-own-work limit; ${ownWorkSummary(t)}`
       : end.kind === "timeout"
         ? "the turn exceeded its time limit"
         : end.reason;

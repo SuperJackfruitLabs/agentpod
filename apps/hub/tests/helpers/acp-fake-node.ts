@@ -164,6 +164,8 @@ export interface FakeAcpNode {
   releasePrompt(stopReason?: string): void;
   /** The oldest hanging turn's agent says `text` (an agent_message_chunk). */
   agentSays(text: string): void;
+  /** The first live process sends an unsolicited message, with no prompt in flight. */
+  agentWakes(text: string): void;
   close(): void;
 }
 
@@ -696,6 +698,22 @@ export async function connectFakeAcpNode(
         params: {
           sessionId: proc.agentSessionId,
           update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+        },
+      });
+    },
+    agentWakes: (text: string) => {
+      const proc = processes.find((p) => !p.closed);
+      if (!proc) return;
+      sendAgent(proc, {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: proc.agentSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId: "fake-unsolicited-wake",
+            content: { type: "text", text },
+          },
         },
       });
     },

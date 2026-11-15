@@ -19,6 +19,8 @@ import { z } from "zod";
 
 /** Derived nowhere and switched nowhere: one flag, one meaning. */
 export const BRIDGE_ENV_FLAG = "ENABLE_SUPERPIPELINE_BRIDGE";
+export const OWN_WORK_QUIET_MS_ENV = "SUPERPIPELINE_BRIDGE_OWN_WORK_QUIET_MS";
+export const OWN_WORK_TIMEOUT_MS_ENV = "SUPERPIPELINE_BRIDGE_OWN_WORK_TIMEOUT_MS";
 
 /**
  * The orchestrator this bridge speaks to, and the value written to
@@ -97,6 +99,10 @@ export const BridgeAgentConfig = z.object({
    * 15-minute reclaim never fires on a waiting run. The bound is policy.
    */
   permissionWaitMs: z.number().int().positive().optional(),
+  /** Silence after Hermes' unsolicited wake updates before the run is complete. */
+  ownWorkQuietMs: z.number().int().positive().optional(),
+  /** Hard ceiling for a run parked on Hermes' detached work. */
+  ownWorkTimeoutMs: z.number().int().positive().optional(),
   /** How many of this agent's runs may be in flight. superpipeline defaults to 1. */
   maxConcurrency: z.number().int().positive().optional(),
   /** superpipeline profile to claim under, when the board routes by profile. */
@@ -125,6 +131,15 @@ export type BridgeAgentConfig = z.infer<typeof BridgeAgentConfig>;
 export interface BridgeConfig {
   baseUrl: string;
   source: string;
+  ownWorkQuietMs?: number;
+  ownWorkTimeoutMs?: number;
+}
+
+function optionalPositiveInteger(name: string): number | undefined {
+  const raw = process.env[name]?.trim();
+  if (!raw) return undefined;
+  if (!/^\d+$/.test(raw) || Number(raw) <= 0) throw new Error(`${name} must be a positive integer in milliseconds`);
+  return Number(raw);
 }
 
 export function isBridgeEnabled(): boolean {
@@ -137,8 +152,8 @@ export function isBridgeEnabled(): boolean {
  * **The roster is not here any more.** It was `SUPERPIPELINE_BRIDGE_AGENTS`, a JSON array of agent
  * identities and their credentials in `hub.env`, and it is now a table —
  * `services/bridge/roster.ts`, read per reconcile tick. What remains in the environment is the
- * two facts that really are deployment configuration: whether the bridge runs at all, and which
- * superpipeline it talks to.
+ * deployment facts that really are configuration: whether the bridge runs, which superpipeline it
+ * talks to, and the optional quiet/hard-ceiling policy for unsolicited background-work wakes.
  *
  * What is lost with it is the boot-time refusal: "a bridge that silently claimed nothing because
  * its roster failed to parse would look exactly like a quiet board" cannot be checked here, since
@@ -170,5 +185,12 @@ export function loadBridgeConfig(): BridgeConfig | null {
     );
   }
 
-  return { baseUrl: baseUrl.replace(/\/+$/, ""), source: BRIDGE_SOURCE };
+  const ownWorkQuietMs = optionalPositiveInteger(OWN_WORK_QUIET_MS_ENV);
+  const ownWorkTimeoutMs = optionalPositiveInteger(OWN_WORK_TIMEOUT_MS_ENV);
+  return {
+    baseUrl: baseUrl.replace(/\/+$/, ""),
+    source: BRIDGE_SOURCE,
+    ...(ownWorkQuietMs === undefined ? {} : { ownWorkQuietMs }),
+    ...(ownWorkTimeoutMs === undefined ? {} : { ownWorkTimeoutMs }),
+  };
 }

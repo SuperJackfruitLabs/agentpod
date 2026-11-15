@@ -14,7 +14,7 @@ import { probeSalaamWork } from "./salaam-dispatch";
  */
 
 import * as acpSessions from "../acp";
-import { BRIDGE_SOURCE, isBridgeEnabled, type BridgeAgentConfig } from "./config";
+import { BRIDGE_SOURCE, isBridgeEnabled, loadBridgeConfig, type BridgeAgentConfig } from "./config";
 import { loopKey, reconcileRoster, type LoopRegistry, type ReconcileState } from "./reconcile";
 import { bridgePlaneCredential, readEveryBridgeRoster, type BridgeAgentSecrets } from "./roster";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
@@ -280,8 +280,9 @@ export async function startSuperpipelineBridge(
 ): Promise<BridgeHandle | null> {
   if (!isBridgeEnabled()) return null;
 
-  const baseUrl = (process.env.SUPERPIPELINE_BASE_URL ?? "").trim().replace(/\/+$/, "");
-  if (!baseUrl) return null;
+  const bridgeConfig = loadBridgeConfig();
+  if (!bridgeConfig) return null;
+  const { baseUrl } = bridgeConfig;
 
   const acp = deps.acp ?? hubAcpPort;
   const bridgeLog = createLogger("bridge");
@@ -336,6 +337,8 @@ export async function startSuperpipelineBridge(
             // tenant the roster below is read from.
             tenantId: agent.tenantId ?? BOOTSTRAP_TENANT_ID,
             source: BRIDGE_SOURCE,
+            ...(bridgeConfig.ownWorkQuietMs === undefined ? {} : { ownWorkQuietMs: bridgeConfig.ownWorkQuietMs }),
+            ...(bridgeConfig.ownWorkTimeoutMs === undefined ? {} : { ownWorkTimeoutMs: bridgeConfig.ownWorkTimeoutMs }),
             log,
             mcpUrl,
           }),
