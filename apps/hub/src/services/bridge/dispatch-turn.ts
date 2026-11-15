@@ -281,7 +281,7 @@ interface BackgroundMarker {
 }
 
 /** Hermes encodes tool results as nested ACP content blocks whose text is JSON. */
-function backgroundMarker(value: unknown, toolCallId: string): BackgroundMarker | null {
+export function backgroundMarker(value: unknown, toolCallId: string): BackgroundMarker | null {
   if (typeof value === "string") {
     const text = value.trim();
     if (!text.startsWith("{") && !text.startsWith("[")) return null;
