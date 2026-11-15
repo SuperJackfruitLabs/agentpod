@@ -1,0 +1,1694 @@
+{
+  "version": "superbench.workspace-operations-fixtures.v1",
+  "valid": [
+    {
+      "name": "create-two-members",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "create-max-quota",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example",
+        "quota_bytes": 1125899906842624
+      }
+    },
+    {
+      "name": "recover-exact-seal-allowlist",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "key": "new_workspace",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "recovery/example"
+          }
+        ],
+        "source": {
+          "repository": "https://example.invalid/alpha.git",
+          "bench_id": "11111111111111111111111111111111",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "initialize": true,
+        "request_id": "recover-example"
+      }
+    },
+    {
+      "name": "status",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status"
+      }
+    },
+    {
+      "name": "host_status",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "host_status"
+      }
+    },
+    {
+      "name": "archive",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "archive",
+        "key": "workspace_example"
+      }
+    },
+    {
+      "name": "stop_admin",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop_admin",
+        "key": "workspace_example"
+      }
+    },
+    {
+      "name": "lease",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "key": "workspace_example",
+        "holder": "worker",
+        "request_id": "lease-example"
+      }
+    },
+    {
+      "name": "checkpoint",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "checkpoint",
+        "key": "workspace_example",
+        "lease_token": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "name": "release",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "release",
+        "key": "workspace_example",
+        "lease_token": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "name": "stop",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop",
+        "key": "workspace_example",
+        "lease_token": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "name": "run",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "workspace_example",
+        "holder": "worker",
+        "request_id": "run-example",
+        "arguments": [
+          "sh",
+          "-c",
+          "printf example"
+        ]
+      }
+    },
+    {
+      "name": "run-explicit-stopped-owner",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "workspace_example",
+        "holder": "worker",
+        "request_id": "run-example",
+        "arguments": [
+          "sh",
+          "-c",
+          "printf example"
+        ],
+        "lease_token": "000000000000000000000000000000000000000000000000",
+        "repository_name": "alpha",
+        "checkpoint": false
+      }
+    },
+    {
+      "name": "setup",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "setup",
+        "key": "workspace_example",
+        "holder": "worker",
+        "request_id": "setup-example"
+      }
+    },
+    {
+      "name": "setup-explicit-stopped-owner",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "setup",
+        "key": "workspace_example",
+        "holder": "worker",
+        "request_id": "setup-example",
+        "lease_token": "000000000000000000000000000000000000000000000000",
+        "repository_name": "alpha",
+        "offline": true
+      }
+    },
+    {
+      "name": "astral-unicode-argument",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "workspace_example",
+        "holder": "worker",
+        "request_id": "run-example",
+        "arguments": [
+          "printf",
+          "🧪"
+        ]
+      }
+    },
+    {
+      "name": "short-branch-and-base-exact-byte-bound",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "argument-exact-8192-byte-bound",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "workspace_example",
+        "holder": "worker",
+        "request_id": "run-example",
+        "arguments": [
+          "printf",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      }
+    },
+    {
+      "name": "create-same-repository-distinct-targets",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "task/first"
+          },
+          {
+            "name": "beta",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "task/second",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "recover-same-repository-distinct-targets",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "key": "new_workspace",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "task/first"
+          },
+          {
+            "name": "beta",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "task/second"
+          }
+        ],
+        "source": {
+          "repository": "https://example.invalid/alpha.git",
+          "bench_id": "11111111111111111111111111111111",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "initialize": true,
+        "request_id": "recover-example"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "create-invalid-version-superbench.v1",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "create-invalid-initialize-False",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": false,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "create-invalid-initialize-None",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": null,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "create-invalid-quota_bytes-0",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example",
+        "quota_bytes": 0
+      }
+    },
+    {
+      "name": "create-invalid-quota_bytes-1025",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example",
+        "quota_bytes": 1025
+      }
+    },
+    {
+      "name": "create-invalid-quota_bytes-1125899906843648",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example",
+        "quota_bytes": 1125899906843648
+      }
+    },
+    {
+      "name": "create-invalid-quota_bytes-1024",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example",
+        "quota_bytes": "1024"
+      }
+    },
+    {
+      "name": "create-invalid-repositories-[]",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "create-invalid-key-None",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": null,
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "create-invalid-request_id-None",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": null
+      }
+    },
+    {
+      "name": "create-invalid-holder-invented-holder",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example",
+        "holder": "invented-holder"
+      }
+    },
+    {
+      "name": "create-invalid-repository-https://example.inva",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example",
+        "repository": "https://example.invalid/unrelated.git"
+      }
+    },
+    {
+      "name": "create-invalid-host_path-/example/host",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example",
+        "host_path": "/example/host"
+      }
+    },
+    {
+      "name": "create-invalid-lease_token-00000000000000000000",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example",
+        "lease_token": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "name": "create-invalid-unknown-True",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example",
+        "unknown": true
+      }
+    },
+    {
+      "name": "create-missing-initialize",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "create-missing-request-id",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true
+      }
+    },
+    {
+      "name": "unknown-member-field",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git",
+            "path": "/example/checkout"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "too-many-members",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "repo00",
+            "repository": "https://example.invalid/0.git"
+          },
+          {
+            "name": "repo01",
+            "repository": "https://example.invalid/1.git"
+          },
+          {
+            "name": "repo02",
+            "repository": "https://example.invalid/2.git"
+          },
+          {
+            "name": "repo03",
+            "repository": "https://example.invalid/3.git"
+          },
+          {
+            "name": "repo04",
+            "repository": "https://example.invalid/4.git"
+          },
+          {
+            "name": "repo05",
+            "repository": "https://example.invalid/5.git"
+          },
+          {
+            "name": "repo06",
+            "repository": "https://example.invalid/6.git"
+          },
+          {
+            "name": "repo07",
+            "repository": "https://example.invalid/7.git"
+          },
+          {
+            "name": "repo08",
+            "repository": "https://example.invalid/8.git"
+          },
+          {
+            "name": "repo09",
+            "repository": "https://example.invalid/9.git"
+          },
+          {
+            "name": "repo10",
+            "repository": "https://example.invalid/10.git"
+          },
+          {
+            "name": "repo11",
+            "repository": "https://example.invalid/11.git"
+          },
+          {
+            "name": "repo12",
+            "repository": "https://example.invalid/12.git"
+          },
+          {
+            "name": "repo13",
+            "repository": "https://example.invalid/13.git"
+          },
+          {
+            "name": "repo14",
+            "repository": "https://example.invalid/14.git"
+          },
+          {
+            "name": "repo15",
+            "repository": "https://example.invalid/15.git"
+          },
+          {
+            "name": "repo16",
+            "repository": "https://example.invalid/16.git"
+          },
+          {
+            "name": "repo17",
+            "repository": "https://example.invalid/17.git"
+          },
+          {
+            "name": "repo18",
+            "repository": "https://example.invalid/18.git"
+          },
+          {
+            "name": "repo19",
+            "repository": "https://example.invalid/19.git"
+          },
+          {
+            "name": "repo20",
+            "repository": "https://example.invalid/20.git"
+          },
+          {
+            "name": "repo21",
+            "repository": "https://example.invalid/21.git"
+          },
+          {
+            "name": "repo22",
+            "repository": "https://example.invalid/22.git"
+          },
+          {
+            "name": "repo23",
+            "repository": "https://example.invalid/23.git"
+          },
+          {
+            "name": "repo24",
+            "repository": "https://example.invalid/24.git"
+          },
+          {
+            "name": "repo25",
+            "repository": "https://example.invalid/25.git"
+          },
+          {
+            "name": "repo26",
+            "repository": "https://example.invalid/26.git"
+          },
+          {
+            "name": "repo27",
+            "repository": "https://example.invalid/27.git"
+          },
+          {
+            "name": "repo28",
+            "repository": "https://example.invalid/28.git"
+          },
+          {
+            "name": "repo29",
+            "repository": "https://example.invalid/29.git"
+          },
+          {
+            "name": "repo30",
+            "repository": "https://example.invalid/30.git"
+          },
+          {
+            "name": "repo31",
+            "repository": "https://example.invalid/31.git"
+          },
+          {
+            "name": "repo32",
+            "repository": "https://example.invalid/32.git"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "duplicate-member-names",
+      "reason": "member_order",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "alpha",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "unsorted-members",
+      "reason": "member_order",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          },
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "missing-coordinator",
+      "reason": "coordinator",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "missing",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "full-ref-in-short-branch",
+      "reason": "branch_name",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "refs/heads/task/example"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "unsafe-short-base",
+      "reason": "branch_name",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git",
+            "base": "../main"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "credential-bearing-identity",
+      "reason": "repository_identity",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example-user:example-password@example.invalid/repo.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "unknown-source-identity",
+      "reason": "source_identity",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "key": "new_workspace",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "recovery/example"
+          }
+        ],
+        "source": {
+          "repository": "https://example.invalid/not-allowed.git",
+          "bench_id": "11111111111111111111111111111111",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "initialize": true,
+        "request_id": "recover-example"
+      }
+    },
+    {
+      "name": "recover-forbids-base",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "key": "new_workspace",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git",
+            "base": "main"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "recovery/example"
+          }
+        ],
+        "source": {
+          "repository": "https://example.invalid/alpha.git",
+          "bench_id": "11111111111111111111111111111111",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "initialize": true,
+        "request_id": "recover-example"
+      }
+    },
+    {
+      "name": "recover-forbids-new-coordinator",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "key": "new_workspace",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "recovery/example"
+          }
+        ],
+        "source": {
+          "repository": "https://example.invalid/alpha.git",
+          "bench_id": "11111111111111111111111111111111",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "initialize": true,
+        "request_id": "recover-example",
+        "checkpoint_repository": "alpha"
+      }
+    },
+    {
+      "name": "recover-forbids-source-host-path",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "key": "new_workspace",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "recovery/example"
+          }
+        ],
+        "source": {
+          "repository": "https://example.invalid/alpha.git",
+          "bench_id": "11111111111111111111111111111111",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "path": "/example/host"
+        },
+        "initialize": true,
+        "request_id": "recover-example"
+      }
+    },
+    {
+      "name": "recover-missing-initialize",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "key": "new_workspace",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "recovery/example"
+          }
+        ],
+        "source": {
+          "repository": "https://example.invalid/alpha.git",
+          "bench_id": "11111111111111111111111111111111",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "request_id": "recover-example"
+      }
+    },
+    {
+      "name": "recover-missing-source",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "key": "new_workspace",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "recovery/example"
+          }
+        ],
+        "initialize": true,
+        "request_id": "recover-example"
+      }
+    },
+    {
+      "name": "recover-missing-request_id",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "key": "new_workspace",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "recovery/example"
+          }
+        ],
+        "source": {
+          "repository": "https://example.invalid/alpha.git",
+          "bench_id": "11111111111111111111111111111111",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "initialize": true
+      }
+    },
+    {
+      "name": "create-forbids-member-selector",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example",
+        "repository_name": "alpha"
+      }
+    },
+    {
+      "name": "create-forbids-member-selector-with-quota",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example",
+        "quota_bytes": 1125899906842624,
+        "repository_name": "alpha"
+      }
+    },
+    {
+      "name": "recover-forbids-member-selector",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "key": "new_workspace",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "recovery/example"
+          }
+        ],
+        "source": {
+          "repository": "https://example.invalid/alpha.git",
+          "bench_id": "11111111111111111111111111111111",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "initialize": true,
+        "request_id": "recover-example",
+        "repository_name": "alpha"
+      }
+    },
+    {
+      "name": "status-forbids-member-selector",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "repository_name": "alpha"
+      }
+    },
+    {
+      "name": "host_status-forbids-member-selector",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "host_status",
+        "repository_name": "alpha"
+      }
+    },
+    {
+      "name": "archive-forbids-member-selector",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "archive",
+        "key": "workspace_example",
+        "repository_name": "alpha"
+      }
+    },
+    {
+      "name": "archive-no-grace-bypass",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "archive",
+        "key": "workspace_example",
+        "archive_grace": "0s"
+      }
+    },
+    {
+      "name": "stop_admin-forbids-member-selector",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop_admin",
+        "key": "workspace_example",
+        "repository_name": "alpha"
+      }
+    },
+    {
+      "name": "stop-admin-no-body-authority",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop_admin",
+        "key": "workspace_example",
+        "admin": true
+      }
+    },
+    {
+      "name": "lease-forbids-member-selector",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "key": "workspace_example",
+        "holder": "worker",
+        "request_id": "lease-example",
+        "repository_name": "alpha"
+      }
+    },
+    {
+      "name": "checkpoint-forbids-receipt-id",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "checkpoint",
+        "key": "workspace_example",
+        "lease_token": "00000000000000000000000000000000",
+        "request_id": "forbidden"
+      }
+    },
+    {
+      "name": "checkpoint-forbids-member-selector",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "checkpoint",
+        "key": "workspace_example",
+        "lease_token": "00000000000000000000000000000000",
+        "repository_name": "alpha"
+      }
+    },
+    {
+      "name": "release-forbids-receipt-id",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "release",
+        "key": "workspace_example",
+        "lease_token": "00000000000000000000000000000000",
+        "request_id": "forbidden"
+      }
+    },
+    {
+      "name": "release-forbids-member-selector",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "release",
+        "key": "workspace_example",
+        "lease_token": "00000000000000000000000000000000",
+        "repository_name": "alpha"
+      }
+    },
+    {
+      "name": "stop-forbids-receipt-id",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop",
+        "key": "workspace_example",
+        "lease_token": "00000000000000000000000000000000",
+        "request_id": "forbidden"
+      }
+    },
+    {
+      "name": "stop-forbids-member-selector",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop",
+        "key": "workspace_example",
+        "lease_token": "00000000000000000000000000000000",
+        "repository_name": "alpha"
+      }
+    },
+    {
+      "name": "run-null-lease-token",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "workspace_example",
+        "holder": "worker",
+        "request_id": "run-example",
+        "arguments": [
+          "sh",
+          "-c",
+          "printf example"
+        ],
+        "lease_token": null
+      }
+    },
+    {
+      "name": "setup-null-lease-token",
+      "reason": "schema",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "setup",
+        "key": "workspace_example",
+        "holder": "worker",
+        "request_id": "setup-example",
+        "lease_token": null
+      }
+    },
+    {
+      "name": "lone-high-surrogate-branch",
+      "reason": "unicode_scalars",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "task/\ud800"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "lone-low-surrogate-argument",
+      "reason": "unicode_scalars",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "workspace_example",
+        "holder": "worker",
+        "request_id": "run-example",
+        "arguments": [
+          "printf",
+          "\udc00"
+        ]
+      }
+    },
+    {
+      "name": "branch-unicode-exceeds-255-bytes",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      },
+      "reason": "branch_name"
+    },
+    {
+      "name": "base-unicode-exceeds-255-bytes",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git",
+            "base": "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界"
+          },
+          {
+            "name": "beta",
+            "repository": "git@example.invalid:team/beta.git",
+            "branch": "task/example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      },
+      "reason": "branch_name"
+    },
+    {
+      "name": "argument-unicode-exceeds-8192-bytes",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "workspace_example",
+        "holder": "worker",
+        "request_id": "run-example",
+        "arguments": [
+          "printf",
+          "🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂"
+        ]
+      },
+      "reason": "argument_bytes"
+    },
+    {
+      "name": "create-duplicate-explicit-target",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "task/same"
+          },
+          {
+            "name": "beta",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "task/same",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      },
+      "reason": "duplicate_target"
+    },
+    {
+      "name": "create-duplicate-default-explicit-target",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "key": "workspace_example",
+        "checkpoint_repository": "alpha",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "bench/workspace_example",
+            "base": "trunk"
+          }
+        ],
+        "initialize": true,
+        "request_id": "create-example"
+      },
+      "reason": "duplicate_target"
+    },
+    {
+      "name": "recover-duplicate-explicit-target",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "key": "new_workspace",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "task/same"
+          },
+          {
+            "name": "beta",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "task/same"
+          }
+        ],
+        "source": {
+          "repository": "https://example.invalid/alpha.git",
+          "bench_id": "11111111111111111111111111111111",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "initialize": true,
+        "request_id": "recover-example"
+      },
+      "reason": "duplicate_target"
+    },
+    {
+      "name": "recover-duplicate-default-explicit-target",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "key": "new_workspace",
+        "repositories": [
+          {
+            "name": "alpha",
+            "repository": "https://example.invalid/alpha.git"
+          },
+          {
+            "name": "beta",
+            "repository": "https://example.invalid/alpha.git",
+            "branch": "bench/new_workspace"
+          }
+        ],
+        "source": {
+          "repository": "https://example.invalid/alpha.git",
+          "bench_id": "11111111111111111111111111111111",
+          "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "initialize": true,
+        "request_id": "recover-example"
+      },
+      "reason": "duplicate_target"
+    }
+  ],
+  "lexical": [
+    {
+      "name": "duplicate-operation",
+      "reason": "duplicate_key",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"status\",\"operation\":\"host_status\"}"
+    },
+    {
+      "name": "duplicate-nested-member",
+      "reason": "duplicate_key",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"create\",\"repositories\":[{\"name\":\"alpha\",\"name\":\"beta\"}]}"
+    },
+    {
+      "name": "trailing-document",
+      "reason": "json",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"status\"} {}"
+    }
+  ]
+}

@@ -1,0 +1,5345 @@
+{
+  "version": "superbench.workspace-responses-fixtures.v1",
+  "status": "proposed; structural conformance is not runtime evidence",
+  "valid": [
+    {
+      "name": "create-ready",
+      "status": 200,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "create-partial-grant",
+      "status": 422,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1",
+        "authorized_grant": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": false,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "initializing",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "lease": {
+              "holder": "initialization",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        },
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "recover-ready",
+      "status": 200,
+      "expected": {
+        "operation": "recover",
+        "key": "card",
+        "request_id": "recover-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "ok": true,
+        "request_id": "recover-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "recovered_from": {
+              "bench_id": "44444444444444444444444444444444",
+              "seal": "ffffffffffffffffffffffffffffffffffffffff",
+              "manifest_sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+            }
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "recover-partial-grant",
+      "status": 422,
+      "expected": {
+        "operation": "recover",
+        "key": "card",
+        "request_id": "recover-1",
+        "authorized_grant": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "ok": false,
+        "request_id": "recover-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "initializing",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "lease": {
+              "holder": "initialization",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        },
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "lease-held-grant",
+      "status": 200,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1",
+        "authorized_grant": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": true,
+        "request_id": "lease-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "run-held-grant",
+      "status": 422,
+      "expected": {
+        "operation": "run",
+        "key": "card",
+        "request_id": "run-1",
+        "authorized_grant": true,
+        "checkpoint": false
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "ok": false,
+        "request_id": "run-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card",
+          "execution": {
+            "id": "33333333333333333333333333333333",
+            "phase": "stopped"
+          },
+          "exit_code": 7,
+          "log_truncated": false
+        },
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "run-completed-released",
+      "status": 200,
+      "expected": {
+        "operation": "run",
+        "key": "card",
+        "request_id": "run-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "ok": true,
+        "request_id": "run-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "execution": {
+            "id": "33333333333333333333333333333333",
+            "phase": "stopped"
+          },
+          "exit_code": 0,
+          "log_truncated": false
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "run-supplied-token-no-grant",
+      "status": 422,
+      "expected": {
+        "operation": "run",
+        "key": "card",
+        "request_id": "run-1",
+        "lease_token": "66666666666666666666666666666666",
+        "holder": "run:one"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "ok": false,
+        "request_id": "run-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "execution": {
+            "id": "33333333333333333333333333333333",
+            "phase": "stopped"
+          },
+          "exit_code": 7,
+          "log_truncated": false
+        },
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "setup-held-grant",
+      "status": 422,
+      "expected": {
+        "operation": "setup",
+        "key": "card",
+        "request_id": "setup-1",
+        "authorized_grant": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "setup",
+        "ok": false,
+        "request_id": "setup-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card",
+          "execution": {
+            "id": "33333333333333333333333333333333",
+            "phase": "stopped"
+          },
+          "exit_code": 7,
+          "log_truncated": false,
+          "preparation": [
+            {
+              "name": "a",
+              "status": "prepared"
+            },
+            {
+              "name": "b",
+              "status": "failed"
+            }
+          ]
+        },
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "setup-completed-released",
+      "status": 200,
+      "expected": {
+        "operation": "setup",
+        "key": "card",
+        "request_id": "setup-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "setup",
+        "ok": true,
+        "request_id": "setup-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "execution": {
+            "id": "33333333333333333333333333333333",
+            "phase": "stopped"
+          },
+          "exit_code": 0,
+          "log_truncated": false,
+          "preparation": [
+            {
+              "name": "a",
+              "status": "prepared"
+            },
+            {
+              "name": "b",
+              "status": "prepared"
+            }
+          ]
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "setup-supplied-token-no-grant",
+      "status": 422,
+      "expected": {
+        "operation": "setup",
+        "key": "card",
+        "request_id": "setup-1",
+        "lease_token": "66666666666666666666666666666666",
+        "holder": "run:one"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "setup",
+        "ok": false,
+        "request_id": "setup-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "execution": {
+            "id": "33333333333333333333333333333333",
+            "phase": "stopped"
+          },
+          "exit_code": 7,
+          "log_truncated": false,
+          "preparation": [
+            {
+              "name": "a",
+              "status": "prepared"
+            },
+            {
+              "name": "b",
+              "status": "failed"
+            }
+          ]
+        },
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "run-retained-success",
+      "status": 200,
+      "expected": {
+        "operation": "run",
+        "key": "card",
+        "request_id": "run-1",
+        "authorized_grant": true,
+        "checkpoint": false
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "ok": true,
+        "request_id": "run-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card",
+          "execution": {
+            "id": "33333333333333333333333333333333",
+            "phase": "stopped"
+          },
+          "exit_code": 0,
+          "log_truncated": false
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "run-reused-retained-success",
+      "status": 200,
+      "expected": {
+        "operation": "run",
+        "key": "card",
+        "request_id": "run-1",
+        "lease_token": "66666666666666666666666666666666",
+        "holder": "run:one",
+        "checkpoint": false
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "ok": true,
+        "request_id": "run-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "execution": {
+            "id": "33333333333333333333333333333333",
+            "phase": "stopped"
+          },
+          "exit_code": 0,
+          "log_truncated": false
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "setup-no-command-success",
+      "status": 200,
+      "expected": {
+        "operation": "setup",
+        "key": "card",
+        "request_id": "setup-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "setup",
+        "ok": true,
+        "request_id": "setup-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "preparation": [
+            {
+              "name": "a",
+              "status": "prepared"
+            },
+            {
+              "name": "b",
+              "status": "prepared"
+            }
+          ]
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "checkpoint-complete",
+      "status": 200,
+      "expected": {
+        "operation": "checkpoint",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "checkpoint",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          }
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "checkpoint-pending",
+      "status": 422,
+      "expected": {
+        "operation": "checkpoint",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "checkpoint",
+        "ok": false,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            },
+            "pending": {
+              "generation_id": "77777777777777777777777777777777",
+              "previous_seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "9999999999999999999999999999999999999999"
+                },
+                {
+                  "name": "b",
+                  "commit": "9999999999999999999999999999999999999999"
+                }
+              ]
+            }
+          }
+        },
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "release-complete",
+      "status": 200,
+      "expected": {
+        "operation": "release",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "release",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "stop-revoked-no-grant",
+      "status": 200,
+      "expected": {
+        "operation": "stop",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": true,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          }
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "stop-admin-recovery-grant",
+      "status": 200,
+      "expected": {
+        "operation": "stop_admin",
+        "key": "card",
+        "authorized_grant": true,
+        "verified_fence": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop_admin",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": true,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "stop-admin-failed-fence",
+      "status": 422,
+      "expected": {
+        "operation": "stop_admin",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop_admin",
+        "ok": false,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          }
+        },
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "archive-archived",
+      "status": 200,
+      "expected": {
+        "operation": "archive",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "archive",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "archived",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "archive": {
+              "archived_at": "2026-11-15T00:00:00Z",
+              "reap_after": "2026-11-22T00:00:00Z",
+              "freeze_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "frozen_at": "2026-11-15T00:00:01Z",
+              "automatic": false
+            }
+          }
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "archive-reaping",
+      "status": 200,
+      "expected": {
+        "operation": "archive",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "archive",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reaping",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "archive": {
+              "archived_at": "2026-11-15T00:00:00Z",
+              "reap_after": "2026-11-22T00:00:00Z",
+              "freeze_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "frozen_at": "2026-11-15T00:00:01Z",
+              "automatic": false,
+              "reaping_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            }
+          }
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "archive-reaped",
+      "status": 200,
+      "expected": {
+        "operation": "archive",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "archive",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reaped",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "archive": {
+              "archived_at": "2026-11-15T00:00:00Z",
+              "reap_after": "2026-11-22T00:00:00Z",
+              "freeze_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "frozen_at": "2026-11-15T00:00:01Z",
+              "automatic": false,
+              "reaping_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "reaped_at": "2026-11-22T00:00:02Z"
+            }
+          }
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "status-mixed-complete",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": true,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "status-empty",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": ""
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": []
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "host-redacted-budget",
+      "status": 200,
+      "expected": {
+        "operation": "host_status",
+        "key": ""
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "host_status",
+        "ok": true,
+        "result": {
+          "managed": true,
+          "data_free_bytes": 9007199254740991,
+          "state_free_bytes": 1048576
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "error-403-forbidden",
+      "status": 403,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": false,
+        "request_id": "lease-1",
+        "error": {
+          "code": "forbidden",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "error-404-not_found",
+      "status": 404,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": false,
+        "request_id": "lease-1",
+        "error": {
+          "code": "not_found",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "error-409-conflict",
+      "status": 409,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": false,
+        "request_id": "lease-1",
+        "error": {
+          "code": "conflict",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "error-409-in_progress",
+      "status": 409,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": false,
+        "request_id": "lease-1",
+        "error": {
+          "code": "in_progress",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "error-409-operation_in_doubt",
+      "status": 409,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": false,
+        "request_id": "lease-1",
+        "error": {
+          "code": "operation_in_doubt",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "error-503-unavailable",
+      "status": 503,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": false,
+        "request_id": "lease-1",
+        "error": {
+          "code": "unavailable",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "error-503-operation_in_doubt",
+      "status": 503,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": false,
+        "request_id": "lease-1",
+        "error": {
+          "code": "operation_in_doubt",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "error-422-operation_failed",
+      "status": 422,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": false,
+        "request_id": "lease-1",
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "early-400",
+      "status": 400,
+      "expected": {
+        "operation": "create",
+        "request_id": "create-1",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "ok": false,
+        "error": {
+          "code": "invalid_request",
+          "message": "Request refused."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "early-413",
+      "status": 413,
+      "expected": {
+        "operation": "create",
+        "request_id": "create-1",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "ok": false,
+        "error": {
+          "code": "invalid_request",
+          "message": "Request refused."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "early-415",
+      "status": 415,
+      "expected": {
+        "operation": "create",
+        "request_id": "create-1",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "ok": false,
+        "error": {
+          "code": "invalid_request",
+          "message": "Request refused."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "early-405",
+      "status": 405,
+      "expected": {
+        "operation": "create",
+        "request_id": "create-1",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "ok": false,
+        "error": {
+          "code": "invalid_request",
+          "message": "Request refused."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "early-403",
+      "status": 403,
+      "expected": {
+        "operation": "create",
+        "request_id": "create-1",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "ok": false,
+        "error": {
+          "code": "forbidden",
+          "message": "Request refused."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "early-404",
+      "status": 404,
+      "expected": {
+        "operation": "create",
+        "request_id": "create-1",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "ok": false,
+        "error": {
+          "code": "not_found",
+          "message": "Request refused."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "early-503",
+      "status": 503,
+      "expected": {
+        "operation": "create",
+        "request_id": "create-1",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "ok": false,
+        "error": {
+          "code": "unavailable",
+          "message": "Request refused."
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "stop-admin-oversized-root-no-grant",
+      "status": 200,
+      "expected": {
+        "operation": "stop_admin",
+        "key": "card",
+        "authorized_grant": true,
+        "verified_fence": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop_admin",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": true,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          }
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "status-relinquishing-source",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ],
+              "transfer_state": "relinquishing"
+            }
+          ]
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "status-transferred-source",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ],
+              "transfer_state": "transferred"
+            }
+          ]
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "archive-transferred-source",
+      "status": 200,
+      "expected": {
+        "operation": "archive",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "archive",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "archived",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "archive": {
+              "archived_at": "2026-11-15T00:00:00Z",
+              "reap_after": "2026-11-22T00:00:00Z",
+              "freeze_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "frozen_at": "2026-11-15T00:00:01Z",
+              "automatic": false
+            },
+            "transfer_state": "transferred"
+          }
+        }
+      },
+      "validation": "wire"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-version",
+      "status": 200,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1"
+      },
+      "body": {
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "schema",
+      "validation": "wire"
+    },
+    {
+      "name": "unknown-response-version",
+      "status": 200,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1"
+      },
+      "body": {
+        "version": "superbench.v3",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "schema",
+      "validation": "wire"
+    },
+    {
+      "name": "unknown-envelope-field",
+      "status": 200,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "root_path": "/bounded/benches/card"
+        },
+        "extra": true
+      },
+      "reason": "schema",
+      "validation": "wire"
+    },
+    {
+      "name": "null-result",
+      "status": 200,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": null
+      },
+      "reason": "schema",
+      "validation": "wire"
+    },
+    {
+      "name": "token-in-status",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": true,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ],
+              "grant": {
+                "lease_token": "66666666666666666666666666666666"
+              }
+            }
+          ]
+        }
+      },
+      "reason": "schema",
+      "validation": "wire"
+    },
+    {
+      "name": "private-log-path",
+      "status": 200,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1",
+        "authorized_grant": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": true,
+        "request_id": "lease-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped",
+                "log_path": "/private/log"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "schema",
+      "validation": "wire"
+    },
+    {
+      "name": "repository-url-in-mutation",
+      "status": 200,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "repository": "https://example.invalid/repository"
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "schema",
+      "validation": "wire"
+    },
+    {
+      "name": "unsafe-host-count",
+      "status": 200,
+      "expected": {
+        "operation": "host_status",
+        "key": ""
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "host_status",
+        "ok": true,
+        "result": {
+          "managed": true,
+          "data_free_bytes": 9007199254740992,
+          "state_free_bytes": 1048576
+        }
+      },
+      "reason": "schema",
+      "validation": "wire"
+    },
+    {
+      "name": "identity-operation-mismatch",
+      "status": 200,
+      "expected": {
+        "operation": "recover",
+        "key": "card",
+        "request_id": "create-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "identity",
+      "validation": "wire"
+    },
+    {
+      "name": "identity-request-id-mismatch",
+      "status": 200,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "another"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "identity",
+      "validation": "wire"
+    },
+    {
+      "name": "http-success-with-error",
+      "status": 422,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "http_status",
+      "validation": "wire"
+    },
+    {
+      "name": "http-error-with-success",
+      "status": 200,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": false,
+        "request_id": "lease-1",
+        "error": {
+          "code": "conflict",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "reason": "http_status",
+      "validation": "wire"
+    },
+    {
+      "name": "grant-without-authority",
+      "status": 200,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1",
+        "authorized_grant": false
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": true,
+        "request_id": "lease-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "grant_authority",
+      "validation": "producer"
+    },
+    {
+      "name": "grant-reexports-supplied-token",
+      "status": 200,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1",
+        "authorized_grant": true,
+        "lease_token": "66666666666666666666666666666666"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": true,
+        "request_id": "lease-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "grant_authority",
+      "validation": "wire"
+    },
+    {
+      "name": "readiness-with-held-owner",
+      "status": 200,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1",
+        "authorized_grant": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": true,
+        "request_id": "lease-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "readiness",
+      "validation": "wire"
+    },
+    {
+      "name": "incomplete-checkpoint-vector",
+      "status": 200,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                }
+              ]
+            }
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "member_vector",
+      "validation": "wire"
+    },
+    {
+      "name": "unsorted-checkpoint-vector",
+      "status": 200,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                },
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                }
+              ]
+            }
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "member_vector",
+      "validation": "wire"
+    },
+    {
+      "name": "wrong-status-inventory-count",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": true,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "reason": "member_vector",
+      "validation": "wire"
+    },
+    {
+      "name": "omitted-scalar-kind",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": true,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "reason": "status_complete",
+      "validation": "producer"
+    },
+    {
+      "name": "unsorted-global-status",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": true,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            }
+          ]
+        }
+      },
+      "reason": "status_order",
+      "validation": "wire"
+    },
+    {
+      "name": "partial-specific-key-status",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "card",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": true,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "reason": "identity",
+      "validation": "wire"
+    },
+    {
+      "name": "pending-predecessor-mismatch",
+      "status": 422,
+      "expected": {
+        "operation": "checkpoint",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "checkpoint",
+        "ok": false,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            },
+            "pending": {
+              "generation_id": "77777777777777777777777777777777",
+              "previous_seal": "0000000000000000000000000000000000000000",
+              "manifest_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "9999999999999999999999999999999999999999"
+                },
+                {
+                  "name": "b",
+                  "commit": "9999999999999999999999999999999999999999"
+                }
+              ]
+            }
+          }
+        },
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "reason": "checkpoint_chain",
+      "validation": "wire"
+    },
+    {
+      "name": "terminal-archive-has-lease",
+      "status": 200,
+      "expected": {
+        "operation": "archive",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "archive",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "archived",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "archive": {
+              "archived_at": "2026-11-15T00:00:00Z",
+              "reap_after": "2026-11-22T00:00:00Z",
+              "freeze_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "frozen_at": "2026-11-15T00:00:01Z",
+              "automatic": false
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          }
+        }
+      },
+      "reason": "archive_state",
+      "validation": "wire"
+    },
+    {
+      "name": "admin-grant-without-fence",
+      "status": 200,
+      "expected": {
+        "operation": "stop_admin",
+        "key": "card",
+        "authorized_grant": true,
+        "verified_fence": false
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop_admin",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": true,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "grant_authority",
+      "validation": "producer"
+    },
+    {
+      "name": "setup-success-holds-owner",
+      "status": 200,
+      "expected": {
+        "operation": "setup",
+        "key": "card",
+        "request_id": "setup-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "setup",
+        "ok": true,
+        "request_id": "setup-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "execution": {
+            "id": "33333333333333333333333333333333",
+            "phase": "stopped"
+          },
+          "exit_code": 0,
+          "log_truncated": false,
+          "preparation": [
+            {
+              "name": "a",
+              "status": "prepared"
+            },
+            {
+              "name": "b",
+              "status": "prepared"
+            }
+          ]
+        }
+      },
+      "reason": "completion",
+      "validation": "wire"
+    },
+    {
+      "name": "checkpoint-cannot-reexport-token",
+      "status": 200,
+      "expected": {
+        "operation": "checkpoint",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "checkpoint",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "grant_authority",
+      "validation": "wire"
+    },
+    {
+      "name": "stop-cannot-reexport-token",
+      "status": 200,
+      "expected": {
+        "operation": "stop",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": true,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "grant_authority",
+      "validation": "wire"
+    },
+    {
+      "name": "admin-failed-fence-cannot-grant",
+      "status": 422,
+      "expected": {
+        "operation": "stop_admin",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop_admin",
+        "ok": false,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        },
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "reason": "grant_authority",
+      "validation": "wire"
+    },
+    {
+      "name": "create-replay-cannot-grant-later-owner",
+      "status": 422,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1",
+        "authorized_grant": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": false,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        },
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "reason": "grant_authority",
+      "validation": "wire"
+    },
+    {
+      "name": "root-on-checkpoint",
+      "status": 200,
+      "expected": {
+        "operation": "checkpoint",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "checkpoint",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "root_path",
+      "validation": "wire"
+    },
+    {
+      "name": "initialization-cannot-report-success",
+      "status": 200,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1",
+        "authorized_grant": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "initializing",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "lease": {
+              "holder": "initialization",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "reason": "completion",
+      "validation": "wire"
+    },
+    {
+      "name": "release-success-cannot-retain-owner",
+      "status": 200,
+      "expected": {
+        "operation": "release",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "release",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          }
+        }
+      },
+      "reason": "completion",
+      "validation": "wire"
+    },
+    {
+      "name": "checkpoint-success-cannot-retain-pending",
+      "status": 200,
+      "expected": {
+        "operation": "checkpoint",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "checkpoint",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            },
+            "pending": {
+              "generation_id": "77777777777777777777777777777777",
+              "previous_seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "9999999999999999999999999999999999999999"
+                },
+                {
+                  "name": "b",
+                  "commit": "9999999999999999999999999999999999999999"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "reason": "completion",
+      "validation": "wire"
+    },
+    {
+      "name": "archive-success-requires-frozen-completion",
+      "status": 200,
+      "expected": {
+        "operation": "archive",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "archive",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "archived",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "archive": {
+              "archived_at": "2026-11-15T00:00:00Z",
+              "reap_after": "2026-11-22T00:00:00Z",
+              "freeze_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "automatic": false
+            }
+          }
+        }
+      },
+      "reason": "completion",
+      "validation": "wire"
+    },
+    {
+      "name": "stop-success-requires-revocation",
+      "status": 200,
+      "expected": {
+        "operation": "stop",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "stop",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          }
+        }
+      },
+      "reason": "stop_completion",
+      "validation": "wire"
+    },
+    {
+      "name": "run-success-cannot-report-failed-exit",
+      "status": 200,
+      "expected": {
+        "operation": "run",
+        "key": "card",
+        "request_id": "run-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "ok": true,
+        "request_id": "run-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "execution": {
+            "id": "33333333333333333333333333333333",
+            "phase": "stopped"
+          },
+          "exit_code": 7,
+          "log_truncated": false
+        }
+      },
+      "reason": "execution_outcome",
+      "validation": "wire"
+    },
+    {
+      "name": "recovery-cannot-name-self",
+      "status": 200,
+      "expected": {
+        "operation": "recover",
+        "key": "card",
+        "request_id": "recover-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "recover",
+        "ok": true,
+        "request_id": "recover-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "recovered_from": {
+              "bench_id": "11111111111111111111111111111111",
+              "seal": "ffffffffffffffffffffffffffffffffffffffff",
+              "manifest_sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+            }
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "validation": "wire",
+      "reason": "recovery_identity"
+    },
+    {
+      "name": "supervised-mode-cannot-be-cooperative",
+      "status": 200,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1",
+        "authorized_grant": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": true,
+        "request_id": "lease-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "cooperative",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "validation": "wire",
+      "reason": "lease_mode"
+    },
+    {
+      "name": "initialization-needs-owner",
+      "status": 422,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1",
+        "authorized_grant": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": false,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "initializing",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        },
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire",
+      "reason": "initialization_owner"
+    },
+    {
+      "name": "ready-needs-checkpoint",
+      "status": 200,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "validation": "wire",
+      "reason": "checkpoint_state"
+    },
+    {
+      "name": "pending-cannot-reuse-generation",
+      "status": 422,
+      "expected": {
+        "operation": "checkpoint",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "checkpoint",
+        "ok": false,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            },
+            "pending": {
+              "generation_id": "22222222222222222222222222222222",
+              "previous_seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "9999999999999999999999999999999999999999"
+                },
+                {
+                  "name": "b",
+                  "commit": "9999999999999999999999999999999999999999"
+                }
+              ]
+            }
+          }
+        },
+        "error": {
+          "code": "operation_failed",
+          "message": "Inspect retained workspace state."
+        }
+      },
+      "validation": "wire",
+      "reason": "checkpoint_chain"
+    },
+    {
+      "name": "inventory-source-format-mismatch",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": true,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "object_format"
+    },
+    {
+      "name": "inventory-unsafe-short-branch",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": true,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bad..branch",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "branch_name"
+    },
+    {
+      "name": "archive-deadline-before-intent",
+      "status": 200,
+      "expected": {
+        "operation": "archive",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "archive",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "archived",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "archive": {
+              "archived_at": "2026-11-15T00:00:00Z",
+              "reap_after": "2026-11-14T00:00:00Z",
+              "freeze_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "frozen_at": "2026-11-15T00:00:01Z",
+              "automatic": false
+            }
+          }
+        }
+      },
+      "validation": "wire",
+      "reason": "archive_time"
+    },
+    {
+      "name": "setup-success-needs-selected-proof",
+      "status": 200,
+      "expected": {
+        "operation": "setup",
+        "key": "card",
+        "request_id": "setup-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "setup",
+        "ok": true,
+        "request_id": "setup-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "execution": {
+            "id": "33333333333333333333333333333333",
+            "phase": "stopped"
+          },
+          "exit_code": 0,
+          "log_truncated": false,
+          "preparation": [
+            {
+              "name": "a",
+              "status": "prepared"
+            },
+            {
+              "name": "b",
+              "status": "failed"
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "preparation"
+    },
+    {
+      "name": "unicode-root-exceeds-byte-bound",
+      "status": 200,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "root_path": "/😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+        }
+      },
+      "validation": "wire",
+      "reason": "root_path"
+    },
+    {
+      "name": "message-exceeds-utf8-byte-bound",
+      "status": 409,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": false,
+        "request_id": "lease-1",
+        "error": {
+          "code": "conflict",
+          "message": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+        }
+      },
+      "validation": "wire",
+      "reason": "message_bytes"
+    },
+    {
+      "name": "new-grant-needs-root",
+      "status": 200,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1",
+        "authorized_grant": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": true,
+        "request_id": "lease-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          }
+        }
+      },
+      "validation": "wire",
+      "reason": "root_path"
+    },
+    {
+      "name": "root-needs-canonical-components",
+      "status": 200,
+      "expected": {
+        "operation": "create",
+        "key": "card",
+        "request_id": "create-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "create",
+        "ok": true,
+        "request_id": "create-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "root_path": "/bounded/../card"
+        }
+      },
+      "validation": "wire",
+      "reason": "root_path"
+    },
+    {
+      "name": "unknown-execution-cannot-claim-exit",
+      "status": 200,
+      "expected": {
+        "operation": "run",
+        "key": "card",
+        "request_id": "run-1"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "ok": true,
+        "request_id": "run-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "execution": {
+            "id": "33333333333333333333333333333333",
+            "phase": "starting"
+          },
+          "exit_code": 0,
+          "log_truncated": false
+        }
+      },
+      "validation": "wire",
+      "reason": "execution_outcome"
+    },
+    {
+      "name": "nested-null-execution",
+      "status": 200,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1",
+        "authorized_grant": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": true,
+        "request_id": "lease-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": null
+            }
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "transfer-forged-readiness",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": true,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ],
+              "transfer_state": "transferred"
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "transfer-unknown-state",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ],
+              "transfer_state": "available"
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "transfer-empty-state",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ],
+              "transfer_state": ""
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "transfer-null-state",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ],
+              "transfer_state": null
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "transfer-without-checkpoint",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ],
+              "transfer_state": "transferred"
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "transfer-with-owner",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ],
+              "transfer_state": "transferred",
+              "lease": {
+                "holder": "worker",
+                "mode": "cooperative",
+                "stop_requested": false
+              }
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "transfer-with-pending",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "ready",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ],
+              "transfer_state": "transferred",
+              "pending": {
+                "generation_id": "33333333333333333333333333333333",
+                "manifest_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+                "previous_seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "transfer-initializing-state",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "initializing",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ],
+              "transfer_state": "transferred",
+              "lease": {
+                "holder": "initialization",
+                "mode": "cooperative",
+                "stop_requested": true
+              }
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "transfer-with-grant",
+      "status": 200,
+      "expected": {
+        "operation": "lease",
+        "key": "card",
+        "request_id": "lease-1",
+        "authorized_grant": true
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "lease",
+        "ok": true,
+        "request_id": "lease-1",
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "run:one",
+              "mode": "supervised",
+              "stop_requested": false,
+              "execution": {
+                "id": "33333333333333333333333333333333",
+                "phase": "stopped"
+              }
+            },
+            "transfer_state": "transferred"
+          },
+          "grant": {
+            "lease_token": "66666666666666666666666666666666"
+          },
+          "root_path": "/bounded/benches/card"
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "relinquishing-cannot-already-archive",
+      "status": 200,
+      "expected": {
+        "operation": "archive",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "archive",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "archived",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "archive": {
+              "archived_at": "2026-11-15T00:00:00Z",
+              "reap_after": "2026-11-22T00:00:00Z",
+              "freeze_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "frozen_at": "2026-11-15T00:00:01Z",
+              "automatic": false
+            },
+            "transfer_state": "relinquishing"
+          }
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    }
+  ],
+  "lexical": [
+    {
+      "name": "duplicate-envelope",
+      "reason": "duplicate_key",
+      "raw": "{\"version\":\"superbench.v2\",\"version\":\"superbench.v2\"}"
+    },
+    {
+      "name": "duplicate-nested",
+      "reason": "duplicate_key",
+      "raw": "{\"error\":{\"code\":\"conflict\",\"code\":\"forbidden\"}}"
+    },
+    {
+      "name": "trailing-document",
+      "reason": "json",
+      "raw": "{} {}"
+    },
+    {
+      "name": "unpaired-surrogate",
+      "reason": "unicode_scalars",
+      "raw": "{\"error\":{\"message\":\"\\ud800\"}}"
+    },
+    {
+      "name": "unpaired-key",
+      "reason": "unicode_scalars",
+      "raw": "{\"\\ud800\":0}"
+    },
+    {
+      "name": "negative-zero",
+      "reason": "integer_encoding",
+      "raw": "{\"data_free_bytes\":-0}"
+    },
+    {
+      "name": "fractional-count",
+      "reason": "integer_encoding",
+      "raw": "{\"data_free_bytes\":1.0}"
+    },
+    {
+      "name": "exponent-count",
+      "reason": "integer_encoding",
+      "raw": "{\"data_free_bytes\":1e3}"
+    }
+  ]
+}
