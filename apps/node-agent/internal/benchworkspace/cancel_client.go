@@ -27,12 +27,30 @@ func (*CancelFailure) Error() string {
 // stop, another host or redispatch. Success returns a producer observation only;
 // requested intent does not establish fencing or authorize a handoff.
 func (c *Client) Cancel(ctx context.Context, target CancelRequest) (*CancelResponse, error) {
+	return c.cancel(ctx, target, nil)
+}
+
+// CancelWithEvidence preserves Cancel's once-only semantics and retains exact
+// private bytes. A capture or hash is not a successful acknowledgement; a caller
+// must independently reparse the saved target and full response before any use.
+func (c *Client) CancelWithEvidence(ctx context.Context, target CancelRequest) (*CancelResponse, *ExchangeEvidence, error) {
+	evidence := &ExchangeEvidence{}
+	out, err := c.cancel(ctx, target, evidence)
+	if len(evidence.request) == 0 {
+		return out, nil, err
+	}
+	return out, evidence, err
+}
+func (c *Client) cancel(ctx context.Context, target CancelRequest, evidence *ExchangeEvidence) (*CancelResponse, error) {
 	raw, err := json.Marshal(target)
 	if err != nil {
 		return nil, ErrInvalid
 	}
 	if _, err = ParseCancelRequest(raw); err != nil {
 		return nil, err
+	}
+	if evidence != nil {
+		evidence.request = append([]byte(nil), raw...)
 	}
 	req, err := http.NewRequestWithContext(ctx, "POST", "http://superbench.local/v2/operations", bytes.NewReader(raw))
 	if err != nil {
@@ -52,6 +70,10 @@ func (c *Client) Cancel(ctx context.Context, target CancelRequest) (*CancelRespo
 	body, err := io.ReadAll(io.LimitReader(reply.Body, MaxBody+1))
 	if err != nil || len(body) > MaxBody {
 		return fail("invalid_response")
+	}
+	if evidence != nil {
+		evidence.response = append([]byte(nil), body...)
+		evidence.status = reply.StatusCode
 	}
 	response, err := ParseCancelResponse(body, reply.StatusCode, target)
 	if err != nil {

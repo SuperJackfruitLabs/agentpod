@@ -67,7 +67,7 @@ func TestCancellationTombstoneVetoesLatePrepareAcrossRestart(t *testing.T) {
 		t.Fatal("pre-source cancel", status, e)
 	}
 	before := journalBytes(t, c, spec)
-	if !bytes.Contains(before, []byte("agentpod.private-bench-dispatch.v3")) {
+	if !bytes.Contains(before, []byte("agentpod.private-bench-dispatch.v4")) {
 		t.Fatal("missing explicit journal version")
 	}
 	restarted := Manager{Source: c}
@@ -226,7 +226,7 @@ func TestMalformedCancelReplyKeepsIntentAndNeverFallsBackToOwnerStop(t *testing.
 
 func TestCancellationJournalRejectsFutureAndCorruptStateWithoutEffects(t *testing.T) {
 	for _, corrupt := range []func(map[string]any){
-		func(doc map[string]any) { doc["version"] = "agentpod.private-bench-dispatch.v4" },
+		func(doc map[string]any) { doc["version"] = "agentpod.private-bench-dispatch.v5" },
 		func(doc map[string]any) { doc["version"] = "agentpod.private-bench-dispatch.v2" },
 		func(doc map[string]any) { delete(doc, "cancellations") },
 		func(doc map[string]any) { doc["cancellations"] = []any{} },

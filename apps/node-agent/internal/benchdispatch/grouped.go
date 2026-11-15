@@ -7,48 +7,11 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
-	"regexp"
-	"strings"
 	"unicode/utf8"
 
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattempt"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/superbench"
 )
-
-var groupedMemberName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
-var groupedRegistration = regexp.MustCompile(`^[a-f0-9]{32}$`)
-
-var validGroupedIdentity = benchattempt.ValidGroupedIdentity
-
-func validateGroupedPlan(p Plan) error {
-	g := p.Grouped
-	if !validGroupedIdentity(p.Identity) || g == nil || !groupedRegistration.MatchString(p.RegistrationID) || !physicalName(g.WorkspaceRoot) || !utf8.ValidString(g.WorkspaceRoot) || strings.ContainsRune(g.WorkspaceRoot, 0) || len(g.WorkspaceRoot) > 4096 || filepath.Base(g.WorkspaceRoot) != p.BenchKey || filepath.Base(filepath.Dir(g.WorkspaceRoot)) != "benches" || len(g.Members) != len(p.Sources) || p.Identity.Epoch > 1<<53-1 {
-		return ErrInvalid
-	}
-	rel, err := filepath.Rel(g.WorkspaceRoot, p.ContextPath)
-	if err != nil || rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return ErrInvalid
-	}
-	selected := g.RepositoryName == ""
-	repositories := map[string]bool{}
-	for i, m := range g.Members {
-		s := p.Sources[i]
-		if repositories[m.RepositorySHA256] || !groupedMemberName.MatchString(m.Name) || m.Name != s.Name || m.RepositorySHA256 != s.RepositorySHA256 || m.TaskRef != s.TaskRef || m.Commit != s.Commit || m.TaskRef != "refs/heads/card/"+p.Identity.CardID || (m.ObjectFormat != "sha1" && m.ObjectFormat != "sha256") || m.ObjectFormat == "sha1" && len(m.Commit) != 40 || m.ObjectFormat == "sha256" && len(m.Commit) != 64 {
-			return ErrInvalid
-		}
-		repositories[m.RepositorySHA256] = true
-		selected = selected || m.Name == g.RepositoryName
-	}
-	if !selected {
-		return ErrInvalid
-	}
-	raw, _ := json.Marshal(benchworkspace.Request{Version: benchworkspace.Version, Operation: "run", Key: p.BenchKey, Holder: p.Holder, RequestID: p.RequestID, Arguments: []string{p.ExecutablePath, p.ContextPath, p.ContextSHA256}})
-	if _, err = benchworkspace.Parse(raw); err != nil {
-		return ErrInvalid
-	}
-	return nil
-}
 
 func validateGroupedLaunch(p Plan, raw []byte) error {
 	r, err := benchworkspace.Parse(raw)

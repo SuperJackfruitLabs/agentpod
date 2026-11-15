@@ -146,7 +146,12 @@ func (m Manager) Cancel(ctx context.Context, spec benchdispatch.SourceSpec) (Sta
 			if e := m.recheck(ctx, spec, plan, observation); e != nil {
 				return e
 			}
-			reply, callErr := m.Source.Client.Cancel(ctx, target)
+			reply, capture, callErr := m.Source.Client.CancelWithEvidence(ctx, target)
+			if capture != nil {
+				if e := m.observeExchange(spec, plan, capture); e != nil {
+					return e
+				}
+			}
 			if callErr == nil && reply != nil && reply.Result != nil {
 				observation.State = reply.Result.State
 			}
