@@ -1,0 +1,55 @@
+{
+  "source": "owner checkpoint-json.ts at 9592d349b5ec7b0a746f97e726ab95dc33948f14; generated once offline, no runtime import",
+  "cases": [
+    {
+      "policy": {
+        "version": "superpipeline.checkpoint-policy.v1",
+        "kind": "superbench",
+        "allowUnchanged": false,
+        "repositories": [
+          {
+            "name": "app",
+            "provider": "forge",
+            "repository": "example/app"
+          }
+        ],
+        "checkpointRepository": "app",
+        "reporterPrincipalId": "prn_coordinator1",
+        "nodeId": "node_pilot01",
+        "executors": [
+          {
+            "agentId": "agt_example",
+            "stationId": "station_pilot01"
+          }
+        ]
+      },
+      "canonical": "{\"allowUnchanged\":false,\"checkpointRepository\":\"app\",\"executors\":[{\"agentId\":\"agt_example\",\"stationId\":\"station_pilot01\"}],\"kind\":\"superbench\",\"nodeId\":\"node_pilot01\",\"reporterPrincipalId\":\"prn_coordinator1\",\"repositories\":[{\"name\":\"app\",\"provider\":\"forge\",\"repository\":\"example/app\"}],\"version\":\"superpipeline.checkpoint-policy.v1\"}",
+      "sha256": "e4854f02957e3d622fde729b62bdcd5c0334baa94c9fd0629bf8dd624887d144"
+    },
+    {
+      "policy": {
+        "version": "superpipeline.checkpoint-policy.v1",
+        "kind": "superbench",
+        "allowUnchanged": false,
+        "repositories": [
+          {
+            "name": "app",
+            "provider": "forge",
+            "repository": "example/app"
+          }
+        ],
+        "checkpointRepository": "app",
+        "reporterPrincipalId": "prn_coordinator1",
+        "nodeId": "node_😀 <>&\n",
+        "executors": [
+          {
+            "agentId": "agt_example",
+            "stationId": "station_日本"
+          }
+        ]
+      },
+      "canonical": "{\"allowUnchanged\":false,\"checkpointRepository\":\"app\",\"executors\":[{\"agentId\":\"agt_example\",\"stationId\":\"station_\\u65e5\\u672c\"}],\"kind\":\"superbench\",\"nodeId\":\"node_\\ud83d\\ude00\\u2028<>&\\u000a\",\"reporterPrincipalId\":\"prn_coordinator1\",\"repositories\":[{\"name\":\"app\",\"provider\":\"forge\",\"repository\":\"example/app\"}],\"version\":\"superpipeline.checkpoint-policy.v1\"}",
+      "sha256": "0c8bc87d093b4fb3383b7bfe6a565830212fe192240a36b194965062243ec7f6"
+    }
+  ]
+}
