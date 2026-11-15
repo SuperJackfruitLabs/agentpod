@@ -100,7 +100,7 @@ exact active `BoundSource` lookup returns only the cap-free, not-yet-launched
 plan; it does not reissue a grant. Historical request IDs cannot be reused for
 another acquisition. No automatic adoption, cleanup, rewind or release occurs.
 
-This coordinator intentionally stops before payload launch. A production path
+Source preparation intentionally stops before payload launch. A production path
 still needs accepted grouped/cancellation contracts and capability discovery,
 actual common control-pair enforcement and authenticated selected-node routing,
 immutable work-owner source admission, an explicit structured harness adapter,
@@ -122,6 +122,12 @@ Worker task outcomes remain distinct from orchestration success. Current owner
 checks run again after admission and transport awaits. Private immutable ledger
 proposals still include the original private Plan paths: they are not the Hub
 wire result or an accepted settlement. SourceBinding is the separate path-free
-projection. Exact historical proposal replay cannot launch another child or
+projection. `benchcoordinator.ReadCompletion` additionally reparses a completed
+journal entry, its saved producer response and exact worker result under the
+journal lock before returning typed source, service and task fields. It omits
+the private Plan. Task handoff remains bounded untrusted child output; it is
+not sanitized or evidence of source authority. This private accessor neither
+launches nor grants, and its future authenticated caller must authorize
+disclosure and admission separately. Exact historical proposal replay cannot launch another child or
 renew ownership. Actual authenticated Hub current/admission wiring, source trust
 acceptance, and end-to-end coordinator integration remain required before use.
