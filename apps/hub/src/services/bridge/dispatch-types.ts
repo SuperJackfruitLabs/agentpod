@@ -204,7 +204,7 @@ export const DEFAULT_HEARTBEAT_MS = 60_000;
 /** A harness that never yields still has to end somewhere. */
 export const DEFAULT_TURN_TIMEOUT_MS = 30 * 60_000;
 /** Hermes wake turns have no end marker, so silence is their terminal signal. */
-export const DEFAULT_OWN_WORK_QUIET_MS = 5_000;
+export const DEFAULT_OWN_WORK_QUIET_MS = 30_000;
 /** Detached work must never hold a card and station forever. */
 export const DEFAULT_OWN_WORK_TIMEOUT_MS = 30 * 60_000;
 /** How often a run with a question outstanding is re-read. */

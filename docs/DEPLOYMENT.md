@@ -225,9 +225,9 @@ PROVISIONING_HUB_URL=https://hub.<your-domain>
 # lowercase string "true" — `1` and `TRUE` read as off.
 # ENABLE_SUPERPIPELINE_BRIDGE=false
 # SUPERPIPELINE_BASE_URL=https://superpipeline.dev
-# Optional background-work wake policy, in milliseconds. Defaults: 5000 quiet,
+# Optional background-work wake policy, in milliseconds. Defaults: 30000 quiet,
 # 1800000 hard ceiling. Both must be positive integers when set.
-# SUPERPIPELINE_BRIDGE_OWN_WORK_QUIET_MS=5000
+# SUPERPIPELINE_BRIDGE_OWN_WORK_QUIET_MS=30000
 # SUPERPIPELINE_BRIDGE_OWN_WORK_TIMEOUT_MS=1800000
 # Optional: an Accounts service credential holding approval-requests:relay, so SuperToolkit
 # approval requests reach chat (see "The decision relay" below). Unset = they do not.

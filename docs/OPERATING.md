@@ -1634,7 +1634,7 @@ encrypted with it.
 Hermes background delegations and terminal jobs marked `notify_on_complete` keep their ACP
 session, lease and heartbeat attached after the prompted turn ends. The bridge closes the run only
 after Hermes' unsolicited wake has been quiet for `SUPERPIPELINE_BRIDGE_OWN_WORK_QUIET_MS`
-(5 seconds by default). `SUPERPIPELINE_BRIDGE_OWN_WORK_TIMEOUT_MS` is the hard ceiling (30 minutes
+(30 seconds by default: a wake turn's first reply can take longer than a few seconds, and closing early loses it). `SUPERPIPELINE_BRIDGE_OWN_WORK_TIMEOUT_MS` is the hard ceiling (30 minutes
 by default); expiry blocks the run with its pending-work inventory instead of holding a station
 forever. Both settings are positive integer milliseconds.
 
