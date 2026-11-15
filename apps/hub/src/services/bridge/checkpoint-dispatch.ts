@@ -1,4 +1,4 @@
-/** Private proposed selection seam. No production constructor advertises or implements it. */
+/** Proposed dedicated selection. Only an explicitly installed private profile constructs a port. */
 import { z } from "zod";
 import { CHECKPOINT_CLAIM_PROTOCOL, parsePendingCheckpointClaim, type PendingCheckpointClaim } from "./checkpoint-claim";
 import type { DispatchResult } from "./dispatch-types";
@@ -13,13 +13,16 @@ function scalars(value: string): boolean {
 }
 const opaque = z.string().min(1).max(128).refine(scalars);
 const targetSchema = z.object({
-  tenantId: opaque, boardId: opaque, agentId: opaque, stationId: opaque, nodeId: opaque,
+  tenantId: opaque, sourceTenantId: opaque, boardId: opaque, agentId: opaque, stationId: opaque, nodeId: opaque,
   hostId: opaque, registryRevision: opaque,
-  coordinatorVersion: z.literal("superbench.v2"),
+  benchProtocol: z.literal("superbench.v2"),
+  coordinatorImplementationSHA256: z.string().regex(/^[a-f0-9]{64}(?![\s\S])/),
+  executionMode: z.literal("linux-cgroup-v2"),
   workerVersion: z.literal("agentpod.superbench-worker.v2"),
   workerSHA256: z.string().regex(/^[a-f0-9]{64}(?![\s\S])/),
 }).strict();
-/** Observed trusted registry selection, never a source attestation or execution grant. */
+/** Server-selected Hub and source tenant IDs remain distinct; the source pin comes only from trusted org-plane configuration.
+ * Observed registry selection is never a source attestation or execution grant. */
 export type CheckpointTarget = Readonly<z.infer<typeof targetSchema>>;
 export interface CheckpointSelectionIdentity { tenantId: string; boardId: string; stationId: string }
 export interface CheckpointDispatchPort {
@@ -27,17 +30,20 @@ export interface CheckpointDispatchPort {
   ready(identity: Readonly<CheckpointSelectionIdentity>): Promise<CheckpointTarget | undefined>;
   /** Fresh trusted lookup of the exact immutable target, not a caller-provided readiness boolean. */
   current(target: CheckpointTarget): Promise<boolean>;
+  /** Pending exact old attempts block new claims and never become a new run. */
+  recover?(): Promise<DispatchResult | undefined>;
   /** Owns operation-bound execution/repair/settlement. No generic ACP or private proposal bytes here. */
   dispatch(input: Readonly<{ target: CheckpointTarget; claim: PendingCheckpointClaim }>): Promise<DispatchResult>;
 }
 export interface CheckpointSelection {
   readonly protocol: typeof CHECKPOINT_CLAIM_PROTOCOL;
+  recover(): Promise<DispatchResult | undefined>;
   dispatch(client: SuperpipelineClient, claim: PendingCheckpointClaim): Promise<DispatchResult>;
 }
 const parked = (): DispatchResult => ({ status: "unreported", reason: "Checkpoint dispatch requires reconciliation" });
 
 function matches(target: CheckpointTarget, claim: PendingCheckpointClaim): boolean {
-  return claim.tenantId === target.tenantId && claim.boardId === target.boardId && claim.agentId === target.agentId &&
+  return claim.tenantId === target.sourceTenantId && claim.boardId === target.boardId && claim.agentId === target.agentId &&
     claim.policy.nodeId === target.nodeId && claim.policy.executors.some((executor) =>
       executor.agentId === target.agentId && executor.stationId === target.stationId);
 }
@@ -55,6 +61,7 @@ export async function selectCheckpointDispatch(port: CheckpointDispatchPort | un
     !await port.current(target)) throw new Error("Checkpoint target unavailable");
   return Object.freeze({
     protocol: CHECKPOINT_CLAIM_PROTOCOL,
+    recover: () => port.recover?.() ?? Promise.resolve(undefined),
     async dispatch(client: SuperpipelineClient, value: PendingCheckpointClaim): Promise<DispatchResult> {
       // Once claimed, never release/stop/report on uncertain ownership, and never select ACP as a fallback.
       try {

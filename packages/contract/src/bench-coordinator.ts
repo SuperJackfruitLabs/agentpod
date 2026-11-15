@@ -1,9 +1,11 @@
-/** PROPOSED dedicated coordinator data only. No handler, capability or authority is enabled. */
+/** PROPOSED dedicated coordinator data. Optional private handlers do not enable a capability or authority. */
 import { z } from "zod";
 
 export const BENCH_COORDINATOR_VERSION = "agentpod.bench-coordinator.v1";
 export const BENCH_COORDINATOR_MAX_REQUEST = 64 * 1024;
 export const BENCH_COORDINATOR_MAX_RESPONSE = 256 * 1024;
+/** PROPOSED explicit broker verb; handlers and installation opt-in are separate gates. */
+export const BENCH_COORDINATOR_VERB = "bench.coordinator";
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
 const scalar = (value: string) => {
   for (const part of value) {
@@ -61,7 +63,7 @@ export const BenchCoordinatorSourceBinding = z.object({
 export type BenchCoordinatorSourceBinding = z.infer<typeof BenchCoordinatorSourceBinding>;
 export const BenchCoordinatorPrepared = z.object({
   binding: BenchCoordinatorSourceBinding, binding_sha256: sha,
-  request_id: key, checkpoint_repository: name,
+  request_id: key, checkpoint_repository: name, source_request_sha256: sha,
 }).strict().refine((p) => {
   const coordinator = p.binding.members.find((m) => m.name === p.checkpoint_repository);
   return coordinator !== undefined && p.binding.checkpoint.seal.length === (coordinator.object_format === "sha1" ? 40 : 64) &&
@@ -81,11 +83,13 @@ const task = z.object({ version: z.literal("agentpod.superbench-worker.v2"), bin
   board_id: product("brd"), card_id: product("card"), run_id: product("run"), epoch: integer.min(1),
 }).strict(), outcome: z.enum(["complete", "blocked", "failed"]), handoff }).strict()
   .refine((v) => bytes(v) <= 65536);
-export const BenchCoordinatorCompletion = z.object({ source: BenchCoordinatorPrepared, service, task }).strict()
+export const BenchCoordinatorCompletion = z.object({ source: BenchCoordinatorPrepared, service, task,
+  source_request_sha256: sha, source_receipt_sha256: sha }).strict()
   .refine((c) => {
     const b = c.source.binding; const i = b.identity; const t = c.task.binding; const s = c.service;
     const coordinator = b.members.find((m) => m.name === c.source.checkpoint_repository);
-    return s.request_id === c.source.request_id && s.request_sha256 === b.request_sha256 && s.body_sha256 === b.body_sha256 &&
+    return c.source_request_sha256 === c.source.source_request_sha256 &&
+      s.request_id === c.source.request_id && s.request_sha256 === b.request_sha256 && s.body_sha256 === b.body_sha256 &&
       t.board_id === i.board_id && t.card_id === i.card_id && t.run_id === i.run_id && t.epoch === i.epoch &&
       sorted(s.checkpoints) && s.checkpoints.length === b.sources.length && s.checkpoints.every((m, n) => {
         const old = b.sources[n]; const known = b.members[n];
@@ -115,6 +119,28 @@ export const BenchCoordinatorRequest = requestUnion.refine((r) => r.operation ==
     r.source_receipt.run_id === r.identity.run_id && r.source_receipt.epoch === r.identity.epoch))
   .refine((r) => bytes(r) <= BENCH_COORDINATOR_MAX_REQUEST);
 export type BenchCoordinatorRequest = z.infer<typeof BenchCoordinatorRequest>;
+
+/** Node-authenticated fresh authority lookup; the URL and credential are installation-owned. */
+export const BENCH_COORDINATOR_CURRENT_VERSION = "agentpod.bench-coordinator-current.v1";
+export const BenchCoordinatorCurrentRequest = z.object({
+  version: z.literal(BENCH_COORDINATOR_CURRENT_VERSION), phase: z.enum(["prepare", "execute", "observe"]),
+  nonce: bid, identity: BenchCoordinatorIdentity, target: BenchCoordinatorTarget, profile_id: id,
+  prepare_request_sha256: sha,
+  execute_request_sha256: sha.optional(),
+  binding_sha256: sha.optional(), source_digest: sha.optional(),
+}).strict().refine((r) => matched(r.identity, r.target) &&
+  (r.source_digest === undefined || r.binding_sha256 !== undefined) &&
+  (r.phase !== "execute" || r.binding_sha256 !== undefined && r.source_digest !== undefined && r.execute_request_sha256 !== undefined))
+  .refine((r) => bytes(r) <= BENCH_COORDINATOR_MAX_REQUEST);
+export type BenchCoordinatorCurrentRequest = z.infer<typeof BenchCoordinatorCurrentRequest>;
+const currentBase = { version: z.literal(BENCH_COORDINATOR_CURRENT_VERSION), nonce: bid,
+  request_sha256: sha, issued_at_ms: integer, expires_at_ms: integer };
+export const BenchCoordinatorCurrentResponse = z.discriminatedUnion("decision", [
+  z.object({ ...currentBase, decision: z.literal("current") }).strict(),
+  z.object({ ...currentBase, decision: z.literal("refused"),
+    code: z.enum(["unauthorized", "stale_owner", "unavailable", "pending", "invalid"]) }).strict(),
+]).refine((r) => r.expires_at_ms > r.issued_at_ms && r.expires_at_ms - r.issued_at_ms <= 5000);
+export type BenchCoordinatorCurrentResponse = z.infer<typeof BenchCoordinatorCurrentResponse>;
 const pending = z.object({ ...fixed, operation: z.enum(["prepare", "execute", "status"]), ...owned,
   state: z.enum(["unknown", "pending", "superseded"]) }).strict();
 const prepared = z.object({ ...fixed, operation: z.enum(["prepare", "status"]), ...owned,
@@ -217,4 +243,22 @@ export async function parseBenchCoordinatorResponse(raw: Uint8Array, request: un
 export async function checkBenchCoordinatorResponse(value: unknown, request: unknown): Promise<BenchCoordinatorResponse> {
   try { return await checkResponse(value, request); }
   catch { throw new Error("Coordinator response refused"); }
+}
+
+export function parseBenchCoordinatorCurrentRequest(raw: Uint8Array): BenchCoordinatorCurrentRequest {
+  try { return BenchCoordinatorCurrentRequest.parse(read(raw, BENCH_COORDINATOR_MAX_REQUEST)); }
+  catch { throw new Error("Coordinator current request refused"); }
+}
+export async function parseBenchCoordinatorCurrentResponse(raw: Uint8Array, requestRaw: Uint8Array,
+  nowMs = Date.now()): Promise<BenchCoordinatorCurrentResponse> {
+  try {
+    const request = parseBenchCoordinatorCurrentRequest(requestRaw);
+    const response = BenchCoordinatorCurrentResponse.parse(read(raw, 4096));
+    const hash = await crypto.subtle.digest("SHA-256", new Uint8Array(requestRaw));
+    const expected = Array.from(new Uint8Array(hash), (n) => n.toString(16).padStart(2, "0")).join("");
+    if (!Number.isSafeInteger(nowMs) || response.nonce !== request.nonce || response.request_sha256 !== expected ||
+      response.issued_at_ms > nowMs || response.expires_at_ms <= nowMs)
+      throw new Error("Coordinator current response refused");
+    return response;
+  } catch { throw new Error("Coordinator current response refused"); }
 }

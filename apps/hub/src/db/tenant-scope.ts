@@ -38,6 +38,7 @@ import { salaamWorkOwners, salaamWorkDecisions, salaamWorkReports } from "./sche
 import { acpEvents, acpRuns, acpSessions, acpPromptRequests } from "./schema/acp";
 import { matrixBoardRooms } from "./schema/board-rooms";
 import { bridgeAgents, bridgeBoardSettings, bridgeDispatches } from "./schema/bridge";
+import { checkpointDispatches } from "./schema/checkpoint-dispatch";
 import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
 import {
@@ -157,6 +158,7 @@ export const TENANT_SCOPED_TABLES = {
   bridgeAgents,
   bridgeBoardSettings,
   bridgeDispatches,
+  checkpointDispatches,
   agentTasks,
   cloudflareSandboxes,
   matrixRooms,

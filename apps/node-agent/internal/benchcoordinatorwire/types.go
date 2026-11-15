@@ -90,6 +90,7 @@ type Prepared struct {
 	BindingSHA256        string        `json:"binding_sha256"`
 	RequestID            string        `json:"request_id"`
 	CheckpointRepository string        `json:"checkpoint_repository"`
+	SourceRequestSHA256  string        `json:"source_request_sha256"`
 }
 type Service struct {
 	RequestID          string   `json:"request_id"`
@@ -120,9 +121,11 @@ type WorkerResult struct {
 	Handoff map[string]string `json:"handoff"`
 }
 type Completion struct {
-	Source  Prepared     `json:"source"`
-	Service Service      `json:"service"`
-	Task    WorkerResult `json:"task"`
+	Source              Prepared     `json:"source"`
+	Service             Service      `json:"service"`
+	Task                WorkerResult `json:"task"`
+	SourceRequestSHA256 string       `json:"source_request_sha256"`
+	SourceReceiptSHA256 string       `json:"source_receipt_sha256"`
 }
 type Receipt struct {
 	RunID        string `json:"run_id"`

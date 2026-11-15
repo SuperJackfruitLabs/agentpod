@@ -10,6 +10,9 @@ type Config struct {
 	Hub        string `json:"hub"`
 	NodeID     string `json:"nodeId"`
 	NodeSecret string `json:"nodeSecret"`
+	// ProposedCheckpointRegistry is an explicit private operator pin. Empty keeps
+	// dedicated coordinator dispatch disabled; no capability is advertised.
+	ProposedCheckpointRegistry string `json:"proposedCheckpointRegistry,omitempty"`
 	// HermesStartCmd is the shell command used to start the Hermes gateway.
 	// Needed by the lifecycle "start" and "restart" actions. Optional.
 	HermesStartCmd string `json:"hermesStartCmd,omitempty"`

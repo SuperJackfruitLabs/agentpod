@@ -918,6 +918,13 @@
       "when": 1792580400020,
       "tag": "0130_board_chat_moved_notice",
       "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1792580400021,
+      "tag": "0131_checkpoint_dispatches",
+      "breakpoints": true
     }
   ]
 }
