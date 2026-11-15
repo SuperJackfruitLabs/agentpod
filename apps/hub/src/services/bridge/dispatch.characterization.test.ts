@@ -137,6 +137,8 @@ interface RigOpts {
     failPrompt?: string;
     libraryTools?: boolean;
     script?: (ev: EventMaker, promptCount: number) => AcpEvent[];
+    /** Updates the fake agent sends after its prompted turn has ended, without another prompt. */
+    wake?: (ev: EventMaker) => AcpEvent[];
     onAnswer?: (ev: EventMaker, optionId: string) => AcpEvent[];
     strict?: StrictWorkSelection;
     renew?: boolean;
@@ -196,7 +198,9 @@ function rig(o: RigOpts) {
   let seq = 0;
   const ev: EventMaker = (type, payload) => ({ sessionId: SESSION_ID, seq: ++seq, type, payload, createdAt: new Date().toISOString() });
   const subs = new Set<(e: AcpEvent) => void>();
-  const emit = (events: AcpEvent[]) => queueMicrotask(() => events.forEach((e) => subs.forEach((fn) => fn(e))));
+  const emit = (events: AcpEvent[]) => queueMicrotask(() =>
+    events.forEach((e) => subs.forEach((fn) => fn(e))),
+  );
   const a = o.acp ?? {};
   let promptCount = 0;
   const port: AcpPort = {
@@ -241,7 +245,11 @@ function rig(o: RigOpts) {
     let renewals = 0;
     port.renewExecution = async (userId, sessionId, run) => {
       trace.push({ acp: "renewExecution", userId, sessionId, run });
-      a.onRenew?.(++renewals);
+      const count = ++renewals;
+      a.onRenew?.(count);
+      // A kept-open session receives the fake agent's unsolicited wake on its first renewal.
+      // A bridge that tears the session down at end_turn never reaches this point.
+      if (count === 1 && a.wake) emit(a.wake(ev));
     };
   }
 
@@ -546,6 +554,111 @@ test("a waiting tool call that exceeds the turn ceiling is blocked with the pend
     }),
   }));
   expect(outcome.trace.some((entry) => entry.board?.endsWith("/complete"))).toBe(false);
+});
+
+const OWN_WORK_TEST_TIMING = {
+  heartbeatMs: 250,
+  turnTimeoutMs: 1_000,
+  ownWorkQuietMs: 5,
+  ownWorkTimeoutMs: 1_000,
+};
+const content = (text: string) => [{ type: "content", content: { type: "text", text } }];
+
+test("a Hermes background delegation stays attached for its unprompted wake turn", async () => {
+  const r = rig({
+    n: 68,
+    deps: OWN_WORK_TEST_TIMING,
+    acp: {
+      renew: true,
+      script: (ev) => [
+        chunk(ev, "Waiting for the delegated audit."),
+        ev("agent-update", {
+          sessionUpdate: "tool_call",
+          toolCallId: "delegate-1",
+          title: "delegate_task: audit",
+        }),
+        ev("agent-update", {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "delegate-1",
+          status: "completed",
+          content: content('{"status":"dispatched","mode":"background","delegation_id":"deleg_audit"}'),
+        }),
+        ev("state", { status: "idle" }),
+      ],
+      wake: (ev) => [
+        ev("agent-update", {
+          sessionUpdate: "tool_call",
+          toolCallId: "wake-1",
+          messageId: "wake-message-1",
+          title: "Background delegation result",
+        }),
+        ev("agent-update", {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "wake-1",
+          messageId: "wake-message-1",
+          status: "completed",
+          content: content("delegated audit finished"),
+        }),
+        ev("agent-update", {
+          sessionUpdate: "agent_message_chunk",
+          messageId: "wake-message-1",
+          content: { type: "text", text: "Finished with the real delegated result." },
+        }),
+      ],
+    },
+  });
+
+  const outcome = await r.run();
+  expect(outcome.result).toMatchObject({ status: "reported" });
+  expect(outcome.trace.filter((entry) => entry.acp === "promptSession")).toHaveLength(1);
+  expect(outcome.trace.filter((entry) => entry.acp === "createSession")).toHaveLength(1);
+  expect(outcome.trace).toContainEqual(expect.objectContaining({
+    body: expect.objectContaining({ body: expect.stringContaining("deleg_audit") }),
+  }));
+  expect(outcome.trace).toContainEqual(expect.objectContaining({
+    body: expect.objectContaining({ result: "delegated audit finished" }),
+  }));
+  expect(outcome.after).toMatchObject({
+    rows: [{ outcome: "reported", result: { summary: "Finished with the real delegated result." } }],
+  });
+});
+
+test("a Hermes notify-on-complete process waits for its unprompted result", async () => {
+  const r = rig({
+    n: 69,
+    deps: OWN_WORK_TEST_TIMING,
+    acp: {
+      renew: true,
+      script: (ev) => [
+        ev("agent-update", {
+          sessionUpdate: "tool_call",
+          toolCallId: "terminal-1",
+          title: "terminal: build",
+        }),
+        ev("agent-update", {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "terminal-1",
+          status: "completed",
+          content: content('{"status":"running","session_id":"proc_build","notify_on_complete":true}'),
+        }),
+        ev("state", { status: "idle" }),
+      ],
+      wake: (ev) => [
+        ev("agent-update", {
+          sessionUpdate: "agent_message_chunk",
+          messageId: "wake-message-2",
+          content: { type: "text", text: "Build proc_build completed successfully." },
+        }),
+      ],
+    },
+  });
+
+  const outcome = await r.run();
+  expect(outcome.result).toMatchObject({ status: "reported" });
+  expect(outcome.trace.filter((entry) => entry.acp === "promptSession")).toHaveLength(1);
+  expect(outcome.after).toMatchObject({
+    rows: [{ outcome: "reported", result: { summary: "Build proc_build completed successfully." } }],
+  });
 });
 
 test("a full turn: the session open, the prompt, activities, produced before complete, then reported", async () => {
