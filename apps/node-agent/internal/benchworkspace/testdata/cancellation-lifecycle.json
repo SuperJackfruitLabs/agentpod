@@ -1,0 +1,70 @@
+{
+  "version": "superbench.cancellation-lifecycle-fixtures.v1",
+  "status": "proposed runtime obligations; plain data does not prove execution or deployment",
+  "scenarios": [
+    {
+      "name": "before-receipt-claim",
+      "response_case": "no-effects-cancelled",
+      "assertions": [
+        "Cancellation tombstone and original receipt claim decide atomically for authenticated peer UID plus target ID and digest.",
+        "Winning tombstone prevents any effect and grant; changed digest and cross-UID attempts cannot target it."
+      ]
+    },
+    {
+      "name": "full-capacity",
+      "response_case": "pending-exact-fence",
+      "assertions": [
+        "Existing admitted cancellation remains available at full normal operation slots and tombstone budgets.",
+        "Unknown target may be refused at bounded tombstone capacity; refusal is not cancellation."
+      ]
+    },
+    {
+      "name": "after-ownership-before-effects",
+      "response_case": "pending-exact-fence",
+      "assertions": [
+        "Bind fresh operation epoch and exact lease/workspace atomically before planning or allocation.",
+        "Short effect gate serializes cancel barrier against spawn, capture creation, filesystem mutation and publication; admission never waits on workspace flock or running Git."
+      ]
+    },
+    {
+      "name": "managed-descendants",
+      "response_case": "pending-exact-fence",
+      "assertions": [
+        "Exercise real managed descendants, controller death and restart.",
+        "Retain intent and operation_in_doubt when exact scopes, provenance, or continuation revocation cannot be proven; timeouts never establish fence."
+      ]
+    },
+    {
+      "name": "completion-race",
+      "response_case": "completion-won",
+      "assertions": [
+        "Durable finalization wins or cancellation barrier wins atomically.",
+        "Completed receipt remains exact historical receipt; cancellation winner prevents fresh grant and any later admitted effect."
+      ]
+    },
+    {
+      "name": "later-owner-and-same-token",
+      "response_case": "no-effects-cancelled",
+      "assertions": [
+        "Late cancel must compare original operation identity, epoch, workspace and recorded authority within stop gate.",
+        "Do not stop replacement owner, reused workspace key, repaired initialization or later operation on same token."
+      ]
+    },
+    {
+      "name": "restart-and-sql-fault",
+      "response_case": "pending-exact-fence",
+      "assertions": [
+        "Fault SQL commits before and after ownership, gate and finalization; preserve unknown execution outcomes.",
+        "Restart reconciles evidence without redispatching payload, hooks, creation or pushes."
+      ]
+    },
+    {
+      "name": "partial-publication",
+      "response_case": "pending-exact-fence",
+      "assertions": [
+        "Preserve already published refs, files, journals, receipts and quota.",
+        "Cancellation does not checkpoint, rollback, release, retire quota, or acquire ownership."
+      ]
+    }
+  ]
+}

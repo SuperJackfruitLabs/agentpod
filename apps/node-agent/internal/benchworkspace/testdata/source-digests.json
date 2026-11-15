@@ -1,0 +1,38 @@
+{
+  "version": "superbench.source-digest-fixtures.v1",
+  "status": "proposed cancellation binding; existing producer typed Request.Digest behavior",
+  "producer_revision": "63b1e66187cd72c0151b341912bf29f6a6cd2268",
+  "producer_method": "internal/protocolv2.Request.Digest: SHA256(json.Marshal(parsed typed Request))",
+  "vectors": [
+    {
+      "canonical": "{\"version\":\"superbench.v2\",\"operation\":\"create\",\"key\":\"cancel_example\",\"repositories\":[{\"name\":\"alpha\",\"repository\":\"https://example.invalid/alpha.git\",\"branch\":\"card/example\",\"base\":\"trunk\"}],\"checkpoint_repository\":\"alpha\",\"request_id\":\"create-example\",\"initialize\":true,\"quota_bytes\":1024}",
+      "name": "create-integer",
+      "sha256": "dbcc0331a8beb65a1ba9e49b1520ba0825decc377a27d42736d8754a58b9220d",
+      "wire": "{\"version\":\"superbench.v2\",\"operation\":\"create\",\"key\":\"cancel_example\",\"repositories\":[{\"name\":\"alpha\",\"repository\":\"https://example.invalid/alpha.git\",\"branch\":\"card/example\",\"base\":\"trunk\"}],\"checkpoint_repository\":\"alpha\",\"request_id\":\"create-example\",\"initialize\":true,\"quota_bytes\":1024}"
+    },
+    {
+      "canonical": "{\"version\":\"superbench.v2\",\"operation\":\"create\",\"key\":\"cancel_example\",\"repositories\":[{\"name\":\"alpha\",\"repository\":\"https://example.invalid/alpha.git\",\"branch\":\"card/example\",\"base\":\"trunk\"}],\"checkpoint_repository\":\"alpha\",\"request_id\":\"create-example\",\"initialize\":true,\"quota_bytes\":1024}",
+      "name": "create-equivalent-decimal",
+      "sha256": "dbcc0331a8beb65a1ba9e49b1520ba0825decc377a27d42736d8754a58b9220d",
+      "wire": "{\"version\":\"superbench.v2\",\"operation\":\"create\",\"key\":\"cancel_example\",\"repositories\":[{\"name\":\"alpha\",\"repository\":\"https://example.invalid/alpha.git\",\"branch\":\"card/example\",\"base\":\"trunk\"}],\"checkpoint_repository\":\"alpha\",\"request_id\":\"create-example\",\"initialize\":true,\"quota_bytes\":1.024e3}"
+    },
+    {
+      "canonical": "{\"version\":\"superbench.v2\",\"operation\":\"run\",\"key\":\"cancel_example\",\"holder\":\"worker:example\",\"request_id\":\"run-example\",\"lease_token\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"arguments\":[\"sh\",\"-c\",\"printf \\\"\\u003c\\u0026\\u003e 🧪 é \\\\n\\\"\",\"\\u2028\\u2029\",\"\"],\"checkpoint\":false,\"repository_name\":\"alpha\"}",
+      "name": "held-run-html-unicode-false",
+      "sha256": "a4a0a4121ced3c1d2fdb0c19aad133937d8c0d125c86b44bd290719714c69fda",
+      "wire": "{\"version\":\"superbench.v2\",\"operation\":\"run\",\"key\":\"cancel_example\",\"holder\":\"worker:example\",\"request_id\":\"run-example\",\"lease_token\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"arguments\":[\"sh\",\"-c\",\"printf \\\"<&> 🧪 é \\\\n\\\"\",\"  \",\"\"],\"checkpoint\":false,\"repository_name\":\"alpha\"}"
+    },
+    {
+      "canonical": "{\"version\":\"superbench.v2\",\"operation\":\"run\",\"key\":\"cancel_example\",\"holder\":\"worker:example\",\"request_id\":\"run-omitted-example\",\"lease_token\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"arguments\":[\"sh\",\"-c\",\"printf \\\"\\u003c\\u0026\\u003e 🧪 é \\\\n\\\"\",\"\\u2028\\u2029\",\"\"],\"repository_name\":\"alpha\"}",
+      "name": "held-run-omitted-checkpoint",
+      "sha256": "89df0b67ac45999dec8e2066d94326ee54ea0a72da0a622f49406ab3429c7afa",
+      "wire": "{\"version\":\"superbench.v2\",\"operation\":\"run\",\"key\":\"cancel_example\",\"holder\":\"worker:example\",\"request_id\":\"run-omitted-example\",\"lease_token\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"arguments\":[\"sh\",\"-c\",\"printf \\\"<&> 🧪 é \\\\n\\\"\",\"  \",\"\"],\"repository_name\":\"alpha\"}"
+    },
+    {
+      "canonical": "{\"version\":\"superbench.v2\",\"operation\":\"recover\",\"key\":\"cancel_recovery\",\"repositories\":[{\"name\":\"alpha\",\"repository\":\"https://example.invalid/alpha.git\",\"branch\":\"card/recover\"}],\"source\":{\"repository\":\"https://example.invalid/alpha.git\",\"bench_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"manifest_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"request_id\":\"recover-example\",\"initialize\":true}",
+      "name": "recover-reordered-source",
+      "sha256": "5c2e62d9fc338328a34ac3cb8562945cd6496b82c31ea35a41a602b26e463481",
+      "wire": "{\"version\":\"superbench.v2\",\"operation\":\"recover\",\"key\":\"cancel_recovery\",\"repositories\":[{\"name\":\"alpha\",\"repository\":\"https://example.invalid/alpha.git\",\"branch\":\"card/recover\"}],\"source\":{\"manifest_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"bench_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"repository\":\"https://example.invalid/alpha.git\"},\"initialize\":true,\"request_id\":\"recover-example\"}"
+    }
+  ]
+}

@@ -40,3 +40,14 @@ Fresh acquisitions bind any returned lease to the requested holder even before
 the caller has a lease token. Unix-socket regressions reject foreign grants in
 successful and partial-failure lease/run/setup replies without exposing a result
 or capability; the durable attempt remains uncertain and is never retried.
+
+The separate private cancellation extension pins the proposed cancellation
+schemas and corpora without widening the ordinary request schema. It targets the
+original growth request ID and its typed producer digest, including pre-grant
+acquisition. Five actual producer goldens cover normalization, nested recovery
+field order, Unicode escaping and present-false versus omitted fields.
+`Cancel` sends one Unix request and retains uncertainty for every failure;
+it never substitutes a token/key stop, fallback or another execution. Replies
+are cap-free producer observations. `cancel_requested` is intent only, and even
+schema-valid `cancelled` bytes cannot independently certify a fence. No production
+caller enables this extension before reviewed producer support and acceptance.
