@@ -335,6 +335,12 @@ async function linkHeld(deps: LinkDeps, input: LinkInput, b: Budget, path: strin
   const lib = deps.client.asService({ principal: input.actor.principal, kind: "agent" });
   const preDeclare = b.stop();
   if (preDeclare) return preDeclare;
+  // An explicit title names the logical artifact on a card. Keep that identity stable when a later
+  // run writes the revision at a different workspace path; otherwise Superlibrary would start v1
+  // of a second item because linked uploads are keyed by their source path.
+  const sourcePath = prov.card && input.title?.trim()
+    ? `artifacts/${prov.card}/${encodeURIComponent(input.title.trim())}`
+    : path;
   const declare = await call(lib, "POST", "/api/v1/uploads", {
     timeoutMs: within(b, LIBRARY_TIMEOUT_MS),
     json: {
@@ -344,7 +350,7 @@ async function linkHeld(deps: LinkDeps, input: LinkInput, b: Budget, path: strin
       files: files.map((f) => ({ path: f.path, bytes: f.bytes.length, sha256: f.sha256 })),
       // LinkSource is strict on Superlibrary's side: only these keys.
       source: {
-        station: input.station.id, stationName: input.station.stationKey, path, board: prov.board,
+        station: input.station.id, stationName: input.station.stationKey, path: sourcePath, board: prov.board,
         ...(prov.card ? { card: prov.card } : {}), ...(prov.run ? { run: prov.run } : {}),
       },
     },
