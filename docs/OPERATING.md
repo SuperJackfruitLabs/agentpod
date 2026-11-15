@@ -1631,6 +1631,13 @@ before `initDatabase()` and cannot read the table; what it still refuses at boot
 `SUPERPIPELINE_BASE_URL` or `ENCRYPTION_KEY`, the latter because every rostered credential is
 encrypted with it.
 
+Hermes background delegations and terminal jobs marked `notify_on_complete` keep their ACP
+session, lease and heartbeat attached after the prompted turn ends. The bridge closes the run only
+after Hermes' unsolicited wake has been quiet for `SUPERPIPELINE_BRIDGE_OWN_WORK_QUIET_MS`
+(5 seconds by default). `SUPERPIPELINE_BRIDGE_OWN_WORK_TIMEOUT_MS` is the hard ceiling (30 minutes
+by default); expiry blocks the run with its pending-work inventory instead of holding a station
+forever. Both settings are positive integer milliseconds.
+
 **A credential cannot be read back**, from the console or the API — the read surface answers
 `hasToken` and `hasMcpToken` and nothing else. Rotating one is "replace", and it takes effect on
 the next tick.

@@ -13,9 +13,21 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { isBridgeEnabled, loadBridgeConfig, BRIDGE_ENV_FLAG } from "./config";
+import {
+  isBridgeEnabled,
+  loadBridgeConfig,
+  BRIDGE_ENV_FLAG,
+  OWN_WORK_QUIET_MS_ENV,
+  OWN_WORK_TIMEOUT_MS_ENV,
+} from "./config";
 
-const KEYS = [BRIDGE_ENV_FLAG, "SUPERPIPELINE_BASE_URL", "ENCRYPTION_KEY"] as const;
+const KEYS = [
+  BRIDGE_ENV_FLAG,
+  "SUPERPIPELINE_BASE_URL",
+  "ENCRYPTION_KEY",
+  OWN_WORK_QUIET_MS_ENV,
+  OWN_WORK_TIMEOUT_MS_ENV,
+] as const;
 const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
 
 function env(over: Partial<Record<(typeof KEYS)[number], string | undefined>>) {
@@ -84,6 +96,16 @@ describe("what an enabled bridge still needs from the environment", () => {
   test("configured, it reports the source every ledger row is written under", () => {
     enabled();
     expect(loadBridgeConfig()).toEqual({ baseUrl: "https://superpipeline.example", source: "superpipeline" });
+  });
+
+  test("the own-work quiet window and hard ceiling are optional positive-millisecond settings", () => {
+    enabled();
+    process.env[OWN_WORK_QUIET_MS_ENV] = "2500";
+    process.env[OWN_WORK_TIMEOUT_MS_ENV] = "900000";
+    expect(loadBridgeConfig()).toMatchObject({ ownWorkQuietMs: 2_500, ownWorkTimeoutMs: 900_000 });
+
+    process.env[OWN_WORK_TIMEOUT_MS_ENV] = "0";
+    expect(() => loadBridgeConfig()).toThrow(OWN_WORK_TIMEOUT_MS_ENV);
   });
 
   test("it no longer carries a roster — that is the table's job now", () => {

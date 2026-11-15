@@ -260,7 +260,10 @@ export class ActivityCoalescer {
         const activity: BoardActivity = {
           type: "action",
           action: String(p.title ?? this.toolTitles.get(id) ?? p.kind ?? "tool"),
-          result: output ?? status,
+          // Hermes returns ACP content arrays here. Sending the array through SuperPipeline's
+          // logger renders it as "[object Object]"; preserve structured non-content results, but
+          // render ACP blocks as the text a person actually received.
+          result: Array.isArray(output) ? textOf(output) : output ?? status,
         };
         if (this.pendingTool && this.pendingTool.id === id) {
           this.pendingTool.activity = activity;
@@ -351,11 +354,12 @@ export class ActivityCoalescer {
 }
 
 /** ACP content blocks are a string, a `{type:"text"}` block, or an array of them. */
-function textOf(content: unknown): string {
+export function textOf(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) return content.map(textOf).join("");
-  const c = content as { type?: string; text?: string } | null;
+  const c = content as { type?: string; text?: string; content?: unknown } | null;
   // oxlint-disable-next-line typescript/no-unnecessary-type-conversion -- wire content: `text` is not proven a string
   if (c && c.type === "text") return String(c.text ?? "");
+  if (c && c.type === "content") return textOf(c.content);
   return content === undefined || content === null ? "" : JSON.stringify(content);
 }

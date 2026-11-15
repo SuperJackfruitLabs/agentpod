@@ -661,6 +661,31 @@ test("a Hermes notify-on-complete process waits for its unprompted result", asyn
   });
 });
 
+test("Hermes background work that never wakes hits its configured hard ceiling", async () => {
+  const r = rig({
+    n: 70,
+    deps: { ownWorkTimeoutMs: 20, turnTimeoutMs: 1_000 },
+    acp: {
+      script: (ev) => [
+        ev("agent-update", {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "delegate-stuck",
+          status: "completed",
+          content: content('{"status":"dispatched","delegation_id":"deleg_stuck"}'),
+        }),
+        ev("state", { status: "idle" }),
+      ],
+    },
+  });
+
+  const outcome = await r.run();
+  expect(outcome.result).toMatchObject({
+    status: "blocked",
+    reason: "the run exceeded its waiting-on-own-work limit; pending work: delegated subtask deleg_stuck",
+  });
+  expect(outcome.trace.some((entry) => entry.board?.endsWith("/complete"))).toBe(false);
+});
+
 test("a full turn: the session open, the prompt, activities, produced before complete, then reported", async () => {
   const r = rig({
     n: 10,
