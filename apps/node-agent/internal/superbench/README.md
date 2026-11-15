@@ -57,6 +57,16 @@ stopped lease. Board mutation waits for explicit reconciliation/checkpoint/relea
 same-UID command. This is the accepted trusted-command local boundary; no UID,
 mount, arbitrary remote endpoint or board token audience is introduced.
 
+## Release artifact foundation
+
+The product release build includes `agentpod-bench-worker-<os>-<arch>` for the
+same Linux/macOS and amd64/arm64 matrix as node/fleet. `version` reports the
+release tag, platform and private worker protocol. The existing release kit
+includes these assets in SHA256SUMS and provenance. A future dispatcher must
+select an explicit release tag, verify the worker checksum/provenance and bind
+the exact executable digest in its private plan. This does not install the
+worker, change self-update, or enable dispatch. No worker release is claimed here.
+
 ## Remaining integration
 
 No board dispatch, station capability, gateway request, ACP override, board

@@ -290,6 +290,8 @@ jobs:
       # warning is pure shell and runs here against fake binaries.
       - name: Test the node installer
         run: bash apps/node-agent/scripts/install.test.sh
+      - name: Test the release binary build matrix
+        run: sh deploy/release/build.test.sh
       - name: Test the hub release script's env parsing
         run: bash deploy/release.test.sh
 
