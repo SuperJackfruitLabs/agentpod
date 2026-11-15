@@ -42,6 +42,7 @@
  * `SEPARATION_OF_DUTIES` and 409 for `GATE_NOT_PENDING` as well.
  */
 
+import { CHECKPOINT_CLAIM_PROTOCOL, CheckpointClaimRefused, readCheckpointClaim, refuseLegacyCheckpoint, parsePendingCheckpointClaim, validateCheckpointContext, type PendingCheckpointClaim } from "./checkpoint-claim";
 import type { BoardActivity } from "./coalesce";
 import type { ElicitationPendingDelivery, GatePendingDelivery } from "./deliveries";
 import { context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
@@ -117,6 +118,8 @@ export interface RunStage {
   key: string;
   name: string;
   instructions?: string;
+  /** An explicit execution boundary; never ordinary prompt metadata. */
+  checkpointPolicy?: unknown;
 }
 
 export interface ClaimedWork {
@@ -125,6 +128,7 @@ export interface ClaimedWork {
   card: ClaimedCard;
   stage: RunStage | null;
   handoff: unknown;
+  checkpointClaim?: PendingCheckpointClaim;
 }
 
 export interface RunReference {
@@ -414,8 +418,14 @@ export class SuperpipelineClient {
    * A refusal is an error, never "nothing available": a rejected token that
    * looked like an empty queue would poll forever and report healthy.
    */
-  async claim(opts: { maxConcurrency?: number; profileKey?: string } = {}): Promise<ClaimedWork | null> {
+  async claim(opts: { maxConcurrency?: number; profileKey?: string; checkpointProtocol?: typeof CHECKPOINT_CLAIM_PROTOCOL; checkpointOnly?: boolean } = {}): Promise<ClaimedWork | null> {
+    readCheckpointClaim(undefined, opts.checkpointProtocol, this.boardId); // Refuse unsupported opt-in before network effects.
+    if (opts.checkpointOnly !== undefined && (typeof opts.checkpointOnly !== "boolean" ||
+      (opts.checkpointOnly && opts.checkpointProtocol !== CHECKPOINT_CLAIM_PROTOCOL)))
+      throw new CheckpointClaimRefused("unsupported");
     const body: Record<string, unknown> = {};
+    if (opts.checkpointOnly !== undefined) body.checkpointOnly = opts.checkpointOnly;
+    if (opts.checkpointProtocol !== undefined) body.checkpointProtocol = opts.checkpointProtocol;
     if (opts.maxConcurrency !== undefined) body.maxConcurrency = opts.maxConcurrency;
     if (opts.profileKey !== undefined) body.profileKey = opts.profileKey;
 
@@ -431,6 +441,9 @@ export class SuperpipelineClient {
       handoff?: unknown;
     };
 
+    const checkpointClaim = readCheckpointClaim(res, opts.checkpointProtocol, this.boardId);
+    if (opts.checkpointOnly && (res as { claimed?: unknown } | null)?.claimed === true && !checkpointClaim)
+      throw new CheckpointClaimRefused("required");
     if (!res.claimed || !res.runId || res.leaseEpoch === undefined || !res.card) return null;
     return {
       runId: res.runId,
@@ -438,6 +451,7 @@ export class SuperpipelineClient {
       card: res.card,
       stage: res.stage ?? null,
       handoff: res.handoff ?? null,
+      ...(checkpointClaim ? { checkpointClaim } : {}),
     };
   }
 
@@ -447,8 +461,12 @@ export class SuperpipelineClient {
    * readable — which is what lets the bridge check what a previous attempt was
    * asked to do before deciding to repeat it.
    */
-  async context(runId: string): Promise<RunContext> {
-    return (await this.send("GET", `/v1/boards/${this.boardId}/runs/${runId}`)) as RunContext;
+  async context(runId: string, checkpointClaim?: PendingCheckpointClaim): Promise<RunContext> {
+    const pending = checkpointClaim === undefined ? undefined : parsePendingCheckpointClaim(checkpointClaim);
+    const result = await this.send("GET", `/v1/boards/${this.boardId}/runs/${runId}`);
+    if (pending) validateCheckpointContext(result, pending, this.boardId, runId);
+    else refuseLegacyCheckpoint(result);
+    return result as RunContext;
   }
 
   /** The runs of the card this run holds (superpipeline GET runs/:runId/attempts): the run's own

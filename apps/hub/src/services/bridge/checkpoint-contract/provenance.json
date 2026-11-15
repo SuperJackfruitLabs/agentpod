@@ -1,0 +1,18 @@
+{
+  "status": "PROPOSED; producer-first foundation, no pilot enablement",
+  "policy_schema_sha256": "bfe207f1a331355ab74e62aeb64e34600ce5ab2aa976d1f3390210acf72fd921",
+  "policy_schema_source": "SuperJackfruitLabs/treaty schemas/superpipeline-api/run-checkpoint-policy.v1.json",
+  "treaty_revision": "d578c7e3ed0709cf7d6d38f7545edacab1691201",
+  "claim_owner_revision": "c5a38c91d2245ee916ffe045c44ce5849cb638b9",
+  "claim_owner_candidate_files_sha256": {
+    "apps/api/src/board/checkpoint-claims.ts": "695788b9196779b88c2d277c249efa24463010d7a21848fcb39da3094a9bae8a",
+    "apps/api/src/board/claims.ts": "d5daf9c59b15777cbe8992d27071792fe368414338899760681674c309bc83e4",
+    "apps/api/src/board/checkpoint-json.ts": "2bf7e44114bf8cbd7360e41280a70cd10b237f13a3b8a96ebd05481b1fc7635c",
+    "apps/api/src/board/rpc.ts": "7a143bc7ce699e8dfbeb7b038995a3a1554fbba2d83183c49eda2d621d02feb5",
+    "apps/api/src/routes/boards/runs.ts": "6f5112cd85212f83b0a57fdae8b7e4f7a80c348d896729756e37f365ebffc09c"
+  },
+  "claim_fixture_policy_digest": "e4854f02957e3d622fde729b62bdcd5c0334baa94c9fd0629bf8dd624887d144",
+  "charter_decision": "2026-11-15-checkpoint-settlement-needs-a-coordinator-grant.md",
+  "charter_status": "Proposed. Not accepted.",
+  "checkpoint_only_status": "PROPOSED owner extension; true requires exact checkpointProtocol; no production port enabled"
+}

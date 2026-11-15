@@ -1,0 +1,122 @@
+{
+  "status": "PROPOSED consumer foundation; no authority, acceptance or enablement",
+  "pending": {
+    "version": "superpipeline.checkpoint-claim.v1",
+    "admissionState": "pending",
+    "tenantId": "tnt_example",
+    "boardId": "brd_134a0ddb6d434478",
+    "cardId": "card_0123456789abcdef",
+    "stageKey": "test",
+    "agentId": "agt_example",
+    "runId": "run_0123456789abcdef",
+    "leaseEpoch": 1,
+    "policy": {
+      "version": "superpipeline.checkpoint-policy.v1",
+      "kind": "superbench",
+      "allowUnchanged": false,
+      "repositories": [
+        {
+          "name": "app",
+          "provider": "forge",
+          "repository": "example/app"
+        }
+      ],
+      "checkpointRepository": "app",
+      "reporterPrincipalId": "prn_coordinator1",
+      "nodeId": "node_pilot01",
+      "executors": [
+        {
+          "agentId": "agt_example",
+          "stationId": "station_pilot01"
+        }
+      ]
+    },
+    "policyDigest": "e4854f02957e3d622fde729b62bdcd5c0334baa94c9fd0629bf8dd624887d144"
+  },
+  "claimed": {
+    "claimed": true,
+    "runId": "run_0123456789abcdef",
+    "leaseEpoch": 1,
+    "card": {
+      "id": "card_0123456789abcdef",
+      "title": "Fixture work",
+      "currentStageKey": "test",
+      "currentRunId": "run_0123456789abcdef",
+      "delegateAgentId": "agt_example",
+      "state": "working"
+    },
+    "stage": {
+      "key": "test",
+      "name": "Test",
+      "checkpointPolicy": {
+        "version": "superpipeline.checkpoint-policy.v1",
+        "kind": "superbench",
+        "allowUnchanged": false,
+        "repositories": [
+          {
+            "name": "app",
+            "provider": "forge",
+            "repository": "example/app"
+          }
+        ],
+        "checkpointRepository": "app",
+        "reporterPrincipalId": "prn_coordinator1",
+        "nodeId": "node_pilot01",
+        "executors": [
+          {
+            "agentId": "agt_example",
+            "stationId": "station_pilot01"
+          }
+        ]
+      }
+    },
+    "handoff": null
+  },
+  "context": {
+    "run": {
+      "runId": "run_0123456789abcdef",
+      "cardId": "card_0123456789abcdef",
+      "stageKey": "test",
+      "leaseEpoch": 1,
+      "status": "working",
+      "outcome": null,
+      "startedAt": "2026-11-15T00:00:00Z",
+      "endedAt": null
+    },
+    "card": {
+      "id": "card_0123456789abcdef",
+      "title": "Fixture work",
+      "currentStageKey": "test",
+      "currentRunId": "run_0123456789abcdef",
+      "delegateAgentId": "agt_example",
+      "state": "working"
+    },
+    "stage": {
+      "key": "test",
+      "name": "Test",
+      "checkpointPolicy": {
+        "version": "superpipeline.checkpoint-policy.v1",
+        "kind": "superbench",
+        "allowUnchanged": false,
+        "repositories": [
+          {
+            "name": "app",
+            "provider": "forge",
+            "repository": "example/app"
+          }
+        ],
+        "checkpointRepository": "app",
+        "reporterPrincipalId": "prn_coordinator1",
+        "nodeId": "node_pilot01",
+        "executors": [
+          {
+            "agentId": "agt_example",
+            "stationId": "station_pilot01"
+          }
+        ]
+      }
+    },
+    "handoff": null,
+    "references": []
+  }
+}

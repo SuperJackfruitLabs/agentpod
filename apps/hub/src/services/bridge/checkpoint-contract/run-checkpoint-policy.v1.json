@@ -1,0 +1,94 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "kind",
+    "allowUnchanged",
+    "repositories",
+    "checkpointRepository",
+    "reporterPrincipalId",
+    "nodeId",
+    "executors"
+  ],
+  "properties": {
+    "version": {
+      "const": "superpipeline.checkpoint-policy.v1"
+    },
+    "kind": {
+      "const": "superbench"
+    },
+    "allowUnchanged": {
+      "type": "boolean"
+    },
+    "repositories": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "provider", "repository"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}(?![\\s\\S])"
+          },
+          "provider": {
+            "enum": ["forge", "github"]
+          },
+          "repository": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?![\\s\\S])"
+          }
+        }
+      }
+    },
+    "checkpointRepository": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}(?![\\s\\S])"
+    },
+    "reporterPrincipalId": {
+      "type": "string",
+      "pattern": "^prn_[A-Za-z0-9]{6,}(?![\\s\\S])",
+      "maxLength": 80
+    },
+    "nodeId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "executors": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["agentId", "stationId"],
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "pattern": "^agt_[A-Za-z0-9]{6,}(?![\\s\\S])",
+            "maxLength": 80
+          },
+          "stationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/SuperJackfruitLabs/treaty/main/schemas/superpipeline-api/run-checkpoint-policy.v1.json",
+  "title": "PROPOSED nonweakenable explicit pilot safety policy",
+  "description": "Unaccepted proposal. Structural validity grants no authority and proves neither fencing nor remote confirmation. Producer state checks and existing authenticated principal authority remain required."
+}
