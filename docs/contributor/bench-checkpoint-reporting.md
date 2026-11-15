@@ -43,6 +43,17 @@ control-pair and SuperPipeline pending/current-source observations after awaits.
 Private physical profile configuration is read only under the literal proposed
 flag; no configuration is supplied or enabled by these source changes.
 
+`PROPOSED_CHECKPOINT_COORDINATOR` must equal the literal `true` before the
+Hub reads any dedicated profile. Unset or other values keep this path disabled.
+`PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE` selects an absolute physical
+JSON file, at most 64 KiB, in a private directory. The file and directory must be
+owned by the service user or root and inaccessible to other users; symlinks are
+refused. The versioned profile pins the issuer organization, both tenant ID
+spaces, selected workspace and agent, repository mapping and installed Node,
+worker and registry digests. Missing or invalid configuration refuses dedicated
+work. These settings provision no credentials, policy, capability or acceptance;
+no profile or environment setting is installed by this change.
+
 The service client uses the proposed owner service revision
 `7d87ef6a964b54062f9af2e610a122263fb0242f`: raw strict T37 receipts from
 `POST /checkpoint-settlements` and `GET /checkpoint`. It recognizes only the
