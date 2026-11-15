@@ -281,15 +281,17 @@ interface BackgroundMarker {
 }
 
 /** Hermes encodes tool results as nested ACP content blocks whose text is JSON. */
-function backgroundMarker(value: unknown, toolCallId: string): BackgroundMarker | null {
+export function backgroundMarker(value: unknown, toolCallId: string): BackgroundMarker | null {
   if (typeof value === "string") {
     const text = value.trim();
-    if (!text.startsWith("{") && !text.startsWith("[")) return null;
-    try {
-      return backgroundMarker(JSON.parse(text), toolCallId);
-    } catch {
-      return null;
+    if (text.startsWith("{") || text.startsWith("[")) {
+      try {
+        return backgroundMarker(JSON.parse(text), toolCallId);
+      } catch {
+        // Not JSON after all: read it as Markdown below.
+      }
     }
+    return markdownMarker(text, toolCallId);
   }
   if (Array.isArray(value)) {
     for (const item of value) {
@@ -331,6 +333,25 @@ function backgroundMarker(value: unknown, toolCallId: string): BackgroundMarker 
   for (const candidate of nested) {
     const found = backgroundMarker(candidate, toolCallId);
     if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Hermes v0.23.1 renders a terminal result as Markdown lines (`- **notify_on_complete:** True`),
+ * not JSON. Read the same three markers from that form.
+ */
+function markdownMarker(text: string, toolCallId: string): BackgroundMarker | null {
+  const field = (name: string): string | undefined =>
+    new RegExp(String.raw`^\s*[-*]?\s*\**${name}\**\s*:\s*\**\s*(\S+?)\**\s*$`, "mi").exec(text)?.[1];
+  const delegation = field("delegation_id");
+  if (delegation) return { key: `delegation:${delegation}`, label: `delegated subtask ${delegation}` };
+  if (field("mode")?.toLowerCase() === "background") {
+    return { key: `delegation:${toolCallId}`, label: `background delegation ${toolCallId}` };
+  }
+  if (field("notify_on_complete")?.toLowerCase() === "true") {
+    const processId = field("session_id") ?? toolCallId;
+    return { key: `process:${processId}`, label: `background process ${processId}` };
   }
   return null;
 }

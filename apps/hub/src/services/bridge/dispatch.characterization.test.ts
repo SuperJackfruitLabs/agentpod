@@ -661,6 +661,53 @@ test("a Hermes notify-on-complete process waits for its unprompted result", asyn
   });
 });
 
+test("a Hermes terminal result in Markdown still marks its background process", async () => {
+  // Hermes v0.23.1 renders a terminal result as Markdown text, not JSON. This is the update a
+  // staging station recorded (2026-11-15); a JSON-only reading missed it and closed the run early.
+  const r = rig({
+    n: 71,
+    deps: OWN_WORK_TEST_TIMING,
+    acp: {
+      renew: true,
+      script: (ev) => [
+        ev("agent-update", {
+          sessionUpdate: "tool_call",
+          toolCallId: "terminal-md",
+          title: "terminal: sleep 90 + 2 commands",
+        }),
+        ev("agent-update", {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "terminal-md",
+          kind: "execute",
+          status: "completed",
+          content: content(
+            "terminal result\n- **output:** Background process started\n- **session_id:** proc_1fa5e4a37a64\n- **pid:** 859246\n- **exit_code:** 0\n- **notify_on_complete:** True",
+          ),
+        }),
+        chunk(ev, "The background process has started; I'll report when it finishes."),
+        ev("state", { status: "idle" }),
+      ],
+      wake: (ev) => [
+        ev("agent-update", {
+          sessionUpdate: "agent_message_chunk",
+          messageId: "wake-message-md",
+          content: { type: "text", text: "canary-c.txt reads: Sun Nov 15 10:09:42 AM UTC 2026" },
+        }),
+      ],
+    },
+  });
+
+  const outcome = await r.run();
+  expect(outcome.result).toMatchObject({ status: "reported" });
+  expect(outcome.trace.filter((entry) => entry.acp === "promptSession")).toHaveLength(1);
+  expect(outcome.trace).toContainEqual(expect.objectContaining({
+    body: expect.objectContaining({ body: expect.stringContaining("background process proc_1fa5e4a37a64") }),
+  }));
+  expect(outcome.after).toMatchObject({
+    rows: [{ outcome: "reported", result: { summary: "canary-c.txt reads: Sun Nov 15 10:09:42 AM UTC 2026" } }],
+  });
+});
+
 test("Hermes background work that never wakes hits its configured hard ceiling", async () => {
   const r = rig({
     n: 70,
