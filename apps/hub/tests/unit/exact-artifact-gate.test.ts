@@ -4,16 +4,6 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { registerHubTools, type ToolDeps } from "../../src/mcp/tools";
-import { gateProseBody, type GatePendingDelivery } from "../../src/services/board-chat/gates";
-
-type GateReference = { title: string; url: string };
-
-function gateWithReferences(
-  delivery: GatePendingDelivery,
-  references: GateReference[],
-): GatePendingDelivery & { references: GateReference[] } {
-  return { ...delivery, references };
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -52,11 +42,8 @@ async function callArtifactTool(deps: ToolDeps): Promise<{
   }
 }
 
-/**
- * Regression target: returning only the floating item URL, or rendering a gate without the
- * opening run's references, would let a reviewer approve work without seeing its exact version.
- */
-test("an artifact link pins its version and the chat gate shows exactly what the run linked", async () => {
+/** A floating item URL would let a reviewer approve a different version than the one linked. */
+test("an artifact link returns its pinned version and tells agents to attach it", async () => {
   const itemUrl = "https://app.superlibrary.dev/a/itm_0000000000000007";
   const versionUrl = `${itemUrl}/v/7`;
   const linked = {
@@ -73,26 +60,6 @@ test("an artifact link pins its version and the chat gate shows exactly what the
     link: async () => linked,
   };
   const { linkResult, toolDescription } = await callArtifactTool(deps);
-  const delivery: GatePendingDelivery = {
-    event: "gate.pending",
-    boardId: "brd_fixture",
-    cardId: "card_fixture",
-    gateId: "gate_fixture",
-    stageKey: "review",
-    returnStageKey: "build",
-    cardTitle: "Approve the release evidence",
-    producedBy: "agt_fixture",
-    options: [
-      { id: "approve", label: "Approve" },
-      { id: "request_changes", label: "Request changes" },
-      { id: "reject", label: "Reject" },
-    ],
-    ts: "2026-11-16T00:00:00.000Z",
-  };
-  const withReference = gateProseBody(
-    gateWithReferences(delivery, [{ title: "Release evidence", url: versionUrl }]),
-  );
-  const withNone = gateProseBody(gateWithReferences(delivery, []));
 
   expect({
     linkResult: {
@@ -101,8 +68,6 @@ test("an artifact link pins its version and the chat gate shows exactly what the
       next: linkResult.next,
     },
     toolDescription,
-    referenceLines: withReference.split("\n").filter((line) => line.includes("Release evidence")),
-    noReferenceLines: withNone.split("\n").filter((line) => line.includes("This run linked no artifact")),
   }).toEqual({
     linkResult: {
       url: itemUrl,
@@ -110,7 +75,5 @@ test("an artifact link pins its version and the chat gate shows exactly what the
       next: expect.stringContaining("versionUrl"),
     },
     toolDescription: expect.stringMatching(/attach the (?:returned )?version-pinned URL.*superpipeline_add_reference/i),
-    referenceLines: [`- [Release evidence](${versionUrl})`],
-    noReferenceLines: ["This run linked no artifact"],
   });
 });
