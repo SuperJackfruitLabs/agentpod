@@ -47,3 +47,6 @@ export * from "./salaam-operator-settlement";
 export * from "./paths";
 
 export * from "./capability-catalog";
+
+// Proposed data-only coordinator contract; no advertised verb or capability.
+export * from "./bench-coordinator";
