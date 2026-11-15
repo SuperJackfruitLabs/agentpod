@@ -33,6 +33,7 @@ export * from "./acp";
 
 // Work claimed from an external orchestrator (the superpipeline bridge)
 export * from "./bridge";
+export * from "./checkpoint-dispatch";
 
 // Matrix Application Service bookkeeping (#351)
 export * from "./matrix";

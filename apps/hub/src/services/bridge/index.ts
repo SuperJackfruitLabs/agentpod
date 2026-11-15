@@ -41,3 +41,6 @@ export { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./supe
 export type { Fetcher } from "./superpipeline";
 export { isWorkAvailable, onWorkAvailable, wakeBoard } from "./work-wake";
 export type { WorkAvailableDelivery } from "./work-wake";
+
+export { checkpointCurrentDecision } from "./checkpoint-current-decision";
+export { CHECKPOINT_COORDINATOR_FLAG } from "./checkpoint-profiles";

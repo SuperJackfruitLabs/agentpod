@@ -35,12 +35,32 @@ The source transport follows SuperPipeline source owner
 `e78e1bb8414b6a2127b666348d62d1c06571714c`. These remain proposed contracts.
 Tests import plain fixtures, never another product's TypeScript.
 
-The remaining path requires an authenticated coordinator broker verb and Node
-handler, real registry/current/admission gates, a durable exact attempt and
-request ledger, canonical source digests derived by the Node from its saved
-private exchanges, and a retained immutable settlement body before submission.
-Existing raw request/response hashes and Go typed request digests cannot be
-relabeled as the settlement contract's canonical hashes. All source and
-completion joins must finish under fresh issuer, station, occupancy, control-pair,
-policy and run checks. Unknown execution or cancellation remains parked; no
-generic ACP fallback or replacement-owner adoption is allowed.
+The default-off Hub callback and immutable attempt table now retain the original
+prepare request/selected authorization before Node effects. The callback verifies
+the actual enrolled Node credential and compares fresh database occupancy, issuer
+control-pair and SuperPipeline pending/current-source observations after awaits.
+Private physical profile configuration is read only under the literal proposed
+flag; no configuration is supplied or enabled by these source changes.
+
+The service client uses the proposed owner service revision
+`7d87ef6a964b54062f9af2e610a122263fb0242f`: raw strict T37 receipts from
+`POST /checkpoint-settlements` and `GET /checkpoint`. It recognizes only the
+exact authenticated `CHECKPOINT_RECEIPT_MISSING` response as receipt absence.
+Disabled, unknown-board, expired, foreign, malformed or lost responses park.
+The entire canonical submission, including handoff/outcome, must be retained
+before POST; both its request digest and the observation-only report digest are
+checked on a receipt. No child execution is repeated to recover a report reply.
+
+The Node now derives canonical source request/receipt hashes from its exact saved
+private exchanges. Existing raw request/response and Go typed body digests retain
+their original meanings. The report builder checks complete/released/stopped
+results, exact retained start/prepared evidence and server-owned repository
+mapping; arbitrary repository hashes never authorize logical repositories.
+Untrusted child handoff remains text and is not source attestation.
+
+Actual authenticated database/service integration is a separate verification
+gate. The complete Hub broker dispatch/source-admission/report orchestration,
+uncertain-operation cancellation/reconciliation, accepted authority decisions and
+operator provisioning remain required. This checkpoint does not enable the
+Developer Experience pilot or satisfy native laptop preparation. No generic ACP
+fallback or adoption of replacement-owner output is allowed.

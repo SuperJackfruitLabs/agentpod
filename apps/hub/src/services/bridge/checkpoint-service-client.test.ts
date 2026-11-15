@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { checkpointReceiptSchema } from "./checkpoint-settlement-data";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { parseCheckpointProfile, requireCheckpointProfileClaim } from "./checkpoint-profile";
 import { checkpointPolicyDigest, parsePendingCheckpointClaim } from "./checkpoint-claim";
@@ -124,4 +125,52 @@ test("lost admission response is uncertain and never retried with a fresh reques
   const h = await harness(); h.response(async () => { throw new Error("private response capability"); });
   await expect(h.client.admit(h.claim, h.source)).rejects.toThrow("Checkpoint refused: uncertain");
   expect(h.calls.filter((call) => call.url.startsWith(h.profile.sourceOrigin))).toHaveLength(1);
+});
+
+async function settlementFixture(h: ReturnType<typeof inputs>) {
+  const value = { version: "superpipeline.checkpoint-settlement.v1", checkpoint: {
+    version: "superpipeline.run-checkpoint.v1", settlementId: "settlement_fixture", binding: h.source.binding,
+    policyDigest: h.claim.policyDigest, disposition: "changed", start: h.source.start,
+    checkpoint: { protocol: "superbench.v2", key: h.source.benchKey, benchId: h.source.benchId,
+      requestId: h.source.requestId, generationId: "e".repeat(32), seal: "f".repeat(40), manifestSha256: "a".repeat(64),
+      checkpointRepository: "app", members: [{ name: "app", provider: "forge", repository: "example/app",
+        branch: "card/" + h.claim.cardId, objectFormat: "sha1", commit: "b".repeat(40) }] },
+    execution: { id: "c".repeat(32), exitCode: 0 }, workerResultSha256: "d".repeat(64),
+    sourceReceiptSha256: "e".repeat(64), sourceRequestSha256: h.source.sourceRequestSha256 },
+    handoff: { summary: "untrusted child text" }, outcome: "pass" };
+  const body = canonicalCheckpoint(value);
+  const receipt = checkpointReceiptSchema.parse({ version: "superpipeline.run-checkpoint-receipt.v1", settlementId: value.checkpoint.settlementId,
+    requestDigest: await checkpointDigest(value), reportDigest: await checkpointDigest(value.checkpoint),
+    reportedBy: h.profile.reporterPrincipalId, runId: h.claim.runId, leaseEpoch: h.claim.leaseEpoch,
+    recordedAt: "2026-11-16T00:00:00.000Z", checkpoint: value.checkpoint.checkpoint });
+  return { body, receipt };
+}
+test("issuer-authenticated settlement retains exact whole body and reads the same raw historical receipt", async () => {
+  const h = await harness(); const s = await settlementFixture(h);
+  h.response(async () => Response.json(s.receipt));
+  expect(await h.client.settle(h.claim, s.body)).toEqual(s.receipt);
+  expect(await h.client.receipt(h.claim, s.body)).toEqual(s.receipt);
+  const calls = h.calls.filter((call) => call.url.startsWith(h.profile.sourceOrigin));
+  expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+    `/v1/boards/${h.claim.boardId}/runs/${h.claim.runId}/checkpoint-settlements`,
+    `/v1/boards/${h.claim.boardId}/runs/${h.claim.runId}/checkpoint`]);
+  expect(calls[0]?.init?.body).toBe(s.body);
+  expect(calls[0]?.init?.method).toBe("POST"); expect(calls[1]?.init?.method).toBe("GET");
+});
+test.each(["CHECKPOINT_SETTLEMENT_DISABLED", "NOT_INITIALIZED", "unexpected"])("receipt 404 %s is not absence or readiness", async (code) => {
+  const h = await harness(); const s = await settlementFixture(h);
+  h.response(async () => Response.json({ error: { code } }, { status: 404 }));
+  await expect(h.client.receipt(h.claim, s.body)).rejects.toThrow("unavailable");
+});
+test("only exact authenticated missing-receipt code means no receipt; lost POST never resends", async () => {
+  const h = await harness(); const s = await settlementFixture(h);
+  h.response(async () => Response.json({ error: { code: "CHECKPOINT_RECEIPT_MISSING" } }, { status: 404 }));
+  expect(await h.client.receipt(h.claim, s.body)).toBeUndefined();
+  let posts = 0; h.response(async () => { posts++; throw new Error("private transport detail"); });
+  await expect(h.client.settle(h.claim, s.body)).rejects.toThrow("uncertain"); expect(posts).toBe(1);
+});
+test.each(["requestDigest", "reportDigest", "reportedBy"] as const)("foreign raw receipt %s is refused", async (field) => {
+  const h = await harness(); const s = await settlementFixture(h);
+  h.response(async () => Response.json({ ...s.receipt, [field]: field === "reportedBy" ? "prn_foreign001" : "f".repeat(64) }));
+  await expect(h.client.settle(h.claim, s.body)).rejects.toThrow("source");
 });

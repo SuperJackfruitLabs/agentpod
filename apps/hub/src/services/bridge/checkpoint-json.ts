@@ -1,7 +1,7 @@
 /** Proposed owner ASCII canonical/lexical format. No authority follows from a digest.
  * Mirrors SuperPipeline checkpoint-json.ts; owner corpus is pinned in checkpoint-contract. */
-function readCheckpointJSON(raw: Uint8Array): unknown {
-  if (raw.byteLength > 65536) throw new Error("INVALID_CHECKPOINT");
+function readCheckpointJSON(raw: Uint8Array, context = false): unknown {
+  if (raw.byteLength > (context ? 262144 : 65536)) throw new Error("INVALID_CHECKPOINT");
   const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(raw);
   let pos = 0;
   function whitespace(): void {
@@ -65,10 +65,11 @@ function readCheckpointJSON(raw: Uint8Array): unknown {
       throw new Error("INVALID_CHECKPOINT");
     }
     const rest = text.slice(pos);
-    const atom = /^(true|false|0|[1-9][0-9]*)/.exec(rest)?.[0];
+    const atom = (context ? /^(true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/ : /^(true|false|0|[1-9][0-9]*)/).exec(rest)?.[0];
     if (!atom) throw new Error("INVALID_CHECKPOINT");
     pos += atom.length;
-    if (atom !== 'true' && atom !== 'false' && !Number.isSafeInteger(Number(atom)))
+    if (atom !== 'true' && atom !== 'false' && atom !== 'null' &&
+      !(context ? Number.isFinite(Number(atom)) : Number.isSafeInteger(Number(atom))))
       throw new Error("INVALID_CHECKPOINT");
   }
   value(0);
@@ -117,4 +118,10 @@ export function parseCheckpointJSON(raw: Uint8Array): unknown {
   } catch {
     throw new Error("INVALID_CHECKPOINT");
   }
+}
+
+/** Ordinary run context permits null and finite JSON numbers; authority fields are validated separately. */
+export function parseCheckpointContextJSON(raw: Uint8Array): unknown {
+  try { return readCheckpointJSON(raw, true); }
+  catch { throw new Error("INVALID_CHECKPOINT_CONTEXT"); }
 }

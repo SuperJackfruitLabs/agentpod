@@ -59,6 +59,7 @@ import { runtimeRoutes } from './routes/runtimes.ts';
 import { stationRoutes } from './routes/stations.ts';
 // A node exchanging its credential for a station-scoped agent token
 import { stationTokenRoutes } from './routes/station-token.ts';
+import { checkpointCurrentRoutes } from './routes/checkpoint-current.ts';
 // A node redeeming a human's authorization for a station's Matrix credential
 import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-credential.ts';
 import { createStationGitIdentityRoutes } from './routes/station-git-identity.ts';
@@ -224,6 +225,7 @@ const app = new Hono()
    * it just cannot sit behind a middleware built for a person.
    */
   .route('/api', stationTokenRoutes)
+  .route('/api', checkpointCurrentRoutes)
   .route('/api', skillArtifactDownloadRoutes)
   /**
    * POST /api/nodes/:nodeId/stations/:stationId/matrix-credential — this

@@ -1,4 +1,4 @@
-/** Proposed server-owned coordinator mapping. No environment loader or production opt-in. */
+/** Proposed server-owned coordinator mapping; explicit private installation remains default off. */
 import { z } from "zod";
 import { BenchCoordinatorTarget } from "@agentpod/contract";
 import type { PendingCheckpointClaim } from "./checkpoint-claim";
