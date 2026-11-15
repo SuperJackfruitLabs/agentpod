@@ -328,3 +328,62 @@ test("a request sent inside a trace carries it as _meta; one outside carries no 
     restore();
   }
 });
+
+
+test.each([true, false])("another node cannot settle or consume an RPC response (%s)", async (ok) => {
+  const { msgs, restore } = makeSendStub("expected-node");
+  let settlements = 0;
+  try {
+    const pending = broker.request("expected-node", "detect", {}, { timeoutMs: 1000 });
+    void pending.then(() => { settlements++; return undefined; });
+    const sent = msgs[0];
+    if (sent?.type !== "req") throw new Error("expected req msg");
+    broker.handleNodeMessage("other-node", { type: "res", id: sent.id, ok, data: "forged", error: "forged" });
+    await Promise.resolve();
+    expect(settlements).toBe(0);
+    broker.handleNodeMessage("expected-node", { type: "res", id: sent.id, ok: true, data: "real" });
+    expect(await pending).toEqual({ ok: true, data: "real" });
+    broker.handleNodeMessage("expected-node", { type: "res", id: sent.id, ok: true, data: "duplicate" });
+    await Promise.resolve();
+    expect(settlements).toBe(1);
+  } finally {
+    broker.dropNode("expected-node");
+    restore();
+  }
+});
+
+test("a wrong-node reply leaves the original request timeout armed", async () => {
+  const { msgs, restore } = makeSendStub("timeout-node");
+  try {
+    const pending = broker.request("timeout-node", "detect", {}, { timeoutMs: 50 });
+    const sent = msgs[0];
+    if (sent?.type !== "req") throw new Error("expected req msg");
+    broker.handleNodeMessage("other-node", { type: "res", id: sent.id, ok: true, data: "forged" });
+    expect(await pending).toEqual({ ok: false, error: "timeout" });
+  } finally {
+    broker.dropNode("timeout-node");
+    restore();
+  }
+});
+
+test("wrong-node chunks and eof cannot deliver or remove the expected stream", () => {
+  const { msgs, restore } = makeSendStub("stream-node");
+  const received: Array<{ seq: number; chunk: string | null; eof: boolean }> = [];
+  const streaming = broker.stream("stream-node", "logs.tail", {}, (seq, chunk, eof) => {
+    received.push({ seq, chunk, eof });
+  });
+  try {
+    const sent = msgs[0];
+    if (sent?.type !== "req") throw new Error("expected req msg");
+    broker.handleNodeMessage("other-node", { type: "stream", id: sent.id, seq: 0, chunk: "forged", eof: false });
+    broker.handleNodeMessage("other-node", { type: "stream", id: sent.id, seq: 1, chunk: null, eof: true });
+    expect(received).toEqual([]);
+    broker.handleNodeMessage("stream-node", { type: "stream", id: sent.id, seq: 0, chunk: "real", eof: false });
+    broker.handleNodeMessage("stream-node", { type: "stream", id: sent.id, seq: 1, chunk: null, eof: true });
+    broker.handleNodeMessage("stream-node", { type: "stream", id: sent.id, seq: 2, chunk: "duplicate", eof: false });
+    expect(received).toEqual([{ seq: 0, chunk: "real", eof: false }, { seq: 1, chunk: null, eof: true }]);
+  } finally {
+    streaming.cancel();
+    restore();
+  }
+});

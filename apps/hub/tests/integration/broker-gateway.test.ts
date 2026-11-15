@@ -182,7 +182,7 @@ test(
         }
       };
 
-      await new Promise((r) => setTimeout(r, 150));
+      await waitForNodeOnline(nodeId);
 
       const received: Array<{ seq: number; chunk: string | null; eof: boolean }> = [];
       const streamDone = new Promise<void>((res) => {
@@ -212,3 +212,82 @@ test(
   },
   10_000
 );
+
+
+test("gateway binds replies and streams to the authenticated requested node", async () => {
+  const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+  const nodes: Array<{ nodeId: string; ws: WebSocket }> = [];
+  try {
+    for (const hostname of ["broker-binding-owner", "broker-binding-other"]) {
+      const { token } = await mintEnrollmentToken(TEST_USER_ID, BOOTSTRAP_TENANT_ID);
+      const { nodeId, nodeSecret } = await enrollNode(token, {
+        hostname, os: "linux", arch: "amd64", cpuCount: 1,
+      });
+      const ws = new WebSocket(`ws://localhost:${server.port}/public/nodes/gateway`, {
+        headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
+      });
+      nodes.push({ nodeId, ws });
+      await waitForNodeOnline(nodeId);
+    }
+    const [owner, other] = nodes;
+    if (!owner || !other) throw new Error("expected two enrolled nodes");
+    // Replies on this socket form a processing barrier after its forged frames.
+    other.ws.addEventListener("message", (event) => {
+      const msg = JSON.parse(String(event.data));
+      if (msg.type === "req") {
+        other.ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true }));
+      }
+    });
+    const barrier = async () => {
+      expect((await broker.request(other.nodeId, "detect", {}, { timeoutMs: 3_000 })).ok).toBe(true);
+    };
+    const nextRequest = () => new Promise<string>((resolve) => {
+      owner.ws.addEventListener("message", (event) => {
+        const msg = JSON.parse(String(event.data));
+        if (msg.type === "req") resolve(msg.id);
+      }, { once: true });
+    });
+
+    const requestId = nextRequest();
+    let settled = false;
+    const result = broker.request(owner.nodeId, "detect", {}, { timeoutMs: 3_000 });
+    void result.then(() => { settled = true; return undefined; });
+    const id = await requestId;
+    other.ws.send(JSON.stringify({ type: "res", id, ok: true, data: "forged" }));
+    await barrier();
+    expect(settled).toBe(false);
+    owner.ws.send(JSON.stringify({ type: "res", id, ok: true, data: "owner" }));
+    expect(await result).toEqual({ ok: true, data: "owner", error: undefined });
+
+    const streamRequestId = nextRequest();
+    const received: Array<{ seq: number; chunk: string | null; eof: boolean }> = [];
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => { finish = resolve; });
+    const stream = broker.stream(owner.nodeId, "logs.tail", {}, (seq, chunk, eof) => {
+      received.push({ seq, chunk, eof });
+      if (eof) finish();
+    });
+    try {
+      const streamId = await streamRequestId;
+      other.ws.send(JSON.stringify({ type: "stream", id: streamId, seq: 0, chunk: "forged", eof: false }));
+      other.ws.send(JSON.stringify({ type: "stream", id: streamId, seq: 1, chunk: null, eof: true }));
+      await barrier();
+      expect(received).toEqual([]);
+      owner.ws.send(JSON.stringify({ type: "stream", id: streamId, seq: 0, chunk: "owner", eof: false }));
+      owner.ws.send(JSON.stringify({ type: "stream", id: streamId, seq: 1, chunk: null, eof: true }));
+      await done;
+      expect(received).toEqual([
+        { seq: 0, chunk: "owner", eof: false },
+        { seq: 1, chunk: null, eof: true },
+      ]);
+    } finally {
+      stream.cancel();
+    }
+  } finally {
+    for (const node of nodes) {
+      broker.dropNode(node.nodeId);
+      node.ws.close();
+    }
+    server.stop(true);
+  }
+}, 15_000);
