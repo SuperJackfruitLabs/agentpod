@@ -95,6 +95,16 @@ test("a file larger than one read arrives whole, with its hash and its provenanc
   ]);
 });
 
+/** The upload declaration the hub sends, read without assertions. */
+function declared(json: unknown): { path: string; bytes: number } {
+  if (typeof json !== "object" || json === null || !("source" in json) || !("files" in json)) throw new Error("not a declaration");
+  const { source, files } = json;
+  if (typeof source !== "object" || source === null || !("path" in source) || typeof source.path !== "string") throw new Error("no source path");
+  const first: unknown = Array.isArray(files) ? files[0] : undefined;
+  if (typeof first !== "object" || first === null || !("bytes" in first) || typeof first.bytes !== "number") throw new Error("no file bytes");
+  return { path: source.path, bytes: first.bytes };
+}
+
 test("re-linking a renamed revision for the same card versions the existing artifact", async () => {
   // Regression caught: the hub must not let the current source path choose a new item when a later
   // run links a renamed revision of the same card artifact.
@@ -111,14 +121,6 @@ test("re-linking a renamed revision for the same card versions the existing arti
   // Model the pinned Superlibrary behavior: absent an explicit revision target, agent uploads are
   // identified by station + source path + board. A renamed path therefore starts a new item.
   const declarations = new Map<string, { path: string; bytes: number }>();
-  const declared = (json: unknown): { path: string; bytes: number } => {
-    if (typeof json !== "object" || json === null || !("source" in json) || !("files" in json)) throw new Error("not a declaration");
-    const { source, files } = json;
-    if (typeof source !== "object" || source === null || !("path" in source) || typeof source.path !== "string") throw new Error("no source path");
-    const first: unknown = Array.isArray(files) ? files[0] : undefined;
-    if (typeof first !== "object" || first === null || !("bytes" in first) || typeof first.bytes !== "number") throw new Error("no file bytes");
-    return { path: source.path, bytes: first.bytes };
-  };
   const itemsBySourcePath = new Map<string, { itemId: string; version: number }>();
   let nextUpload = 0;
   d.client.asService = () => ({
