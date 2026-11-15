@@ -62,6 +62,11 @@ import { context, trace } from "@opentelemetry/api";
 import { tracer } from "../../telemetry/otel";
 import { liveById } from "./session-state";
 import { reportTurnError } from "./plugin-reports";
+import { beginTurn } from "./turn";
+import { turnDeps } from "./recovery";
+import { turnErrorForSilentTurn } from "./turn-error";
+import { setStatus } from "./events";
+import { recordAudit } from "../audit";
 import { useTestTelemetry } from "../../../tests/helpers/telemetry";
 import { mintEnrollmentToken, enrollNode } from "../nodes/enrollment";
 import { adoptStations } from "../stations/registry";
@@ -2918,6 +2923,64 @@ test("a second report after the turn already shows the plugin's error is not pos
     fake.close();
   } finally {
     _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("repeated generic recordError audits and publishes once across the audit await", async () => {
+  const { server, fake, station } = await setupRig("acpsess-duplicate-error", {
+    stationKey: "acp-duplicate-error-station",
+  });
+  let sessionId: string | undefined;
+  const release = Promise.withResolvers<void>();
+  const writes: Promise<void>[] = [];
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    sessionId = row.id;
+    const live = liveById.get(row.id);
+    if (!live) throw new Error("Expected the created session to be live");
+    await setStatus(live, "working").done;
+    const audit = await recordAudit(db, {
+      tenantId: live.tenantId, userId: TEST_USER, nodeId: live.nodeId,
+      stationKey: live.stationKey, verb: "acp.prompt", params: { chars: 0 },
+    });
+    let auditCalls = 0;
+    const entered = Promise.withResolvers<void>();
+    // Call the same captured turn directly: the SDK's Promise normally has
+    // one outcome, so two plugin reports would not exercise this guard.
+    const turn = beginTurn(live, turnDeps, {
+      done: async (result, error) => {
+        auditCalls++;
+        entered.resolve();
+        await release.promise;
+        await audit.done(result, error);
+      },
+    }, crypto.randomUUID());
+    const error = turnErrorForSilentTurn(live.harness, "end_turn");
+    const before = live.seq;
+    writes.push(turn.recordError(error));
+    await entered.promise;
+    writes.push(turn.recordError(error));
+    release.resolve();
+    await Promise.all(writes);
+    await live.chain;
+    turn.settled();
+    await turn.recordError(error); // Also refuse a repeat after persistence.
+    const events = (await eventsFor(row.id)).filter((event) => event.seq > before);
+    expect({
+      auditCalls,
+      errorSources: errorEvents(events).map(errorSource),
+      stateTransitions: events.filter((event) => event.type === "state").length,
+    }).toEqual({ auditCalls: 1, errorSources: ["acp-stop-reason"], stateTransitions: 1 });
+    expect(live.status).toBe("idle");
+    const rows = await rawSql`SELECT result,error FROM station_audit WHERE node_id=${live.nodeId} AND verb='acp.prompt'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ result: "error", error: error.message });
+  } finally {
+    release.resolve();
+    await Promise.allSettled(writes);
+    if (sessionId) await endSession(TEST_USER, sessionId, "cleanup");
+    fake.close();
     server.stop(true);
   }
 });

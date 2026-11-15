@@ -197,7 +197,7 @@ async function imageRefusalFor(live: LiveSession, images: PromptImage[]): Promis
 }
 
 /** Reset the per-turn marks and take this turn's epoch (the stale-turn guard). */
-function beginTurn(
+export function beginTurn(
   live: LiveSession,
   deps: TurnDeps,
   audit: AuditHandle,
@@ -236,6 +236,8 @@ function beginTurn(
       live.lastTurnSettledAt = Date.now();
     },
     recordError: async (error: TurnError) => {
+      // Claim the error before yielding to the audit so repeat outcomes do not
+      // audit or publish the same turn failure twice.
       if (live.turnErrorRecorded) return;
       if (live.executionAuthority)
         error = {
