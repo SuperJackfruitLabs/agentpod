@@ -1,7 +1,56 @@
 import { expect, test } from "bun:test";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { registerHubTools, type ToolDeps } from "../../src/mcp/tools";
 import { gateProseBody, type GatePendingDelivery } from "../../src/services/board-chat/gates";
+
+type GateReference = { title: string; url: string };
+
+function gateWithReferences(
+  delivery: GatePendingDelivery,
+  references: GateReference[],
+): GatePendingDelivery & { references: GateReference[] } {
+  return { ...delivery, references };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+async function callArtifactTool(deps: ToolDeps): Promise<{
+  linkResult: Record<string, unknown>;
+  toolDescription: string;
+}> {
+  const server = new McpServer({ name: "exact-artifact-gate-test", version: "1" });
+  registerHubTools(server, deps);
+  const client = new Client({ name: "exact-artifact-gate-test", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+
+  try {
+    const tools = await client.listTools();
+    const tool = tools.tools.find(({ name }) => name === "agentpod_link_artifact");
+    if (!tool) throw new Error("agentpod_link_artifact was not registered");
+    const result = await client.callTool({
+      name: "agentpod_link_artifact",
+      arguments: { path: "evidence.md" },
+    });
+    if (!Array.isArray(result.content)) throw new Error("artifact tool returned no content");
+    const content = result.content[0];
+    if (!isRecord(content) || content.type !== "text" || typeof content.text !== "string") {
+      throw new Error("artifact tool returned no text");
+    }
+    const linkResult: unknown = JSON.parse(content.text);
+    if (!isRecord(linkResult)) throw new Error("artifact tool returned a non-object");
+    return { linkResult, toolDescription: tool.description ?? "" };
+  } finally {
+    await client.close();
+    await server.close();
+  }
+}
 
 /**
  * Regression target: returning only the floating item URL, or rendering a gate without the
@@ -10,14 +59,6 @@ import { gateProseBody, type GatePendingDelivery } from "../../src/services/boar
 test("an artifact link pins its version and the chat gate shows exactly what the run linked", async () => {
   const itemUrl = "https://app.superlibrary.dev/a/itm_0000000000000007";
   const versionUrl = `${itemUrl}/v/7`;
-  const configs = new Map<string, any>();
-  const handlers = new Map<string, (args: any) => Promise<any>>();
-  const server = {
-    registerTool(name: string, config: any, handler: (args: any) => Promise<any>) {
-      configs.set(name, config);
-      handlers.set(name, handler);
-    },
-  } as never;
   const linked = {
     ok: true as const,
     itemId: "itm_0000000000000007",
@@ -31,11 +72,7 @@ test("an artifact link pins its version and the chat gate shows exactly what the
     caller: { principalId: "prn_agent", kind: "agent" },
     link: async () => linked,
   };
-  registerHubTools(server, deps);
-
-  const linkResult = JSON.parse(
-    (await handlers.get("agentpod_link_artifact")!({ path: "evidence.md" })).content[0].text,
-  );
+  const { linkResult, toolDescription } = await callArtifactTool(deps);
   const delivery: GatePendingDelivery = {
     event: "gate.pending",
     boardId: "brd_fixture",
@@ -52,13 +89,10 @@ test("an artifact link pins its version and the chat gate shows exactly what the
     ],
     ts: "2026-11-16T00:00:00.000Z",
   };
-  const withReference = gateProseBody({
-    ...delivery,
-    references: [{ title: "Release evidence", url: versionUrl }],
-  } as GatePendingDelivery & { references: Array<{ title: string; url: string }> });
-  const withNone = gateProseBody({ ...delivery, references: [] } as GatePendingDelivery & {
-    references: Array<{ title: string; url: string }>;
-  });
+  const withReference = gateProseBody(
+    gateWithReferences(delivery, [{ title: "Release evidence", url: versionUrl }]),
+  );
+  const withNone = gateProseBody(gateWithReferences(delivery, []));
 
   expect({
     linkResult: {
@@ -66,7 +100,7 @@ test("an artifact link pins its version and the chat gate shows exactly what the
       versionUrl: linkResult.versionUrl,
       next: linkResult.next,
     },
-    toolDescription: configs.get("agentpod_link_artifact").description,
+    toolDescription,
     referenceLines: withReference.split("\n").filter((line) => line.includes("Release evidence")),
     noReferenceLines: withNone.split("\n").filter((line) => line.includes("This run linked no artifact")),
   }).toEqual({
