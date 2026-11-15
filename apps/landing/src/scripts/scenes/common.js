@@ -1,7 +1,7 @@
 // Shared by the scenes' small loader and the lazy world: which sun phase to light, the product
 // accent as a colour, whether motion is allowed, and how far a stage has scrolled. Phase and accent
 // come from vibekit's plain (no Svelte) entry, so the scenes follow the same day as the apps.
-import { ACCENTS, ACCENT_HUES, PHASES, PRODUCT_ACCENTS, phaseAt } from '@superjackfruit/vibekit/appearance';
+import { ACCENTS, ACCENT_HUES, PHASES, PRODUCT_ACCENTS, phaseAt } from '@superjackfruitlabs/vibekit-ui/appearance';
 
 export const PRODUCT = 'agentpod';
 
