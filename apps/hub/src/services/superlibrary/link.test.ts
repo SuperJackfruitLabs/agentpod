@@ -110,21 +110,29 @@ test("re-linking a renamed revision for the same card versions the existing arti
 
   // Model the pinned Superlibrary behavior: absent an explicit revision target, agent uploads are
   // identified by station + source path + board. A renamed path therefore starts a new item.
-  const declarations = new Map<string, any>();
+  const declarations = new Map<string, { path: string; bytes: number }>();
+  const declared = (json: unknown): { path: string; bytes: number } => {
+    if (typeof json !== "object" || json === null || !("source" in json) || !("files" in json)) throw new Error("not a declaration");
+    const { source, files } = json;
+    if (typeof source !== "object" || source === null || !("path" in source) || typeof source.path !== "string") throw new Error("no source path");
+    const first: unknown = Array.isArray(files) ? files[0] : undefined;
+    if (typeof first !== "object" || first === null || !("bytes" in first) || typeof first.bytes !== "number") throw new Error("no file bytes");
+    return { path: source.path, bytes: first.bytes };
+  };
   const itemsBySourcePath = new Map<string, { itemId: string; version: number }>();
   let nextUpload = 0;
   d.client.asService = () => ({
     async request(method, path, init = {}) {
       if (method === "POST" && path === "/api/v1/uploads") {
         const uploadId = `upl_000000000000000${++nextUpload}`;
-        declarations.set(uploadId, init.json);
+        declarations.set(uploadId, declared(init.json));
         return Response.json({ uploadId }, { status: 201 });
       }
       if (method === "PUT" && path.includes("/files?path=")) return new Response(null, { status: 204 });
       const committed = path.match(/^\/api\/v1\/uploads\/(upl_[0-9a-f]+)\/commit$/);
-      if (method === "POST" && committed) {
-        const declaration = declarations.get(committed[1]!)!;
-        const sourcePath = declaration.source.path as string;
+      const declaration = committed?.[1] === undefined ? undefined : declarations.get(committed[1]);
+      if (method === "POST" && declaration) {
+        const sourcePath = declaration.path;
         const prior = itemsBySourcePath.get(sourcePath);
         const item = prior ?? {
           itemId: `itm_${String(itemsBySourcePath.size + 1).padStart(16, "0")}`,
@@ -137,7 +145,7 @@ test("re-linking a renamed revision for the same card versions the existing arti
           url: `https://app.superlibrary.dev/a/${item.itemId}`,
           sha256: "x",
           mediaType: "text/markdown",
-          bytes: declaration.files[0].bytes,
+          bytes: declaration.bytes,
         }, { status: 201 });
       }
       throw new Error(`unexpected Superlibrary call: ${method} ${path}`);
