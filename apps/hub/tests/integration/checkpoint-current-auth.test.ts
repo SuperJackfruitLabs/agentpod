@@ -158,11 +158,13 @@ test("installed production port verifies actual broker target pins without ACP o
   } finally { connectionManager.register(nodeId, () => {}); }
 });
 
-test.each(["none", "prepare", "execute", "settlement", "before-settlement"])("real broker and immutable DB phases preserve %s uncertainty without redispatch", async (lost) => {
+test.each(["none", "prepare", "execute", "settlement", "before-settlement", "before-settlement-ended", "before-settlement-expired", "before-settlement-source", "before-settlement-grant", "before-settlement-unavailable"])("real broker and immutable DB phases preserve %s uncertainty without redispatch", async (lost) => {
   const selected = parsePendingCheckpointClaim({ ...claim, runId: "run_" + suffix + lost.replaceAll("-", "") });
   const reserved = await reserveCheckpointAttempt(profile, selected, { profile_id: profile.profileKey, prompt: "fixture", timeout_seconds: 60 });
   const completion = await checkpointNodeObservation(reserved.attempt);
   contextClaim = selected;
+  const beforeSettlement = lost.startsWith("before-settlement");
+  const refused = beforeSettlement && lost !== "before-settlement";
   let prepares = 0, executions = 0, posts = 0, reads = 0, sourceGets = 0;
   let prepared = false, completed = false, lostOnce = false;
   let source: CheckpointSource | undefined;
@@ -197,9 +199,11 @@ test.each(["none", "prepare", "execute", "settlement", "before-settlement"])("re
       sourceGets++;
       // Durable submission_pending has already committed, but no POST has
       // happened. This is the same retained state as death in that gap.
-      if (lost === "before-settlement" && sourceGets === 3) throw new Error("fixture-before-post");
+      if (beforeSettlement && sourceGets === 3) throw new Error("fixture-before-post");
       return Response.json({ ...source, tenantId: profile.sourceTenantId, policy, policyDigest: selected.policyDigest,
-        status: "working", lastHeartbeatMs: Date.now() });
+        status: lost === "before-settlement-ended" && sourceGets > 3 ? "completed" : "working",
+        lastHeartbeatMs: lost === "before-settlement-expired" && sourceGets > 3 ? 0 : Date.now(),
+        ...(lost === "before-settlement-source" && sourceGets > 3 ? { benchId: "e".repeat(32) } : {}) });
     }
     if (address === base + "/checkpoint-settlements") {
       posts++;
@@ -214,6 +218,8 @@ test.each(["none", "prepare", "execute", "settlement", "before-settlement"])("re
     }
     if (address === base + "/checkpoint") {
       reads++;
+      if (lost === "before-settlement-grant") await fakePlane.putGrant(owner, { mayDispatch: [], mayGrantReach: false, scopes: [] });
+      if (lost === "before-settlement-unavailable") return Response.json({ error: { code: "NOT_INITIALIZED" } }, { status: 404 });
       return receipt ? Response.json(receipt) : Response.json({ error: { code: "CHECKPOINT_RECEIPT_MISSING" } }, { status: 404 });
     }
     throw new Error("unexpected private orchestration fixture request");
@@ -225,13 +231,15 @@ test.each(["none", "prepare", "execute", "settlement", "before-settlement"])("re
     const retained = await readCheckpointAttempt(tenantId, reserved.attempt.row.attemptId);
     if (!retained) throw new Error("missing retained attempt");
     const final = first.status === "reported" ? first : await driveCheckpointAttempt(retained, client);
-    expect(final.status).toBe("reported");
-    expect(prepares).toBe(1); expect(executions).toBe(1); expect(posts).toBe(1);
-    expect(reads).toBe(lost === "settlement" || lost === "before-settlement" ? 1 : 0);
+    expect(final.status).toBe(refused ? "unreported" : "reported");
+    expect(prepares).toBe(1); expect(executions).toBe(1); expect(posts).toBe(refused ? 0 : 1);
+    expect(reads).toBe(lost === "settlement" || beforeSettlement ? 1 : 0);
     const stored = await readCheckpointAttempt(tenantId, reserved.attempt.row.attemptId);
-    expect(stored?.row.phase).toBe("reported");
+    expect(stored?.row.phase).toBe(refused ? "submission_pending" : "reported");
     expect(stored?.row.settlementBody).toBe(canonicalCheckpoint(JSON.parse(stored?.row.settlementBody ?? "{}")));
+    if (beforeSettlement) expect(stored?.row.settlementBody).toBe(retained.row.settlementBody);
   } finally {
+    await fakePlane.putGrant(owner, { mayDispatch: [occupant], mayGrantReach: false, scopes: [] });
     contextClaim = claim;
     extraFetch = async () => { throw new Error("unexpected private auth fixture request"); };
     connectionManager.register(nodeId, () => {});

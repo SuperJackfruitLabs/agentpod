@@ -68,13 +68,18 @@ settlement before their effects. Only the original successful reservation or
 phase compare-and-set may send Prepare or Execute. Restarts read exact Status;
 an unresolved old attempt blocks a fresh claim and cannot adopt a new owner.
 
-After a lost settlement POST reply, recovery reads the exact historical receipt.
-There is deliberately no automatic settlement resend. Death after retaining
-`submission_pending` but before POST therefore remains parked when the receipt
-is missing, even with a complete retained body. A separately reviewed explicit
-reconciliation operation must establish current source/run/reporter authority
-before replaying that exact idempotent settlement. It must never repeat a child
-or substitute a new report. A cancelled or failed task does not become a pass.
+After a lost settlement POST reply, recovery first reads the exact historical
+receipt. Only an authenticated `CHECKPOINT_RECEIPT_MISSING` reply permits
+resubmission of the complete retained settlement. Reconciliation checks the
+current run and heartbeat, re-derives the same report from the retained strict
+completion, verifies the active exact admitted source, and rechecks the current
+workspace/issuer authority before POST. The service rechecks its selected
+reporter and atomically settles the identical submission once. This also closes
+death after retaining `submission_pending` but before sending POST. A timeout,
+disabled service, revoked grant, replaced source or ended run remains parked.
+No child is repeated and no new report or request ID is substituted. Historical
+receipts remain readable without requiring a still-active run. A cancelled or
+failed task does not become a pass.
 
 Authenticated database/broker tests and actual managed Node/service execution
 are distinct gates; typed fixture observations do not prove remote fencing.

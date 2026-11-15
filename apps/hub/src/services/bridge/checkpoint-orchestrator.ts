@@ -128,15 +128,26 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
         case "submission_pending": {
           if (!attempt.row.settlementBody || hash(attempt.row.settlementBody) !== attempt.row.settlementSHA256)
             throw new CheckpointRefused("source");
-          if (sendSettlement) {
+          const body = attempt.row.settlementBody;
+          // Recover an existing effect first. Only the exact authenticated
+          // missing-receipt response permits a new settlement attempt.
+          let receipt = sendSettlement ? undefined : await service.receipt(attempt.claim, body);
+          if (!receipt) {
+            // T37 settlement is idempotent by the complete retained submission.
+            // This reconciles a crash before POST, or an uncertain POST whose
+            // receipt is still absent. It never repeats Prepare or Execute.
+            await client.context(attempt.claim.runId, attempt.claim);
+            await client.heartbeat(attempt.claim);
             const { source } = await retainedCheckpointSource(attempt);
-            requireActiveSource(await service.source(attempt.claim), source);
+            if (!attempt.row.completion) throw new CheckpointRefused("source");
+            const report = await buildCheckpointSettlement(attempt, parseCheckpointContextJSON(encode(attempt.row.completion)));
+            if (report.body !== body || report.sha256 !== attempt.row.settlementSHA256) throw new CheckpointRefused("source");
+            const snapshot = await service.source(attempt.claim);
+            requireActiveSource(snapshot, source);
             await current(attempt);
+            requireActiveSource(snapshot, source);
+            receipt = await service.settle(attempt.claim, body);
           }
-          // A lost POST reply replays the historical receipt lookup, never the
-          // child, a generic complete verb, or a newly constructed report.
-          const receipt = sendSettlement ? await service.settle(attempt.claim, attempt.row.settlementBody) :
-            await service.receipt(attempt.claim, attempt.row.settlementBody);
           sendSettlement = false;
           if (!receipt) return parked(attempt);
           await current(attempt);
