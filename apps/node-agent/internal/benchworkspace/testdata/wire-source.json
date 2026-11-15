@@ -1,19 +1,18 @@
 {
   "repository": "https://forge.superjackfruit.com/SuperJackfruitLabs/superbench",
-  "revision": "f2b501d3b496212ed01aed491a4f22c659d70f4b",
+  "revision": "63b1e66187cd72c0151b341912bf29f6a6cd2268",
   "status": "wire-only types/validators adapted locally; no engine imports or independent producer authority",
   "files": {
     "internal/protocolv2/request.go": "eb9a5387b8095244510da1a83b9127df027eb0ff795e1b0cf2db1571f2391fed",
     "internal/protocolv2/json.go": "a79c1f89a979ce63e121b7ebff7e1b6f77f7fc2681ff21c3b7a0da26af2d2e39",
     "internal/protocolv2/response.go": "da20d1e5fa0f065a8c19368125fd4f1cb6e46c9aa54c3e2ab36165bbbe5d048d",
     "internal/protocolv2/response_parse.go": "658af9c78cd7e8c14ad5125ceb03b308cc21cd1518c46cde43ddee4d8b9c6c5f",
-    "internal/protocolv2/response_validate.go": "b2ebc4cf53a0a9fd00a36405062baa61fc30044e84313ab966ea1e644d416cca",
+    "internal/protocolv2/response_validate.go": "89a1f15ee915d4b644ca4224dcd4e85261882ac6b4d86743aab61255ab7e8db5",
     "internal/protocolv2/validate.go": "b1c4a51eb94acfe8a22d65140ccbb89ee72a57e7e99df1a3a85f3ee442578a71",
     "internal/model/ref.go": "13278395e09d99f9cceab42cc0a94233b65473c046b3aa347ebbb2a0aa0a9809",
     "internal/checkpointset/manifest.go": "bfb0d183f2f75c0403eda062e76ec8c1feb450d4c85a3f773d3bd382f1b6f11e"
   },
   "local_adaptations": [
-    "Private producer Authority validation is omitted; repository and ref predicates are local wire-only checks.",
-    "Known request holder binds fresh returned leases independently of a preexisting lease token; producer and consumer regressions cover this request identity constraint."
+    "Private producer Authority validation is omitted; repository and ref predicates are local wire-only checks."
   ]
 }
