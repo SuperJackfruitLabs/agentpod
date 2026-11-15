@@ -27,7 +27,7 @@ The site ships nothing any app imports, so it has no claim on their dependency r
 
 ## What it wears
 
-**The suite's docs theme**, `@superjackfruit/docs-theme`, vendored under `vendor/` with the
+**The suite's docs theme**, `@superjackfruitlabs/vibekit-docs`, vendored under `vendor/` with the
 frontdoor and vibekit tarballs it needs (the same three files SuperDispatch's and SuperExchange's
 docs sites carry; `.gitignore` keeps `vendor/*.tgz`). The whole design config is
 `sjlDocs({ product: 'agentpod', status: 'lights on' })` in `astro.config.mjs`: vibekit's cobalt,

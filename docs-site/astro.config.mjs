@@ -1,7 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
-import sjlDocs from '@superjackfruit/docs-theme';
+import sjlDocs from '@superjackfruitlabs/vibekit-docs';
 
 export default defineConfig({
   site: 'https://docs.agentpod.dev',
@@ -24,7 +24,7 @@ export default defineConfig({
         'A fleet and facilities console for agent runtimes. Docs for running a fleet, ' +
         'operating the machines your agents live on, and building against the hub.',
       // The suite's docs theme: vibekit's cobalt, the faces, the street, status badges, the footers,
-      // the 404, the edit link and llms.txt. See @superjackfruit/docs-theme's README.
+      // the 404, the edit link and llms.txt. See @superjackfruitlabs/vibekit-docs's README.
       plugins: [
         sjlDocs({
           product: 'agentpod',
