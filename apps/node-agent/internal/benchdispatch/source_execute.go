@@ -42,6 +42,9 @@ func (s Store) sourceBinding(ctx context.Context, spec SourceSpec) (Plan, Source
 	var p Plan
 	var b SourceBinding
 	err := s.withDocument(ctx, spec.BenchKey, false, func(doc *state) (bool, error) {
+		if cancelled(doc, sourceID(spec)) {
+			return false, ErrOwner
+		}
 		for i := range doc.Records {
 			r := &doc.Records[i]
 			if r.Source == nil || sourceDigest(r.Source.Spec) != sourceDigest(spec) {

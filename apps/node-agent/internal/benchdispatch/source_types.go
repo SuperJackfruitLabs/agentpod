@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattempt"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 )
 
@@ -13,45 +14,13 @@ const sourceVersion = "agentpod.private-bench-dispatch.v2"
 
 // SourceSpec reserves a fixed task/host/packaging identity before any source
 // growth. It has no repository URLs, arguments, environment or capabilities.
-type SourceSpec struct {
-	Identity             Identity           `json:"identity"`
-	HostID               string             `json:"host_id"`
-	BenchKey             string             `json:"bench_key"`
-	Holder               string             `json:"holder"`
-	ContextParent        string             `json:"context_parent"`
-	DataRoot             string             `json:"data_root"`
-	CheckpointRepository string             `json:"checkpoint_repository"`
-	Repositories         []SourceRepository `json:"repositories"`
-	WorkerPath           string             `json:"worker_path"`
-	WorkerSHA256         string             `json:"worker_sha256"`
-	TaskSHA256           string             `json:"task_sha256"`
-	Create               bool               `json:"create"`
-	CreateRequestID      string             `json:"create_request_id,omitempty"`
-	LeaseRequestID       string             `json:"lease_request_id"`
-	RunRequestID         string             `json:"run_request_id"`
-}
+type SourceSpec = benchattempt.SourceSpec
 
-type SourceRepository struct {
-	Name             string `json:"name"`
-	RepositorySHA256 string `json:"repository_sha256"`
-	TaskRef          string `json:"task_ref"`
-	Base             string `json:"base"`
-	ObjectFormat     string `json:"object_format"`
-}
+type SourceRepository = benchattempt.SourceRepository
 
-type SourceOperation struct {
-	Step           string `json:"step"`
-	RequestSHA256  string `json:"request_sha256"`
-	BodySHA256     string `json:"body_sha256"`
-	ResponseSHA256 string `json:"response_sha256,omitempty"`
-	HTTPStatus     int    `json:"http_status,omitempty"`
-	Phase          string `json:"phase"`
-}
+type SourceOperation = benchattempt.SourceOperation
 
-type SourceReservation struct {
-	Spec       SourceSpec        `json:"spec"`
-	Operations []SourceOperation `json:"operations"`
-}
+type SourceReservation = benchattempt.SourceReservation
 
 func sourceID(s SourceSpec) string     { raw, _ := json.Marshal(s.Identity); return digest(raw) }
 func sourceDigest(s SourceSpec) string { raw, _ := json.Marshal(s); return digest(raw) }

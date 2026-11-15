@@ -82,6 +82,9 @@ func (s Store) Dispatch(ctx context.Context, p Plan, raw []byte, gate Gate, laun
 		return ErrInvalid
 	}
 	err := s.withState(ctx, p, false, func(doc *state) (bool, error) {
+		if cancelled(doc, planID(p)) {
+			return false, ErrOwner
+		}
 		r, e := find(doc, p)
 		if e != nil {
 			return false, e
@@ -139,6 +142,9 @@ func (s Store) StageProposal(ctx context.Context, p Plan, o Observation, gate Ga
 	}
 	var replay []byte
 	err := s.withState(ctx, p, false, func(doc *state) (bool, error) {
+		if cancelled(doc, planID(p)) {
+			return false, ErrOwner
+		}
 		r, e := find(doc, p)
 		if e != nil {
 			return false, e
@@ -184,6 +190,9 @@ func (s Store) StageProposal(ctx context.Context, p Plan, o Observation, gate Ga
 		return nil, ErrInvalid
 	}
 	err = s.withState(ctx, p, false, func(doc *state) (bool, error) {
+		if cancelled(doc, planID(p)) {
+			return false, ErrOwner
+		}
 		r, e := find(doc, p)
 		if e != nil {
 			return false, e

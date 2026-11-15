@@ -23,6 +23,9 @@ func (s Store) ReserveSource(ctx context.Context, spec SourceSpec, gate SourceGa
 		return ErrInvalid
 	}
 	return s.withDocument(ctx, spec.BenchKey, true, func(doc *state) (bool, error) {
+		if cancelled(doc, sourceID(spec)) {
+			return false, ErrOwner
+		}
 		if gate(ctx, spec) != nil || ctx.Err() != nil {
 			return false, ErrOwner
 		}
@@ -55,7 +58,9 @@ func (s Store) ReserveSource(ctx context.Context, spec SourceSpec, gate SourceGa
 		if len(doc.Records) >= maxRecords {
 			return false, ErrInvalid
 		}
-		doc.Version = sourceVersion
+		if doc.Version != cancellationVersion {
+			doc.Version = sourceVersion
+		}
 		doc.Source = &SourceReservation{Spec: spec, Operations: []SourceOperation{}}
 		doc.Active = sourceID(spec)
 		return true, nil
@@ -145,7 +150,10 @@ func (s Store) BeginSourceOperation(ctx context.Context, spec SourceSpec, step s
 		return false, ErrInvalid
 	}
 	send := false
-	err = s.withSource(ctx, spec, func(_ *state, r *SourceReservation) (bool, error) {
+	err = s.withSource(ctx, spec, func(doc *state, r *SourceReservation) (bool, error) {
+		if cancelled(doc, sourceID(spec)) {
+			return false, ErrOwner
+		}
 		if gate(ctx, spec) != nil || ctx.Err() != nil {
 			return false, ErrOwner
 		}
