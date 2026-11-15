@@ -29,6 +29,8 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   } catch { return { status: "not-ready", reason: "Checkpoint target unavailable" }; }
   if (dedicated) {
     try {
+      const resumed = await dedicated.recover();
+      if (resumed) return resumed;
       const work = await client.claim({ maxConcurrency: agent.maxConcurrency, profileKey: agent.profileKey,
         checkpointProtocol: dedicated.protocol, checkpointOnly: true });
       if (!work) return { status: "idle" };

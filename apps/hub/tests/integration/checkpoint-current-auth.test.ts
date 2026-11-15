@@ -12,9 +12,15 @@ import { stations } from "../../src/db/schema/stations";
 import { bridgeAgents } from "../../src/db/schema/bridge";
 import { checkpointDispatches } from "../../src/db/schema/checkpoint-dispatch";
 import { checkpointCurrentRoutes } from "../../src/routes/checkpoint-current";
-import { connectionManager } from "../../src/services/broker";
+import { connectionManager, handleNodeMessage } from "../../src/services/broker";
 import { parseCheckpointProfile } from "../../src/services/bridge/checkpoint-profile";
-import { reserveCheckpointAttempt } from "../../src/services/bridge/checkpoint-ledger";
+import { readCheckpointAttempt, reserveCheckpointAttempt } from "../../src/services/bridge/checkpoint-ledger";
+import { driveCheckpointAttempt } from "../../src/services/bridge/checkpoint-orchestrator";
+import { checkpointAgentClient } from "../../src/services/bridge/checkpoint-agent-client";
+import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON } from "../../src/services/bridge/checkpoint-json";
+import { parseCheckpointSource, type CheckpointSource } from "../../src/services/bridge/checkpoint-source";
+import { checkpointSettlementSchema } from "../../src/services/bridge/checkpoint-settlement-data";
+import { checkpointNodeObservation } from "../helpers/checkpoint-node";
 import { checkpointPolicyDigest, parsePendingCheckpointClaim } from "../../src/services/bridge/checkpoint-claim";
 import { setOrgPlaneClientForTests } from "../../src/auth/org-plane/client";
 import { TEST_PLANE } from "../../src/auth/org-plane/config";
@@ -22,7 +28,7 @@ import { fakePlane, fakePlaneJwks, signPlaneToken } from "../helpers/fake-plane"
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createHash } from "node:crypto";
 import claimFixture from "../../src/services/bridge/checkpoint-contract/claim.fixture.json";
-import { parseBenchCoordinatorCurrentResponse } from "@agentpod/contract";
+import { BenchCoordinatorRequest, parseBenchCoordinatorCurrentResponse } from "@agentpod/contract";
 
 const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 20);
 const organizationId = "org_" + suffix;
@@ -44,6 +50,8 @@ const profile = parseCheckpointProfile({ version: "agentpod.checkpoint-profile.v
 const policy = { ...claimFixture.pending.policy, reporterPrincipalId: profile.reporterPrincipalId, nodeId,
   executors: [{ agentId: profile.target.agent_id, stationId }] };
 const claim = parsePendingCheckpointClaim({ ...claimFixture.pending, policy, policyDigest: checkpointPolicyDigest(policy) });
+let contextClaim = claim;
+let extraFetch: (address: string, init?: RequestInit) => Promise<Response> = async () => { throw new Error("unexpected private auth fixture request"); };
 let attempt: Awaited<ReturnType<typeof reserveCheckpointAttempt>>["attempt"];
 let sourceReads = 0;
 let afterContext: () => Promise<void> = async () => {};
@@ -74,14 +82,16 @@ beforeAll(async () => {
   restorePlane = setOrgPlaneClientForTests({ ...fakePlane, agentToken: async (principal, audience) => ({ expiresIn: 300,
     accessToken: await signPlaneToken({ sub: principal, principalKind: "agent", aud: audience, ent: ["superpipeline"], scope: "claim", org: organizationId }) }) });
   restoreFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => {
+  globalThis.fetch = async (url, init) => {
     const address = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
     if (address === TEST_PLANE.jwksUrl) return Response.json(await fakePlaneJwks());
-    if (address === `${profile.sourceOrigin}/v1/boards/${claim.boardId}/runs/${claim.runId}`) {
+    if (address === `${profile.sourceOrigin}/v1/boards/${contextClaim.boardId}/runs/${contextClaim.runId}`) {
       sourceReads++; await afterContext();
-      return Response.json({ ...claimFixture.context, stage: { ...claimFixture.context.stage, checkpointPolicy: policy } });
+      return Response.json({ ...claimFixture.context, run: { ...claimFixture.context.run, runId: contextClaim.runId },
+        card: { ...claimFixture.context.card, currentRunId: contextClaim.runId },
+        stage: { ...claimFixture.context.stage, checkpointPolicy: policy } });
     }
-    throw new Error("unexpected private auth fixture request");
+    return extraFetch(address, init);
   };
   attempt = (await reserveCheckpointAttempt(profile, claim, { profile_id: profile.profileKey, prompt: "fixture", timeout_seconds: 60 })).attempt;
 });
@@ -124,6 +134,79 @@ test("foreign workspace mapping and revoked actual issuer grant refuse", async (
 test("retained row cannot change identity or rewind phase", async () => {
   await expect(db.update(checkpointDispatches).set({ prepareSHA256: "f".repeat(64) }).where(eq(checkpointDispatches.attemptId, attempt.row.attemptId)).execute()).rejects.toThrow();
   await expect(db.update(checkpointDispatches).set({ phase: "reported" }).where(eq(checkpointDispatches.attemptId, attempt.row.attemptId)).execute()).rejects.toThrow();
+});
+
+test.each(["none", "prepare", "execute", "settlement"])("real broker and immutable DB phases recover %s lost reply without redispatch", async (lost) => {
+  const selected = parsePendingCheckpointClaim({ ...claim, runId: "run_" + suffix + lost });
+  contextClaim = selected;
+  const reserved = await reserveCheckpointAttempt(profile, selected, { profile_id: profile.profileKey, prompt: "fixture", timeout_seconds: 60 });
+  const completion = await checkpointNodeObservation(reserved.attempt);
+  let prepares = 0, executions = 0, posts = 0, reads = 0;
+  let prepared = false, completed = false, lostOnce = false;
+  let source: CheckpointSource | undefined;
+  let receipt: unknown;
+  connectionManager.register(nodeId, (message) => {
+    if (message.type !== "req" || message.verb !== "bench.coordinator") return;
+    const request = BenchCoordinatorRequest.parse(message.params);
+    if (request.operation === "prepare") { prepares++; prepared = true; }
+    if (request.operation === "execute") { executions++; completed = true; }
+    const response = { version: "agentpod.bench-coordinator.v1", operation: request.operation,
+      identity: reserved.attempt.request.identity, target: profile.target,
+      ...(completed ? { state: "completed", completion } : prepared ? { state: "prepared", source: completion.source } : { state: "unknown" }) };
+    // A different authenticated Node cannot consume the selected request.
+    handleNodeMessage("node_wrong_fixture", { type: "res", id: message.id, ok: true, data: { ...response, state: "unknown" } });
+    if (!lostOnce && request.operation === lost) {
+      lostOnce = true;
+      handleNodeMessage(nodeId, { type: "res", id: message.id, ok: false, error: "fixture-lost-reply" });
+    } else handleNodeMessage(nodeId, { type: "res", id: message.id, ok: true, data: response });
+  });
+  extraFetch = async (address, init) => {
+    if (address === TEST_PLANE.url + "/api/token/service") return Response.json({ access_token: await signPlaneToken({
+      sub: profile.reporterPrincipalId, principalKind: "service", org: organizationId, aud: profile.sourceAudience,
+      ent: ["superpipeline"], scope: "checkpoints:read checkpoints:submit" }), expires_in: 300 });
+    const base = `${profile.sourceOrigin}/v1/boards/${selected.boardId}/runs/${selected.runId}`;
+    if (address === base + "/heartbeat") return Response.json({ ok: true });
+    if (address === base + "/checkpoint-source") {
+      if (init?.method === "POST") {
+        if (typeof init.body !== "string") throw new Error("expected source bytes");
+        source = parseCheckpointSource(parseCheckpointJSON(encode(init.body)));
+        return Response.json({ runId: selected.runId, leaseEpoch: selected.leaseEpoch, sourceDigest: await checkpointDigest(source), admittedAt: Date.now() });
+      }
+      return Response.json({ ...source, tenantId: profile.sourceTenantId, policy, policyDigest: selected.policyDigest,
+        status: "working", lastHeartbeatMs: Date.now() });
+    }
+    if (address === base + "/checkpoint-settlements") {
+      posts++;
+      if (typeof init?.body !== "string") throw new Error("expected report bytes");
+      const submitted = checkpointSettlementSchema.parse(parseCheckpointJSON(encode(init.body)));
+      receipt = { version: "superpipeline.run-checkpoint-receipt.v1", settlementId: submitted.checkpoint.settlementId,
+        requestDigest: await checkpointDigest(submitted), reportDigest: await checkpointDigest(submitted.checkpoint),
+        reportedBy: profile.reporterPrincipalId, runId: selected.runId, leaseEpoch: selected.leaseEpoch,
+        recordedAt: new Date().toISOString(), checkpoint: submitted.checkpoint.checkpoint };
+      if (lost === "settlement" && !lostOnce) { lostOnce = true; throw new Error("fixture-lost-reply"); }
+      return Response.json(receipt);
+    }
+    if (address === base + "/checkpoint") { reads++; return Response.json(receipt); }
+    throw new Error("unexpected private orchestration fixture request");
+  };
+  try {
+    const client = await checkpointAgentClient(profile);
+    const first = await driveCheckpointAttempt(reserved.attempt, client, reserved.send);
+    expect(first.status).toBe(lost === "none" ? "reported" : "unreported");
+    const retained = await readCheckpointAttempt(tenantId, reserved.attempt.row.attemptId);
+    if (!retained) throw new Error("missing retained attempt");
+    const final = first.status === "reported" ? first : await driveCheckpointAttempt(retained, client);
+    expect(final.status).toBe("reported");
+    expect(prepares).toBe(1); expect(executions).toBe(1); expect(posts).toBe(1);
+    expect(reads).toBe(lost === "settlement" ? 1 : 0);
+    const stored = await readCheckpointAttempt(tenantId, reserved.attempt.row.attemptId);
+    expect(stored?.row.phase).toBe("reported");
+    expect(stored?.row.settlementBody).toBe(canonicalCheckpoint(JSON.parse(stored?.row.settlementBody ?? "{}")));
+  } finally {
+    contextClaim = claim;
+    extraFetch = async () => { throw new Error("unexpected private auth fixture request"); };
+    connectionManager.register(nodeId, () => {});
+  }
 });
 
 test("post-context occupancy replacement refuses the old retained attempt", async () => {

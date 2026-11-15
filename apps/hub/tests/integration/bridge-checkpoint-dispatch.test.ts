@@ -24,7 +24,7 @@ function harness() {
     stationId: "station_pilot01", token: "spa_fixture-not-for-worker", hubUserId: "user_fixture", mode: "full-auto" as const };
   const target: CheckpointTarget = { tenantId: fixture.pending.tenantId, sourceTenantId: fixture.pending.tenantId, boardId: agent.boardId, stationId: agent.stationId,
     agentId: fixture.pending.agentId, nodeId: "node_pilot01", hostId: "host_fixture", registryRevision: "registry_fixture",
-    coordinatorVersion: "superbench.v2", workerVersion: "agentpod.superbench-worker.v2", workerSHA256: "a".repeat(64) };
+    benchProtocol: "superbench.v2", coordinatorImplementationSHA256: "b".repeat(64), executionMode: "linux-cgroup-v2", workerVersion: "agentpod.superbench-worker.v2", workerSHA256: "a".repeat(64) };
   const calls: Array<{ path: string; body: unknown }> = [];
   const dispatched: Parameters<CheckpointDispatchPort["dispatch"]>[0][] = [];
   let valid = true;

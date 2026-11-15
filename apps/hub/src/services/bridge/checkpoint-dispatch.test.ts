@@ -6,7 +6,7 @@ import { SuperpipelineClient } from "./superpipeline";
 
 const identity = { tenantId: "fleet_hub_fixture", boardId: fixture.pending.boardId, stationId: "station_pilot01" };
 function target(): CheckpointTarget { return { ...identity, sourceTenantId: fixture.pending.tenantId, agentId: fixture.pending.agentId, nodeId: "node_pilot01",
-  hostId: "host_fixture", registryRevision: "registry_fixture", coordinatorVersion: "superbench.v2",
+  hostId: "host_fixture", registryRevision: "registry_fixture", benchProtocol: "superbench.v2", coordinatorImplementationSHA256: "b".repeat(64), executionMode: "linux-cgroup-v2",
   workerVersion: "agentpod.superbench-worker.v2", workerSHA256: "a".repeat(64) }; }
 function harness() {
   const observed = target();
@@ -35,7 +35,7 @@ test("there is no opt-in without the dedicated trusted port or real readiness", 
   expect(h.checks).toHaveLength(0);
 });
 
-test.each(["tenantId", "boardId", "stationId", "workerVersion", "coordinatorVersion", "workerSHA256"] as const)(
+test.each(["tenantId", "boardId", "stationId", "workerVersion", "benchProtocol", "workerSHA256", "coordinatorImplementationSHA256", "executionMode"] as const)(
   "readiness refuses foreign or unsupported %s before any claim", async (field) => {
     const h = harness();
     Object.assign(h.observed, { [field]: "foreign" });

@@ -22,6 +22,7 @@ import { runOnce, type AcpPort, type DispatchResult } from "./dispatch";
 import { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./superpipeline";
 import { createLogger } from "../../utils/logger";
 import { onWorkAvailable } from "./work-wake";
+import { checkpointRuntime } from "./checkpoint-port";
 
 /** How long to wait after a claim that found nothing. */
 const DEFAULT_POLL_MS = 5_000;
@@ -326,10 +327,13 @@ export async function startSuperpipelineBridge(
         fetch: fetchAdapter,
       });
       const handle = startAgentLoop({
-        run: async (handover) =>
-          runOnce({
+        run: async (handover) => {
+          const dedicated = checkpointRuntime(agent.tenantId ?? BOOTSTRAP_TENANT_ID,
+            agent.boardId, agent.stationId, agent.key);
+          return runOnce({
             handover,
-            client,
+            client: dedicated ? await dedicated.client() : client,
+            ...(dedicated ? { checkpoint: dedicated.port } : {}),
             acp,
             agent: config,
             // The roster row's own tenant (W5): the composite FK pins it to its station's, so the
@@ -341,7 +345,8 @@ export async function startSuperpipelineBridge(
             ...(bridgeConfig.ownWorkTimeoutMs === undefined ? {} : { ownWorkTimeoutMs: bridgeConfig.ownWorkTimeoutMs }),
             log,
             mcpUrl,
-          }),
+          });
+        },
         log: (m, meta) => log(m, { agent: agent.key, ...meta }),
         wake: (fn) => onWorkAvailable(agent.boardId, fn),
       });

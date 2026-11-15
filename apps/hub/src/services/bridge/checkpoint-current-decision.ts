@@ -84,6 +84,7 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array)
     requireInstalledCheckpointProfile(attempt.profile);
     const finalAuthority = await readCheckpointAuthority(attempt.profile);
     const final = await readCheckpointAttempt(request.identity.tenant_id, request.identity.attempt_id);
+    requireInstalledCheckpointProfile(attempt.profile);
     if (canonicalCheckpoint(finalAuthority) !== attempt.row.authority || !final ||
       JSON.stringify(final.row) !== JSON.stringify(attempt.row)) return refused("stale_owner");
     const now = Date.now();

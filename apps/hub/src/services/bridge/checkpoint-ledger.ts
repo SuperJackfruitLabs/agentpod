@@ -98,3 +98,51 @@ export async function reserveCheckpointAttempt(value: CheckpointProfile, pending
   sameReservation(attempt, profile, claim, authority, input);
   return { attempt, send: false };
 }
+
+export type CheckpointAdvance =
+  | { phase: "prepared"; prepared: string }
+  | { phase: "source_pending"; source: string }
+  | { phase: "admitted"; sourceReceipt: string }
+  | { phase: "execute_pending"; executeRequest: string; executeSHA256: string }
+  | { phase: "completed"; completion: string }
+  | { phase: "submission_pending"; settlementBody: string; settlementSHA256: string }
+  | { phase: "reported"; settlementReceipt: string };
+const predecessor = { prepared: "prepare_pending", source_pending: "prepared", admitted: "source_pending",
+  execute_pending: "admitted", completed: "execute_pending", submission_pending: "completed", reported: "submission_pending" };
+
+/** Compare-and-set owns the right to send an effect. A raced or replayed
+ * transition never grants that right again; every populated cell is immutable.
+ */
+export async function advanceCheckpointAttempt(attempt: RetainedCheckpointAttempt, evidence: CheckpointAdvance): Promise<{
+  attempt: RetainedCheckpointAttempt; send: boolean;
+}> {
+  if (attempt.row.phase !== predecessor[evidence.phase]) throw new CheckpointRefused("stale");
+  for (const [key, value] of Object.entries(evidence)) {
+    if (key !== "phase" && (typeof value !== "string" || Buffer.byteLength(value, "utf8") > 262144))
+      throw new CheckpointRefused("invalid");
+  }
+  const [updated] = await db.update(checkpointDispatches).set({ ...evidence, updatedAt: new Date() }).where(and(
+    eq(checkpointDispatches.tenantId, attempt.row.tenantId), eq(checkpointDispatches.attemptId, attempt.row.attemptId),
+    eq(checkpointDispatches.prepareSHA256, attempt.row.prepareSHA256), eq(checkpointDispatches.phase, attempt.row.phase))).returning();
+  if (updated) return { attempt: checked(updated), send: true };
+  const current = await readCheckpointAttempt(attempt.row.tenantId, attempt.row.attemptId);
+  if (!current || Object.entries(evidence).some(([key, value]) => Reflect.get(current.row, key) !== value))
+    throw new CheckpointRefused("stale");
+  return { attempt: current, send: false };
+}
+
+/** A pending old owner blocks fresh claims; it is never relabelled as a new run. */
+export async function pendingCheckpointAttempt(profile: CheckpointProfile): Promise<RetainedCheckpointAttempt | undefined> {
+  const rows = await db.select().from(checkpointDispatches).where(and(
+    eq(checkpointDispatches.tenantId, profile.target.tenant_id), eq(checkpointDispatches.boardId, profile.target.board_id)));
+  const pending = rows.filter((row) => {
+    if (row.phase === "reported") return false;
+    const original = checked(row);
+    if (original.profile.target.station_id !== profile.target.station_id) return false;
+    // A changed profile cannot make an unresolved old reservation disappear.
+    if (row.profile !== canonicalCheckpoint(profile)) throw new CheckpointRefused("stale");
+    return true;
+  });
+  if (pending.length > 1) throw new CheckpointRefused("uncertain");
+  return pending[0] ? checked(pending[0]) : undefined;
+}
