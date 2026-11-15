@@ -1,0 +1,19 @@
+{
+  "repository": "https://forge.superjackfruit.com/SuperJackfruitLabs/treaty",
+  "revision": "e66ec6098980ca09472440bc6d5aebf241f43a35",
+  "status": "proposal; no suite consumer deployment implied",
+  "files": {
+    "schemas/superbench/operation.v1.json": {
+      "local": "operation.v1.json",
+      "sha256": "a36ed1cca68b49e7d63d4ed37c838d2f962968a10a9fbc8eb4a4aeb8dd3d89ca"
+    },
+    "fixtures/superbench-api/operations.json": {
+      "local": "operations.json",
+      "sha256": "2f645432b4a34be777e2d6f753cde9086dd3ec25e48da733336734007629c06e"
+    },
+    "fixtures/superbench-api/creation.json": {
+      "local": "creation.json",
+      "sha256": "97cd2cdef9f60ab50880b84f04970298052975c0651a71849fb19bf9f3ef4484"
+    }
+  }
+}

@@ -1,0 +1,488 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/SuperJackfruitLabs/treaty/main/schemas/superbench/operation.v1.json",
+  "title": "SuperBench local operation v1",
+  "description": "Local Unix-peer authenticated operator API; not an event or remote identity contract. Proposed ownership boundary is under charter review.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "operation"],
+  "properties": {
+    "version": {
+      "const": "superbench.v1"
+    },
+    "operation": {
+      "enum": [
+        "create",
+        "recover",
+        "status",
+        "host_status",
+        "lease",
+        "checkpoint",
+        "release",
+        "run",
+        "setup",
+        "stop",
+        "stop_admin"
+      ]
+    },
+    "key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^[^-]"
+    },
+    "branch": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "base": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "holder": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,199}$"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$"
+    },
+    "lease_token": {
+      "type": "string",
+      "pattern": "^([a-f0-9]{32}|[a-f0-9]{48})$"
+    },
+    "arguments": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "prefixItems": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        }
+      ],
+      "items": {
+        "type": "string",
+        "maxLength": 8192
+      }
+    },
+    "checkpoint": {
+      "type": "boolean"
+    },
+    "offline": {
+      "type": "boolean"
+    },
+    "initialize": {
+      "type": "boolean",
+      "const": true
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "operation": {
+          "const": "create"
+        }
+      },
+      "required": ["key", "repository", "request_id"],
+      "not": {
+        "anyOf": [
+          {
+            "required": ["holder"]
+          },
+          {
+            "required": ["lease_token"]
+          },
+          {
+            "required": ["arguments"]
+          },
+          {
+            "required": ["checkpoint"]
+          },
+          {
+            "required": ["offline"]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "recover"
+        }
+      },
+      "required": ["key", "repository", "branch", "request_id"],
+      "not": {
+        "anyOf": [
+          {
+            "required": ["holder"]
+          },
+          {
+            "required": ["lease_token"]
+          },
+          {
+            "required": ["arguments"]
+          },
+          {
+            "required": ["checkpoint"]
+          },
+          {
+            "required": ["offline"]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "status"
+        }
+      },
+      "required": [],
+      "not": {
+        "anyOf": [
+          {
+            "required": ["repository"]
+          },
+          {
+            "required": ["branch"]
+          },
+          {
+            "required": ["base"]
+          },
+          {
+            "required": ["holder"]
+          },
+          {
+            "required": ["request_id"]
+          },
+          {
+            "required": ["lease_token"]
+          },
+          {
+            "required": ["arguments"]
+          },
+          {
+            "required": ["checkpoint"]
+          },
+          {
+            "required": ["offline"]
+          },
+          {
+            "required": ["initialize"]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "host_status"
+        }
+      },
+      "required": [],
+      "not": {
+        "anyOf": [
+          {
+            "required": ["key"]
+          },
+          {
+            "required": ["repository"]
+          },
+          {
+            "required": ["branch"]
+          },
+          {
+            "required": ["base"]
+          },
+          {
+            "required": ["holder"]
+          },
+          {
+            "required": ["request_id"]
+          },
+          {
+            "required": ["lease_token"]
+          },
+          {
+            "required": ["arguments"]
+          },
+          {
+            "required": ["checkpoint"]
+          },
+          {
+            "required": ["offline"]
+          },
+          {
+            "required": ["initialize"]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "lease"
+        }
+      },
+      "required": ["key", "holder", "request_id"],
+      "not": {
+        "anyOf": [
+          {
+            "required": ["repository"]
+          },
+          {
+            "required": ["branch"]
+          },
+          {
+            "required": ["base"]
+          },
+          {
+            "required": ["lease_token"]
+          },
+          {
+            "required": ["arguments"]
+          },
+          {
+            "required": ["checkpoint"]
+          },
+          {
+            "required": ["offline"]
+          },
+          {
+            "required": ["initialize"]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "checkpoint"
+        }
+      },
+      "required": ["key", "lease_token"],
+      "not": {
+        "anyOf": [
+          {
+            "required": ["repository"]
+          },
+          {
+            "required": ["branch"]
+          },
+          {
+            "required": ["base"]
+          },
+          {
+            "required": ["holder"]
+          },
+          {
+            "required": ["request_id"]
+          },
+          {
+            "required": ["arguments"]
+          },
+          {
+            "required": ["checkpoint"]
+          },
+          {
+            "required": ["offline"]
+          },
+          {
+            "required": ["initialize"]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "release"
+        }
+      },
+      "required": ["key", "lease_token"],
+      "not": {
+        "anyOf": [
+          {
+            "required": ["repository"]
+          },
+          {
+            "required": ["branch"]
+          },
+          {
+            "required": ["base"]
+          },
+          {
+            "required": ["holder"]
+          },
+          {
+            "required": ["request_id"]
+          },
+          {
+            "required": ["arguments"]
+          },
+          {
+            "required": ["checkpoint"]
+          },
+          {
+            "required": ["offline"]
+          },
+          {
+            "required": ["initialize"]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "run"
+        }
+      },
+      "required": ["key", "holder", "arguments", "request_id"],
+      "not": {
+        "anyOf": [
+          {
+            "required": ["repository"]
+          },
+          {
+            "required": ["branch"]
+          },
+          {
+            "required": ["base"]
+          },
+          {
+            "required": ["lease_token"]
+          },
+          {
+            "required": ["offline"]
+          },
+          {
+            "required": ["initialize"]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "setup"
+        }
+      },
+      "required": ["key", "holder", "request_id"],
+      "not": {
+        "anyOf": [
+          {
+            "required": ["repository"]
+          },
+          {
+            "required": ["branch"]
+          },
+          {
+            "required": ["base"]
+          },
+          {
+            "required": ["lease_token"]
+          },
+          {
+            "required": ["arguments"]
+          },
+          {
+            "required": ["checkpoint"]
+          },
+          {
+            "required": ["initialize"]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "stop"
+        }
+      },
+      "required": ["key", "lease_token"],
+      "not": {
+        "anyOf": [
+          {
+            "required": ["repository"]
+          },
+          {
+            "required": ["branch"]
+          },
+          {
+            "required": ["base"]
+          },
+          {
+            "required": ["holder"]
+          },
+          {
+            "required": ["request_id"]
+          },
+          {
+            "required": ["arguments"]
+          },
+          {
+            "required": ["checkpoint"]
+          },
+          {
+            "required": ["offline"]
+          },
+          {
+            "required": ["initialize"]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "operation": {
+          "const": "stop_admin"
+        }
+      },
+      "required": ["key"],
+      "not": {
+        "anyOf": [
+          {
+            "required": ["repository"]
+          },
+          {
+            "required": ["branch"]
+          },
+          {
+            "required": ["base"]
+          },
+          {
+            "required": ["holder"]
+          },
+          {
+            "required": ["request_id"]
+          },
+          {
+            "required": ["lease_token"]
+          },
+          {
+            "required": ["arguments"]
+          },
+          {
+            "required": ["checkpoint"]
+          },
+          {
+            "required": ["offline"]
+          },
+          {
+            "required": ["initialize"]
+          }
+        ]
+      }
+    }
+  ]
+}

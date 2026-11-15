@@ -1,0 +1,512 @@
+{
+  "valid": {
+    "create": {
+      "version": "superbench.v1",
+      "operation": "create",
+      "key": "card_example",
+      "repository": "https://example.invalid/repository.git",
+      "request_id": "create-example"
+    },
+    "recover": {
+      "version": "superbench.v1",
+      "operation": "recover",
+      "key": "card_example",
+      "repository": "https://example.invalid/repository.git",
+      "branch": "card/card_example",
+      "request_id": "recover-example"
+    },
+    "status": {
+      "version": "superbench.v1",
+      "operation": "status"
+    },
+    "host_status": {
+      "version": "superbench.v1",
+      "operation": "host_status"
+    },
+    "lease": {
+      "version": "superbench.v1",
+      "operation": "lease",
+      "key": "card_example",
+      "holder": "run_example",
+      "request_id": "lease-example"
+    },
+    "checkpoint": {
+      "version": "superbench.v1",
+      "operation": "checkpoint",
+      "key": "card_example",
+      "lease_token": "00000000000000000000000000000000"
+    },
+    "release": {
+      "version": "superbench.v1",
+      "operation": "release",
+      "key": "card_example",
+      "lease_token": "00000000000000000000000000000000"
+    },
+    "run": {
+      "version": "superbench.v1",
+      "operation": "run",
+      "key": "card_example",
+      "holder": "run_example",
+      "arguments": [
+        "sh",
+        "-c",
+        "printf hello"
+      ],
+      "request_id": "run-example"
+    },
+    "setup": {
+      "version": "superbench.v1",
+      "operation": "setup",
+      "key": "card_example",
+      "holder": "run_example",
+      "request_id": "setup-example"
+    },
+    "stop": {
+      "version": "superbench.v1",
+      "operation": "stop",
+      "key": "card_example",
+      "lease_token": "00000000000000000000000000000000"
+    },
+    "stop_admin": {
+      "version": "superbench.v1",
+      "operation": "stop_admin",
+      "key": "card_example"
+    },
+    "run-no-checkpoint": {
+      "version": "superbench.v1",
+      "operation": "run",
+      "key": "card_example",
+      "holder": "run_example",
+      "arguments": [
+        "sh",
+        "-c",
+        "printf hello"
+      ],
+      "request_id": "run-example",
+      "checkpoint": false
+    },
+    "setup-offline": {
+      "version": "superbench.v1",
+      "operation": "setup",
+      "key": "card_example",
+      "holder": "run_example",
+      "request_id": "setup-example",
+      "offline": true
+    },
+    "create-initialize": {
+      "version": "superbench.v1",
+      "operation": "create",
+      "key": "card_example",
+      "repository": "https://example.invalid/repository.git",
+      "request_id": "create-example",
+      "initialize": true
+    },
+    "recover-initialize": {
+      "version": "superbench.v1",
+      "operation": "recover",
+      "key": "card_example",
+      "repository": "https://example.invalid/repository.git",
+      "branch": "card/card_example",
+      "request_id": "recover-example",
+      "initialize": true
+    }
+  },
+  "invalid": [
+    {
+      "name": "unknown version",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status"
+      }
+    },
+    {
+      "name": "unknown operation",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "delete-everything"
+      }
+    },
+    {
+      "name": "unknown authority field",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "status",
+        "admin": true
+      }
+    },
+    {
+      "name": "escape key",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "lease",
+        "key": "../escape",
+        "holder": "run_example",
+        "request_id": "lease-example"
+      }
+    },
+    {
+      "name": "missing request id",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "run",
+        "key": "card_example",
+        "holder": "run_example",
+        "arguments": [
+          "sh",
+          "-c",
+          "printf hello"
+        ]
+      }
+    },
+    {
+      "name": "empty program",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "run",
+        "key": "card_example",
+        "holder": "run_example",
+        "arguments": [
+          ""
+        ],
+        "request_id": "run-example"
+      }
+    },
+    {
+      "name": "unexpected command on status",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "status",
+        "arguments": [
+          "sh"
+        ]
+      }
+    },
+    {
+      "name": "null optional field",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "create",
+        "key": "card_example",
+        "repository": "https://example.invalid/repository.git",
+        "request_id": "create-example",
+        "branch": null
+      }
+    },
+    {
+      "name": "wrong flag type",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "run",
+        "key": "card_example",
+        "holder": "run_example",
+        "arguments": [
+          "sh",
+          "-c",
+          "printf hello"
+        ],
+        "request_id": "run-example",
+        "checkpoint": "true"
+      }
+    },
+    {
+      "name": "empty token",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "stop",
+        "key": "card_example",
+        "lease_token": ""
+      }
+    },
+    {
+      "name": "admin token confusion",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "stop_admin",
+        "key": "card_example",
+        "lease_token": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "name": "repository option injection",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "create",
+        "key": "card_example",
+        "repository": "--upload-pack=bad",
+        "request_id": "create-example"
+      }
+    },
+    {
+      "name": "invalid holder",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "lease",
+        "key": "card_example",
+        "holder": "someone\nelse",
+        "request_id": "lease-example"
+      }
+    },
+    {
+      "name": "too many arguments",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "run",
+        "key": "card_example",
+        "holder": "run_example",
+        "arguments": [
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true",
+          "true"
+        ],
+        "request_id": "run-example"
+      }
+    },
+    {
+      "name": "root is not an object",
+      "body": []
+    },
+    {
+      "name": "create cannot bypass initialization through a request flag",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "create",
+        "key": "initial-setup",
+        "repository": "https://example.invalid/workspace/repository.git",
+        "request_id": "initial-setup",
+        "skip_setup": true
+      }
+    },
+    {
+      "name": "recover cannot bypass initialization through a request flag",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "recover",
+        "key": "initial-setup",
+        "repository": "https://example.invalid/workspace/repository.git",
+        "request_id": "initial-setup",
+        "skip_setup": true,
+        "branch": "bench/initial-setup"
+      }
+    },
+    {
+      "name": "create rejects initialize false",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "create",
+        "key": "card_example",
+        "repository": "https://example.invalid/repository.git",
+        "request_id": "create-example",
+        "initialize": false
+      }
+    },
+    {
+      "name": "create rejects initialize null",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "create",
+        "key": "card_example",
+        "repository": "https://example.invalid/repository.git",
+        "request_id": "create-example",
+        "initialize": null
+      }
+    },
+    {
+      "name": "create rejects initialize \"true\"",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "create",
+        "key": "card_example",
+        "repository": "https://example.invalid/repository.git",
+        "request_id": "create-example",
+        "initialize": "true"
+      }
+    },
+    {
+      "name": "recover rejects initialize false",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "recover",
+        "key": "card_example",
+        "repository": "https://example.invalid/repository.git",
+        "branch": "card/card_example",
+        "request_id": "recover-example",
+        "initialize": false
+      }
+    },
+    {
+      "name": "recover rejects initialize null",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "recover",
+        "key": "card_example",
+        "repository": "https://example.invalid/repository.git",
+        "branch": "card/card_example",
+        "request_id": "recover-example",
+        "initialize": null
+      }
+    },
+    {
+      "name": "recover rejects initialize \"true\"",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "recover",
+        "key": "card_example",
+        "repository": "https://example.invalid/repository.git",
+        "branch": "card/card_example",
+        "request_id": "recover-example",
+        "initialize": "true"
+      }
+    },
+    {
+      "name": "initialize is not a lease authority field",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "lease",
+        "key": "card_example",
+        "holder": "run_example",
+        "request_id": "lease-example",
+        "initialize": true
+      }
+    }
+  ],
+  "decode_rejections": [
+    {
+      "name": "duplicate operation",
+      "raw": "{\"version\":\"superbench.v1\",\"operation\":\"status\",\"operation\":\"run\"}"
+    },
+    {
+      "name": "trailing document",
+      "raw": "{\"version\": \"superbench.v1\", \"operation\": \"status\"} {}"
+    },
+    {
+      "name": "malformed JSON",
+      "raw": "{\"version\":"
+    }
+  ]
+}
