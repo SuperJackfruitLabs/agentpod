@@ -22,8 +22,9 @@ type SourceOperation = benchattempt.SourceOperation
 
 type SourceReservation = benchattempt.SourceReservation
 
-func sourceID(s SourceSpec) string     { raw, _ := json.Marshal(s.Identity); return digest(raw) }
-func sourceDigest(s SourceSpec) string { raw, _ := json.Marshal(s); return digest(raw) }
+var sourceID = benchattempt.SourceIdentitySHA256
+var sourceDigest = benchattempt.SourceSpecSHA256
+
 func validSourceSpec(s SourceSpec) bool {
 	ids := []string{s.Identity.TenantID, s.Identity.BoardID, s.Identity.CardID, s.Identity.StageID, s.Identity.RunID, s.Identity.AgentID, s.Identity.StationID, s.Identity.NodeID, s.Identity.AttemptID, s.Identity.ControlPrincipalID, s.Identity.ControlGrantID, s.HostID}
 	for _, id := range ids {
@@ -67,12 +68,9 @@ func validSourceSpec(s SourceSpec) bool {
 	}
 	return true
 }
-func sourceSteps(s SourceSpec) []string {
-	if s.Create {
-		return []string{"create", "lease", "checkpoint"}
-	}
-	return []string{"lease", "checkpoint"}
-}
+
+var sourceSteps = benchattempt.SourceSteps
+
 func validReservation(r *SourceReservation) bool {
 	if r == nil || !validSourceSpec(r.Spec) {
 		return false

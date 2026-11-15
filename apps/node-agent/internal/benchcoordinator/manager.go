@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattempt"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcanonical"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcleanup"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
@@ -22,6 +23,7 @@ type Prepared struct {
 	BindingSHA256        string                      `json:"binding_sha256"`
 	RequestID            string                      `json:"request_id"`
 	CheckpointRepository string                      `json:"checkpoint_repository"`
+	SourceRequestSHA256  string                      `json:"source_request_sha256"`
 }
 type Status struct {
 	State                  string                            `json:"state"`
@@ -31,8 +33,8 @@ type Status struct {
 	RequiresReconciliation bool                              `json:"requires_reconciliation,omitempty"`
 }
 
-func prepared(b benchdispatch.SourceBinding, spec benchdispatch.SourceSpec) Prepared {
-	return Prepared{Binding: b, BindingSHA256: benchdispatch.SourceBindingSHA256(b), RequestID: spec.RunRequestID, CheckpointRepository: spec.CheckpointRepository}
+func prepared(b benchdispatch.SourceBinding, spec benchdispatch.SourceSpec, d benchcanonical.Digests) Prepared {
+	return Prepared{Binding: b, BindingSHA256: benchdispatch.SourceBindingSHA256(b), RequestID: spec.RunRequestID, CheckpointRepository: spec.CheckpointRepository, SourceRequestSHA256: d.SourceRequestSHA256}
 }
 func (m Manager) current(ctx context.Context, spec benchdispatch.SourceSpec) error {
 	if m.Source.Client == nil || m.Source.Current == nil {
@@ -50,14 +52,14 @@ func (m Manager) Prepare(ctx context.Context, spec benchdispatch.SourceSpec, tas
 	if _, e := m.Source.Prepare(ctx, spec, task); e != nil {
 		return Prepared{}, e
 	}
-	b, e := m.Source.Binding(ctx, spec)
+	b, d, e := m.Source.Store.CanonicalSource(ctx, spec)
 	if e != nil {
 		return Prepared{}, e
 	}
 	if e = m.current(ctx, spec); e != nil {
 		return Prepared{}, e
 	}
-	return prepared(b, spec), nil
+	return prepared(b, spec, d), nil
 }
 func (m Manager) Execute(ctx context.Context, spec benchdispatch.SourceSpec, admit benchdispatch.AdmissionGate) (Completion, error) {
 	if e := m.current(ctx, spec); e != nil {
@@ -106,11 +108,11 @@ func (m Manager) Status(ctx context.Context, spec benchdispatch.SourceSpec) (Sta
 		return Status{}, e
 	}
 	if _, e = m.Source.Store.BoundSource(ctx, spec); e == nil {
-		b, e := m.Source.Binding(ctx, spec)
+		b, d, e := m.Source.Store.CanonicalSource(ctx, spec)
 		if e != nil {
 			return Status{}, e
 		}
-		p := prepared(b, spec)
+		p := prepared(b, spec, d)
 		if e = m.current(ctx, spec); e != nil {
 			return Status{}, e
 		}

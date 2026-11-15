@@ -9,29 +9,16 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattempt"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcanonical"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/superbench"
 )
 
-// SourceBinding is a credential-free observation of exact preserved producer
-// replies. It is not an admission, signature, or proof of an isolated writer.
-type SourceBinding struct {
-	Identity      Identity                   `json:"identity"`
-	HostID        string                     `json:"host_id"`
-	BenchKey      string                     `json:"bench_key"`
-	BenchID       string                     `json:"bench_id"`
-	Sources       []Source                   `json:"sources"`
-	Members       []superbench.GroupedMember `json:"members"`
-	Checkpoint    benchworkspace.Checkpoint  `json:"checkpoint"`
-	Operations    []SourceOperation          `json:"operations"`
-	RequestSHA256 string                     `json:"request_sha256"`
-	BodySHA256    string                     `json:"body_sha256"`
-	ContextSHA256 string                     `json:"context_sha256"`
-	WorkerSHA256  string                     `json:"worker_sha256"`
-}
+type SourceBinding = benchattempt.SourceBinding
 
 // SourceBindingSHA256 identifies exact projection bytes; it grants no authority.
-func SourceBindingSHA256(b SourceBinding) string { raw, _ := json.Marshal(b); return digest(raw) }
+var SourceBindingSHA256 = benchattempt.SourceBindingSHA256
 
 // AdmissionGate must independently authenticate the Hub's current admitted
 // source and control pair against this exact binding. No production route
@@ -39,6 +26,10 @@ func SourceBindingSHA256(b SourceBinding) string { raw, _ := json.Marshal(b); re
 type AdmissionGate func(context.Context, SourceBinding) error
 
 func (s Store) sourceBinding(ctx context.Context, spec SourceSpec) (Plan, SourceBinding, error) {
+	return s.readBinding(ctx, spec, nil)
+}
+
+func (s Store) readBinding(ctx context.Context, spec SourceSpec, canonical *benchcanonical.Digests) (Plan, SourceBinding, error) {
 	var p Plan
 	var b SourceBinding
 	err := s.withDocument(ctx, spec.BenchKey, false, func(doc *state) (bool, error) {
@@ -71,6 +62,13 @@ func (s Store) sourceBinding(ctx context.Context, spec SourceSpec) (Plan, Source
 				return false, ErrVerify
 			}
 			b = SourceBinding{Identity: p.Identity, HostID: p.HostID, BenchKey: p.BenchKey, BenchID: p.RegistrationID, Sources: append([]Source(nil), p.Sources...), Members: append([]superbench.GroupedMember(nil), p.Grouped.Members...), Checkpoint: *cp.Workspace.Checkpoint, Operations: append([]SourceOperation(nil), r.Source.Operations...), RequestSHA256: p.RequestSHA256, BodySHA256: p.BodySHA256, ContextSHA256: p.ContextSHA256, WorkerSHA256: p.ExecutableSHA256}
+			if canonical != nil {
+				var e error
+				*canonical, e = s.canonicalRun(spec, p, nil)
+				if e != nil {
+					return false, e
+				}
+			}
 			return false, nil
 		}
 		return false, ErrOwner

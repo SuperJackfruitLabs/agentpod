@@ -4,11 +4,8 @@
 package benchdispatch
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"regexp"
-	"strings"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattempt"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/superbench"
@@ -19,14 +16,13 @@ const maxState = 4 << 20
 const maxRecords = 256
 
 var (
-	ErrInvalid    = benchattempt.ErrInvalid
-	ErrPending    = benchattempt.ErrPending
-	ErrOwner      = benchattempt.ErrOwner
-	ErrConflict   = benchattempt.ErrConflict
-	ErrVerify     = benchattempt.ErrVerify
-	idPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$`)
-	hexPattern    = regexp.MustCompile(`^[a-f0-9]{64}$`)
-	commitPattern = regexp.MustCompile(`^([a-f0-9]{40}|[a-f0-9]{64})$`)
+	ErrInvalid  = benchattempt.ErrInvalid
+	ErrPending  = benchattempt.ErrPending
+	ErrOwner    = benchattempt.ErrOwner
+	ErrConflict = benchattempt.ErrConflict
+	ErrVerify   = benchattempt.ErrVerify
+	idPattern   = regexp.MustCompile(benchattempt.IDPattern)
+	hexPattern  = regexp.MustCompile(benchattempt.SHA256Pattern)
 )
 
 // Identity binds one attempt to its original owner. A reclaimed run is a NEW
@@ -61,10 +57,11 @@ type state struct {
 	Records       []Record                    `json:"records"`
 }
 
-func digest(b []byte) string   { d := sha256.Sum256(b); return hex.EncodeToString(d[:]) }
-func planID(p Plan) string     { b, _ := json.Marshal(p.Identity); return digest(b) }
-func planDigest(p Plan) string { b, _ := json.Marshal(p); return digest(b) }
-func samePlan(a, b Plan) bool  { return planDigest(a) == planDigest(b) }
+var digest = benchattempt.RawSHA256
+var planID = benchattempt.PlanIdentitySHA256
+var planDigest = benchattempt.PlanSHA256
+
+func samePlan(a, b Plan) bool { return planDigest(a) == planDigest(b) }
 
 func validatePlan(p Plan) error {
 	ids := []string{p.Identity.TenantID, p.Identity.BoardID, p.Identity.CardID, p.Identity.StageID, p.Identity.RunID, p.Identity.AgentID, p.Identity.StationID, p.Identity.NodeID, p.Identity.AttemptID, p.Identity.ControlPrincipalID, p.Identity.ControlGrantID, p.HostID, p.RegistrationID}
@@ -96,68 +93,7 @@ func validatePlan(p Plan) error {
 	}
 	return nil
 }
-func validSources(v []Source) bool {
-	if len(v) == 0 || len(v) > 32 {
-		return false
-	}
-	names := map[string]bool{}
-	targets := map[string]bool{}
-	for i, s := range v {
-		if !idPattern.MatchString(s.Name) || names[s.Name] || (i > 0 && v[i-1].Name >= s.Name) || !hexPattern.MatchString(s.RepositorySHA256) || !commitPattern.MatchString(s.Commit) || !validRef(s.TaskRef) {
-			return false
-		}
-		target := s.RepositorySHA256 + "\x00" + s.TaskRef
-		if targets[target] {
-			return false
-		}
-		targets[target] = true
-		names[s.Name] = true
-	}
-	return true
-}
-func validRef(s string) bool {
-	if len(s) > 4096 || !strings.HasPrefix(s, "refs/heads/") || strings.ContainsAny(s, " ~^:?*[\\\x7f") || strings.Contains(s, "..") || strings.Contains(s, "@{") || strings.HasSuffix(s, ".") {
-		return false
-	}
-	for _, r := range s {
-		if r < 32 {
-			return false
-		}
-	}
-	for _, c := range strings.Split(s, "/") {
-		if c == "" || strings.HasPrefix(c, ".") || strings.HasSuffix(c, ".lock") {
-			return false
-		}
-	}
-	return true
-}
-func validateObservation(p Plan, o Observation) error {
-	if o.RequestID != p.RequestID || o.RequestSHA256 != p.RequestSHA256 || o.BodySHA256 != p.BodySHA256 || !idPattern.MatchString(o.ExecutionID) || !o.Stopped || !o.Released || !hexPattern.MatchString(o.ResponseSHA256) || !hexPattern.MatchString(o.WorkerResultSHA256) || !validSources(o.Checkpoints) || len(o.Checkpoints) != len(p.Sources) {
-		return ErrVerify
-	}
-	for i, s := range p.Sources {
-		c := o.Checkpoints[i]
-		if s.Name != c.Name || s.RepositorySHA256 != c.RepositorySHA256 || s.TaskRef != c.TaskRef {
-			return ErrVerify
-		}
-	}
-	switch o.Kind {
-	case "scalar-v1":
-		if p.Grouped != nil {
-			return ErrVerify
-		}
-		if len(o.Checkpoints) != 1 || o.GenerationID != "" || o.SealCommit != "" || o.ManifestSHA256 != "" {
-			return ErrVerify
-		}
-	case "grouped-v2":
-		if p.Grouped == nil {
-			return ErrVerify
-		}
-		if len(o.GenerationID) != 32 || !hexPattern.MatchString(o.GenerationID+o.GenerationID) || !commitPattern.MatchString(o.SealCommit) || !hexPattern.MatchString(o.ManifestSHA256) {
-			return ErrVerify
-		}
-	default:
-		return ErrVerify
-	}
-	return nil
-}
+
+var validSources = benchattempt.ValidSources
+var validRef = benchattempt.ValidRef
+var validateObservation = benchattempt.ValidateObservation
