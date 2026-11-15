@@ -10,7 +10,8 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 )
 
-const cancellationVersion = "agentpod.private-bench-dispatch.v3"
+const cancellationVersion = "agentpod.private-bench-dispatch.v4"
+const legacyCancellationVersion = "agentpod.private-bench-dispatch.v3"
 
 func cancelled(doc *state, id string) bool {
 	for _, c := range doc.Cancellations {
@@ -85,10 +86,31 @@ func (s Store) cleanupPlan(doc *state, spec SourceSpec) (*benchcleanup.Plan, err
 			}
 			targets = append(targets, target)
 		}
-		if (op.Step == "lease" || op.Step == "create") && (op.Phase == "observed" || op.Phase == "failed") {
-			reply, e := s.observedSourceReply(spec, op)
+		if op.Step == "lease" || op.Step == "create" {
+			var reply *benchworkspace.Response
+			var e error
+			if op.Phase == "observed" || op.Phase == "failed" {
+				reply, e = s.observedSourceReply(spec, op)
+			}
 			if e != nil {
 				return nil, e
+			}
+			if reply == nil {
+				original, _, err := s.sourceRequest(spec, op.Step)
+				if err != nil {
+					return nil, err
+				}
+				c, err := benchattempt.FindCancellation(doc.Cancellations, sourceID(spec), sourceDigest(spec))
+				if err != nil {
+					return nil, err
+				}
+				reply, e = benchcleanup.HistoricalReply(s.Root, c, original)
+				if errors.Is(e, ErrPending) {
+					continue
+				}
+				if e != nil {
+					return nil, e
+				}
 			}
 			m, ok := reply.Result.(*benchworkspace.Mutation)
 			if ok && m.Grant != nil {
@@ -175,6 +197,7 @@ func (s Store) CancellationStatus(ctx context.Context, spec SourceSpec) (benchat
 		if e == nil {
 			result = *c
 			result.Observations = append([]benchattempt.CleanupObservation(nil), c.Observations...)
+			result.Exchanges = append([]benchattempt.CleanupExchange(nil), c.Exchanges...)
 		}
 		return false, e
 	})

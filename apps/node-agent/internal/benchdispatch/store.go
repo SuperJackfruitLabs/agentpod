@@ -92,11 +92,16 @@ func (s Store) withDocument(ctx context.Context, key string, create bool, fn fun
 	return writeAtomic(s.Root, base+".json", raw)
 }
 func validateState(s state) error {
-	if s.Version != version && s.Version != sourceVersion && s.Version != cancellationVersion || len(s.Records) > maxRecords || s.Version == version && s.Source != nil {
+	if s.Version != version && s.Version != sourceVersion && s.Version != cancellationVersion && s.Version != legacyCancellationVersion || len(s.Records) > maxRecords || s.Version == version && s.Source != nil {
 		return ErrInvalid
 	}
-	if s.Version != cancellationVersion && s.Cancellations != nil || s.Version == cancellationVersion && len(s.Cancellations) == 0 || !benchattempt.ValidCancellations(s.Cancellations) {
+	if s.Version != cancellationVersion && s.Version != legacyCancellationVersion && s.Cancellations != nil || (s.Version == cancellationVersion || s.Version == legacyCancellationVersion) && len(s.Cancellations) == 0 || !benchattempt.ValidCancellations(s.Cancellations) {
 		return ErrInvalid
+	}
+	for _, c := range s.Cancellations {
+		if s.Version != cancellationVersion && c.Exchanges != nil {
+			return ErrInvalid
+		}
 	}
 	if s.Source != nil && (!validReservation(s.Source) || s.Source.Spec.BenchKey != s.BenchKey || s.Active != sourceID(s.Source.Spec)) {
 		return ErrInvalid
@@ -112,7 +117,7 @@ func validateState(s state) error {
 		if s.Source != nil && id == sourceID(s.Source.Spec) {
 			return ErrInvalid
 		}
-		if r.Source != nil && (s.Version != sourceVersion && s.Version != cancellationVersion || !validReservation(r.Source) || len(r.Source.Operations) != len(sourceSteps(r.Source.Spec)) || r.Source.Operations[len(r.Source.Operations)-1].Phase != "observed" || !sourcePlanMatches(r.Source.Spec, r.Plan)) {
+		if r.Source != nil && (s.Version != sourceVersion && s.Version != cancellationVersion && s.Version != legacyCancellationVersion || !validReservation(r.Source) || len(r.Source.Operations) != len(sourceSteps(r.Source.Spec)) || r.Source.Operations[len(r.Source.Operations)-1].Phase != "observed" || !sourcePlanMatches(r.Source.Spec, r.Plan)) {
 			return ErrInvalid
 		}
 		seen[id] = true

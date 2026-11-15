@@ -4,8 +4,6 @@
 package benchdispatch
 
 import (
-	"regexp"
-
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattempt"
 )
 
@@ -19,8 +17,6 @@ var (
 	ErrOwner    = benchattempt.ErrOwner
 	ErrConflict = benchattempt.ErrConflict
 	ErrVerify   = benchattempt.ErrVerify
-	idPattern   = regexp.MustCompile(benchattempt.IDPattern)
-	hexPattern  = regexp.MustCompile(benchattempt.SHA256Pattern)
 )
 
 // Identity binds one attempt to its original owner. A reclaimed run is a NEW
@@ -63,5 +59,4 @@ func samePlan(a, b Plan) bool { return planDigest(a) == planDigest(b) }
 
 var validatePlan = benchattempt.ValidatePlan
 
-var validSources = benchattempt.ValidSources
 var validateObservation = benchattempt.ValidateObservation

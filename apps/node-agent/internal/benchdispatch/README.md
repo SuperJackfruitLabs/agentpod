@@ -135,7 +135,9 @@ acceptance, and end-to-end coordinator integration remain required before use.
 `benchcoordinator.Manager` adds private prepare, execute, status and cancellation
 orchestration. Cancellation first persists an exact-spec tombstone in the same
 locked document, including when no source operation exists yet. The explicit
-private v3 format requires at least one tombstone; old v1/v2 records retain their
+private v4 format requires at least one tombstone and binds immutable private
+ACK/lookup exchange files by digest. Historical v3 tombstones remain readable
+without rewriting them and reject future exchange fields; old v1/v2 records retain their
 serialized meanings and reject cancellation fields. The tombstone blocks delayed
 prepare, binding, payload dispatch and proposal creation across restart. Late
 actual replies remain private evidence rather than being discarded.
@@ -149,9 +151,21 @@ lease; the saved token is a distinct cleanup operation. Malformed or missing
 acknowledgements park uncertainty without fallback. The opaque cleanup plan
 cannot be serialized or formatted as transport data. Status exposes only bounded
 observations and reconciliation need, not that plan or any private capability.
-Historical receipt recovery after a verified cancellation acknowledgement is not
-implemented by this foundation. No public broker handler, readiness advertisement,
-automatic reconciliation or settlement authority is enabled.
+The private file codec now lives in `benchsourceio`: `benchdispatch` owns the
+lock and operation state; `benchsourceio` depends on `benchsource`, `benchjournal`
+and `benchworkspace` for the unchanged bounded request/reply byte format. It
+supplies neither transport nor admission authority.
+
+`Manager.ReconcileCancellation` independently reparses saved successful ACKs before
+reading the proposed receipt-lookup endpoint. It never resends the original growth
+body, even after a valid ACK. A missing receipt in a replaced database remains
+parked. A completed lookup is independently parsed against the exact original
+request; any recovered capability can only enrich the original-token Stop plan.
+Neither original pending/error evidence nor the permanent veto is overwritten.
+All raw replies remain in private files; status does not expose their paths,
+capabilities or bodies. This requires reviewed producer support for the proposed
+read-only endpoint. No public broker handler, readiness advertisement, automatic
+reconciliation or settlement authority is enabled.
 
 The additive proposed settlement digests keep the existing raw capture hashes
 and typed request digest unchanged. `Store.CanonicalSource` computes

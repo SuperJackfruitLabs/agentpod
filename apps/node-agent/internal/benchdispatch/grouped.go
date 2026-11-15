@@ -9,12 +9,9 @@ import (
 	"reflect"
 	"unicode/utf8"
 
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattempt"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/superbench"
 )
-
-var validGroupedIdentity = benchattempt.ValidGroupedIdentity
 
 func validateGroupedLaunch(p Plan, raw []byte) error {
 	r, err := benchworkspace.Parse(raw)

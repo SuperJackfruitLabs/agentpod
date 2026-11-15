@@ -130,6 +130,17 @@ type Cancellation struct {
 	IdentitySHA256 string               `json:"identity_sha256"`
 	SourceSHA256   string               `json:"source_sha256"`
 	Observations   []CleanupObservation `json:"observations,omitempty"`
+	Exchanges      []CleanupExchange    `json:"exchanges,omitempty"`
+}
+
+// CleanupExchange contains private-file references, never historical capabilities.
+type CleanupExchange struct {
+	Operation       string `json:"operation"`
+	TargetRequestID string `json:"target_request_id"`
+	TargetDigest    string `json:"target_digest"`
+	RequestSHA256   string `json:"request_sha256"`
+	ResponseSHA256  string `json:"response_sha256,omitempty"`
+	HTTPStatus      int    `json:"http_status,omitempty"`
 }
 type CleanupObservation struct {
 	Operation       string `json:"operation"`

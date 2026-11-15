@@ -11,7 +11,7 @@ func ValidCancellations(records []Cancellation) bool {
 	}
 	seen := map[string]bool{}
 	for _, c := range records {
-		if !cleanupDigest.MatchString(c.IdentitySHA256) || !cleanupDigest.MatchString(c.SourceSHA256) || seen[c.IdentitySHA256] || len(c.Observations) > 32 {
+		if !cleanupDigest.MatchString(c.IdentitySHA256) || !cleanupDigest.MatchString(c.SourceSHA256) || seen[c.IdentitySHA256] || len(c.Observations) > 32 || len(c.Exchanges) > 32 {
 			return false
 		}
 		seen[c.IdentitySHA256] = true
@@ -20,8 +20,16 @@ func ValidCancellations(records []Cancellation) bool {
 				return false
 			}
 		}
+		for _, e := range c.Exchanges {
+			if !ValidCleanupExchange(e) {
+				return false
+			}
+		}
 	}
 	return true
+}
+func ValidCleanupExchange(e CleanupExchange) bool {
+	return (e.Operation == "cancel" || e.Operation == "receipt_lookup") && cleanupRequestID.MatchString(e.TargetRequestID) && cleanupDigest.MatchString(e.TargetDigest) && cleanupDigest.MatchString(e.RequestSHA256) && ((e.ResponseSHA256 == "" && e.HTTPStatus == 0) || (cleanupDigest.MatchString(e.ResponseSHA256) && e.HTTPStatus >= 100 && e.HTTPStatus <= 599))
 }
 func ValidCleanupObservation(o CleanupObservation) bool {
 	if !cleanupDigest.MatchString(o.TargetDigest) {

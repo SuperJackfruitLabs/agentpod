@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"os"
 	"path/filepath"
 	"strconv"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchsourceio"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 )
 
@@ -16,7 +15,7 @@ import (
 // source effects. No public dispatcher supplies it or enables this private path.
 type SourceGate func(context.Context, SourceSpec) error
 
-const privateSourceRequestHeader = "agentpod.private-source-request.v1\n"
+const privateSourceRequestHeader = benchsourceio.RequestHeader
 
 func (s Store) ReserveSource(ctx context.Context, spec SourceSpec, gate SourceGate) error {
 	if !validSourceSpec(spec) || gate == nil {
@@ -58,7 +57,7 @@ func (s Store) ReserveSource(ctx context.Context, spec SourceSpec, gate SourceGa
 		if len(doc.Records) >= maxRecords {
 			return false, ErrInvalid
 		}
-		if doc.Version != cancellationVersion {
+		if doc.Version != cancellationVersion && doc.Version != legacyCancellationVersion {
 			doc.Version = sourceVersion
 		}
 		doc.Source = &SourceReservation{Spec: spec, Operations: []SourceOperation{}}
@@ -81,54 +80,13 @@ func sourceFile(spec SourceSpec, step, suffix string) string {
 	return digest([]byte(spec.BenchKey)) + "-" + sourceID(spec) + "-" + step + suffix
 }
 func (s Store) sourceRequest(spec SourceSpec, step string) (benchworkspace.Request, []byte, error) {
-	raw, err := readFile(filepath.Join(s.Root, sourceFile(spec, step, ".request")), benchworkspace.MaxBody+len(privateSourceRequestHeader), true)
-	if err != nil {
-		return benchworkspace.Request{}, nil, ErrPending
-	}
-	if !bytes.HasPrefix(raw, []byte(privateSourceRequestHeader)) {
-		return benchworkspace.Request{}, nil, ErrInvalid
-	}
-	raw = raw[len(privateSourceRequestHeader):]
-	r, err := benchworkspace.Parse(raw)
-	if err != nil || !sourceRequestMatches(spec, step, r) {
-		return benchworkspace.Request{}, nil, ErrInvalid
-	}
-	return r, raw, nil
+	return benchsourceio.Request(s.Root, spec, step)
 }
 func (s Store) sourceReply(spec SourceSpec, step string) (*benchworkspace.Response, error) {
-	r, _, err := s.sourceRequest(spec, step)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := readFile(filepath.Join(s.Root, sourceFile(spec, step, ".response")), benchworkspace.MaxResponse+4, true)
-	if err != nil {
-		return nil, ErrPending
-	}
-	if len(raw) < 4 || raw[3] != '\n' {
-		return nil, ErrInvalid
-	}
-	status, err := strconv.Atoi(string(raw[:3]))
-	if err != nil {
-		return nil, ErrInvalid
-	}
-	response, err := benchworkspace.ParseResponse(raw[4:], status, r)
-	if err != nil {
-		return nil, ErrInvalid
-	}
-	return &response, nil
+	return benchsourceio.Reply(s.Root, spec, step)
 }
 func (s Store) writeSourceFile(name string, raw []byte) error {
-	old, err := readFile(filepath.Join(s.Root, name), benchworkspace.MaxResponse+4, true)
-	if err == nil {
-		if !bytes.Equal(old, raw) {
-			return ErrConflict
-		}
-		return nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return ErrInvalid
-	}
-	return writeAtomic(s.Root, name, raw)
+	return benchsourceio.WriteExact(s.Root, name, raw)
 }
 
 // BeginSourceOperation persists exact private request bytes and consumes this
