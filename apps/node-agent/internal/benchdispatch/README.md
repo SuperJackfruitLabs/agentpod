@@ -65,7 +65,9 @@ inside `benchd.run`. They are neither fencing proof nor host attestation.
 `SourceCoordinator.Prepare` reserves a typed `SourceSpec` in the same per-bench
 document before any acquisition. Its fixed task/run/epoch, host, repository/ref
 allowlist, context location outside the data root, packaging hashes and task
-input digest cannot change during preparation. The current trusted owner,
+input digest cannot change during preparation. The exact packaged grouped
+worker board/card/run binding grammar is checked before reservation or any
+service call; scalar-v1 identity behavior remains unchanged. The current trusted owner,
 registry and control-pair callback is mandatory and rechecked after transport
 awaits; metadata supplied by an untrusted caller is not that authorization.
 

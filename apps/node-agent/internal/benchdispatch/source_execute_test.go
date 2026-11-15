@@ -254,3 +254,32 @@ func TestExecuteBoundRechecksCurrentAfterFinalAdmissionAwait(t *testing.T) {
 		t.Fatal("could not reconcile original evidence", e)
 	}
 }
+
+func TestSourceBindingLexicalRefusalPrecedesEveryEffect(t *testing.T) {
+	for _, field := range []string{"board", "card", "run"} {
+		t.Run(field, func(t *testing.T) {
+			trial := sourceFixture(t, true)
+			switch field {
+			case "board":
+				trial.spec.Identity.BoardID = "brd_short"
+			case "card":
+				trial.spec.Identity.CardID = "card_short"
+				for i := range trial.spec.Repositories {
+					trial.spec.Repositories[i].TaskRef = "refs/heads/card/card_short"
+					trial.coordinator.Repositories[i].Branch = "card/card_short"
+				}
+			case "run":
+				trial.spec.Identity.RunID = "run_short"
+			}
+			if _, e := trial.coordinator.Prepare(t.Context(), trial.spec, trial.task); !errors.Is(e, ErrInvalid) {
+				t.Fatal("binding was not refused", e)
+			}
+			if trial.count("create")+trial.count("lease")+trial.count("checkpoint") != 0 {
+				t.Fatal("source grew before worker binding validation")
+			}
+			if _, e := os.Stat(filepath.Join(trial.coordinator.Store.Root, digest([]byte(trial.spec.BenchKey))+".json")); !os.IsNotExist(e) {
+				t.Fatal("journal created before worker binding validation", e)
+			}
+		})
+	}
+}

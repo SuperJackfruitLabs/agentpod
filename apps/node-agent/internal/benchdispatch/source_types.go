@@ -62,7 +62,7 @@ func validSourceSpec(s SourceSpec) bool {
 			return false
 		}
 	}
-	if s.Identity.Epoch == 0 || s.Identity.Epoch > 1<<53-1 || !hexPattern.MatchString(s.Identity.PolicySHA256) || !hexPattern.MatchString(s.WorkerSHA256) || !hexPattern.MatchString(s.TaskSHA256) || !physicalName(s.DataRoot) || len(s.DataRoot) > 4096 || !physicalName(s.WorkerPath) || len(s.WorkerPath) > 4096 || len(s.Repositories) < 1 || len(s.Repositories) > 32 {
+	if !validGroupedIdentity(s.Identity) || s.Identity.Epoch == 0 || s.Identity.Epoch > 1<<53-1 || !hexPattern.MatchString(s.Identity.PolicySHA256) || !hexPattern.MatchString(s.WorkerSHA256) || !hexPattern.MatchString(s.TaskSHA256) || !physicalName(s.DataRoot) || len(s.DataRoot) > 4096 || !physicalName(s.WorkerPath) || len(s.WorkerPath) > 4096 || len(s.Repositories) < 1 || len(s.Repositories) > 32 {
 		return false
 	}
 	found := false

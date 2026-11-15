@@ -16,11 +16,22 @@ import (
 )
 
 var groupedMemberName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+var groupedBindingID = regexp.MustCompile(`^(brd|card|run)_[A-Za-z0-9]{6,}$`)
 var groupedRegistration = regexp.MustCompile(`^[a-f0-9]{32}$`)
+
+// Match the packaged grouped worker's binding grammar before any growth.
+func validGroupedIdentity(identity Identity) bool {
+	for i, id := range []string{identity.BoardID, identity.CardID, identity.RunID} {
+		if !groupedBindingID.MatchString(id) || !strings.HasPrefix(id, []string{"brd_", "card_", "run_"}[i]) {
+			return false
+		}
+	}
+	return true
+}
 
 func validateGroupedPlan(p Plan) error {
 	g := p.Grouped
-	if g == nil || !groupedRegistration.MatchString(p.RegistrationID) || !physicalName(g.WorkspaceRoot) || !utf8.ValidString(g.WorkspaceRoot) || strings.ContainsRune(g.WorkspaceRoot, 0) || len(g.WorkspaceRoot) > 4096 || filepath.Base(g.WorkspaceRoot) != p.BenchKey || filepath.Base(filepath.Dir(g.WorkspaceRoot)) != "benches" || len(g.Members) != len(p.Sources) || p.Identity.Epoch > 1<<53-1 {
+	if !validGroupedIdentity(p.Identity) || g == nil || !groupedRegistration.MatchString(p.RegistrationID) || !physicalName(g.WorkspaceRoot) || !utf8.ValidString(g.WorkspaceRoot) || strings.ContainsRune(g.WorkspaceRoot, 0) || len(g.WorkspaceRoot) > 4096 || filepath.Base(g.WorkspaceRoot) != p.BenchKey || filepath.Base(filepath.Dir(g.WorkspaceRoot)) != "benches" || len(g.Members) != len(p.Sources) || p.Identity.Epoch > 1<<53-1 {
 		return ErrInvalid
 	}
 	rel, err := filepath.Rel(g.WorkspaceRoot, p.ContextPath)
