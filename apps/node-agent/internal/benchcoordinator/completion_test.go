@@ -23,6 +23,9 @@ import (
 
 func hash(b []byte) string { s := sha256.Sum256(b); return hex.EncodeToString(s[:]) }
 func completionFixture(t *testing.T) (benchdispatch.SourceCoordinator, benchdispatch.SourceSpec, benchdispatch.Plan, *atomic.Int32) {
+	return completionFixtureWith(t, false, nil)
+}
+func completionFixtureWith(t *testing.T, unprepared bool, intercept func(http.ResponseWriter, []byte) bool) (benchdispatch.SourceCoordinator, benchdispatch.SourceSpec, benchdispatch.Plan, *atomic.Int32) {
 	t.Helper()
 	parent, e := filepath.EvalSymlinks(t.TempDir())
 	if e != nil {
@@ -57,6 +60,9 @@ func completionFixture(t *testing.T) (benchdispatch.SourceCoordinator, benchdisp
 		raw, err := io.ReadAll(io.LimitReader(r.Body, benchworkspace.MaxBody+1))
 		if err != nil {
 			t.Error(err)
+			return
+		}
+		if intercept != nil && intercept(w, raw) {
 			return
 		}
 		req, err := benchworkspace.Parse(raw)
@@ -103,9 +109,12 @@ func completionFixture(t *testing.T) (benchdispatch.SourceCoordinator, benchdisp
 	}
 	t.Cleanup(func() { client.Close(); _ = server.Close(); <-done; _ = os.RemoveAll(socketDir) })
 	c := benchdispatch.SourceCoordinator{Store: benchdispatch.Store{Root: filepath.Join(parent, "ledger")}, Client: client, Repositories: []benchworkspace.Repository{{Name: "a", Repository: "/authorized/a", Branch: "card/card_example1", Base: "main"}}, ContextParent: parent, Current: func(context.Context, benchdispatch.SourceSpec) error { return nil }}
-	p, e := c.Prepare(t.Context(), spec, task)
-	if e != nil {
-		t.Fatal(e)
+	var p benchdispatch.Plan
+	if !unprepared {
+		p, e = c.Prepare(t.Context(), spec, task)
+		if e != nil {
+			t.Fatal(e)
+		}
 	}
 	return c, spec, p, runs
 }

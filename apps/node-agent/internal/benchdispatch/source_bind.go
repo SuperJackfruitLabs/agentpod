@@ -86,6 +86,9 @@ func (s Store) BindSource(ctx context.Context, spec SourceSpec, p Plan, rawRun [
 		return ErrInvalid
 	}
 	return s.withSource(ctx, spec, func(doc *state, r *SourceReservation) (bool, error) {
+		if cancelled(doc, sourceID(spec)) {
+			return false, ErrOwner
+		}
 		if len(r.Operations) != len(sourceSteps(spec)) {
 			return false, ErrPending
 		}

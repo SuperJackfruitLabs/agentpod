@@ -131,3 +131,24 @@ launches nor grants, and its future authenticated caller must authorize
 disclosure and admission separately. Exact historical proposal replay cannot launch another child or
 renew ownership. Actual authenticated Hub current/admission wiring, source trust
 acceptance, and end-to-end coordinator integration remain required before use.
+
+`benchcoordinator.Manager` adds private prepare, execute, status and cancellation
+orchestration. Cancellation first persists an exact-spec tombstone in the same
+locked document, including when no source operation exists yet. The explicit
+private v3 format requires at least one tombstone; old v1/v2 records retain their
+serialized meanings and reject cancellation fields. The tombstone blocks delayed
+prepare, binding, payload dispatch and proposal creation across restart. Late
+actual replies remain private evidence rather than being discarded.
+
+Cleanup targets only preserved original growth request IDs/digests and, when a
+validated original response supplied one, its exact private owner token. It never
+uses a key-only or administrative stop. An operation cancellation observation,
+including `already_completed`, does not prove fencing, release or checkpoint
+success. In particular cancelling a completed lease request cannot stop its held
+lease; the saved token is a distinct cleanup operation. Malformed or missing
+acknowledgements park uncertainty without fallback. The opaque cleanup plan
+cannot be serialized or formatted as transport data. Status exposes only bounded
+observations and reconciliation need, not that plan or any private capability.
+Historical receipt recovery after a verified cancellation acknowledgement is not
+implemented by this foundation. No public broker handler, readiness advertisement,
+automatic reconciliation or settlement authority is enabled.
