@@ -1,0 +1,8 @@
+{
+  "repository": "https://forge.superjackfruit.com/SuperJackfruitLabs/superbench",
+  "revision": "615cd06b97187dbf9b74cdafcc898979ff116f8a",
+  "path": "internal/protocol/request.go",
+  "sha256": "767e89d75d2dcc3061130592a758e43eb79fed8a7315da19d57e1edf316e823d",
+  "copy_changes": "package name/comment; errors.Is EOF check required by consumer lint",
+  "publication_gate": "owner PR33 merged as d77696442926b58b9b208257c222c0a30bd8ad71"
+}

@@ -1,0 +1,160 @@
+{
+  "version": "superbench.creation.v1",
+  "status": "proposal; runtime assertions belong to the producer",
+  "cases": [
+    {
+      "name": "configured-ready",
+      "scenario": "configured",
+      "request": {
+        "version": "superbench.v1",
+        "operation": "create",
+        "key": "configured-ready",
+        "repository": "https://example.invalid/workspace/repository.git",
+        "request_id": "configured-ready",
+        "initialize": true
+      },
+      "expect": {
+        "status": 200,
+        "ok": true,
+        "held_lease_token": false,
+        "setup_exit_code": 0,
+        "ready_for_acquisition": true
+      }
+    },
+    {
+      "name": "no-setup-ready",
+      "scenario": "none",
+      "request": {
+        "version": "superbench.v1",
+        "operation": "create",
+        "key": "no-setup-ready",
+        "repository": "https://example.invalid/workspace/repository.git",
+        "request_id": "no-setup-ready",
+        "initialize": true
+      },
+      "expect": {
+        "status": 200,
+        "ok": true,
+        "held_lease_token": false,
+        "setup_exit_code": null,
+        "ready_for_acquisition": true
+      }
+    },
+    {
+      "name": "setup-failure-held",
+      "scenario": "failure",
+      "request": {
+        "version": "superbench.v1",
+        "operation": "create",
+        "key": "setup-failure-held",
+        "repository": "https://example.invalid/workspace/repository.git",
+        "request_id": "setup-failure-held",
+        "initialize": true
+      },
+      "expect": {
+        "status": 422,
+        "ok": false,
+        "held_lease_token": true,
+        "setup_exit_code": 7,
+        "ready_for_acquisition": false
+      }
+    },
+    {
+      "name": "dirty-setup-held",
+      "scenario": "dirty",
+      "request": {
+        "version": "superbench.v1",
+        "operation": "create",
+        "key": "dirty-setup-held",
+        "repository": "https://example.invalid/workspace/repository.git",
+        "request_id": "dirty-setup-held",
+        "initialize": true
+      },
+      "expect": {
+        "status": 409,
+        "ok": false,
+        "held_lease_token": true,
+        "setup_exit_code": 0,
+        "ready_for_acquisition": false
+      }
+    },
+    {
+      "name": "recovery-ready",
+      "scenario": "configured",
+      "request": {
+        "version": "superbench.v1",
+        "operation": "recover",
+        "key": "recovery-ready",
+        "repository": "https://example.invalid/workspace/repository.git",
+        "request_id": "recovery-ready",
+        "initialize": true,
+        "branch": "bench/recovery-ready"
+      },
+      "expect": {
+        "status": 200,
+        "ok": true,
+        "held_lease_token": false,
+        "setup_exit_code": 0,
+        "ready_for_acquisition": true
+      }
+    },
+    {
+      "name": "recovery-failure-held",
+      "scenario": "failure",
+      "request": {
+        "version": "superbench.v1",
+        "operation": "recover",
+        "key": "recovery-failure-held",
+        "repository": "https://example.invalid/workspace/repository.git",
+        "request_id": "recovery-failure-held",
+        "initialize": true,
+        "branch": "bench/recovery-failure-held"
+      },
+      "expect": {
+        "status": 422,
+        "ok": false,
+        "held_lease_token": true,
+        "setup_exit_code": 7,
+        "ready_for_acquisition": false
+      }
+    },
+    {
+      "name": "invalid-config-held",
+      "scenario": "invalid-config",
+      "request": {
+        "version": "superbench.v1",
+        "operation": "create",
+        "key": "invalid-config-held",
+        "repository": "https://example.invalid/workspace/repository.git",
+        "request_id": "invalid-config-held",
+        "initialize": true
+      },
+      "expect": {
+        "status": 422,
+        "ok": false,
+        "held_lease_token": true,
+        "setup_exit_code": null,
+        "ready_for_acquisition": false
+      }
+    },
+    {
+      "name": "ambiguous-lockfiles-held",
+      "scenario": "ambiguous-lockfiles",
+      "request": {
+        "version": "superbench.v1",
+        "operation": "create",
+        "key": "ambiguous-lockfiles-held",
+        "repository": "https://example.invalid/workspace/repository.git",
+        "request_id": "ambiguous-lockfiles-held",
+        "initialize": true
+      },
+      "expect": {
+        "status": 422,
+        "ok": false,
+        "held_lease_token": true,
+        "setup_exit_code": null,
+        "ready_for_acquisition": false
+      }
+    }
+  ]
+}
