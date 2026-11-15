@@ -92,6 +92,9 @@ func (s Store) Dispatch(ctx context.Context, p Plan, raw []byte, gate Gate, laun
 		if r.Phase != "prepared" {
 			return false, ErrPending
 		}
+		if e = s.boundSourceEvidence(r); e != nil {
+			return false, e
+		}
 		if validateLaunch(p, raw) != nil {
 			return false, ErrInvalid
 		}

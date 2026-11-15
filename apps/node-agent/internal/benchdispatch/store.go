@@ -14,7 +14,14 @@ import (
 type Store struct{ Root string }
 
 func (s Store) withState(ctx context.Context, p Plan, create bool, fn func(*state) (bool, error)) error {
-	if validatePlan(p) != nil || ctx.Err() != nil || !physicalName(s.Root) {
+	if validatePlan(p) != nil {
+		return ErrInvalid
+	}
+	return s.withDocument(ctx, p.BenchKey, create, fn)
+}
+
+func (s Store) withDocument(ctx context.Context, key string, create bool, fn func(*state) (bool, error)) error {
+	if ctx.Err() != nil || !physicalName(s.Root) {
 		return ErrInvalid
 	}
 	if physicalDir(s.Root, true) != nil {
@@ -31,7 +38,7 @@ func (s Store) withState(ctx context.Context, p Plan, create bool, fn func(*stat
 			return ErrInvalid
 		}
 	}
-	base := digest([]byte(p.BenchKey))
+	base := digest([]byte(key))
 	lockPath := filepath.Join(s.Root, base+".lock")
 	if st, e := os.Lstat(lockPath); e == nil && (!st.Mode().IsRegular() || st.Mode().Perm() != 0600) {
 		return ErrInvalid
@@ -55,7 +62,7 @@ func (s Store) withState(ctx context.Context, p Plan, create bool, fn func(*stat
 	defer unlock()
 	path := filepath.Join(s.Root, base+".json")
 	raw, err := readFile(path, maxState, true)
-	doc := state{Version: version, BenchKey: p.BenchKey, Records: []Record{}}
+	doc := state{Version: version, BenchKey: key, Records: []Record{}}
 	if err == nil {
 		if decode(raw, &doc) != nil || validateState(doc) != nil {
 			return ErrInvalid
@@ -63,7 +70,7 @@ func (s Store) withState(ctx context.Context, p Plan, create bool, fn func(*stat
 	} else if !errors.Is(err, os.ErrNotExist) || !create {
 		return ErrInvalid
 	}
-	if doc.BenchKey != p.BenchKey {
+	if doc.BenchKey != key {
 		return ErrInvalid
 	}
 	changed, err := fn(&doc)
@@ -83,15 +90,24 @@ func (s Store) withState(ctx context.Context, p Plan, create bool, fn func(*stat
 	return writeAtomic(s.Root, base+".json", raw)
 }
 func validateState(s state) error {
-	if s.Version != version || len(s.Records) > maxRecords {
+	if s.Version != version && s.Version != sourceVersion || len(s.Records) > maxRecords || s.Version == version && s.Source != nil {
+		return ErrInvalid
+	}
+	if s.Source != nil && (!validReservation(s.Source) || s.Source.Spec.BenchKey != s.BenchKey || s.Active != sourceID(s.Source.Spec)) {
 		return ErrInvalid
 	}
 	seen := map[string]bool{}
 	executions := map[string]bool{}
-	active := false
+	active := s.Source != nil
 	for _, r := range s.Records {
 		id := planID(r.Plan)
 		if validatePlan(r.Plan) != nil || r.Plan.BenchKey != s.BenchKey || seen[id] {
+			return ErrInvalid
+		}
+		if s.Source != nil && id == sourceID(s.Source.Spec) {
+			return ErrInvalid
+		}
+		if r.Source != nil && (s.Version != sourceVersion || !validReservation(r.Source) || len(r.Source.Operations) != len(sourceSteps(r.Source.Spec)) || r.Source.Operations[len(r.Source.Operations)-1].Phase != "observed" || !sourcePlanMatches(r.Source.Spec, r.Plan)) {
 			return ErrInvalid
 		}
 		seen[id] = true

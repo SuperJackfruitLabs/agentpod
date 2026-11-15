@@ -108,17 +108,19 @@ type Proposal struct {
 }
 
 type Record struct {
-	Plan           Plan            `json:"plan"`
-	Phase          string          `json:"phase"`
-	Proposal       json.RawMessage `json:"proposal,omitempty"`
-	ProposalSHA256 string          `json:"proposal_sha256,omitempty"`
+	Plan           Plan               `json:"plan"`
+	Source         *SourceReservation `json:"source,omitempty"`
+	Phase          string             `json:"phase"`
+	Proposal       json.RawMessage    `json:"proposal,omitempty"`
+	ProposalSHA256 string             `json:"proposal_sha256,omitempty"`
 }
 
 type state struct {
-	Version  string   `json:"version"`
-	BenchKey string   `json:"bench_key"`
-	Active   string   `json:"active,omitempty"`
-	Records  []Record `json:"records"`
+	Version  string             `json:"version"`
+	Source   *SourceReservation `json:"source,omitempty"`
+	BenchKey string             `json:"bench_key"`
+	Active   string             `json:"active,omitempty"`
+	Records  []Record           `json:"records"`
 }
 
 func digest(b []byte) string   { d := sha256.Sum256(b); return hex.EncodeToString(d[:]) }

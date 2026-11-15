@@ -1,8 +1,9 @@
 # Private dispatch ledger
 
-This package is an unwired node-side foundation. It does not enable the pilot,
+This package is a private node-side coordinator and dispatch journal. It does not
+enable the pilot,
 change node/hub frames, submit board mutations, certify shared policy, negotiate
-an API, supply model credentials, or coordinate source acquisition. The accepted
+an API, or supply model credentials. The accepted
 scalar worker must run **inside `benchd.run`**. The package has no ACP fallback.
 
 `Store.Prepare` records the exact owner, registered bench, authorized source
@@ -60,7 +61,47 @@ serialization omits it and retains its existing launch validation. These checks
 bind a launch; the packaged worker checks actual checkouts after preparation
 inside `benchd.run`. They are neither fencing proof nor host attestation.
 
-This extension still starts after source preparation: `Prepare` requires a full
-source vector, context and exact run-request digest. It cannot reserve an unknown
-source before acquisition. A separately reviewed pending-source transition is
-needed before any coordinator can safely perform the first growth operation.
+`Store.Prepare` still requires a full vector and exact launch. The separate
+`SourceCoordinator.Prepare` reserves a typed `SourceSpec` in the same per-bench
+document before any acquisition. Its fixed task/run/epoch, host, repository/ref
+allowlist, context location outside the data root, packaging hashes and task
+input digest cannot change during preparation. The current trusted owner,
+registry and control-pair callback is mandatory and rechecked after transport
+awaits; metadata supplied by an untrusted caller is not that authorization.
+
+The concrete coordinator optionally creates with initialization, then calls the
+actual Unix client to lease (including configured preparation) and checkpoint
+while retaining that exact token. It never prepares an unowned checkout. Exact
+request bytes are privately fsynced and their one send opportunity consumed
+before transport. Complete replies are privately captured before journal
+advancement. An uncertain send, including a crash before transport starts, stays
+reserved with no redispatch. A captured reply whose document advancement was
+interrupted can be reparsed and reconciled without another service request.
+Known partial failures also retain the reservation and private response.
+
+The private document upgrades from v1 to v2 only when a source reservation is
+introduced; historical scalar records/proposals retain their original meaning.
+Existing scalar and grouped reservations mutually exclude source preparation.
+Repository URLs, task arguments/prompt/environment and continuation capabilities
+stay out of ordinary reservation JSON. Explicit private wire artifacts have
+0600 permissions and a non-JSON framing header; they can contain capabilities
+and must never be forwarded as ordinary output. Parsing or hashing their bytes
+is an observation, not cryptographic attestation.
+
+Binding rereads the actual lease/checkpoint responses, exact holder/token,
+registered bench ID, canonical configured root, whole checkpoint vector and
+object-format widths, then constructs and hashes the protected worker context.
+The task digest is independently checked again at binding. A single document
+commit swaps the reservation for that immutable complete launch. Changed or
+missing receipts refuse first dispatch and lost-reply bound-plan lookup. An
+exact active `BoundSource` lookup returns only the cap-free, not-yet-launched
+plan; it does not reissue a grant. Historical request IDs cannot be reused for
+another acquisition. No automatic adoption, cleanup, rewind or release occurs.
+
+This coordinator intentionally stops before payload launch. A production path
+still needs accepted grouped/cancellation contracts and capability discovery,
+actual common control-pair enforcement and authenticated selected-node routing,
+immutable work-owner source admission, an explicit structured harness adapter,
+full service receipt/result verification and service-only settlement. The
+required callbacks are private trust boundaries for that caller, not substitutes
+for those implementations. No public route or node verb imports this path.
