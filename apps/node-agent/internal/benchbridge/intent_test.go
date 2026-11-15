@@ -34,8 +34,12 @@ func prepareFixture(t *testing.T) ([]byte, benchcoordinatorwire.Request) {
 }
 
 func intentChoice(r benchcoordinatorwire.Request) (benchdispatch.SourceSpec, benchdispatch.SourceTask) {
+	timeout, err := taskTimeout(r.Task.TimeoutSeconds)
+	if err != nil {
+		panic("invalid task timeout in fixture")
+	}
 	task := benchdispatch.SourceTask{Arguments: []string{"/bin/sh"}, Environment: map[string]string{},
-		Prompt: r.Task.Prompt, TimeoutSeconds: uint32(r.Task.TimeoutSeconds), RepositoryName: r.Task.RepositoryName}
+		Prompt: r.Task.Prompt, TimeoutSeconds: timeout, RepositoryName: r.Task.RepositoryName}
 	spec := benchdispatch.SourceSpec{Identity: benchdispatch.Identity(*r.Identity), HostID: r.Target.HostID,
 		BenchKey: "fixture", Holder: "fixture", ContextParent: "/private/context", DataRoot: "/private/data",
 		WorkerPath: "/private/worker", WorkerSHA256: r.Target.WorkerSHA256, TaskSHA256: benchdispatch.SourceTaskSHA256(task),

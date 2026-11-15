@@ -42,7 +42,7 @@ func NewHubCurrent(hub, nodeID, nodeSecret string) (*HubCurrent, error) {
 	}
 	ip := net.ParseIP(u.Hostname())
 	loopback := u.Hostname() == "localhost" || ip != nil && ip.IsLoopback()
-	if u.Scheme != "https" && !(u.Scheme == "http" && loopback) {
+	if u.Scheme != "https" && (u.Scheme != "http" || !loopback) {
 		return nil, ErrCurrent
 	}
 	// The node ID is a path segment and an Authorization component, not a URL.
@@ -50,7 +50,7 @@ func NewHubCurrent(hub, nodeID, nodeSecret string) (*HubCurrent, error) {
 		return nil, ErrCurrent
 	}
 	for _, r := range nodeID {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' && r != '-' {
 			return nil, ErrCurrent
 		}
 	}

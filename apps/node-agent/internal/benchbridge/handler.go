@@ -80,10 +80,21 @@ func (h *Handler) check(ctx context.Context, r benchcoordinatorwire.Request, p L
 	}
 	return nil
 }
+func taskTimeout(value uint64) (uint32, error) {
+	if value < 1 || value > 3600 {
+		return 0, ErrIntent
+	}
+	return uint32(value), nil
+}
+
 func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p LocalProfile) (benchdispatch.SourceSpec, benchdispatch.SourceTask, error) {
 	var zero benchdispatch.SourceSpec
 	if r.Identity == nil || r.Task == nil {
 		return zero, benchdispatch.SourceTask{}, ErrIntent
+	}
+	timeout, err := taskTimeout(r.Task.TimeoutSeconds)
+	if err != nil {
+		return zero, benchdispatch.SourceTask{}, err
 	}
 	identity := benchdispatch.Identity(*r.Identity)
 	stable, _ := json.Marshal([]string{identity.TenantID, identity.BoardID, identity.CardID})
@@ -115,7 +126,7 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 		}
 	}
 	task := benchdispatch.SourceTask{Arguments: append([]string(nil), p.Arguments...), Environment: map[string]string{}, Prompt: r.Task.Prompt,
-		TimeoutSeconds: uint32(r.Task.TimeoutSeconds), RepositoryName: r.Task.RepositoryName}
+		TimeoutSeconds: timeout, RepositoryName: r.Task.RepositoryName}
 	for k, v := range p.Environment {
 		task.Environment[k] = v
 	}
@@ -207,10 +218,16 @@ func (h *Handler) Handle(ctx context.Context, verb string, raw json.RawMessage, 
 		return nil, false, errors.New("invalid dedicated coordinator request")
 	}
 	response, err := h.handle(ctx, r, raw)
-	if err != nil {
-		return refused(r.Operation), false, nil
+	return transportOutcome(r, response, err), false, nil
+}
+
+// transportOutcome never exports internal error text. An explicitly parked
+// outcome stays pending; every other internal failure becomes a closed refusal.
+func transportOutcome(r benchcoordinatorwire.Request, response benchcoordinatorwire.Response, err error) benchcoordinatorwire.Response {
+	if err != nil && response.State != "pending" {
+		return refused(r.Operation)
 	}
-	return response, false, nil
+	return response
 }
 func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, raw []byte) (benchcoordinatorwire.Response, error) {
 	if h.installed() != nil || managed(ctx, h.client) != nil {
@@ -239,17 +256,17 @@ func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, ra
 			return h.choose(ctx, r, p)
 		})
 		if err != nil {
-			return pending(r), nil
+			return pending(r), err
 		}
 		send, err := intents.ClaimEffects(ctx, raw)
 		if err != nil {
-			return pending(r), nil
+			return pending(r), err
 		}
 		m := h.manager(r, p, intent, "prepare")
 		if send {
 			source, err := m.Prepare(ctx, *intent.Spec, *intent.Task)
 			if err != nil {
-				return pending(r), nil
+				return pending(r), err
 			}
 			return preparedResponse(r, source)
 		}
@@ -257,7 +274,7 @@ func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, ra
 	}
 	intent, err := intents.Read(ctx, r)
 	if err != nil || intent.Spec == nil {
-		return pending(r), nil
+		return pending(r), ErrIntent
 	}
 	if r.Operation == "status" {
 		return h.status(ctx, r, p, intent)
@@ -272,15 +289,15 @@ func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, ra
 	}
 	saved, err := (benchdispatch.Store{Root: h.registry.StateRoot}).ReservedSourceSpec(ctx, intent.Spec.BenchKey, intent.Spec.Identity)
 	if err != nil || !reflect.DeepEqual(saved, *intent.Spec) {
-		return pending(r), nil
+		return pending(r), ErrIntent
 	}
 	send, err := intents.ClaimExecution(ctx, raw)
 	if err != nil {
-		return pending(r), nil
+		return pending(r), err
 	}
 	intent, err = intents.Read(ctx, r)
 	if err != nil {
-		return pending(r), nil
+		return pending(r), err
 	}
 	if !send {
 		return h.status(ctx, r, p, intent)
@@ -293,7 +310,7 @@ func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, ra
 		return h.check(ctx, r, p, intent, "execute")
 	})
 	if err != nil {
-		return pending(r), nil
+		return pending(r), err
 	}
 	return completedResponse(r, saved, completion)
 }
@@ -303,11 +320,11 @@ func (h *Handler) status(ctx context.Context, r benchcoordinatorwire.Request, p 
 	}
 	saved, err := (benchdispatch.Store{Root: h.registry.StateRoot}).ReservedSourceSpec(ctx, intent.Spec.BenchKey, intent.Spec.Identity)
 	if err != nil || !reflect.DeepEqual(saved, *intent.Spec) {
-		return pending(r), nil
+		return pending(r), ErrIntent
 	}
 	status, err := h.manager(r, p, intent, "observe").Status(ctx, saved)
 	if err != nil {
-		return pending(r), nil
+		return pending(r), err
 	}
 	if status.State == "completed" && status.Completion != nil && r.Operation != "prepare" {
 		return completedResponse(r, saved, *status.Completion)
