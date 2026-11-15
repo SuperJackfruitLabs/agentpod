@@ -141,6 +141,8 @@ export interface LiveSession {
   turnInFlight: boolean;
   /** This turn already has its error event; a second would say it twice. */
   turnErrorRecorded: boolean;
+  /** Whether recordError is awaiting its audit or has queued the error event. */
+  turnErrorPhase?: "audit" | "queued";
   /** Where the last turn's recorded error came from, to tell a follow-up from a repeat. */
   turnErrorSource: TurnError["source"] | null;
   /** A plugin's report that arrived while the turn was still running. */

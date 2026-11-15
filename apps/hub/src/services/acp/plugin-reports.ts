@@ -107,7 +107,11 @@ export function reportTurnError(
     live.awaitingTurnError(error);
     return "awaited";
   }
-  if (live.turnInFlight && !live.turnErrorRecorded) {
+  if (
+    live.turnInFlight &&
+    (!live.turnErrorRecorded ||
+      (live.turnErrorPhase === "audit" && live.turnErrorSource !== "plugin"))
+  ) {
     // More than one report for a turn: merge, never replace. Replacing lost
     // Kimi's quota — the cause — behind the fallbacks' errors (2026-09-26).
     live.pendingTurnErrorAt = Date.now();
@@ -118,12 +122,28 @@ export function reportTurnError(
     live.pendingTurnError = error;
     return "pending";
   }
+  return queueTurnErrorFollowup(live, error);
+}
+
+/** Queue detail only after the turn's primary error has its transcript position. */
+export function queueTurnErrorFollowup(
+  live: LiveSession,
+  error: TurnError,
+): TurnErrorReportOutcome {
   if (live.turnErrorSource === "plugin") {
     // The room already shows a plugin's account of this turn. Another would be
     // the same news twice, which is exactly what krishna's room showed.
     return "duplicate";
   }
-  if (Date.now() - live.lastTurnSettledAt < LATE_TURN_ERROR_MS) {
+  if (
+    (live.turnInFlight &&
+      live.turnErrorRecorded &&
+      live.turnErrorPhase !== "audit") ||
+    Date.now() - live.lastTurnSettledAt < LATE_TURN_ERROR_MS
+  ) {
+    // The error can be visible while its turn still awaits the queued status
+    // write. That turn has not settled yet, so its previous settlement time
+    // (zero for the first turn) cannot date this follow-up.
     // The turn already has its error ("completed without a reply"). This one
     // says why, so it follows rather than being lost.
     live.turnErrorSource = error.source;
@@ -131,7 +151,7 @@ export function reportTurnError(
     return "late";
   }
   log.warn("a turn error was reported too long after its turn to place", {
-    nodeId,
+    nodeId: live.nodeId,
     sessionId: live.id,
   });
   return "unmatched";
