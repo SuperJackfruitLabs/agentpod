@@ -105,3 +105,21 @@ immutable work-owner source admission, an explicit structured harness adapter,
 full service receipt/result verification and service-only settlement. The
 required callbacks are private trust boundaries for that caller, not substitutes
 for those implementations. No public route or node verb imports this path.
+`SourceCoordinator.Binding` projects the exact preserved start checkpoint and
+receipt/request/context/worker hashes without private paths or capabilities.
+`ExecuteBound` requires a separate mandatory `AdmissionGate` for independently
+authenticated current Hub admission of that exact binding. No production route
+supplies that gate. The coordinator loads its original private held-token run,
+consumes the dispatch intent, and calls the concrete Unix client once. A valid
+captured reply can be reconciled; a missing reply never causes redispatch.
+
+The final observation requires an independently parsed successful producer run
+reply with stopped execution, known zero orchestration exit, whole checkpoint,
+and no held lease or pending vector, plus the strictly bound worker result.
+Worker task outcomes remain distinct from orchestration success. Current owner
+checks run again after admission and transport awaits. Private immutable ledger
+proposals still include the original private Plan paths: they are not the Hub
+wire result or an accepted settlement. SourceBinding is the separate path-free
+projection. Exact historical proposal replay cannot launch another child or
+renew ownership. Actual authenticated Hub current/admission wiring, source trust
+acceptance, and end-to-end coordinator integration remain required before use.

@@ -125,6 +125,9 @@ func (s Store) BindSource(ctx context.Context, spec SourceSpec, p Plan, rawRun [
 		if gate(ctx, spec) != nil || ctx.Err() != nil {
 			return false, ErrOwner
 		}
+		if e := s.writeSourceFile(sourceFile(spec, "run", ".request"), append([]byte(privateSourceRequestHeader), rawRun...)); e != nil {
+			return false, e
+		}
 		doc.Records = append(doc.Records, Record{Plan: p, Source: r, Phase: "prepared"})
 		doc.Source = nil
 		return true, nil
