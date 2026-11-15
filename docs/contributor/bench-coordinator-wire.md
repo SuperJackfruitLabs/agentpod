@@ -106,7 +106,8 @@ credential remains in the node process and never enters a worker context.
 
 The request names an exact retained attempt, profile, identity and target with
 a fresh 128-bit nonce. Execution additionally binds the prepared binding and
-source admission digests. The server must verify its retained request, installed
+source admission digests and the exact retained execute request bytes. Every phase
+also binds the exact retained prepare request bytes. The server must verify its retained request, installed
 profile, current station/occupancy/workspace, issuer control pair and actual
 current SuperPipeline ownership after awaited reads. Before source admission it
 checks the original pending claim; afterward it also checks the service's stored
@@ -117,8 +118,29 @@ The bounded response joins the nonce and SHA-256 of the exact raw request, has
 a lifetime of at most five seconds, and requires `Cache-Control: no-store`.
 Future, expired, foreign and replayed decisions refuse. A valid refusal, lost
 response or timeout parks the attempt and proves no process fence or release.
-The included Node HTTP adapter verifies this transport boundary; the actual Hub
-endpoint and installed coordinator constructor remain separate integration work.
+The Node HTTP adapter verifies this transport boundary. The default-off Hub route
+uses actual enrolled-node authentication and retained database/issuer/source
+lookups. The optional Node configuration `proposedCheckpointRegistry` constructs
+the dedicated handler from a physical private local registry; empty keeps it
+disabled. An invalid explicit pin refuses the verb before generic dispatch.
+No configuration or heartbeat capability is supplied by this change.
+
+The registry pins exact installed coordinator and worker bytes separately from
+the bench protocol. Trusted local profiles supply clone identities, commands and
+an explicit environment allowlist; broker payloads cannot supply them. The
+private adapter intent retains the exact prepare body and resolved source/task
+before effects, then marks at-most-once preparation and execution handoffs.
+Missing/corrupt source metadata never permits a new Create decision. Status
+recovers only the exact full-identity saved source spec and does not launch work.
+Canonical request/receipt digests come from the actual saved private exchanges;
+the existing raw/body hashes retain their original meanings.
+
+The dedicated handler requires Linux managed host status. This does not provide
+native laptop preparation. These are trusted same-user commands, not a new
+same-UID isolation boundary. Real authenticated Hub/Node/service integration,
+complete report port wiring, cancellation reconciliation, contract acceptance
+and operator provisioning remain rollout gates. A cancellation response alone
+is never a fence or release proof.
 
 ## Conformance
 

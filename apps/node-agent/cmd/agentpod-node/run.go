@@ -305,6 +305,8 @@ func runCmd() {
 		}
 	}
 	h = gateway.NewSalaamHandler(h, salaamClient)
+	h, closeCheckpoint := checkpointCoordinatorHandler(h, cfg)
+	defer closeCheckpoint()
 	// The daemon's otel.env comes from its own cgroup (otelenv.DaemonPath), not from uid: a
 	// system unit with User= still reads the system file, and a node that is not the
 	// systemd service at all (container, `apn run`) answers unsupported instead of exiting.

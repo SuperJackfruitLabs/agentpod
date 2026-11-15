@@ -11,14 +11,16 @@ const Verb = "bench.coordinator"
 // CurrentRequest names an already retained attempt. Neither a request nor a
 // digest creates authority; the authenticated Hub must re-read its actual state.
 type CurrentRequest struct {
-	Version       string   `json:"version"`
-	Phase         string   `json:"phase"`
-	Nonce         string   `json:"nonce"`
-	Identity      Identity `json:"identity"`
-	Target        Target   `json:"target"`
-	ProfileID     string   `json:"profile_id"`
-	BindingSHA256 string   `json:"binding_sha256,omitempty"`
-	SourceDigest  string   `json:"source_digest,omitempty"`
+	Version              string   `json:"version"`
+	Phase                string   `json:"phase"`
+	Nonce                string   `json:"nonce"`
+	Identity             Identity `json:"identity"`
+	Target               Target   `json:"target"`
+	ProfileID            string   `json:"profile_id"`
+	PrepareRequestSHA256 string   `json:"prepare_request_sha256"`
+	ExecuteRequestSHA256 string   `json:"execute_request_sha256,omitempty"`
+	BindingSHA256        string   `json:"binding_sha256,omitempty"`
+	SourceDigest         string   `json:"source_digest,omitempty"`
 }
 
 type CurrentResponse struct {
@@ -35,10 +37,11 @@ func ParseCurrentRequest(raw []byte) (CurrentRequest, error) {
 	var r CurrentRequest
 	if decode(raw, MaxRequest, &r) != nil || r.Version != CurrentVersion ||
 		!one(r.Phase, "prepare", "execute", "observe") || !bidPattern.MatchString(r.Nonce) ||
-		!matched(r.Identity, r.Target) || !ids(r.ProfileID) ||
+		!matched(r.Identity, r.Target) || !ids(r.ProfileID) || !hashes(r.PrepareRequestSHA256) ||
 		r.BindingSHA256 != "" && !hashes(r.BindingSHA256) || r.SourceDigest != "" && !hashes(r.SourceDigest) ||
+		r.ExecuteRequestSHA256 != "" && !hashes(r.ExecuteRequestSHA256) ||
 		r.SourceDigest != "" && r.BindingSHA256 == "" ||
-		r.Phase == "execute" && (r.BindingSHA256 == "" || r.SourceDigest == "") {
+		r.Phase == "execute" && (r.BindingSHA256 == "" || r.SourceDigest == "" || r.ExecuteRequestSHA256 == "") {
 		return CurrentRequest{}, ErrInvalid
 	}
 	return r, nil

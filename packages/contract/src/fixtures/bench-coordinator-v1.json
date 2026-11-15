@@ -1095,7 +1095,8 @@
           },
           "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
           "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "checkpoint_repository": "api"
+          "checkpoint_repository": "api",
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
         }
       },
       "accept": true
@@ -1274,7 +1275,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -1316,7 +1318,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": true
@@ -1495,7 +1499,8 @@
             },
             "binding_sha256": "0c7c8edbbd4d20c5c2ea9c8cd14473d0148408c5cb8b15446930c569c4f465be",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -1537,7 +1542,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -1716,7 +1723,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -1758,7 +1766,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -1937,7 +1947,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -1979,7 +1990,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -2158,7 +2171,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -2200,7 +2214,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -2379,7 +2395,8 @@
             },
             "binding_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -2421,7 +2438,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -2600,7 +2619,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -2642,7 +2662,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -2821,7 +2843,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -2863,7 +2886,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         },
         "message": "/private/fixture fixture-secret"
       },
@@ -3043,7 +3068,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -3085,7 +3111,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -3264,7 +3292,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -3306,7 +3335,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -3485,7 +3516,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -3527,7 +3559,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -3706,7 +3740,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -3748,7 +3783,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -3927,7 +3964,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -3969,7 +4007,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -4148,7 +4188,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -4190,7 +4231,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -4369,7 +4412,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -4411,7 +4455,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -4590,7 +4636,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -4632,7 +4679,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -4811,7 +4860,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -4854,7 +4904,9 @@
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
           },
-          "plan": {}
+          "plan": {},
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -5033,7 +5085,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -5075,7 +5128,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -5254,7 +5309,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -5296,7 +5352,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -5475,7 +5533,8 @@
             },
             "binding_sha256": "6718a733a6bcbd1cbf1f80284b0b383146a7be67c1914ef246694f7be4042741",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -5517,7 +5576,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -5697,7 +5758,8 @@
             },
             "binding_sha256": "a11c91dc2917a7f20598f3aba891afe97a852f8835ad660ceae249abc882de27",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -5739,7 +5801,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -5893,7 +5957,8 @@
             },
             "binding_sha256": "453b979edffa21d3188e39fc37ddb2cdd754d2604a23f95d93e68b39288261a6",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -5935,7 +6000,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -6111,7 +6178,8 @@
           },
           "binding_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
           "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "checkpoint_repository": "api"
+          "checkpoint_repository": "api",
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
         }
       },
       "accept": false
@@ -6798,7 +6866,8 @@
           },
           "binding_sha256": "1f1837888f6ae0a30702b7fbeca71a09079bbebb6f6f5bd82948a4c333949b2c",
           "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "checkpoint_repository": "repo01"
+          "checkpoint_repository": "repo01",
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
         }
       },
       "accept": true
@@ -7492,7 +7561,8 @@
           },
           "binding_sha256": "27cc0d1aca592f3b3b91a001eb6f4812a007d483ebbf735c49ca604fb9a063ef",
           "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "checkpoint_repository": "repo01"
+          "checkpoint_repository": "repo01",
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
         }
       },
       "accept": false
@@ -7671,7 +7741,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "source-run",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "source-run",
@@ -7713,7 +7784,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": true
@@ -7892,7 +7965,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "source-run",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "source-run",
@@ -7934,7 +8008,9 @@
             "handoff": {
               "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false
@@ -8113,7 +8189,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -8158,7 +8235,9 @@
               "prototype": "still text",
               "": "empty-key child text"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": true
@@ -8337,7 +8416,8 @@
             },
             "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "checkpoint_repository": "api"
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
           },
           "service": {
             "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -8382,7 +8462,855 @@
               "prototype": "still text",
               "": "empty-key child text"
             }
-          }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "completion missing canonical source_request_sha256",
+      "request": {
+        "version": "agentpod.bench-coordinator.v1",
+        "operation": "execute",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
+        "source_receipt": {
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "source_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "admitted_at": 1
+        }
+      },
+      "value": {
+        "version": "agentpod.bench-coordinator.v1",
+        "operation": "execute",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "state": "completed",
+        "completion": {
+          "source": {
+            "binding": {
+              "identity": {
+                "tenant_id": "tenant-fixture",
+                "board_id": "brd_ABC123",
+                "card_id": "card_ABC123",
+                "stage_id": "write-test",
+                "run_id": "run_ABC123",
+                "epoch": 7,
+                "agent_id": "agt_ABC123",
+                "station_id": "station-fixture",
+                "node_id": "node-fixture",
+                "attempt_id": "attempt-fixture",
+                "control_principal_id": "prn_ABC123",
+                "control_grant_id": "selected-authorization-fixture",
+                "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              },
+              "host_id": "host-fixture",
+              "bench_key": "Fixture_card",
+              "bench_id": "11111111111111111111111111111111",
+              "sources": [
+                {
+                  "name": "api",
+                  "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                },
+                {
+                  "name": "web",
+                  "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                }
+              ],
+              "members": [
+                {
+                  "name": "api",
+                  "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "object_format": "sha1",
+                  "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                },
+                {
+                  "name": "web",
+                  "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "object_format": "sha256",
+                  "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                }
+              ],
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "manifest_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+                "members": [
+                  {
+                    "name": "api",
+                    "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                  },
+                  {
+                    "name": "web",
+                    "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                  }
+                ],
+                "seal": "4444444444444444444444444444444444444444"
+              },
+              "operations": [
+                {
+                  "step": "create",
+                  "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                  "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                  "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                  "http_status": 200,
+                  "phase": "observed"
+                },
+                {
+                  "step": "lease",
+                  "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                  "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                  "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                  "http_status": 200,
+                  "phase": "observed"
+                },
+                {
+                  "step": "checkpoint",
+                  "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                  "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                  "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                  "http_status": 200,
+                  "phase": "observed"
+                }
+              ],
+              "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+              "body_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+              "context_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            },
+            "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
+            "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "service": {
+            "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+            "body_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+            "response_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "worker_result_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "execution_id": "77777777777777777777777777777777",
+            "stopped": true,
+            "released": true,
+            "checkpoints": [
+              {
+                "name": "api",
+                "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "task_ref": "refs/heads/card/card_ABC123",
+                "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              },
+              {
+                "name": "web",
+                "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                "task_ref": "refs/heads/card/card_ABC123",
+                "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+              }
+            ],
+            "kind": "grouped-v2",
+            "generation_id": "55555555555555555555555555555555",
+            "seal_commit": "6666666666666666666666666666666666666666",
+            "manifest_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          },
+          "task": {
+            "version": "agentpod.superbench-worker.v2",
+            "binding": {
+              "board_id": "brd_ABC123",
+              "card_id": "card_ABC123",
+              "run_id": "run_ABC123",
+              "epoch": 7
+            },
+            "outcome": "complete",
+            "handoff": {
+              "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
+            }
+          },
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "completion missing canonical source_receipt_sha256",
+      "request": {
+        "version": "agentpod.bench-coordinator.v1",
+        "operation": "execute",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
+        "source_receipt": {
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "source_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "admitted_at": 1
+        }
+      },
+      "value": {
+        "version": "agentpod.bench-coordinator.v1",
+        "operation": "execute",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "state": "completed",
+        "completion": {
+          "source": {
+            "binding": {
+              "identity": {
+                "tenant_id": "tenant-fixture",
+                "board_id": "brd_ABC123",
+                "card_id": "card_ABC123",
+                "stage_id": "write-test",
+                "run_id": "run_ABC123",
+                "epoch": 7,
+                "agent_id": "agt_ABC123",
+                "station_id": "station-fixture",
+                "node_id": "node-fixture",
+                "attempt_id": "attempt-fixture",
+                "control_principal_id": "prn_ABC123",
+                "control_grant_id": "selected-authorization-fixture",
+                "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              },
+              "host_id": "host-fixture",
+              "bench_key": "Fixture_card",
+              "bench_id": "11111111111111111111111111111111",
+              "sources": [
+                {
+                  "name": "api",
+                  "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                },
+                {
+                  "name": "web",
+                  "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                }
+              ],
+              "members": [
+                {
+                  "name": "api",
+                  "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "object_format": "sha1",
+                  "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                },
+                {
+                  "name": "web",
+                  "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "object_format": "sha256",
+                  "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                }
+              ],
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "manifest_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+                "members": [
+                  {
+                    "name": "api",
+                    "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                  },
+                  {
+                    "name": "web",
+                    "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                  }
+                ],
+                "seal": "4444444444444444444444444444444444444444"
+              },
+              "operations": [
+                {
+                  "step": "create",
+                  "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                  "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                  "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                  "http_status": 200,
+                  "phase": "observed"
+                },
+                {
+                  "step": "lease",
+                  "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                  "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                  "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                  "http_status": 200,
+                  "phase": "observed"
+                },
+                {
+                  "step": "checkpoint",
+                  "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                  "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                  "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                  "http_status": 200,
+                  "phase": "observed"
+                }
+              ],
+              "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+              "body_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+              "context_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            },
+            "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
+            "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "service": {
+            "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+            "body_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+            "response_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "worker_result_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "execution_id": "77777777777777777777777777777777",
+            "stopped": true,
+            "released": true,
+            "checkpoints": [
+              {
+                "name": "api",
+                "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "task_ref": "refs/heads/card/card_ABC123",
+                "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              },
+              {
+                "name": "web",
+                "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                "task_ref": "refs/heads/card/card_ABC123",
+                "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+              }
+            ],
+            "kind": "grouped-v2",
+            "generation_id": "55555555555555555555555555555555",
+            "seal_commit": "6666666666666666666666666666666666666666",
+            "manifest_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          },
+          "task": {
+            "version": "agentpod.superbench-worker.v2",
+            "binding": {
+              "board_id": "brd_ABC123",
+              "card_id": "card_ABC123",
+              "run_id": "run_ABC123",
+              "epoch": 7
+            },
+            "outcome": "complete",
+            "handoff": {
+              "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
+            }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "prepared missing canonical request digest",
+      "request": {
+        "version": "agentpod.bench-coordinator.v1",
+        "operation": "prepare",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "task": {
+          "profile_id": "fixture-profile",
+          "prompt": "Write a failing test. 日本語 <fixture>",
+          "timeout_seconds": 60
+        }
+      },
+      "value": {
+        "version": "agentpod.bench-coordinator.v1",
+        "operation": "prepare",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "state": "prepared",
+        "source": {
+          "binding": {
+            "identity": {
+              "tenant_id": "tenant-fixture",
+              "board_id": "brd_ABC123",
+              "card_id": "card_ABC123",
+              "stage_id": "write-test",
+              "run_id": "run_ABC123",
+              "epoch": 7,
+              "agent_id": "agt_ABC123",
+              "station_id": "station-fixture",
+              "node_id": "node-fixture",
+              "attempt_id": "attempt-fixture",
+              "control_principal_id": "prn_ABC123",
+              "control_grant_id": "selected-authorization-fixture",
+              "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "host_id": "host-fixture",
+            "bench_key": "Fixture_card",
+            "bench_id": "11111111111111111111111111111111",
+            "sources": [
+              {
+                "name": "api",
+                "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "task_ref": "refs/heads/card/card_ABC123",
+                "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              },
+              {
+                "name": "web",
+                "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                "task_ref": "refs/heads/card/card_ABC123",
+                "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+              }
+            ],
+            "members": [
+              {
+                "name": "api",
+                "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "task_ref": "refs/heads/card/card_ABC123",
+                "object_format": "sha1",
+                "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              },
+              {
+                "name": "web",
+                "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                "task_ref": "refs/heads/card/card_ABC123",
+                "object_format": "sha256",
+                "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+              }
+            ],
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "manifest_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+              "members": [
+                {
+                  "name": "api",
+                  "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                },
+                {
+                  "name": "web",
+                  "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                }
+              ],
+              "seal": "4444444444444444444444444444444444444444"
+            },
+            "operations": [
+              {
+                "step": "create",
+                "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                "http_status": 200,
+                "phase": "observed"
+              },
+              {
+                "step": "lease",
+                "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                "http_status": 200,
+                "phase": "observed"
+              },
+              {
+                "step": "checkpoint",
+                "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                "http_status": 200,
+                "phase": "observed"
+              }
+            ],
+            "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+            "body_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+            "context_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          },
+          "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
+          "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "checkpoint_repository": "api"
+        }
+      },
+      "accept": false
+    },
+    {
+      "name": "completion canonical request differs from admitted prepared",
+      "request": {
+        "version": "agentpod.bench-coordinator.v1",
+        "operation": "execute",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
+        "source_receipt": {
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "source_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "admitted_at": 1
+        }
+      },
+      "value": {
+        "version": "agentpod.bench-coordinator.v1",
+        "operation": "execute",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "state": "completed",
+        "completion": {
+          "source": {
+            "binding": {
+              "identity": {
+                "tenant_id": "tenant-fixture",
+                "board_id": "brd_ABC123",
+                "card_id": "card_ABC123",
+                "stage_id": "write-test",
+                "run_id": "run_ABC123",
+                "epoch": 7,
+                "agent_id": "agt_ABC123",
+                "station_id": "station-fixture",
+                "node_id": "node-fixture",
+                "attempt_id": "attempt-fixture",
+                "control_principal_id": "prn_ABC123",
+                "control_grant_id": "selected-authorization-fixture",
+                "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              },
+              "host_id": "host-fixture",
+              "bench_key": "Fixture_card",
+              "bench_id": "11111111111111111111111111111111",
+              "sources": [
+                {
+                  "name": "api",
+                  "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                },
+                {
+                  "name": "web",
+                  "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                }
+              ],
+              "members": [
+                {
+                  "name": "api",
+                  "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "object_format": "sha1",
+                  "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                },
+                {
+                  "name": "web",
+                  "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "object_format": "sha256",
+                  "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                }
+              ],
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "manifest_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+                "members": [
+                  {
+                    "name": "api",
+                    "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                  },
+                  {
+                    "name": "web",
+                    "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                  }
+                ],
+                "seal": "4444444444444444444444444444444444444444"
+              },
+              "operations": [
+                {
+                  "step": "create",
+                  "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                  "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                  "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                  "http_status": 200,
+                  "phase": "observed"
+                },
+                {
+                  "step": "lease",
+                  "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                  "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                  "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                  "http_status": 200,
+                  "phase": "observed"
+                },
+                {
+                  "step": "checkpoint",
+                  "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                  "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                  "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                  "http_status": 200,
+                  "phase": "observed"
+                }
+              ],
+              "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+              "body_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+              "context_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            },
+            "binding_sha256": "55d3ee7163919ddf34c3b14f85792218aecf4d39d0ad709b2c97c524043d7c32",
+            "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "service": {
+            "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+            "body_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+            "response_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "worker_result_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "execution_id": "77777777777777777777777777777777",
+            "stopped": true,
+            "released": true,
+            "checkpoints": [
+              {
+                "name": "api",
+                "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "task_ref": "refs/heads/card/card_ABC123",
+                "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              },
+              {
+                "name": "web",
+                "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                "task_ref": "refs/heads/card/card_ABC123",
+                "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+              }
+            ],
+            "kind": "grouped-v2",
+            "generation_id": "55555555555555555555555555555555",
+            "seal_commit": "6666666666666666666666666666666666666666",
+            "manifest_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          },
+          "task": {
+            "version": "agentpod.superbench-worker.v2",
+            "binding": {
+              "board_id": "brd_ABC123",
+              "card_id": "card_ABC123",
+              "run_id": "run_ABC123",
+              "epoch": 7
+            },
+            "outcome": "complete",
+            "handoff": {
+              "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
+            }
+          },
+          "source_request_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
         }
       },
       "accept": false

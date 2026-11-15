@@ -1,0 +1,99 @@
+package benchbridge
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func registryFixture(t *testing.T) (string, Registry) {
+	t.Helper()
+	root := intentStore(t).Root
+	dirs := make([]string, 4)
+	for i, name := range []string{"state", "intents", "contexts", "data"} {
+		dirs[i] = filepath.Join(root, name)
+		if os.Mkdir(dirs[i], 0700) != nil {
+			t.Fatal("private directory")
+		}
+	}
+	worker := filepath.Join(root, "worker")
+	if os.WriteFile(worker, []byte("#!/bin/sh\nexit 0\n"), 0700) != nil {
+		t.Fatal("fixture worker")
+	}
+	workerSHA, err := executableHash(worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	self, err = filepath.EvalSymlinks(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selfSHA, err := executableHash(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, request := prepareFixture(t)
+	r := Registry{Version: "agentpod.private-coordinator-registry.v1", NodeID: request.Target.NodeID, HostID: request.Target.HostID,
+		Socket: filepath.Join(root, "source.sock"), StateRoot: dirs[0], IntentRoot: dirs[1], ContextParent: dirs[2], DataRoot: dirs[3],
+		WorkerPath: worker, WorkerSHA256: workerSHA, CoordinatorSHA256: selfSHA, Profiles: []LocalProfile{{ID: "fixture", TenantID: request.Target.TenantID,
+			BoardID: request.Target.BoardID, AgentID: request.Target.AgentID, StationID: request.Target.StationID, CheckpointRepository: "api",
+			Repositories: []LocalRepository{{Name: "api", Repository: "/fixture/repo", Base: "main", ObjectFormat: "sha1"}}, Arguments: []string{"/bin/sh"}, Environment: map[string]string{"PATH": "/usr/bin:/bin"}}}}
+	path := filepath.Join(root, "registry.json")
+	writeRegistry(t, path, r)
+	return path, r
+}
+func writeRegistry(t *testing.T, path string, r Registry) {
+	t.Helper()
+	raw, err := json.Marshal(r)
+	if err != nil || os.WriteFile(path, raw, 0600) != nil {
+		t.Fatal("write registry")
+	}
+}
+func TestRegistryPinsActualInstalledBytesAndRefusesCredentialEnvironment(t *testing.T) {
+	path, r := registryFixture(t)
+	got, digest, err := readRegistry(path, r.NodeID)
+	raw, _ := os.ReadFile(path)
+	if err != nil || digest != rawSHA(raw) || got.WorkerSHA256 != r.WorkerSHA256 {
+		t.Fatalf("valid registry refused: %v", err)
+	}
+	r.Profiles[0].Environment["SERVICE_TOKEN"] = "fixture-must-not-enter-worker"
+	writeRegistry(t, path, r)
+	if _, _, err = readRegistry(path, r.NodeID); err == nil {
+		t.Fatal("credential environment accepted")
+	}
+	delete(r.Profiles[0].Environment, "SERVICE_TOKEN")
+	writeRegistry(t, path, r)
+	if os.WriteFile(r.WorkerPath, []byte("changed trusted worker"), 0700) != nil {
+		t.Fatal("change worker")
+	}
+	if _, _, err = readRegistry(path, r.NodeID); err == nil {
+		t.Fatal("changed installed worker accepted")
+	}
+}
+func TestRegistryRefusesWrongNodePublicConfigAndSymlink(t *testing.T) {
+	path, r := registryFixture(t)
+	if _, _, err := readRegistry(path, "foreign-node"); err == nil {
+		t.Fatal("foreign node accepted")
+	}
+	if os.Chmod(path, 0644) != nil {
+		t.Fatal("chmod")
+	}
+	if _, _, err := readRegistry(path, r.NodeID); err == nil {
+		t.Fatal("public config accepted")
+	}
+	if os.Chmod(path, 0600) != nil {
+		t.Fatal("chmod")
+	}
+	alias := filepath.Join(filepath.Dir(path), "alias.json")
+	if os.Symlink(path, alias) != nil {
+		t.Fatal("symlink")
+	}
+	if _, _, err := readRegistry(alias, r.NodeID); err == nil {
+		t.Fatal("symlink accepted")
+	}
+}

@@ -94,7 +94,7 @@ func BindingDigest(b SourceBinding) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 func validPrepared(p Prepared) bool {
-	if !validBinding(p.Binding) || (!hashes(p.BindingSHA256) || !keyPattern.MatchString(p.RequestID)) || !namePattern.MatchString(p.CheckpointRepository) {
+	if !validBinding(p.Binding) || (!hashes(p.BindingSHA256, p.SourceRequestSHA256) || !keyPattern.MatchString(p.RequestID)) || !namePattern.MatchString(p.CheckpointRepository) {
 		return false
 	}
 	for _, m := range p.Binding.Members {
@@ -114,6 +114,9 @@ func validCompletion(c Completion) bool {
 	s := c.Service
 	t := c.Task
 	i := b.Identity
+	if !hashes(c.SourceRequestSHA256, c.SourceReceiptSHA256) || c.SourceRequestSHA256 != p.SourceRequestSHA256 {
+		return false
+	}
 	if !validPrepared(p) || s.RequestID != p.RequestID || s.RequestSHA256 != b.RequestSHA256 || s.BodySHA256 != b.BodySHA256 || !hashes(s.ResponseSHA256, s.WorkerResultSHA256, s.ManifestSHA256) || !bidPattern.MatchString(s.ExecutionID) || !s.Stopped || !s.Released || s.Kind != "grouped-v2" || !bidPattern.MatchString(s.GenerationID) || !commitPattern.MatchString(s.SealCommit) || len(s.SealCommit) != len(b.Checkpoint.Seal) || len(s.Checkpoints) != len(b.Sources) || t.Version != "agentpod.superbench-worker.v2" || !one(t.Outcome, "complete", "blocked", "failed") || t.Handoff == nil || t.Binding != (WorkerBinding{BoardID: i.BoardID, CardID: i.CardID, RunID: i.RunID, Epoch: i.Epoch}) {
 		return false
 	}

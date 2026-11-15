@@ -1,4 +1,4 @@
-/** PROPOSED dedicated coordinator data only. No handler, capability or authority is enabled. */
+/** PROPOSED dedicated coordinator data. Optional private handlers do not enable a capability or authority. */
 import { z } from "zod";
 
 export const BENCH_COORDINATOR_VERSION = "agentpod.bench-coordinator.v1";
@@ -63,7 +63,7 @@ export const BenchCoordinatorSourceBinding = z.object({
 export type BenchCoordinatorSourceBinding = z.infer<typeof BenchCoordinatorSourceBinding>;
 export const BenchCoordinatorPrepared = z.object({
   binding: BenchCoordinatorSourceBinding, binding_sha256: sha,
-  request_id: key, checkpoint_repository: name,
+  request_id: key, checkpoint_repository: name, source_request_sha256: sha,
 }).strict().refine((p) => {
   const coordinator = p.binding.members.find((m) => m.name === p.checkpoint_repository);
   return coordinator !== undefined && p.binding.checkpoint.seal.length === (coordinator.object_format === "sha1" ? 40 : 64) &&
@@ -83,11 +83,13 @@ const task = z.object({ version: z.literal("agentpod.superbench-worker.v2"), bin
   board_id: product("brd"), card_id: product("card"), run_id: product("run"), epoch: integer.min(1),
 }).strict(), outcome: z.enum(["complete", "blocked", "failed"]), handoff }).strict()
   .refine((v) => bytes(v) <= 65536);
-export const BenchCoordinatorCompletion = z.object({ source: BenchCoordinatorPrepared, service, task }).strict()
+export const BenchCoordinatorCompletion = z.object({ source: BenchCoordinatorPrepared, service, task,
+  source_request_sha256: sha, source_receipt_sha256: sha }).strict()
   .refine((c) => {
     const b = c.source.binding; const i = b.identity; const t = c.task.binding; const s = c.service;
     const coordinator = b.members.find((m) => m.name === c.source.checkpoint_repository);
-    return s.request_id === c.source.request_id && s.request_sha256 === b.request_sha256 && s.body_sha256 === b.body_sha256 &&
+    return c.source_request_sha256 === c.source.source_request_sha256 &&
+      s.request_id === c.source.request_id && s.request_sha256 === b.request_sha256 && s.body_sha256 === b.body_sha256 &&
       t.board_id === i.board_id && t.card_id === i.card_id && t.run_id === i.run_id && t.epoch === i.epoch &&
       sorted(s.checkpoints) && s.checkpoints.length === b.sources.length && s.checkpoints.every((m, n) => {
         const old = b.sources[n]; const known = b.members[n];
@@ -123,10 +125,12 @@ export const BENCH_COORDINATOR_CURRENT_VERSION = "agentpod.bench-coordinator-cur
 export const BenchCoordinatorCurrentRequest = z.object({
   version: z.literal(BENCH_COORDINATOR_CURRENT_VERSION), phase: z.enum(["prepare", "execute", "observe"]),
   nonce: bid, identity: BenchCoordinatorIdentity, target: BenchCoordinatorTarget, profile_id: id,
+  prepare_request_sha256: sha,
+  execute_request_sha256: sha.optional(),
   binding_sha256: sha.optional(), source_digest: sha.optional(),
 }).strict().refine((r) => matched(r.identity, r.target) &&
   (r.source_digest === undefined || r.binding_sha256 !== undefined) &&
-  (r.phase !== "execute" || r.binding_sha256 !== undefined && r.source_digest !== undefined))
+  (r.phase !== "execute" || r.binding_sha256 !== undefined && r.source_digest !== undefined && r.execute_request_sha256 !== undefined))
   .refine((r) => bytes(r) <= BENCH_COORDINATOR_MAX_REQUEST);
 export type BenchCoordinatorCurrentRequest = z.infer<typeof BenchCoordinatorCurrentRequest>;
 const currentBase = { version: z.literal(BENCH_COORDINATOR_CURRENT_VERSION), nonce: bid,
