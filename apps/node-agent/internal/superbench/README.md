@@ -1,7 +1,7 @@
 # Internal SuperBench adapter foundation
 
 This package and `cmd/agentpod-bench-worker` are an unconnected scalar-v1
-foundation, not an enabled adapter, multi-repository implementation, consumer
+foundation with private protected grouped-worker groundwork, not an enabled adapter, consumer
 acceptance claim or completed Developer Experience pilot. Existing ACP dispatch
 and node contracts are unchanged.
 
@@ -83,3 +83,34 @@ and use bounded reads. Failure.Error never prints raw service messages or tokens
 a typed retained response is private operator reconciliation data and must not
 be logged. The client does not currently implement a durable adapter settlement
 ledger or an adapter-local operation receipt journal.
+
+## Private protected grouped worker candidate
+
+The additive two-argument worker mode is private groundwork. It does not enable
+node dispatch or adopt a shared worker wire contract. The original one-argument
+scalar invocation, version output, context, client and result semantics stay v1.
+A future authenticated grouped coordinator packages `GroupedWorkerSpec` outside
+the checkout data, binds its returned exact-byte SHA256 to source admission, and
+submits service argv `[verifiedWorkerPath, contextDirectory, expectedSHA256]`.
+The service request omits `repository_name`, so its supervised payload starts in
+the aggregate root; the worker derives its optional selected member cwd itself.
+
+The hash is checked before decoding context or creating launch artifacts. The
+context binds board/card/run/epoch, bench key/ID, physical aggregate root and the
+complete sorted repository vector. After service preparation, the worker checks
+all physical member/control/common paths, exact origin digests, task refs,
+formats and HEADs, index flags and clean tracked/untracked status before starting
+one harness. It refuses external Git config/includes/filters, alternates,
+replacement refs, partial clones and submodules. Fixed Git runs without optional
+index writes, ambient Git variables or lazy fetch. Protected mode requires Unix
+filesystem semantics. A valid launch consumes its private context exactly once;
+source refusal retains that evidence and never rebinds admission automatically.
+
+These checks establish the behavior of this trusted packaged executable under
+the existing same-UID trusted-command boundary. Context permissions and its hash
+do not isolate a hostile concurrent same-UID process or provide cryptographic
+attestation. The structured child result is task output, never proof of fencing,
+checkpoint confirmation or release. Those remain independently validated service
+outcomes tied to the exact request and source admission. Live source binding,
+issuer provisioning, approved policy enablement, cancellation, board settlement
+and the real managed grouped pilot remain separate integration requirements.
