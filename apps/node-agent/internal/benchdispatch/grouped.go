@@ -11,23 +11,15 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattempt"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/superbench"
 )
 
 var groupedMemberName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
-var groupedBindingID = regexp.MustCompile(`^(brd|card|run)_[A-Za-z0-9]{6,}$`)
 var groupedRegistration = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
-// Match the packaged grouped worker's binding grammar before any growth.
-func validGroupedIdentity(identity Identity) bool {
-	for i, id := range []string{identity.BoardID, identity.CardID, identity.RunID} {
-		if !groupedBindingID.MatchString(id) || !strings.HasPrefix(id, []string{"brd_", "card_", "run_"}[i]) {
-			return false
-		}
-	}
-	return true
-}
+var validGroupedIdentity = benchattempt.ValidGroupedIdentity
 
 func validateGroupedPlan(p Plan) error {
 	g := p.Grouped

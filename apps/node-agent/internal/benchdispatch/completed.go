@@ -5,12 +5,17 @@ import (
 	"path/filepath"
 	"reflect"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcanonical"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/superbench"
 )
 
 // Completed reparses preserved historical evidence; it never grants or launches.
 // Disclosure/current admission remain the authenticated adapter's responsibility.
 func (s Store) Completed(ctx context.Context, spec SourceSpec) (b SourceBinding, o Observation, task superbench.WorkerResult, err error) {
+	return s.completed(ctx, spec, nil)
+}
+
+func (s Store) completed(ctx context.Context, spec SourceSpec, canonical *benchcanonical.Digests) (b SourceBinding, o Observation, task superbench.WorkerResult, err error) {
 	var p Plan
 	if !validSourceSpec(spec) {
 		return SourceBinding{}, o, task, ErrInvalid
@@ -44,6 +49,12 @@ func (s Store) Completed(ctx context.Context, spec SourceSpec) (b SourceBinding,
 		raw, e := readFile(filepath.Join(p.ContextPath, "result.json"), superbench.MaxWorker, true)
 		if e != nil || digest(raw) != o.WorkerResultSHA256 || decode(raw, &task) != nil {
 			return false, ErrVerify
+		}
+		if canonical != nil {
+			*canonical, e = s.canonicalRun(spec, p, &o)
+			if e != nil {
+				return false, e
+			}
 		}
 		return false, nil
 	})

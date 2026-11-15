@@ -152,3 +152,16 @@ observations and reconciliation need, not that plan or any private capability.
 Historical receipt recovery after a verified cancellation acknowledgement is not
 implemented by this foundation. No public broker handler, readiness advertisement,
 automatic reconciliation or settlement authority is enabled.
+
+The additive proposed settlement digests keep the existing raw capture hashes
+and typed request digest unchanged. `Store.CanonicalSource` computes
+`source_request_sha256` from the exact validated saved **payload run** request,
+not the create/lease request. `Store.CompletedCanonical` also computes
+`source_receipt_sha256` from the independently validated full saved success
+response after removing only `result.root_path` and `result.grant`. Both codecs
+run inside the journal lock; callers receive digests, never the private bytes.
+`Prepared` and `Completion` expose these separate fields for the future trusted
+report builder. Rewriting a capture with canonically equivalent JSON still fails
+its original immutable raw hash check. The codec pins the proposed Treaty owner
+vectors at `d578c7e3ed0709cf7d6d38f7545edacab1691201`; it does not
+supply reporting authority, attest a host, or enable a broker route.
