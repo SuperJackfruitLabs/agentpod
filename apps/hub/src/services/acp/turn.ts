@@ -43,6 +43,8 @@ interface Turn {
   audit: AuditHandle;
   epoch: number;
   logicalRequestId: string;
+  /** Immutable admission facts for this instruction, never a later turn's grant. */
+  executionAuthority: LiveSession["executionAuthority"];
   /** Only the completion of the CURRENT turn may transition status. */
   isCurrentTurn(): boolean;
   /** The turn is over: clear the in-flight marks (a no-op once a newer turn began). */
@@ -216,12 +218,17 @@ export function beginTurn(
   live.lastProducedAt = 0;
   live.turnResolution = null;
   const epoch = live.turnEpoch;
+  const executionAuthority = live.executionAuthority
+    ? structuredClone(live.executionAuthority)
+    : undefined;
+  let errorRecorded = false;
   return {
     live,
     deps,
     audit,
     epoch,
     logicalRequestId,
+    executionAuthority,
     isCurrentTurn: () =>
       !live.ended &&
       live.turnEpoch === epoch &&
@@ -236,19 +243,24 @@ export function beginTurn(
       live.lastTurnSettledAt = Date.now();
     },
     recordError: async (error: TurnError) => {
-      // Claim the error before yielding to the audit so repeat outcomes do not
-      // audit or publish the same turn failure twice.
-      if (live.turnErrorRecorded) return;
-      if (live.executionAuthority)
+      // The latch belongs to this captured turn, even when its first outcome
+      // arrives after replacement. Shared marks belong only to the current epoch.
+      if (errorRecorded) return;
+      const current = !live.ended && live.turnEpoch === epoch;
+      if (current && live.turnErrorRecorded) return;
+      errorRecorded = true;
+      if (executionAuthority)
         error = {
           ...error,
           failureCode: error.failureCode ?? "execution_interrupted",
           logicalRequestId: logicalRequestId,
-          localSessionId: live.executionAuthority.sessionId ?? undefined,
+          localSessionId: executionAuthority.sessionId ?? undefined,
         };
-      live.turnErrorRecorded = true;
-      live.turnErrorPhase = "audit";
-      live.turnErrorSource = error.source;
+      if (current) {
+        live.turnErrorRecorded = true;
+        live.turnErrorPhase = "audit";
+        live.turnErrorSource = error.source;
+      }
       await audit.done("error", error.message).catch(() => {});
       if (live.ended || live.turnEpoch !== epoch) {
         // The old failure still belongs in history, but its delayed audit
@@ -274,14 +286,14 @@ export function beginTurn(
 
 // ─── The response ─────────────────────────────────────────────────────────────
 
-async function onTurnResponse(turn: Turn, response: unknown): Promise<void> {
+export async function onTurnResponse(turn: Turn, response: unknown): Promise<void> {
   const { live } = turn;
   const parsedFailure = await checkSalaamResponse(turn, response);
   const stopReason = (response as { stopReason?: unknown })?.stopReason;
   if (
     parsedFailure?.success ||
     ["max_tokens", "refusal", "cancelled"].includes(String(stopReason)) ||
-    (live.executionAuthority && stopReason !== "end_turn")
+    (turn.executionAuthority && stopReason !== "end_turn")
   ) {
     const error = parsedFailure?.success
       ? turnErrorFromRejection(
@@ -307,7 +319,7 @@ async function onTurnResponse(turn: Turn, response: unknown): Promise<void> {
  * recorded. Throws (into the rejection handler) on metadata that is malformed or not this turn's.
  */
 async function checkSalaamResponse(turn: Turn, response: unknown): Promise<ParsedFailure | null> {
-  const { live, logicalRequestId } = turn;
+  const { live, logicalRequestId, executionAuthority } = turn;
   const responseMeta = (response as { _meta?: Record<string, unknown> })
     ._meta;
   const rawFailure = responseMeta?.["salaam.dev/failure"];
@@ -319,10 +331,10 @@ async function checkSalaamResponse(turn: Turn, response: unknown): Promise<Parse
   if (
     parsedFailure?.success &&
     (parsedFailure.data.requestId !== logicalRequestId ||
-      parsedFailure.data.sessionId !== live.executionAuthority?.sessionId)
+      parsedFailure.data.sessionId !== executionAuthority?.sessionId)
   )
     throw Error("Salaam failure belongs to another instruction");
-  if (live.executionAuthority) {
+  if (executionAuthority) {
     const metadata = (response as { _meta?: Record<string, unknown> })
       ._meta;
     const terminal = SalaamPromptReceipt.parse({
@@ -418,8 +430,8 @@ async function settleSilentTurn(turn: Turn, response: unknown): Promise<void> {
 
 // ─── The rejection ────────────────────────────────────────────────────────────
 
-async function onTurnRejected(turn: Turn, err: unknown): Promise<void> {
-  const { live, logicalRequestId } = turn;
+export async function onTurnRejected(turn: Turn, err: unknown): Promise<void> {
+  const { live, logicalRequestId, executionAuthority } = turn;
   const typed = SalaamAcpFailure.safeParse(
     (err as { data?: Record<string, unknown> })?.data?.[
       "salaam.dev/failure"
@@ -427,9 +439,9 @@ async function onTurnRejected(turn: Turn, err: unknown): Promise<void> {
   );
   const correlated =
     typed.success &&
-    typed.data.sessionId === live.executionAuthority?.sessionId &&
+    typed.data.sessionId === executionAuthority?.sessionId &&
     typed.data.requestId === logicalRequestId;
-  if (live.executionAuthority)
+  if (executionAuthority)
     await updateSalaamPrompt(
       live.id,
       logicalRequestId,
@@ -440,7 +452,7 @@ async function onTurnRejected(turn: Turn, err: unknown): Promise<void> {
   // The harness's words, with what it put in `data` — Codex's quota
   // sentence is only there — classified into one shape for every reader.
   let error = turnErrorFromRejection(err, live.harness);
-  if (live.executionAuthority)
+  if (executionAuthority)
     error =
       typed.success && !correlated
         ? {
@@ -451,13 +463,13 @@ async function onTurnRejected(turn: Turn, err: unknown): Promise<void> {
             source: "acp-rejection",
             failureCode: "failure_correlation",
             logicalRequestId,
-            localSessionId: live.executionAuthority.sessionId ?? undefined,
+            localSessionId: executionAuthority.sessionId ?? undefined,
           }
         : {
             ...error,
             failureCode: error.failureCode ?? "execution_interrupted",
             logicalRequestId,
-            localSessionId: live.executionAuthority.sessionId ?? undefined,
+            localSessionId: executionAuthority.sessionId ?? undefined,
           };
   error = await probeSilentRejection(turn, err, error);
   await turn.audit.done("error", error.message).catch(() => {});
@@ -495,11 +507,13 @@ async function onTurnRejected(turn: Turn, err: unknown): Promise<void> {
  * A Salaam prompt rejected because its transport went away: the accepted prompt belongs to the
  * daemon, so inspect it (for up to 90 s) and never resubmit it. True when that settled the turn.
  */
-async function awaitDaemonOutcome(turn: Turn): Promise<boolean> {
-  const { live, logicalRequestId } = turn;
+export async function awaitDaemonOutcome(turn: Turn): Promise<boolean> {
+  const { live, logicalRequestId, executionAuthority } = turn;
+  const superseded = () => live.ended || live.turnEpoch !== turn.epoch;
+  if (superseded()) return false;
   if (
     !(
-      live.executionAuthority &&
+      executionAuthority &&
       !live.ended &&
       (live.transportLost || !connectionManager.isOnline(live.nodeId))
     )
@@ -507,12 +521,13 @@ async function awaitDaemonOutcome(turn: Turn): Promise<boolean> {
     return false;
   // The accepted prompt belongs to the daemon. Inspect it; never resubmit it.
   const deadline = Date.now() + 90_000;
-  while (!live.ended && Date.now() < deadline) {
+  while (!superseded() && Date.now() < deadline) {
     if (connectionManager.isOnline(live.nodeId)) {
       try {
         const status = await inspectSalaamExecution(
-          live.executionAuthority,
+          executionAuthority,
         );
+        if (superseded()) return false;
         if (status.revoked) break;
         if (status.interrupted_attempts.length) {
           await turn.recordError(
@@ -531,6 +546,7 @@ async function awaitDaemonOutcome(turn: Turn): Promise<boolean> {
             live.id,
             logicalRequestId,
           );
+          if (superseded()) return false;
           if (["completed", "interrupted"].includes(recovered.state)) {
             await turn.audit.done(
               recovered.state === "completed" ? "ok" : "error",
@@ -538,6 +554,7 @@ async function awaitDaemonOutcome(turn: Turn): Promise<boolean> {
                 ? undefined
                 : "Saved instruction was interrupted or cancelled",
             );
+            if (superseded()) return true;
             await setStatus(
               live,
               live.pendingCancellation &&
@@ -554,6 +571,7 @@ async function awaitDaemonOutcome(turn: Turn): Promise<boolean> {
         // The daemon could not be inspected this time; poll again until the deadline.
       }
     }
+    if (superseded()) return false;
     await new Promise((r) => setTimeout(r, 100));
   }
   return false;

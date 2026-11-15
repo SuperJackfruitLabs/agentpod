@@ -43,11 +43,12 @@ import { test, expect, beforeAll, afterAll } from "bun:test";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { Hono } from "hono";
 import { asc, eq } from "drizzle-orm";
+import { SalaamAuthorityStatus } from "@agentpod/contract";
 import type { AcpEvent, DetectedStation } from "@agentpod/contract";
 
 // src/ imports — DB URL is already set above
 import { db, rawSql } from "../../db/drizzle";
-import { acpSessions, acpEvents } from "../../db/schema/acp";
+import { acpSessions, acpEvents, acpPromptRequests, type StoredSalaamExecution } from "../../db/schema/acp";
 import { nodes } from "../../db/schema/nodes";
 import { createTestUser, deleteTestUsers } from "../../../tests/helpers/database";
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
@@ -62,11 +63,12 @@ import { context, trace } from "@opentelemetry/api";
 import { tracer } from "../../telemetry/otel";
 import { liveById } from "./session-state";
 import { reportTurnError } from "./plugin-reports";
-import { beginTurn } from "./turn";
+import { beginTurn, awaitDaemonOutcome, onTurnResponse, onTurnRejected } from "./turn";
 import { turnDeps } from "./recovery";
 import { turnErrorForSilentTurn } from "./turn-error";
 import { setStatus } from "./events";
 import { recordAudit } from "../audit";
+import { request as brokerRequest } from "../broker";
 import { useTestTelemetry } from "../../../tests/helpers/telemetry";
 import { mintEnrollmentToken, enrollNode } from "../nodes/enrollment";
 import { adoptStations } from "../stations/registry";
@@ -2982,6 +2984,259 @@ test("repeated generic recordError audits and publishes once across the audit aw
     if (sessionId) await endSession(TEST_USER, sessionId, "cleanup");
     fake.close();
     server.stop(true);
+  }
+});
+
+function capturedAuthority(live: NonNullable<ReturnType<typeof liveById.get>>): StoredSalaamExecution {
+  return {
+    binding: {
+      version: 1, organization_id: "org_0123456789abcdef0123",
+      principal_id: "prn_0123456789abcdef0123", node_id: live.nodeId,
+      station_id: live.stationId, station_key: "salaam:0123456789abcdef",
+      occupancy_epoch: 1, hub_session_id: live.id, workspace: "/workspace",
+      run: { source: "agentpod", id: live.id, epoch: 1 },
+    },
+    leaseSequence: 1, sessionId: crypto.randomUUID(), admissionId: crypto.randomUUID(),
+    stopRequestId: crypto.randomUUID(), state: "active",
+  };
+}
+
+test("an old recorder first invoked after replacement cannot claim the new turn", async () => {
+  const { server, fake, station } = await setupRig("acpsess-late-recorder", {
+    stationKey: "acp-late-recorder-station", harnessSessionKey: "agent:late-recorder:main",
+  });
+  let sessionId: string | undefined;
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    sessionId = row.id;
+    const live = liveById.get(row.id);
+    if (!live) throw new Error("Expected live session");
+    await setStatus(live, "working").done;
+    const oldAuthority = capturedAuthority(live);
+    live.executionAuthority = oldAuthority;
+    const oldSessionId = oldAuthority.sessionId;
+    const makeAudit = () => recordAudit(db, {
+      tenantId: live.tenantId, userId: TEST_USER, nodeId: live.nodeId,
+      stationKey: live.stationKey, verb: "acp.prompt", params: { chars: 0 },
+    });
+    const oldId = crypto.randomUUID();
+    const old = beginTurn(live, turnDeps, await makeAudit(), oldId);
+    // Mutate then replace the authority: the captured turn retains original facts.
+    oldAuthority.sessionId = crypto.randomUUID();
+    live.executionAuthority = { ...oldAuthority, sessionId: crypto.randomUUID() };
+    const current = beginTurn(live, turnDeps, await makeAudit(), crypto.randomUUID());
+    const before = live.seq;
+    const error = turnErrorForSilentTurn(live.harness, "end_turn");
+    await old.recordError(error);
+    await old.recordError(error);
+    expect({ recorded: live.turnErrorRecorded, phase: live.turnErrorPhase, source: live.turnErrorSource,
+      status: live.status, inFlight: live.turnInFlight }).toEqual({
+      recorded: false, phase: undefined, source: null, status: "working", inFlight: true,
+    });
+    const historical = errorEvents((await eventsFor(row.id)).filter((event) => event.seq > before));
+    expect(historical).toHaveLength(1);
+    expect(historical[0]?.payload).toMatchObject({ logicalRequestId: oldId, localSessionId: oldSessionId });
+    // Use the actual node report route after the stale recorder. A new turn's
+    // report remains pending until its OWN generic recorder queues the primary.
+    live.harnessSessionKey = "agent:late-recorder:main";
+    const detail = report("agent:late-recorder:main", "provider", "model", "Current turn failed").report;
+    expect(reportTurnError(live.nodeId, detail)).toBe("pending");
+    await current.recordError(error);
+    current.settled();
+    await live.chain;
+    expect(errorEvents((await eventsFor(row.id)).filter((event) => event.seq > before)).map(errorSource))
+      .toEqual(["acp-stop-reason", "acp-stop-reason", "plugin"]);
+    const rows = await rawSql`SELECT result FROM station_audit WHERE node_id=${live.nodeId} AND verb='acp.prompt'`;
+    expect(rows).toHaveLength(2);
+    expect(rows.every((audit) => audit.result === "error")).toBe(true);
+    expect(live.status).toBe("idle");
+  } finally {
+    if (sessionId) {
+      const live = liveById.get(sessionId);
+      if (live) delete live.executionAuthority;
+      await endSession(TEST_USER, sessionId, "cleanup");
+    }
+    fake.close(); server.stop(true);
+  }
+});
+
+test.each(["completed", "interrupted", "ordinary"] as const)(
+  "a late %s response uses its original admission and receipt",
+  async (outcome) => {
+    const { server, fake, station } = await setupRig("acpsess-late-response-" + outcome, {
+      stationKey: "acp-late-response-" + outcome,
+    });
+    let sessionId: string | undefined;
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+      sessionId = row.id;
+      const live = liveById.get(row.id);
+      if (!live) throw new Error("Expected live session");
+      await setStatus(live, "working").done;
+      const original = capturedAuthority(live);
+      if (outcome !== "ordinary") {
+        live.harness = "salaam";
+        live.executionAuthority = original;
+      }
+      const makeAudit = () => recordAudit(db, { tenantId: live.tenantId, userId: TEST_USER,
+        nodeId: live.nodeId, stationKey: live.stationKey, verb: "acp.prompt", params: { chars: 0 } });
+      const requestId = crypto.randomUUID(), attemptId = crypto.randomUUID();
+      const old = beginTurn(live, turnDeps, await makeAudit(), requestId);
+      if (outcome !== "ordinary") await db.insert(acpPromptRequests).values({ sessionId: live.id,
+        tenantId: live.tenantId, requestId, inputDigest: "a".repeat(64), inputText: "saved", state: "accepted", attemptId });
+      live.executionAuthority = { ...original, sessionId: crypto.randomUUID() };
+      const current = beginTurn(live, turnDeps, await makeAudit(), crypto.randomUUID());
+      const before = live.seq;
+      if (outcome === "interrupted") {
+        // Valid-shaped metadata for the replacement admission is still foreign
+        // to this old request and must not consume its durable receipt.
+        await expect(onTurnResponse(old, { stopReason: "refusal", _meta: {
+          "salaam.dev/requestId": requestId, "salaam.dev/attemptId": attemptId,
+          "salaam.dev/failure": { version: 1, kind: "auth", code: "provider_auth",
+            message: "Foreign failure", sessionId: live.executionAuthority.sessionId, requestId, attemptId },
+        } })).rejects.toThrow("Salaam failure belongs to another instruction");
+        expect(await db.select().from(acpPromptRequests).where(eq(acpPromptRequests.sessionId, row.id)))
+          .toMatchObject([{ requestId, attemptId, state: "accepted" }]);
+      }
+      await onTurnResponse(old, {
+        stopReason: outcome === "interrupted" ? "refusal" : "end_turn",
+        ...(outcome !== "ordinary" ? { _meta: {
+          "salaam.dev/requestId": requestId, "salaam.dev/attemptId": attemptId,
+          ...(outcome === "interrupted" ? { "salaam.dev/failure": {
+            version: 1, kind: "auth", code: "provider_auth", message: "Original failure",
+            sessionId: original.sessionId, requestId, attemptId,
+          } } : {}),
+        } } : {}),
+      });
+      await live.chain;
+      expect({ epoch: live.turnEpoch, status: live.status, inFlight: live.turnInFlight,
+        recorded: live.turnErrorRecorded }).toEqual({ epoch: current.epoch, status: "working", inFlight: true, recorded: false });
+      expect((await eventsFor(row.id)).filter((event) => event.seq > before)).toHaveLength(0);
+      const receipts = await db.select().from(acpPromptRequests).where(eq(acpPromptRequests.sessionId, row.id));
+      if (outcome === "ordinary") expect(receipts).toHaveLength(0);
+      else expect(receipts).toMatchObject([{ requestId, attemptId, state: outcome }]);
+      const audits = await rawSql`SELECT result,error FROM station_audit WHERE node_id=${live.nodeId} AND verb='acp.prompt'`;
+      expect(audits.filter((audit) => audit.result === (outcome === "interrupted" ? "error" : "ok"))).toHaveLength(1);
+    } finally {
+      if (sessionId) {
+        const live = liveById.get(sessionId);
+        if (live) delete live.executionAuthority;
+        await endSession(TEST_USER, sessionId, "cleanup");
+      }
+      fake.close(); server.stop(true);
+    }
+  },
+);
+
+test.each(["ordinary", "completed", "interrupted"] as const)(
+  "a stale %s rejection retains its historical audit and terminal receipt",
+  async (outcome) => {
+    const { server, fake, station } = await setupRig("acpsess-stale-rejection-" + outcome, {
+      stationKey: "acp-stale-rejection-" + outcome,
+    });
+    let sessionId: string | undefined;
+    try {
+      const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+      sessionId = row.id;
+      const live = liveById.get(row.id);
+      if (!live) throw new Error("Expected live session");
+      await setStatus(live, "working").done;
+      const original = capturedAuthority(live);
+      if (outcome !== "ordinary") {
+        live.harness = "salaam";
+        live.executionAuthority = original;
+      }
+      const makeAudit = () => recordAudit(db, { tenantId: live.tenantId, userId: TEST_USER,
+        nodeId: live.nodeId, stationKey: live.stationKey, verb: "acp.prompt", params: { chars: 0 } });
+      const requestId = crypto.randomUUID(), attemptId = crypto.randomUUID();
+      const old = beginTurn(live, turnDeps, await makeAudit(), requestId);
+      if (outcome !== "ordinary") await db.insert(acpPromptRequests).values({ sessionId: live.id,
+        tenantId: live.tenantId, requestId, inputDigest: "a".repeat(64), inputText: "saved", state: outcome, attemptId });
+      live.executionAuthority = { ...original, sessionId: crypto.randomUUID() };
+      const current = beginTurn(live, turnDeps, await makeAudit(), crypto.randomUUID());
+      const before = live.seq;
+      await onTurnRejected(old, outcome === "ordinary" ? new Error("Original rejected") : {
+        message: "Original rejected", data: { "salaam.dev/failure": {
+          version: 1, kind: "auth", code: "provider_auth", message: "Original rejected",
+          sessionId: original.sessionId, requestId, attemptId,
+        } },
+      });
+      await live.chain;
+      expect({ epoch: live.turnEpoch, status: live.status, inFlight: live.turnInFlight,
+        recorded: live.turnErrorRecorded }).toEqual({ epoch: current.epoch, status: "working", inFlight: true, recorded: false });
+      expect((await eventsFor(row.id)).filter((event) => event.seq > before)).toHaveLength(0);
+      const audits = await rawSql`SELECT result,error FROM station_audit WHERE node_id=${live.nodeId} AND verb='acp.prompt'`;
+      expect(audits.filter((audit) => audit.result === "error")).toMatchObject([{ error: "Original rejected" }]);
+      const receipts = await db.select().from(acpPromptRequests).where(eq(acpPromptRequests.sessionId, row.id));
+      if (outcome === "ordinary") expect(receipts).toHaveLength(0);
+      else expect(receipts).toMatchObject([{ requestId, attemptId, state: outcome }]);
+      expect(fake.agentReceived.filter((message) => message.method === "session/prompt")).toHaveLength(0);
+    } finally {
+      if (sessionId) {
+        const live = liveById.get(sessionId);
+        if (live) delete live.executionAuthority;
+        await endSession(TEST_USER, sessionId, "cleanup");
+      }
+      fake.close(); server.stop(true);
+    }
+  },
+);
+
+test("a recovered old daemon outcome cannot idle a replacement after its audit await", async () => {
+  const { server, fake, station } = await setupRig("acpsess-late-recovery", {
+    stationKey: "acp-late-recovery-station", salaam: {},
+  });
+  let sessionId: string | undefined;
+  const release = Promise.withResolvers<void>();
+  let recovery: Promise<boolean> | undefined;
+  try {
+    const row = await createSession({ tenantId: BOOTSTRAP_TENANT_ID, stationId: station.id, userId: TEST_USER, mode: "ask" });
+    sessionId = row.id;
+    const live = liveById.get(row.id);
+    if (!live) throw new Error("Expected live session");
+    const saved = capturedAuthority(live);
+    const admitted = await brokerRequest(live.nodeId, "salaam.admit", { binding: saved.binding });
+    if (!admitted.ok) throw new Error("Expected fixture admission");
+    const status = SalaamAuthorityStatus.parse(admitted.data);
+    saved.sessionId = status.session_id; saved.admissionId = status.admission_id;
+    live.executionAuthority = saved;
+    live.transportLost = true;
+    await setStatus(live, "working").done;
+    const requestId = crypto.randomUUID();
+    await db.insert(acpPromptRequests).values({ sessionId: live.id, tenantId: live.tenantId,
+      requestId, inputDigest: "a".repeat(64), inputText: "saved", state: "completed" });
+    const audit = await recordAudit(db, { tenantId: live.tenantId, userId: TEST_USER,
+      nodeId: live.nodeId, stationKey: live.stationKey, verb: "acp.prompt", params: { chars: 0 } });
+    const entered = Promise.withResolvers<void>();
+    const old = beginTurn(live, turnDeps, { done: async (result, error) => {
+      entered.resolve(); await release.promise; await audit.done(result, error);
+    } }, requestId);
+    await setStatus(live, "waiting").done; // Recovery intentionally runs while waiting too.
+    const dispatched = fake.agentReceived.filter((message) => message.method === "session/prompt").length;
+    recovery = awaitDaemonOutcome(old);
+    await entered.promise;
+    const newerAudit = await recordAudit(db, { tenantId: live.tenantId, userId: TEST_USER,
+      nodeId: live.nodeId, stationKey: live.stationKey, verb: "acp.prompt", params: { chars: 0 } });
+    await setStatus(live, "working").done;
+    const current = beginTurn(live, turnDeps, newerAudit, crypto.randomUUID());
+    const before = live.seq;
+    release.resolve();
+    expect(await recovery).toBe(true);
+    await live.chain;
+    expect({ epoch: live.turnEpoch, status: live.status, inFlight: live.turnInFlight,
+      recorded: live.turnErrorRecorded }).toEqual({ epoch: current.epoch, status: "working", inFlight: true, recorded: false });
+    expect((await eventsFor(row.id)).filter((event) => event.seq > before && event.type === "state")).toHaveLength(0);
+    expect(fake.agentReceived.filter((message) => message.method === "session/prompt")).toHaveLength(dispatched);
+    expect(fake.salaamRequests.map((request) => request.verb)).toEqual(["salaam.admit", "salaam.status"]);
+  } finally {
+    release.resolve();
+    if (recovery) await recovery;
+    if (sessionId) {
+      const live = liveById.get(sessionId);
+      if (live) { delete live.executionAuthority; live.transportLost = false; }
+      await endSession(TEST_USER, sessionId, "cleanup");
+    }
+    fake.close(); server.stop(true);
   }
 });
 
