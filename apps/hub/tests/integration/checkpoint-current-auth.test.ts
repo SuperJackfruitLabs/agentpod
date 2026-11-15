@@ -113,11 +113,6 @@ test("actual invalid Node credential never reaches issuer/source authority", asy
   const before = sourceReads; const result = await current({}, nodeId + ":wrong-secret");
   expect(result.response.status).toBe(401); expect(sourceReads).toBe(before);
 });
-test("post-context occupancy replacement refuses the old retained attempt", async () => {
-  afterContext = async () => { await db.update(stations).set({ occupancyEpoch: 2 }).where(eq(stations.id, stationId)); };
-  try { const result = await current(); expect((await parseBenchCoordinatorCurrentResponse(result.body, result.raw, Date.now())).decision).toBe("refused"); }
-  finally { afterContext = async () => {}; await db.update(stations).set({ occupancyEpoch: 1 }).where(eq(stations.id, stationId)); }
-});
 test("foreign workspace mapping and revoked actual issuer grant refuse", async () => {
   await db.update(tenants).set({ externalId: "org_" + "f".repeat(20) }).where(eq(tenants.id, tenantId));
   try { const result = await current(); expect((await parseBenchCoordinatorCurrentResponse(result.body, result.raw, Date.now())).decision).toBe("refused"); }
@@ -127,6 +122,17 @@ test("foreign workspace mapping and revoked actual issuer grant refuse", async (
   finally { await fakePlane.putGrant(owner, { mayDispatch: [occupant], mayGrantReach: false, scopes: [] }); }
 });
 test("retained row cannot change identity or rewind phase", async () => {
-  await expect(db.update(checkpointDispatches).set({ prepareSHA256: "f".repeat(64) }).where(eq(checkpointDispatches.attemptId, attempt.row.attemptId))).rejects.toThrow();
-  await expect(db.update(checkpointDispatches).set({ phase: "reported" }).where(eq(checkpointDispatches.attemptId, attempt.row.attemptId))).rejects.toThrow();
+  await expect(db.update(checkpointDispatches).set({ prepareSHA256: "f".repeat(64) }).where(eq(checkpointDispatches.attemptId, attempt.row.attemptId)).execute()).rejects.toThrow();
+  await expect(db.update(checkpointDispatches).set({ phase: "reported" }).where(eq(checkpointDispatches.attemptId, attempt.row.attemptId)).execute()).rejects.toThrow();
+});
+
+test("post-context occupancy replacement refuses the old retained attempt", async () => {
+  const before = sourceReads;
+  afterContext = async () => {
+    // The database owns occupancy_epoch: only an actual occupant change advances it.
+    const [replaced] = await db.update(stations).set({ principalId: owner }).where(eq(stations.id, stationId)).returning();
+    expect(replaced?.occupancyEpoch).toBe(2);
+  };
+  try { const result = await current(); expect(sourceReads).toBe(before + 1); expect((await parseBenchCoordinatorCurrentResponse(result.body, result.raw, Date.now())).decision).toBe("refused"); }
+  finally { afterContext = async () => {}; }
 });
