@@ -54,12 +54,19 @@ func (c *Client) Close() { c.http.CloseIdleConnections() }
 // stop, acquisition or child redispatch. Every failed mutation still belongs to
 // its durable attempt, regardless of the failure's uncertainty classification.
 func (c *Client) Do(ctx context.Context, request Request) (*Response, error) {
+	return c.do(ctx, request, nil)
+}
+
+func (c *Client) do(ctx context.Context, request Request, evidence *ExchangeEvidence) (*Response, error) {
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return nil, err
 	}
 	if _, err = Parse(raw); err != nil {
 		return nil, err
+	}
+	if evidence != nil {
+		evidence.request = append([]byte(nil), raw...)
 	}
 	req, err := http.NewRequestWithContext(ctx, "POST", "http://superbench.local/v2/operations", bytes.NewReader(raw))
 	if err != nil {
@@ -85,6 +92,10 @@ func (c *Client) Do(ctx context.Context, request Request) (*Response, error) {
 	body, err := io.ReadAll(io.LimitReader(reply.Body, int64(limit)+1))
 	if err != nil || len(body) > limit {
 		return failed("invalid_response")
+	}
+	if evidence != nil {
+		evidence.response = append([]byte(nil), body...)
+		evidence.status = reply.StatusCode
 	}
 	parsed, err := ParseResponse(body, reply.StatusCode, request)
 	if err != nil {

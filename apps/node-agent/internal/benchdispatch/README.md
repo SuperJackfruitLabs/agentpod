@@ -2,13 +2,14 @@
 
 This package is an unwired node-side foundation. It does not enable the pilot,
 change node/hub frames, submit board mutations, certify shared policy, negotiate
-an API, supply model credentials, or implement grouped execution. The accepted
+an API, supply model credentials, or coordinate source acquisition. The accepted
 scalar worker must run **inside `benchd.run`**. The package has no ACP fallback.
 
 `Store.Prepare` records the exact owner, registered bench, authorized source
 vector, policy/control pair, service request hashes, and private worker context
 and executable identities. The caller must obtain those authorities first.
-`Dispatch` validates the exact raw accepted scalar request and local artifacts,
+`Dispatch` validates the exact raw accepted scalar request or an explicitly
+bound proposed grouped request and local artifacts,
 calls the mandatory admission `Gate`, and fsyncs the pending intent before its
 one launch callback. The callback must submit that request to `benchd.run`.
 Inspecting status or reconciling a service receipt never calls the callback.
@@ -24,8 +25,9 @@ callback is a local trust seam, **not accepted external certification authority*
 The current owner/policy gate is rechecked after asynchronous verification.
 Same-attempt replay returns identical persisted proposal bytes. A new run can
 produce a new proposal at the same commit only after its own launch and evidence;
-it cannot rename the earlier run's proof. The grouped-v2 observation shape is
-reserved proposed data, not an implemented or accepted consumer protocol.
+it cannot rename the earlier run's proof. The grouped-v2 observation shape
+requires an explicit grouped plan; it remains proposed, not an accepted consumer
+protocol.
 
 A proposal is not board acceptance. Future hub wiring must independently check
 its authenticated selected service reporter, current epoch/heartbeat/policy,
@@ -47,3 +49,18 @@ claim of a transaction with the external board or an atomic authorization check
 across that network boundary. Full cancellation during configured setup, worker
 release packaging, node/hub wire, settlement authority and the complete multi-repo
 adapter remain separate owner-reviewed work.
+
+An optional immutable `grouped` descriptor binds the registered 32-hex bench ID,
+physical aggregate root, selected logical member and complete sorted member
+vector including object formats. The actual v2 launch must reuse a private held
+token, omit service `repository_name`, keep checkpoint/release enabled and invoke
+exactly `[packaged worker, private context, expected context SHA256]`. The context
+bytes, binding, root and complete vector must match that descriptor. Scalar plan
+serialization omits it and retains its existing launch validation. These checks
+bind a launch; the packaged worker checks actual checkouts after preparation
+inside `benchd.run`. They are neither fencing proof nor host attestation.
+
+This extension still starts after source preparation: `Prepare` requires a full
+source vector, context and exact run-request digest. It cannot reserve an unknown
+source before acquisition. A separately reviewed pending-source transition is
+needed before any coordinator can safely perform the first growth operation.

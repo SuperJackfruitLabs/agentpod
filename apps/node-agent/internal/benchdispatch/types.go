@@ -56,20 +56,29 @@ type Source struct {
 	Commit           string `json:"commit"`
 }
 
+// GroupedLaunch binds the protected worker's complete expected start vector.
+// It contains no continuation token. Omission preserves scalar-v1 plan bytes.
+type GroupedLaunch struct {
+	WorkspaceRoot  string                     `json:"workspace_root"`
+	RepositoryName string                     `json:"repository_name,omitempty"`
+	Members        []superbench.GroupedMember `json:"members"`
+}
+
 type Plan struct {
-	Identity         Identity `json:"identity"`
-	HostID           string   `json:"host_id"`
-	BenchKey         string   `json:"bench_key"`
-	RegistrationID   string   `json:"registration_id"`
-	Holder           string   `json:"holder"`
-	Sources          []Source `json:"sources"`
-	RequestID        string   `json:"request_id"`
-	RequestSHA256    string   `json:"request_sha256"` // Exact raw request bytes.
-	BodySHA256       string   `json:"body_sha256"`    // Producer's normalized body digest.
-	ContextPath      string   `json:"context_path"`
-	ContextSHA256    string   `json:"context_sha256"` // Exact private request.json bytes.
-	ExecutablePath   string   `json:"executable_path"`
-	ExecutableSHA256 string   `json:"executable_sha256"`
+	Identity         Identity       `json:"identity"`
+	Grouped          *GroupedLaunch `json:"grouped,omitempty"`
+	HostID           string         `json:"host_id"`
+	BenchKey         string         `json:"bench_key"`
+	RegistrationID   string         `json:"registration_id"`
+	Holder           string         `json:"holder"`
+	Sources          []Source       `json:"sources"`
+	RequestID        string         `json:"request_id"`
+	RequestSHA256    string         `json:"request_sha256"` // Exact raw request bytes.
+	BodySHA256       string         `json:"body_sha256"`    // Producer's normalized body digest.
+	ContextPath      string         `json:"context_path"`
+	ContextSHA256    string         `json:"context_sha256"` // Exact private request.json bytes.
+	ExecutablePath   string         `json:"executable_path"`
+	ExecutableSHA256 string         `json:"executable_sha256"`
 }
 
 // Observation is data, not a capability. Verify must independently bind these
@@ -135,6 +144,9 @@ func validatePlan(p Plan) error {
 	if !validSources(p.Sources) || !physicalName(p.ContextPath) || !physicalName(p.ExecutablePath) || len(p.ContextPath) > 4096 || len(p.ExecutablePath) > 4096 {
 		return ErrInvalid
 	}
+	if p.Grouped != nil {
+		return validateGroupedPlan(p)
+	}
 	// Validate the producer's own scalar request identity rules without inventing
 	// a held-token run extension. Actual raw arguments are bound at Dispatch.
 	raw, _ := json.Marshal(superbench.Request{Version: superbench.Version, Operation: "run", Key: p.BenchKey, Holder: p.Holder, RequestID: p.RequestID, Arguments: []string{p.ExecutablePath, p.ContextPath}})
@@ -191,10 +203,16 @@ func validateObservation(p Plan, o Observation) error {
 	}
 	switch o.Kind {
 	case "scalar-v1":
+		if p.Grouped != nil {
+			return ErrVerify
+		}
 		if len(o.Checkpoints) != 1 || o.GenerationID != "" || o.SealCommit != "" || o.ManifestSHA256 != "" {
 			return ErrVerify
 		}
 	case "grouped-v2":
+		if p.Grouped == nil {
+			return ErrVerify
+		}
 		if len(o.GenerationID) != 32 || !hexPattern.MatchString(o.GenerationID+o.GenerationID) || !commitPattern.MatchString(o.SealCommit) || !hexPattern.MatchString(o.ManifestSHA256) {
 			return ErrVerify
 		}

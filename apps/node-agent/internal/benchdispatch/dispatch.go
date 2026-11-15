@@ -28,6 +28,9 @@ func validateLaunch(p Plan, raw []byte) error {
 	if digest(raw) != p.RequestSHA256 {
 		return ErrInvalid
 	}
+	if p.Grouped != nil {
+		return validateGroupedLaunch(p, raw)
+	}
 	r, err := superbench.Parse(raw)
 	if err != nil {
 		return ErrInvalid

@@ -51,3 +51,12 @@ it never substitutes a token/key stop, fallback or another execution. Replies
 are cap-free producer observations. `cancel_requested` is intent only, and even
 schema-valid `cancelled` bytes cannot independently certify a fence. No production
 caller enables this extension before reviewed producer support and acceptance.
+
+`DoWithEvidence` uses the same once-only transport and validators as `Do` while
+retaining the exact attempted request and complete bounded response bytes for an
+explicit private evidence sink. The evidence object refuses ordinary JSON/text
+serialization and redacts formatting because those bytes may contain a private
+continuation. Hashes and captured bytes are observations only; malformed replies
+still fail validation and lost replies remain uncertain. Neither capture nor a
+request digest proves the producer received or executed a request. No source
+coordinator, receipt verifier, reporter credential or settlement is enabled.
