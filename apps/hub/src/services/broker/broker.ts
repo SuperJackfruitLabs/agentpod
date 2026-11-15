@@ -173,12 +173,12 @@ export function sendFrame(
  * Routes to the correct pending request or stream handler.
  */
 export function handleNodeMessage(
-  _nodeId: string,
+  nodeId: string,
   msg: ResponseMsg | StreamMsg
 ): void {
   if (msg.type === "res") {
     const entry = pending.get(msg.id);
-    if (!entry) return;
+    if (!entry || entry.nodeId !== nodeId) return;
     clearTimeout(entry.timer);
     pending.delete(msg.id);
     entry.resolve({ ok: msg.ok, data: msg.data, error: msg.error });
@@ -187,7 +187,7 @@ export function handleNodeMessage(
 
   if (msg.type === "stream") {
     const entry = streams.get(msg.id);
-    if (!entry) return;
+    if (!entry || entry.nodeId !== nodeId) return;
     entry.handler(msg.seq, msg.chunk, msg.eof);
     if (msg.eof) {
       streams.delete(msg.id);
