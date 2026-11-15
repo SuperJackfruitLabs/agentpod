@@ -17,6 +17,7 @@ import { parseCheckpointProfile } from "../../src/services/bridge/checkpoint-pro
 import { readCheckpointAttempt, reserveCheckpointAttempt } from "../../src/services/bridge/checkpoint-ledger";
 import { driveCheckpointAttempt } from "../../src/services/bridge/checkpoint-orchestrator";
 import { checkpointAgentClient } from "../../src/services/bridge/checkpoint-agent-client";
+import { checkpointRuntime } from "../../src/services/bridge/checkpoint-port";
 import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON } from "../../src/services/bridge/checkpoint-json";
 import { parseCheckpointSource, type CheckpointSource } from "../../src/services/bridge/checkpoint-source";
 import { checkpointSettlementSchema } from "../../src/services/bridge/checkpoint-settlement-data";
@@ -82,7 +83,7 @@ beforeAll(async () => {
   restorePlane = setOrgPlaneClientForTests({ ...fakePlane, agentToken: async (principal, audience) => ({ expiresIn: 300,
     accessToken: await signPlaneToken({ sub: principal, principalKind: "agent", aud: audience, ent: ["superpipeline"], scope: "claim", org: organizationId }) }) });
   restoreFetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
+  globalThis.fetch = Object.assign(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     const address = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
     if (address === TEST_PLANE.jwksUrl) return Response.json(await fakePlaneJwks());
     if (address === `${profile.sourceOrigin}/v1/boards/${contextClaim.boardId}/runs/${contextClaim.runId}`) {
@@ -92,7 +93,7 @@ beforeAll(async () => {
         stage: { ...claimFixture.context.stage, checkpointPolicy: policy } });
     }
     return extraFetch(address, init);
-  };
+  }, { preconnect: restoreFetch.preconnect });
   attempt = (await reserveCheckpointAttempt(profile, claim, { profile_id: profile.profileKey, prompt: "fixture", timeout_seconds: 60 })).attempt;
 });
 // Rows are deliberately immutable and retained for this isolated test database.
@@ -136,11 +137,32 @@ test("retained row cannot change identity or rewind phase", async () => {
   await expect(db.update(checkpointDispatches).set({ phase: "reported" }).where(eq(checkpointDispatches.attemptId, attempt.row.attemptId)).execute()).rejects.toThrow();
 });
 
+test("installed production port verifies actual broker target pins without ACP or Salaam", async () => {
+  const runtime = checkpointRuntime(tenantId, claim.boardId, stationId, profile.agentKey);
+  if (!runtime) throw new Error("missing installed test profile");
+  let altered = true;
+  connectionManager.register(nodeId, (message) => {
+    if (message.type !== "req" || message.verb !== "bench.coordinator") return;
+    handleNodeMessage(nodeId, { type: "res", id: message.id, ok: true, data: {
+      version: "agentpod.bench-coordinator.v1", operation: "ready", state: "available",
+      target: { ...profile.target, worker_sha256: altered ? "f".repeat(64) : profile.target.worker_sha256 },
+    } });
+  });
+  try {
+    const identity = { tenantId, boardId: claim.boardId, stationId };
+    await expect(runtime.port.ready(identity)).rejects.toThrow();
+    altered = false;
+    expect(await runtime.port.ready(identity)).toMatchObject({ ...identity, sourceTenantId: profile.sourceTenantId,
+      benchProtocol: "superbench.v2", executionMode: "linux-cgroup-v2",
+      coordinatorImplementationSHA256: profile.target.coordinator_implementation_sha256, workerSHA256: profile.target.worker_sha256 });
+  } finally { connectionManager.register(nodeId, () => {}); }
+});
+
 test.each(["none", "prepare", "execute", "settlement", "before-settlement"])("real broker and immutable DB phases preserve %s uncertainty without redispatch", async (lost) => {
-  const selected = parsePendingCheckpointClaim({ ...claim, runId: "run_" + suffix + lost });
-  contextClaim = selected;
+  const selected = parsePendingCheckpointClaim({ ...claim, runId: "run_" + suffix + lost.replaceAll("-", "") });
   const reserved = await reserveCheckpointAttempt(profile, selected, { profile_id: profile.profileKey, prompt: "fixture", timeout_seconds: 60 });
   const completion = await checkpointNodeObservation(reserved.attempt);
+  contextClaim = selected;
   let prepares = 0, executions = 0, posts = 0, reads = 0, sourceGets = 0;
   let prepared = false, completed = false, lostOnce = false;
   let source: CheckpointSource | undefined;
