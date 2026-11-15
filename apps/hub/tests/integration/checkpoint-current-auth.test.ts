@@ -225,11 +225,11 @@ test.each(["none", "prepare", "execute", "settlement", "before-settlement"])("re
     const retained = await readCheckpointAttempt(tenantId, reserved.attempt.row.attemptId);
     if (!retained) throw new Error("missing retained attempt");
     const final = first.status === "reported" ? first : await driveCheckpointAttempt(retained, client);
-    expect(final.status).toBe(lost === "before-settlement" ? "unreported" : "reported");
-    expect(prepares).toBe(1); expect(executions).toBe(1); expect(posts).toBe(lost === "before-settlement" ? 0 : 1);
+    expect(final.status).toBe("reported");
+    expect(prepares).toBe(1); expect(executions).toBe(1); expect(posts).toBe(1);
     expect(reads).toBe(lost === "settlement" || lost === "before-settlement" ? 1 : 0);
     const stored = await readCheckpointAttempt(tenantId, reserved.attempt.row.attemptId);
-    expect(stored?.row.phase).toBe(lost === "before-settlement" ? "submission_pending" : "reported");
+    expect(stored?.row.phase).toBe("reported");
     expect(stored?.row.settlementBody).toBe(canonicalCheckpoint(JSON.parse(stored?.row.settlementBody ?? "{}")));
   } finally {
     contextClaim = claim;
