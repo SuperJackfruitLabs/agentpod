@@ -4,11 +4,9 @@
 package benchdispatch
 
 import (
-	"encoding/json"
 	"regexp"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattempt"
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/superbench"
 )
 
 const version = "agentpod.private-bench-dispatch.v1"
@@ -63,36 +61,7 @@ var planDigest = benchattempt.PlanSHA256
 
 func samePlan(a, b Plan) bool { return planDigest(a) == planDigest(b) }
 
-func validatePlan(p Plan) error {
-	ids := []string{p.Identity.TenantID, p.Identity.BoardID, p.Identity.CardID, p.Identity.StageID, p.Identity.RunID, p.Identity.AgentID, p.Identity.StationID, p.Identity.NodeID, p.Identity.AttemptID, p.Identity.ControlPrincipalID, p.Identity.ControlGrantID, p.HostID, p.RegistrationID}
-	for _, s := range ids {
-		if !idPattern.MatchString(s) {
-			return ErrInvalid
-		}
-	}
-	if p.Identity.Epoch == 0 {
-		return ErrInvalid
-	}
-	for _, h := range []string{p.Identity.PolicySHA256, p.RequestSHA256, p.BodySHA256, p.ContextSHA256, p.ExecutableSHA256} {
-		if !hexPattern.MatchString(h) {
-			return ErrInvalid
-		}
-	}
-	if !validSources(p.Sources) || !physicalName(p.ContextPath) || !physicalName(p.ExecutablePath) || len(p.ContextPath) > 4096 || len(p.ExecutablePath) > 4096 {
-		return ErrInvalid
-	}
-	if p.Grouped != nil {
-		return validateGroupedPlan(p)
-	}
-	// Validate the producer's own scalar request identity rules without inventing
-	// a held-token run extension. Actual raw arguments are bound at Dispatch.
-	raw, _ := json.Marshal(superbench.Request{Version: superbench.Version, Operation: "run", Key: p.BenchKey, Holder: p.Holder, RequestID: p.RequestID, Arguments: []string{p.ExecutablePath, p.ContextPath}})
-	_, err := superbench.Parse(raw)
-	if err != nil {
-		return ErrInvalid
-	}
-	return nil
-}
+var validatePlan = benchattempt.ValidatePlan
 
 var validSources = benchattempt.ValidSources
 var validateObservation = benchattempt.ValidateObservation
