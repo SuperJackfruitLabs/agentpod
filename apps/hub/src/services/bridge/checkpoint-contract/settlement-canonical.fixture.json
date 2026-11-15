@@ -1,0 +1,211 @@
+{
+  "version": "superpipeline.run-checkpoint-canonical.v1",
+  "status": "proposal",
+  "cases": [
+    {
+      "name": "policy",
+      "value": {
+        "version": "superpipeline.checkpoint-policy.v1",
+        "kind": "superbench",
+        "allowUnchanged": false,
+        "repositories": [
+          {
+            "name": "app",
+            "provider": "forge",
+            "repository": "example/app"
+          }
+        ],
+        "checkpointRepository": "app",
+        "reporterPrincipalId": "prn_coordinator1",
+        "nodeId": "node_pilot01",
+        "executors": [
+          {
+            "agentId": "agt_example",
+            "stationId": "station_pilot01"
+          }
+        ]
+      },
+      "canonical": "{\"allowUnchanged\":false,\"checkpointRepository\":\"app\",\"executors\":[{\"agentId\":\"agt_example\",\"stationId\":\"station_pilot01\"}],\"kind\":\"superbench\",\"nodeId\":\"node_pilot01\",\"reporterPrincipalId\":\"prn_coordinator1\",\"repositories\":[{\"name\":\"app\",\"provider\":\"forge\",\"repository\":\"example/app\"}],\"version\":\"superpipeline.checkpoint-policy.v1\"}",
+      "sha256": "e4854f02957e3d622fde729b62bdcd5c0334baa94c9fd0629bf8dd624887d144"
+    },
+    {
+      "name": "report",
+      "value": {
+        "version": "superpipeline.run-checkpoint.v1",
+        "settlementId": "settlement-1",
+        "binding": {
+          "boardId": "brd_134a0ddb6d434478",
+          "cardId": "card_0123456789abcdef",
+          "stageKey": "test",
+          "runId": "run_0123456789abcdef",
+          "leaseEpoch": 1,
+          "agentId": "agt_example",
+          "stationId": "station_pilot01",
+          "nodeId": "node_pilot01",
+          "attemptId": "attempt-1"
+        },
+        "policyDigest": "e4854f02957e3d622fde729b62bdcd5c0334baa94c9fd0629bf8dd624887d144",
+        "disposition": "changed",
+        "start": [
+          {
+            "name": "app",
+            "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "checkpoint": {
+          "protocol": "superbench.v2",
+          "key": "card_0123456789abcdef",
+          "benchId": "cccccccccccccccccccccccccccccccc",
+          "requestId": "run-checkpoint-1",
+          "generationId": "dddddddddddddddddddddddddddddddd",
+          "seal": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "manifestSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "members": [
+            {
+              "name": "app",
+              "provider": "forge",
+              "repository": "example/app",
+              "branch": "card/card_0123456789abcdef",
+              "objectFormat": "sha1",
+              "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ],
+          "checkpointRepository": "app"
+        },
+        "execution": {
+          "id": "11111111111111111111111111111111",
+          "exitCode": 0
+        },
+        "workerResultSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "sourceReceiptSha256": "677359ee412fda7dda39da134a386fa327ac769efe256a9dafebc5765676577b",
+        "sourceRequestSha256": "06fe5c1708bb24efb100de74c217f0634e3cfdcc567438b239ff55570c6c2100"
+      },
+      "canonical": "{\"binding\":{\"agentId\":\"agt_example\",\"attemptId\":\"attempt-1\",\"boardId\":\"brd_134a0ddb6d434478\",\"cardId\":\"card_0123456789abcdef\",\"leaseEpoch\":1,\"nodeId\":\"node_pilot01\",\"runId\":\"run_0123456789abcdef\",\"stageKey\":\"test\",\"stationId\":\"station_pilot01\"},\"checkpoint\":{\"benchId\":\"cccccccccccccccccccccccccccccccc\",\"checkpointRepository\":\"app\",\"generationId\":\"dddddddddddddddddddddddddddddddd\",\"key\":\"card_0123456789abcdef\",\"manifestSha256\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"members\":[{\"branch\":\"card/card_0123456789abcdef\",\"commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"name\":\"app\",\"objectFormat\":\"sha1\",\"provider\":\"forge\",\"repository\":\"example/app\"}],\"protocol\":\"superbench.v2\",\"requestId\":\"run-checkpoint-1\",\"seal\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\"},\"disposition\":\"changed\",\"execution\":{\"exitCode\":0,\"id\":\"11111111111111111111111111111111\"},\"policyDigest\":\"e4854f02957e3d622fde729b62bdcd5c0334baa94c9fd0629bf8dd624887d144\",\"settlementId\":\"settlement-1\",\"sourceReceiptSha256\":\"677359ee412fda7dda39da134a386fa327ac769efe256a9dafebc5765676577b\",\"sourceRequestSha256\":\"06fe5c1708bb24efb100de74c217f0634e3cfdcc567438b239ff55570c6c2100\",\"start\":[{\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"app\"}],\"version\":\"superpipeline.run-checkpoint.v1\",\"workerResultSha256\":\"2222222222222222222222222222222222222222222222222222222222222222\"}",
+      "sha256": "ebf6ca89f0110cef05c904a9661fe97c119159171724623cb9635e8293c7adec"
+    },
+    {
+      "name": "source-projection",
+      "value": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "request_id": "run-checkpoint-1",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card_0123456789abcdef",
+            "bench_id": "cccccccccccccccccccccccccccccccc",
+            "phase": "ready",
+            "member_count": 1,
+            "checkpoint_repository": "app",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 4096,
+            "checkpoint": {
+              "generation_id": "dddddddddddddddddddddddddddddddd",
+              "manifest_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "members": [
+                {
+                  "name": "app",
+                  "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              ],
+              "seal": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          },
+          "execution": {
+            "id": "11111111111111111111111111111111",
+            "phase": "stopped"
+          },
+          "exit_code": 0
+        }
+      },
+      "canonical": "{\"ok\":true,\"operation\":\"run\",\"request_id\":\"run-checkpoint-1\",\"result\":{\"execution\":{\"id\":\"11111111111111111111111111111111\",\"phase\":\"stopped\"},\"exit_code\":0,\"workspace\":{\"bench_id\":\"cccccccccccccccccccccccccccccccc\",\"checkpoint\":{\"generation_id\":\"dddddddddddddddddddddddddddddddd\",\"manifest_sha256\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"members\":[{\"commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"name\":\"app\"}],\"seal\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\"},\"checkpoint_repository\":\"app\",\"key\":\"card_0123456789abcdef\",\"member_count\":1,\"phase\":\"ready\",\"quota_bytes\":33554432,\"quota_inodes\":4096,\"ready_for_acquisition\":true}},\"version\":\"superbench.v2\"}",
+      "sha256": "677359ee412fda7dda39da134a386fa327ac769efe256a9dafebc5765676577b"
+    },
+    {
+      "name": "unicode-escape",
+      "value": {
+        "s": "line\n\\\"\u00e9\ud83d\ude00"
+      },
+      "canonical": "{\"s\":\"line\\u000a\\\\\\\"\\u00e9\\ud83d\\ude00\"}",
+      "sha256": "c44890875972192a88f9187a2d811c22433b316b96d93e5d2aae6c35a14325c0"
+    },
+    {
+      "name": "source-request",
+      "value": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "card_0123456789abcdef",
+        "holder": "run_0123456789abcdef",
+        "request_id": "run-checkpoint-1",
+        "arguments": ["worker"]
+      },
+      "canonical": "{\"arguments\":[\"worker\"],\"holder\":\"run_0123456789abcdef\",\"key\":\"card_0123456789abcdef\",\"operation\":\"run\",\"request_id\":\"run-checkpoint-1\",\"version\":\"superbench.v2\"}",
+      "sha256": "06fe5c1708bb24efb100de74c217f0634e3cfdcc567438b239ff55570c6c2100"
+    },
+    {
+      "name": "settlement-request",
+      "value": {
+        "version": "superpipeline.checkpoint-settlement.v1",
+        "checkpoint": {
+          "version": "superpipeline.run-checkpoint.v1",
+          "settlementId": "settlement-1",
+          "binding": {
+            "boardId": "brd_134a0ddb6d434478",
+            "cardId": "card_0123456789abcdef",
+            "stageKey": "test",
+            "runId": "run_0123456789abcdef",
+            "leaseEpoch": 1,
+            "agentId": "agt_example",
+            "stationId": "station_pilot01",
+            "nodeId": "node_pilot01",
+            "attemptId": "attempt-1"
+          },
+          "policyDigest": "e4854f02957e3d622fde729b62bdcd5c0334baa94c9fd0629bf8dd624887d144",
+          "disposition": "changed",
+          "start": [
+            {
+              "name": "app",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "checkpoint": {
+            "protocol": "superbench.v2",
+            "key": "card_0123456789abcdef",
+            "benchId": "cccccccccccccccccccccccccccccccc",
+            "requestId": "run-checkpoint-1",
+            "generationId": "dddddddddddddddddddddddddddddddd",
+            "seal": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "manifestSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "members": [
+              {
+                "name": "app",
+                "provider": "forge",
+                "repository": "example/app",
+                "branch": "card/card_0123456789abcdef",
+                "objectFormat": "sha1",
+                "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ],
+            "checkpointRepository": "app"
+          },
+          "execution": {
+            "id": "11111111111111111111111111111111",
+            "exitCode": 0
+          },
+          "workerResultSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "sourceReceiptSha256": "677359ee412fda7dda39da134a386fa327ac769efe256a9dafebc5765676577b",
+          "sourceRequestSha256": "06fe5c1708bb24efb100de74c217f0634e3cfdcc567438b239ff55570c6c2100"
+        },
+        "handoff": {
+          "test": "tests/example.test.ts",
+          "fails": "expected assertion failed",
+          "commit": "https://forge.example/example/app/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "outcome": "pass"
+      },
+      "canonical": "{\"checkpoint\":{\"binding\":{\"agentId\":\"agt_example\",\"attemptId\":\"attempt-1\",\"boardId\":\"brd_134a0ddb6d434478\",\"cardId\":\"card_0123456789abcdef\",\"leaseEpoch\":1,\"nodeId\":\"node_pilot01\",\"runId\":\"run_0123456789abcdef\",\"stageKey\":\"test\",\"stationId\":\"station_pilot01\"},\"checkpoint\":{\"benchId\":\"cccccccccccccccccccccccccccccccc\",\"checkpointRepository\":\"app\",\"generationId\":\"dddddddddddddddddddddddddddddddd\",\"key\":\"card_0123456789abcdef\",\"manifestSha256\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"members\":[{\"branch\":\"card/card_0123456789abcdef\",\"commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"name\":\"app\",\"objectFormat\":\"sha1\",\"provider\":\"forge\",\"repository\":\"example/app\"}],\"protocol\":\"superbench.v2\",\"requestId\":\"run-checkpoint-1\",\"seal\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\"},\"disposition\":\"changed\",\"execution\":{\"exitCode\":0,\"id\":\"11111111111111111111111111111111\"},\"policyDigest\":\"e4854f02957e3d622fde729b62bdcd5c0334baa94c9fd0629bf8dd624887d144\",\"settlementId\":\"settlement-1\",\"sourceReceiptSha256\":\"677359ee412fda7dda39da134a386fa327ac769efe256a9dafebc5765676577b\",\"sourceRequestSha256\":\"06fe5c1708bb24efb100de74c217f0634e3cfdcc567438b239ff55570c6c2100\",\"start\":[{\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"app\"}],\"version\":\"superpipeline.run-checkpoint.v1\",\"workerResultSha256\":\"2222222222222222222222222222222222222222222222222222222222222222\"},\"handoff\":{\"commit\":\"https://forge.example/example/app/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"fails\":\"expected assertion failed\",\"test\":\"tests/example.test.ts\"},\"outcome\":\"pass\",\"version\":\"superpipeline.checkpoint-settlement.v1\"}",
+      "sha256": "4f11eca8ad62020b73d79c31c85bbab71f9972ce55464be3c7450aff6a6f1039"
+    }
+  ]
+}

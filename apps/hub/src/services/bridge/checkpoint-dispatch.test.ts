@@ -4,8 +4,8 @@ import { parsePendingCheckpointClaim } from "./checkpoint-claim";
 import fixture from "./checkpoint-contract/claim.fixture.json";
 import { SuperpipelineClient } from "./superpipeline";
 
-const identity = { tenantId: fixture.pending.tenantId, boardId: fixture.pending.boardId, stationId: "station_pilot01" };
-function target(): CheckpointTarget { return { ...identity, agentId: fixture.pending.agentId, nodeId: "node_pilot01",
+const identity = { tenantId: "fleet_hub_fixture", boardId: fixture.pending.boardId, stationId: "station_pilot01" };
+function target(): CheckpointTarget { return { ...identity, sourceTenantId: fixture.pending.tenantId, agentId: fixture.pending.agentId, nodeId: "node_pilot01",
   hostId: "host_fixture", registryRevision: "registry_fixture", coordinatorVersion: "superbench.v2",
   workerVersion: "agentpod.superbench-worker.v2", workerSHA256: "a".repeat(64) }; }
 function harness() {
@@ -96,4 +96,25 @@ test("changed current run/policy and uncertain dispatch never become generic rep
     status: "unreported", reason: "Checkpoint dispatch requires reconciliation",
   });
   expect(h.calls.every((path) => path.endsWith(`/runs/${fixture.pending.runId}`))).toBe(true);
+});
+
+
+test("distinct Hub and source tenant IDs are retained through context and dispatch", async () => {
+  const h = harness();
+  const selection = await selectCheckpointDispatch(h.port, identity);
+  await selection?.dispatch(h.client, parsePendingCheckpointClaim(fixture.pending));
+  expect(h.dispatched).toHaveLength(1);
+  expect(h.dispatched[0]?.target.tenantId).toBe("fleet_hub_fixture");
+  expect(h.dispatched[0]?.target.sourceTenantId).toBe(fixture.pending.tenantId);
+  expect(h.dispatched[0]?.claim.tenantId).toBe(fixture.pending.tenantId);
+  expect(h.checks.every((value) => value.sourceTenantId === fixture.pending.tenantId)).toBe(true);
+});
+
+test("a changed trusted source tenant pin refuses the claim before any context fetch", async () => {
+  const h = harness();
+  Object.assign(h.observed, { sourceTenantId: "tnt_wrong_source" });
+  const selection = await selectCheckpointDispatch(h.port, identity);
+  expect((await selection?.dispatch(h.client, parsePendingCheckpointClaim(fixture.pending)))?.status).toBe("unreported");
+  expect(h.calls).toHaveLength(0);
+  expect(h.dispatched).toHaveLength(0);
 });
