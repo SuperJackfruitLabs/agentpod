@@ -104,6 +104,7 @@ func readRegistry(path, nodeID string) (Registry, string, error) {
 		return Registry{}, "", ErrRegistry
 	}
 	seen := map[string]bool{}
+	selectors := map[string]bool{}
 	for _, p := range r.Profiles {
 		target := r.target(p, rawSHA(raw))
 		request := benchcoordinatorwire.Request{Version: benchcoordinatorwire.Version, Operation: "ready", TenantID: p.TenantID, BoardID: p.BoardID, StationID: p.StationID}
@@ -112,6 +113,11 @@ func readRegistry(path, nodeID string) (Registry, string, error) {
 			return Registry{}, "", ErrRegistry
 		}
 		seen[p.ID] = true
+		selector := p.TenantID + "\x00" + p.BoardID + "\x00" + p.StationID
+		if selectors[selector] || !benchjournal.PhysicalName(p.Arguments[0]) {
+			return Registry{}, "", ErrRegistry
+		}
+		selectors[selector] = true
 		// The complete target is also validated independently of any claimed run.
 		response := benchcoordinatorwire.Response{Version: benchcoordinatorwire.Version, Operation: "ready", State: "available", Target: &target}
 		encoded, _ = json.Marshal(response)
@@ -133,12 +139,12 @@ func readRegistry(path, nodeID string) (Registry, string, error) {
 			return Registry{}, "", ErrRegistry
 		}
 		for k, v := range p.Environment {
-			if k != "PATH" && k != "LANG" && k != "LC_ALL" && k != "TZ" && k != "TERM" || strings.ContainsRune(v, 0) {
+			if k != "PATH" && k != "LANG" && k != "LC_ALL" && k != "TZ" && k != "TERM" || strings.ContainsAny(v, "\x00\r\n") {
 				return Registry{}, "", ErrRegistry
 			}
 		}
 		for _, arg := range p.Arguments {
-			if strings.ContainsRune(arg, 0) {
+			if strings.ContainsRune(arg, 0) || len(arg) > 8192 {
 				return Registry{}, "", ErrRegistry
 			}
 		}

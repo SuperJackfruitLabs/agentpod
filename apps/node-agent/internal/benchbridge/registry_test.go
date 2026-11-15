@@ -97,3 +97,26 @@ func TestRegistryRefusesWrongNodePublicConfigAndSymlink(t *testing.T) {
 		t.Fatal("symlink accepted")
 	}
 }
+
+func TestRegistryRefusesAmbiguousSelectorsAndInvalidWorkerInputsBeforeReadiness(t *testing.T) {
+	path, r := registryFixture(t)
+	duplicate := r.Profiles[0]
+	duplicate.ID = "another-profile"
+	r.Profiles = append(r.Profiles, duplicate)
+	writeRegistry(t, path, r)
+	if _, _, err := readRegistry(path, r.NodeID); err == nil {
+		t.Fatal("ambiguous registry selector accepted")
+	}
+	r.Profiles = r.Profiles[:1]
+	r.Profiles[0].Arguments = []string{"relative-command"}
+	writeRegistry(t, path, r)
+	if _, _, err := readRegistry(path, r.NodeID); err == nil {
+		t.Fatal("relative worker command advertised")
+	}
+	r.Profiles[0].Arguments = []string{"/bin/sh"}
+	r.Profiles[0].Environment["LANG"] = "en_US\ninjected"
+	writeRegistry(t, path, r)
+	if _, _, err := readRegistry(path, r.NodeID); err == nil {
+		t.Fatal("invalid worker environment advertised")
+	}
+}
