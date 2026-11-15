@@ -165,3 +165,13 @@ report builder. Rewriting a capture with canonically equivalent JSON still fails
 its original immutable raw hash check. The codec pins the proposed Treaty owner
 vectors at `d578c7e3ed0709cf7d6d38f7545edacab1691201`; it does not
 supply reporting authority, attest a host, or enable a broker route.
+
+`Store.ReservedSourceSpec` recovers an exact existing source specification for a
+full attempt identity under the same document lock. It reads active or historical
+source records without deciding whether to create, launching, changing the
+journal, or granting authority. Recovery must use this saved specification rather
+than recompute `Create` from current service status after a lost reply. Missing
+or corrupt state remains a refusal; a generic lookup error never authorizes new
+growth. A separate fresh retained work-owner reservation and trusted profile are
+required for the initial preparation path. The returned private specification is
+not a broker response and its caller must still enforce current ownership.

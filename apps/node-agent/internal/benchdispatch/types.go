@@ -95,5 +95,4 @@ func validatePlan(p Plan) error {
 }
 
 var validSources = benchattempt.ValidSources
-var validRef = benchattempt.ValidRef
 var validateObservation = benchattempt.ValidateObservation
