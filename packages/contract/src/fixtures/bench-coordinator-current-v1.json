@@ -1,0 +1,468 @@
+{
+  "status": "PROPOSED; no installed handler, service grant or pilot enabled",
+  "requests": [
+    {
+      "name": "prepare",
+      "accept": true,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "phase": "prepare",
+        "nonce": "11111111111111111111111111111111",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "profile_id": "profile-fixture"
+      }
+    },
+    {
+      "name": "execute missing binding",
+      "accept": false,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "phase": "execute",
+        "nonce": "11111111111111111111111111111111",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "profile_id": "profile-fixture"
+      }
+    },
+    {
+      "name": "unknown phase",
+      "accept": false,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "phase": "cancel",
+        "nonce": "11111111111111111111111111111111",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "profile_id": "profile-fixture"
+      }
+    },
+    {
+      "name": "extra secret",
+      "accept": false,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "phase": "prepare",
+        "nonce": "11111111111111111111111111111111",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "profile_id": "profile-fixture",
+        "token": "fixture-forbidden"
+      }
+    },
+    {
+      "name": "bad nonce",
+      "accept": false,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "phase": "prepare",
+        "nonce": "1111111111111111111111111111111",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "profile_id": "profile-fixture"
+      }
+    },
+    {
+      "name": "unknown version",
+      "accept": false,
+      "value": {
+        "version": "future",
+        "phase": "prepare",
+        "nonce": "11111111111111111111111111111111",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "profile_id": "profile-fixture"
+      }
+    },
+    {
+      "name": "foreign node",
+      "accept": false,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "phase": "prepare",
+        "nonce": "11111111111111111111111111111111",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-foreign",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "profile_id": "profile-fixture"
+      }
+    },
+    {
+      "name": "admitted execute",
+      "accept": true,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "phase": "execute",
+        "nonce": "11111111111111111111111111111111",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "profile_id": "profile-fixture",
+        "binding_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "name": "fresh current",
+      "accept": true,
+      "request_raw": "{\"version\":\"agentpod.bench-coordinator-current.v1\",\"phase\":\"prepare\",\"nonce\":\"11111111111111111111111111111111\",\"identity\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"card_id\":\"card_ABC123\",\"stage_id\":\"write-test\",\"run_id\":\"run_ABC123\",\"epoch\":7,\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"attempt_id\":\"attempt-fixture\",\"control_principal_id\":\"prn_ABC123\",\"control_grant_id\":\"selected-authorization-fixture\",\"policy_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"target\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"host_id\":\"host-fixture\",\"registry_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"coordinator_implementation_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"execution_mode\":\"linux-cgroup-v2\",\"bench_protocol\":\"superbench.v2\",\"worker_version\":\"agentpod.superbench-worker.v2\",\"worker_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"profile_id\":\"profile-fixture\"}",
+      "now_ms": 100000,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "nonce": "11111111111111111111111111111111",
+        "request_sha256": "f839e6fde0f0b9104480b00fa625469689609a056406f3b2a710fb75524cbbf5",
+        "issued_at_ms": 99900,
+        "expires_at_ms": 101000,
+        "decision": "current"
+      }
+    },
+    {
+      "name": "foreign nonce",
+      "accept": false,
+      "request_raw": "{\"version\":\"agentpod.bench-coordinator-current.v1\",\"phase\":\"prepare\",\"nonce\":\"11111111111111111111111111111111\",\"identity\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"card_id\":\"card_ABC123\",\"stage_id\":\"write-test\",\"run_id\":\"run_ABC123\",\"epoch\":7,\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"attempt_id\":\"attempt-fixture\",\"control_principal_id\":\"prn_ABC123\",\"control_grant_id\":\"selected-authorization-fixture\",\"policy_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"target\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"host_id\":\"host-fixture\",\"registry_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"coordinator_implementation_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"execution_mode\":\"linux-cgroup-v2\",\"bench_protocol\":\"superbench.v2\",\"worker_version\":\"agentpod.superbench-worker.v2\",\"worker_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"profile_id\":\"profile-fixture\"}",
+      "now_ms": 100000,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "nonce": "22222222222222222222222222222222",
+        "request_sha256": "f839e6fde0f0b9104480b00fa625469689609a056406f3b2a710fb75524cbbf5",
+        "issued_at_ms": 99900,
+        "expires_at_ms": 101000,
+        "decision": "current"
+      }
+    },
+    {
+      "name": "foreign digest",
+      "accept": false,
+      "request_raw": "{\"version\":\"agentpod.bench-coordinator-current.v1\",\"phase\":\"prepare\",\"nonce\":\"11111111111111111111111111111111\",\"identity\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"card_id\":\"card_ABC123\",\"stage_id\":\"write-test\",\"run_id\":\"run_ABC123\",\"epoch\":7,\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"attempt_id\":\"attempt-fixture\",\"control_principal_id\":\"prn_ABC123\",\"control_grant_id\":\"selected-authorization-fixture\",\"policy_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"target\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"host_id\":\"host-fixture\",\"registry_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"coordinator_implementation_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"execution_mode\":\"linux-cgroup-v2\",\"bench_protocol\":\"superbench.v2\",\"worker_version\":\"agentpod.superbench-worker.v2\",\"worker_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"profile_id\":\"profile-fixture\"}",
+      "now_ms": 100000,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "nonce": "11111111111111111111111111111111",
+        "request_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "issued_at_ms": 99900,
+        "expires_at_ms": 101000,
+        "decision": "current"
+      }
+    },
+    {
+      "name": "expired",
+      "accept": false,
+      "request_raw": "{\"version\":\"agentpod.bench-coordinator-current.v1\",\"phase\":\"prepare\",\"nonce\":\"11111111111111111111111111111111\",\"identity\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"card_id\":\"card_ABC123\",\"stage_id\":\"write-test\",\"run_id\":\"run_ABC123\",\"epoch\":7,\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"attempt_id\":\"attempt-fixture\",\"control_principal_id\":\"prn_ABC123\",\"control_grant_id\":\"selected-authorization-fixture\",\"policy_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"target\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"host_id\":\"host-fixture\",\"registry_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"coordinator_implementation_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"execution_mode\":\"linux-cgroup-v2\",\"bench_protocol\":\"superbench.v2\",\"worker_version\":\"agentpod.superbench-worker.v2\",\"worker_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"profile_id\":\"profile-fixture\"}",
+      "now_ms": 100000,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "nonce": "11111111111111111111111111111111",
+        "request_sha256": "f839e6fde0f0b9104480b00fa625469689609a056406f3b2a710fb75524cbbf5",
+        "issued_at_ms": 99900,
+        "expires_at_ms": 99999,
+        "decision": "current"
+      }
+    },
+    {
+      "name": "future decision",
+      "accept": false,
+      "request_raw": "{\"version\":\"agentpod.bench-coordinator-current.v1\",\"phase\":\"prepare\",\"nonce\":\"11111111111111111111111111111111\",\"identity\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"card_id\":\"card_ABC123\",\"stage_id\":\"write-test\",\"run_id\":\"run_ABC123\",\"epoch\":7,\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"attempt_id\":\"attempt-fixture\",\"control_principal_id\":\"prn_ABC123\",\"control_grant_id\":\"selected-authorization-fixture\",\"policy_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"target\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"host_id\":\"host-fixture\",\"registry_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"coordinator_implementation_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"execution_mode\":\"linux-cgroup-v2\",\"bench_protocol\":\"superbench.v2\",\"worker_version\":\"agentpod.superbench-worker.v2\",\"worker_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"profile_id\":\"profile-fixture\"}",
+      "now_ms": 100000,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "nonce": "11111111111111111111111111111111",
+        "request_sha256": "f839e6fde0f0b9104480b00fa625469689609a056406f3b2a710fb75524cbbf5",
+        "issued_at_ms": 100001,
+        "expires_at_ms": 101000,
+        "decision": "current"
+      }
+    },
+    {
+      "name": "excess lifetime",
+      "accept": false,
+      "request_raw": "{\"version\":\"agentpod.bench-coordinator-current.v1\",\"phase\":\"prepare\",\"nonce\":\"11111111111111111111111111111111\",\"identity\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"card_id\":\"card_ABC123\",\"stage_id\":\"write-test\",\"run_id\":\"run_ABC123\",\"epoch\":7,\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"attempt_id\":\"attempt-fixture\",\"control_principal_id\":\"prn_ABC123\",\"control_grant_id\":\"selected-authorization-fixture\",\"policy_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"target\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"host_id\":\"host-fixture\",\"registry_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"coordinator_implementation_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"execution_mode\":\"linux-cgroup-v2\",\"bench_protocol\":\"superbench.v2\",\"worker_version\":\"agentpod.superbench-worker.v2\",\"worker_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"profile_id\":\"profile-fixture\"}",
+      "now_ms": 100000,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "nonce": "11111111111111111111111111111111",
+        "request_sha256": "f839e6fde0f0b9104480b00fa625469689609a056406f3b2a710fb75524cbbf5",
+        "issued_at_ms": 99900,
+        "expires_at_ms": 110000,
+        "decision": "current"
+      }
+    },
+    {
+      "name": "unknown decision",
+      "accept": false,
+      "request_raw": "{\"version\":\"agentpod.bench-coordinator-current.v1\",\"phase\":\"prepare\",\"nonce\":\"11111111111111111111111111111111\",\"identity\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"card_id\":\"card_ABC123\",\"stage_id\":\"write-test\",\"run_id\":\"run_ABC123\",\"epoch\":7,\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"attempt_id\":\"attempt-fixture\",\"control_principal_id\":\"prn_ABC123\",\"control_grant_id\":\"selected-authorization-fixture\",\"policy_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"target\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"host_id\":\"host-fixture\",\"registry_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"coordinator_implementation_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"execution_mode\":\"linux-cgroup-v2\",\"bench_protocol\":\"superbench.v2\",\"worker_version\":\"agentpod.superbench-worker.v2\",\"worker_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"profile_id\":\"profile-fixture\"}",
+      "now_ms": 100000,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "nonce": "11111111111111111111111111111111",
+        "request_sha256": "f839e6fde0f0b9104480b00fa625469689609a056406f3b2a710fb75524cbbf5",
+        "issued_at_ms": 99900,
+        "expires_at_ms": 101000,
+        "decision": "allowed"
+      }
+    },
+    {
+      "name": "extra capability",
+      "accept": false,
+      "request_raw": "{\"version\":\"agentpod.bench-coordinator-current.v1\",\"phase\":\"prepare\",\"nonce\":\"11111111111111111111111111111111\",\"identity\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"card_id\":\"card_ABC123\",\"stage_id\":\"write-test\",\"run_id\":\"run_ABC123\",\"epoch\":7,\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"attempt_id\":\"attempt-fixture\",\"control_principal_id\":\"prn_ABC123\",\"control_grant_id\":\"selected-authorization-fixture\",\"policy_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"target\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"host_id\":\"host-fixture\",\"registry_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"coordinator_implementation_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"execution_mode\":\"linux-cgroup-v2\",\"bench_protocol\":\"superbench.v2\",\"worker_version\":\"agentpod.superbench-worker.v2\",\"worker_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"profile_id\":\"profile-fixture\"}",
+      "now_ms": 100000,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "nonce": "11111111111111111111111111111111",
+        "request_sha256": "f839e6fde0f0b9104480b00fa625469689609a056406f3b2a710fb75524cbbf5",
+        "issued_at_ms": 99900,
+        "expires_at_ms": 101000,
+        "decision": "current",
+        "lease_token": "fixture-forbidden"
+      }
+    },
+    {
+      "name": "fresh refusal",
+      "accept": true,
+      "request_raw": "{\"version\":\"agentpod.bench-coordinator-current.v1\",\"phase\":\"prepare\",\"nonce\":\"11111111111111111111111111111111\",\"identity\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"card_id\":\"card_ABC123\",\"stage_id\":\"write-test\",\"run_id\":\"run_ABC123\",\"epoch\":7,\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"attempt_id\":\"attempt-fixture\",\"control_principal_id\":\"prn_ABC123\",\"control_grant_id\":\"selected-authorization-fixture\",\"policy_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"target\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"host_id\":\"host-fixture\",\"registry_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"coordinator_implementation_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"execution_mode\":\"linux-cgroup-v2\",\"bench_protocol\":\"superbench.v2\",\"worker_version\":\"agentpod.superbench-worker.v2\",\"worker_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"profile_id\":\"profile-fixture\"}",
+      "now_ms": 100000,
+      "value": {
+        "version": "agentpod.bench-coordinator-current.v1",
+        "nonce": "11111111111111111111111111111111",
+        "request_sha256": "f839e6fde0f0b9104480b00fa625469689609a056406f3b2a710fb75524cbbf5",
+        "issued_at_ms": 99900,
+        "expires_at_ms": 101000,
+        "decision": "refused",
+        "code": "stale_owner"
+      }
+    }
+  ],
+  "lexical": [
+    {
+      "name": "duplicate nonce",
+      "raw": "{\"version\":\"agentpod.bench-coordinator-current.v1\",\"phase\":\"prepare\",\"nonce\":\"11111111111111111111111111111111\",\"identity\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"card_id\":\"card_ABC123\",\"stage_id\":\"write-test\",\"run_id\":\"run_ABC123\",\"epoch\":7,\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"attempt_id\":\"attempt-fixture\",\"control_principal_id\":\"prn_ABC123\",\"control_grant_id\":\"selected-authorization-fixture\",\"policy_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"target\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"host_id\":\"host-fixture\",\"registry_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"coordinator_implementation_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"execution_mode\":\"linux-cgroup-v2\",\"bench_protocol\":\"superbench.v2\",\"worker_version\":\"agentpod.superbench-worker.v2\",\"worker_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"profile_id\":\"profile-fixture\",\"nonce\":\"11111111111111111111111111111111\"}"
+    },
+    {
+      "name": "null phase",
+      "raw": "{\"version\":\"agentpod.bench-coordinator-current.v1\",\"phase\":null,\"nonce\":\"11111111111111111111111111111111\",\"identity\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"card_id\":\"card_ABC123\",\"stage_id\":\"write-test\",\"run_id\":\"run_ABC123\",\"epoch\":7,\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"attempt_id\":\"attempt-fixture\",\"control_principal_id\":\"prn_ABC123\",\"control_grant_id\":\"selected-authorization-fixture\",\"policy_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"target\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"host_id\":\"host-fixture\",\"registry_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"coordinator_implementation_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"execution_mode\":\"linux-cgroup-v2\",\"bench_protocol\":\"superbench.v2\",\"worker_version\":\"agentpod.superbench-worker.v2\",\"worker_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"profile_id\":\"profile-fixture\"}"
+    },
+    {
+      "name": "trailing object",
+      "raw": "{\"version\":\"agentpod.bench-coordinator-current.v1\",\"phase\":\"prepare\",\"nonce\":\"11111111111111111111111111111111\",\"identity\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"card_id\":\"card_ABC123\",\"stage_id\":\"write-test\",\"run_id\":\"run_ABC123\",\"epoch\":7,\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"attempt_id\":\"attempt-fixture\",\"control_principal_id\":\"prn_ABC123\",\"control_grant_id\":\"selected-authorization-fixture\",\"policy_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"target\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"host_id\":\"host-fixture\",\"registry_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"coordinator_implementation_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"execution_mode\":\"linux-cgroup-v2\",\"bench_protocol\":\"superbench.v2\",\"worker_version\":\"agentpod.superbench-worker.v2\",\"worker_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"profile_id\":\"profile-fixture\"}{}"
+    },
+    {
+      "name": "escaped invalid scalar",
+      "raw": "{\"version\":\"agentpod.bench-coordinator-current.v1\",\"phase\":\"prepare\",\"nonce\":\"11111111111111111111111111111111\",\"identity\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"card_id\":\"card_ABC123\",\"stage_id\":\"write-test\",\"run_id\":\"run_ABC123\",\"epoch\":7,\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"attempt_id\":\"attempt-fixture\",\"control_principal_id\":\"prn_ABC123\",\"control_grant_id\":\"selected-authorization-fixture\",\"policy_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"target\":{\"tenant_id\":\"tenant-fixture\",\"board_id\":\"brd_ABC123\",\"agent_id\":\"agt_ABC123\",\"station_id\":\"station-fixture\",\"node_id\":\"node-fixture\",\"host_id\":\"host-fixture\",\"registry_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"coordinator_implementation_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"execution_mode\":\"linux-cgroup-v2\",\"bench_protocol\":\"superbench.v2\",\"worker_version\":\"agentpod.superbench-worker.v2\",\"worker_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"profile_id\":\"\\ud800\"}"
+    }
+  ]
+}

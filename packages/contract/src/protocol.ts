@@ -10,6 +10,7 @@ import { SkillPlacementPlan, SkillPlacementReceipt } from "./skill-placement";
 import { McpProxyStatusParams, McpProxyStatusResult, McpProxySetParams, McpProxySetResult, McpProxyRotateParams, McpProxyRotateResult } from "./mcp-proxy";
 import { ForgeApiDeliverParams, ForgeApiPolicyParams, ForgeApiVerifyParams, ForgeApiRevokeParams, ForgeApiStatusParams, ForgeApiDeliverResult, ForgeApiPolicyResult, ForgeApiVerifyResult, ForgeApiRevokeResult, ForgeApiStatusResult } from "./forge-api";
 import { PluginPlanParams, PluginApplyParams, PluginInspectParams, PluginOperationPlan, PluginOperationReceipt, PluginOperationResult } from "./plugin-operation";
+import { BenchCoordinatorRequest, BenchCoordinatorResponse, BENCH_COORDINATOR_VERB } from "./bench-coordinator";
 
 /**
  * `_meta` carries W3C trace context (superwitness C2). Optional: a node that predates it
@@ -44,6 +45,7 @@ export type InputMsg = z.infer<typeof InputMsg>;
 export type ResizeMsg = z.infer<typeof ResizeMsg>;
 
 export const VERB_PARAMS = {
+  [BENCH_COORDINATOR_VERB]: BenchCoordinatorRequest,
   "salaam.admit": SalaamAuthorityParams,
   "salaam.renew": SalaamAuthorityParams.extend({ lease_sequence: z.number().int().positive() }),
   "salaam.revoke": SalaamAuthorityParams.extend({ reason: z.string().min(1).max(1024) }),
@@ -189,6 +191,7 @@ export const VERB_PARAMS = {
 // NOTE: "detect" returns plain Station[] (no adopted field) — the hub
 // annotates adopted:true/false from its DB before forwarding to clients.
 export const VERB_RESULTS = {
+  [BENCH_COORDINATOR_VERB]: BenchCoordinatorResponse,
   "salaam.admit": SalaamAuthorityStatus,
   "salaam.renew": SalaamAuthorityStatus,
   "salaam.revoke": SalaamAuthorityStatus,

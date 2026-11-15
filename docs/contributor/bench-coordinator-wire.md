@@ -1,9 +1,10 @@
 # Proposed dedicated checkpoint coordinator wire
 
-Status: **proposed, data-only, disabled**. These strict TypeScript schemas and
+Status: **proposed, disabled**. These strict TypeScript schemas and
 standard-library Go parsers are an owner-first checkpoint for a future dedicated
-adapter. No broker verb, station capability, heartbeat readiness, handler,
-constructor, service grant, deployment setting or board policy is enabled.
+adapter. The explicit `bench.coordinator` verb is registered in the owner's
+strict parameter/result schema tables. No installed handler, station capability,
+heartbeat readiness, service grant, deployment setting or board policy is enabled.
 Use the existing authenticated gateway/broker request and response envelope; the
 objects here are its proposed inner data. An unknown operation/version refuses.
 It never falls back to ACP, Salaam or an ordinary agent command.
@@ -94,6 +95,30 @@ separately admit them. No operation-bound cross-RPC cancellation endpoint or
 uncertain-growth repair is implemented by these DTOs. Until independently
 verified cancellation, current/authenticated gates, transport, actual source
 admission and immutable settlement are integrated, the DX pilot stays disabled.
+
+## Fresh Node-to-Hub authority
+
+The proposed `agentpod.bench-coordinator-current.v1` lookup uses
+`POST /api/nodes/:nodeId/bench-coordinator/current`. Its authenticated identity is
+the existing enrollment credential. The origin comes only from trusted node
+installation configuration; a broker payload cannot choose an endpoint. This
+credential remains in the node process and never enters a worker context.
+
+The request names an exact retained attempt, profile, identity and target with
+a fresh 128-bit nonce. Execution additionally binds the prepared binding and
+source admission digests. The server must verify its retained request, installed
+profile, current station/occupancy/workspace, issuer control pair and actual
+current SuperPipeline ownership after awaited reads. Before source admission it
+checks the original pending claim; afterward it also checks the service's stored
+source. A generic callback, reflected request, node-online flag or receipt hash
+cannot supply this decision.
+
+The bounded response joins the nonce and SHA-256 of the exact raw request, has
+a lifetime of at most five seconds, and requires `Cache-Control: no-store`.
+Future, expired, foreign and replayed decisions refuse. A valid refusal, lost
+response or timeout parks the attempt and proves no process fence or release.
+The included Node HTTP adapter verifies this transport boundary; the actual Hub
+endpoint and installed coordinator constructor remain separate integration work.
 
 ## Conformance
 
