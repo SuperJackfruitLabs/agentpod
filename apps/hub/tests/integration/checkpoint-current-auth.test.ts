@@ -66,7 +66,7 @@ beforeAll(async () => {
   await db.insert(stations).values({ id: stationId, tenantId, userId: owner, principalId: occupant, occupancyEpoch: 1,
     nodeId, stationKey: "fixture:" + suffix, kind: "leaf", displayName: "fixture", harness: "codex", workspacePath: "/fixture" });
   await db.insert(bridgeAgents).values({ tenantId, key: profile.agentKey, boardId: claim.boardId, stationId, profileKey: profile.profileKey,
-    tokenEncrypted: "fixture-not-used", credentialSource: { version: 1, kind: "station-plane", principalId: occupant, organizationId: organizationId, audience: "https://app.superpipeline.dev" } });
+    tokenEncrypted: "", credentialSource: { version: 1, kind: "station-plane", principalId: occupant, organizationId: organizationId, audience: "https://app.superpipeline.dev" } });
   connectionManager.register(nodeId, () => {});
   root = realpathSync(mkdtempSync(join(tmpdir(), "checkpoint-current-auth-"))); chmodSync(root, 0o700);
   const file = join(root, "profiles.json"); writeFileSync(file, JSON.stringify({ version: "agentpod.checkpoint-profiles.v1", profiles: [profile] }), { mode: 0o600 });
