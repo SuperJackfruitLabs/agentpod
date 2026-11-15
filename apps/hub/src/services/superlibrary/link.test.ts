@@ -95,6 +95,63 @@ test("a file larger than one read arrives whole, with its hash and its provenanc
   ]);
 });
 
+test("re-linking a renamed revision for the same card versions the existing artifact", async () => {
+  // Regression caught: the hub must not let the current source path choose a new item when a later
+  // run links a renamed revision of the same card artifact.
+  const original = new TextEncoder().encode("voice: first pass\n");
+  const revised = new TextEncoder().encode("voice: revised pass\n");
+  const { d } = deps({ tree: { "out/docs-voice-pass-spec.md": original, "out/docs-voice-pass-spec-v2.md": revised } });
+  let provenanceCall = 0;
+  d.provenance = async () => ({
+    board: BOARD,
+    card: "card_00000000000000c1",
+    run: `run_00000000000000d${++provenanceCall}`,
+  });
+
+  // Model the pinned Superlibrary behavior: absent an explicit revision target, agent uploads are
+  // identified by station + source path + board. A renamed path therefore starts a new item.
+  const declarations = new Map<string, any>();
+  const itemsBySourcePath = new Map<string, { itemId: string; version: number }>();
+  let nextUpload = 0;
+  d.client.asService = () => ({
+    async request(method, path, init = {}) {
+      if (method === "POST" && path === "/api/v1/uploads") {
+        const uploadId = `upl_000000000000000${++nextUpload}`;
+        declarations.set(uploadId, init.json);
+        return Response.json({ uploadId }, { status: 201 });
+      }
+      if (method === "PUT" && path.includes("/files?path=")) return new Response(null, { status: 204 });
+      const committed = path.match(/^\/api\/v1\/uploads\/(upl_[0-9a-f]+)\/commit$/);
+      if (method === "POST" && committed) {
+        const declaration = declarations.get(committed[1]!)!;
+        const sourcePath = declaration.source.path as string;
+        const prior = itemsBySourcePath.get(sourcePath);
+        const item = prior ?? {
+          itemId: `itm_${String(itemsBySourcePath.size + 1).padStart(16, "0")}`,
+          version: 0,
+        };
+        item.version++;
+        itemsBySourcePath.set(sourcePath, item);
+        return Response.json({
+          ...item,
+          url: `https://app.superlibrary.dev/a/${item.itemId}`,
+          sha256: "x",
+          mediaType: "text/markdown",
+          bytes: declaration.files[0].bytes,
+        }, { status: 201 });
+      }
+      throw new Error(`unexpected Superlibrary call: ${method} ${path}`);
+    },
+  });
+
+  const v1 = await link(d, { path: "out/docs-voice-pass-spec.md", title: "Docs voice pass spec" });
+  expect(v1).toMatchObject({ ok: true, version: 1 });
+  if (!v1.ok) throw new Error("first link should succeed");
+
+  const v2 = await link(d, { path: "out/docs-voice-pass-spec-v2.md", title: "Docs voice pass spec" });
+  expect(v2).toMatchObject({ ok: true, itemId: v1.itemId, version: 2, url: v1.url });
+});
+
 test("a board with no card or run sends neither key", async () => {
   const { d, sent } = deps();
   d.provenance = async () => ({ board: BOARD });
