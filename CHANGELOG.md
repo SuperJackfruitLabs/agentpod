@@ -10,6 +10,8 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+## v0.1.129 — 2026-11-16
+
 ### Fixed
 
 - Broker replies, failures and stream chunks are accepted only from the authenticated
