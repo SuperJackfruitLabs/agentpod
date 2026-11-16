@@ -1,0 +1,7 @@
+{
+  "repository": "ssh://git@forge.superjackfruit.com:2222/SuperJackfruitLabs/treaty.git",
+  "revision": "094ebb69f369053008a20b0a311d1a88aebef988",
+  "path": "fixtures/agentpod-local/registered-worker.json",
+  "sha256": "e2acd823e34631076e3dcf66cc1f0e306a9b95620ac3371a046ea39848367c13",
+  "status": "PROPOSED wire corpus; no producer state, topology or fencing proof"
+}
