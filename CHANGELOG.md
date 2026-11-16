@@ -10,6 +10,14 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+### Added
+
+- The private bench worker has an explicit `hermes-v1` adapter for bounded prompt
+  input and binding-matched task results. It requires a separately prepared
+  payload-owned Hermes home, executable, provider and model. No dispatcher enables
+  it by default; installed access, provider readiness and the producer crossing
+  remain separate verification requirements.
+
 ## v0.1.129 — 2026-11-16
 
 ### Fixed
