@@ -4,7 +4,7 @@ import { BenchCoordinatorCurrentResponse, BenchCoordinatorPrepared, benchCoordin
   parseBenchCoordinatorRequest } from "@agentpod/contract";
 import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON } from "./checkpoint-json";
 import { readCheckpointAttempt, type RetainedCheckpointAttempt } from "./checkpoint-ledger";
-import { CheckpointRefused } from "./checkpoint-profile";
+import { checkpointProfileId, CheckpointRefused } from "./checkpoint-profile";
 import { requireInstalledCheckpointProfile } from "./checkpoint-profiles";
 import { readCheckpointAuthority } from "./checkpoint-current";
 import { checkpointAgentClient } from "./checkpoint-agent-client";
@@ -45,7 +45,7 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array)
     const attempt = await readCheckpointAttempt(request.identity.tenant_id, request.identity.attempt_id);
     if (!attempt || canonicalCheckpoint(request.identity) !== canonicalCheckpoint(attempt.request.identity) ||
       canonicalCheckpoint(request.target) !== canonicalCheckpoint(attempt.request.target) ||
-      request.profile_id !== attempt.profile.profileKey || request.prepare_request_sha256 !== attempt.row.prepareSHA256)
+      request.profile_id !== checkpointProfileId(attempt.profile) || request.prepare_request_sha256 !== attempt.row.prepareSHA256)
       return refused("stale_owner");
     requireInstalledCheckpointProfile(attempt.profile);
     const authority = await readCheckpointAuthority(attempt.profile);

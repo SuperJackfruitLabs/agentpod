@@ -51,7 +51,12 @@ JSON file, at most 64 KiB, in a private directory. The file and directory must b
 owned by the service user or root and inaccessible to other users; symlinks are
 refused. The versioned profile pins the issuer organization, both tenant ID
 spaces, selected workspace and agent, repository mapping and installed Node,
-worker and registry digests. Missing or invalid configuration refuses dedicated
+worker and registry digests. `profileKey` selects the exact bridge harness profile,
+including `""` for its default profile. Optional `coordinatorProfileId` selects the
+Node registry profile independently and must be nonempty. Named harness profiles
+retain their existing coordinator ID when this field is omitted; a default harness
+profile requires it explicitly. Null and empty profile keys are not interchangeable
+in stored roster ownership checks. Missing or invalid configuration refuses dedicated
 work. A failed load is logged once with a closed code and disables only dedicated
 selection; unrelated agents continue through their ordinary bridge path. Generic
 clients still reject actual checkpoint claims and every non-null policy, so a

@@ -13,7 +13,7 @@ import { bridgeAgents } from "../../src/db/schema/bridge";
 import { checkpointDispatches } from "../../src/db/schema/checkpoint-dispatch";
 import { checkpointCurrentRoutes } from "../../src/routes/checkpoint-current";
 import { connectionManager, handleNodeMessage } from "../../src/services/broker";
-import { parseCheckpointProfile } from "../../src/services/bridge/checkpoint-profile";
+import { checkpointProfileId, parseCheckpointProfile } from "../../src/services/bridge/checkpoint-profile";
 import { readCheckpointAttempt, reserveCheckpointAttempt } from "../../src/services/bridge/checkpoint-ledger";
 import { driveCheckpointAttempt } from "../../src/services/bridge/checkpoint-orchestrator";
 import { checkpointAgentClient } from "../../src/services/bridge/checkpoint-agent-client";
@@ -42,7 +42,7 @@ let root = "";
 const profile = parseCheckpointProfile({ version: "agentpod.checkpoint-profile.v1", organizationId: organizationId,
   sourceTenantId: claimFixture.pending.tenantId, sourceOrigin: "https://pipeline.test", sourceAudience: "https://app.superpipeline.dev",
   reporterPrincipalId: "prn_" + "c".repeat(20), ownerPrincipalId: owner, occupantPrincipalId: occupant,
-  agentKey: "checkpoint-auth-" + suffix, profileKey: "fixture-profile", occupancyEpoch: 1,
+  agentKey: "checkpoint-auth-" + suffix, profileKey: "", coordinatorProfileId: "fixture-profile", occupancyEpoch: 1,
   target: { tenant_id: tenantId, board_id: claimFixture.pending.boardId, agent_id: claimFixture.pending.agentId,
     station_id: stationId, node_id: nodeId, host_id: "host_fixture", registry_sha256: "a".repeat(64),
     coordinator_implementation_sha256: "b".repeat(64), execution_mode: "linux-cgroup-v2", bench_protocol: "superbench.v2",
@@ -94,7 +94,7 @@ beforeAll(async () => {
     }
     return extraFetch(address, init);
   }, { preconnect: restoreFetch.preconnect });
-  attempt = (await reserveCheckpointAttempt(profile, claim, { profile_id: profile.profileKey, prompt: "fixture", timeout_seconds: 60 })).attempt;
+  attempt = (await reserveCheckpointAttempt(profile, claim, { profile_id: checkpointProfileId(profile), prompt: "fixture", timeout_seconds: 60 })).attempt;
 });
 // Rows are deliberately immutable and retained for this isolated test database.
 // The QA driver drops its exact owned database afterward; there is no trigger bypass.
@@ -109,7 +109,7 @@ afterAll(async () => {
 });
 async function current(overrides: Record<string, unknown> = {}, credential = nodeId + ":" + secret) {
   const raw = encode(JSON.stringify({ version: "agentpod.bench-coordinator-current.v1", phase: "prepare", nonce: crypto.randomUUID().replaceAll("-", ""),
-    identity: attempt.request.identity, target: profile.target, profile_id: profile.profileKey, prepare_request_sha256: attempt.row.prepareSHA256, ...overrides }));
+    identity: attempt.request.identity, target: profile.target, profile_id: checkpointProfileId(profile), prepare_request_sha256: attempt.row.prepareSHA256, ...overrides }));
   const response = await app.request(`/api/nodes/${nodeId}/bench-coordinator/current`, { method: "POST", headers: { authorization: "Bearer " + credential, "content-type": "application/json" }, body: raw });
   return { response, raw, body: new Uint8Array(await response.arrayBuffer()) };
 }
@@ -120,6 +120,24 @@ test("actual enrolled Node and fresh DB/issuer/run joins return only an exact sh
   const text = new TextDecoder().decode(result.body); expect(text).not.toContain(secret); expect(text).not.toContain("access_token");
   expect(decision.request_sha256).toBe(createHash("sha256").update(result.raw).digest("hex"));
 });
+test("default harness profile keeps exact DB ownership and independent coordinator identity", async () => {
+  expect(profile.profileKey).toBe("");
+  expect(attempt.request.task.profile_id).toBe("fixture-profile");
+  expect(JSON.parse(attempt.row.authority).profileKey).toBe("");
+  const wrongCoordinator = await current({ profile_id: "other-coordinator" });
+  expect((await parseBenchCoordinatorCurrentResponse(wrongCoordinator.body, wrongCoordinator.raw, Date.now())).decision).toBe("refused");
+  for (const profileKey of [null, "fixture-profile"]) {
+    await db.update(bridgeAgents).set({ profileKey }).where(eq(bridgeAgents.tenantId, tenantId));
+    try {
+      const mismatch = await current();
+      expect((await parseBenchCoordinatorCurrentResponse(mismatch.body, mismatch.raw, Date.now())).decision).toBe("refused");
+    } finally { await db.update(bridgeAgents).set({ profileKey: "" }).where(eq(bridgeAgents.tenantId, tenantId)); }
+    const restored = await current();
+    expect((await parseBenchCoordinatorCurrentResponse(restored.body, restored.raw, Date.now())).decision).toBe("current");
+  }
+});
+
+
 test("actual invalid Node credential never reaches issuer/source authority", async () => {
   const before = sourceReads; const result = await current({}, nodeId + ":wrong-secret");
   expect(result.response.status).toBe(401); expect(sourceReads).toBe(before);
@@ -160,7 +178,7 @@ test("installed production port verifies actual broker target pins without ACP o
 
 test.each(["none", "prepare", "execute", "settlement", "before-settlement", "before-settlement-ended", "before-settlement-expired", "before-settlement-source", "before-settlement-grant", "before-settlement-unavailable"])("real broker and immutable DB phases preserve %s uncertainty without redispatch", async (lost) => {
   const selected = parsePendingCheckpointClaim({ ...claim, runId: "run_" + suffix + lost.replaceAll("-", "") });
-  const reserved = await reserveCheckpointAttempt(profile, selected, { profile_id: profile.profileKey, prompt: "fixture", timeout_seconds: 60 });
+  const reserved = await reserveCheckpointAttempt(profile, selected, { profile_id: checkpointProfileId(profile), prompt: "fixture", timeout_seconds: 60 });
   const completion = await checkpointNodeObservation(reserved.attempt);
   contextClaim = selected;
   const beforeSettlement = lost.startsWith("before-settlement");
