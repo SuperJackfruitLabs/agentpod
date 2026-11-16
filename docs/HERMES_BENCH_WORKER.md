@@ -39,7 +39,17 @@ terminal result, and terminal text containing one strict grouped WorkerResult:
 `version: agentpod.superbench-worker.v2`, the exact input binding, `outcome` of
 `complete`, `blocked`, or `failed`, and a string-valued `handoff` object. Normal
 prose, foreign bindings, missing/duplicate terminals, error results, replay gaps, truncation,
-oversize output, and nonzero exits produce no result on stdout. Logs go to stderr.
+oversize output, and nonzero exits produce no result on stdout. Null values in
+nonterminal tool arguments are permitted; terminal result validation remains
+strict.
+
+Logs go to stderr. Stream-event logs contain only event type, tool name, and
+byte counts for tool input/output or assistant text. Input counts measure the
+JSON-encoded argument value. Raw tool arguments, tool output, assistant text,
+session IDs and terminal result text are not copied into these event logs.
+The child's own stderr is forwarded separately, bounded to 64 KiB; it can contain
+Hermes diagnostics and is not content-redacted. Exceeding that stderr cap or the
+1 MiB stream cap refuses the task without emitting a worker result.
 The result remains task evidence; it proves neither fencing nor checkpoint,
 release, or board settlement. Cancellation stops the child leader; the supervising
 producer must independently fence descendants before publishing evidence.

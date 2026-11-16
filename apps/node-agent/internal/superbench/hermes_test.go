@@ -44,6 +44,8 @@ func hermesFixture(t *testing.T, mode string) (HermesConfig, hermesInput, string
 		event["replay_gap"] = true
 	case "terminal-failure":
 		event["exit_code"] = 1
+	case "terminal-null":
+		event["replay_gap"] = nil
 	case "blocked":
 		result.Outcome = "blocked"
 		raw, _ = json.Marshal(result)
@@ -52,6 +54,24 @@ func hermesFixture(t *testing.T, mode string) (HermesConfig, hermesInput, string
 	terminal, _ := json.Marshal(event)
 	output := init + string(terminal) + "\n"
 	switch mode {
+	case "tool-null", "tool-null-input", "tool-logs":
+		input := any(map[string]any{"secret": "PRIVATE_TOOL_INPUT"})
+		switch mode {
+		case "tool-null":
+			input.(map[string]any)["nested"] = map[string]any{"nullable": nil}
+		case "tool-null-input":
+			input = nil
+		}
+		output = init
+		for _, e := range []map[string]any{
+			{"type": "tool_use", "name": "fixture_tool", "input": input, "timestamp": 2},
+			{"type": "tool_result", "name": "fixture_tool", "output": "PRIVATE_TOOL_OUTPUT", "duration_ms": 1, "is_error": false, "timestamp": 3},
+			{"type": "text", "text": "PRIVATE_ASSISTANT_TEXT", "timestamp": 4},
+		} {
+			raw, _ := json.Marshal(e)
+			output += string(raw) + "\n"
+		}
+		output += string(terminal) + "\n"
 	case "partial":
 		output = init
 	case "truncated":
@@ -75,13 +95,23 @@ func hermesFixture(t *testing.T, mode string) (HermesConfig, hermesInput, string
 	body := `#!/bin/sh
 set -eu
 [ "$#" = 10 ]
-[ "$1" = chat ] && [ "$2" = --query-file ] && [ "$3" = - ]
-[ "$4" = --oneshot ] && [ "$5" = --format ] && [ "$6" = stream-json ]
-[ "$7" = --provider ] && [ "$8" = test-provider ]
-[ "$9" = --model ] && [ "${10}" = test-model ]
-[ -z "${HUB_TOKEN+x}" ] && [ -z "${NODE_TOKEN+x}" ] && [ -z "${OPENAI_API_KEY+x}" ]
-[ -z "${HERMES_KANBAN_TASK+x}" ] && [ -z "${LD_PRELOAD+x}" ]
-[ "$HERMES_HOME" = "$HOME/.hermes" ] && [ "$TMPDIR" = "$HOME/tmp" ]
+[ "$1" = chat ]
+[ "$2" = --query-file ]
+[ "$3" = - ]
+[ "$4" = --oneshot ]
+[ "$5" = --format ]
+[ "$6" = stream-json ]
+[ "$7" = --provider ]
+[ "$8" = test-provider ]
+[ "$9" = --model ]
+[ "${10}" = test-model ]
+[ -z "${HUB_TOKEN+x}" ]
+[ -z "${NODE_TOKEN+x}" ]
+[ -z "${OPENAI_API_KEY+x}" ]
+[ -z "${HERMES_KANBAN_TASK+x}" ]
+[ -z "${LD_PRELOAD+x}" ]
+[ "$HERMES_HOME" = "$HOME/.hermes" ]
+[ "$TMPDIR" = "$HOME/tmp" ]
 cat > "$HOME/query"
 printf 'child log only\n' >&2
 `
@@ -129,7 +159,7 @@ func TestHermesRealChildProtocolAndPrivateEnvironment(t *testing.T) {
 }
 
 func TestHermesRefusesFalseCompletion(t *testing.T) {
-	for _, mode := range []string{"nonzero", "foreign", "prose", "error", "terminal-failure", "replay-gap", "partial", "truncated", "duplicate-terminal", "duplicate-key", "extra", "large"} {
+	for _, mode := range []string{"nonzero", "foreign", "prose", "error", "terminal-failure", "terminal-null", "replay-gap", "partial", "truncated", "duplicate-terminal", "duplicate-key", "extra", "large"} {
 		t.Run(mode, func(t *testing.T) {
 			c, in, _ := hermesFixture(t, mode)
 			var out, logs bytes.Buffer
@@ -147,6 +177,32 @@ func TestHermesRefusesFalseCompletion(t *testing.T) {
 	var out, logs bytes.Buffer
 	if err := runHermes(t.Context(), in, &out, &logs, c); err != nil || !strings.Contains(out.String(), `"outcome":"blocked"`) {
 		t.Fatalf("blocked observation lost: %v %s", err, out.Bytes())
+	}
+}
+
+func TestHermesToolNullsAndMetadataLogs(t *testing.T) {
+	for _, mode := range []string{"tool-null", "tool-null-input", "tool-logs"} {
+		t.Run(mode, func(t *testing.T) {
+			c, in, _ := hermesFixture(t, mode)
+			var out, logs bytes.Buffer
+			if err := runHermes(t.Context(), in, &out, &logs, c); err != nil {
+				t.Fatalf("valid tool events refused: %v", err)
+			}
+			var result WorkerResult
+			if err := decodeGroupedResult(out.Bytes(), &result, in.Binding); err != nil || result.Outcome != "complete" {
+				t.Fatalf("terminal result changed: %v %s", err, out.Bytes())
+			}
+			for _, secret := range []string{"PRIVATE_TOOL_INPUT", "PRIVATE_TOOL_OUTPUT", "PRIVATE_ASSISTANT_TEXT", "session_id", "handoff"} {
+				if strings.Contains(logs.String(), secret) {
+					t.Fatalf("private event content logged: %s", secret)
+				}
+			}
+			for _, summary := range []string{`"type":"tool_use","name":"fixture_tool","input_bytes":`, `"type":"tool_result","name":"fixture_tool","output_bytes":19`, `"type":"text","text_bytes":22`} {
+				if !strings.Contains(logs.String(), summary) {
+					t.Fatalf("missing event metadata %s: %s", summary, logs.String())
+				}
+			}
+		})
 	}
 }
 

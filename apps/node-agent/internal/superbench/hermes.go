@@ -151,7 +151,7 @@ func parseHermesStream(raw []byte, b Binding, model string, logs io.Writer) (Wor
 		line := scan.Bytes()
 		var e hermesEvent
 		var value any
-		if count > 4096 || finished || len(line) == 0 || strictJSON(line, &value) != nil || !noGroupedNull(value) {
+		if count > 4096 || finished || len(line) == 0 || strictJSON(line, &value) != nil {
 			return result, ErrHermesResult
 		}
 		d := json.NewDecoder(bytes.NewReader(line))
@@ -170,7 +170,7 @@ func parseHermesStream(raw []byte, b Binding, model string, logs io.Writer) (Wor
 			switch e.Type {
 			case "text", "tool_use", "tool_result":
 			case "result":
-				if e.ExitCode == nil || *e.ExitCode != 0 || e.Error != "" || e.ReplayGap || e.Duration == nil || *e.Duration < 0 || len(e.Tokens) != 5 {
+				if !noGroupedNull(value) || e.ExitCode == nil || *e.ExitCode != 0 || e.Error != "" || e.ReplayGap || e.Duration == nil || *e.Duration < 0 || len(e.Tokens) != 5 {
 					return result, ErrHermesResult
 				}
 				for _, name := range []string{"input", "output", "total", "cache_read", "cache_write"} {
@@ -188,7 +188,7 @@ func parseHermesStream(raw []byte, b Binding, model string, logs io.Writer) (Wor
 			}
 		}
 		if !finished {
-			if _, err := logs.Write(append(bytes.Clone(line), '\n')); err != nil {
+			if err := logHermesEvent(logs, e, value); err != nil {
 				return result, ErrHermesResult
 			}
 		}
@@ -197,6 +197,34 @@ func parseHermesStream(raw []byte, b Binding, model string, logs io.Writer) (Wor
 		return WorkerResult{}, ErrHermesResult
 	}
 	return result, nil
+}
+
+// Stream logs contain metadata only. Tool arguments, tool output and assistant
+// text can contain private task data and must not be copied into Node logs.
+func logHermesEvent(logs io.Writer, event hermesEvent, value any) error {
+	entry := struct {
+		Type        string `json:"type"`
+		Name        string `json:"name,omitempty"`
+		InputBytes  int    `json:"input_bytes,omitempty"`
+		OutputBytes int    `json:"output_bytes,omitempty"`
+		TextBytes   int    `json:"text_bytes,omitempty"`
+	}{Type: event.Type}
+	switch event.Type {
+	case "tool_use":
+		entry.Name = event.Name
+		if input, present := value.(map[string]any)["input"]; present {
+			raw, err := json.Marshal(input)
+			if err != nil {
+				return err
+			}
+			entry.InputBytes = len(raw)
+		}
+	case "tool_result":
+		entry.Name, entry.OutputBytes = event.Name, len(event.Output)
+	case "text":
+		entry.TextBytes = len(event.Text)
+	}
+	return json.NewEncoder(logs).Encode(entry)
 }
 
 func hermesEventFields(kind string, value any) bool {
