@@ -4,7 +4,7 @@ import { BENCH_COORDINATOR_VERB, CARD_PROMPT_VERSION, CardPrompt, CardPromptComm
 import { request as nodeRequest } from "../broker";
 import { canonicalCheckpoint } from "./checkpoint-json";
 import { readCheckpointAuthority } from "./checkpoint-current";
-import { readCheckpointProfiles, requireInstalledCheckpointProfile } from "./checkpoint-profiles";
+import { installedCheckpointProfiles, requireInstalledCheckpointProfile } from "./checkpoint-profiles";
 import { CheckpointRefused, requireCheckpointProfileClaim, type CheckpointProfile } from "./checkpoint-profile";
 import { checkpointAgentClient } from "./checkpoint-agent-client";
 import { pendingCheckpointAttempt, reserveCheckpointAttempt } from "./checkpoint-ledger";
@@ -26,7 +26,7 @@ function target(profile: CheckpointProfile): CheckpointTarget {
 export function checkpointRuntime(tenantId: string, boardId: string, stationId: string, agentKey: string): {
   client(): Promise<SuperpipelineClient>; port: CheckpointDispatchPort;
 } | undefined {
-  const found = readCheckpointProfiles().find((p) => p.target.tenant_id === tenantId &&
+  const found = installedCheckpointProfiles().find((p) => p.target.tenant_id === tenantId &&
     p.target.board_id === boardId && p.target.station_id === stationId && p.agentKey === agentKey);
   if (!found) return undefined;
   const profile: CheckpointProfile = found;

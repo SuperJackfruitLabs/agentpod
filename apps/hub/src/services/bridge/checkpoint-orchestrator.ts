@@ -2,6 +2,7 @@
  * its original durable attempt; neither a child nor a request ID is replaced.
  */
 import { createHash } from "node:crypto";
+import { createLogger } from "../../utils/logger";
 import { BENCH_COORDINATOR_VERB, BenchCoordinatorRequest, parseBenchCoordinatorResponse,
   type BenchCoordinatorResponse } from "@agentpod/contract";
 import { request as nodeRequest } from "../broker";
@@ -20,8 +21,13 @@ import type { DispatchResult } from "./dispatch-types";
 
 const encode = (raw: string) => new TextEncoder().encode(raw);
 const hash = (raw: string) => createHash("sha256").update(raw, "utf8").digest("hex");
-const parked = (attempt: RetainedCheckpointAttempt): DispatchResult => ({ status: "unreported",
-  externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId, reason: "Checkpoint dispatch requires reconciliation" });
+const log = createLogger("bridge-checkpoint");
+const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["code"] = "uncertain"): DispatchResult => {
+  log.warn("checkpoint dispatch parked for reconciliation", { tenantId: attempt.row.tenantId,
+    boardId: attempt.row.boardId, runId: attempt.claim.runId, attemptId: attempt.row.attemptId, phase: attempt.row.phase, code });
+  return { status: "unreported", externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId,
+    reason: "Checkpoint dispatch requires reconciliation" };
+};
 
 async function current(attempt: RetainedCheckpointAttempt): Promise<void> {
   requireInstalledCheckpointProfile(attempt.profile);
@@ -164,5 +170,5 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
     }
     return attempt.row.phase === "reported" ? { status: "reported", externalRunId: attempt.claim.runId,
       attemptId: attempt.row.attemptId } : parked(attempt);
-  } catch { return parked(attempt); }
+  } catch (error) { return parked(attempt, error instanceof CheckpointRefused ? error.code : "unavailable"); }
 }

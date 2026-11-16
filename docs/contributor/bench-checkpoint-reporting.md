@@ -1,9 +1,11 @@
-# Proposed dedicated checkpoint reporting
+# Dedicated checkpoint reporting (default off)
 
-This work follows the proposed charter decision
-`2026-11-15-checkpoint-settlement-needs-a-coordinator-grant.md`. It enables no
-capability, installed configuration, service grant, stage policy or pilot. The accepted
-host-local SuperBench contract does not accept this cross-product authority.
+This work follows charter decision
+`2026-11-15-checkpoint-settlement-needs-a-coordinator-grant.md`, accepted by the
+operator on 2026-11-16 with its enablement conditions (Charter `c8c369f8`).
+Acceptance does not provision a grant or enable a pilot. This code installs no
+configuration, service credential or stage policy. The standalone host-local
+SuperBench lifecycle remains independent of the suite coordinator.
 
 The internal Hub source client uses the existing organization issuer's service
 token endpoint and verifies its EdDSA signature, audience, organization, service
@@ -51,8 +53,26 @@ owned by the service user or root and inaccessible to other users; symlinks are
 refused. The versioned profile pins the issuer organization, both tenant ID
 spaces, selected workspace and agent, repository mapping and installed Node,
 worker and registry digests. Missing or invalid configuration refuses dedicated
-work. These settings provision no credentials, policy, capability or acceptance;
-no profile or environment setting is installed by this change.
+work. A failed load is logged once with a closed code and disables only dedicated
+selection; unrelated agents continue through their ordinary bridge path. Generic
+clients still reject actual checkpoint claims and every non-null policy, so a
+broken installation cannot silently execute policy-required work through ACP.
+
+Profiles are an immutable process snapshot, loaded lazily once per configured
+path, including a failed load. Editing, repairing, replacing or deleting the same
+file does not reload that snapshot: restart the Hub to apply it. A changed server
+configuration path selects a new snapshot; no file watcher or periodic read runs.
+Roster loop construction selects its dedicated runtime once. Every operation still
+rechecks the literal flag, current issuer/control pair, selected station/node,
+run/epoch and policy around awaits; snapshot caching does not cache authority.
+These settings provision no credentials, policy or capability; no profile or
+environment setting is installed by this change.
+
+The `bridge-checkpoint` structured logs report profile availability, successfully
+committed attempt phases, and parking with closed refusal codes. Work identifiers
+allow an operator to join the phase to its ledger row. These log events exclude
+private configuration paths, bodies, credentials, worker handoff and raw errors.
+A parked message is not proof of fencing, release or successful settlement.
 
 The service client uses the proposed owner service revision
 `7d87ef6a964b54062f9af2e610a122263fb0242f`: raw strict T37 receipts from

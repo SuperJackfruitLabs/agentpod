@@ -2,6 +2,7 @@
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { dirname, isAbsolute, normalize, parse, sep } from "node:path";
 import { z } from "zod";
+import { createLogger } from "../../utils/logger";
 import { canonicalCheckpoint, parseCheckpointJSON } from "./checkpoint-json";
 import { CheckpointRefused, parseCheckpointProfile, type CheckpointProfile } from "./checkpoint-profile";
 
@@ -20,7 +21,7 @@ function readPrivate(path: string): Uint8Array {
   }
   const parent = lstatSync(dirname(path));
   if (!parent.isDirectory() || (parent.mode & 0o077) !== 0 || !privateOwner(parent.uid)) throw new CheckpointRefused("invalid");
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = fstatSync(fd);
     if (!before.isFile() || (before.mode & 0o077) !== 0 || !privateOwner(before.uid) || before.size > 65536)
@@ -48,8 +49,32 @@ export function readCheckpointProfiles(env: Record<string, string | undefined> =
   } catch { throw new CheckpointRefused("unavailable"); }
 }
 
+const log = createLogger("bridge-checkpoint");
+let installation: { path: string | undefined; profiles: readonly CheckpointProfile[] } | undefined;
+/** Private pins are installed once per configured path, including a failed load.
+ * Editing the same file requires a Hub restart; credentials/current authority are
+ * still checked afresh before effects. A malformed installation disables only
+ * dedicated dispatch, never ordinary agent loops or their legacy client.
+ */
+export function installedCheckpointProfiles(): readonly CheckpointProfile[] {
+  if (process.env[CHECKPOINT_COORDINATOR_FLAG] !== "true") return [];
+  const path = process.env[CONFIG_FILE];
+  if (installation && installation.path === path) return installation.profiles;
+  let profiles: readonly CheckpointProfile[];
+  try {
+    profiles = readCheckpointProfiles();
+    log.info("checkpoint profile snapshot loaded", { profiles: profiles.length, reload: "restart-required" });
+  } catch {
+    profiles = Object.freeze([]);
+    // Neither private filenames, profile contents nor raw exceptions enter logs.
+    log.warn("checkpoint profile snapshot unavailable; dedicated dispatch disabled", { code: "unavailable", reload: "restart-required" });
+  }
+  installation = { path, profiles };
+  return profiles;
+}
+
 export function requireInstalledCheckpointProfile(profile: CheckpointProfile): void {
-  const installed = readCheckpointProfiles().find((value) => value.target.tenant_id === profile.target.tenant_id &&
+  const installed = installedCheckpointProfiles().find((value) => value.target.tenant_id === profile.target.tenant_id &&
     value.target.board_id === profile.target.board_id && value.target.station_id === profile.target.station_id);
   if (!installed || canonicalCheckpoint(installed) !== canonicalCheckpoint(profile)) throw new CheckpointRefused("stale");
 }

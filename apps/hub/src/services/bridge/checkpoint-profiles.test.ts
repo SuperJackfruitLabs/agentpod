@@ -1,23 +1,24 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { readCheckpointProfiles, CHECKPOINT_COORDINATOR_FLAG } from "./checkpoint-profiles";
+import { readCheckpointProfiles, requireInstalledCheckpointProfile, CHECKPOINT_COORDINATOR_FLAG } from "./checkpoint-profiles";
 import corpus from "../../../../../packages/contract/src/fixtures/bench-coordinator-v1.json";
 
 import { checkpointRuntime } from "./checkpoint-port";
 const prior = { flag: process.env.PROPOSED_CHECKPOINT_COORDINATOR, file: process.env.PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE };
 const roots: string[] = [];
 afterEach(() => {
-  for (const [key, value] of [["PROPOSED_CHECKPOINT_COORDINATOR", prior.flag], ["PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE", prior.file]]) {
-    if (value === undefined) delete process.env[key!]; else process.env[key!] = value;
+  for (const [key, value] of Object.entries({ PROPOSED_CHECKPOINT_COORDINATOR: prior.flag, PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE: prior.file })) {
+    if (value === undefined) delete process.env[key]; else process.env[key] = value;
   }
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture() {
   const fixtureRequest = corpus.requests.find((item) => item.name === "prepare");
   if (!fixtureRequest) throw new Error("fixture prepare missing");
   const request = fixtureRequest.value;
-  if (!("target" in request)) throw new Error("fixture target missing");
+  if (!("target" in request) || !request.target) throw new Error("fixture target missing");
   return { version: "agentpod.checkpoint-profile.v1", organizationId: "org_" + "a".repeat(20),
     sourceTenantId: "tnt_source", sourceOrigin: "https://pipeline.test", sourceAudience: "https://app.superpipeline.dev",
     reporterPrincipalId: "prn_" + "b".repeat(20), ownerPrincipalId: "prn_" + "c".repeat(20),
@@ -55,15 +56,41 @@ test("readable config, parent, symlink, unknown key and duplicate selector refus
 
 test("an enabled unavailable installation does not fail an unrelated ordinary agent", () => {
   const f = installed(); Object.assign(process.env, f.env); unlinkSync(f.file);
-  expect(checkpointRuntime("ordinary-tenant", "ordinary-board", "ordinary-station", "ordinary-agent")).toBeUndefined();
-  // Repeated cycles still refuse checkpoint readiness without retrying the bad file.
-  expect(checkpointRuntime("ordinary-tenant", "ordinary-board", "ordinary-station", "ordinary-agent")).toBeUndefined();
+  const warning = spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    expect(checkpointRuntime("ordinary-tenant", "ordinary-board", "ordinary-station", "ordinary-agent")).toBeUndefined();
+    // A repaired file is not silently reread on a later cycle; explicit restart/reconfiguration is required.
+    writeFileSync(f.file, JSON.stringify({ version: "agentpod.checkpoint-profiles.v1", profiles: [fixture()] }), { mode: 0o600 });
+    const p = fixture(); const t = p.target;
+    expect(checkpointRuntime(t.tenant_id, t.board_id, t.station_id, p.agentKey)).toBeUndefined();
+    expect(warning).toHaveBeenCalledTimes(1);
+    const message = JSON.stringify(warning.mock.calls);
+    expect(message).toContain("dedicated dispatch disabled");
+    expect(message).not.toContain(f.file);
+    expect(message).not.toContain(p.sourceOrigin);
+  } finally { warning.mockRestore(); }
 });
 test("installed pins are a stable snapshot rather than a filesystem read every cycle", () => {
   const f = installed(); Object.assign(process.env, f.env); const profile = fixture(); const t = profile.target;
   const runtime = () => checkpointRuntime(t.tenant_id, t.board_id, t.station_id, profile.agentKey);
-  expect(runtime()).toBeDefined(); unlinkSync(f.file);
+  expect(runtime()).toBeDefined(); const [pin] = readCheckpointProfiles(f.env); unlinkSync(f.file);
   expect(runtime()).toBeDefined();
+  if (!pin) throw new Error("fixture pin missing");
+  expect(() => requireInstalledCheckpointProfile(pin)).not.toThrow();
+  delete process.env.PROPOSED_CHECKPOINT_COORDINATOR;
+  expect(runtime()).toBeUndefined();
+  expect(() => requireInstalledCheckpointProfile(pin)).toThrow(/Checkpoint/);
   const installedProfile = readCheckpointProfiles({});
   expect(installedProfile).toEqual([]); // Explicit flag-off remains free of config reads.
+});
+
+test("a non-regular profile cannot block the bridge while opening its snapshot", () => {
+  const f = installed(); unlinkSync(f.file);
+  const fifo = spawnSync("mkfifo", [f.file]);
+  expect(fifo.status).toBe(0); chmodSync(f.file, 0o600);
+  const script = `import {readCheckpointProfiles} from ${JSON.stringify(join(import.meta.dir, "checkpoint-profiles.ts"))};
+    try { readCheckpointProfiles(${JSON.stringify(f.env)}); process.exit(2); } catch { process.exit(0); }`;
+  const child = spawnSync(process.execPath, ["--eval", script], { timeout: 2000, stdio: "pipe" });
+  expect(child.error).toBeUndefined();
+  expect(child.status).toBe(0);
 });

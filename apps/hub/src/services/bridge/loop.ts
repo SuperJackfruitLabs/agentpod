@@ -326,10 +326,12 @@ export async function startSuperpipelineBridge(
         ...(agent.credentialSource ? {credential: bridgePlaneCredential(agent)} : {}),
         fetch: fetchAdapter,
       });
+      // Config pins belong to this loop's installation, not its polling cycle.
+      // An unavailable snapshot returns no dedicated runtime; ordinary work is unchanged.
+      const dedicated = checkpointRuntime(agent.tenantId ?? BOOTSTRAP_TENANT_ID,
+        agent.boardId, agent.stationId, agent.key);
       const handle = startAgentLoop({
         run: async (handover) => {
-          const dedicated = checkpointRuntime(agent.tenantId ?? BOOTSTRAP_TENANT_ID,
-            agent.boardId, agent.stationId, agent.key);
           return runOnce({
             handover,
             client: dedicated ? await dedicated.client() : client,
