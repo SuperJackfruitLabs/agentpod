@@ -38,7 +38,7 @@ func ParseResponse(raw []byte, httpStatus int, request Request) (Response, error
 	if wire.Version != Version || wire.OK == (wire.Error != nil) || wire.OK && wire.Result == nil {
 		return zero, ErrResponse
 	}
-	if wire.Error != nil && (!validHTTPError(wire.Error.Code, httpStatus) || len(wire.Error.Message) == 0 || len(wire.Error.Message) > 256) {
+	if wire.Error != nil && (!validOperationHTTPError(wire.Error.Code, httpStatus) || len(wire.Error.Message) == 0 || len(wire.Error.Message) > 256) {
 		return zero, ErrResponse
 	}
 	if wire.OK && httpStatus != 200 {
@@ -79,6 +79,15 @@ func ParseResponse(raw []byte, httpStatus int, request Request) (Response, error
 		}
 	}
 	return response, nil
+}
+
+// Allocation diagnostics extend ordinary operations only; cancellation keeps its
+// separately reviewed closed error set.
+func validOperationHTTPError(code string, status int) bool {
+	if code == "capacity_exhausted" {
+		return status == 422
+	}
+	return validHTTPError(code, status)
 }
 
 func validHTTPError(code string, status int) bool {
