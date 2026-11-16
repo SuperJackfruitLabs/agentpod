@@ -21,7 +21,7 @@ test.each([fixture.pending, null, false, { version: "unknown" }])(
   },
 );
 
-test.each([fixture.pending.policy, null, false, { version: "unknown" }])(
+test.each([fixture.pending.policy, {}, false, { version: "unknown" }])(
   "a required or malformed policy cannot silently enter the legacy path: %j", async (checkpointPolicy) => {
     const { client } = board({ ...fixture.claimed, stage: { ...fixture.claimed.stage, checkpointPolicy } });
     await expect(client.claim()).rejects.toThrow(/checkpoint/i);
@@ -210,4 +210,13 @@ test("checkpointOnly true requires the exact protocol before any request", async
   const { client, calls } = board(checkpointReply());
   await expect(client.claim({ checkpointOnly: true })).rejects.toThrow(/unsupported/);
   expect(calls).toHaveLength(0);
+});
+
+test("an absent policy serialized as null preserves ordinary legacy claim and context", async () => {
+  const stage = { key: "plain", name: "Plain", checkpointPolicy: null };
+  const claimed = { ...fixture.claimed, stage };
+  expect(await board(claimed).client.claim()).toMatchObject({ runId: claimed.runId, stage });
+  const context = { ...fixture.context, stage };
+  expect(await board(context).client.context(fixture.pending.runId)).toEqual(context);
+  await expect(board({ ...claimed, checkpointClaim: null }).client.claim()).rejects.toThrow(/checkpoint/i);
 });

@@ -1,12 +1,18 @@
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readCheckpointProfiles, CHECKPOINT_COORDINATOR_FLAG } from "./checkpoint-profiles";
 import corpus from "../../../../../packages/contract/src/fixtures/bench-coordinator-v1.json";
 
+import { checkpointRuntime } from "./checkpoint-port";
+const prior = { flag: process.env.PROPOSED_CHECKPOINT_COORDINATOR, file: process.env.PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE };
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+  for (const [key, value] of [["PROPOSED_CHECKPOINT_COORDINATOR", prior.flag], ["PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE", prior.file]]) {
+    if (value === undefined) delete process.env[key!]; else process.env[key!] = value;
+  }
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture() {
   const fixtureRequest = corpus.requests.find((item) => item.name === "prepare");
   if (!fixtureRequest) throw new Error("fixture prepare missing");
@@ -45,4 +51,19 @@ test("readable config, parent, symlink, unknown key and duplicate selector refus
   expect(() => readCheckpointProfiles(f.env)).toThrow();
   writeFileSync(f.file, JSON.stringify({ version: "agentpod.checkpoint-profiles.v1", profiles: [fixture(), fixture()] }));
   expect(() => readCheckpointProfiles(f.env)).toThrow();
+});
+
+test("an enabled unavailable installation does not fail an unrelated ordinary agent", () => {
+  const f = installed(); Object.assign(process.env, f.env); unlinkSync(f.file);
+  expect(checkpointRuntime("ordinary-tenant", "ordinary-board", "ordinary-station", "ordinary-agent")).toBeUndefined();
+  // Repeated cycles still refuse checkpoint readiness without retrying the bad file.
+  expect(checkpointRuntime("ordinary-tenant", "ordinary-board", "ordinary-station", "ordinary-agent")).toBeUndefined();
+});
+test("installed pins are a stable snapshot rather than a filesystem read every cycle", () => {
+  const f = installed(); Object.assign(process.env, f.env); const profile = fixture(); const t = profile.target;
+  const runtime = () => checkpointRuntime(t.tenant_id, t.board_id, t.station_id, profile.agentKey);
+  expect(runtime()).toBeDefined(); unlinkSync(f.file);
+  expect(runtime()).toBeDefined();
+  const installedProfile = readCheckpointProfiles({});
+  expect(installedProfile).toEqual([]); // Explicit flag-off remains free of config reads.
 });
