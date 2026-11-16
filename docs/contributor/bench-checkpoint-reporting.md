@@ -1,10 +1,9 @@
 # Dedicated checkpoint reporting (default off)
 
-This work follows charter decision
-`2026-11-15-checkpoint-settlement-needs-a-coordinator-grant.md`, accepted by the
-operator on 2026-11-16 with its enablement conditions (Charter `c8c369f8`).
-Acceptance does not provision a grant or enable a pilot. This code installs no
-configuration, service credential or stage policy. The standalone host-local
+The coordinator design is accepted with conditions before enablement. Acceptance
+establishes the suite-to-SuperBench ownership boundary; it does not provision a
+grant, accept every optional wire extension or enable a pilot. This code installs
+no configuration, service credential or stage policy. The standalone host-local
 SuperBench lifecycle remains independent of the suite coordinator.
 
 The internal Hub source client uses the existing organization issuer's service
@@ -30,13 +29,13 @@ lease: new publication requires the same stored source, working run and fresh
 heartbeat. The source admission receipt digest identifies the admitted source;
 it is distinct from the canonical execution receipt digest in a settlement.
 
-The canonical goldens are copied unchanged from Treaty revision
-`d578c7e3ed0709cf7d6d38f7545edacab1691201`,
+Canonical conformance uses the shared fixture
 `fixtures/superpipeline-run-checkpoint/canonical.json`, SHA-256
 `e199f937c17a28edf8b0ab7285870faf0880dba23ccf15f51604e183052e7fb0`.
-The source transport follows SuperPipeline source owner
-`e78e1bb8414b6a2127b666348d62d1c06571714c`. These remain proposed contracts.
-Tests import plain fixtures, never another product's TypeScript.
+Tests import plain fixtures, never another product's TypeScript. Matching a
+schema, canonical digest or fixture does not prove an issuer grant, remote
+fencing or a successful lifecycle. Optional protocol extensions still require
+their own acceptance and producer/consumer conformance before enablement.
 
 The default-off Hub callback and immutable attempt table now retain the original
 prepare request/selected authorization before Node effects. The callback verifies
@@ -74,9 +73,8 @@ allow an operator to join the phase to its ledger row. These log events exclude
 private configuration paths, bodies, credentials, worker handoff and raw errors.
 A parked message is not proof of fencing, release or successful settlement.
 
-The service client uses the proposed owner service revision
-`7d87ef6a964b54062f9af2e610a122263fb0242f`: raw strict T37 receipts from
-`POST /checkpoint-settlements` and `GET /checkpoint`. It recognizes only the
+The service client validates raw strict receipts from the dedicated
+`POST /checkpoint-settlements` and `GET /checkpoint` endpoints. It recognizes only the
 exact authenticated `CHECKPOINT_RECEIPT_MISSING` response as receipt absence.
 Disabled, unknown-board, expired, foreign, malformed or lost responses park.
 The entire canonical submission, including handoff/outcome, must be retained
@@ -115,7 +113,7 @@ failed task does not become a pass.
 Authenticated database/broker tests and actual managed Node/service execution
 are distinct gates; typed fixture observations do not prove remote fencing.
 The complete deployed Hub/Node/source-admission/report path, uncertain-operation
-cancellation/reconciliation, accepted authority decisions and operator
-provisioning remain required. This checkpoint does not enable the
+cancellation/reconciliation, acceptance of the remaining wire and issuer
+contracts, and operator provisioning remain required. This checkpoint does not enable the
 Developer Experience pilot or satisfy native laptop preparation. No generic ACP
 fallback or adoption of replacement-owner output is allowed.

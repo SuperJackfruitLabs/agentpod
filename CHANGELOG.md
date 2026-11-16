@@ -10,7 +10,6 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
-
 ### Fixed
 
 - Broker replies, failures and stream chunks are accepted only from the authenticated
@@ -25,6 +24,14 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   the same profile file. Ordinary claims with an absent policy serialized as `null`
   retain their legacy behavior; actual checkpoint claims and non-null policies still
   require the dedicated path.
+
+- **A board roster no longer calls a station busy for a parked run.** `GET
+  /api/bridge/boards/:boardId/roster` counted `parked` dispatches as work in hand, but #786 parks a
+  revoked strict run precisely so it stops holding the roster, and the bridge goes on claiming on
+  the station. A placement service read such a station as busy for good. Only `working` runs (a
+  run in progress, or one waiting on a permission answer) count now.
+
+- Fixes found while rebuilding the console and checking every page with an accessibility sweep, among them: an open file's tab in Files had its close button nested inside the tab, which screen readers cannot reach (Delete now closes the focused tab, and the cross stays for the pointer); the rendered Markdown preview could not be scrolled from the keyboard; on a phone many buttons, links, radio buttons and checkboxes were smaller than a fingertip; and the Cleanup list's checkboxes could only be hit on the box itself, not on their row.
 
 ### Added
 
@@ -46,20 +53,13 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   error codes and work identifiers. Credentials, private paths, request/response
   bodies and child output are not logged by these diagnostics.
 
-### Added
 - **`agentpod_link_artifact` returns a version-pinned link.** Besides `url` (the item, which
   always opens its latest version) it returns `versionUrl` (`/a/<item>/v/<n>`), and the tool and
   the hub's MCP instructions tell agents to attach that, so a gate opens the exact version it asks
   a person to approve.
 
-### Fixed
-- **A board roster no longer calls a station busy for a parked run.** `GET
-  /api/bridge/boards/:boardId/roster` counted `parked` dispatches as work in hand, but #786 parks a
-  revoked strict run precisely so it stops holding the roster, and the bridge goes on claiming on
-  the station. A placement service read such a station as busy for good. Only `working` runs (a
-  run in progress, or one waiting on a permission answer) count now.
-
 ### Changed
+
 - **The code is restructured into modules, with no change in behaviour** (the modularity work,
   PR #836). The hub's `services/` is 23 modules, each imported through its `index.ts` and
   layered so none imports up; its seven files over 1,000 lines are split (the largest,
@@ -81,10 +81,6 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 - **The console is rebuilt on vibekit**, the suite's design system. It comes in four vibes (Daylight, Paper, Studio and Quiet), each in light and dark, chosen under Appearance in the account menu. With no saved choice the console follows the sun instead of the OS setting. Navigation stays put as you move between pages, and on a phone it becomes a bottom bar with a More sheet. Tables turn into cards on narrow screens, and every control is at least 44px under 1024px wide.
 - **The old colour schemes, font pairings and custom themes are gone.** A person's old light or dark choice seeds the new Appearance setting once; everything else from the old theme settings is dropped.
 - Building the console now needs Node 22 or newer (vibekit requires it); there are no new build variables.
-
-### Fixed
-
-- Fixes found while rebuilding the console and checking every page with an accessibility sweep, among them: an open file's tab in Files had its close button nested inside the tab, which screen readers cannot reach (Delete now closes the focused tab, and the cross stays for the pointer); the rendered Markdown preview could not be scrolled from the keyboard; on a phone many buttons, links, radio buttons and checkboxes were smaller than a fingertip; and the Cleanup list's checkboxes could only be hit on the box itself, not on their row.
 
 ## v0.1.22 — 2026-08-12
 
