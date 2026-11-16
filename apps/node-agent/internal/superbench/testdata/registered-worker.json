@@ -1,0 +1,2638 @@
+{
+  "status": "PROPOSED independent schema/canonical/framing corpus. AgentPod producer does not yet consume this shared corpus; no integrated producer or fencing proof.",
+  "valid": [
+    {
+      "name": "complete registered capsule",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "sha256": "89865712fa41611f60ae45b5fbe8ec9402d885d56cb0436abc3a73ff8ec62da8",
+      "header_hex": "000004c1"
+    },
+    {
+      "name": "canonical untrusted handoff",
+      "kind": "result",
+      "body": {
+        "version": "agentpod.superbench-worker.v2",
+        "binding": {
+          "board_id": "brd_ABCDEF",
+          "card_id": "card_ABCDEF",
+          "run_id": "run_ABCDEF",
+          "epoch": 7
+        },
+        "outcome": "complete",
+        "handoff": {
+          "__proto__": "task text",
+          "summary": "<done>&\n ",
+          "": "BMP",
+          "😀": "astral"
+        }
+      },
+      "raw": "{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"outcome\":\"complete\",\"handoff\":{\"__proto__\":\"task text\",\"summary\":\"\\u003cdone\\u003e\\u0026\\n\\u2029\",\"\":\"BMP\",\"😀\":\"astral\"}}",
+      "sha256": "5a46b07a4e78627f6229e14d6503342660aebff8775c4f7ea24bfc066bc2d73a",
+      "header_hex": "00000107"
+    },
+    {
+      "name": "selected repository capsule",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "repository_name": "app",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"repository_name\":\"app\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "sha256": "0146e6e61d3d9babf27561734a3376053fc38de2fc2ecabc74a79a21d4fd11f4",
+      "header_hex": "000004d9"
+    },
+    {
+      "name": "task blocked",
+      "kind": "result",
+      "body": {
+        "version": "agentpod.superbench-worker.v2",
+        "binding": {
+          "board_id": "brd_ABCDEF",
+          "card_id": "card_ABCDEF",
+          "run_id": "run_ABCDEF",
+          "epoch": 7
+        },
+        "outcome": "blocked",
+        "handoff": {
+          "__proto__": "task text",
+          "summary": "<done>&\n ",
+          "": "BMP",
+          "😀": "astral"
+        }
+      },
+      "raw": "{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"outcome\":\"blocked\",\"handoff\":{\"__proto__\":\"task text\",\"summary\":\"\\u003cdone\\u003e\\u0026\\n\\u2029\",\"\":\"BMP\",\"😀\":\"astral\"}}",
+      "sha256": "399c2bb04806015ee4c4d8d25a38e20519ac1014c3a33b6614e71d4af991c30a",
+      "header_hex": "00000106"
+    },
+    {
+      "name": "task failed",
+      "kind": "result",
+      "body": {
+        "version": "agentpod.superbench-worker.v2",
+        "binding": {
+          "board_id": "brd_ABCDEF",
+          "card_id": "card_ABCDEF",
+          "run_id": "run_ABCDEF",
+          "epoch": 7
+        },
+        "outcome": "failed",
+        "handoff": {
+          "__proto__": "task text",
+          "summary": "<done>&\n ",
+          "": "BMP",
+          "😀": "astral"
+        }
+      },
+      "raw": "{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"outcome\":\"failed\",\"handoff\":{\"__proto__\":\"task text\",\"summary\":\"\\u003cdone\\u003e\\u0026\\n\\u2029\",\"\":\"BMP\",\"😀\":\"astral\"}}",
+      "sha256": "0b5b8379e443a970f156976113f88d221484f98e1b8a82473a66dbd596d8d45e",
+      "header_hex": "00000105"
+    },
+    {
+      "name": "complete two member source and physical vector",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            {
+              "name": "lib",
+              "repository_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha256",
+              "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            },
+            {
+              "name": "lib",
+              "checkout": {
+                "device": "2049",
+                "inode": "8"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "9"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "10"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "11"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},{\"name\":\"lib\",\"repository_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha256\",\"commit\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}},{\"name\":\"lib\",\"checkout\":{\"device\":\"2049\",\"inode\":\"8\"},\"admin\":{\"device\":\"2049\",\"inode\":\"9\"},\"home\":{\"device\":\"2049\",\"inode\":\"10\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"11\"}}]}}",
+      "sha256": "a6f50acdad4412450ac9e8cbb70eddf79077599c2e7fa8c0bbaeba4235652739",
+      "header_hex": "0000065e"
+    },
+    {
+      "name": "uint64 identities never round through JSON numbers",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "18446744073709551615",
+            "inode": "18446744073709551615"
+          },
+          "root_home": {
+            "device": "18446744073709551615",
+            "inode": "18446744073709551614"
+          },
+          "root_tmp": {
+            "device": "18446744073709551615",
+            "inode": "18446744073709551613"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "18446744073709551615",
+                "inode": "18446744073709551612"
+              },
+              "admin": {
+                "device": "18446744073709551615",
+                "inode": "18446744073709551611"
+              },
+              "home": {
+                "device": "18446744073709551615",
+                "inode": "18446744073709551610"
+              },
+              "tmp": {
+                "device": "18446744073709551615",
+                "inode": "18446744073709551609"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"18446744073709551615\",\"inode\":\"18446744073709551615\"},\"root_home\":{\"device\":\"18446744073709551615\",\"inode\":\"18446744073709551614\"},\"root_tmp\":{\"device\":\"18446744073709551615\",\"inode\":\"18446744073709551613\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"18446744073709551615\",\"inode\":\"18446744073709551612\"},\"admin\":{\"device\":\"18446744073709551615\",\"inode\":\"18446744073709551611\"},\"home\":{\"device\":\"18446744073709551615\",\"inode\":\"18446744073709551610\"},\"tmp\":{\"device\":\"18446744073709551615\",\"inode\":\"18446744073709551609\"}}]}}",
+      "sha256": "cb086bd893ab20e48b4b345e5ee66208af737c3e492390201c8d0e1d5cb137c8",
+      "header_hex": "000005b6"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "scope is never caller authority",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        },
+        "scope": {
+          "fenced": true
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]},\"scope\":{\"fenced\":true}}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "lease credential field",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        },
+        "lease_token": "not-allowed"
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]},\"lease_token\":\"not-allowed\"}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "reporter credential field",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin",
+            "REPORTER_TOKEN": "not-allowed"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\",\"REPORTER_TOKEN\":\"not-allowed\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "private node context field",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        },
+        "context_path": "/private/node-context"
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]},\"context_path\":\"/private/node-context\"}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "wrong layout key",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "other",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"other\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_semantics"
+    },
+    {
+      "name": "wrong layout immutable bench",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "22222222222222222222222222222222",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"22222222222222222222222222222222\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_semantics"
+    },
+    {
+      "name": "wrong member join",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "other",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"other\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_semantics"
+    },
+    {
+      "name": "duplicate physical node",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_semantics"
+    },
+    {
+      "name": "physical node other device",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2050",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2050\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_semantics"
+    },
+    {
+      "name": "leading zero physical inode",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "02"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"02\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "uint64 physical overflow",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "18446744073709551616"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"18446744073709551616\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_semantics"
+    },
+    {
+      "name": "rounded numeric inode",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": 2
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":2},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "foreign card task ref",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_GHIJKL",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_GHIJKL\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_semantics"
+    },
+    {
+      "name": "wrong source format width",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha256",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha256\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "unregistered selected member",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60,
+          "repository_name": "other"
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60,\"repository_name\":\"other\"},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_semantics"
+    },
+    {
+      "name": "changed allocation root",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/other",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/other\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_semantics"
+    },
+    {
+      "name": "unclean root",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data//benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data//benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_semantics"
+    },
+    {
+      "name": "UTF8 argv byte overflow",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task",
+            "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\",\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_semantics"
+    },
+    {
+      "name": "source mutation instruction is not evidence",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ],
+          "admitted": true
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}],\"admitted\":true}}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "unknown outcome",
+      "kind": "result",
+      "body": {
+        "version": "agentpod.superbench-worker.v2",
+        "binding": {
+          "board_id": "brd_ABCDEF",
+          "card_id": "card_ABCDEF",
+          "run_id": "run_ABCDEF",
+          "epoch": 7
+        },
+        "outcome": "fenced",
+        "handoff": {
+          "__proto__": "task text",
+          "summary": "<done>&\n ",
+          "": "BMP",
+          "😀": "astral"
+        }
+      },
+      "raw": "{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"outcome\":\"fenced\",\"handoff\":{\"__proto__\":\"task text\",\"summary\":\"\\u003cdone\\u003e\\u0026\\n\\u2029\",\"\":\"BMP\",\"😀\":\"astral\"}}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "missing result handoff",
+      "kind": "result",
+      "body": {
+        "version": "agentpod.superbench-worker.v2",
+        "binding": {
+          "board_id": "brd_ABCDEF",
+          "card_id": "card_ABCDEF",
+          "run_id": "run_ABCDEF",
+          "epoch": 7
+        },
+        "outcome": "complete"
+      },
+      "raw": "{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"outcome\":\"complete\"}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "null task map",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": null,
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":null,\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "fractional epoch",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7.5
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7.5},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "integer_encoding"
+    },
+    {
+      "name": "unsafe epoch",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 9007199254740992
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":9007199254740992},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "safe_integer"
+    },
+    {
+      "name": "environment newline",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "a\nb",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"a\\nb\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "trailing LF in board identity",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF\n",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\\n\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "trailing LF in physical number",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2\n"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\\n\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "trailing Unicode line separator in bench ID",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "1111111111111111111111111111111 ",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C.UTF-8",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"1111111111111111111111111111111\\u2028\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "trailing newline environment value",
+      "kind": "capsule",
+      "body": {
+        "version": "agentpod.registered-worker.v1",
+        "task": {
+          "version": "agentpod.superbench-worker.v2",
+          "binding": {
+            "board_id": "brd_ABCDEF",
+            "card_id": "card_ABCDEF",
+            "run_id": "run_ABCDEF",
+            "epoch": 7
+          },
+          "bench_key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "workspace_root": "/payload-data/benches/task_01",
+          "members": [
+            {
+              "name": "app",
+              "repository_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "task_ref": "refs/heads/card/card_ABCDEF",
+              "object_format": "sha1",
+              "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "arguments": [
+            "/usr/bin/example-harness",
+            "--task"
+          ],
+          "prompt": "Review <task> & return text. ",
+          "environment": {
+            "LANG": "C\n",
+            "PATH": "/usr/bin:/bin"
+          },
+          "timeout_seconds": 60
+        },
+        "layout": {
+          "key": "task_01",
+          "bench_id": "11111111111111111111111111111111",
+          "version": "superbench.payload-layout.v1",
+          "policy_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "root": {
+            "device": "2049",
+            "inode": "1"
+          },
+          "root_home": {
+            "device": "2049",
+            "inode": "2"
+          },
+          "root_tmp": {
+            "device": "2049",
+            "inode": "3"
+          },
+          "members": [
+            {
+              "name": "app",
+              "checkout": {
+                "device": "2049",
+                "inode": "4"
+              },
+              "admin": {
+                "device": "2049",
+                "inode": "5"
+              },
+              "home": {
+                "device": "2049",
+                "inode": "6"
+              },
+              "tmp": {
+                "device": "2049",
+                "inode": "7"
+              }
+            }
+          ]
+        }
+      },
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C\\n\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_schema"
+    }
+  ],
+  "lexical": [
+    {
+      "name": "extra whitespace",
+      "kind": "capsule",
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}\n",
+      "reason": "registered_canonical"
+    },
+    {
+      "name": "reordered envelope",
+      "kind": "capsule",
+      "raw": "{\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"version\":\"agentpod.registered-worker.v1\",\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_canonical"
+    },
+    {
+      "name": "unescaped HTML",
+      "kind": "capsule",
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review <task\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "registered_canonical"
+    },
+    {
+      "name": "duplicate field",
+      "kind": "capsule",
+      "raw": "{\"version\":\"duplicate\",\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "duplicate_key"
+    },
+    {
+      "name": "null document",
+      "kind": "capsule",
+      "raw": "null",
+      "reason": "registered_schema"
+    },
+    {
+      "name": "exponent epoch",
+      "kind": "capsule",
+      "raw": "{\"version\":\"agentpod.registered-worker.v1\",\"task\":{\"version\":\"agentpod.superbench-worker.v2\",\"binding\":{\"board_id\":\"brd_ABCDEF\",\"card_id\":\"card_ABCDEF\",\"run_id\":\"run_ABCDEF\",\"epoch\":7e0},\"bench_key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"workspace_root\":\"/payload-data/benches/task_01\",\"members\":[{\"name\":\"app\",\"repository_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"task_ref\":\"refs/heads/card/card_ABCDEF\",\"object_format\":\"sha1\",\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"arguments\":[\"/usr/bin/example-harness\",\"--task\"],\"prompt\":\"Review \\u003ctask\\u003e \\u0026 return text.\\u2028\",\"environment\":{\"LANG\":\"C.UTF-8\",\"PATH\":\"/usr/bin:/bin\"},\"timeout_seconds\":60},\"layout\":{\"key\":\"task_01\",\"bench_id\":\"11111111111111111111111111111111\",\"version\":\"superbench.payload-layout.v1\",\"policy_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"root\":{\"device\":\"2049\",\"inode\":\"1\"},\"root_home\":{\"device\":\"2049\",\"inode\":\"2\"},\"root_tmp\":{\"device\":\"2049\",\"inode\":\"3\"},\"members\":[{\"name\":\"app\",\"checkout\":{\"device\":\"2049\",\"inode\":\"4\"},\"admin\":{\"device\":\"2049\",\"inode\":\"5\"},\"home\":{\"device\":\"2049\",\"inode\":\"6\"},\"tmp\":{\"device\":\"2049\",\"inode\":\"7\"}}]}}",
+      "reason": "integer_encoding"
+    }
+  ]
+}
