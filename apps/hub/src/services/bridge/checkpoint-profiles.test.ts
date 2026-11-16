@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { readCheckpointProfiles, requireInstalledCheckpointProfile, CHECKPOINT_COORDINATOR_FLAG } from "./checkpoint-profiles";
 import corpus from "../../../../../packages/contract/src/fixtures/bench-coordinator-v1.json";
 
+import { checkpointProfileId, parseCheckpointProfile } from "./checkpoint-profile";
+import { canonicalCheckpoint } from "./checkpoint-json";
 import { checkpointRuntime } from "./checkpoint-port";
 const prior = { flag: process.env.PROPOSED_CHECKPOINT_COORDINATOR, file: process.env.PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE };
 const roots: string[] = [];
@@ -93,4 +95,26 @@ test("a non-regular profile cannot block the bridge while opening its snapshot",
   const child = spawnSync(process.execPath, ["--eval", script], { timeout: 2000, stdio: "pipe" });
   expect(child.error).toBeUndefined();
   expect(child.status).toBe(0);
+});
+
+
+test("coordinator profile identity is independent of the default harness profile", () => {
+  const named = fixture();
+  const legacy = parseCheckpointProfile(named);
+  expect(checkpointProfileId(legacy)).toBe(named.profileKey);
+  expect(canonicalCheckpoint(legacy)).toBe(canonicalCheckpoint(named));
+  expect(Object.hasOwn(legacy, "coordinatorProfileId")).toBe(false);
+  const selected = parseCheckpointProfile({ ...named, profileKey: "", coordinatorProfileId: "fixture-profile" });
+  expect(selected.profileKey).toBe("");
+  expect(checkpointProfileId(selected)).toBe("fixture-profile");
+  const independent = parseCheckpointProfile({ ...named, coordinatorProfileId: "other-coordinator" });
+  expect(independent.profileKey).toBe(named.profileKey);
+  expect(checkpointProfileId(independent)).toBe("other-coordinator");
+});
+test("a default harness profile requires a valid explicit coordinator identity", () => {
+  expect(() => parseCheckpointProfile({ ...fixture(), profileKey: "" })).toThrow("Checkpoint refused: invalid");
+  expect(() => parseCheckpointProfile({ ...fixture(), profileKey: null, coordinatorProfileId: "fixture-profile" })).toThrow("Checkpoint refused: invalid");
+  for (const coordinatorProfileId of ["", " invalid", "bad\n", null]) {
+    expect(() => parseCheckpointProfile({ ...fixture(), profileKey: "", coordinatorProfileId })).toThrow("Checkpoint refused: invalid");
+  }
 });

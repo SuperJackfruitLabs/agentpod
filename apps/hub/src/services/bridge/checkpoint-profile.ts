@@ -19,7 +19,7 @@ const profileSchema = z.object({
   organizationId: z.string().regex(/^org_[a-f0-9]{20}(?![\s\S])/),
   sourceTenantId: id, sourceOrigin: endpoint, sourceAudience: endpoint,
   reporterPrincipalId: principal, ownerPrincipalId: principal, occupantPrincipalId: principal,
-  agentKey: id, profileKey: id, occupancyEpoch: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  agentKey: id, profileKey: z.union([z.literal(""), id]), coordinatorProfileId: id.optional(), occupancyEpoch: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   target: BenchCoordinatorTarget,
   repositories: z.array(z.object({ name, repositorySHA256: sha,
     provider: z.enum(["forge", "github"]), repository: z.string().max(200)
@@ -27,7 +27,7 @@ const profileSchema = z.object({
     objectFormat: z.enum(["sha1", "sha256"]),
   }).strict()).min(1).max(32),
   checkpointRepository: name,
-}).strict().refine((value) => value.repositories.every((member, index) => index === 0 ||
+}).strict().refine((value) => (value.coordinatorProfileId ?? value.profileKey) !== "").refine((value) => value.repositories.every((member, index) => index === 0 ||
   (value.repositories[index - 1]?.name ?? "") < member.name) &&
   value.repositories.some((member) => member.name === value.checkpointRepository) &&
   new Set(value.repositories.map((member) => member.repositorySHA256)).size === value.repositories.length &&
@@ -59,4 +59,9 @@ export function requireCheckpointProfileClaim(profile: CheckpointProfile, claim:
       const pin = profile.repositories[index];
       return pin?.name !== member.name || pin.provider !== member.provider || pin.repository !== member.repository;
     })) throw new CheckpointRefused("authority");
+}
+
+/** Select the Node coordinator independently of the bridge harness profile. */
+export function checkpointProfileId(profile: CheckpointProfile): string {
+  return profile.coordinatorProfileId ?? profile.profileKey;
 }

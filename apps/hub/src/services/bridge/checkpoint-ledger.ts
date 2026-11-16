@@ -7,7 +7,7 @@ import { db } from "../../db/drizzle";
 import { checkpointDispatches, type CheckpointDispatchRow } from "../../db/schema/checkpoint-dispatch";
 import { parsePendingCheckpointClaim, type PendingCheckpointClaim } from "./checkpoint-claim";
 import { canonicalCheckpoint, parseCheckpointJSON } from "./checkpoint-json";
-import { CheckpointRefused, parseCheckpointProfile, requireCheckpointProfileClaim, type CheckpointProfile } from "./checkpoint-profile";
+import { checkpointProfileId, CheckpointRefused, parseCheckpointProfile, requireCheckpointProfileClaim, type CheckpointProfile } from "./checkpoint-profile";
 import { parseCheckpointAuthority, readCheckpointAuthority, type CheckpointAuthority } from "./checkpoint-current";
 
 export type PrepareRequest = Extract<BenchCoordinatorRequest, { operation: "prepare" }>;
@@ -40,7 +40,7 @@ function checked(row: CheckpointDispatchRow): RetainedCheckpointAttempt {
     authority.principalId !== profile.occupantPrincipalId || authority.ownerPrincipalId !== profile.ownerPrincipalId ||
     authority.stationId !== profile.target.station_id || authority.nodeId !== profile.target.node_id ||
     authority.occupancyEpoch !== profile.occupancyEpoch || authority.agentKey !== profile.agentKey || authority.profileKey !== profile.profileKey ||
-    request.task.profile_id !== profile.profileKey || canonicalCheckpoint(request.target) !== canonicalCheckpoint(profile.target))
+    request.task.profile_id !== checkpointProfileId(profile) || canonicalCheckpoint(request.target) !== canonicalCheckpoint(profile.target))
     throw new CheckpointRefused("source");
   // The raw authority bytes are retained, not trusted as a new grant. Every
   // current check compares them to a fresh actual database/issuer observation.
@@ -85,7 +85,7 @@ export async function reserveCheckpointAttempt(value: CheckpointProfile, pending
       node_id: profile.target.node_id, attempt_id: attemptId, control_principal_id: profile.ownerPrincipalId,
       control_grant_id: authority.authorizationSnapshotId, policy_sha256: claim.policyDigest,
     }, task: input })));
-  if (parsed.operation !== "prepare" || parsed.task.profile_id !== profile.profileKey) throw new CheckpointRefused("invalid");
+  if (parsed.operation !== "prepare" || parsed.task.profile_id !== checkpointProfileId(profile)) throw new CheckpointRefused("invalid");
   const request = JSON.stringify(parsed);
   const inserted = await db.insert(checkpointDispatches).values({ tenantId: profile.target.tenant_id, boardId: claim.boardId,
     runId: claim.runId, leaseEpoch: claim.leaseEpoch, attemptId, profile: canonicalCheckpoint(profile),

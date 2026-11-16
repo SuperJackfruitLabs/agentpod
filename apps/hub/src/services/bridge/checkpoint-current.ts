@@ -32,7 +32,7 @@ export interface CheckpointAuthority {
 const text = z.string().min(1).max(200);
 const authoritySchema = z.object({ organizationId: text, tenantId: text, sourceTenantId: text,
   stationId: text, nodeId: text, occupancyEpoch: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  principalId: text, ownerPrincipalId: text, agentKey: text, profileKey: text, rosterRevision: text,
+  principalId: text, ownerPrincipalId: text, agentKey: text, profileKey: z.union([z.literal(""), text]), rosterRevision: text,
   authorizationSnapshotId: z.string().regex(/^selected-auth:[a-f0-9]{64}(?![\s\S])/) }).strict();
 export function parseCheckpointAuthority(value: unknown): CheckpointAuthority {
   const parsed = authoritySchema.safeParse(value);

@@ -5,7 +5,7 @@ import { request as nodeRequest } from "../broker";
 import { canonicalCheckpoint } from "./checkpoint-json";
 import { readCheckpointAuthority } from "./checkpoint-current";
 import { installedCheckpointProfiles, requireInstalledCheckpointProfile } from "./checkpoint-profiles";
-import { CheckpointRefused, requireCheckpointProfileClaim, type CheckpointProfile } from "./checkpoint-profile";
+import { checkpointProfileId, CheckpointRefused, requireCheckpointProfileClaim, type CheckpointProfile } from "./checkpoint-profile";
 import { checkpointAgentClient } from "./checkpoint-agent-client";
 import { pendingCheckpointAttempt, reserveCheckpointAttempt } from "./checkpoint-ledger";
 import { driveCheckpointAttempt } from "./checkpoint-orchestrator";
@@ -73,7 +73,7 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
         ...(context.commentsOmitted === undefined ? {} : { commentsOmitted: context.commentsOmitted }),
         run: null, libraryTools: false }));
       if (!await current(chosen)) throw new CheckpointRefused("authority");
-      const reserved = await reserveCheckpointAttempt(profile, claim, { profile_id: profile.profileKey,
+      const reserved = await reserveCheckpointAttempt(profile, claim, { profile_id: checkpointProfileId(profile),
         prompt, timeout_seconds: 1800 });
       return driveCheckpointAttempt(reserved.attempt, client, reserved.send);
     },
