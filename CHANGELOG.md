@@ -18,6 +18,12 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   it by default; installed access, provider readiness and the producer crossing
   remain separate verification requirements.
 
+### Fixed
+
+- Recognize the proposed SuperBench logical-capacity refusal only for ordinary
+  operations at HTTP 422, preserving its bounded diagnostic without redispatch.
+  Cancellation errors and unknown response codes remain closed.
+
 ## v0.1.129 — 2026-11-16
 
 ### Fixed
