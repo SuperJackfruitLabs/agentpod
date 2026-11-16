@@ -10,6 +10,42 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+
+### Fixed
+
+- Broker replies, failures and stream chunks are accepted only from the authenticated
+  node selected for the request. Another enrolled node cannot consume its pending
+  reply or close its stream (#885).
+- Turn errors retain generic-before-plugin event ordering through finalization.
+  Duplicate errors are recorded once; late audit and Salaam recovery results remain
+  bound to the original turn and cannot reset a replacement turn (#887).
+- An invalid opt-in checkpoint profile no longer interrupts unrelated bridge agents.
+  Profile pins are loaded once per configured path, including failed loads, instead
+  of rereading a private file on every polling cycle. Restart the Hub after editing
+  the same profile file. Ordinary claims with an absent policy serialized as `null`
+  retain their legacy behavior; actual checkpoint claims and non-null policies still
+  require the dedicated path.
+
+### Added
+
+- Default-off dedicated checkpoint coordination, with a Hub-only reporting
+  credential and authenticated enrolled-node checks. Migration **0131** creates the
+  immutable `checkpoint_dispatches` attempt ledger automatically at Hub startup;
+  this schema addition applies even with the feature disabled, but inserts no
+  attempts or configuration by itself. The new
+  `POST /api/nodes/:nodeId/bench-coordinator/current` route returns 404 unless the
+  explicit coordinator flag is enabled. Neither the migration nor the route
+  provisions a grant, enables a board policy or starts a pilot.
+- Release assets include four version-pinned private worker helpers:
+  `agentpod-bench-worker-linux-amd64`, `agentpod-bench-worker-linux-arm64`,
+  `agentpod-bench-worker-darwin-amd64` and `agentpod-bench-worker-darwin-arm64`,
+  covered by `SHA256SUMS`. Publishing these artifacts does not install the helper
+  or enable checkpoint dispatch.
+- Structured checkpoint diagnostics identify a loaded or unavailable profile
+  snapshot, committed attempt phases and parked reconciliation, using closed
+  error codes and work identifiers. Credentials, private paths, request/response
+  bodies and child output are not logged by these diagnostics.
+
 ### Added
 - **`agentpod_link_artifact` returns a version-pinned link.** Besides `url` (the item, which
   always opens its latest version) it returns `versionUrl` (`/a/<item>/v/<n>`), and the tool and
