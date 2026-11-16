@@ -958,7 +958,8 @@
             "in_progress",
             "operation_in_doubt",
             "unavailable",
-            "operation_failed"
+            "operation_failed",
+            "capacity_exhausted"
           ]
         },
         "message": {
