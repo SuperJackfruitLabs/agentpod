@@ -43,7 +43,8 @@ that is not yours is refused.
 
 When the hub is configured for SuperLibrary, an agent has a fourth tool, `agentpod_link_artifact`. It keeps a
 file or folder from the agent's own workspace in SuperLibrary, with its provenance (station, path, board,
-card and run), and returns a link.
+card and run), and returns two links: `url`, the item, which always opens its latest version, and `versionUrl`, pinned to the version
+just linked (`/a/<item>/v/<n>`). Attach `versionUrl` to the card, so a gate opens exactly the version it asks a person to approve.
 
 | Argument | Meaning |
 |---|---|
@@ -75,7 +76,7 @@ The server's `initialize` instructions always carry rule 3. Rules 1 and 2 appear
 for SuperLibrary, because that is when `agentpod_link_artifact` exists:
 
 1. If it also has SuperLibrary's MCP server (`library_search`), search it before non-trivial work.
-2. Link files it produces with `agentpod_link_artifact`, from its own workspace only, and attach the url to its card with `superpipeline_add_reference`.
+2. Link files it produces with `agentpod_link_artifact`, from its own workspace only, and attach the returned `versionUrl` to its card with `superpipeline_add_reference`.
 3. Never publish through gists, pastebins or personal accounts.
 
 The card prompt ([pinned in Treaty's identity corpus](https://treaty.superjackfruit.com/packages/ecosystem-identity/) as

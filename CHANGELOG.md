@@ -10,6 +10,12 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+### Added
+- **`agentpod_link_artifact` returns a version-pinned link.** Besides `url` (the item, which
+  always opens its latest version) it returns `versionUrl` (`/a/<item>/v/<n>`), and the tool and
+  the hub's MCP instructions tell agents to attach that, so a gate opens the exact version it asks
+  a person to approve.
+
 ### Fixed
 - **A board roster no longer calls a station busy for a parked run.** `GET
   /api/bridge/boards/:boardId/roster` counted `parked` dispatches as work in hand, but #786 parks a

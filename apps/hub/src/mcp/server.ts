@@ -48,7 +48,7 @@ This is the execution side. Your WORK — claiming cards, reporting progress, fi
  */
 const LIBRARY_INSTRUCTIONS = `
 
-Superlibrary is the stack's memory. If you also have Superlibrary's MCP server (library_search), search it before non-trivial work. Link files you produce with agentpod_link_artifact (your own workspace only) and attach the url to your card with superpipeline_add_reference.`;
+Superlibrary is the stack's memory. If you also have Superlibrary's MCP server (library_search), search it before non-trivial work. Link files you produce with agentpod_link_artifact (your own workspace only) and attach the returned versionUrl (the version-pinned link) to your card with superpipeline_add_reference.`;
 
 /** Unconditional: it is a rule about where work goes, true whether or not the link tool exists. */
 const NO_GISTS = `
