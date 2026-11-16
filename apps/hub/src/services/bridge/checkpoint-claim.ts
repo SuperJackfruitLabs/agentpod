@@ -60,7 +60,7 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 function marker(value: unknown): boolean {
   return record(value) && (Object.hasOwn(value, "checkpointClaim") ||
-    (record(value.stage) && Object.hasOwn(value.stage, "checkpointPolicy")));
+    (record(value.stage) && Object.hasOwn(value.stage, "checkpointPolicy") && value.stage.checkpointPolicy !== null));
 }
 /** A legacy/read-only caller cannot silently project away a required execution boundary. */
 export function refuseLegacyCheckpoint(value: unknown): void {

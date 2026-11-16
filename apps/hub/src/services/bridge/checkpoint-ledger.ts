@@ -1,5 +1,6 @@
 /** Durable once-only preparation intent. Pending rows never authorize a fresh attempt. */
 import { createHash, randomBytes } from "node:crypto";
+import { createLogger } from "../../utils/logger";
 import { and, eq } from "drizzle-orm";
 import { parseBenchCoordinatorRequest, type BenchCoordinatorRequest } from "@agentpod/contract";
 import { db } from "../../db/drizzle";
@@ -16,6 +17,7 @@ export interface RetainedCheckpointAttempt {
   claim: PendingCheckpointClaim;
   request: PrepareRequest;
 }
+const log = createLogger("bridge-checkpoint");
 const encode = (raw: string) => new TextEncoder().encode(raw);
 const hash = (raw: string) => createHash("sha256").update(raw, "utf8").digest("hex");
 
@@ -124,7 +126,12 @@ export async function advanceCheckpointAttempt(attempt: RetainedCheckpointAttemp
   const [updated] = await db.update(checkpointDispatches).set({ ...evidence, updatedAt: new Date() }).where(and(
     eq(checkpointDispatches.tenantId, attempt.row.tenantId), eq(checkpointDispatches.attemptId, attempt.row.attemptId),
     eq(checkpointDispatches.prepareSHA256, attempt.row.prepareSHA256), eq(checkpointDispatches.phase, attempt.row.phase))).returning();
-  if (updated) return { attempt: checked(updated), send: true };
+  if (updated) {
+    const next = checked(updated);
+    log.info("checkpoint attempt phase committed", { tenantId: updated.tenantId,
+      boardId: updated.boardId, runId: updated.runId, attemptId: updated.attemptId, phase: updated.phase });
+    return { attempt: next, send: true };
+  }
   const current = await readCheckpointAttempt(attempt.row.tenantId, attempt.row.attemptId);
   if (!current || Object.entries(evidence).some(([key, value]) => Reflect.get(current.row, key) !== value))
     throw new CheckpointRefused("stale");

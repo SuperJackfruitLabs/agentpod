@@ -10,20 +10,56 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
-### Added
-- **`agentpod_link_artifact` returns a version-pinned link.** Besides `url` (the item, which
-  always opens its latest version) it returns `versionUrl` (`/a/<item>/v/<n>`), and the tool and
-  the hub's MCP instructions tell agents to attach that, so a gate opens the exact version it asks
-  a person to approve.
-
 ### Fixed
+
+- Broker replies, failures and stream chunks are accepted only from the authenticated
+  node selected for the request. Another enrolled node cannot consume its pending
+  reply or close its stream (#885).
+- Turn errors retain generic-before-plugin event ordering through finalization.
+  Duplicate errors are recorded once; late audit and Salaam recovery results remain
+  bound to the original turn and cannot reset a replacement turn (#887).
+- An invalid opt-in checkpoint profile no longer interrupts unrelated bridge agents.
+  Profile pins are loaded once per configured path, including failed loads, instead
+  of rereading a private file on every polling cycle. Restart the Hub after editing
+  the same profile file. Ordinary claims with an absent policy serialized as `null`
+  retain their legacy behavior; actual checkpoint claims and non-null policies still
+  require the dedicated path.
+
 - **A board roster no longer calls a station busy for a parked run.** `GET
   /api/bridge/boards/:boardId/roster` counted `parked` dispatches as work in hand, but #786 parks a
   revoked strict run precisely so it stops holding the roster, and the bridge goes on claiming on
   the station. A placement service read such a station as busy for good. Only `working` runs (a
   run in progress, or one waiting on a permission answer) count now.
 
+- Fixes found while rebuilding the console and checking every page with an accessibility sweep, among them: an open file's tab in Files had its close button nested inside the tab, which screen readers cannot reach (Delete now closes the focused tab, and the cross stays for the pointer); the rendered Markdown preview could not be scrolled from the keyboard; on a phone many buttons, links, radio buttons and checkboxes were smaller than a fingertip; and the Cleanup list's checkboxes could only be hit on the box itself, not on their row.
+
+### Added
+
+- Default-off dedicated checkpoint coordination, with a Hub-only reporting
+  credential and authenticated enrolled-node checks. Migration **0131** creates the
+  immutable `checkpoint_dispatches` attempt ledger automatically at Hub startup;
+  this schema addition applies even with the feature disabled, but inserts no
+  attempts or configuration by itself. The new
+  `POST /api/nodes/:nodeId/bench-coordinator/current` route returns 404 unless the
+  explicit coordinator flag is enabled. Neither the migration nor the route
+  provisions a grant, enables a board policy or starts a pilot.
+- Release assets include four version-pinned private worker helpers:
+  `agentpod-bench-worker-linux-amd64`, `agentpod-bench-worker-linux-arm64`,
+  `agentpod-bench-worker-darwin-amd64` and `agentpod-bench-worker-darwin-arm64`,
+  covered by `SHA256SUMS`. Publishing these artifacts does not install the helper
+  or enable checkpoint dispatch.
+- Structured checkpoint diagnostics identify a loaded or unavailable profile
+  snapshot, committed attempt phases and parked reconciliation, using closed
+  error codes and work identifiers. Credentials, private paths, request/response
+  bodies and child output are not logged by these diagnostics.
+
+- **`agentpod_link_artifact` returns a version-pinned link.** Besides `url` (the item, which
+  always opens its latest version) it returns `versionUrl` (`/a/<item>/v/<n>`), and the tool and
+  the hub's MCP instructions tell agents to attach that, so a gate opens the exact version it asks
+  a person to approve.
+
 ### Changed
+
 - **The code is restructured into modules, with no change in behaviour** (the modularity work,
   PR #836). The hub's `services/` is 23 modules, each imported through its `index.ts` and
   layered so none imports up; its seven files over 1,000 lines are split (the largest,
@@ -45,10 +81,6 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 - **The console is rebuilt on vibekit**, the suite's design system. It comes in four vibes (Daylight, Paper, Studio and Quiet), each in light and dark, chosen under Appearance in the account menu. With no saved choice the console follows the sun instead of the OS setting. Navigation stays put as you move between pages, and on a phone it becomes a bottom bar with a More sheet. Tables turn into cards on narrow screens, and every control is at least 44px under 1024px wide.
 - **The old colour schemes, font pairings and custom themes are gone.** A person's old light or dark choice seeds the new Appearance setting once; everything else from the old theme settings is dropped.
 - Building the console now needs Node 22 or newer (vibekit requires it); there are no new build variables.
-
-### Fixed
-
-- Fixes found while rebuilding the console and checking every page with an accessibility sweep, among them: an open file's tab in Files had its close button nested inside the tab, which screen readers cannot reach (Delete now closes the focused tab, and the cross stays for the pointer); the rendered Markdown preview could not be scrolled from the keyboard; on a phone many buttons, links, radio buttons and checkboxes were smaller than a fingertip; and the Cleanup list's checkboxes could only be hit on the box itself, not on their row.
 
 ## v0.1.22 — 2026-08-12
 
