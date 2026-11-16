@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -28,15 +29,15 @@ func TestRegisteredCLIRefusesFrameWithClosedDiagnostic(t *testing.T) {
 	}
 	raw := []byte("private-token-never-print")
 	sum := sha256.Sum256(raw)
-	cmd := exec.Command(exe, "-test.run=^TestRegisteredCLIChild$", "--", "registered-v1", hex.EncodeToString(sum[:]))
+	cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestRegisteredCLIChild$", "--", "registered-v1", hex.EncodeToString(sum[:]))
 	cmd.Env = []string{"REGISTERED_CLI_TEST_CHILD=1"}
-	cmd.Stdin = bytes.NewReader(append([]byte{0, 0, 0, byte(len(raw))}, raw...))
+	cmd.Stdin = bytes.NewReader(append([]byte{0, 0, 0, byte(len(raw) & 255)}, raw...))
 	var out, logs bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &logs
 	err = cmd.Run()
-	exit, ok := err.(*exec.ExitError)
-	if !ok || exit.ExitCode() != 1 || out.Len() != 0 || logs.String() != "registered worker refused: frame\n" {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 || out.Len() != 0 || logs.String() != "registered worker refused: frame\n" {
 		t.Fatalf("wrong refusal %v stdout=%q stderr=%q", err, out.String(), logs.String())
 	}
 	if strings.Contains(logs.String(), string(raw)) {

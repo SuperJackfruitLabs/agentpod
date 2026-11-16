@@ -4,6 +4,7 @@ package superbench
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -29,7 +30,7 @@ func registeredNode(path string, expected RegisteredNode) error {
 		return ErrRegisteredLayout
 	}
 	s, ok := opened.Sys().(*syscall.Stat_t)
-	if !ok || strconv.FormatUint(uint64(s.Dev), 10) != expected.Device || strconv.FormatUint(s.Ino, 10) != expected.Inode || opened.Mode().Perm() != 0700 || s.Uid != uint32(os.Geteuid()) || s.Gid != uint32(os.Getegid()) {
+	if !ok || fmt.Sprint(s.Dev) != expected.Device || strconv.FormatUint(s.Ino, 10) != expected.Inode || opened.Mode().Perm() != 0700 || int64(s.Uid) != int64(os.Geteuid()) || int64(s.Gid) != int64(os.Getegid()) {
 		return ErrRegisteredLayout
 	}
 	after, err := os.Lstat(path)

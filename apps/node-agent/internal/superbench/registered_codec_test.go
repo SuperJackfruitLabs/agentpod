@@ -3,7 +3,6 @@ package superbench
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"os"
@@ -18,11 +17,12 @@ func registeredCodecFixture(t *testing.T) RegisteredCapsule {
 	task := groupedSpecForTest(t)
 	n := uint64(0)
 	node := func() RegisteredNode { n++; return RegisteredNode{Device: "1", Inode: strconv.FormatUint(n, 10)} }
-	return RegisteredCapsule{Version: RegisteredWorkerVersion, Task: task, Layout: RegisteredLayout{Version: RegisteredLayoutVersion, PolicySHA256: strings.Repeat("a", 64), Root: node(), RootHome: node(), RootTemp: node(), Members: []RegisteredMember{{Name: "a", Checkout: node(), Admin: node(), Home: node(), Temp: node()}}}}
+	return RegisteredCapsule{Version: RegisteredWorkerVersion, Task: task, Layout: RegisteredLayout{Key: task.BenchKey, BenchID: task.BenchID, Version: RegisteredLayoutVersion, PolicySHA256: strings.Repeat("a", 64), Root: node(), RootHome: node(), RootTemp: node(), Members: []RegisteredMember{{Name: "a", Checkout: node(), Admin: node(), Home: node(), Temp: node()}}}}
 }
 func frameCapsule(raw []byte) []byte {
 	var b [4]byte
-	binary.BigEndian.PutUint32(b[:], uint32(len(raw)))
+	n := len(raw)
+	b = [4]byte{byte(n >> 24 & 255), byte(n >> 16 & 255), byte(n >> 8 & 255), byte(n & 255)}
 	return append(b[:], raw...)
 }
 func TestRegisteredCapsuleStrictNoncredentialRoundtrip(t *testing.T) {
@@ -44,6 +44,7 @@ func TestRegisteredCapsuleStrictNoncredentialRoundtrip(t *testing.T) {
 	}
 	for _, change := range []func(*RegisteredCapsule){
 		func(c *RegisteredCapsule) { c.Task.Environment["BENCH_LEASE_TOKEN"] = "secret" },
+		func(c *RegisteredCapsule) { c.Layout.BenchID = strings.Repeat("b", 32) },
 		func(c *RegisteredCapsule) { c.Layout.Root.Inode = "01" },
 		func(c *RegisteredCapsule) { c.Layout.Root.Inode = "18446744073709551616" },
 		func(c *RegisteredCapsule) { c.Layout.Members[0].Checkout = c.Layout.Root },

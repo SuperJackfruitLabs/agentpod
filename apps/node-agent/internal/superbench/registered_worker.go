@@ -36,7 +36,7 @@ func ReadRegisteredInput(ctx context.Context, in *os.File, expectedSHA string) (
 		if in.SetReadDeadline(until) != nil {
 			return RegisteredCapsule{}, ErrRegisteredFrame
 		}
-		defer in.SetReadDeadline(time.Time{})
+		defer func() { _ = in.SetReadDeadline(time.Time{}) }()
 	} else if !s.Mode().IsRegular() || s.Size() > MaxWorker+4 {
 		return RegisteredCapsule{}, ErrRegisteredFrame
 	}
@@ -125,7 +125,8 @@ func WriteRegisteredResult(out io.Writer, result WorkerResult) error {
 		return ErrRegisteredResult
 	}
 	var size [4]byte
-	binary.BigEndian.PutUint32(size[:], uint32(len(raw)))
+	nraw := len(raw)
+	size = [4]byte{byte(nraw >> 24 & 255), byte(nraw >> 16 & 255), byte(nraw >> 8 & 255), byte(nraw & 255)}
 	frame := append(size[:], raw...)
 	n, err := out.Write(frame)
 	if err != nil || n != len(frame) {

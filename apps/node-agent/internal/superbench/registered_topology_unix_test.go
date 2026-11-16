@@ -18,7 +18,7 @@ import (
 
 func registeredGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("/usr/bin/git", args...)
+	cmd := exec.CommandContext(t.Context(), "/usr/bin/git", args...)
 	cmd.Dir = dir
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0"}
 	raw, err := cmd.CombinedOutput()
@@ -37,7 +37,7 @@ func registeredStat(t *testing.T, p string) RegisteredNode {
 	if !ok {
 		t.Fatal("missing physical identity")
 	}
-	return RegisteredNode{Device: strconv.FormatUint(uint64(n.Dev), 10), Inode: strconv.FormatUint(n.Ino, 10)}
+	return RegisteredNode{Device: fmt.Sprint(n.Dev), Inode: strconv.FormatUint(n.Ino, 10)}
 }
 func registeredTreeFixture(t *testing.T) RegisteredCapsule {
 	t.Helper()
@@ -161,7 +161,7 @@ func TestRegisteredWorkerConsumesFrameAndSeparatesLogsFromResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe, "-test.run=^TestRegisteredWorkerSubprocess$")
+	cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestRegisteredWorkerSubprocess$")
 	cmd.Dir = c.Task.WorkspaceRoot
 	cmd.Env = []string{"REGISTERED_WORKER_TEST_CHILD=1", "REGISTERED_WORKER_DIGEST=" + groupedSHA(raw)}
 	cmd.Stdin = bytes.NewReader(frameCapsule(raw))
@@ -197,7 +197,7 @@ func TestRegisteredWorkerLateMemberRefusalHasNoHarnessEffects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe, "-test.run=^TestRegisteredWorkerSubprocess$")
+	cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestRegisteredWorkerSubprocess$")
 	cmd.Dir = c.Task.WorkspaceRoot
 	cmd.Env = []string{"REGISTERED_WORKER_TEST_CHILD=1", "REGISTERED_WORKER_DIGEST=" + groupedSHA(raw)}
 	cmd.Stdin = bytes.NewReader(frameCapsule(raw))
@@ -205,8 +205,8 @@ func TestRegisteredWorkerLateMemberRefusalHasNoHarnessEffects(t *testing.T) {
 	cmd.Stdout = &out
 	cmd.Stderr = &logs
 	err = cmd.Run()
-	exit, ok := err.(*exec.ExitError)
-	if !ok || exit.ExitCode() != 1 || out.Len() != 0 || logs.String() != ErrRegisteredLayout.Error()+"\n" {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 || out.Len() != 0 || logs.String() != ErrRegisteredLayout.Error()+"\n" {
 		t.Fatalf("wrong refusal: %v %q %q", err, out.Bytes(), logs.String())
 	}
 	if _, err = os.Lstat(marker); !os.IsNotExist(err) {

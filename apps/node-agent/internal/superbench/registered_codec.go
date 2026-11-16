@@ -29,6 +29,8 @@ type RegisteredMember struct {
 	Temp     RegisteredNode `json:"tmp"`
 }
 type RegisteredLayout struct {
+	Key          string             `json:"key"`
+	BenchID      string             `json:"bench_id"`
 	Version      string             `json:"version"`
 	PolicySHA256 string             `json:"policy_sha256"`
 	Root         RegisteredNode     `json:"root"`
@@ -55,7 +57,7 @@ func (c RegisteredCapsule) validate() error {
 		return ErrRegisteredFrame
 	}
 	l := c.Layout
-	if l.Version != RegisteredLayoutVersion || !groupedDigest.MatchString(l.PolicySHA256) || len(l.Members) != len(c.Task.Members) {
+	if l.Key != c.Task.BenchKey || l.BenchID != c.Task.BenchID || l.Version != RegisteredLayoutVersion || !groupedDigest.MatchString(l.PolicySHA256) || len(l.Members) != len(c.Task.Members) {
 		return ErrRegisteredLayout
 	}
 	seen := map[RegisteredNode]bool{}
