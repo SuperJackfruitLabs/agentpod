@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,31 @@ import (
 var version = "dev"
 
 func entry(args []string, out, errOut io.Writer) int {
+	return entryInput(args, os.Stdin, out, errOut)
+}
+func entryInput(args []string, in *os.File, out, errOut io.Writer) int {
+	if len(args) > 0 && args[0] == "registered-v1" {
+		if len(args) != 2 || !superbench.ValidGroupedContextDigest(args[1]) {
+			fmt.Fprintln(errOut, "registered worker requires one capsule digest")
+			return 2
+		}
+		os.Clearenv()
+		if err := superbench.ExecuteRegisteredWorker(context.Background(), in, out, errOut, args[1]); err != nil {
+			code := "frame"
+			switch {
+			case errors.Is(err, superbench.ErrRegisteredLayout):
+				code = "layout"
+			case errors.Is(err, superbench.ErrRegisteredTask):
+				code = "task"
+			case errors.Is(err, superbench.ErrRegisteredResult):
+				code = "result"
+			}
+			fmt.Fprintln(errOut, "registered worker refused: "+code)
+			return 1
+		}
+		return 0
+	}
+
 	if len(args) == 2 {
 		pair := [2]string(args)
 		if superbench.ValidGroupedContextDigest(pair[1]) {
