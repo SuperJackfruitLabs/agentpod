@@ -37,17 +37,20 @@ type step struct {
 }
 
 type record struct {
-	ID         string                       `json:"id"`
-	Spec       benchdispatch.SourceSpec     `json:"spec"`
-	Phase      string                       `json:"phase"`
-	Code       string                       `json:"code,omitempty"`
-	Cancelled  bool                         `json:"cancelled,omitempty"`
-	Release    string                       `json:"release,omitempty"` // "", "needed" or "done"
-	Steps      []step                       `json:"steps"`
-	Capsule    string                       `json:"capsule_sha256,omitempty"`
-	Binding    *benchdispatch.SourceBinding `json:"binding,omitempty"`
-	SourceSHA  string                       `json:"source_request_sha256,omitempty"`
-	Completion *benchcoordinator.Completion `json:"completion,omitempty"`
+	ID        string                   `json:"id"`
+	Spec      benchdispatch.SourceSpec `json:"spec"`
+	Phase     string                   `json:"phase"`
+	Code      string                   `json:"code,omitempty"`
+	Cancelled bool                     `json:"cancelled,omitempty"`
+	Release   string                   `json:"release,omitempty"` // "", "needed" or "done"
+	// ReleaseFailures counts release attempts that did not free the lease. It
+	// only makes an endlessly refused release visible; retries never stop.
+	ReleaseFailures int                          `json:"release_failures,omitempty"`
+	Steps           []step                       `json:"steps"`
+	Capsule         string                       `json:"capsule_sha256,omitempty"`
+	Binding         *benchdispatch.SourceBinding `json:"binding,omitempty"`
+	SourceSHA       string                       `json:"source_request_sha256,omitempty"`
+	Completion      *benchcoordinator.Completion `json:"completion,omitempty"`
 }
 
 func (r *record) step(name string) *step {

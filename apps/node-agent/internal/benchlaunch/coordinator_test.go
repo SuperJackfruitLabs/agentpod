@@ -36,8 +36,10 @@ type trial struct {
 	task       benchdispatch.SourceTask
 	stale      atomic.Bool
 	superseded atomic.Bool
-	// current is the one spec the hub treats as current. Like the real
-	// handler, every other spec is definitely superseded.
+	// current is the one spec the hub treats as current; every other spec is
+	// treated as definitely superseded (ErrSuperseded). The real handler only
+	// says so on an authenticated stale_owner decision and otherwise returns
+	// ErrCurrent, which retires nothing.
 	current atomic.Pointer[benchdispatch.SourceSpec]
 	dir     string
 }
@@ -598,5 +600,44 @@ func TestSupersedeWaitsForTheOldLease(t *testing.T) {
 	}
 	if _, err = tr.c.Prepare(context.Background(), next, tr.task); err != nil {
 		t.Fatal("newer attempt did not proceed once the old lease was released", err)
+	}
+}
+
+// The probe: a malformed release reply must not be replayed forever. The run
+// is refused for capacity, the first release answers an unparseable 500, and
+// the hub moves on; the next prepare resends the release and proceeds.
+func TestMalformedReleaseReplyIsResent(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.capacity["run"], tr.malformedRelease = true, 1
+	_, err := tr.c.Execute(context.Background(), tr.spec, admitAll)
+	wantCode(t, err, "capacity_exhausted")
+	if r, _ := tr.record(t, tr.spec); r.Release != "needed" || !tr.leased || tr.count(tr.posts, "release") != 1 {
+		t.Fatal("fixture: the first release should have been malformed", r.Release)
+	}
+	delete(tr.capacity, "run")
+	next := nextAttempt(tr.spec)
+	tr.current.Store(&next)
+	if _, err = tr.c.Prepare(context.Background(), next, tr.task); err != nil {
+		t.Fatal("a malformed release reply blocked the bench", err)
+	}
+	if old, _ := tr.record(t, tr.spec); !old.terminal() || tr.count(tr.posts, "release") != 2 || tr.count(tr.effects, "release") != 1 {
+		t.Fatal("release was not resent after a malformed reply", old.Release, tr.count(tr.posts, "release"))
+	}
+}
+
+// An endlessly refused release keeps retrying and becomes visible in Status.
+func TestEndlesslyRefusedReleaseIsVisible(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.refuseRelease = 100
+	var status benchcoordinator.Status
+	var err error
+	for i := 0; i < releaseWarnAfter+1; i++ {
+		status, err = tr.c.Cancel(context.Background(), tr.spec)
+	}
+	r, _ := tr.record(t, tr.spec)
+	if err != nil || status.State != "release_refused" || r.ReleaseFailures < releaseWarnAfter || !tr.leased || tr.count(tr.posts, "release") != releaseWarnAfter+1 {
+		t.Fatal("a stuck release was silent or stopped retrying", status.State, r.ReleaseFailures, err)
 	}
 }

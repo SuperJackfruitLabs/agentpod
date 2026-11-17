@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchattempt"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcanonical"
@@ -210,17 +211,37 @@ func (c Coordinator) cleanup(ctx context.Context, spec benchdispatch.SourceSpec)
 	reply, err := c.ordinary(ctx, spec, "release", request, true)
 	if err != nil {
 		var refusal *Refusal
-		if errors.As(err, &refusal) && refusal.Code == "verification_failed" {
-			return benchdispatch.ErrPending
+		if !errors.As(err, &refusal) || refusal.Code != "verification_failed" {
+			return err // lost or fenced: the step is kept or the record is not ours
 		}
-		return err
 	}
-	if reply.OK || c.leaseGone(ctx, spec) {
+	if err == nil && reply.OK || c.leaseGone(ctx, spec) {
 		return done()
 	}
-	// A definite refusal while we still hold the lease: send it again next time.
+	// A refused or malformed reply while we still hold the lease. Release is
+	// token-scoped and repeatable, so drop the saved reply and send it again
+	// next time; never replay a bad answer forever.
 	c.forget(ctx, spec, "release")
+	c.releaseFailed(ctx, spec)
 	return benchdispatch.ErrPending
+}
+
+// releaseWarnAfter is how many failed releases pass before each further
+// failure is logged; the attempt keeps retrying regardless.
+const releaseWarnAfter = 3
+
+func (c Coordinator) releaseFailed(ctx context.Context, spec benchdispatch.SourceSpec) {
+	failures := 0
+	_ = c.mark(ctx, spec, func(r *record) bool { r.ReleaseFailures++; failures = r.ReleaseFailures; return true })
+	if failures >= releaseWarnAfter {
+		log.Printf("bench %s: release refused %d times while the lease is still held; retrying, operator attention needed", spec.BenchKey, failures)
+	}
+}
+
+// releaseStuck reports a record whose release keeps failing, so Status can
+// say so instead of a plain cancel_requested.
+func releaseStuck(r record) bool {
+	return r.Release == "needed" && r.ReleaseFailures >= releaseWarnAfter
 }
 
 // leaseGone is a read-only status check after a refused release.
@@ -285,7 +306,11 @@ func (c Coordinator) Cancel(ctx context.Context, spec benchdispatch.SourceSpec) 
 func (c Coordinator) retired(ctx context.Context, spec benchdispatch.SourceSpec) (benchcoordinator.Status, error) {
 	err := c.retire(ctx, spec)
 	if errors.Is(err, benchdispatch.ErrPending) {
-		return benchcoordinator.Status{State: "cancel_requested", RequiresReconciliation: true}, nil
+		state := "cancel_requested"
+		if r, _, e := c.Journal.read(ctx, spec); e == nil && releaseStuck(r) {
+			state = "release_refused" // the lease is still held and its release keeps failing
+		}
+		return benchcoordinator.Status{State: state, RequiresReconciliation: true}, nil
 	}
 	if errors.Is(err, errAbsent) {
 		return benchcoordinator.Status{}, refuse("stale_owner")

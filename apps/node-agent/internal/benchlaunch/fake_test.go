@@ -19,29 +19,30 @@ import (
 // fakeBench is a scripted SuperBench producer speaking the real wire bytes.
 // It keeps exact receipts so a repeated request ID replays instead of acting.
 type fakeBench struct {
-	mu            sync.Mutex
-	t             *testing.T
-	benchID       string
-	holder        string
-	token         string
-	leased        bool
-	posts         map[string]int // every request that reached the producer, by operation
-	effects       map[string]int // operations that actually acted
-	receipts      map[string]receipt
-	loseAfter     map[string]bool // act, keep the receipt, drop the reply
-	loseBefore    map[string]bool // drop the request before it acts
-	inProgress    map[string]bool // answer in_progress once, keep acting in the background
-	capacity      map[string]bool
-	exit          int
-	stdout        func(frame []byte) []byte
-	lookup        string // forced lookup state, e.g. "absent"
-	tamperRead    bool
-	block         chan struct{} // run waits here until closed or ctx ends
-	running       chan struct{} // closed when a blocked run has started
-	refuseRelease int           // answer this many releases with conflict while still leased
-	cancels       []benchworkspace.CancelRequest
-	lastCapsule   superbench.RegisteredCapsule
-	runArgs       []string
+	mu               sync.Mutex
+	t                *testing.T
+	benchID          string
+	holder           string
+	token            string
+	leased           bool
+	posts            map[string]int // every request that reached the producer, by operation
+	effects          map[string]int // operations that actually acted
+	receipts         map[string]receipt
+	loseAfter        map[string]bool // act, keep the receipt, drop the reply
+	loseBefore       map[string]bool // drop the request before it acts
+	inProgress       map[string]bool // answer in_progress once, keep acting in the background
+	capacity         map[string]bool
+	exit             int
+	stdout           func(frame []byte) []byte
+	lookup           string // forced lookup state, e.g. "absent"
+	tamperRead       bool
+	block            chan struct{} // run waits here until closed or ctx ends
+	running          chan struct{} // closed when a blocked run has started
+	refuseRelease    int           // answer this many releases with conflict while still leased
+	malformedRelease int           // answer this many releases with an unparseable 500
+	cancels          []benchworkspace.CancelRequest
+	lastCapsule      superbench.RegisteredCapsule
+	runArgs          []string
 }
 type receipt struct {
 	digest string
@@ -197,6 +198,10 @@ func (f *fakeBench) act(ctx context.Context, spec benchdispatch.SourceSpec, r be
 		m := benchworkspace.Mutation{Workspace: f.workspace(spec, true, strings.Repeat("2", 32), fakeCommitA, fakeCommitB), Grant: &benchworkspace.Grant{LeaseToken: f.token}, RootPath: "/data/benches/" + spec.BenchKey}
 		return 200, envelope(op, r.RequestID, true, m, "")
 	case "checkpoint", "release":
+		if op == "release" && f.malformedRelease > 0 {
+			f.malformedRelease--
+			return 500, []byte(`{"ok":false,"error":{"code":"internal"}}`)
+		}
 		if op == "release" && f.refuseRelease > 0 {
 			f.refuseRelease--
 			return 409, envelope(op, "", false, nil, "conflict")

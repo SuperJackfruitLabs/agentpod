@@ -126,7 +126,10 @@ After launch, retiring sends one cancel for the run's exact target and waits for
 the run's receipt. A newer attempt's `prepare` frees the bench only once the
 older record is terminal; until then (lease still held, or run unresolved) it
 returns `pending`, retryable, and reaches nothing. A definite refusal of a
-release we still hold is forgotten and sent again on the next cleanup.
+release we still hold, or a reply that does not parse, is forgotten and sent again
+on the next cleanup; nothing replays a bad answer. Retries never stop, but after
+three failed releases each further failure is logged with the bench key and
+count, and `Status` reports `release_refused` instead of `cancel_requested`.
 
 On the hub, `stale_owner` is reserved for a definite change (the attempt row is
 gone, or its run, epoch, attempt or owner authority changed). A row that merely
