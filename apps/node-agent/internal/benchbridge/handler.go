@@ -380,6 +380,14 @@ func (h *Handler) status(ctx context.Context, r benchcoordinatorwire.Request, p 
 	if err != nil {
 		return failed(r, err)
 	}
+	return statusResponse(r, saved, status)
+}
+
+// statusResponse is the only place a coordinator Status reaches the wire.
+// completed and prepared carry their evidence; every other node-internal state
+// (pending, cancel_requested, release_refused, ...) is the wire's parked
+// "pending", so a new internal state can never widen the contract.
+func statusResponse(r benchcoordinatorwire.Request, saved benchdispatch.SourceSpec, status benchcoordinator.Status) (benchcoordinatorwire.Response, error) {
 	if status.State == "completed" && status.Completion != nil && r.Operation != "prepare" {
 		return completedResponse(r, saved, *status.Completion)
 	}

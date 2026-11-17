@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { BenchCoordinatorRequest } from "@agentpod/contract";
+import { BenchCoordinatorRequest, parseBenchCoordinatorResponse } from "@agentpod/contract";
 import corpus from "../../../../../packages/contract/src/fixtures/bench-coordinator-v1.json";
 import { TEST_PLANE } from "../../auth/org-plane/config";
 import { checkpointPolicyDigest, parsePendingCheckpointClaim } from "./checkpoint-claim";
@@ -71,4 +71,22 @@ test("any other refusal stays the generic reconciliation park", async () => {
   const result = await driveCheckpointAttempt(attempt, h.client, false, h.deps);
   expect(result.reason).toBe("Checkpoint dispatch requires reconciliation");
   expect(attempt.row.phase).toBe("execute_pending");
+});
+
+// The bridge sends every node-internal parked state (cancel_requested,
+// release_refused, ...) as the shared corpus "pending" response; the
+// benchbridge Go test pins those bytes. The hub parses it and parks generically.
+test("a node-internal parked state arrives as pending and parks the row", async () => {
+  const pending = corpus.responses.find((c) => c.name === "pending");
+  if (!pending) throw new Error("shared pending fixture missing");
+  const attempt = executePending();
+  const reply = { ...pending.value, identity: attempt.request.identity, target: attempt.request.target };
+  const h = harness(reply);
+  const result = await driveCheckpointAttempt(attempt, h.client, false, h.deps);
+  expect(result.reason).toBe("Checkpoint dispatch requires reconciliation");
+  expect(attempt.row.phase).toBe("execute_pending");
+  expect(h.sent).toHaveLength(1);
+  // It parked because it parsed as pending, not because parsing failed.
+  const parsed = await parseBenchCoordinatorResponse(new TextEncoder().encode(JSON.stringify(reply)), BenchCoordinatorRequest.parse(h.sent[0]));
+  expect(parsed.state).toBe("pending");
 });
