@@ -1,0 +1,464 @@
+{
+  "version": "superbench.private-execution-io-fixtures.v1",
+  "status": "PROPOSED; adapter conformance is not execution evidence",
+  "request": {
+    "version": "superbench.v2",
+    "operation": "run",
+    "key": "card",
+    "holder": "run:one",
+    "request_id": "run-1",
+    "lease_token": "66666666666666666666666666666666",
+    "arguments": [
+      "worker"
+    ],
+    "io": {
+      "version": "superbench.finite-io.v1",
+      "stdin_base64": "AAEC",
+      "stdout_limit_bytes": 1048576
+    }
+  },
+  "response": {
+    "name": "run-supplied-token-no-grant",
+    "status": 422,
+    "expected": {
+      "operation": "run",
+      "key": "card",
+      "request_id": "run-1",
+      "lease_token": "66666666666666666666666666666666",
+      "holder": "run:one"
+    },
+    "body": {
+      "version": "superbench.v2",
+      "operation": "run",
+      "ok": false,
+      "request_id": "run-1",
+      "result": {
+        "workspace": {
+          "key": "card",
+          "bench_id": "11111111111111111111111111111111",
+          "phase": "ready",
+          "member_count": 2,
+          "checkpoint_repository": "a",
+          "ready_for_acquisition": false,
+          "quota_bytes": 33554432,
+          "quota_inodes": 1000,
+          "checkpoint": {
+            "generation_id": "22222222222222222222222222222222",
+            "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "members": [
+              {
+                "name": "a",
+                "commit": "cccccccccccccccccccccccccccccccccccccccc"
+              },
+              {
+                "name": "b",
+                "commit": "dddddddddddddddddddddddddddddddddddddddd"
+              }
+            ]
+          },
+          "lease": {
+            "holder": "run:one",
+            "mode": "supervised",
+            "stop_requested": false,
+            "execution": {
+              "id": "33333333333333333333333333333333",
+              "phase": "stopped"
+            }
+          }
+        },
+        "execution": {
+          "id": "33333333333333333333333333333333",
+          "phase": "stopped"
+        },
+        "exit_code": 7,
+        "log_truncated": false,
+        "io": {
+          "version": "superbench.finite-io.v1",
+          "stdout_base64": "AAEC",
+          "stdout_bytes": 3,
+          "stdout_sha256": "ae4b3280e56e2faf83f414a6e3dabe9d5fbe18976544c05fed121accb85b53fc"
+        }
+      },
+      "error": {
+        "code": "operation_failed",
+        "message": "Inspect retained workspace state."
+      }
+    },
+    "validation": "wire"
+  },
+  "observation_request": {
+    "version": "superbench.v2",
+    "operation": "registration_observe",
+    "key": "card",
+    "bench_id": "11111111111111111111111111111111",
+    "holder": "run:one",
+    "lease_token": "66666666666666666666666666666666"
+  },
+  "observation_response": {
+    "version": "superbench.v2",
+    "operation": "registration_observe",
+    "ok": true,
+    "result": {
+      "key": "card",
+      "bench_id": "11111111111111111111111111111111",
+      "root_path": "/workspace/benches/card",
+      "layout_version": "superbench.payload-layout.v1",
+      "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "root": {
+        "device": "1",
+        "inode": "1"
+      },
+      "root_home": {
+        "device": "1",
+        "inode": "2"
+      },
+      "root_tmp": {
+        "device": "1",
+        "inode": "3"
+      },
+      "members": [
+        {
+          "name": "a",
+          "checkout": {
+            "device": "1",
+            "inode": "4"
+          },
+          "admin": {
+            "device": "1",
+            "inode": "5"
+          },
+          "home": {
+            "device": "1",
+            "inode": "6"
+          },
+          "tmp": {
+            "device": "1",
+            "inode": "7"
+          }
+        },
+        {
+          "name": "b",
+          "checkout": {
+            "device": "1",
+            "inode": "8"
+          },
+          "admin": {
+            "device": "1",
+            "inode": "9"
+          },
+          "home": {
+            "device": "1",
+            "inode": "10"
+          },
+          "tmp": {
+            "device": "1",
+            "inode": "11"
+          }
+        }
+      ],
+      "checkpoint": {
+        "generation_id": "22222222222222222222222222222222",
+        "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "members": [
+          {
+            "name": "a",
+            "commit": "cccccccccccccccccccccccccccccccccccccccc"
+          },
+          {
+            "name": "b",
+            "commit": "dddddddddddddddddddddddddddddddddddddddd"
+          }
+        ]
+      }
+    }
+  },
+  "base64": [
+    {
+      "encoded": "",
+      "hex": ""
+    },
+    {
+      "encoded": "AAEC",
+      "hex": "000102"
+    },
+    {
+      "encoded": "YQ==",
+      "hex": "61"
+    },
+    {
+      "encoded": "YWI=",
+      "hex": "6162"
+    }
+  ],
+  "invalid_base64": [
+    "YQ",
+    "YQ=",
+    "YR==",
+    "YWJ=",
+    "YQ==\n",
+    "_w==",
+    "-w==",
+    "@@@@"
+  ],
+  "producer_scenarios": [
+    "copied-input-before-launch-and-eof",
+    "setup-never-inherits-input",
+    "registered-layout-physical-inspection",
+    "owner-change-across-inspection-refuses",
+    "scope-fence-before-output",
+    "drain-before-seal",
+    "overflow-no-success-or-partial-output",
+    "seal-error-preserves-uncertainty",
+    "exact-uid-id-digest-replay-no-growth",
+    "lost-reply-no-redispatch",
+    "legacy-encoding-and-limits-unchanged",
+    "profile-larger-reservation-before-effects"
+  ],
+  "invalid_requests": [
+    {
+      "name": "unknown-version",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "card",
+        "holder": "run:one",
+        "request_id": "run-1",
+        "lease_token": "66666666666666666666666666666666",
+        "arguments": [
+          "worker"
+        ],
+        "io": {
+          "version": "unknown",
+          "stdin_base64": "AAEC",
+          "stdout_limit_bytes": 1048576
+        }
+      }
+    },
+    {
+      "name": "no-stdout",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "card",
+        "holder": "run:one",
+        "request_id": "run-1",
+        "lease_token": "66666666666666666666666666666666",
+        "arguments": [
+          "worker"
+        ],
+        "io": {
+          "version": "superbench.finite-io.v1",
+          "stdin_base64": "AAEC",
+          "stdout_limit_bytes": 0
+        }
+      }
+    },
+    {
+      "name": "oversized-limit",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "card",
+        "holder": "run:one",
+        "request_id": "run-1",
+        "lease_token": "66666666666666666666666666666666",
+        "arguments": [
+          "worker"
+        ],
+        "io": {
+          "version": "superbench.finite-io.v1",
+          "stdin_base64": "AAEC",
+          "stdout_limit_bytes": 1048577
+        }
+      }
+    },
+    {
+      "name": "noncanonical-padding",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "card",
+        "holder": "run:one",
+        "request_id": "run-1",
+        "lease_token": "66666666666666666666666666666666",
+        "arguments": [
+          "worker"
+        ],
+        "io": {
+          "version": "superbench.finite-io.v1",
+          "stdin_base64": "YR==",
+          "stdout_limit_bytes": 1048576
+        }
+      }
+    },
+    {
+      "name": "profile-without-io",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "card",
+        "holder": "run:one",
+        "request_id": "run-1",
+        "lease_token": "66666666666666666666666666666666",
+        "arguments": [
+          "worker"
+        ]
+      }
+    },
+    {
+      "name": "asserted-scope",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "card",
+        "holder": "run:one",
+        "request_id": "run-1",
+        "lease_token": "66666666666666666666666666666666",
+        "arguments": [
+          "worker"
+        ],
+        "io": {
+          "version": "superbench.finite-io.v1",
+          "stdin_base64": "AAEC",
+          "stdout_limit_bytes": 1048576
+        },
+        "execution_scope": "asserted"
+      }
+    },
+    {
+      "name": "null-io",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "card",
+        "holder": "run:one",
+        "request_id": "run-1",
+        "lease_token": "66666666666666666666666666666666",
+        "arguments": [
+          "worker"
+        ],
+        "io": null
+      }
+    }
+  ],
+  "request_digests": [
+    {
+      "name": "plain",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "card",
+        "holder": "run:one",
+        "request_id": "run-1",
+        "lease_token": "66666666666666666666666666666666",
+        "arguments": [
+          "worker"
+        ],
+        "io": {
+          "version": "superbench.finite-io.v1",
+          "stdin_base64": "AAEC",
+          "stdout_limit_bytes": 1048576
+        }
+      },
+      "canonical": "{\"version\":\"superbench.v2\",\"operation\":\"run\",\"key\":\"card\",\"holder\":\"run:one\",\"request_id\":\"run-1\",\"lease_token\":\"66666666666666666666666666666666\",\"arguments\":[\"worker\"],\"io\":{\"version\":\"superbench.finite-io.v1\",\"stdin_base64\":\"AAEC\",\"stdout_limit_bytes\":1048576}}",
+      "sha256": "3c2e1fd408208ccb349af1ad0fb5a34ebedcb1ca91000807558df9e9d489565e"
+    },
+    {
+      "name": "json-escaping",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "run",
+        "key": "card",
+        "holder": "run:one",
+        "request_id": "run-1",
+        "lease_token": "66666666666666666666666666666666",
+        "arguments": [
+          "<>&  "
+        ],
+        "io": {
+          "version": "superbench.finite-io.v1",
+          "stdin_base64": "AAEC",
+          "stdout_limit_bytes": 1048576
+        }
+      },
+      "canonical": "{\"version\":\"superbench.v2\",\"operation\":\"run\",\"key\":\"card\",\"holder\":\"run:one\",\"request_id\":\"run-1\",\"lease_token\":\"66666666666666666666666666666666\",\"arguments\":[\"\\u003c\\u003e\\u0026\\u2028\\u2029\"],\"io\":{\"version\":\"superbench.finite-io.v1\",\"stdin_base64\":\"AAEC\",\"stdout_limit_bytes\":1048576}}",
+      "sha256": "40d33a1f861ebbdc8978c23fad589e2e1817f2a68dc3a345360d4fe6e510b1b9"
+    }
+  ],
+  "lexical": [
+    {
+      "name": "leading-utf8-bom",
+      "prefix_hex": "efbbbf",
+      "error": "leading_bom"
+    }
+  ],
+  "observation_errors": [
+    {
+      "code": "invalid_request",
+      "statuses": [
+        400,
+        405,
+        413,
+        415
+      ]
+    },
+    {
+      "code": "forbidden",
+      "statuses": [
+        403
+      ]
+    },
+    {
+      "code": "not_found",
+      "statuses": [
+        404
+      ]
+    },
+    {
+      "code": "conflict",
+      "statuses": [
+        409
+      ]
+    },
+    {
+      "code": "in_progress",
+      "statuses": [
+        409
+      ]
+    },
+    {
+      "code": "operation_in_doubt",
+      "statuses": [
+        409,
+        503
+      ]
+    },
+    {
+      "code": "unavailable",
+      "statuses": [
+        503
+      ]
+    },
+    {
+      "code": "operation_failed",
+      "statuses": [
+        422
+      ]
+    }
+  ],
+  "capacity_response": {
+    "status": 422,
+    "body": {
+      "version": "superbench.v2",
+      "operation": "run",
+      "ok": false,
+      "request_id": "run-1",
+      "error": {
+        "code": "capacity_exhausted",
+        "message": "needed_bytes=2 available_bytes=1 needed_inodes=1 available_inodes=0"
+      }
+    }
+  }
+}

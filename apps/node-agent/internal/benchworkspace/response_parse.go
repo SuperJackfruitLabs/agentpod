@@ -26,8 +26,17 @@ type responseWire struct {
 // It cannot prove private producer acquisition/fencing authority or global
 // inventory completeness. The caller must obtain that independent evidence separately.
 func ParseResponse(raw []byte, httpStatus int, request Request) (Response, error) {
+	return parseResponse(raw, httpStatus, request, MaxBody, false)
+}
+
+// parseResponse keeps one envelope validator for both encodings. growthLimit is
+// MaxBody without a profile; finite selects the profiled run result type.
+func parseResponse(raw []byte, httpStatus int, request Request, growthLimit int, finite bool) (Response, error) {
 	var zero Response
-	if len(raw) > MaxResponse || Growth(request.Operation) && len(raw) > MaxBody || !utf8.Valid(raw) || !scalarEscapes(raw) || !strictJSON(raw) || !responseIntegers(raw) {
+	if finite && request.Operation != "run" {
+		return zero, ErrResponse
+	}
+	if len(raw) > MaxResponse && !finite || Growth(request.Operation) && len(raw) > growthLimit || !utf8.Valid(raw) || !scalarEscapes(raw) || !strictJSON(raw) || !responseIntegers(raw) {
 		return zero, ErrResponse
 	}
 	var wire responseWire
@@ -50,7 +59,7 @@ func ParseResponse(raw []byte, httpStatus int, request Request) (Response, error
 		}
 		return response, nil
 	}
-	if !Known(request.Operation) || wire.Operation != request.Operation || wire.RequestID != request.RequestID || Growth(wire.Operation) != (wire.RequestID != "") || wire.RequestID != "" && !keyPattern.MatchString(wire.RequestID) || Growth(wire.Operation) && len(raw) > MaxBody {
+	if !Known(request.Operation) || wire.Operation != request.Operation || wire.RequestID != request.RequestID || Growth(wire.Operation) != (wire.RequestID != "") || wire.RequestID != "" && !keyPattern.MatchString(wire.RequestID) {
 		return zero, ErrResponse
 	}
 	if wire.Result != nil {
@@ -65,6 +74,9 @@ func ParseResponse(raw []byte, httpStatus int, request Request) (Response, error
 			result = &HostStatus{}
 		case "run":
 			result = &RunOutcome{}
+			if finite {
+				result = &FiniteRunOutcome{}
+			}
 		case "setup":
 			result = &SetupOutcome{}
 		default:
@@ -74,7 +86,11 @@ func ParseResponse(raw []byte, httpStatus int, request Request) (Response, error
 			return zero, ErrResponse
 		}
 		response.Result = result
-		if !validResponseResult(response, request) {
+		checked := response
+		if f, ok := result.(*FiniteRunOutcome); ok {
+			checked.Result = &f.RunOutcome
+		}
+		if !validResponseResult(checked, request) {
 			return zero, ErrResponse
 		}
 	}
