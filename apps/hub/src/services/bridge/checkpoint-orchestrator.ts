@@ -46,17 +46,25 @@ async function current(attempt: RetainedCheckpointAttempt): Promise<void> {
   if (canonicalCheckpoint(authority) !== attempt.row.authority) throw new CheckpointRefused("stale");
 }
 
-async function exchange(attempt: RetainedCheckpointAttempt, raw: string): Promise<BenchCoordinatorResponse> {
+/** The Hub's effects, injectable so the phase logic can be tested without a broker or ledger database. */
+export interface CheckpointDriveDeps {
+  authority(attempt: RetainedCheckpointAttempt): Promise<void>;
+  request: typeof nodeRequest;
+  service: typeof createCheckpointServiceClient;
+}
+const defaultDeps: CheckpointDriveDeps = { authority: current, request: nodeRequest, service: createCheckpointServiceClient };
+
+async function exchange(attempt: RetainedCheckpointAttempt, raw: string, deps: CheckpointDriveDeps): Promise<BenchCoordinatorResponse> {
   const sent = BenchCoordinatorRequest.parse(parseCheckpointJSON(encode(raw)));
-  await current(attempt);
+  await deps.authority(attempt);
   // Broker correlates replies to the authenticated selected enrolled Node.
   // A timeout never causes this function to repeat the request.
-  const result = await nodeRequest(attempt.profile.target.node_id, BENCH_COORDINATOR_VERB, sent, { timeoutMs: 15_000 });
+  const result = await deps.request(attempt.profile.target.node_id, BENCH_COORDINATOR_VERB, sent, { timeoutMs: 15_000 });
   if (!result.ok) throw new CheckpointRefused("uncertain");
   const serialized = JSON.stringify(result.data);
   if (typeof serialized !== "string" || Buffer.byteLength(serialized, "utf8") > 262144) throw new CheckpointRefused("source");
   const response = await parseBenchCoordinatorResponse(encode(serialized), sent);
-  await current(attempt);
+  await deps.authority(attempt);
   return response;
 }
 
@@ -69,19 +77,19 @@ function statusRequest(attempt: RetainedCheckpointAttempt): string {
  * successful original INSERT, never a lookup, restart or speculative retry.
  */
 export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt, client: SuperpipelineClient,
-  sendPrepare = false): Promise<DispatchResult> {
+  sendPrepare = false, deps: CheckpointDriveDeps = defaultDeps): Promise<DispatchResult> {
   let attempt = initial;
   let sendExecute = false; let sendSettlement = false;
-  const service = createCheckpointServiceClient(attempt.profile);
+  const service = deps.service(attempt.profile);
   try {
     // There are eight durable phases. No polling loop, timer or background
     // child is created by the Hub; subsequent cycles resume this same row.
     for (let step = 0; step < 8; step++) {
-      await current(attempt);
+      await deps.authority(attempt);
       switch (attempt.row.phase) {
         case "prepare_pending": {
           await client.heartbeat(attempt.claim);
-          const response = await exchange(attempt, sendPrepare ? attempt.row.prepareRequest : statusRequest(attempt));
+          const response = await exchange(attempt, sendPrepare ? attempt.row.prepareRequest : statusRequest(attempt), deps);
           sendPrepare = false;
           if (response.state !== "prepared") return refusedOrParked(attempt, response);
           const next = await advanceCheckpointAttempt(attempt, { phase: "prepared", prepared: canonicalCheckpoint(response.source) });
@@ -99,9 +107,9 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
           await client.heartbeat(attempt.claim);
           const { source } = await retainedCheckpointSource(attempt);
           if (attempt.row.source !== canonicalCheckpoint(source)) throw new CheckpointRefused("source");
-          await current(attempt);
+          await deps.authority(attempt);
           const receipt = await service.admit(attempt.claim, source);
-          await current(attempt);
+          await deps.authority(attempt);
           attempt = (await advanceCheckpointAttempt(attempt, { phase: "admitted", sourceReceipt: canonicalCheckpoint(receipt) })).attempt;
           break;
         }
@@ -112,7 +120,7 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
           if (receipt.runId !== attempt.claim.runId || receipt.leaseEpoch !== attempt.claim.leaseEpoch ||
             receipt.sourceDigest !== await checkpointDigest(source)) throw new CheckpointRefused("source");
           requireActiveSource(await service.source(attempt.claim), source);
-          await current(attempt);
+          await deps.authority(attempt);
           const execution = JSON.stringify(BenchCoordinatorRequest.parse({ version: attempt.request.version, operation: "execute",
             identity: attempt.request.identity, target: attempt.request.target, binding_sha256: prepared.binding_sha256,
             source_receipt: { run_id: receipt.runId, epoch: receipt.leaseEpoch, source_digest: receipt.sourceDigest, admitted_at: receipt.admittedAt } }));
@@ -123,7 +131,7 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
           if (!attempt.row.executeRequest || hash(attempt.row.executeRequest) !== attempt.row.executeSHA256)
             throw new CheckpointRefused("source");
           await client.heartbeat(attempt.claim);
-          const response = await exchange(attempt, sendExecute ? attempt.row.executeRequest : statusRequest(attempt));
+          const response = await exchange(attempt, sendExecute ? attempt.row.executeRequest : statusRequest(attempt), deps);
           sendExecute = false;
           if (response.state !== "completed") return refusedOrParked(attempt, response);
           // Strict DTO validation precedes storage; report joins separately
@@ -136,7 +144,7 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
           if (!attempt.row.completion) throw new CheckpointRefused("source");
           const { source } = await retainedCheckpointSource(attempt);
           requireActiveSource(await service.source(attempt.claim), source);
-          await current(attempt);
+          await deps.authority(attempt);
           const report = await buildCheckpointSettlement(attempt, parseCheckpointContextJSON(encode(attempt.row.completion)));
           const next = await advanceCheckpointAttempt(attempt, { phase: "submission_pending", settlementBody: report.body, settlementSHA256: report.sha256 });
           attempt = next.attempt; sendSettlement = next.send; break;
@@ -160,13 +168,13 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
             if (report.body !== body || report.sha256 !== attempt.row.settlementSHA256) throw new CheckpointRefused("source");
             const snapshot = await service.source(attempt.claim);
             requireActiveSource(snapshot, source);
-            await current(attempt);
+            await deps.authority(attempt);
             requireActiveSource(snapshot, source);
             receipt = await service.settle(attempt.claim, body);
           }
           sendSettlement = false;
           if (!receipt) return parked(attempt);
-          await current(attempt);
+          await deps.authority(attempt);
           attempt = (await advanceCheckpointAttempt(attempt, { phase: "reported", settlementReceipt: canonicalCheckpoint(receipt) })).attempt;
           break;
         }

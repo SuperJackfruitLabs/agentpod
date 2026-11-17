@@ -3,6 +3,7 @@ import { selectCheckpointDispatch, type CheckpointDispatchPort, type CheckpointT
 import { parsePendingCheckpointClaim } from "./checkpoint-claim";
 import fixture from "./checkpoint-contract/claim.fixture.json";
 import { SuperpipelineClient } from "./superpipeline";
+import type { DispatchResult } from "./dispatch-types";
 
 const identity = { tenantId: "fleet_hub_fixture", boardId: fixture.pending.boardId, stationId: "station_pilot01" };
 function target(): CheckpointTarget { return { ...identity, sourceTenantId: fixture.pending.tenantId, agentId: fixture.pending.agentId, nodeId: "node_pilot01",
@@ -121,7 +122,7 @@ test("a changed trusted source tenant pin refuses the claim before any context f
 
 test("a named capacity refusal from the port reaches the caller unchanged", async () => {
   const h = harness();
-  const refusal = { status: "unreported" as const, externalRunId: fixture.pending.runId, attemptId: "attempt-fixture",
+  const refusal: DispatchResult = { status: "unreported", externalRunId: fixture.pending.runId, attemptId: "attempt-fixture",
     reason: "SuperBench capacity exhausted; the attempt stays parked and is not retried" };
   h.port.dispatch = async (value) => { h.dispatched.push(value); return refusal; };
   const selection = await selectCheckpointDispatch(h.port, identity);
