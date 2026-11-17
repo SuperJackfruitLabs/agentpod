@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchlaunch"
 )
 
 func registryFixture(t *testing.T) (string, Registry) {
@@ -118,5 +121,58 @@ func TestRegistryRefusesAmbiguousSelectorsAndInvalidWorkerInputsBeforeReadiness(
 	writeRegistry(t, path, r)
 	if _, _, err := readRegistry(path, r.NodeID); err == nil {
 		t.Fatal("invalid worker environment advertised")
+	}
+}
+
+func TestRegistryLaunchIsOptInAndClosed(t *testing.T) {
+	path, r := registryFixture(t)
+	raw, _ := os.ReadFile(path)
+	if string(raw) == "" || json.Valid(raw) && strings.Contains(string(raw), `"launch"`) {
+		t.Fatal("default registry names a launch")
+	}
+	r.Profiles[0].Launch = "registered-v1"
+	writeRegistry(t, path, r)
+	got, _, err := readRegistry(path, r.NodeID)
+	if err != nil || got.Profiles[0].Launch != "registered-v1" {
+		t.Fatal("registered launch opt-in refused", err)
+	}
+	r.Profiles[0].Launch = "registered-v2"
+	writeRegistry(t, path, r)
+	if _, _, err = readRegistry(path, r.NodeID); err == nil {
+		t.Fatal("unknown launch accepted")
+	}
+}
+
+func TestOnlyTheRegisteredProfileSelectsTheRegisteredLaunch(t *testing.T) {
+	path, r := registryFixture(t)
+	h := &Handler{registry: r}
+	_, request := prepareFixture(t)
+	if _, ok := h.manager(request, r.Profiles[0], Intent{}, "prepare").(groupedCoordinator); !ok {
+		t.Fatal("default profile left the grouped launch")
+	}
+	r.Profiles[0].Launch = "registered-v1"
+	writeRegistry(t, path, r)
+	m := h.manager(request, r.Profiles[0], Intent{}, "prepare")
+	launch, ok := m.(benchlaunch.Coordinator)
+	if !ok || launch.Journal.Root != filepath.Join(r.StateRoot, "registered") {
+		t.Fatal("registered profile not selected")
+	}
+	if st, err := os.Stat(launch.Journal.Root); err != nil || st.Mode().Perm() != 0700 {
+		t.Fatal("registered journal is not private", err)
+	}
+}
+
+func TestRegisteredRefusalKeepsItsCode(t *testing.T) {
+	_, request := prepareFixture(t)
+	response, err := failed(request, &benchlaunch.Refusal{Code: "capacity_exhausted"})
+	if err != nil || response.State != "refused" || response.Code != "capacity_exhausted" {
+		t.Fatal("capacity refusal lost", response, err)
+	}
+	if response, err = failed(request, ErrIntent); err == nil || response.State != "pending" {
+		t.Fatal("unknown failure was not parked")
+	}
+	raw, _ := json.Marshal(transportOutcome(request, response, err))
+	if !strings.Contains(string(raw), `"pending"`) {
+		t.Fatal("parked outcome not pending on the wire")
 	}
 }

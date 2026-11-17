@@ -152,7 +152,8 @@ export const BenchCoordinatorResponse = z.union([
   z.object({ ...fixed, operation: z.literal("ready"), state: z.literal("unavailable"),
     code: z.enum(["disabled", "unsupported", "offline", "unverified"]) }).strict(),
   z.object({ ...fixed, operation: z.enum(["ready", "prepare", "execute", "status"]), state: z.literal("refused"),
-    code: z.enum(["invalid", "unsupported", "unavailable", "unauthorized", "stale_owner", "conflict", "pending", "verification_failed"]) }).strict(),
+    code: z.enum(["invalid", "unsupported", "unavailable", "unauthorized", "stale_owner", "conflict", "pending", "verification_failed",
+      "capacity_exhausted"]) }).strict(),
   pending, prepared, completed,
 ]).refine((r) => {
   if (!("identity" in r)) return true;

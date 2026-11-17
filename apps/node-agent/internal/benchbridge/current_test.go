@@ -112,7 +112,7 @@ func TestCurrentRefusesReplayedDecisions(t *testing.T) {
 }
 
 func TestCurrentClosedRefusals(t *testing.T) {
-	for _, mode := range []string{"nonce", "digest", "expired", "future", "lifetime", "refused", "compression", "cache", "oversize", "redirect", "malformed"} {
+	for _, mode := range []string{"nonce", "digest", "expired", "future", "lifetime", "refused", "refused-unavailable", "compression", "cache", "oversize", "redirect", "malformed"} {
 		t.Run(mode, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				raw, _ := io.ReadAll(r.Body)
@@ -133,6 +133,8 @@ func TestCurrentClosedRefusals(t *testing.T) {
 					d.ExpiresAtMs += 10000
 				case "refused":
 					d.Decision, d.Code = "refused", "stale_owner"
+				case "refused-unavailable":
+					d.Decision, d.Code = "refused", "unavailable"
 				case "compression":
 					w.Header().Set("Content-Encoding", "gzip")
 				case "cache":
@@ -155,9 +157,15 @@ func TestCurrentClosedRefusals(t *testing.T) {
 			defer server.Close()
 			client, _ := NewHubCurrent(server.URL, "node-fixture", "synthetic-private")
 			defer client.Close()
-			if err := client.Check(context.Background(), currentFixture(t)); !errors.Is(err, ErrCurrent) ||
-				err.Error() != "checkpoint current authority unavailable; retain attempt" {
-				t.Fatal("unsafe or non-static refusal")
+			err := client.Check(context.Background(), currentFixture(t))
+			// Only an authentic, fresh stale_owner decision is told apart; it
+			// still wraps ErrCurrent. Every other failure stays the static error.
+			want := ErrCurrent
+			if mode == "refused" {
+				want = ErrStale
+			}
+			if !errors.Is(err, ErrCurrent) || errors.Is(err, ErrStale) != (mode == "refused") || err.Error() != want.Error() {
+				t.Fatal("unsafe or non-static refusal", err)
 			}
 		})
 	}

@@ -58,8 +58,21 @@ func NewReceiptLookupRequest(source Request) (ReceiptLookupRequest, error) {
 // grant is not current ownership; callers must reparse the exact original body
 // against their original source request and preserve all uncertainty.
 func ParseReceiptLookupResponse(raw []byte, status int, target ReceiptLookupRequest) (ReceiptLookupResponse, error) {
+	return parseReceiptLookup(raw, status, target, false)
+}
+
+// ParseFiniteReceiptLookupResponse is the explicitly profiled lookup: a retained
+// original body up to MaxFiniteBody inside an envelope up to MaxFiniteLookup.
+func ParseFiniteReceiptLookupResponse(raw []byte, status int, target ReceiptLookupRequest) (ReceiptLookupResponse, error) {
+	return parseReceiptLookup(raw, status, target, true)
+}
+func parseReceiptLookup(raw []byte, status int, target ReceiptLookupRequest, finite bool) (ReceiptLookupResponse, error) {
 	var zero ReceiptLookupResponse
-	if !validReceiptLookupRequest(target) || len(raw) > MaxReceiptLookupResponse || !utf8.Valid(raw) || !scalarEscapes(raw) || !strictJSON(raw) {
+	envelope, body := MaxReceiptLookupResponse, MaxBody
+	if finite {
+		envelope, body = MaxFiniteLookup, MaxFiniteBody
+	}
+	if !validReceiptLookupRequest(target) || len(raw) > envelope || !utf8.Valid(raw) || !scalarEscapes(raw) || !strictJSON(raw) {
 		return zero, ErrResponse
 	}
 	fields, ok := fieldSet(raw, []string{"version", "operation", "ok"}, []string{"result", "error"})
@@ -86,7 +99,7 @@ func ParseReceiptLookupResponse(raw []byte, status int, target ReceiptLookupRequ
 	required := []string{"target_request_id", "target_digest", "state"}
 	if result.State == "completed" {
 		required = append(required, "http_status", "response_body")
-		if result.HTTPStatus < 200 || result.HTTPStatus > 599 || result.ResponseBody == "" || len(result.ResponseBody) > MaxBody || !utf8.ValidString(result.ResponseBody) {
+		if result.HTTPStatus < 200 || result.HTTPStatus > 599 || result.ResponseBody == "" || len(result.ResponseBody) > body || !utf8.ValidString(result.ResponseBody) {
 			return zero, ErrResponse
 		}
 	} else if !oneOf(result.State, "absent", "in_progress", "operation_in_doubt", "cancel_requested") {

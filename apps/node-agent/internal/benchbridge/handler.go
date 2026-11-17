@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcoordinator"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcoordinatorwire"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchlaunch"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 )
 
@@ -73,6 +76,9 @@ func (h *Handler) check(ctx context.Context, r benchcoordinatorwire.Request, p L
 		current.SourceDigest = r.SourceReceipt.SourceDigest
 	}
 	if err := h.current.Check(ctx, current); err != nil {
+		if errors.Is(err, ErrStale) && h.installed() == nil {
+			return ErrStale
+		}
 		return ErrCurrent
 	}
 	if h.installed() != nil {
@@ -144,18 +150,57 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 	}
 	return spec, task, nil
 }
-func (h *Handler) manager(r benchcoordinatorwire.Request, p LocalProfile, intent Intent, phase string) benchcoordinator.Manager {
-	source := benchdispatch.SourceCoordinator{Store: benchdispatch.Store{Root: h.registry.StateRoot}, Client: h.client, ContextParent: h.registry.ContextParent}
+
+// coordinator is the attempt lifecycle the handler drives. The grouped
+// context launch and the registered stdin launch both implement it.
+type coordinator interface {
+	Prepare(context.Context, benchdispatch.SourceSpec, benchdispatch.SourceTask) (benchcoordinator.Prepared, error)
+	Execute(context.Context, benchdispatch.SourceSpec, benchdispatch.AdmissionGate) (benchcoordinator.Completion, error)
+	Status(context.Context, benchdispatch.SourceSpec) (benchcoordinator.Status, error)
+	Reserved(context.Context, benchdispatch.SourceSpec) (benchdispatch.SourceSpec, error)
+}
+
+type groupedCoordinator struct{ benchcoordinator.Manager }
+
+func (g groupedCoordinator) Reserved(ctx context.Context, spec benchdispatch.SourceSpec) (benchdispatch.SourceSpec, error) {
+	return g.Source.Store.ReservedSourceSpec(ctx, spec.BenchKey, spec.Identity)
+}
+
+func (h *Handler) manager(r benchcoordinatorwire.Request, p LocalProfile, intent Intent, phase string) coordinator {
+	var repositories []benchworkspace.Repository
 	for _, repo := range p.Repositories {
-		source.Repositories = append(source.Repositories, benchworkspace.Repository{Name: repo.Name, Repository: repo.Repository, Base: repo.Base, Branch: "card/" + r.Identity.CardID})
+		repositories = append(repositories, benchworkspace.Repository{Name: repo.Name, Repository: repo.Repository, Base: repo.Base, Branch: "card/" + r.Identity.CardID})
 	}
-	source.Current = func(ctx context.Context, spec benchdispatch.SourceSpec) error {
+	current := func(ctx context.Context, spec benchdispatch.SourceSpec) error {
 		if intent.Spec == nil || !reflect.DeepEqual(spec, *intent.Spec) {
 			return ErrCurrent
 		}
-		return h.check(ctx, r, p, intent, phase)
+		if err := h.check(ctx, r, p, intent, phase); errors.Is(err, ErrStale) {
+			return benchlaunch.ErrSuperseded
+		} else if err != nil {
+			return ErrCurrent
+		}
+		return nil
 	}
-	return benchcoordinator.Manager{Source: source}
+	if p.Launch == benchlaunch.Mode {
+		// A private sibling of the grouped journal; Journal refuses it unless 0700.
+		root := filepath.Join(h.registry.StateRoot, "registered")
+		_ = os.Mkdir(root, 0700)
+		return benchlaunch.Coordinator{Journal: benchlaunch.Journal{Root: root}, Producer: h.client, Repositories: repositories, Current: current}
+	}
+	source := benchdispatch.SourceCoordinator{Store: benchdispatch.Store{Root: h.registry.StateRoot}, Client: h.client, ContextParent: h.registry.ContextParent, Repositories: repositories, Current: current}
+	return groupedCoordinator{benchcoordinator.Manager{Source: source}}
+}
+
+// failed keeps unknown outcomes parked. Only a terminal refusal from the
+// registered launch is reported, with its own code.
+func failed(r benchcoordinatorwire.Request, err error) (benchcoordinatorwire.Response, error) {
+	if code, ok := benchlaunch.RefusalCode(err); ok {
+		response := refused(r.Operation)
+		response.Code = code
+		return response, nil
+	}
+	return pending(r), err
 }
 func pending(r benchcoordinatorwire.Request) benchcoordinatorwire.Response {
 	return benchcoordinatorwire.Response{Version: benchcoordinatorwire.Version, Operation: r.Operation, State: "pending", Identity: r.Identity, Target: r.Target}
@@ -266,7 +311,7 @@ func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, ra
 		if send {
 			source, err := m.Prepare(ctx, *intent.Spec, *intent.Task)
 			if err != nil {
-				return pending(r), err
+				return failed(r, err)
 			}
 			return preparedResponse(r, source)
 		}
@@ -287,7 +332,7 @@ func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, ra
 	if h.check(ctx, r, p, prospective, "execute") != nil {
 		return refused(r.Operation), ErrCurrent
 	}
-	saved, err := (benchdispatch.Store{Root: h.registry.StateRoot}).ReservedSourceSpec(ctx, intent.Spec.BenchKey, intent.Spec.Identity)
+	saved, err := h.manager(r, p, intent, "execute").Reserved(ctx, *intent.Spec)
 	if err != nil || !reflect.DeepEqual(saved, *intent.Spec) {
 		return pending(r), ErrIntent
 	}
@@ -310,22 +355,39 @@ func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, ra
 		return h.check(ctx, r, p, intent, "execute")
 	})
 	if err != nil {
-		return pending(r), err
+		return failed(r, err)
 	}
 	return completedResponse(r, saved, completion)
 }
 func (h *Handler) status(ctx context.Context, r benchcoordinatorwire.Request, p LocalProfile, intent Intent) (benchcoordinatorwire.Response, error) {
-	if intent.Spec == nil || h.check(ctx, r, p, intent, "observe") != nil {
+	// A registered attempt the hub has definitely superseded may still reach
+	// Status, which retires its own record (release, no run); see benchlaunch.
+	if intent.Spec == nil {
 		return refused(r.Operation), ErrCurrent
 	}
-	saved, err := (benchdispatch.Store{Root: h.registry.StateRoot}).ReservedSourceSpec(ctx, intent.Spec.BenchKey, intent.Spec.Identity)
+	if err := h.check(ctx, r, p, intent, "observe"); err != nil && (!errors.Is(err, ErrStale) || p.Launch != benchlaunch.Mode) {
+		return refused(r.Operation), ErrCurrent
+	}
+	m := h.manager(r, p, intent, "observe")
+	saved, err := m.Reserved(ctx, *intent.Spec)
 	if err != nil || !reflect.DeepEqual(saved, *intent.Spec) {
-		return pending(r), ErrIntent
+		if err == nil {
+			err = ErrIntent
+		}
+		return failed(r, err)
 	}
-	status, err := h.manager(r, p, intent, "observe").Status(ctx, saved)
+	status, err := m.Status(ctx, saved)
 	if err != nil {
-		return pending(r), err
+		return failed(r, err)
 	}
+	return statusResponse(r, saved, status)
+}
+
+// statusResponse is the only place a coordinator Status reaches the wire.
+// completed and prepared carry their evidence; every other node-internal state
+// (pending, cancel_requested, release_refused, ...) is the wire's parked
+// "pending", so a new internal state can never widen the contract.
+func statusResponse(r benchcoordinatorwire.Request, saved benchdispatch.SourceSpec, status benchcoordinator.Status) (benchcoordinatorwire.Response, error) {
 	if status.State == "completed" && status.Completion != nil && r.Operation != "prepare" {
 		return completedResponse(r, saved, *status.Completion)
 	}

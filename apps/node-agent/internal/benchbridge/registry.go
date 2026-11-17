@@ -11,6 +11,7 @@ import (
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcoordinatorwire"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchjournal"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchlaunch"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 )
 
@@ -42,6 +43,9 @@ type LocalProfile struct {
 	Repositories         []LocalRepository `json:"repositories"`
 	Arguments            []string          `json:"arguments"`
 	Environment          map[string]string `json:"environment"`
+	// Launch selects the worker transport. Empty keeps the grouped context
+	// launch; "registered-v1" opts in to the finite stdin transport.
+	Launch string `json:"launch,omitempty"`
 }
 type LocalRepository struct {
 	Name         string `json:"name"`
@@ -110,6 +114,9 @@ func readRegistry(path, nodeID string) (Registry, string, error) {
 		request := benchcoordinatorwire.Request{Version: benchcoordinatorwire.Version, Operation: "ready", TenantID: p.TenantID, BoardID: p.BoardID, StationID: p.StationID}
 		encoded, _ := json.Marshal(request)
 		if _, err = benchcoordinatorwire.ParseRequest(encoded); err != nil || p.ID == "" || seen[p.ID] || len(p.Arguments) == 0 || len(p.Arguments) > 128 || p.Environment == nil {
+			return Registry{}, "", ErrRegistry
+		}
+		if p.Launch != "" && p.Launch != benchlaunch.Mode {
 			return Registry{}, "", ErrRegistry
 		}
 		seen[p.ID] = true

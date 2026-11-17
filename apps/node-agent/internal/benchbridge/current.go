@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net"
@@ -21,6 +22,11 @@ import (
 )
 
 var ErrCurrent = errors.New("checkpoint current authority unavailable; retain attempt")
+
+// ErrStale is an authenticated, well-formed hub decision that this attempt is
+// stale_owner. It wraps ErrCurrent; only it (never a transport failure) lets a
+// registered attempt clean up its own record.
+var ErrStale = fmt.Errorf("checkpoint attempt superseded: %w", ErrCurrent)
 
 // HubCurrent contains the existing enrollment credential privately. It must
 // never enter a task environment, public DTO, source plan or error message.
@@ -116,6 +122,9 @@ func (c *HubCurrent) Check(ctx context.Context, request benchcoordinatorwire.Cur
 		return ErrCurrent
 	}
 	decision, err := benchcoordinatorwire.ParseCurrentResponse(body, raw, time.Now().UnixMilli())
+	if err == nil && decision.Decision == "refused" && decision.Code == "stale_owner" {
+		return ErrStale
+	}
 	if err != nil || decision.Decision != "current" {
 		return ErrCurrent
 	}

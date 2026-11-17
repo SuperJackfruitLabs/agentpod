@@ -188,7 +188,7 @@ func ParseResponse(raw []byte, request Request) (Response, error) {
 	}
 	names := []string{"version", "operation", "state"}
 	if r.State == "refused" {
-		if !one(r.Code, "invalid", "unsupported", "unavailable", "unauthorized", "stale_owner", "conflict", "pending", "verification_failed") || !fields(raw, append(names, "code")...) {
+		if !one(r.Code, "invalid", "unsupported", "unavailable", "unauthorized", "stale_owner", "conflict", "pending", "verification_failed", "capacity_exhausted") || !fields(raw, append(names, "code")...) {
 			return Response{}, ErrInvalid
 		}
 		return r, nil

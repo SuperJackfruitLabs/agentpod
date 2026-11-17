@@ -58,3 +58,12 @@ This adapter follows the inspected Hermes `chat` stream-json protocol. Different
 Hermes versions may refuse or emit incompatible events and will fail closed.
 The adapter and synthetic-child tests do not establish installed Hermes access,
 provider connectivity, registered-layout admission, or a successful live task.
+
+## Registered launch
+
+With the proposed registered launch ([`BENCH_REGISTERED_LAUNCH.md`](BENCH_REGISTERED_LAUNCH.md)),
+the coordinator starts `agentpod-bench-worker registered-v1 <capsule_sha256>` through
+SuperBench's finite stdin transport. The capsule's task arguments name the harness
+(for example this `hermes-v1` mode); the worker reads its prompt from the capsule,
+never from a Node-private path. The payload home, executable and provider
+configuration above remain prerequisites the operator prepares.

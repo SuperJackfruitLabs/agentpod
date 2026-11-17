@@ -33,6 +33,19 @@ export async function retainedCheckpointSource(attempt: RetainedCheckpointAttemp
     sourceRequestSha256: prepared.source_request_sha256, workerContextSha256: b.context_sha256 }) };
 }
 
+type AttemptRow = RetainedCheckpointAttempt["row"];
+/**
+ * The second read of the attempt row. stale_owner lets a Node retire its own
+ * attempt, so it is reserved for a definite change: the row is gone, or its run,
+ * epoch, attempt or owner authority differ. Any other difference (the Hub moving
+ * the row on between its two reads) is a race and stays retryable.
+ */
+export function finalRowDecision(initial: AttemptRow, final: AttemptRow | undefined): "current" | "stale_owner" | "unavailable" {
+  if (!final || final.tenantId !== initial.tenantId || final.attemptId !== initial.attemptId || final.runId !== initial.runId ||
+    final.leaseEpoch !== initial.leaseEpoch || final.authority !== initial.authority) return "stale_owner";
+  return JSON.stringify(final) === JSON.stringify(initial) ? "current" : "unavailable";
+}
+
 export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array) {
   const request = parseBenchCoordinatorCurrentRequest(raw);
   const base = { version: request.version, nonce: request.nonce, request_sha256: hash(raw) };
@@ -85,8 +98,9 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array)
     const finalAuthority = await readCheckpointAuthority(attempt.profile);
     const final = await readCheckpointAttempt(request.identity.tenant_id, request.identity.attempt_id);
     requireInstalledCheckpointProfile(attempt.profile);
-    if (canonicalCheckpoint(finalAuthority) !== attempt.row.authority || !final ||
-      JSON.stringify(final.row) !== JSON.stringify(attempt.row)) return refused("stale_owner");
+    if (canonicalCheckpoint(finalAuthority) !== attempt.row.authority) return refused("stale_owner");
+    const reread = finalRowDecision(attempt.row, final?.row);
+    if (reread !== "current") return refused(reread);
     const now = Date.now();
     if (active) requireActiveSource(active.snapshot, active.source, now);
     if (expires <= now) return refused("unavailable");
