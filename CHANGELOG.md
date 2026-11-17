@@ -12,6 +12,15 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Added
 
+- Proposed registered bench launch: a registry profile with `"launch": "registered-v1"`
+  delivers the worker's task to the payload only as SuperBench finite stdin and
+  reads its framed result from sealed stdout, then reads the run's receipt back
+  and releases the lease. Lost replies recover through the receipt with the same
+  request ID; nothing is resent. Off unless both the coordinator registry flag
+  and the profile opt in. See `docs/BENCH_REGISTERED_LAUNCH.md`.
+- The coordinator wire can refuse with `capacity_exhausted`; the hub reports it
+  by name on the parked attempt and never re-sends prepare or execute.
+
 - The private bench worker has an explicit `hermes-v1` adapter for bounded prompt
   input and binding-matched task results. It requires a separately prepared
   payload-owned Hermes home, executable, provider and model. No dispatcher enables
