@@ -118,3 +118,13 @@ test("a changed trusted source tenant pin refuses the claim before any context f
   expect(h.calls).toHaveLength(0);
   expect(h.dispatched).toHaveLength(0);
 });
+
+test("a named capacity refusal from the port reaches the caller unchanged", async () => {
+  const h = harness();
+  const refusal = { status: "unreported" as const, externalRunId: fixture.pending.runId, attemptId: "attempt-fixture",
+    reason: "SuperBench capacity exhausted; the attempt stays parked and is not retried" };
+  h.port.dispatch = async (value) => { h.dispatched.push(value); return refusal; };
+  const selection = await selectCheckpointDispatch(h.port, identity);
+  expect(await selection?.dispatch(h.client, parsePendingCheckpointClaim(fixture.pending))).toEqual(refusal);
+  expect(h.dispatched).toHaveLength(1);
+});

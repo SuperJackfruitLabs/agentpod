@@ -15,6 +15,7 @@ import { CheckpointRefused } from "./checkpoint-profile";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { parseSourceReceipt, requireActiveSource } from "./checkpoint-source";
 import { buildCheckpointSettlement } from "./checkpoint-report";
+import { checkpointRefusal } from "./checkpoint-refusal";
 import { checkedCheckpointReceipt } from "./checkpoint-settlement-data";
 import type { SuperpipelineClient } from "./superpipeline";
 import type { DispatchResult } from "./dispatch-types";
@@ -28,6 +29,15 @@ const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["cod
   return { status: "unreported", externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId,
     reason: "Checkpoint dispatch requires reconciliation" };
 };
+
+/** Named terminal refusals keep the row parked but say why; nothing is re-sent. */
+function refusedOrParked(attempt: RetainedCheckpointAttempt, response: BenchCoordinatorResponse): DispatchResult {
+  const refusal = checkpointRefusal(response, { externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId });
+  if (!refusal) return parked(attempt);
+  log.warn("checkpoint dispatch refused", { tenantId: attempt.row.tenantId, boardId: attempt.row.boardId,
+    runId: attempt.claim.runId, attemptId: attempt.row.attemptId, phase: attempt.row.phase, code: "capacity_exhausted" });
+  return refusal;
+}
 
 async function current(attempt: RetainedCheckpointAttempt): Promise<void> {
   requireInstalledCheckpointProfile(attempt.profile);
@@ -73,7 +83,7 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
           await client.heartbeat(attempt.claim);
           const response = await exchange(attempt, sendPrepare ? attempt.row.prepareRequest : statusRequest(attempt));
           sendPrepare = false;
-          if (response.state !== "prepared") return parked(attempt);
+          if (response.state !== "prepared") return refusedOrParked(attempt, response);
           const next = await advanceCheckpointAttempt(attempt, { phase: "prepared", prepared: canonicalCheckpoint(response.source) });
           attempt = next.attempt; break;
         }
@@ -115,7 +125,7 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
           await client.heartbeat(attempt.claim);
           const response = await exchange(attempt, sendExecute ? attempt.row.executeRequest : statusRequest(attempt));
           sendExecute = false;
-          if (response.state !== "completed") return parked(attempt);
+          if (response.state !== "completed") return refusedOrParked(attempt, response);
           // Strict DTO validation precedes storage; report joins separately
           // require the exact original start, task outcome and final vector.
           await buildCheckpointSettlement(attempt, response.completion);
