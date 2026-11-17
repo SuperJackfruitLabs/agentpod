@@ -12,7 +12,7 @@
   "dependencies": {
     "@astrojs/starlight": "^0.42.11",
     "@superjackfruitlabs/vibekit-docs": "^0.0.5",
-    "@superjackfruitlabs/vibekit-frame": "^0.0.17",
+    "@superjackfruitlabs/vibekit-frame": "^0.0.18",
     "@superjackfruitlabs/vibekit-ui": "^0.0.19",
     "astro": "^7.4.11",
     "starlight-llms-txt": "^0.12.0"
