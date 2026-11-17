@@ -3,7 +3,6 @@ package benchlaunch
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"path/filepath"
 	"strings"
 
@@ -98,8 +97,8 @@ func (c Coordinator) Prepare(ctx context.Context, spec benchdispatch.SourceSpec,
 	if err := c.current(ctx, spec); err != nil {
 		return zero, err
 	}
-	if err := c.supersede(ctx, spec); err != nil && !errors.Is(err, benchdispatch.ErrPending) {
-		return zero, err
+	if err := c.supersede(ctx, spec); err != nil {
+		return zero, err // ErrPending: the older attempt is still releasing or running
 	}
 	if err := c.Journal.reserve(ctx, spec); err != nil {
 		return zero, err

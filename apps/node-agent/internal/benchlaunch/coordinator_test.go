@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -35,7 +36,10 @@ type trial struct {
 	task       benchdispatch.SourceTask
 	stale      atomic.Bool
 	superseded atomic.Bool
-	dir        string
+	// current is the one spec the hub treats as current. Like the real
+	// handler, every other spec is definitely superseded.
+	current atomic.Pointer[benchdispatch.SourceSpec]
+	dir     string
 }
 
 func newTrial(t *testing.T) *trial {
@@ -50,12 +54,16 @@ func newTrial(t *testing.T) *trial {
 	}
 	tr := &trial{fakeBench: newFake(t), spec: spec, task: task, dir: dir}
 	tr.c = tr.coordinator(repos)
+	tr.current.Store(&spec)
 	return tr
 }
 
 // coordinator builds a fresh instance over the same journal: a Node restart.
 func (tr *trial) coordinator(repos []benchworkspace.Repository) Coordinator {
-	return Coordinator{Journal: Journal{Root: tr.dir}, Producer: tr.fakeBench, Repositories: repos, Current: func(context.Context, benchdispatch.SourceSpec) error {
+	return Coordinator{Journal: Journal{Root: tr.dir}, Producer: tr.fakeBench, Repositories: repos, Current: func(_ context.Context, spec benchdispatch.SourceSpec) error {
+		if want := tr.current.Load(); want != nil && !reflect.DeepEqual(*want, spec) {
+			return ErrSuperseded
+		}
 		if tr.superseded.Load() {
 			return ErrSuperseded
 		}
@@ -275,8 +283,11 @@ func TestNewAttemptWaitsForAnUnresolvedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	tr.lookup = "in_progress"
-	_, err := tr.c.Prepare(context.Background(), nextAttempt(tr.spec), tr.task)
-	wantCode(t, err, "conflict")
+	next := nextAttempt(tr.spec)
+	tr.current.Store(&next)
+	if _, err := tr.c.Prepare(context.Background(), next, tr.task); !errors.Is(err, benchdispatch.ErrPending) {
+		t.Fatal("newer attempt did not wait for the unresolved run", err)
+	}
 	if tr.count(tr.posts, "lease") != 1 || tr.count(tr.posts, "run") != 1 {
 		t.Fatal("a second attempt reached the producer while a run was unresolved")
 	}
@@ -303,6 +314,7 @@ func (tr *trial) assertRetired(t *testing.T) {
 	next := nextAttempt(tr.spec)
 	tr.superseded.Store(false)
 	tr.stale.Store(false)
+	tr.current.Store(&next)
 	if _, err := tr.c.Prepare(context.Background(), next, tr.task); err != nil {
 		t.Fatal("next attempt on the same card refused", err)
 	}
@@ -333,6 +345,7 @@ func TestNewAttemptSupersedesAPreparedOne(t *testing.T) {
 	tr := newTrial(t)
 	tr.prepare(t)
 	next := nextAttempt(tr.spec)
+	tr.current.Store(&next)
 	if _, err := tr.c.Prepare(context.Background(), next, tr.task); err != nil {
 		t.Fatal("new current attempt was refused", err)
 	}
@@ -508,5 +521,82 @@ func TestJournalIsPrivate(t *testing.T) {
 	}
 	if _, err = tr.c.Status(context.Background(), tr.spec); err == nil {
 		t.Fatal("journal in a shared directory was used")
+	}
+}
+
+// A refused attempt that still holds its lease (its release failed) must not
+// lock the bench once the hub moves on: the newer attempt's prepare retires it.
+func TestRefusedRecordStillReleasesAfterTheHubMovesOn(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.capacity["run"], tr.refuseRelease = true, 1
+	_, err := tr.c.Execute(context.Background(), tr.spec, admitAll)
+	wantCode(t, err, "capacity_exhausted")
+	if r, _ := tr.record(t, tr.spec); r.Release != "needed" || r.Cancelled || !tr.leased || tr.count(tr.posts, "release") != 1 {
+		t.Fatal("fixture: the first release should have been refused", r.Release, r.Cancelled)
+	}
+	delete(tr.capacity, "run")
+	next := nextAttempt(tr.spec)
+	tr.current.Store(&next) // the old spec is now definitely superseded
+	if _, err = tr.c.Prepare(context.Background(), next, tr.task); err != nil {
+		t.Fatal("the stale refused record locked the bench", err)
+	}
+	old, active := tr.record(t, tr.spec)
+	if !old.terminal() || active || tr.count(tr.effects, "release") != 1 || tr.count(tr.posts, "run") != 1 {
+		t.Fatal("refused record was not released and retired", old.Release, active)
+	}
+	if _, err = tr.c.Execute(context.Background(), next, admitAll); err != nil {
+		t.Fatal("next attempt did not run", err)
+	}
+}
+
+// The same refused record, asked by Status after a stale decision.
+func TestRefusedRecordReleasesOnAStaleStatus(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.capacity["run"], tr.refuseRelease = true, 1
+	_, err := tr.c.Execute(context.Background(), tr.spec, admitAll)
+	wantCode(t, err, "capacity_exhausted")
+	tr.superseded.Store(true)
+	_, err = tr.c.Status(context.Background(), tr.spec)
+	wantCode(t, err, "capacity_exhausted")
+	if r, active := tr.record(t, tr.spec); !r.terminal() || active || tr.leased || tr.count(tr.effects, "release") != 1 {
+		t.Fatal("stale Status left the refused record holding its lease", r.Release)
+	}
+}
+
+// A refused (not cancelled) record retries its release while still current.
+func TestRefusedRecordRetriesItsReleaseWhileCurrent(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.capacity["run"], tr.refuseRelease = true, 1
+	_, err := tr.c.Execute(context.Background(), tr.spec, admitAll)
+	wantCode(t, err, "capacity_exhausted")
+	_, err = tr.c.Status(context.Background(), tr.spec)
+	wantCode(t, err, "capacity_exhausted")
+	if r, _ := tr.record(t, tr.spec); r.Cancelled || !r.terminal() || tr.leased || tr.count(tr.posts, "release") != 2 {
+		t.Fatal("refused record did not retry its release", r.Release, tr.count(tr.posts, "release"))
+	}
+}
+
+// While the older record still holds its lease, the newer attempt waits,
+// retryably, and reaches nothing; once the release lands it proceeds.
+func TestSupersedeWaitsForTheOldLease(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.capacity["run"], tr.refuseRelease = true, 2
+	_, err := tr.c.Execute(context.Background(), tr.spec, admitAll)
+	wantCode(t, err, "capacity_exhausted")
+	delete(tr.capacity, "run")
+	next := nextAttempt(tr.spec)
+	tr.current.Store(&next)
+	if _, err = tr.c.Prepare(context.Background(), next, tr.task); !errors.Is(err, benchdispatch.ErrPending) {
+		t.Fatal("newer attempt did not wait for the old lease", err)
+	}
+	if tr.count(tr.posts, "lease") != 1 || !tr.leased {
+		t.Fatal("newer attempt reached the producer while the old lease was held")
+	}
+	if _, err = tr.c.Prepare(context.Background(), next, tr.task); err != nil {
+		t.Fatal("newer attempt did not proceed once the old lease was released", err)
 	}
 }

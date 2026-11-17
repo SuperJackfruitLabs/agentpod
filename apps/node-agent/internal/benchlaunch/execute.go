@@ -304,7 +304,7 @@ func (c Coordinator) retire(ctx context.Context, spec benchdispatch.SourceSpec) 
 	err := c.Journal.withRecord(ctx, spec, func(rec *record, active bool) (bool, error) {
 		raw, _ := json.Marshal(rec)
 		_ = json.Unmarshal(raw, &r)
-		if rec.terminal() || rec.Phase == phaseRefused || rec.Phase == phaseCompleted {
+		if rec.terminal() {
 			return false, nil
 		}
 		if !active {
@@ -313,15 +313,27 @@ func (c Coordinator) retire(ctx context.Context, spec benchdispatch.SourceSpec) 
 		if rec.Cancelled {
 			return false, nil
 		}
+		// The veto also covers refused and completed records whose lease is
+		// still held: it is what lets their release go out without a current
+		// decision. It never authorises a run.
 		rec.Cancelled, r.Cancelled = true, true
 		return true, nil
 	})
 	if err != nil {
 		return err
 	}
+	if r.terminal() {
+		if r.Phase == phaseCompleted {
+			return refuse("stale_owner")
+		}
+		return refuse(r.Code)
+	}
 	if r.Phase == phaseCompleted || r.Phase == phaseRefused {
 		if e := c.cleanup(ctx, spec); e != nil {
 			return e
+		}
+		if after, _, e := c.Journal.read(ctx, spec); e == nil && after.Release == "needed" {
+			return benchdispatch.ErrPending
 		}
 		if r.Phase == phaseCompleted {
 			return refuse("stale_owner") // a completed result is not re-published to a stale caller
@@ -382,13 +394,19 @@ func (c Coordinator) supersede(ctx context.Context, spec benchdispatch.SourceSpe
 	if err != nil || old == nil {
 		return err
 	}
-	if err = c.retire(ctx, *old); err != nil {
-		if code, ok := RefusalCode(err); ok && (code == "stale_owner" || code == "capacity_exhausted" || code == "verification_failed" || code == "unsupported" || code == "conflict") {
-			return nil // the old record is terminal now
-		}
+	err = c.retire(ctx, *old)
+	// Only a terminal record frees the bench: while the older one still holds
+	// its lease (or its run is unresolved) the newer attempt waits, retryable.
+	if r, _, e := c.Journal.read(ctx, *old); e == nil && r.terminal() {
+		return nil
+	}
+	if err == nil || isRefusalErr(err) {
+		return benchdispatch.ErrPending
 	}
 	return err
 }
+
+func isRefusalErr(err error) bool { _, ok := RefusalCode(err); return ok }
 
 // Reserved returns the exact spec this journal reserved for the attempt.
 func (c Coordinator) Reserved(ctx context.Context, spec benchdispatch.SourceSpec) (benchdispatch.SourceSpec, error) {

@@ -92,7 +92,7 @@ retry of the same attempt reaches the same journal record, never a new launch.
 | Cancellation before launch | `Cancel` before step 8 | veto journaled first; held lease released with its token; no run is ever sent | `refused` `stale_owner` |
 | Cancellation mid-run | `Cancel` after step 8 | veto journaled; one cancel request targets the run's request ID and digest; `cancel_requested` is recorded as intent only. Later lookups observe the final receipt; its result is never published; the lease is released | `pending`, then `refused` `stale_owner` |
 | Context cancelled while waiting for the run reply | transport error | same as a lost reply; no resend | `pending` |
-| Stale holder | hub `current` check before every send and after every await; journal `active` pointer; producer `conflict`/`forbidden`; lease grant for another holder | no further send; lease not released by a non-owner. A definitely superseded record retires itself (see below) | `refused` `stale_owner` (or `conflict` for a newer attempt while an older run is unresolved) |
+| Stale holder | hub `current` check before every send and after every await; journal `active` pointer; producer `conflict`/`forbidden`; lease grant for another holder | no further send; lease not released by a non-owner. A definitely superseded record retires itself (see below) | `refused` `stale_owner` (a newer attempt gets `pending` until the older record is terminal) |
 | Capacity refusal | `capacity_exhausted` (HTTP 422) on create, lease or run | terminal for the attempt; never retried; a held lease is released | `refused` `capacity_exhausted` |
 | Worker crash | run response with a nonzero exit code, or no valid frame on stdout | terminal; lease released when still held | `refused` `verification_failed` |
 | Invalid result | stdout fails the io digest, the frame, the canonical bytes or the binding | terminal; lease released when still held | `refused` `verification_failed` |
@@ -115,16 +115,31 @@ released), and marks the record terminal (`Cancelled`, `stale_owner`).
 | --- | --- | --- |
 | `Status` | the hub answers `current` with an authenticated, fresh `refused`/`stale_owner` decision (`ErrSuperseded`) | that decision. A hub that cannot be reached or answers anything else retires nothing |
 | `Cancel` | always | the journal record's identity: the exact reserved spec (tenant, board, card, run, epoch, attempt). No current decision is needed |
-| `Prepare` of a newer attempt on the same card | its own decision is current while an older record still owns the bench | the newer attempt's current decision. The older record is retired first; the newer one then reserves |
+| `Prepare` of a newer attempt on the same card | its own decision is current while an older record still owns the bench | the newer attempt's current decision. The older record is retired first; the newer one reserves once it is terminal, otherwise `pending` |
 | `Execute` | stale decision | refuses with `stale_owner` and sends nothing; it does not retire |
 
+The veto covers any record that still holds its lease, including one already
+refused (for example `capacity_exhausted` whose first release failed) or
+completed. It authorises release and cancel only, never a run.
+
 After launch, retiring sends one cancel for the run's exact target and waits for
-the run's receipt; the bench stays blocked (`conflict` for a newer attempt)
-until the run is observed and the lease released. A definite refusal of a
+the run's receipt. A newer attempt's `prepare` frees the bench only once the
+older record is terminal; until then (lease still held, or run unresolved) it
+returns `pending`, retryable, and reaches nothing. A definite refusal of a
 release we still hold is forgotten and sent again on the next cleanup.
 
-The grouped (non-registered) path keeps its existing behaviour; its `Cancel`
-still requires a current decision.
+On the hub, `stale_owner` is reserved for a definite change (the attempt row is
+gone, or its run, epoch, attempt or owner authority changed). A row that merely
+moved between the hub's two reads answers `unavailable`, which retires nothing.
+
+### Known limit: the grouped path
+
+The grouped (non-registered) launch still has the stale-after-prepare lockup:
+after a successful prepare, a stale decision leaves its lease held and its
+journal record active, because its `Status` and `Cancel` require a current
+decision. A newer attempt on that card then waits on the bench. Applying this
+record-identity cleanup to `benchcoordinator.Manager` and the `benchdispatch`
+cancellation store is a follow-up.
 
 ## What the hub sees
 
