@@ -47,6 +47,11 @@ type Coordinator struct {
 	Current benchdispatch.SourceGate
 }
 
+// ErrSuperseded is what Current returns when the hub has definitely decided
+// this attempt is no longer current (an authenticated stale_owner decision).
+// Only this error lets an attempt retire itself; an unreachable hub does not.
+var ErrSuperseded = errors.New("bench attempt superseded by the hub")
+
 func (c Coordinator) current(ctx context.Context, spec benchdispatch.SourceSpec) error {
 	if c.Current == nil || c.Producer == nil || ctx.Err() != nil || c.Current(ctx, spec) != nil || ctx.Err() != nil {
 		return refuse("stale_owner")
@@ -126,7 +131,9 @@ func (c Coordinator) send(ctx context.Context, spec benchdispatch.SourceSpec, k 
 		if r.Cancelled && !k.cleanup {
 			return false, refuse("stale_owner")
 		}
-		if c.current(ctx, spec) != nil {
+		// A vetoed record may still clean up after itself (release, cancel)
+		// without a current decision; every other send needs one.
+		if (!k.cleanup || !r.Cancelled) && c.current(ctx, spec) != nil {
 			return false, refuse("stale_owner")
 		}
 		if s == nil {
@@ -199,6 +206,20 @@ func (c Coordinator) recover(ctx context.Context, k call) (int, []byte, error) {
 		return 0, nil, benchdispatch.ErrPending
 	}
 	return reply.Result.HTTPStatus, []byte(reply.Result.ResponseBody), nil
+}
+
+// forget drops a journaled step so a later cleanup may send it again. Only
+// token-scoped, repeatable steps (release) are ever forgotten.
+func (c Coordinator) forget(ctx context.Context, spec benchdispatch.SourceSpec, name string) {
+	_ = c.mark(ctx, spec, func(r *record) bool {
+		for i := range r.Steps {
+			if r.Steps[i].Name == name {
+				r.Steps = append(r.Steps[:i], r.Steps[i+1:]...)
+				return true
+			}
+		}
+		return false
+	})
 }
 
 // mark changes the record under the lock. It never sends.

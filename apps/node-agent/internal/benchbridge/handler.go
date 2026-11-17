@@ -76,6 +76,9 @@ func (h *Handler) check(ctx context.Context, r benchcoordinatorwire.Request, p L
 		current.SourceDigest = r.SourceReceipt.SourceDigest
 	}
 	if err := h.current.Check(ctx, current); err != nil {
+		if errors.Is(err, ErrStale) && h.installed() == nil {
+			return ErrStale
+		}
 		return ErrCurrent
 	}
 	if h.installed() != nil {
@@ -172,7 +175,12 @@ func (h *Handler) manager(r benchcoordinatorwire.Request, p LocalProfile, intent
 		if intent.Spec == nil || !reflect.DeepEqual(spec, *intent.Spec) {
 			return ErrCurrent
 		}
-		return h.check(ctx, r, p, intent, phase)
+		if err := h.check(ctx, r, p, intent, phase); errors.Is(err, ErrStale) {
+			return benchlaunch.ErrSuperseded
+		} else if err != nil {
+			return ErrCurrent
+		}
+		return nil
 	}
 	if p.Launch == benchlaunch.Mode {
 		// A private sibling of the grouped journal; Journal refuses it unless 0700.
@@ -352,7 +360,12 @@ func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, ra
 	return completedResponse(r, saved, completion)
 }
 func (h *Handler) status(ctx context.Context, r benchcoordinatorwire.Request, p LocalProfile, intent Intent) (benchcoordinatorwire.Response, error) {
-	if intent.Spec == nil || h.check(ctx, r, p, intent, "observe") != nil {
+	// A registered attempt the hub has definitely superseded may still reach
+	// Status, which retires its own record (release, no run); see benchlaunch.
+	if intent.Spec == nil {
+		return refused(r.Operation), ErrCurrent
+	}
+	if err := h.check(ctx, r, p, intent, "observe"); err != nil && (!errors.Is(err, ErrStale) || p.Launch != benchlaunch.Mode) {
 		return refused(r.Operation), ErrCurrent
 	}
 	m := h.manager(r, p, intent, "observe")

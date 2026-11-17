@@ -218,6 +218,8 @@ func (c Coordinator) cleanup(ctx context.Context, spec benchdispatch.SourceSpec)
 	if reply.OK || c.leaseGone(ctx, spec) {
 		return done()
 	}
+	// A definite refusal while we still hold the lease: send it again next time.
+	c.forget(ctx, spec, "release")
 	return benchdispatch.ErrPending
 }
 
@@ -241,8 +243,13 @@ func (c Coordinator) leaseGone(ctx context.Context, spec benchdispatch.SourceSpe
 // Status reconciles from the journal and read-only lookups. It never sends a
 // growth request; a sent run is advanced only through its receipt.
 func (c Coordinator) Status(ctx context.Context, spec benchdispatch.SourceSpec) (benchcoordinator.Status, error) {
-	if err := c.current(ctx, spec); err != nil {
-		return benchcoordinator.Status{}, err
+	if c.Current == nil {
+		return benchcoordinator.Status{}, refuse("stale_owner")
+	}
+	if err := c.Current(ctx, spec); errors.Is(err, ErrSuperseded) {
+		return c.retired(ctx, spec)
+	} else if err != nil || ctx.Err() != nil {
+		return benchcoordinator.Status{}, refuse("stale_owner")
 	}
 	r, _, err := c.Journal.read(ctx, spec)
 	if errors.Is(err, errAbsent) {
@@ -268,53 +275,119 @@ func (c Coordinator) Status(ctx context.Context, spec benchdispatch.SourceSpec) 
 	return benchcoordinator.Status{State: "pending", RequiresReconciliation: true}, nil
 }
 
-// Cancel records the veto before any transport. Before launch it releases the
-// lease and ends the attempt. After launch it sends one cancel for the run's
-// exact target; a reply is intent only, so the attempt stays parked until the
-// run's receipt is observed. The result of a cancelled run is never published.
+// Cancel ends this exact attempt. It is authorised by the journal record's
+// identity (the same reserved spec), not by a current decision, so a node can
+// clean up after a decision that has already moved on. See retire.
 func (c Coordinator) Cancel(ctx context.Context, spec benchdispatch.SourceSpec) (benchcoordinator.Status, error) {
-	if err := c.current(ctx, spec); err != nil {
-		return benchcoordinator.Status{}, err
+	return c.retired(ctx, spec)
+}
+
+func (c Coordinator) retired(ctx context.Context, spec benchdispatch.SourceSpec) (benchcoordinator.Status, error) {
+	err := c.retire(ctx, spec)
+	if errors.Is(err, benchdispatch.ErrPending) {
+		return benchcoordinator.Status{State: "cancel_requested", RequiresReconciliation: true}, nil
 	}
+	if errors.Is(err, errAbsent) {
+		return benchcoordinator.Status{}, refuse("stale_owner")
+	}
+	return benchcoordinator.Status{}, err
+}
+
+// retire vetoes this record before any transport and winds it down without
+// ever sending or resending a run. Before launch it releases the lease the
+// record holds and ends the attempt. After launch it sends one cancel for the
+// run's exact target (intent only) and stays parked until the run's receipt is
+// observed; that result is never published. Release is token-scoped and treats
+// a lease already gone as success.
+func (c Coordinator) retire(ctx context.Context, spec benchdispatch.SourceSpec) error {
 	var r record
 	err := c.Journal.withRecord(ctx, spec, func(rec *record, active bool) (bool, error) {
-		if !active && !rec.terminal() {
-			return false, refuse("stale_owner")
-		}
 		raw, _ := json.Marshal(rec)
 		_ = json.Unmarshal(raw, &r)
-		if rec.Cancelled || rec.terminal() {
+		if rec.terminal() || rec.Phase == phaseRefused || rec.Phase == phaseCompleted {
+			return false, nil
+		}
+		if !active {
+			return false, refuse("stale_owner")
+		}
+		if rec.Cancelled {
 			return false, nil
 		}
 		rec.Cancelled, r.Cancelled = true, true
 		return true, nil
 	})
 	if err != nil {
-		return benchcoordinator.Status{}, err
+		return err
 	}
 	if r.Phase == phaseCompleted || r.Phase == phaseRefused {
-		return c.Status(ctx, spec)
+		if e := c.cleanup(ctx, spec); e != nil {
+			return e
+		}
+		if r.Phase == phaseCompleted {
+			return refuse("stale_owner") // a completed result is not re-published to a stale caller
+		}
+		return refuse(r.Code)
 	}
 	run := r.step("run")
 	if run == nil || !run.Sent {
 		lease := r.step("lease")
-		return benchcoordinator.Status{}, c.terminate(ctx, spec, "stale_owner", lease != nil && lease.Sent)
+		err = c.terminate(ctx, spec, "stale_owner", lease != nil && lease.Sent)
+		if after, _, e := c.Journal.read(ctx, spec); e == nil && after.Release == "needed" {
+			return benchdispatch.ErrPending
+		}
+		return err
 	}
 	if run.Response == nil {
 		_, finite, err := runCall(r)
 		if err != nil {
-			return benchcoordinator.Status{}, err
+			return err
 		}
 		_, target, err := benchworkspace.FiniteTarget(finite)
 		if err != nil {
-			return benchcoordinator.Status{}, benchdispatch.ErrInvalid
+			return benchdispatch.ErrInvalid
 		}
 		raw, _ := json.Marshal(target)
 		if status, body, err := c.send(ctx, spec, call{name: "cancel", path: benchworkspace.PathOperations, cleanup: true, request: raw}); err == nil {
 			_, _ = benchworkspace.ParseCancelResponse(body, status, target) // intent only, never a fence
 		}
 	}
-	return c.Status(ctx, spec)
+	_, err = c.advance(ctx, spec)
+	if err == nil {
+		return refuse("stale_owner")
+	}
+	if after, _, e := c.Journal.read(ctx, spec); e == nil && after.Release == "needed" {
+		return benchdispatch.ErrPending
+	}
+	return err
+}
+
+// supersede retires an older attempt on the same card that still owns the
+// bench. It runs only for a spec whose own decision is current, which is the
+// hub's statement that the older attempt no longer is.
+func (c Coordinator) supersede(ctx context.Context, spec benchdispatch.SourceSpec) error {
+	var old *benchdispatch.SourceSpec
+	err := c.Journal.update(ctx, spec.BenchKey, func(doc *document) (bool, error) {
+		for i := range doc.Records {
+			r := doc.Records[i]
+			if r.ID == doc.Active && r.ID != recordID(spec) && !r.terminal() {
+				o := r.Spec.Identity
+				n := spec.Identity
+				if o.TenantID == n.TenantID && o.BoardID == n.BoardID && o.CardID == n.CardID {
+					old = &r.Spec
+				}
+			}
+		}
+		return false, nil
+	})
+	if err != nil || old == nil {
+		return err
+	}
+	if err = c.retire(ctx, *old); err != nil {
+		if code, ok := RefusalCode(err); ok && (code == "stale_owner" || code == "capacity_exhausted" || code == "verification_failed" || code == "unsupported" || code == "conflict") {
+			return nil // the old record is terminal now
+		}
+	}
+	return err
 }
 
 // Reserved returns the exact spec this journal reserved for the attempt.

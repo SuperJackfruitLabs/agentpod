@@ -92,7 +92,7 @@ retry of the same attempt reaches the same journal record, never a new launch.
 | Cancellation before launch | `Cancel` before step 8 | veto journaled first; held lease released with its token; no run is ever sent | `refused` `stale_owner` |
 | Cancellation mid-run | `Cancel` after step 8 | veto journaled; one cancel request targets the run's request ID and digest; `cancel_requested` is recorded as intent only. Later lookups observe the final receipt; its result is never published; the lease is released | `pending`, then `refused` `stale_owner` |
 | Context cancelled while waiting for the run reply | transport error | same as a lost reply; no resend | `pending` |
-| Stale holder | hub `current` check before every send and after every await; journal `active` pointer; producer `conflict`/`forbidden`; lease grant for another holder | no further send; lease not released by a non-owner | `refused` `stale_owner` (or `conflict` for a second attempt on a busy bench) |
+| Stale holder | hub `current` check before every send and after every await; journal `active` pointer; producer `conflict`/`forbidden`; lease grant for another holder | no further send; lease not released by a non-owner. A definitely superseded record retires itself (see below) | `refused` `stale_owner` (or `conflict` for a newer attempt while an older run is unresolved) |
 | Capacity refusal | `capacity_exhausted` (HTTP 422) on create, lease or run | terminal for the attempt; never retried; a held lease is released | `refused` `capacity_exhausted` |
 | Worker crash | run response with a nonzero exit code, or no valid frame on stdout | terminal; lease released when still held | `refused` `verification_failed` |
 | Invalid result | stdout fails the io digest, the frame, the canonical bytes or the binding | terminal; lease released when still held | `refused` `verification_failed` |
@@ -102,6 +102,29 @@ retry of the same attempt reaches the same journal record, never a new launch.
 
 No path makes a Node-private file readable by the payload UID. The only bytes the
 payload receives are the capsule frame on stdin.
+
+## Stale attempts clean up after themselves
+
+A record that the hub has moved on from must not hold the bench forever. The
+node may clean up **its own** journal record without a current decision, under
+the per-bench lock: it never sends or resends a run, releases the lease the
+record holds with that record's token (a lease already gone counts as
+released), and marks the record terminal (`Cancelled`, `stale_owner`).
+
+| Entry point | Trigger | Authorised by |
+| --- | --- | --- |
+| `Status` | the hub answers `current` with an authenticated, fresh `refused`/`stale_owner` decision (`ErrSuperseded`) | that decision. A hub that cannot be reached or answers anything else retires nothing |
+| `Cancel` | always | the journal record's identity: the exact reserved spec (tenant, board, card, run, epoch, attempt). No current decision is needed |
+| `Prepare` of a newer attempt on the same card | its own decision is current while an older record still owns the bench | the newer attempt's current decision. The older record is retired first; the newer one then reserves |
+| `Execute` | stale decision | refuses with `stale_owner` and sends nothing; it does not retire |
+
+After launch, retiring sends one cancel for the run's exact target and waits for
+the run's receipt; the bench stays blocked (`conflict` for a newer attempt)
+until the run is observed and the lease released. A definite refusal of a
+release we still hold is forgotten and sent again on the next cleanup.
+
+The grouped (non-registered) path keeps its existing behaviour; its `Cancel`
+still requires a current decision.
 
 ## What the hub sees
 
@@ -119,6 +142,8 @@ terminal refusal from the journal.
   vectors exist). Until it does, the daemon answers step 8 with
   `invalid_request`, which surfaces as `refused` `unsupported`; nothing ran.
 - The coordinator wire has no `cancel` operation. `Coordinator.Cancel` is a Node
-  API, covered by tests, with no hub caller yet.
+  API, covered by tests; a hub caller (the board's cancel reaching the node) is a
+  follow-up. Until then a newer attempt's `prepare`, or `status` after a
+  `stale_owner` decision, is what retires an abandoned record.
 - None of this proves a provider-backed task. The installed payload home,
   provider configuration and a real fenced run still need live proof.

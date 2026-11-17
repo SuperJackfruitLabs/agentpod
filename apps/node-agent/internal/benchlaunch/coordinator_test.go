@@ -30,11 +30,12 @@ func testSpec() (benchdispatch.SourceSpec, benchdispatch.SourceTask, []benchwork
 
 type trial struct {
 	*fakeBench
-	c     Coordinator
-	spec  benchdispatch.SourceSpec
-	task  benchdispatch.SourceTask
-	stale atomic.Bool
-	dir   string
+	c          Coordinator
+	spec       benchdispatch.SourceSpec
+	task       benchdispatch.SourceTask
+	stale      atomic.Bool
+	superseded atomic.Bool
+	dir        string
 }
 
 func newTrial(t *testing.T) *trial {
@@ -55,8 +56,11 @@ func newTrial(t *testing.T) *trial {
 // coordinator builds a fresh instance over the same journal: a Node restart.
 func (tr *trial) coordinator(repos []benchworkspace.Repository) Coordinator {
 	return Coordinator{Journal: Journal{Root: tr.dir}, Producer: tr.fakeBench, Repositories: repos, Current: func(context.Context, benchdispatch.SourceSpec) error {
+		if tr.superseded.Load() {
+			return ErrSuperseded
+		}
 		if tr.stale.Load() {
-			return errors.New("stale")
+			return errors.New("hub unavailable")
 		}
 		return nil
 	}}
@@ -254,16 +258,127 @@ func TestProducerFencingStopsAStaleToken(t *testing.T) {
 	}
 }
 
-func TestSecondAttemptOnABusyBenchIsRefused(t *testing.T) {
+func nextAttempt(spec benchdispatch.SourceSpec) benchdispatch.SourceSpec {
+	next := spec
+	next.Identity.RunID, next.Identity.AttemptID, next.Identity.Epoch, next.Holder = "run_run002", "attempt-2", 2, "cp_other"
+	next.LeaseRequestID, next.RunRequestID = "lease_y", "run_y"
+	return next
+}
+
+// While the older attempt's run may still be executing, nothing can take the
+// bench: the newer attempt is refused and never reaches the producer.
+func TestNewAttemptWaitsForAnUnresolvedRun(t *testing.T) {
 	tr := newTrial(t)
 	tr.prepare(t)
-	other := tr.spec
-	other.Identity.RunID, other.Identity.AttemptID, other.Holder = "run_run002", "attempt-2", "cp_other"
-	_, err := tr.c.Prepare(context.Background(), other, tr.task)
-	wantCode(t, err, "conflict")
-	if tr.count(tr.posts, "lease") != 1 {
-		t.Fatal("a second attempt reached the producer")
+	tr.loseAfter["run"] = true
+	if _, err := tr.c.Execute(context.Background(), tr.spec, admitAll); !errors.Is(err, benchdispatch.ErrPending) {
+		t.Fatal(err)
 	}
+	tr.lookup = "in_progress"
+	_, err := tr.c.Prepare(context.Background(), nextAttempt(tr.spec), tr.task)
+	wantCode(t, err, "conflict")
+	if tr.count(tr.posts, "lease") != 1 || tr.count(tr.posts, "run") != 1 {
+		t.Fatal("a second attempt reached the producer while a run was unresolved")
+	}
+}
+
+func (tr *trial) record(t *testing.T, spec benchdispatch.SourceSpec) (record, bool) {
+	t.Helper()
+	r, active, err := tr.c.Journal.read(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r, active
+}
+
+func (tr *trial) assertRetired(t *testing.T) {
+	t.Helper()
+	r, active := tr.record(t, tr.spec)
+	if !r.terminal() || active || !r.Cancelled || r.Release != "done" {
+		t.Fatal("stale record not terminal", r.Phase, r.Release, active)
+	}
+	if tr.count(tr.effects, "release") != 1 || tr.leased || tr.count(tr.posts, "run") != 0 {
+		t.Fatal("stale attempt kept its lease or launched", tr.count(tr.effects, "release"), tr.leased)
+	}
+	next := nextAttempt(tr.spec)
+	tr.superseded.Store(false)
+	tr.stale.Store(false)
+	if _, err := tr.c.Prepare(context.Background(), next, tr.task); err != nil {
+		t.Fatal("next attempt on the same card refused", err)
+	}
+	if _, err := tr.c.Execute(context.Background(), next, admitAll); err != nil {
+		t.Fatal("next attempt did not run", err)
+	}
+}
+
+func TestStaleAfterPrepareStatusRetiresTheRecord(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.superseded.Store(true)
+	_, err := tr.c.Status(context.Background(), tr.spec)
+	wantCode(t, err, "stale_owner")
+	tr.assertRetired(t)
+}
+
+func TestStaleAfterPrepareCancelRetiresTheRecord(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.stale.Store(true) // the hub cannot even be asked; Cancel is gated on the record itself
+	_, err := tr.c.Cancel(context.Background(), tr.spec)
+	wantCode(t, err, "stale_owner")
+	tr.assertRetired(t)
+}
+
+func TestNewAttemptSupersedesAPreparedOne(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	next := nextAttempt(tr.spec)
+	if _, err := tr.c.Prepare(context.Background(), next, tr.task); err != nil {
+		t.Fatal("new current attempt was refused", err)
+	}
+	old, active := tr.record(t, tr.spec)
+	if !old.terminal() || active || tr.count(tr.effects, "release") != 1 || tr.count(tr.effects, "lease") != 2 || tr.count(tr.posts, "run") != 0 {
+		t.Fatal("older attempt was not retired cleanly", old.Phase, old.Release)
+	}
+	if _, err := tr.c.Execute(context.Background(), tr.spec, admitAll); !isRefusal(err, "stale_owner") || tr.count(tr.posts, "run") != 0 {
+		t.Fatal("retired attempt launched", err)
+	}
+}
+
+// An unreachable hub is not a stale decision: nothing is released or retired.
+func TestUnavailableDecisionRetiresNothing(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.stale.Store(true)
+	_, err := tr.c.Status(context.Background(), tr.spec)
+	wantCode(t, err, "stale_owner")
+	r, active := tr.record(t, tr.spec)
+	if r.Cancelled || !active || r.Phase != phasePrepared || tr.count(tr.posts, "release") != 0 {
+		t.Fatal("hub outage retired a live attempt")
+	}
+}
+
+func TestRefusedReleaseIsRetried(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.refuseRelease = 1
+	_, err := tr.c.Cancel(context.Background(), tr.spec)
+	if err != nil {
+		t.Fatal("a refused release did not stay pending", err)
+	}
+	_, err = tr.c.Cancel(context.Background(), tr.spec)
+	wantCode(t, err, "stale_owner")
+	if tr.count(tr.posts, "release") != 2 || tr.count(tr.effects, "release") != 1 || tr.leased {
+		t.Fatal("release was not retried", tr.count(tr.posts, "release"))
+	}
+}
+
+func TestAbsentReadbackIsVerificationFailure(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.lookup = "absent"
+	_, err := tr.c.Execute(context.Background(), tr.spec, admitAll)
+	wantCode(t, err, "verification_failed")
 }
 
 func TestCancelBeforeLaunchReleasesAndNeverRuns(t *testing.T) {
@@ -370,7 +485,7 @@ func TestProducerWithoutTheProfileIsUnsupported(t *testing.T) {
 		return orig.Post(ctx, path, ct, raw, limit)
 	})
 	_, err := tr.c.Execute(context.Background(), tr.spec, admitAll)
-	if !isRefusal(err, "unsupported") && !isRefusal(err, "verification_failed") {
+	if !isRefusal(err, "unsupported") {
 		t.Fatal("unprofiled producer was not refused", err)
 	}
 }
