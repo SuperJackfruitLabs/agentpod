@@ -26,7 +26,7 @@ func TestContractFilesAreBytePinnedAndRemainProposed(t *testing.T) {
 		Files  map[string]struct{ Local, SHA256 string }
 	}
 	load(t, "source.json", &pin)
-	if !strings.Contains(pin.Status, "PROPOSED") || len(pin.Files) != 5 {
+	if !strings.Contains(pin.Status, "PROPOSED") || len(pin.Files) != 7 {
 		t.Fatal("proposal pin changed")
 	}
 	for name, file := range pin.Files {

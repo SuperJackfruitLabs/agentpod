@@ -22,6 +22,7 @@
         "stop",
         "stop_admin",
         "archive",
+        "reclaim",
         "status",
         "host_status"
       ]
@@ -178,7 +179,14 @@
       "required": ["operation", "ok", "result"],
       "properties": {
         "operation": {
-          "enum": ["checkpoint", "release", "stop", "stop_admin", "archive"]
+          "enum": [
+            "checkpoint",
+            "release",
+            "stop",
+            "stop_admin",
+            "archive",
+            "reclaim"
+          ]
         },
         "ok": {
           "const": true
@@ -192,7 +200,14 @@
       "required": ["operation", "ok", "error"],
       "properties": {
         "operation": {
-          "enum": ["checkpoint", "release", "stop", "stop_admin", "archive"]
+          "enum": [
+            "checkpoint",
+            "release",
+            "stop",
+            "stop_admin",
+            "archive",
+            "reclaim"
+          ]
         },
         "ok": {
           "const": false
@@ -513,7 +528,9 @@
             "ready",
             "archived",
             "reaping",
-            "reaped"
+            "reaped",
+            "reclaiming",
+            "reclaimed"
           ]
         },
         "member_count": {
@@ -553,6 +570,40 @@
         }
       },
       "allOf": [
+        {
+          "if": {
+            "required": ["phase"],
+            "properties": {
+              "phase": {
+                "enum": ["reclaiming", "reclaimed"]
+              }
+            }
+          },
+          "then": {
+            "required": ["checkpoint"],
+            "properties": {
+              "ready_for_acquisition": {
+                "const": false
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["lease"]
+                },
+                {
+                  "required": ["pending"]
+                },
+                {
+                  "required": ["archive"]
+                },
+                {
+                  "required": ["transfer_state"]
+                }
+              ]
+            }
+          }
+        },
         {
           "if": {
             "required": ["transfer_state"]
@@ -719,7 +770,9 @@
             "ready",
             "archived",
             "reaping",
-            "reaped"
+            "reaped",
+            "reclaiming",
+            "reclaimed"
           ]
         },
         "member_count": {
@@ -792,6 +845,40 @@
         }
       },
       "allOf": [
+        {
+          "if": {
+            "required": ["phase"],
+            "properties": {
+              "phase": {
+                "enum": ["reclaiming", "reclaimed"]
+              }
+            }
+          },
+          "then": {
+            "required": ["checkpoint"],
+            "properties": {
+              "ready_for_acquisition": {
+                "const": false
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["lease"]
+                },
+                {
+                  "required": ["pending"]
+                },
+                {
+                  "required": ["archive"]
+                },
+                {
+                  "required": ["transfer_state"]
+                }
+              ]
+            }
+          }
+        },
         {
           "if": {
             "required": ["transfer_state"]

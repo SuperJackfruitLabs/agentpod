@@ -1,0 +1,1403 @@
+{
+  "version": "superbench.reclaim-fixtures.v1",
+  "status": "proposed; producer-first wire vectors for the reclaim operation and the reclaiming/reclaimed phases; wire validation does not prove deletion, quota retirement or deployment",
+  "valid": [
+    {
+      "name": "request-key-only",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "key": "card"
+      }
+    },
+    {
+      "name": "success-reclaimed",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaimed",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "status-reclaiming",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "card",
+        "inventory_keys": [
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "reclaiming",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "status-reclaimed",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "card",
+        "inventory_keys": [
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "reclaimed",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "status-mixed-reclaimed",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "",
+        "inventory_keys": [
+          "aaa",
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "scalar",
+              "key": "aaa",
+              "branch": "bench/aaa",
+              "state": "active",
+              "quota_bytes": 0,
+              "quota_inodes": 0
+            },
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "reclaimed",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "refused-409-conflict",
+      "kind": "response",
+      "status": 409,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": false,
+        "error": {
+          "code": "conflict",
+          "message": "workspace state conflicts with this operation"
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "refused-404-not_found",
+      "kind": "response",
+      "status": 404,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": false,
+        "error": {
+          "code": "not_found",
+          "message": "unknown bench"
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "refused-403-reader-peer",
+      "kind": "response",
+      "status": 403,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": false,
+        "error": {
+          "code": "forbidden",
+          "message": "operator authority required"
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "retryable-422-retains-reclaiming",
+      "kind": "response",
+      "status": 422,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": false,
+        "error": {
+          "code": "operation_failed",
+          "message": "operation failed; inspect retained workspace state and local logs"
+        },
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaiming",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "retryable-422-before-record",
+      "kind": "response",
+      "status": 422,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": false,
+        "error": {
+          "code": "operation_failed",
+          "message": "operation failed; inspect retained workspace state and local logs"
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "retryable-503-retains-reclaiming",
+      "kind": "response",
+      "status": 503,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": false,
+        "error": {
+          "code": "unavailable",
+          "message": "workspace operation unavailable; inspect retained state"
+        },
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaiming",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "validation": "wire"
+    },
+    {
+      "name": "retryable-503-before-record",
+      "kind": "response",
+      "status": 503,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": false,
+        "error": {
+          "code": "unavailable",
+          "message": "workspace operation unavailable; inspect retained state"
+        }
+      },
+      "validation": "wire"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "request-missing-key",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-forbids-lease_token",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "key": "card",
+        "lease_token": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-forbids-request_id",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "key": "card",
+        "request_id": "r1"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-forbids-holder",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "key": "card",
+        "holder": "worker:example"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-forbids-repository_name",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "key": "card",
+        "repository_name": "a"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-forbids-quota_bytes",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "key": "card",
+        "quota_bytes": 1024
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-forbids-unknown-field",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "key": "card",
+        "force": true
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-null-key",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "key": null
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-invalid-key",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "key": "-card"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "request-wrong-version",
+      "kind": "request",
+      "body": {
+        "version": "superbench.v1",
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "reason": "schema"
+    },
+    {
+      "name": "success-cannot-name-reclaiming",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaiming",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "validation": "wire",
+      "reason": "completion"
+    },
+    {
+      "name": "success-cannot-name-ready",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "ready",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "validation": "wire",
+      "reason": "completion"
+    },
+    {
+      "name": "reclaimed-cannot-hold-lease",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaimed",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "worker:example",
+              "mode": "cooperative",
+              "stop_requested": false
+            }
+          }
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "reclaimed-cannot-hold-pending",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaimed",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "pending": {
+              "generation_id": "33333333333333333333333333333333",
+              "manifest_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "previous_seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "ffffffffffffffffffffffffffffffffffffffff"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "reclaimed-needs-checkpoint",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaimed",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000
+          }
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "reclaimed-cannot-offer-acquisition",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaimed",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": true,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "reclaimed-cannot-carry-archive",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaimed",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "archive": {
+              "archived_at": "2026-11-17T00:00:00Z",
+              "reap_after": "2026-11-24T00:00:00Z",
+              "freeze_digest": "9999999999999999999999999999999999999999999999999999999999999999",
+              "automatic": false
+            }
+          }
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "reclaimed-cannot-carry-transfer",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaimed",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "transfer_state": "transferred"
+          }
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "reclaiming-failure-cannot-hold-lease",
+      "kind": "response",
+      "status": 422,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": false,
+        "error": {
+          "code": "operation_failed",
+          "message": "operation failed; inspect retained workspace state and local logs"
+        },
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaiming",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            },
+            "lease": {
+              "holder": "worker:example",
+              "mode": "cooperative",
+              "stop_requested": false
+            }
+          }
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "status-reclaiming-cannot-hold-lease",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "card",
+        "inventory_keys": [
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "reclaiming",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "lease": {
+                "holder": "worker:example",
+                "mode": "cooperative",
+                "stop_requested": false
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "status-reclaiming-needs-checkpoint",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "card",
+        "inventory_keys": [
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "reclaiming",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "status-unknown-phase",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "status",
+        "key": "card",
+        "inventory_keys": [
+          "card"
+        ]
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "status",
+        "ok": true,
+        "result": {
+          "benches": [
+            {
+              "kind": "workspace",
+              "key": "card",
+              "bench_id": "11111111111111111111111111111111",
+              "phase": "reclaimable",
+              "member_count": 2,
+              "checkpoint_repository": "a",
+              "ready_for_acquisition": false,
+              "quota_bytes": 33554432,
+              "quota_inodes": 1000,
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "members": [
+                  {
+                    "name": "a",
+                    "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                  },
+                  {
+                    "name": "b",
+                    "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                  }
+                ]
+              },
+              "members": [
+                {
+                  "name": "a",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "branch": "bench/card",
+                  "base": "main",
+                  "object_format": "sha1",
+                  "source_commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "success-cannot-grant",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaimed",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "grant": {
+            "lease_token": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "root_path": "/data/benches/card"
+        }
+      },
+      "validation": "wire",
+      "reason": "grant_authority"
+    },
+    {
+      "name": "success-cannot-name-root",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaimed",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          },
+          "root_path": "/data/benches/card"
+        }
+      },
+      "validation": "wire",
+      "reason": "root_path"
+    },
+    {
+      "name": "success-cannot-echo-request-id",
+      "kind": "response",
+      "status": 200,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaimed",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          }
+        },
+        "request_id": "r1"
+      },
+      "validation": "wire",
+      "reason": "schema"
+    },
+    {
+      "name": "conflict-wrong-http-422",
+      "kind": "response",
+      "status": 422,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": false,
+        "error": {
+          "code": "conflict",
+          "message": "workspace state conflicts with this operation"
+        }
+      },
+      "validation": "wire",
+      "reason": "http_status"
+    },
+    {
+      "name": "operation-failed-wrong-http-409",
+      "kind": "response",
+      "status": 409,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": false,
+        "error": {
+          "code": "operation_failed",
+          "message": "operation failed; inspect retained workspace state and local logs"
+        }
+      },
+      "validation": "wire",
+      "reason": "http_status"
+    },
+    {
+      "name": "unavailable-wrong-http-422",
+      "kind": "response",
+      "status": 422,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": false,
+        "error": {
+          "code": "unavailable",
+          "message": "workspace operation unavailable; inspect retained state"
+        }
+      },
+      "validation": "wire",
+      "reason": "http_status"
+    },
+    {
+      "name": "success-wrong-http-202",
+      "kind": "response",
+      "status": 202,
+      "expected": {
+        "operation": "reclaim",
+        "key": "card"
+      },
+      "body": {
+        "version": "superbench.v2",
+        "operation": "reclaim",
+        "ok": true,
+        "result": {
+          "workspace": {
+            "key": "card",
+            "bench_id": "11111111111111111111111111111111",
+            "phase": "reclaimed",
+            "member_count": 2,
+            "checkpoint_repository": "a",
+            "ready_for_acquisition": false,
+            "quota_bytes": 33554432,
+            "quota_inodes": 1000,
+            "checkpoint": {
+              "generation_id": "22222222222222222222222222222222",
+              "seal": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "members": [
+                {
+                  "name": "a",
+                  "commit": "cccccccccccccccccccccccccccccccccccccccc"
+                },
+                {
+                  "name": "b",
+                  "commit": "dddddddddddddddddddddddddddddddddddddddd"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "validation": "wire",
+      "reason": "http_status"
+    }
+  ],
+  "lexical": [
+    {
+      "name": "request-duplicate-key",
+      "kind": "request",
+      "reason": "duplicate_key",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"reclaim\",\"key\":\"card\",\"key\":\"other\"}"
+    },
+    {
+      "name": "request-trailing",
+      "kind": "request",
+      "reason": "json",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"reclaim\",\"key\":\"card\"}{}"
+    },
+    {
+      "name": "response-duplicate-phase",
+      "kind": "response",
+      "reason": "duplicate_key",
+      "raw": "{\"version\":\"superbench.v2\",\"operation\":\"reclaim\",\"ok\":true,\"result\":{\"workspace\":{\"key\":\"card\",\"bench_id\":\"11111111111111111111111111111111\",\"phase\":\"reclaiming\",\"phase\":\"reclaimed\",\"member_count\":2,\"checkpoint_repository\":\"a\",\"ready_for_acquisition\":false,\"quota_bytes\":33554432,\"quota_inodes\":1000,\"checkpoint\":{\"generation_id\":\"22222222222222222222222222222222\",\"seal\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"manifest_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"members\":[{\"name\":\"a\",\"commit\":\"cccccccccccccccccccccccccccccccccccccccc\"},{\"name\":\"b\",\"commit\":\"dddddddddddddddddddddddddddddddddddddddd\"}]}}}}"
+    }
+  ]
+}
