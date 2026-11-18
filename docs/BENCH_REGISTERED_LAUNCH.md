@@ -76,6 +76,7 @@ result is the grouped v2 result; only its transport changed.
 | Step | Key | Replay rule |
 | --- | --- | --- |
 | create, lease, run | `request_id` plus the typed body digest (producer receipts) | never resent after "sent" is journaled; recovered by receipt lookup only |
+| stop (stuck bench, see below) | the initialization owner's lease token | sent at most once per attempt; a lost reply is settled only by a `status` read showing the owner stopped, never by a resend |
 | checkpoint, release | lease token | resent only when the journal holds no response; a lost release reply is reconciled from `status` |
 | observe | key, bench_id, holder, lease_token | read-only; repeatable while the lease is ours |
 | receipt lookup, cancel | `target_request_id` + `target_digest` | read-only / idempotent producer extension |
@@ -165,6 +166,39 @@ bench only after it has been released and idle for the reclaim grace
 timeout ends a lease request long before that. A request would have to outlive
 the grace. The follow-up fix is a lease request that carries the `bench_id` it
 expects, so SuperBench refuses it on any other generation.
+
+### Benches stuck before ready
+
+A create that never finished leaves the key's workspace `materializing` or
+`initializing`, held by its `initialization` owner, and every lease on it is
+refused. SuperBench lets a `create` with a new request ID make the key's next
+generation once that owner is stopped and the host frees the old tree; until
+then the create is refused with `409 conflict`. The registered launch uses
+this; the grouped launch is unchanged and still leases.
+
+- The bridge's status read sees the stuck phase and chooses a create with this
+  attempt's own request ID (`create_<attempt>`), as it does for a reclaimed key.
+- Before the create, the record keeps the stuck generation's `bench_id`. If a
+  status read shows its owner not yet stopped, the node looks in the key's
+  journal for the owner's token: the initialization grant that an earlier
+  attempt's failed create returned (or, when that reply was lost, its
+  receipt), on that same generation. With it, the node sends one `stop`. A
+  token from another generation, or none, means the owner is not ours: the
+  attempt parks as `bench_stuck` and sends nothing. The node never sends
+  `stop_admin`; an operator's stop frees the key for the next attempt.
+- A refused stop parks as `bench_stuck`. A lost stop reply parks until a
+  status read shows the owner stopped; it is not resent.
+- The create's `409 conflict` parks as `recreate_refused`. The journaled
+  refusal is replayed on every retry; nothing is resent and nothing stops
+  again. The hub's next attempt retires the parked record and tries once more
+  with its own request ID.
+- A successful create must name a `bench_id` other than the stuck one; it is
+  then a fresh bench whose generation is pinned and bound like any created
+  one. Otherwise the attempt is refused with `verification_failed`.
+
+`Status` reports `bench_stuck` and `recreate_refused` in place of a plain
+`pending` (the wire still says `pending`), and each park is logged once with
+the bench key.
 
 On the hub, `stale_owner` is reserved for a definite change (the attempt row is
 gone, or its run, epoch, attempt or owner authority changed). A row that merely

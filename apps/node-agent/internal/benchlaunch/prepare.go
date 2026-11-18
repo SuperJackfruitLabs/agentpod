@@ -124,17 +124,30 @@ func (c Coordinator) Prepare(ctx context.Context, spec benchdispatch.SourceSpec,
 	}
 	created := ""
 	if spec.Create {
+		if err := c.recoverStuck(ctx, spec); err != nil {
+			return zero, err
+		}
 		yes := true
 		request := benchworkspace.Request{Version: benchworkspace.Version, Operation: "create", Key: spec.BenchKey, Repositories: c.Repositories, CheckpointRepository: spec.CheckpointRepository, Initialize: &yes, RequestID: spec.CreateRequestID}
 		reply, err := c.ordinary(ctx, spec, "create", request, false)
 		if err != nil {
 			return zero, err
 		}
+		r, _, err := c.Journal.read(ctx, spec)
+		if err != nil {
+			return zero, benchdispatch.ErrPending
+		}
 		if !reply.OK {
+			if r.Stuck != "" && reply.Error.Code == "conflict" {
+				// Not recoverable yet: the host has not freed the stuck
+				// generation. The journaled refusal is replayed, never resent.
+				return zero, c.park(ctx, spec, parkRefused)
+			}
 			return zero, c.terminate(ctx, spec, refusalFor(reply.Error.Code), false)
 		}
 		m := mutationOf(reply)
-		if m == nil || m.Workspace.Phase != "ready" || !m.Workspace.ReadyForAcquisition || m.Workspace.Lease != nil || m.RootPath != filepath.Join(spec.DataRoot, "benches", spec.BenchKey) {
+		if m == nil || m.Workspace.Phase != "ready" || !m.Workspace.ReadyForAcquisition || m.Workspace.Lease != nil || m.RootPath != filepath.Join(spec.DataRoot, "benches", spec.BenchKey) ||
+			r.Stuck != "" && m.Workspace.BenchID == r.Stuck { // a create over a stuck bench makes a new generation
 			return zero, c.terminate(ctx, spec, "verification_failed", false)
 		}
 		if err = observe("create", request, reply); err != nil {

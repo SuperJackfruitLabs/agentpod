@@ -57,6 +57,13 @@ type record struct {
 	// gone only when it names this ID. Empty on a record written before the
 	// generation was kept.
 	BenchID string `json:"bench_id,omitempty"`
+	// Stuck is the generation (bench_id) this attempt found stuck before
+	// ready and creates the key's next generation over. Set once, before
+	// any stop or create leaves. See stuck.go.
+	Stuck string `json:"stuck_bench_id,omitempty"`
+	// Parked says why the attempt waits without sending: bench_stuck or
+	// recreate_refused. Status reports it in place of a plain pending.
+	Parked string `json:"parked,omitempty"`
 }
 
 func (r *record) step(name string) *step {

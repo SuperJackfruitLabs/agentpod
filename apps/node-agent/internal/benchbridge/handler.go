@@ -131,10 +131,18 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 				// pending and is retried. Once reclaimed the bench is gone and
 				// a create for the same key makes a fresh one from the card's
 				// pushed branch.
+				//
+				// A registered bench stuck before ready (its create never
+				// finished) is also a create, with this attempt's own request
+				// ID: the registered launch stops an initialization owner it
+				// holds and SuperBench makes the key's next generation, or
+				// refuses and the attempt parks. The grouped launch leases.
 				switch entry.Phase {
 				case "reclaiming":
 					return zero, benchdispatch.SourceTask{}, ErrReclaiming
 				case "reclaimed":
+				case "materializing", "initializing":
+					create = p.Launch == benchlaunch.Mode
 				default:
 					create = false
 				}

@@ -328,6 +328,9 @@ func (c Coordinator) Status(ctx context.Context, spec benchdispatch.SourceSpec) 
 		p, err := prepared(r)
 		return benchcoordinator.Status{State: "prepared", Source: &p}, err
 	}
+	if r.Parked != "" && !r.Cancelled {
+		return benchcoordinator.Status{State: r.Parked, RequiresReconciliation: true}, nil
+	}
 	return benchcoordinator.Status{State: "pending", RequiresReconciliation: true}, nil
 }
 
