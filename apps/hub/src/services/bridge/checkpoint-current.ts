@@ -12,7 +12,7 @@ import { grantAllowsPrincipal } from "../../auth/org-plane/grants";
 import { connectionManager } from "../broker";
 import { isControlPairEnforced } from "../control";
 import { canonicalCheckpoint } from "./checkpoint-json";
-import { CheckpointRefused, type CheckpointProfile } from "./checkpoint-profile";
+import { CheckpointRefused, normalizeRosterProfileKey, type CheckpointProfile } from "./checkpoint-profile";
 
 export interface CheckpointAuthority {
   organizationId: string;
@@ -39,6 +39,19 @@ export function parseCheckpointAuthority(value: unknown): CheckpointAuthority {
   if (!parsed.success) throw new CheckpointRefused("authority");
   return parsed.data;
 }
+export interface RosterFacts {
+  organizationId: string | null; source: string | null; nodeId: string; principalId: string | null; ownerPrincipalId: string;
+  occupancyEpoch: number; profileKey: string | null; nodeStatus: string; lastSeenAt: Date | null;
+}
+/** Whether the freshly read facts are exactly the profile's pins. Exported for tests. */
+export function factsMatchProfile(facts: RosterFacts, profile: CheckpointProfile, now: number): boolean {
+  return isControlPairEnforced() && facts.source === "org-plane" &&
+    facts.organizationId === profile.organizationId && facts.nodeId === profile.target.node_id &&
+    facts.principalId === profile.occupantPrincipalId && facts.ownerPrincipalId === profile.ownerPrincipalId &&
+    facts.occupancyEpoch === profile.occupancyEpoch && normalizeRosterProfileKey(facts.profileKey) === profile.profileKey &&
+    facts.nodeStatus === "online" && connectionManager.isOnline(facts.nodeId) && facts.lastSeenAt !== null &&
+    now - facts.lastSeenAt.getTime() >= 0 && now - facts.lastSeenAt.getTime() <= 45_000;
+}
 async function currentFacts(profile: CheckpointProfile, exec: DbExecutor) {
   const target = profile.target;
   const [facts] = await exec.select({
@@ -53,13 +66,7 @@ async function currentFacts(profile: CheckpointProfile, exec: DbExecutor) {
     .innerJoin(bridgeAgents, and(eq(bridgeAgents.stationId, stations.id), eq(bridgeAgents.tenantId, stations.tenantId)))
     .where(and(eq(stations.id, target.station_id), eq(stations.tenantId, target.tenant_id),
       eq(bridgeAgents.key, profile.agentKey), eq(bridgeAgents.boardId, target.board_id), eq(bridgeAgents.enabled, true)));
-  const now = Date.now();
-  if (!isControlPairEnforced() || !facts || facts.source !== "org-plane" ||
-    facts.organizationId !== profile.organizationId || facts.nodeId !== target.node_id ||
-    facts.principalId !== profile.occupantPrincipalId || facts.ownerPrincipalId !== profile.ownerPrincipalId ||
-    facts.occupancyEpoch !== profile.occupancyEpoch || facts.profileKey !== profile.profileKey ||
-    facts.nodeStatus !== "online" || !connectionManager.isOnline(facts.nodeId) || facts.lastSeenAt === null ||
-    now - facts.lastSeenAt.getTime() < 0 || now - facts.lastSeenAt.getTime() > 45_000)
+  if (!facts || !factsMatchProfile(facts, profile, Date.now()))
     throw new CheckpointRefused("authority");
   return { organizationId: profile.organizationId, tenantId: facts.tenantId, sourceTenantId: profile.sourceTenantId,
     stationId: facts.stationId, nodeId: facts.nodeId, principalId: profile.occupantPrincipalId,

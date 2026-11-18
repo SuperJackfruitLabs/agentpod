@@ -126,11 +126,12 @@ test("default harness profile keeps exact DB ownership and independent coordinat
   expect(JSON.parse(attempt.row.authority).profileKey).toBe("");
   const wrongCoordinator = await current({ profile_id: "other-coordinator" });
   expect((await parseBenchCoordinatorCurrentResponse(wrongCoordinator.body, wrongCoordinator.raw, Date.now())).decision).toBe("refused");
-  for (const profileKey of [null, "fixture-profile"]) {
+  // The roster stores the default profile as NULL (the admin API cannot store ""), so NULL is the default; a named profile is not.
+  for (const [profileKey, expected] of [[null, "current"], ["fixture-profile", "refused"]] as const) {
     await db.update(bridgeAgents).set({ profileKey }).where(eq(bridgeAgents.tenantId, tenantId));
     try {
-      const mismatch = await current();
-      expect((await parseBenchCoordinatorCurrentResponse(mismatch.body, mismatch.raw, Date.now())).decision).toBe("refused");
+      const other = await current();
+      expect((await parseBenchCoordinatorCurrentResponse(other.body, other.raw, Date.now())).decision).toBe(expected);
     } finally { await db.update(bridgeAgents).set({ profileKey: "" }).where(eq(bridgeAgents.tenantId, tenantId)); }
     const restored = await current();
     expect((await parseBenchCoordinatorCurrentResponse(restored.body, restored.raw, Date.now())).decision).toBe("current");
