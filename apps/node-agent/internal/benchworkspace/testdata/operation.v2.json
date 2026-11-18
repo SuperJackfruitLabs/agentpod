@@ -304,6 +304,22 @@
           "const": "archive"
         }
       }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "operation", "key"],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "version": {
+          "const": "superbench.v2"
+        },
+        "operation": {
+          "const": "reclaim"
+        }
+      }
     }
   ],
   "$defs": {

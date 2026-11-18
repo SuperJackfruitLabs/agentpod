@@ -1,0 +1,124 @@
+{
+  "version": "superbench.reclaim-lifecycle-fixtures.v1",
+  "status": "proposed runtime obligations; plain data does not prove deletion, quota retirement, execution or deployment",
+  "scenarios": [
+    {
+      "name": "released-idle-reclaim",
+      "response_case": "success-reclaimed",
+      "steps": [
+        {
+          "request_case": "request-key-only",
+          "response_case": "success-reclaimed"
+        }
+      ],
+      "assertions": [
+        "Operator authority only: a reader peer is refused with 403 forbidden and no result, and no lease token, holder or request ID is accepted.",
+        "Decided from the producer's own records before anything is recorded: a Fresh workspace, phase ready, no lease, no pending generation or stage, no admitted or bound operation, allocated, its complete checkpoint clean in the tree and confirmed in the mirror and on the remote.",
+        "The record moves to reclaiming before any deletion, then to reclaimed once the tree is deleted and the quota project retired.",
+        "Success names phase reclaimed with its last checkpoint, no lease, no pending generation, no grant and no root path."
+      ]
+    },
+    {
+      "name": "refused-reader-peer",
+      "response_case": "refused-403-reader-peer",
+      "steps": [
+        {
+          "request_case": "request-key-only",
+          "response_case": "refused-403-reader-peer"
+        }
+      ],
+      "assertions": [
+        "A peer without operator authority is refused before any state is read; nothing is recorded or deleted and no workspace is disclosed."
+      ]
+    },
+    {
+      "name": "refused-not-released-or-not-idle",
+      "response_case": "refused-409-conflict",
+      "steps": [
+        {
+          "request_case": "request-key-only",
+          "response_case": "refused-409-conflict"
+        }
+      ],
+      "assertions": [
+        "A held lease, a pending generation or stage, an admitted operation, a phase other than ready, an archive, transfer or repair record, or a missing checkpoint or allocation refuses with 409 conflict.",
+        "A legacy (non-Fresh) workspace and a scalar key refuse with 409 conflict; archive and reap remain their route.",
+        "A 409 refusal records nothing and deletes nothing; the caller releases or finishes the workspace first and does not retry unchanged."
+      ]
+    },
+    {
+      "name": "failure-after-record-retries",
+      "response_case": "retryable-422-retains-reclaiming",
+      "steps": [
+        {
+          "request_case": "request-key-only",
+          "response_case": "retryable-422-retains-reclaiming"
+        },
+        {
+          "request_case": "request-key-only",
+          "response_case": "success-reclaimed"
+        }
+      ],
+      "assertions": [
+        "422 operation_failed is retryable: resend the same reclaim request for the same key.",
+        "reclaiming never returns to ready and never offers acquisition; the same request resumes the deletion and quota retirement.",
+        "A failure before the record changes may carry no result; the workspace is then still ready and the same request is still the retry."
+      ]
+    },
+    {
+      "name": "unavailable-retries",
+      "response_case": "retryable-503-retains-reclaiming",
+      "steps": [
+        {
+          "request_case": "request-key-only",
+          "response_case": "retryable-503-retains-reclaiming"
+        },
+        {
+          "request_case": "request-key-only",
+          "response_case": "success-reclaimed"
+        }
+      ],
+      "assertions": [
+        "503 unavailable (including cancellation or a deadline) is retryable with the same request.",
+        "A 503 never proves the tree was or was not deleted; the retained phase, when present, is the evidence."
+      ]
+    },
+    {
+      "name": "interrupted-reply",
+      "response_case": "status-reclaiming",
+      "steps": [
+        {
+          "request_case": "request-key-only"
+        },
+        {
+          "response_case": "status-reclaiming"
+        },
+        {
+          "request_case": "request-key-only",
+          "response_case": "success-reclaimed"
+        }
+      ],
+      "assertions": [
+        "reclaim is not a growth operation: it has no request ID and no operation receipt, so a lost reply has no receipt to look up.",
+        "After a lost or interrupted reply, read status for the key: ready or reclaiming means resend the same reclaim; reclaimed means done.",
+        "A reclaim of an already reclaimed workspace returns 200 with phase reclaimed and changes nothing, so resending is safe.",
+        "A timeout or disconnect never proves deletion or quota retirement."
+      ]
+    },
+    {
+      "name": "create-after-reclaim",
+      "response_case": "status-reclaimed",
+      "status": "PROPOSED: re-creation on a reclaimed key is ruled but not yet implemented by the producer; its exact create behavior is not final.",
+      "steps": [
+        {
+          "response_case": "status-reclaimed"
+        }
+      ],
+      "assertions": [
+        "A status read of a reclaimed bench returns phase reclaimed with its last checkpoint and ready_for_acquisition false.",
+        "The consumer may then issue create for the same key to obtain a fresh bench.",
+        "Until the producer ships re-creation, a consumer must not assume a create on a reclaimed key succeeds; no new request or response field is defined here."
+      ]
+    }
+  ]
+}

@@ -72,7 +72,7 @@ func validVector(vector []Commit, count int, coordinator string) bool {
 	return found
 }
 func validWorkspace(w Workspace) bool {
-	if !keyPattern.MatchString(w.Key) || !idPattern.MatchString(w.BenchID) || !oneOf(w.Phase, "materializing", "initializing", "prepared", "ready", "archived", "reaping", "reaped") || w.MemberCount < 1 || w.MemberCount > 32 || !namePattern.MatchString(w.CheckpointRepository) || !validCaps(w.QuotaBytes, w.QuotaInodes) || !validLease(w.Lease) {
+	if !keyPattern.MatchString(w.Key) || !idPattern.MatchString(w.BenchID) || !oneOf(w.Phase, "materializing", "initializing", "prepared", "ready", "archived", "reaping", "reaped", "reclaiming", "reclaimed") || w.MemberCount < 1 || w.MemberCount > 32 || !namePattern.MatchString(w.CheckpointRepository) || !validCaps(w.QuotaBytes, w.QuotaInodes) || !validLease(w.Lease) {
 		return false
 	}
 	if w.TransferState != "" && (!oneOf(w.TransferState, "relinquishing", "transferred") || !oneOf(w.Phase, "ready", "archived", "reaping", "reaped") || w.Lease != nil || w.Pending != nil || w.Checkpoint == nil || w.TransferState == "relinquishing" && w.Phase != "ready") {
@@ -89,7 +89,12 @@ func validWorkspace(w Workspace) bool {
 	if !validArchive(w.Phase, archive, false) || archive != nil && (w.Lease != nil || w.Pending != nil) {
 		return false
 	}
-	if oneOf(w.Phase, "ready", "archived", "reaping", "reaped") && w.Checkpoint == nil {
+	if oneOf(w.Phase, "ready", "archived", "reaping", "reaped", "reclaiming", "reclaimed") && w.Checkpoint == nil {
+		return false
+	}
+	// A reclaimed (or reclaiming) bench keeps only its last checkpoint: no
+	// lease, pending generation, archive or transfer, and never acquisition.
+	if Reclaim(w.Phase) && (w.Lease != nil || w.Pending != nil) {
 		return false
 	}
 	if oneOf(w.Phase, "materializing", "initializing", "prepared") && (w.Lease == nil || w.Lease.Holder != "initialization") {
@@ -279,6 +284,10 @@ func validResponseResult(response Response, request Request) bool {
 			}
 		case "archive":
 			if w.Archive == nil || w.Archive.FrozenAt == "" {
+				return false
+			}
+		case "reclaim":
+			if w.Phase != "reclaimed" {
 				return false
 			}
 		case "stop", "stop_admin":

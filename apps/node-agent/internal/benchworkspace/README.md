@@ -60,3 +60,13 @@ continuation. Hashes and captured bytes are observations only; malformed replies
 still fail validation and lost replies remain uncertain. Neither capture nor a
 request digest proves the producer received or executed a request. No source
 coordinator, receipt verifier, reporter credential or settlement is enabled.
+
+SuperBench reclaims a released, idle Fresh bench by itself after a grace
+period. The pinned corpus adds the `reclaiming` and `reclaimed` phases and the
+operator-only `reclaim` operation. Status and every other reply parse both
+phases: a reclaimed bench keeps only its last checkpoint, with no lease, pending
+generation, archive or transfer, and never offers acquisition. AgentPod never
+sends `reclaim`: it has no request shape, so `Parse` and every client refuse it,
+and only the response codec checks its replies against the corpus. The bridge
+treats `reclaiming` as not ready yet and `reclaimed` as a create for the same
+key.

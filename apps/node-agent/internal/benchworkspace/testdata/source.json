@@ -1,15 +1,15 @@
 {
   "repository": "https://forge.superjackfruit.com/SuperJackfruitLabs/treaty",
-  "revision": "496959ac16bc207135abb5ebb32e99339d124021",
+  "revision": "83e51d583a71f668eec8c2093394613e002c1678",
   "status": "PROPOSED; consumer wire checks do not accept protocol or prove source authority",
   "files": {
     "schemas/superbench/operation.v2.json": {
       "local": "operation.v2.json",
-      "sha256": "201abdbddcefcb8629246f38214a61ed3e3dfb59e3d851a9dfebd2e0096940a6"
+      "sha256": "22bab58e95060c86010063857e5495e990530279e3c528e8f43ec3d6ed7cc1fc"
     },
     "schemas/superbench/response.v2.json": {
       "local": "response.v2.json",
-      "sha256": "1df33a924e78712082e0a8d262e20c6b0eb751d9ce9c7eac2bb505a11f27337e"
+      "sha256": "64e72583a3e75da94534e28985d01ab9ac12b5bfbc25c37487f975e93a8a0053"
     },
     "fixtures/superbench-api/workspace-operations.json": {
       "local": "workspace-operations.json",
@@ -22,6 +22,14 @@
     "fixtures/superbench-api/workspace-lifecycle.json": {
       "local": "workspace-lifecycle.json",
       "sha256": "0d0dca060902df3706bf3d0c1322c1ea1fbfb22ac5cb50a3243e761906848255"
+    },
+    "fixtures/superbench-api/reclaim.json": {
+      "local": "reclaim.json",
+      "sha256": "f18828e44ea42cbae7875906f5472633a8c291feff062e87e58dd526b7371084"
+    },
+    "fixtures/superbench-api/reclaim-lifecycle.json": {
+      "local": "reclaim-lifecycle.json",
+      "sha256": "19fd90285c4e465b95e0e455ff4d4071b022baf5b1ef066858923d7fab064a52"
     }
   }
 }

@@ -63,6 +63,16 @@ var shapes = map[string]shape{
 }
 
 func Known(operation string) bool { _, ok := shapes[operation]; return ok }
+
+// Reclaim reports the two phases of a bench the producer reclaimed by itself
+// after release. reclaiming is not ready yet; reclaimed is gone and a create
+// for the same key makes a fresh bench.
+func Reclaim(phase string) bool { return phase == "reclaiming" || phase == "reclaimed" }
+
+// knownResponse also reads replies to reclaim, an operator operation. AgentPod
+// never sends one: reclaim has no request shape, so Parse and every client
+// refuse it, and only the response codec checks the pinned corpus.
+func knownResponse(operation string) bool { return Known(operation) || operation == "reclaim" }
 func Growth(operation string) bool {
 	switch operation {
 	case "create", "recover", "lease", "run", "setup":

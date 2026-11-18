@@ -59,7 +59,7 @@ func parseResponse(raw []byte, httpStatus int, request Request, growthLimit int,
 		}
 		return response, nil
 	}
-	if !Known(request.Operation) || wire.Operation != request.Operation || wire.RequestID != request.RequestID || Growth(wire.Operation) != (wire.RequestID != "") || wire.RequestID != "" && !keyPattern.MatchString(wire.RequestID) {
+	if !knownResponse(request.Operation) || wire.Operation != request.Operation || wire.RequestID != request.RequestID || Growth(wire.Operation) != (wire.RequestID != "") || wire.RequestID != "" && !keyPattern.MatchString(wire.RequestID) {
 		return zero, ErrResponse
 	}
 	if wire.Result != nil {
