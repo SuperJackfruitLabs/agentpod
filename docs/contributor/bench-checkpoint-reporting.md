@@ -46,6 +46,23 @@ flag; no configuration is supplied or enabled by these source changes.
 
 `PROPOSED_CHECKPOINT_COORDINATOR` must equal the literal `true` before the
 Hub reads any dedicated profile. Unset or other values keep this path disabled.
+
+Two prerequisites must hold before the coordinator can select any work:
+
+- **`ENFORCE_CONTROL_PAIR=true`.** Checkpoint authority is defined only under
+  control-pair enforcement. With the coordinator on and enforcement off, the Hub
+  logs a startup error naming `ENFORCE_CONTROL_PAIR` and loads no checkpoint
+  profile, so checkpoint dispatch stays off. Ordinary dispatch is unaffected.
+- **A dispatch grant for each checkpoint agent.** The profile's owner principal
+  must carry the occupant agent's principal ID in its issuer `mayDispatch`
+  claim. Without it every selection refuses with `authority`.
+
+A refusal is scoped to checkpoint work. A refused selection or checkpoint client
+never ends the agent's claim cycle: the cycle continues with an ordinary claim,
+which the board never answers with a checkpoint stage. Each distinct refusal code
+is logged once per agent as `checkpoint dispatch refused; ordinary claims continue`,
+then at most once every 15 minutes with the count suppressed meanwhile. Refusals
+still refuse; this changes only how far they reach and how often they are logged.
 `PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE` selects an absolute physical
 JSON file, at most 64 KiB, in a private directory. The file and directory must be
 owned by the service user or root and inaccessible to other users; symlinks are

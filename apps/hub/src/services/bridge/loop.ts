@@ -23,6 +23,7 @@ import { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./supe
 import { createLogger } from "../../utils/logger";
 import { onWorkAvailable } from "./work-wake";
 import { checkpointRuntime } from "./checkpoint-port";
+import { checkpointCycle, createCheckpointRefusalLog } from "./checkpoint-isolation";
 
 /** How long to wait after a claim that found nothing. */
 const DEFAULT_POLL_MS = 5_000;
@@ -246,6 +247,7 @@ const hubAcpPort: AcpPort = {
  */
 export function bridgeLogLevel(message: string, meta?: Record<string, unknown>): "info" | "warn" | "error" {
   if (message.startsWith("halting")) return "error";
+  if (message.startsWith("checkpoint dispatch refused")) return "warn";
   if (meta && meta.error !== undefined) return "warn";
   return "info";
 }
@@ -330,12 +332,14 @@ export async function startSuperpipelineBridge(
       // An unavailable snapshot returns no dedicated runtime; ordinary work is unchanged.
       const dedicated = checkpointRuntime(agent.tenantId ?? BOOTSTRAP_TENANT_ID,
         agent.boardId, agent.stationId, agent.key);
+      // A checkpoint refusal never ends this agent's cycle; it is logged once per reason.
+      const checkpointRefused = createCheckpointRefusalLog((m, meta) => log(m, { agent: agent.key, ...meta }));
       const handle = startAgentLoop({
         run: async (handover) => {
           return runOnce({
             handover,
-            client: dedicated ? await dedicated.client() : client,
-            ...(dedicated ? { checkpoint: dedicated.port } : {}),
+            ...await checkpointCycle(dedicated, client, checkpointRefused),
+            checkpointRefused,
             acp,
             agent: config,
             // The roster row's own tenant (W5): the composite FK pins it to its station's, so the

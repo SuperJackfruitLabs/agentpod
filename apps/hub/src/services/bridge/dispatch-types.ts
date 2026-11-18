@@ -10,6 +10,7 @@ import type { SalaamPublication } from "./salaam-publish";
 import type { Fingerprint } from "../evidence";
 import type { BridgeAgentConfig } from "./config";
 import type { CheckpointDispatchPort } from "./checkpoint-dispatch";
+import type { CheckpointRefusalLog } from "./checkpoint-isolation";
 import type { SuperpipelineClient } from "./superpipeline";
 
 /** Whether a station must run strict Salaam work, and on which protocol version. */
@@ -77,6 +78,8 @@ export interface AcpPort {
 export interface DispatchDeps {
   /** Proposed, unwired trusted dedicated executor. Omitted in all production constructors. */
   checkpoint?: CheckpointDispatchPort;
+  /** Where a refused checkpoint selection is reported; rate-limited by the loop. Absent: `log`. */
+  checkpointRefused?: CheckpointRefusalLog;
   /** Test seam: settle a stopped strict run with its known effects preserved, only once Salaam's
    * status says it can prove them; throws otherwise. Defaults to salaam-dispatch's settlement. */
   settleStoppedWork?: (runId: string) => Promise<void>;

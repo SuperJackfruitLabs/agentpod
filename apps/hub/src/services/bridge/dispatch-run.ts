@@ -7,6 +7,7 @@ import { probeReadiness } from "./dispatch-readiness";
 import { workClaimed } from "./dispatch-work";
 import { recoverPermissionWaits } from "./dispatch-recover";
 import { selectCheckpointDispatch } from "./checkpoint-dispatch";
+import { checkpointRefusalCode } from "./checkpoint-isolation";
 import { SuperpipelineApiError } from "./superpipeline";
 
 export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
@@ -21,12 +22,18 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   );
 
   // Dedicated work is selected before ACP probing, Salaam recovery or prior-output replay.
+  // A refused selection is the checkpoint stage's alone: nothing is claimed for it this cycle,
+  // and the cycle continues with ordinary claims, which never select a checkpoint stage.
   let dedicated;
   try {
     dedicated = await selectCheckpointDispatch(deps.checkpoint, {
       tenantId: deps.tenantId, boardId: agent.boardId, stationId: agent.stationId,
     });
-  } catch { return { status: "not-ready", reason: "Checkpoint target unavailable" }; }
+  } catch (error) {
+    if (deps.checkpointRefused) deps.checkpointRefused(error);
+    else log("checkpoint dispatch refused; ordinary claims continue", { code: checkpointRefusalCode(error) });
+    dedicated = undefined;
+  }
   if (dedicated) {
     try {
       const resumed = await dedicated.recover();
