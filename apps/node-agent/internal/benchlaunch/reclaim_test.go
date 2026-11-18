@@ -209,14 +209,23 @@ func TestRecordWithoutAGenerationIsNotGoneOnReclaim(t *testing.T) {
 	parked(t, tr, "a record without a generation took a reclaim as proof")
 }
 
-// A refused release is only answered by the grant's own generation: a status
-// read of another one proves nothing about the lease we hold.
-func TestRefusedReleaseIsNotGoneOnAnotherGeneration(t *testing.T) {
+// A refused release, then a status read showing a later generation: SuperBench
+// creates one only after the grant's generation is reclaimed, which needs a
+// released bench, so the grant is gone. The same generation still held by us
+// is not.
+func TestRefusedReleaseIsGoneOnALaterGeneration(t *testing.T) {
 	tr := newTrial(t)
 	tr.prepare(t)
+	tr.refuseRelease = 1
+	parked(t, tr, "a refused release on the grant's own generation, still ours, was taken as gone")
+	if r, _ := tr.record(t, tr.spec); r.ReleaseFailures != 1 {
+		t.Fatal("the refused release was not counted", r.ReleaseFailures)
+	}
 	tr.benchID, tr.leased, tr.refuseRelease = strings.Repeat("7", 32), false, 1
-	parked(t, tr, "another generation's status marked the lease gone")
-	if r, _ := tr.record(t, tr.spec); r.ReleaseFailures != 1 || r.BenchID != strings.Repeat("1", 32) {
-		t.Fatal("the refused release was not counted", r.ReleaseFailures, r.BenchID)
+	if _, err := tr.c.Cancel(context.Background(), tr.spec); !isRefusal(err, "stale_owner") {
+		t.Fatal("a later generation did not prove the old lease released", err)
+	}
+	if r, active := tr.record(t, tr.spec); !r.terminal() || active || r.Release != "done" || r.BenchID != strings.Repeat("1", 32) {
+		t.Fatal("the old record still holds the key", r.Release, r.BenchID, active)
 	}
 }

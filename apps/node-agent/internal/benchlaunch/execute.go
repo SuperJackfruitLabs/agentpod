@@ -257,11 +257,18 @@ func releaseStuck(r record) bool {
 	return r.Release == "needed" && r.ReleaseFailures >= releaseWarnAfter
 }
 
-// leaseGone is a read-only status check after a refused release, on the
-// generation the grant was on. Another generation proves nothing.
+// leaseGone is a read-only status check after a refused release of the grant
+// on generation id. On that generation, the lease is gone when it is no longer
+// ours. A status read is never older than the grant it follows, so a different
+// bench_id is a later generation: SuperBench creates one only once the grant's
+// generation is reclaimed, and reclaims only a released bench, so the grant is
+// gone. An unknown generation proves nothing.
 func (c Coordinator) leaseGone(ctx context.Context, spec benchdispatch.SourceSpec, id string) bool {
 	w := c.bench(ctx, spec)
-	return w != nil && id != "" && w.BenchID == id && (w.Lease == nil || w.Lease.Holder != spec.Holder)
+	if w == nil || id == "" {
+		return false
+	}
+	return w.BenchID != id || w.Lease == nil || w.Lease.Holder != spec.Holder
 }
 
 // reclaimed is a read-only status check: SuperBench reclaims only a released,

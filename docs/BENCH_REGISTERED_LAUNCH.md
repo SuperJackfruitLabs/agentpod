@@ -147,8 +147,10 @@ read shows. When a grant is observed, the record keeps the grant's `bench_id`.
 - A grant on a generation other than the one the lease was sent to (the bench
   was reclaimed and created again while the request was in flight) is refused
   with `stale_owner` and released.
-- After a refused release, only a status read of the grant's own generation can
-  show the lease gone.
+- After a refused release, the lease is gone when a status read shows the
+  grant's own generation no longer leased to us, or a later generation: one is
+  created only once the grant's generation is reclaimed, and only a released
+  bench is reclaimed. An unknown generation is not proof.
 - A record from before generations were kept has none, and a reclaim never
   counts as proof for it: it stays parked for an operator rather than risk an
   unreleased grant on a new generation.
@@ -157,7 +159,12 @@ Known limit: a lease request carries no `bench_id`, so SuperBench cannot refuse
 a request that was still in flight after its own generation was reclaimed. If
 the old generation is seen reclaimed, the record ends, and the key is created
 again before that request arrives, the late grant lands on the new generation
-with no record left to release it.
+with no record left to release it. The gap is bounded: SuperBench reclaims a
+bench only after it has been released and idle for the reclaim grace
+(`fresh_reclaim_idle_hours`, 24 hours by default), and the node's request
+timeout ends a lease request long before that. A request would have to outlive
+the grace. The follow-up fix is a lease request that carries the `bench_id` it
+expects, so SuperBench refuses it on any other generation.
 
 On the hub, `stale_owner` is reserved for a definite change (the attempt row is
 gone, or its run, epoch, attempt or owner authority changed). A row that merely
