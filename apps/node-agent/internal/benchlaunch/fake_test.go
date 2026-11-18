@@ -45,6 +45,14 @@ type fakeBench struct {
 	runArgs          []string
 	reclaim          string // "", "reclaiming" or "reclaimed": SuperBench reclaimed the bench by itself
 	afterStatus      func() // runs under the lock once a status reply is built
+	// A create that never finished: the workspace stays in this phase
+	// ("initializing" or "materializing") under its initialization owner.
+	stuck        string
+	initToken    string // the initialization owner's token
+	stopped      bool   // the initialization owner was stopped
+	failCreate   bool   // the next create fails and leaves the bench stuck with a grant
+	holdRecreate bool   // the host has not freed the stuck tree: a create stays a conflict
+	sameRecreate bool   // a create over a stuck bench reports the old bench_id (a producer fault)
 }
 type receipt struct {
 	digest string
@@ -72,6 +80,12 @@ func (f *fakeBench) workspace(spec benchdispatch.SourceSpec, held bool, generati
 		w.Lease = &benchworkspace.LeaseSummary{Holder: f.holder, Mode: "cooperative"}
 	}
 	return w
+}
+
+// stuckWorkspace is a create that never finished, held by its initialization owner.
+func (f *fakeBench) stuckWorkspace(spec benchdispatch.SourceSpec) benchworkspace.Workspace {
+	return benchworkspace.Workspace{Key: spec.BenchKey, BenchID: f.benchID, Phase: f.stuck, MemberCount: 2, CheckpointRepository: "a", QuotaBytes: 1 << 30, QuotaInodes: 1 << 20,
+		Lease: &benchworkspace.LeaseSummary{Holder: "initialization", Mode: "supervised", StopRequested: f.stopped, Execution: &benchworkspace.Execution{ID: strings.Repeat("3", 32), Phase: "stopped"}}}
 }
 
 func envelope(op, requestID string, ok bool, result any, code string) []byte {
@@ -195,6 +209,24 @@ func (f *fakeBench) act(ctx context.Context, spec benchdispatch.SourceSpec, r be
 	}
 	switch op {
 	case "create":
+		if f.failCreate {
+			f.failCreate, f.effects[op] = false, f.effects[op]+1
+			f.stuck, f.initToken, f.stopped = "initializing", strings.Repeat("7", 32), false
+			m := benchworkspace.Mutation{Workspace: f.stuckWorkspace(spec), Grant: &benchworkspace.Grant{LeaseToken: f.initToken}, RootPath: "/data/benches/" + spec.BenchKey}
+			return 422, envelope(op, r.RequestID, false, m, "operation_failed")
+		}
+		if f.stuck != "" {
+			if !f.stopped || f.holdRecreate {
+				return 409, envelope(op, r.RequestID, false, nil, "conflict")
+			}
+			f.effects[op]++
+			f.stuck, f.stopped, f.initToken = "", false, ""
+			if !f.sameRecreate {
+				f.benchID = strings.Repeat("5", 32)
+			}
+			m := benchworkspace.Mutation{Workspace: f.workspace(spec, false, strings.Repeat("2", 32), fakeCommitA, fakeCommitB), RootPath: "/data/benches/" + spec.BenchKey}
+			return 200, envelope(op, r.RequestID, true, m, "")
+		}
 		if f.reclaim != "reclaimed" {
 			return 409, envelope(op, r.RequestID, false, nil, "conflict")
 		}
@@ -202,7 +234,17 @@ func (f *fakeBench) act(ctx context.Context, spec benchdispatch.SourceSpec, r be
 		f.reclaim, f.benchID = "", strings.Repeat("5", 32)
 		m := benchworkspace.Mutation{Workspace: f.workspace(spec, false, strings.Repeat("2", 32), fakeCommitA, fakeCommitB), RootPath: "/data/benches/" + spec.BenchKey}
 		return 200, envelope(op, r.RequestID, true, m, "")
+	case "stop":
+		if f.stuck == "" || r.LeaseToken != f.initToken {
+			return 409, envelope(op, "", false, nil, "conflict")
+		}
+		f.effects[op]++
+		f.stopped = true
+		return 200, envelope(op, "", true, benchworkspace.Mutation{Workspace: f.stuckWorkspace(spec)}, "")
 	case "lease":
+		if f.stuck != "" {
+			return 409, envelope(op, r.RequestID, false, nil, "conflict")
+		}
 		if f.leased {
 			return 409, envelope(op, r.RequestID, false, nil, "conflict")
 		}
@@ -232,6 +274,9 @@ func (f *fakeBench) act(ctx context.Context, spec benchdispatch.SourceSpec, r be
 		w := f.workspace(spec, f.leased, strings.Repeat("2", 32), fakeCommitA, fakeCommitB)
 		if f.reclaim != "" {
 			w.Phase, w.ReadyForAcquisition, w.Lease = f.reclaim, false, nil
+		}
+		if f.stuck != "" {
+			w = f.stuckWorkspace(spec)
 		}
 		inv := map[string]any{"benches": []any{benchworkspace.WorkspaceInventory{Workspace: w, Kind: "workspace", Members: []benchworkspace.Member{{Name: "a", Branch: "card/x", Base: "main", ObjectFormat: "sha1", SourceCommit: fakeCommitA}, {Name: "b", Branch: "card/x", Base: "main", ObjectFormat: "sha1", SourceCommit: fakeCommitB}}}}}
 		if f.afterStatus != nil {

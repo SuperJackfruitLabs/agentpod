@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchlaunch"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 )
 
@@ -61,6 +62,11 @@ func reclaimHandler(t *testing.T, phase string) (*Handler, *statusProducer) {
 			"member_count": 1, "checkpoint_repository": "api", "ready_for_acquisition": phase == "ready", "quota_bytes": 1 << 30, "quota_inodes": 1 << 20,
 			"checkpoint": map[string]any{"generation_id": strings.Repeat("2", 32), "seal": seal, "manifest_sha256": strings.Repeat("c", 64), "members": []any{map[string]string{"name": "api", "commit": seal}}},
 			"members":    []any{map[string]string{"name": "api", "branch": "card/x", "base": "main", "object_format": "sha1", "source_commit": seal}}}
+		if phase == "materializing" || phase == "initializing" {
+			// A create that never finished: no checkpoint, held by its initialization owner.
+			delete(bench, "checkpoint")
+			bench["lease"] = map[string]any{"holder": "initialization", "mode": "supervised", "stop_requested": false, "execution": map[string]string{"id": strings.Repeat("3", 32), "phase": "stopped"}}
+		}
 		benches := []any{bench}
 		if phase == "" {
 			benches = []any{}
@@ -136,5 +142,26 @@ func TestReclaimingBenchParksThePrepare(t *testing.T) {
 	}
 	if producer.count("create") != 0 {
 		t.Fatal("choose created")
+	}
+}
+
+// A registered bench stuck before ready is a create with the attempt's own
+// request ID, so the registered launch can recover it. The grouped launch
+// keeps leasing, unchanged.
+func TestChooseCreatesOverAStuckRegisteredBench(t *testing.T) {
+	for _, phase := range []string{"materializing", "initializing"} {
+		for _, launch := range []string{benchlaunch.Mode, ""} {
+			h, producer := reclaimHandler(t, phase)
+			h.registry.Profiles[0].Launch = launch
+			_, request := prepareFixture(t)
+			spec, _, err := h.choose(context.Background(), request, h.registry.Profiles[0])
+			if err != nil {
+				t.Fatal(phase, launch, err)
+			}
+			want := launch == benchlaunch.Mode
+			if spec.Create != want || (spec.CreateRequestID == "create_"+intentName(*request.Identity)) != want || producer.count("status") != 1 {
+				t.Fatalf("%s %q: create=%v id=%q", phase, launch, spec.Create, spec.CreateRequestID)
+			}
+		}
 	}
 }
