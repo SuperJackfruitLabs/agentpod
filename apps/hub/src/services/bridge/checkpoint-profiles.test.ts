@@ -9,10 +9,10 @@ import corpus from "../../../../../packages/contract/src/fixtures/bench-coordina
 import { checkpointProfileId, parseCheckpointProfile } from "./checkpoint-profile";
 import { canonicalCheckpoint } from "./checkpoint-json";
 import { checkpointRuntime } from "./checkpoint-port";
-const prior = { flag: process.env.PROPOSED_CHECKPOINT_COORDINATOR, file: process.env.PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE };
+const prior = { flag: process.env.PROPOSED_CHECKPOINT_COORDINATOR, file: process.env.PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE, pair: process.env.ENFORCE_CONTROL_PAIR };
 const roots: string[] = [];
 afterEach(() => {
-  for (const [key, value] of Object.entries({ PROPOSED_CHECKPOINT_COORDINATOR: prior.flag, PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE: prior.file })) {
+  for (const [key, value] of Object.entries({ PROPOSED_CHECKPOINT_COORDINATOR: prior.flag, PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE: prior.file, ENFORCE_CONTROL_PAIR: prior.pair })) {
     if (value === undefined) delete process.env[key]; else process.env[key] = value;
   }
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -32,7 +32,7 @@ function installed() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "checkpoint-profile-"))); roots.push(root); chmodSync(root, 0o700);
   const file = join(root, "profiles.json");
   writeFileSync(file, JSON.stringify({ version: "agentpod.checkpoint-profiles.v1", profiles: [fixture()] }), { mode: 0o600 });
-  return { root, file, env: { [CHECKPOINT_COORDINATOR_FLAG]: "true", PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE: file } };
+  return { root, file, env: { [CHECKPOINT_COORDINATOR_FLAG]: "true", PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE: file, ENFORCE_CONTROL_PAIR: "true" } };
 }
 test("no opt-in never reads even an invalid configured path", () => {
   expect(readCheckpointProfiles({ PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE: "/unavailable" })).toEqual([]);

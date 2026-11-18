@@ -7,12 +7,13 @@ import {
   providerImageEnvVar,
 } from "./services/runtimes";
 import { resolveDockerDaemon } from "./services/provisioner";
-import { RELAY_CREDENTIAL_ENV, loadBridgeConfig, readRelayCredential } from "./services/bridge";
+import { RELAY_CREDENTIAL_ENV, checkpointPrerequisiteError, loadBridgeConfig, readRelayCredential } from "./services/bridge";
 import { loadOperatorRules } from "./services/evidence";
 import { HubOperatorsConfigError, parseHubOperators } from "./services/hub";
 import { HubHomeOrgConfigError, parseHubHomeOrg } from "./auth/org-plane/hub-home-org";
 import { MOVED_BOARDS_ENV, MovedBoardsConfigError, parseMovedBoards } from "./services/board-chat";
 import { orgPlaneConfigErrors, type OrgPlaneConfigError } from "./auth/org-plane/config";
+import { createLogger } from "./utils/logger";
 
 export interface ValidationError {
   field: string;
@@ -513,5 +514,20 @@ export function validateConfig(): void {
     process.exit(1);
   }
 
+  reportCheckpointPrerequisite();
   console.log("✅ Configuration validation passed");
+}
+
+/**
+ * Startup line for a checkpoint coordinator that cannot work: its authority requires the control
+ * pair. Not a boot refusal, because ordinary dispatch for every other agent must keep running;
+ * the profiles are instead not loaded (`installedCheckpointProfiles`), so checkpoint stays off.
+ */
+export function reportCheckpointPrerequisite(
+  env: Record<string, string | undefined> = process.env,
+  report: (message: string) => void = (message) => createLogger("config").error(message),
+): boolean {
+  const message = checkpointPrerequisiteError(env);
+  if (message) report(`❌ CHECKPOINT COORDINATOR DISABLED: ${message}`);
+  return message !== undefined;
 }

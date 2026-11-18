@@ -8,6 +8,16 @@ import { CheckpointRefused, parseCheckpointProfile, type CheckpointProfile } fro
 
 export const CHECKPOINT_COORDINATOR_FLAG = "PROPOSED_CHECKPOINT_COORDINATOR";
 const CONFIG_FILE = "PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE";
+const CONTROL_PAIR_FLAG = "ENFORCE_CONTROL_PAIR";
+
+/** Checkpoint authority is defined only under control-pair enforcement (`factsMatchProfile`).
+ * With the coordinator on and enforcement off, every checkpoint selection would refuse, so the
+ * Hub names the missing prerequisite once and loads no profile. Ordinary dispatch is unchanged. */
+export function checkpointPrerequisiteError(env: Record<string, string | undefined> = process.env): string | undefined {
+  if (env[CHECKPOINT_COORDINATOR_FLAG] !== "true" || env[CONTROL_PAIR_FLAG] === "true") return undefined;
+  return `${CHECKPOINT_COORDINATOR_FLAG}=true requires ${CONTROL_PAIR_FLAG}=true; checkpoint profiles are not loaded ` +
+    "and checkpoint dispatch stays off. Ordinary dispatch is unaffected.";
+}
 const envelope = z.object({ version: z.literal("agentpod.checkpoint-profiles.v1"),
   profiles: z.array(z.unknown()).min(1).max(16) }).strict();
 
@@ -50,7 +60,7 @@ export function readCheckpointProfiles(env: Record<string, string | undefined> =
 }
 
 const log = createLogger("bridge-checkpoint");
-let installation: { path: string | undefined; profiles: readonly CheckpointProfile[] } | undefined;
+let installation: { path: string | undefined; enforced: boolean; profiles: readonly CheckpointProfile[] } | undefined;
 /** Private pins are installed once per configured path, including a failed load.
  * Editing the same file requires a Hub restart; credentials/current authority are
  * still checked afresh before effects. A malformed installation disables only
@@ -59,18 +69,30 @@ let installation: { path: string | undefined; profiles: readonly CheckpointProfi
 export function installedCheckpointProfiles(): readonly CheckpointProfile[] {
   if (process.env[CHECKPOINT_COORDINATOR_FLAG] !== "true") return [];
   const path = process.env[CONFIG_FILE];
-  if (installation && installation.path === path) return installation.profiles;
-  let profiles: readonly CheckpointProfile[];
+  const enforced = process.env[CONTROL_PAIR_FLAG] === "true";
+  if (installation && installation.path === path && installation.enforced === enforced) return installation.profiles;
+  const profiles = loadInstallation();
+  installation = { path, enforced, profiles };
+  return profiles;
+}
+function loadInstallation(): readonly CheckpointProfile[] {
+  const prerequisite = checkpointPrerequisiteError();
+  if (prerequisite) {
+    // Refuse to load rather than load profiles whose every selection would refuse: one explicit
+    // line at installation instead of a refusal per claim cycle. Authority itself is unchanged.
+    log.error("checkpoint coordinator prerequisite missing; dedicated dispatch disabled",
+      { code: "prerequisite", missing: CONTROL_PAIR_FLAG, detail: prerequisite, reload: "restart-required" });
+    return Object.freeze([]);
+  }
   try {
-    profiles = readCheckpointProfiles();
+    const profiles = readCheckpointProfiles();
     log.info("checkpoint profile snapshot loaded", { profiles: profiles.length, reload: "restart-required" });
+    return profiles;
   } catch {
-    profiles = Object.freeze([]);
     // Neither private filenames, profile contents nor raw exceptions enter logs.
     log.warn("checkpoint profile snapshot unavailable; dedicated dispatch disabled", { code: "unavailable", reload: "restart-required" });
+    return Object.freeze([]);
   }
-  installation = { path, profiles };
-  return profiles;
 }
 
 export function requireInstalledCheckpointProfile(profile: CheckpointProfile): void {
