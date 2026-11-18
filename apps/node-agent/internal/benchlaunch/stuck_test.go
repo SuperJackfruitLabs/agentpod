@@ -94,6 +94,16 @@ func TestStuckBenchNotOursParks(t *testing.T) {
 		t.Fatal("the park is not visible", st.State, err)
 	}
 	tr.stopped = true // an operator's stop_admin
+	// The same attempt now gets past the park; while its create's reply is
+	// lost it is plainly pending, no longer reported as stuck.
+	tr.loseBefore["create"], tr.lookup = true, "absent"
+	if _, err := tr.c.Prepare(context.Background(), next, tr.task); !errors.Is(err, benchdispatch.ErrPending) || errors.Is(err, ErrBenchStuck) {
+		t.Fatal("fixture: the create's reply should be lost", err)
+	}
+	if st, err := tr.c.Status(context.Background(), next); err != nil || st.State != "pending" {
+		t.Fatal("a park the attempt moved past is still reported", st.State, err)
+	}
+	tr.lookup = ""
 	later := creating(tr.spec, "attempt-3")
 	tr.current.Store(&later)
 	if _, err := tr.c.Prepare(context.Background(), later, tr.task); err != nil {

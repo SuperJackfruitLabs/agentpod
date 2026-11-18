@@ -70,7 +70,9 @@ func (c Coordinator) recoverStuck(ctx context.Context, spec benchdispatch.Source
 		r.Stuck = w.BenchID
 	}
 	if !stuck(w) || w.BenchID != r.Stuck || w.Lease.StopRequested {
-		return nil // the owner is stopped (by us or an operator), or the generation moved on
+		// The owner is stopped (by us or an operator), or the generation
+		// moved on: whatever parked this attempt here no longer holds it.
+		return c.unpark(ctx, spec, parkStuck)
 	}
 	if stop := r.step("stop"); stop != nil && stop.Sent && stop.Response == nil {
 		// The stop's reply was lost and the owner still shows running. A stop
@@ -189,4 +191,19 @@ func (c Coordinator) park(ctx context.Context, spec benchdispatch.SourceSpec, wh
 		log.Printf("bench %s: stuck before ready under an initialization owner this node does not hold; an operator stop_admin frees it", spec.BenchKey)
 	}
 	return ErrBenchStuck
+}
+
+// unpark clears a park reason the attempt has moved past, so Status never
+// reports a state it is no longer in.
+func (c Coordinator) unpark(ctx context.Context, spec benchdispatch.SourceSpec, why string) error {
+	if c.mark(ctx, spec, func(r *record) bool {
+		if r.Parked != why {
+			return false
+		}
+		r.Parked = ""
+		return true
+	}) != nil {
+		return benchdispatch.ErrPending
+	}
+	return nil
 }
