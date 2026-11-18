@@ -65,3 +65,11 @@ export function requireCheckpointProfileClaim(profile: CheckpointProfile, claim:
 export function checkpointProfileId(profile: CheckpointProfile): string {
   return profile.coordinatorProfileId ?? profile.profileKey;
 }
+
+/**
+ * The roster stores a default harness profile as NULL (the admin API cannot store ""),
+ * while a checkpoint profile spells the same default as "". One definition of "same profile".
+ */
+export function normalizeRosterProfileKey(key: string | null | undefined): string {
+  return key ?? "";
+}

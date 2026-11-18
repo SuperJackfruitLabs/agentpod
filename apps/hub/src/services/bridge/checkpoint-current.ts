@@ -12,7 +12,7 @@ import { grantAllowsPrincipal } from "../../auth/org-plane/grants";
 import { connectionManager } from "../broker";
 import { isControlPairEnforced } from "../control";
 import { canonicalCheckpoint } from "./checkpoint-json";
-import { CheckpointRefused, type CheckpointProfile } from "./checkpoint-profile";
+import { CheckpointRefused, normalizeRosterProfileKey, type CheckpointProfile } from "./checkpoint-profile";
 
 export interface CheckpointAuthority {
   organizationId: string;
@@ -39,7 +39,8 @@ export function parseCheckpointAuthority(value: unknown): CheckpointAuthority {
   if (!parsed.success) throw new CheckpointRefused("authority");
   return parsed.data;
 }
-async function currentFacts(profile: CheckpointProfile, exec: DbExecutor) {
+/** Exported for tests. */
+export async function currentFacts(profile: CheckpointProfile, exec: DbExecutor) {
   const target = profile.target;
   const [facts] = await exec.select({
     tenantId: tenants.id, organizationId: tenants.externalId, source: tenants.externalSource,
@@ -57,7 +58,7 @@ async function currentFacts(profile: CheckpointProfile, exec: DbExecutor) {
   if (!isControlPairEnforced() || !facts || facts.source !== "org-plane" ||
     facts.organizationId !== profile.organizationId || facts.nodeId !== target.node_id ||
     facts.principalId !== profile.occupantPrincipalId || facts.ownerPrincipalId !== profile.ownerPrincipalId ||
-    facts.occupancyEpoch !== profile.occupancyEpoch || facts.profileKey !== profile.profileKey ||
+    facts.occupancyEpoch !== profile.occupancyEpoch || normalizeRosterProfileKey(facts.profileKey) !== profile.profileKey ||
     facts.nodeStatus !== "online" || !connectionManager.isOnline(facts.nodeId) || facts.lastSeenAt === null ||
     now - facts.lastSeenAt.getTime() < 0 || now - facts.lastSeenAt.getTime() > 45_000)
     throw new CheckpointRefused("authority");
