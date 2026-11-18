@@ -44,6 +44,7 @@ type fakeBench struct {
 	lastCapsule      superbench.RegisteredCapsule
 	runArgs          []string
 	reclaim          string // "", "reclaiming" or "reclaimed": SuperBench reclaimed the bench by itself
+	afterStatus      func() // runs under the lock once a status reply is built
 }
 type receipt struct {
 	digest string
@@ -233,6 +234,9 @@ func (f *fakeBench) act(ctx context.Context, spec benchdispatch.SourceSpec, r be
 			w.Phase, w.ReadyForAcquisition, w.Lease = f.reclaim, false, nil
 		}
 		inv := map[string]any{"benches": []any{benchworkspace.WorkspaceInventory{Workspace: w, Kind: "workspace", Members: []benchworkspace.Member{{Name: "a", Branch: "card/x", Base: "main", ObjectFormat: "sha1", SourceCommit: fakeCommitA}, {Name: "b", Branch: "card/x", Base: "main", ObjectFormat: "sha1", SourceCommit: fakeCommitB}}}}}
+		if f.afterStatus != nil {
+			f.afterStatus()
+		}
 		return 200, envelope(op, "", true, inv, "")
 	case "run":
 		if finite == nil {

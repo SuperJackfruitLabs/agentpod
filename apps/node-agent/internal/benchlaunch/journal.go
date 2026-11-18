@@ -51,6 +51,12 @@ type record struct {
 	Binding         *benchdispatch.SourceBinding `json:"binding,omitempty"`
 	SourceSHA       string                       `json:"source_request_sha256,omitempty"`
 	Completion      *benchcoordinator.Completion `json:"completion,omitempty"`
+	// BenchID is the bench generation (SuperBench's bench_id) the lease was
+	// requested on, then the one it was granted on. A reclaimed key's next
+	// generation has a new bench_id, so a reclaim proves this record's lease
+	// gone only when it names this ID. Empty on a record written before the
+	// generation was kept.
+	BenchID string `json:"bench_id,omitempty"`
 }
 
 func (r *record) step(name string) *step {

@@ -122,6 +122,7 @@ func (c Coordinator) Prepare(ctx context.Context, spec benchdispatch.SourceSpec,
 		operations = append(operations, benchattempt.SourceOperation{Step: name, RequestSHA256: digest(raw), BodySHA256: body, ResponseSHA256: digest(s.Response), HTTPStatus: s.Status, Phase: "observed"})
 		return nil
 	}
+	created := ""
 	if spec.Create {
 		yes := true
 		request := benchworkspace.Request{Version: benchworkspace.Version, Operation: "create", Key: spec.BenchKey, Repositories: c.Repositories, CheckpointRepository: spec.CheckpointRepository, Initialize: &yes, RequestID: spec.CreateRequestID}
@@ -139,6 +140,10 @@ func (c Coordinator) Prepare(ctx context.Context, spec benchdispatch.SourceSpec,
 		if err = observe("create", request, reply); err != nil {
 			return zero, err
 		}
+		created = m.Workspace.BenchID
+	}
+	if err := c.pin(ctx, spec, created); err != nil {
+		return zero, err
 	}
 	leaseRequest := benchworkspace.Request{Version: benchworkspace.Version, Operation: "lease", Key: spec.BenchKey, Holder: spec.Holder, RequestID: spec.LeaseRequestID}
 	reply, err := c.ordinary(ctx, spec, "lease", leaseRequest, false)
@@ -155,6 +160,14 @@ func (c Coordinator) Prepare(ctx context.Context, spec benchdispatch.SourceSpec,
 	lease := mutationOf(reply)
 	if !heldBy(spec, lease) || lease.Grant == nil || lease.RootPath != filepath.Join(spec.DataRoot, "benches", spec.BenchKey) {
 		return zero, c.terminate(ctx, spec, "stale_owner", false)
+	}
+	if prior, err := c.granted(ctx, spec, lease.Workspace.BenchID); err != nil {
+		return zero, err
+	} else if prior != "" && prior != lease.Workspace.BenchID {
+		// The bench was reclaimed and created again while the lease was in
+		// flight: the grant is on a generation this attempt was not prepared
+		// for. Refuse, and release the grant with its own token.
+		return zero, c.terminate(ctx, spec, "stale_owner", true)
 	}
 	if err = observe("lease", leaseRequest, reply); err != nil {
 		return zero, err
@@ -181,6 +194,58 @@ func (c Coordinator) Prepare(ctx context.Context, spec benchdispatch.SourceSpec,
 		return zero, err
 	}
 	return c.bind(ctx, spec, task, lease, cp, token, layout, operations)
+}
+
+// pin records the bench generation the lease is about to be requested on,
+// before the request can leave: the created bench, or the one a status read
+// shows. It is set once. A record whose lease was sent before generations were
+// kept stays without one, since a status read now may show a later generation.
+// An unreadable status pins nothing; such a record is treated as one without a
+// generation.
+func (c Coordinator) pin(ctx context.Context, spec benchdispatch.SourceSpec, id string) error {
+	r, _, err := c.Journal.read(ctx, spec)
+	if err != nil {
+		return benchdispatch.ErrPending
+	}
+	if s := r.step("lease"); r.BenchID != "" || s != nil && s.Sent {
+		return nil
+	}
+	if id == "" {
+		if w := c.bench(ctx, spec); w != nil {
+			id = w.BenchID
+		}
+	}
+	if id == "" {
+		return nil
+	}
+	if c.mark(ctx, spec, func(r *record) bool {
+		if r.BenchID != "" {
+			return false
+		}
+		r.BenchID = id
+		return true
+	}) != nil {
+		return benchdispatch.ErrPending
+	}
+	return nil
+}
+
+// granted records the generation a grant is on and returns the one recorded
+// before it.
+func (c Coordinator) granted(ctx context.Context, spec benchdispatch.SourceSpec, id string) (string, error) {
+	var prior string
+	err := c.mark(ctx, spec, func(r *record) bool {
+		prior = r.BenchID
+		if prior == id {
+			return false
+		}
+		r.BenchID = id
+		return true
+	})
+	if err != nil {
+		return "", benchdispatch.ErrPending
+	}
+	return prior, nil
 }
 
 // observe reads the registered physical layout under the lease we hold.
