@@ -40,7 +40,7 @@ export function parseCheckpointAuthority(value: unknown): CheckpointAuthority {
   return parsed.data;
 }
 export interface RosterFacts {
-  organizationId: string; source: string | null; nodeId: string; principalId: string; ownerPrincipalId: string;
+  organizationId: string | null; source: string | null; nodeId: string; principalId: string | null; ownerPrincipalId: string;
   occupancyEpoch: number; profileKey: string | null; nodeStatus: string; lastSeenAt: Date | null;
 }
 /** Whether the freshly read facts are exactly the profile's pins. Exported for tests. */
