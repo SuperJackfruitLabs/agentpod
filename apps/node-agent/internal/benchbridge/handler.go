@@ -86,6 +86,10 @@ func (h *Handler) check(ctx context.Context, r benchcoordinatorwire.Request, p L
 	}
 	return nil
 }
+
+// ErrReclaiming parks a prepare while SuperBench is still reclaiming the bench.
+var ErrReclaiming = errors.New("bench is being reclaimed; retry later")
+
 func taskTimeout(value uint64) (uint32, error) {
 	if value < 1 || value > 3600 {
 		return 0, ErrIntent
@@ -113,15 +117,27 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 	if !ok {
 		return zero, benchdispatch.SourceTask{}, ErrIntent
 	}
-	create := true
+	create, seen := true, false
 	for _, entry := range inventory.Benches {
 		switch entry := entry.(type) {
 		case *benchworkspace.WorkspaceInventory:
 			if entry.Key == key {
-				if !create {
+				if seen {
 					return zero, benchdispatch.SourceTask{}, ErrIntent
 				}
-				create = false
+				seen = true
+				// SuperBench reclaims a released, idle bench by itself. While
+				// it is reclaiming nothing is chosen: the prepare stays
+				// pending and is retried. Once reclaimed the bench is gone and
+				// a create for the same key makes a fresh one from the card's
+				// pushed branch.
+				switch entry.Phase {
+				case "reclaiming":
+					return zero, benchdispatch.SourceTask{}, ErrReclaiming
+				case "reclaimed":
+				default:
+					create = false
+				}
 			}
 		case *benchworkspace.ScalarInventory:
 			if entry.Key == key {
