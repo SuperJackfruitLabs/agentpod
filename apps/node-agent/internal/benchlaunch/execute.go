@@ -201,6 +201,12 @@ func (c Coordinator) cleanup(ctx context.Context, spec benchdispatch.SourceSpec)
 	}
 	lease, err := c.ordinary(ctx, spec, "lease", benchworkspace.Request{Version: benchworkspace.Version, Operation: "lease", Key: spec.BenchKey, Holder: spec.Holder, RequestID: spec.LeaseRequestID}, true)
 	if err != nil {
+		// An unresolved lease reply normally parks. A bench SuperBench has
+		// reclaimed (or is reclaiming) proves no lease is held, so the old
+		// attempt's lease is recorded as gone instead of blocking the key.
+		if c.reclaimed(ctx, spec) {
+			return done()
+		}
 		return err
 	}
 	m := mutationOf(lease)
@@ -246,19 +252,32 @@ func releaseStuck(r record) bool {
 
 // leaseGone is a read-only status check after a refused release.
 func (c Coordinator) leaseGone(ctx context.Context, spec benchdispatch.SourceSpec) bool {
+	w := c.bench(ctx, spec)
+	return w != nil && (w.Lease == nil || w.Lease.Holder != spec.Holder)
+}
+
+// reclaimed is a read-only status check: SuperBench reclaims only a released,
+// idle bench, so a reclaiming or reclaimed one holds no lease of ours.
+func (c Coordinator) reclaimed(ctx context.Context, spec benchdispatch.SourceSpec) bool {
+	w := c.bench(ctx, spec)
+	return w != nil && benchworkspace.Reclaim(w.Phase)
+}
+
+// bench reads the key's one workspace from a status reply, or nil.
+func (c Coordinator) bench(ctx context.Context, spec benchdispatch.SourceSpec) *benchworkspace.WorkspaceInventory {
 	request := benchworkspace.Request{Version: benchworkspace.Version, Operation: "status", Key: spec.BenchKey}
 	raw, _ := json.Marshal(request)
 	status, body, err := c.Producer.Post(ctx, benchworkspace.PathOperations, "application/json", raw, benchworkspace.MaxResponse)
 	if err != nil {
-		return false
+		return nil
 	}
 	reply, err := benchworkspace.ParseResponse(body, status, request)
 	inventory, ok := reply.Result.(*benchworkspace.Status)
 	if err != nil || !ok || len(inventory.Benches) != 1 {
-		return false
+		return nil
 	}
-	w, ok := inventory.Benches[0].(*benchworkspace.WorkspaceInventory)
-	return ok && (w.Lease == nil || w.Lease.Holder != spec.Holder)
+	w, _ := inventory.Benches[0].(*benchworkspace.WorkspaceInventory)
+	return w
 }
 
 // Status reconciles from the journal and read-only lookups. It never sends a

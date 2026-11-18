@@ -43,6 +43,7 @@ type fakeBench struct {
 	cancels          []benchworkspace.CancelRequest
 	lastCapsule      superbench.RegisteredCapsule
 	runArgs          []string
+	reclaim          string // "", "reclaiming" or "reclaimed": SuperBench reclaimed the bench by itself
 }
 type receipt struct {
 	digest string
@@ -188,7 +189,18 @@ func (f *fakeBench) act(ctx context.Context, spec benchdispatch.SourceSpec, r be
 	if f.capacity[op] {
 		return 422, envelope(op, r.RequestID, false, nil, "capacity_exhausted")
 	}
+	if f.reclaim != "" && op != "status" && op != "create" {
+		return 409, envelope(op, r.RequestID, false, nil, "conflict")
+	}
 	switch op {
+	case "create":
+		if f.reclaim != "reclaimed" {
+			return 409, envelope(op, r.RequestID, false, nil, "conflict")
+		}
+		f.effects[op]++
+		f.reclaim, f.benchID = "", strings.Repeat("5", 32)
+		m := benchworkspace.Mutation{Workspace: f.workspace(spec, false, strings.Repeat("2", 32), fakeCommitA, fakeCommitB), RootPath: "/data/benches/" + spec.BenchKey}
+		return 200, envelope(op, r.RequestID, true, m, "")
 	case "lease":
 		if f.leased {
 			return 409, envelope(op, r.RequestID, false, nil, "conflict")
@@ -217,6 +229,9 @@ func (f *fakeBench) act(ctx context.Context, spec benchdispatch.SourceSpec, r be
 		return 200, envelope(op, "", true, benchworkspace.Mutation{Workspace: f.workspace(spec, true, strings.Repeat("2", 32), fakeCommitA, fakeCommitB)}, "")
 	case "status":
 		w := f.workspace(spec, f.leased, strings.Repeat("2", 32), fakeCommitA, fakeCommitB)
+		if f.reclaim != "" {
+			w.Phase, w.ReadyForAcquisition, w.Lease = f.reclaim, false, nil
+		}
 		inv := map[string]any{"benches": []any{benchworkspace.WorkspaceInventory{Workspace: w, Kind: "workspace", Members: []benchworkspace.Member{{Name: "a", Branch: "card/x", Base: "main", ObjectFormat: "sha1", SourceCommit: fakeCommitA}, {Name: "b", Branch: "card/x", Base: "main", ObjectFormat: "sha1", SourceCommit: fakeCommitB}}}}}
 		return 200, envelope(op, "", true, inv, "")
 	case "run":
