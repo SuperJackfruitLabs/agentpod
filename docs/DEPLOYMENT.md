@@ -391,6 +391,13 @@ grants failed to load would silently enforce nothing.
 **Populate grants before switching it on.** With enforcement on and no grants,
 every dispatch is refused — which is correct, and is also an outage.
 
+The proposed checkpoint coordinator (`PROPOSED_CHECKPOINT_COORDINATOR=true`)
+requires enforcement. With the coordinator on and enforcement off, the hub logs a
+startup error naming `ENFORCE_CONTROL_PAIR` and loads no checkpoint profile;
+ordinary dispatch is unaffected. Each checkpoint agent also needs a dispatch grant
+from its profile's owner. See
+[bench-checkpoint-reporting.md](contributor/bench-checkpoint-reporting.md).
+
 | Field | Meaning |
 |---|---|
 | `mayDispatch` | Namespaced patterns. AgentPod's name a **node and a station**: `agentpod:<nodeName>/<stationKey>`. `superpipeline:<agentId>` is matched by superpipeline and **ignored** here. |
