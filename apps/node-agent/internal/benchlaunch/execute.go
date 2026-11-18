@@ -201,10 +201,13 @@ func (c Coordinator) cleanup(ctx context.Context, spec benchdispatch.SourceSpec)
 	}
 	lease, err := c.ordinary(ctx, spec, "lease", benchworkspace.Request{Version: benchworkspace.Version, Operation: "lease", Key: spec.BenchKey, Holder: spec.Holder, RequestID: spec.LeaseRequestID}, true)
 	if err != nil {
-		// An unresolved lease reply normally parks. A bench SuperBench has
-		// reclaimed (or is reclaiming) proves no lease is held, so the old
-		// attempt's lease is recorded as gone instead of blocking the key.
-		if c.reclaimed(ctx, spec) {
+		// An unresolved lease reply normally parks. The generation the lease
+		// was requested on, once reclaiming or reclaimed, proves no lease is
+		// held there, so the old attempt's lease is recorded as gone instead
+		// of blocking the key. Any other generation keeps it parked: a late
+		// grant may land there, and the receipt lookup that finds it releases
+		// it below with its own token.
+		if c.reclaimed(ctx, spec, r.BenchID) {
 			return done()
 		}
 		return err
@@ -212,6 +215,10 @@ func (c Coordinator) cleanup(ctx context.Context, spec benchdispatch.SourceSpec)
 	m := mutationOf(lease)
 	if !lease.OK || m == nil || m.Grant == nil {
 		return done()
+	}
+	id := m.Workspace.BenchID
+	if _, err = c.granted(ctx, spec, id); err != nil {
+		return err
 	}
 	request := benchworkspace.Request{Version: benchworkspace.Version, Operation: "release", Key: spec.BenchKey, LeaseToken: m.Grant.LeaseToken}
 	reply, err := c.ordinary(ctx, spec, "release", request, true)
@@ -221,7 +228,7 @@ func (c Coordinator) cleanup(ctx context.Context, spec benchdispatch.SourceSpec)
 			return err // lost or fenced: the step is kept or the record is not ours
 		}
 	}
-	if err == nil && reply.OK || c.leaseGone(ctx, spec) {
+	if err == nil && reply.OK || c.leaseGone(ctx, spec, id) {
 		return done()
 	}
 	// A refused or malformed reply while we still hold the lease. Release is
@@ -250,17 +257,19 @@ func releaseStuck(r record) bool {
 	return r.Release == "needed" && r.ReleaseFailures >= releaseWarnAfter
 }
 
-// leaseGone is a read-only status check after a refused release.
-func (c Coordinator) leaseGone(ctx context.Context, spec benchdispatch.SourceSpec) bool {
+// leaseGone is a read-only status check after a refused release, on the
+// generation the grant was on. Another generation proves nothing.
+func (c Coordinator) leaseGone(ctx context.Context, spec benchdispatch.SourceSpec, id string) bool {
 	w := c.bench(ctx, spec)
-	return w != nil && (w.Lease == nil || w.Lease.Holder != spec.Holder)
+	return w != nil && id != "" && w.BenchID == id && (w.Lease == nil || w.Lease.Holder != spec.Holder)
 }
 
 // reclaimed is a read-only status check: SuperBench reclaims only a released,
-// idle bench, so a reclaiming or reclaimed one holds no lease of ours.
-func (c Coordinator) reclaimed(ctx context.Context, spec benchdispatch.SourceSpec) bool {
+// idle bench, so generation id, once reclaiming or reclaimed, holds no lease of
+// ours. A record with no generation proves nothing and stays parked.
+func (c Coordinator) reclaimed(ctx context.Context, spec benchdispatch.SourceSpec, id string) bool {
 	w := c.bench(ctx, spec)
-	return w != nil && benchworkspace.Reclaim(w.Phase)
+	return w != nil && id != "" && w.BenchID == id && benchworkspace.Reclaim(w.Phase)
 }
 
 // bench reads the key's one workspace from a status reply, or nil.

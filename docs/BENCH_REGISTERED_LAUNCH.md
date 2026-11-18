@@ -131,6 +131,34 @@ on the next cleanup; nothing replays a bad answer. Retries never stop, but after
 three failed releases each further failure is logged with the bench key and
 count, and `Status` reports `release_refused` instead of `cancel_requested`.
 
+### Reclaimed benches and generations
+
+SuperBench may reclaim an idle, released bench, and a later create on the same
+key makes the key's next generation with a new `bench_id` that no earlier
+generation had. Before the lease request leaves, the record keeps the
+generation it is sent to: the created bench's `bench_id`, or the one a status
+read shows. When a grant is observed, the record keeps the grant's `bench_id`.
+
+- An unresolved lease is recorded as gone only when a status read shows **that**
+  generation `reclaiming` or `reclaimed`. A different generation in any phase
+  proves nothing: the old request may still land there. The record stays
+  parked, and if the late grant shows up in the lease's receipt it is released
+  with that grant's own token.
+- A grant on a generation other than the one the lease was sent to (the bench
+  was reclaimed and created again while the request was in flight) is refused
+  with `stale_owner` and released.
+- After a refused release, only a status read of the grant's own generation can
+  show the lease gone.
+- A record from before generations were kept has none, and a reclaim never
+  counts as proof for it: it stays parked for an operator rather than risk an
+  unreleased grant on a new generation.
+
+Known limit: a lease request carries no `bench_id`, so SuperBench cannot refuse
+a request that was still in flight after its own generation was reclaimed. If
+the old generation is seen reclaimed, the record ends, and the key is created
+again before that request arrives, the late grant lands on the new generation
+with no record left to release it.
+
 On the hub, `stale_owner` is reserved for a definite change (the attempt row is
 gone, or its run, epoch, attempt or owner authority changed). A row that merely
 moved between the hub's two reads answers `unavailable`, which retires nothing.
