@@ -149,7 +149,7 @@ func addOptional(body map[string]any, mcpToken, mode, profile, enabled string, c
 //
 // The three identity flags are all required together, and refused without
 // `--credential-source station-plane`, so a half-typed source never reaches the hub as a
-// different one. The hub still decides: the principal must occupy the row's Salaam station, the
+// different one. The hub still decides: the principal must occupy the row's station, the
 // organization must be the workspace's, and the audience must be the hub's own SuperPipeline.
 func addCredentialSource(body map[string]any, kind, principal, organization, audience string) {
 	identity := principal != "" || organization != "" || audience != ""
