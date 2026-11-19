@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
@@ -130,6 +131,95 @@ func TestBridgeSetRefusesAnEmptyPatch(t *testing.T) {
 	}
 	if called {
 		t.Errorf("sent a request for an empty patch; it should never leave the client")
+	}
+}
+
+// TestBridgeSetCredentialSource: the supported way to give an existing token row a plane
+// credential source. The PATCH carries exactly the source and nothing else, so no other field of
+// the live row is overwritten.
+func TestBridgeSetCredentialSource(t *testing.T) {
+	bin := build(t)
+	// The fleet binary is a subprocess, so the race detector cannot see the request finish before
+	// the test reads what the handler stored; the mutex is that edge.
+	var mu sync.Mutex
+	var body map[string]any
+	var method, path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var got map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		mu.Lock()
+		method, path, body = r.Method, r.URL.Path, got
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	env := []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}
+	read := func() (string, string, map[string]any) {
+		mu.Lock()
+		defer mu.Unlock()
+		return method, path, body
+	}
+
+	_, code := run(t, bin, env, "bridge", "set", "k", "--credential-source", "station-plane",
+		"--principal", "prn_aaaaaaaaaaaaaaaaaaaa", "--organization", "org_bbbbbbbbbbbbbbbbbbbb",
+		"--audience", "https://staging-app.superpipeline.dev")
+	if code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	m, p, b := read()
+	if m != http.MethodPatch || p != "/api/admin/bridge/agents/k" {
+		t.Errorf("called %s %s", m, p)
+	}
+	want := map[string]any{"version": float64(1), "kind": "station-plane", "principalId": "prn_aaaaaaaaaaaaaaaaaaaa",
+		"organizationId": "org_bbbbbbbbbbbbbbbbbbbb", "audience": "https://staging-app.superpipeline.dev"}
+	source, _ := b["credentialSource"].(map[string]any)
+	if len(b) != 1 || len(source) != len(want) {
+		t.Fatalf("body = %v, want exactly {credentialSource: %v}", b, want)
+	}
+	for k, v := range want {
+		if source[k] != v {
+			t.Errorf("credentialSource[%s] = %v, want %v", k, source[k], v)
+		}
+	}
+
+	_, code = run(t, bin, env, "bridge", "set", "k", "--credential-source", "none", "--token", "spa_x")
+	if code != 0 {
+		t.Fatalf("none: exit = %d", code)
+	}
+	_, _, b = read()
+	if v, ok := b["credentialSource"]; !ok || v != nil || b["token"] != "spa_x" || len(b) != 2 {
+		t.Errorf("none: body = %v, want {credentialSource: null, token: spa_x}", b)
+	}
+}
+
+// TestBridgeSetCredentialSourceRefusesAPartialSource: a half-typed source never leaves the client.
+func TestBridgeSetCredentialSourceRefusesAPartialSource(t *testing.T) {
+	bin := build(t)
+	var mu sync.Mutex
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		called = true
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	env := []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}
+	for name, args := range map[string][]string{
+		"no audience":    {"--credential-source", "station-plane", "--principal", "prn_a", "--organization", "org_b"},
+		"no kind":        {"--principal", "prn_a", "--organization", "org_b", "--audience", "https://a.test"},
+		"unknown kind":   {"--credential-source", "token", "--token", "spa_x"},
+		"none, no token": {"--credential-source", "none"},
+		"none, identity": {"--credential-source", "none", "--token", "spa_x", "--principal", "prn_a"},
+	} {
+		if _, code := run(t, bin, env, append([]string{"bridge", "set", "k"}, args...)...); code != 2 {
+			t.Errorf("%s: exit = %d, want 2", name, code)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if called {
+		t.Errorf("sent a request for a partial credential source")
 	}
 }
 
