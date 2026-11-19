@@ -277,7 +277,7 @@ describe("giving a legacy row a credential source", () => {
       expect(await jsonField(foreign, "error")).toContain(
         "this deployment's SuperPipeline audience, https://staging-app.superpipeline.dev",
       );
-      expect((await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]!.token).toBe(TOKEN);
+      expect((await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]?.token).toBe(TOKEN);
 
       const arbitrary = await patch("coder-kai", {
         credentialSource: source("https://attacker.test/path"),

@@ -27,7 +27,6 @@ import {
 import { BridgeCredentialSource } from "../../../../packages/contract/src/bridge-credential";
 import { resolveTenantId } from "../auth/tenant";
 import { createLogger } from "../utils/logger";
-import { BridgeRosterRefusal } from "../services/bridge/credential-audience";
 import {
   readBridgeRoster,
   bridgePlaneCredential,
@@ -38,6 +37,7 @@ import {
 } from "../services/bridge";
 
 import { settleNeverDispatchedSalaamWork } from "../services/bridge";
+import { BridgeRosterRefusal } from "../services/bridge";
 import { ensureBridgeDispatchGrant } from "../services/bridge";
 import {
   SuperpipelineClient,
