@@ -127,6 +127,18 @@ run/epoch and policy around awaits; snapshot caching does not cache authority.
 These settings provision no credentials, policy or capability; no profile or
 environment setting is installed by this change.
 
+## What the card shows
+
+Each phase the Hub commits posts one short activity to the card's live stream,
+through the same run verb ordinary dispatch uses: `checkpoint.prepared`,
+`checkpoint.running`, `checkpoint.completed`, `checkpoint.pushed` (each member's
+branch and commit), `checkpoint.submitting`, and `checkpoint.parked` (the phase,
+closed code and reason). Only the pass whose compare-and-set committed a phase
+posts it, and a park is posted once per attempt, phase and reason, not on every
+re-check. An activity is posted after the commit and its failure is only
+logged (`checkpoint activity: activity.post`): the ledger, the node and the
+settlement never wait on it or read it back.
+
 ## Waiting on the node
 
 A coordinator call that outlasts the Hub's wait is not a failure. The broker

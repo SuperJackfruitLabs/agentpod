@@ -50,6 +50,7 @@ function harness(reply: unknown) {
     authority: async () => {},
     request: async (_node, _verb, params) => { sent.push(params); return { ok: true, data: reply }; },
     service: (profile) => createCheckpointServiceClient(profile, { plane: TEST_PLANE, fetch: async () => new Response(null, { status: 500 }) }),
+    advance: async () => { throw new Error("no ledger in this test"); },
   };
   const client = new SuperpipelineClient({ baseUrl: "https://board.test", boardId: "brd_ABC123", token: "spa_fixture",
     fetch: async () => ({ status: 200, ok: true, json: async () => ({}) }) });
@@ -129,6 +130,11 @@ test("a node call that times out parks the attempt naming the timeout, not a bar
   } finally { restore(); }
 });
 
+/** The operation of a request the harness recorded. */
+function operationOf(params: unknown): string {
+  return BenchCoordinatorRequest.parse(params).operation;
+}
+
 /** The same attempt, still waiting on its prepare: the row a stranded staging attempt was left in. */
 function preparePending(): RetainedCheckpointAttempt {
   const attempt = executePending();
@@ -142,7 +148,7 @@ function nodeAnswering(attempt: RetainedCheckpointAttempt, statusState: "unknown
   const h = harness({});
   h.deps.request = async (_node, _verb, params) => {
     h.sent.push(params);
-    const operation = (params as { operation: string }).operation;
+    const operation = operationOf(params);
     const state = operation === "status" ? statusState : "pending";
     return { ok: true, data: { version: "agentpod.bench-coordinator.v1", operation, state,
       identity: attempt.request.identity, target: attempt.request.target } };
@@ -155,7 +161,7 @@ test("a recovered prepare the node never resolved re-sends the identical retaine
   const h = nodeAnswering(attempt, "unknown");
   expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
   expect(h.sent).toHaveLength(2);
-  expect((h.sent[0] as { operation: string }).operation).toBe("status");
+  expect(operationOf(h.sent[0])).toBe("status");
   // Byte for byte the retained request, so the node's digest fence and the Hub's current-decision both match it.
   expect(JSON.stringify(h.sent[1])).toBe(attempt.row.prepareRequest);
   expect(attempt.row.phase).toBe("prepare_pending");
@@ -166,7 +172,7 @@ test("a recovered prepare the node left part way (pending) re-sends the identica
   const h = nodeAnswering(attempt, "pending");
   expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
   expect(h.sent).toHaveLength(2);
-  expect((h.sent[0] as { operation: string }).operation).toBe("status");
+  expect(operationOf(h.sent[0])).toBe("status");
   expect(JSON.stringify(h.sent[1])).toBe(attempt.row.prepareRequest);
 });
 
@@ -186,7 +192,7 @@ test("unknown never re-sends anything after prepare: execute stays a status read
   const h = nodeAnswering(attempt, "unknown");
   expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
   expect(h.sent).toHaveLength(1);
-  expect((h.sent[0] as { operation: string }).operation).toBe("status");
+  expect(operationOf(h.sent[0])).toBe("status");
 });
 
 test("each node call waits as long as its own operation needs, not a flat 15 seconds", async () => {
@@ -195,7 +201,7 @@ test("each node call waits as long as its own operation needs, not a flat 15 sec
   const waits: Array<[string, number | undefined]> = [];
   const answer = h.deps.request;
   h.deps.request = async (node, verb, params, opts) => {
-    waits.push([(params as { operation: string }).operation, opts?.timeoutMs]);
+    waits.push([operationOf(params), opts?.timeoutMs]);
     return answer(node, verb, params, opts);
   };
   await driveCheckpointAttempt(attempt, h.client, false, h.deps);

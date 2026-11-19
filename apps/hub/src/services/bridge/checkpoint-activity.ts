@@ -44,6 +44,7 @@ export function checkpointActivity(event: CheckpointActivityEvent, facts: {
         parameter: { phase: facts.phase, code: facts.code, ...(facts.reason ? { reason: facts.reason } : {}) } };
     }
   }
+  return undefined;
 }
 
 const MAX_REMEMBERED = 4096;
