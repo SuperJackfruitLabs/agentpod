@@ -320,10 +320,12 @@ describe("giving a legacy row a credential source", () => {
         credentialSource: source("https://staging-app.superpipeline.dev"),
       });
       expect(unscoped.status).toBe(400);
-      expect(await jsonField(unscoped, "error")).toContain("(claims.scope): its grant carries no `claim` scope");
+      expect(await jsonField(unscoped, "error")).toContain(
+        "(claims.scope): its grant is missing the `claim` and `run` scopes; add them to the agent's grant scopes",
+      );
       expect((await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]?.token).toBe(TOKEN);
 
-      scope = "claim";
+      scope = "claim run";
       const res = await patch("coder-kai", {
         credentialSource: source("https://staging-app.superpipeline.dev"),
       });

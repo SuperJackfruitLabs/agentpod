@@ -39,8 +39,8 @@ import { orgPlane } from "../../auth/org-plane/config";
 import { createPlaneVerifier } from "../../auth/org-plane/verify";
 import { orgPlaneClient, type PlanePrincipal } from "../../auth/org-plane/client";
 import {
-  BRIDGE_CREDENTIAL_SCOPE,
   createBridgePlaneCredential,
+  missingBridgeScopes,
   planeClaimsRefusal,
   type BridgeCredentialRefusalReason,
   type BridgeCredentialSnapshot,
@@ -516,7 +516,6 @@ async function validateCredentialInput(
 
 /** What an operator does about each refusal of a trial exchange. */
 const GRANT_REFUSAL: Partial<Record<BridgeCredentialRefusalReason, string>> = {
-  "claims.scope": `its grant carries no \`${BRIDGE_CREDENTIAL_SCOPE}\` scope; add \`${BRIDGE_CREDENTIAL_SCOPE}\` to the agent's grant scopes at the organization plane`,
   "claims.ent": "its grant is not entitled to superpipeline at the organization plane",
   "claims.kind": "the plane did not issue it as an agent",
   "claims.org": "the plane issued it for another organization",
@@ -533,16 +532,24 @@ const GRANT_REFUSAL: Partial<Record<BridgeCredentialRefusalReason, string>> = {
 async function requireSpendableGrant(source: BridgeCredentialSource): Promise<void> {
   const cfg = orgPlane();
   let reason: BridgeCredentialRefusalReason | undefined;
+  let missing: string[] = [];
   try {
     const issued = await orgPlaneClient().agentToken(source.principalId, source.audience);
     const claims = await createPlaneVerifier({ issuer: cfg.issuer, jwksUrl: cfg.jwksUrl, audience: source.audience })
       .verify(issued.accessToken);
     reason = planeClaimsRefusal(claims, { principalId: source.principalId, org: source.organizationId });
+    if (claims) missing = missingBridgeScopes(claims);
   } catch {
     throw new BridgeRosterRefusal(
       "Station-plane source: the organization plane would not exchange a grant for the occupant at this audience; nothing was changed",
     );
   }
+  // Scopes first, and every one that is missing: `claim` and `run` are both SuperPipeline agent
+  // scopes, and an operator fixing one should not find the other on the next attempt.
+  if (missing.length > 0 && (reason === undefined || reason === "claims.scope"))
+    throw new BridgeRosterRefusal(
+      `Station-plane source: a trial exchange for the occupant was refused (claims.scope): its grant is missing the ${missing.map((s) => `\`${s}\``).join(" and ")} scope${missing.length > 1 ? "s" : ""}; add ${missing.length > 1 ? "them" : "it"} to the agent's grant scopes at the organization plane; nothing was changed`,
+    );
   if (reason)
     throw new BridgeRosterRefusal(
       `Station-plane source: a trial exchange for the occupant was refused (${reason}): ${GRANT_REFUSAL[reason] ?? "the grant cannot be spent"}; nothing was changed`,

@@ -612,10 +612,12 @@ The hub admits a source only when:
   organization;
 - **a trial exchange succeeds**: the hub asks the plane for a grant exactly as every board request
   will, verifies it, and drops it. The grant must be an agent grant for this principal and
-  organization, entitled to `superpipeline`, and carry the **`claim` scope**. The scope comes from
-  the agent's grant at the organization plane, so an agent whose grant has `scopes: []` is refused
-  with `(claims.scope): its grant carries no \`claim\` scope` and the row is left unchanged. Give
-  the agent's grant the `claim` scope in Accounts first;
+  organization, entitled to `superpipeline`, and carry **both SuperPipeline agent scopes,
+  `claim` and `run`**. The scopes come from the agent's grant at the organization plane, so an
+  agent whose grant has `scopes: []` is refused with
+  `(claims.scope): its grant is missing the \`claim\` and \`run\` scopes` and the row is left
+  unchanged. Give the agent's grant both scopes in Accounts first. (A row admitted earlier is
+  spent while its grant still carries `claim`.)
 - its audience is **this deployment's** superpipeline audience, the origin of
   `SUPERPIPELINE_BASE_URL`. That is a set of one: a staging hub admits only the staging audience
   and production only its own. With `SUPERPIPELINE_BASE_URL` unset or not `https`, no source is

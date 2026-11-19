@@ -292,7 +292,7 @@ function occupant() {
 }
 
 /** The scope the fixture plane's exchanged grant carries; a test changes it to prove the check. */
-let grantScope: string | undefined = "claim";
+let grantScope: string | undefined = "claim run";
 
 /**
  * The organization plane's exchange as Accounts answers it: an agent grant for the audience, with
@@ -315,7 +315,7 @@ function installExchange(): () => void {
   return () => {
     globalThis.fetch = realFetch;
     restorePlane();
-    grantScope = "claim";
+    grantScope = "claim run";
   };
 }
 
@@ -542,11 +542,17 @@ describe("a station-plane source is the occupant's identity, whatever the harnes
   test("a grant without the claim scope is refused up front, naming the scope, and the row is unchanged", async () => {
     await withSalaamBinding(PRODUCTION, async () => {
       await createBridgeAgent({ ...base() });
-      for (const scope of [undefined, "", "run"]) {
+      // SuperPipeline's agent scopes are `claim` and `run`; the refusal names every one missing.
+      for (const [scope, named] of [
+        [undefined, "missing the `claim` and `run` scopes"],
+        ["", "missing the `claim` and `run` scopes"],
+        ["run", "missing the `claim` scope;"],
+        ["claim", "missing the `run` scope;"],
+      ] as const) {
         grantScope = scope;
         await expect(
           updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", { credentialSource: sourceFor(PRODUCTION) }),
-        ).rejects.toThrow("(claims.scope): its grant carries no `claim` scope");
+        ).rejects.toThrow(`(claims.scope): its grant is ${named}`);
         await expect(create()).rejects.toThrow("(claims.scope)");
       }
       const [legacy] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);

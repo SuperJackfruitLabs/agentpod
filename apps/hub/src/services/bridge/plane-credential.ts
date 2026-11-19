@@ -27,6 +27,19 @@ export class BridgeCredentialRefused extends Error {
 export const BRIDGE_CREDENTIAL_SCOPE = "claim";
 
 /**
+ * Every agent scope SuperPipeline defines (`AGENT_TOKEN_SCOPES`): `claim` to take a card, `run` for
+ * the run's own verbs. A new station-plane source must carry both; spending still requires `claim`
+ * alone, so a row admitted before this check is not refused mid-run.
+ */
+export const BRIDGE_REQUIRED_SCOPES = ["claim", "run"] as const;
+
+/** The required scopes a verified grant lacks, in `BRIDGE_REQUIRED_SCOPES` order. */
+export function missingBridgeScopes(claims: OrgPlaneTokenClaims): string[] {
+  const held = new Set(claims.scope?.split(" ") ?? []);
+  return BRIDGE_REQUIRED_SCOPES.filter((scope) => !held.has(scope));
+}
+
+/**
  * The first rule verified claims break for a station-plane source, or undefined. Shared by the
  * spend path and roster admission, so a row is never admitted with a grant it could not spend.
  */

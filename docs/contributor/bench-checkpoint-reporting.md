@@ -65,9 +65,10 @@ Two prerequisites must hold before the coordinator can select any work:
   names the occupant principal, the workspace organization and this deployment's
   SuperPipeline audience: the origin of the Hub's `SUPERPIPELINE_BASE_URL`, and
   nothing else. It must also equal the profile's `sourceAudience`. The agent's
-  grant at the organization plane must carry the `claim` scope: the exchanged
-  grant takes its scopes from it, and one without `claim` is refused on every
-  request (`credential.claims.scope`). Setting the source checks this up front. See
+  grant at the organization plane must carry SuperPipeline's agent scopes,
+  `claim` and `run`: the exchanged grant takes its scopes from it, and one
+  without `claim` is refused on every request (`credential.claims.scope`).
+  Setting the source checks for both up front and names any that is missing. See
   [DEPLOYMENT.md → Giving an agent a plane credential source](../DEPLOYMENT.md#giving-an-agent-a-plane-credential-source)
   for the command on staging and on production.
 
