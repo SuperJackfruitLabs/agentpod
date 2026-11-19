@@ -34,11 +34,14 @@ import { stations } from "../../src/db/schema/stations";
 import { nodes } from "../../src/db/schema/nodes";
 import { tenants, BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { fakePlane } from "../helpers/fake-plane";
+import { fakePlane, fakePlaneJwks, signPlaneToken } from "../helpers/fake-plane";
+import { setOrgPlaneClientForTests } from "../../src/auth/org-plane/client";
+import { TEST_PLANE } from "../../src/auth/org-plane/config";
 import { createTestUser } from "../helpers/database";
 import {
   createBridgeAgent,
   deleteBridgeAgent,
+  bridgePlaneCredential,
   listBridgeAgents,
   readBridgeRoster,
   updateBridgeAgent,
@@ -493,6 +496,33 @@ describe("a station-plane source is the occupant's identity, whatever the harnes
       ).toBe(true);
       expect((await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]?.credentialSource).toEqual(sourceFor(PRODUCTION));
     }, "hermes");
+  });
+
+  test("a hermes row's source is spent: the exchange runs and the binding check passes", async () => {
+    const restorePlane = setOrgPlaneClientForTests({
+      ...fakePlane,
+      agentToken: async (principal, audience) => ({
+        expiresIn: 300,
+        accessToken: await signPlaneToken({ sub: principal, principalKind: "agent", aud: audience,
+          ent: ["superpipeline"], scope: "claim", org: ORGANIZATION }),
+      }),
+    });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const address = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      return address === TEST_PLANE.jwksUrl ? Response.json(await fakePlaneJwks()) : realFetch(url, init);
+    }, { preconnect: realFetch.preconnect });
+    try {
+      await withSalaamBinding(PRODUCTION, async () => {
+        await create();
+        const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+        if (!secret) throw Error("fixture roster secret missing");
+        expect(typeof (await bridgePlaneCredential(secret)())).toBe("string");
+      }, "hermes");
+    } finally {
+      globalThis.fetch = realFetch;
+      restorePlane();
+    }
   });
 
   test("an occupant that is not an agent principal is refused", async () => {
