@@ -247,6 +247,14 @@ read-only bench choice failed) answers `unknown`. Nothing was chosen and no
 source effect was invoked. The hub answers it by re-sending the identical
 retained prepare; any other prepare bytes for the attempt are refused.
 
+A `pending` status in prepare is re-sent the same way. The identical prepare
+resumes the registered launch from its journal: a reservation whose own current
+check failed before any SuperBench call continues with create, lease and
+checkpoint, and every step that was already sent is recovered by receipt
+lookup, never resent. A current check that fails during `status` (a slow or
+unreachable hub) leaves the record parked (`pending`); only an authenticated
+`stale_owner` decision makes it retire and answer `stale_owner`.
+
 The coordinator wire (`agentpod.bench-coordinator.v1`) is unchanged except for one
 new refusal code, `capacity_exhausted`. The hub orchestrator reports it as an
 unreported attempt whose reason names exhausted capacity, and never re-sends

@@ -96,7 +96,7 @@ function statusRequest(attempt: RetainedCheckpointAttempt): string {
 /** One bounded pass through retained phases. sendPrepare is true only for the
  * successful original INSERT, never a lookup, restart or speculative retry. A
  * recovered prepare_pending re-sends the identical retained prepare only after
- * the node's status answers `unknown` (it never resolved that prepare).
+ * the node's status says it never finished it (`unknown` or `pending`).
  */
 export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt, client: SuperpipelineClient,
   sendPrepare = false, deps: CheckpointDriveDeps = defaultDeps): Promise<DispatchResult> {
@@ -112,11 +112,14 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
         case "prepare_pending": {
           await client.heartbeat(attempt.claim);
           let response = await exchange(attempt, sendPrepare ? attempt.row.prepareRequest : statusRequest(attempt), deps);
-          if (!sendPrepare && response.state === "unknown") {
-            // The node holds this exact prepare but never resolved it (its own current check or
-            // read-only choice failed), so it invoked no source effect. Only the identical retained
-            // bytes are re-sent: the node accepts no other prepare for the attempt, resolves it once
-            // and hands off its effects at most once, and the send is current-gated on both sides.
+          if (!sendPrepare && (response.state === "unknown" || response.state === "pending")) {
+            // The node never finished this prepare. `unknown`: it holds the exact prepare but never
+            // resolved it (its own current check or read-only choice failed), so it invoked no
+            // source effect. `pending`: it resolved it, but its launch stopped part way, for
+            // instance on its own current check after the reservation, before any bench call.
+            // Only the identical retained bytes are re-sent: the node accepts no other prepare for
+            // the attempt, resolves it once, hands off its effects once, and a registered launch
+            // resumes its journaled steps, never sending one twice. Both sides gate it on current.
             response = await exchange(attempt, attempt.row.prepareRequest, deps);
           }
           sendPrepare = false;

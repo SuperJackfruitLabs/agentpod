@@ -182,6 +182,11 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 	return spec, task, nil
 }
 
+// prepareResumes says whether a prepare drives the launch's Prepare: the one
+// call that claimed the effects, or any identical prepare of a registered
+// launch, whose journaled steps make a repeat a resume (see handle).
+func prepareResumes(claimed bool, p LocalProfile) bool { return claimed || p.Launch == benchlaunch.Mode }
+
 // coordinator is the attempt lifecycle the handler drives. The grouped
 // context launch and the registered stdin launch both implement it.
 type coordinator interface {
@@ -355,7 +360,12 @@ func (h *Handler) serve(ctx context.Context, r benchcoordinatorwire.Request, raw
 			return pending(r), err
 		}
 		m := h.manager(r, p, intent, "prepare")
-		if send {
+		// The registered launch journals each step before it leaves and never
+		// resends one (a sent step is recovered by receipt lookup only), so the
+		// identical prepare may resume it: an attempt whose own current check
+		// failed after its reservation, before any SuperBench call, finishes
+		// here instead of waiting forever. The grouped launch only reads status.
+		if prepareResumes(send, p) {
 			source, err := m.Prepare(ctx, *intent.Spec, *intent.Task)
 			if err != nil {
 				return failed(r, err)

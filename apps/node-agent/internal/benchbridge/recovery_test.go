@@ -8,6 +8,7 @@ import (
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcoordinatorwire"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchlaunch"
 )
 
 // statusFor is the hub's status request for the prepare's exact retained identity and target.
@@ -99,5 +100,19 @@ func TestIdenticalPrepareFinishesAReservedIntentOnce(t *testing.T) {
 	}
 	if send, err := store.ClaimEffects(context.Background(), raw); send || err != nil {
 		t.Fatal("effects claimed twice", err)
+	}
+}
+
+// A registered launch is resumed by the identical prepare after its effects were claimed; the
+// grouped launch, which cannot resume, only reads status.
+func TestOnlyARegisteredLaunchResumesOnARepeatedPrepare(t *testing.T) {
+	if !prepareResumes(false, LocalProfile{Launch: benchlaunch.Mode}) {
+		t.Fatal("a registered launch stranded after its effects were claimed")
+	}
+	if prepareResumes(false, LocalProfile{}) {
+		t.Fatal("a grouped launch was driven twice")
+	}
+	if !prepareResumes(true, LocalProfile{}) {
+		t.Fatal("the claiming prepare did not drive the launch")
 	}
 }

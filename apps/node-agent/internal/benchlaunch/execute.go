@@ -309,7 +309,10 @@ func (c Coordinator) Status(ctx context.Context, spec benchdispatch.SourceSpec) 
 	if err := c.Current(ctx, spec); errors.Is(err, ErrSuperseded) {
 		return c.retired(ctx, spec)
 	} else if err != nil || ctx.Err() != nil {
-		return benchcoordinator.Status{}, refuse("stale_owner")
+		// A current check that failed (a slow or unreachable hub) proves
+		// nothing. It stays parked: stale_owner is the hub's proof that this
+		// record retired itself, and only ErrSuperseded may say it.
+		return benchcoordinator.Status{}, benchdispatch.ErrPending
 	}
 	r, _, err := c.Journal.read(ctx, spec)
 	if errors.Is(err, errAbsent) {

@@ -232,8 +232,13 @@ resolved it: its own current check or its read-only bench choice failed inside
 the prepare, so it invoked no source effect. The Hub then re-sends the identical
 retained prepare bytes, never new ones. The node's intent accepts only those
 bytes (same digest), resolves the choice once and hands off its effects at most
-once; the send is current-gated on both sides. Any other Status (`pending`
-included) is only read, so a prepare that is still working is never sent again.
+once; the send is current-gated on both sides. A `pending` Status is
+re-sent the same way: the node resolved the prepare, but its launch stopped part
+way (for instance its own current check failed after the reservation was
+journaled, before any SuperBench call). A registered launch journals every step
+before it leaves and never sends one twice (a sent step is recovered by receipt
+lookup only), so the identical prepare resumes it; a grouped launch only reads
+status. A `refused` Status is only read.
 
 After a lost settlement POST reply, recovery first reads the exact historical
 receipt. Only an authenticated `CHECKPOINT_RECEIPT_MISSING` reply permits

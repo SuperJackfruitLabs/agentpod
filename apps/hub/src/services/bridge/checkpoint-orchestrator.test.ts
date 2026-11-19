@@ -161,12 +161,24 @@ test("a recovered prepare the node never resolved re-sends the identical retaine
   expect(attempt.row.phase).toBe("prepare_pending");
 });
 
-test("a recovered prepare the node is still working on is only asked for status", async () => {
+test("a recovered prepare the node left part way (pending) re-sends the identical prepare to resume it", async () => {
   const attempt = preparePending();
   const h = nodeAnswering(attempt, "pending");
   expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
-  expect(h.sent).toHaveLength(1);
+  expect(h.sent).toHaveLength(2);
   expect((h.sent[0] as { operation: string }).operation).toBe("status");
+  expect(JSON.stringify(h.sent[1])).toBe(attempt.row.prepareRequest);
+});
+
+test("a recovered prepare the node refused is only read, never re-sent", async () => {
+  const attempt = preparePending();
+  const h = nodeAnswering(attempt, "pending");
+  h.deps.request = async (_node, _verb, params) => {
+    h.sent.push(params);
+    return { ok: true, data: { version: "agentpod.bench-coordinator.v1", operation: "status", state: "refused", code: "unavailable" } };
+  };
+  expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
+  expect(h.sent).toHaveLength(1);
 });
 
 test("unknown never re-sends anything after prepare: execute stays a status read", async () => {

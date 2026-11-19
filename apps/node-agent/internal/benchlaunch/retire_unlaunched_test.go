@@ -50,3 +50,44 @@ func TestRetireUnlaunchedVetoesTheRun(t *testing.T) {
 		t.Fatal("a vetoed record launched")
 	}
 }
+
+// The live strand: the reservation was journaled, then the launch's own hub current check (the
+// same slow decision) failed before create, so SuperBench got no call. The identical prepare,
+// re-sent, resumes the same record: every step goes out once, never twice.
+func TestPrepareResumesAReservationThatSentNothing(t *testing.T) {
+	tr := newTrial(t)
+	calls := 0
+	c := tr.c
+	c.Current = func(context.Context, benchdispatch.SourceSpec) error {
+		calls++
+		if calls == 2 { // the check under the journal lock, before create leaves
+			return errors.New("hub decision timed out")
+		}
+		return nil
+	}
+	if _, err := c.Prepare(context.Background(), tr.spec, tr.task); err == nil {
+		t.Fatal("the failed check did not stop the prepare")
+	}
+	r, active := tr.record(t, tr.spec)
+	if r.Phase != phaseReserved || !active || len(r.Steps) != 0 || tr.count(tr.posts, "lease") != 0 {
+		t.Fatal("fixture: not a reservation that sent nothing", r.Phase, len(r.Steps))
+	}
+	// Status alone never sends: it is still pending.
+	if s, err := c.Status(context.Background(), tr.spec); err != nil || s.State != "pending" {
+		t.Fatal("status of the reservation", s.State, err)
+	}
+	if _, err := c.Prepare(context.Background(), tr.spec, tr.task); err != nil {
+		t.Fatal("the resumed prepare did not finish", err)
+	}
+	if _, err := c.Prepare(context.Background(), tr.spec, tr.task); err != nil {
+		t.Fatal("a third identical prepare was refused", err)
+	}
+	for _, op := range []string{"lease", "checkpoint", "observe"} {
+		if got := tr.count(tr.posts, op); got != 1 {
+			t.Fatalf("%s went out %d times", op, got)
+		}
+	}
+	if tr.count(tr.posts, "run") != 0 {
+		t.Fatal("a prepare launched")
+	}
+}
