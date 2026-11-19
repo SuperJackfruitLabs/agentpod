@@ -21,6 +21,7 @@ import type { SuperpipelineClient } from "./superpipeline";
 import type { DispatchResult } from "./dispatch-types";
 import { createQuietLog, type QuietLog } from "./quiet-log";
 import { errorFacts, nodeCallReason } from "./checkpoint-log";
+import { nodeCallTimeoutMs } from "./checkpoint-node-call";
 
 const encode = (raw: string) => new TextEncoder().encode(raw);
 const hash = (raw: string) => createHash("sha256").update(raw, "utf8").digest("hex");
@@ -78,7 +79,7 @@ async function exchange(attempt: RetainedCheckpointAttempt, raw: string, deps: C
   await deps.authority(attempt);
   // Broker correlates replies to the authenticated selected enrolled Node.
   // A timeout never causes this function to repeat the request.
-  const result = await deps.request(attempt.profile.target.node_id, BENCH_COORDINATOR_VERB, sent, { timeoutMs: 15_000 });
+  const result = await deps.request(attempt.profile.target.node_id, BENCH_COORDINATOR_VERB, sent, { timeoutMs: nodeCallTimeoutMs(sent.operation) });
   if (!result.ok) throw new CheckpointRefused("uncertain", nodeCallReason(result.error ?? ""), new Error(result.error ?? "no error"));
   const serialized = JSON.stringify(result.data);
   if (typeof serialized !== "string" || Buffer.byteLength(serialized, "utf8") > 262144) throw new CheckpointRefused("source");

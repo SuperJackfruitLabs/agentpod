@@ -127,6 +127,24 @@ run/epoch and policy around awaits; snapshot caching does not cache authority.
 These settings provision no credentials, policy or capability; no profile or
 environment setting is installed by this change.
 
+## Waiting on the node
+
+A coordinator call that outlasts the Hub's wait is not a failure. The broker
+sends no cancel, so the node carries on; the attempt stays parked on its phase
+(`uncertain`, reason `node.call.timeout`) and a later `status` reads what the
+node did. The waits fit each operation (`checkpoint-node-call.ts`): `ready`
+5 seconds, `status` 60, `prepare` 120 and `execute` 60. An execute runs the
+task for up to its whole timeout, so the Hub never waits for it: a longer run is
+read with `status` on later cycles.
+
+The node waits up to 20 seconds (15 for the headers) for each of the Hub's
+current decisions, and asks for one before and after every effect. A decision
+re-reads issuer authority, exchanges a plane grant and reads the run on the
+board, so it takes seconds; the decision carries its own two-second expiry,
+which the node checks on arrival. The organization plane's key set is shared
+across decisions (`sharedPlaneVerifier`) rather than fetched for each one;
+authority reads and grant exchanges stay fresh on every decision by design.
+
 ## An attempt under a replaced profile
 
 A node build or pin change replaces the installed profile while an attempt made
@@ -138,7 +156,9 @@ lets the change make it disappear; it is resolved, with evidence, as follows.
   station's new checkpoint claims wait. The wait is logged as a checkpoint refusal
   (`uncertain`, reason `attempt.unresolved`, or `recover.<code>` when recovery itself
   threw), rate-limited like any other. Ordinary claims continue in the same cycle.
-  Re-driving the attempt backs off from 30 seconds to 15 minutes.
+  Re-driving the attempt backs off from 30 seconds to 5 minutes. Each re-drive
+  heartbeats the run, and SuperPipeline reclaims a run after 15 minutes without
+  one, so the ceiling stays well inside that window.
 - **Superseded is a definite change.** When a loaded installation holds a different
   profile for the attempt's station, the Hub's current-decision answers `stale_owner`
   for the old attempt, so the node retires its own record (it releases what the

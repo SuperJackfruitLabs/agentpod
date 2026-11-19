@@ -8,6 +8,7 @@ import { canonicalCheckpoint } from "./checkpoint-json";
 import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
 import { driveCheckpointAttempt, setParkedLogForTests, type CheckpointDriveDeps } from "./checkpoint-orchestrator";
 import { createQuietLog } from "./quiet-log";
+import { NODE_CALL_TIMEOUT_MS } from "./checkpoint-node-call";
 import { parseCheckpointProfile } from "./checkpoint-profile";
 import { CAPACITY_REASON } from "./checkpoint-refusal";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
@@ -174,4 +175,20 @@ test("unknown never re-sends anything after prepare: execute stays a status read
   expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
   expect(h.sent).toHaveLength(1);
   expect((h.sent[0] as { operation: string }).operation).toBe("status");
+});
+
+test("each node call waits as long as its own operation needs, not a flat 15 seconds", async () => {
+  const attempt = preparePending();
+  const h = nodeAnswering(attempt, "unknown");
+  const waits: Array<[string, number | undefined]> = [];
+  const answer = h.deps.request;
+  h.deps.request = async (node, verb, params, opts) => {
+    waits.push([(params as { operation: string }).operation, opts?.timeoutMs]);
+    return answer(node, verb, params, opts);
+  };
+  await driveCheckpointAttempt(attempt, h.client, false, h.deps);
+  expect(waits).toEqual([["status", NODE_CALL_TIMEOUT_MS.status], ["prepare", NODE_CALL_TIMEOUT_MS.prepare]]);
+  waits.length = 0;
+  await driveCheckpointAttempt(executePending(), h.client, false, h.deps);
+  expect(waits).toEqual([["status", NODE_CALL_TIMEOUT_MS.status]]);
 });

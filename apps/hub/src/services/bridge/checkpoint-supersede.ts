@@ -19,6 +19,7 @@
 import { BENCH_COORDINATOR_VERB, BenchCoordinatorRequest, parseBenchCoordinatorResponse, type BenchCoordinatorResponse } from "@agentpod/contract";
 import { request as nodeRequest } from "../broker";
 import { errorFacts, type ErrorFacts } from "./checkpoint-log";
+import { nodeCallTimeoutMs } from "./checkpoint-node-call";
 import { NO_PRODUCER_EFFECT_PHASES, retireCheckpointAttempt, type CheckpointRetirementReason,
   type RetainedCheckpointAttempt } from "./checkpoint-ledger";
 
@@ -59,7 +60,7 @@ async function nodeStatus(attempt: RetainedCheckpointAttempt): Promise<NodeStatu
 async function nodeStatusReply(attempt: RetainedCheckpointAttempt): Promise<BenchCoordinatorResponse> {
   const sent = BenchCoordinatorRequest.parse({ version: attempt.request.version, operation: "status",
     identity: attempt.request.identity, target: attempt.request.target });
-  const reply = await nodeRequest(attempt.request.target.node_id, BENCH_COORDINATOR_VERB, sent, { timeoutMs: 15_000 });
+  const reply = await nodeRequest(attempt.request.target.node_id, BENCH_COORDINATOR_VERB, sent, { timeoutMs: nodeCallTimeoutMs("status") });
   if (!reply.ok) throw new Error(`status unavailable: ${reply.error ?? "no error"}`);
   const raw = JSON.stringify(reply.data);
   if (typeof raw !== "string" || Buffer.byteLength(raw, "utf8") > 262144) throw new Error("status invalid");

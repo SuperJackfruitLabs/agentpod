@@ -174,3 +174,19 @@ test.each(["requestDigest", "reportDigest", "reportedBy"] as const)("foreign raw
   h.response(async () => Response.json({ ...s.receipt, [field]: field === "reportedBy" ? "prn_foreign001" : "f".repeat(64) }));
   await expect(h.client.settle(h.claim, s.body)).rejects.toThrow("source");
 });
+
+test("clients built per Node decision share one key set: the JWKS is fetched once, not per decision", async () => {
+  const input = inputs();
+  const token = await signPlaneToken({ sub: input.profile.reporterPrincipalId, principalKind: "service",
+    org: TEST_ORG, aud: input.profile.sourceAudience, ent: ["superpipeline"], scope: "checkpoints:read checkpoints:submit" });
+  let jwks = 0;
+  const fetch = async (url: string) => {
+    if (url === TEST_PLANE.url + "/api/token/service") return Response.json({ access_token: token, expires_in: 300 });
+    if (url === TEST_PLANE.jwksUrl) { jwks++; return Response.json(await fakePlaneJwks()); }
+    return Response.json(input.snapshot);
+  };
+  // The current-decision route builds a fresh client for every Node callback.
+  for (let i = 0; i < 3; i++)
+    requireActiveSource(await createCheckpointServiceClient(input.profile, { plane: TEST_PLANE, fetch }).source(input.claim), input.source);
+  expect(jwks).toBe(1);
+});

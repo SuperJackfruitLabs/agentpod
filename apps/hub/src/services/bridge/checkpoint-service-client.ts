@@ -1,7 +1,7 @@
 /** Proposed Hub-only service transport. No spa_ agent token or worker context enters this client. */
 import { createOrgPlaneClient } from "../../auth/org-plane/client";
 import { orgPlane, type OrgPlaneConfig } from "../../auth/org-plane/config";
-import { createPlaneVerifier } from "../../auth/org-plane/verify";
+import { sharedPlaneVerifier } from "../../auth/org-plane/verify";
 import { parsePendingCheckpointClaim, type PendingCheckpointClaim } from "./checkpoint-claim";
 import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON } from "./checkpoint-json";
 import { CheckpointRefused, parseCheckpointProfile, type CheckpointProfile } from "./checkpoint-profile";
@@ -53,7 +53,7 @@ export function createCheckpointServiceClient(configuration: CheckpointProfile, 
   const doFetch = options.fetch ?? fetch;
   const issuer = createOrgPlaneClient({ url: plane.url, credential: plane.serviceCredential,
     fetch: doFetch, timeoutMs: 5_000 });
-  const verifier = createPlaneVerifier({ issuer: plane.issuer, audience: profile.sourceAudience,
+  const verifier = sharedPlaneVerifier({ issuer: plane.issuer, audience: profile.sourceAudience,
     jwksUrl: plane.jwksUrl, fetch: doFetch });
 
   async function exchange(claim: PendingCheckpointClaim, scope: "checkpoints:read" | "checkpoints:submit", body?: string, kind: "source" | "settlement" | "receipt" = "source"): Promise<{ raw: Uint8Array; expiresAtMs: number; missing: boolean }> {

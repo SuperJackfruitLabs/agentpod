@@ -181,3 +181,26 @@ func TestCurrentRejectsUntrustedOriginsAndCredentialShapes(t *testing.T) {
 		t.Fatal("foreign path accepted")
 	}
 }
+
+// The staging hub took about four seconds to decide. The old three-second header timeout turned
+// every such decision into ErrCurrent, which stranded a prepare inside Resolve.
+func TestCurrentWaitsForASlowButFreshDecision(t *testing.T) {
+	request := currentFixture(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(io.LimitReader(r.Body, 65537))
+		time.Sleep(4 * time.Second)
+		decision := decisionFor(t, raw) // issued when the slow decision finishes
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(decision)
+	}))
+	defer server.Close()
+	client, err := NewHubCurrent(server.URL, "node-fixture", "synthetic-private")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if err := client.Check(context.Background(), request); err != nil {
+		t.Fatal("a four-second decision was refused:", err)
+	}
+}

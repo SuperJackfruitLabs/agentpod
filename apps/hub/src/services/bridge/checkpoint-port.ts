@@ -24,6 +24,7 @@ const held = (attemptId: string, runId: string) => ({ status: "unreported" as co
 import type { CheckpointDispatchPort, CheckpointTarget } from "./checkpoint-dispatch";
 import type { SuperpipelineClient } from "./superpipeline";
 import { nodeCallReason, noteCheckpoint } from "./checkpoint-log";
+import { nodeCallTimeoutMs } from "./checkpoint-node-call";
 
 function target(profile: CheckpointProfile): CheckpointTarget {
   const t = profile.target;
@@ -102,7 +103,7 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
       await requireCurrent(selected);
       const request = BenchCoordinatorRequest.parse({ version: "agentpod.bench-coordinator.v1", operation: "ready",
         tenant_id: tenantId, board_id: boardId, station_id: stationId });
-      const reply = await nodeRequest(profile.target.node_id, BENCH_COORDINATOR_VERB, request, { timeoutMs: 5000 });
+      const reply = await nodeRequest(profile.target.node_id, BENCH_COORDINATOR_VERB, request, { timeoutMs: nodeCallTimeoutMs("ready") });
       if (!reply.ok) {
         const reason = nodeCallReason(reply.error ?? "");
         noteCheckpoint("ready", reason, { nodeId: profile.target.node_id }, new Error(reply.error ?? "no error"));
