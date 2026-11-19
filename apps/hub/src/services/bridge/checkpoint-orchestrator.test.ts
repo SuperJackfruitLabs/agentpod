@@ -8,6 +8,7 @@ import { canonicalCheckpoint } from "./checkpoint-json";
 import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
 import { driveCheckpointAttempt, setParkedLogForTests, type CheckpointDriveDeps } from "./checkpoint-orchestrator";
 import { createQuietLog } from "./quiet-log";
+import { NODE_CALL_TIMEOUT_MS } from "./checkpoint-node-call";
 import { parseCheckpointProfile } from "./checkpoint-profile";
 import { CAPACITY_REASON } from "./checkpoint-refusal";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
@@ -49,6 +50,7 @@ function harness(reply: unknown) {
     authority: async () => {},
     request: async (_node, _verb, params) => { sent.push(params); return { ok: true, data: reply }; },
     service: (profile) => createCheckpointServiceClient(profile, { plane: TEST_PLANE, fetch: async () => new Response(null, { status: 500 }) }),
+    advance: async () => { throw new Error("no ledger in this test"); },
   };
   const client = new SuperpipelineClient({ baseUrl: "https://board.test", boardId: "brd_ABC123", token: "spa_fixture",
     fetch: async () => ({ status: 200, ok: true, json: async () => ({}) }) });
@@ -126,4 +128,85 @@ test("a node call that times out parks the attempt naming the timeout, not a bar
     expect(lines).toEqual([expect.objectContaining({ attemptId: attempt.row.attemptId, code: "uncertain",
       reason: "node.call.timeout", errorClass: "Error", error: "timeout" })]);
   } finally { restore(); }
+});
+
+/** The operation of a request the harness recorded. */
+function operationOf(params: unknown): string {
+  return BenchCoordinatorRequest.parse(params).operation;
+}
+
+/** The same attempt, still waiting on its prepare: the row a stranded staging attempt was left in. */
+function preparePending(): RetainedCheckpointAttempt {
+  const attempt = executePending();
+  const prepareRequest = attempt.row.prepareRequest;
+  return { ...attempt, row: { ...attempt.row, phase: "prepare_pending", executeRequest: null, executeSHA256: null,
+    prepareSHA256: createHash("sha256").update(prepareRequest, "utf8").digest("hex") } };
+}
+
+/** A node that answers status with `statusState` and a prepare with `pending`. */
+function nodeAnswering(attempt: RetainedCheckpointAttempt, statusState: "unknown" | "pending") {
+  const h = harness({});
+  h.deps.request = async (_node, _verb, params) => {
+    h.sent.push(params);
+    const operation = operationOf(params);
+    const state = operation === "status" ? statusState : "pending";
+    return { ok: true, data: { version: "agentpod.bench-coordinator.v1", operation, state,
+      identity: attempt.request.identity, target: attempt.request.target } };
+  };
+  return h;
+}
+
+test("a recovered prepare the node never resolved re-sends the identical retained prepare", async () => {
+  const attempt = preparePending();
+  const h = nodeAnswering(attempt, "unknown");
+  expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
+  expect(h.sent).toHaveLength(2);
+  expect(operationOf(h.sent[0])).toBe("status");
+  // Byte for byte the retained request, so the node's digest fence and the Hub's current-decision both match it.
+  expect(JSON.stringify(h.sent[1])).toBe(attempt.row.prepareRequest);
+  expect(attempt.row.phase).toBe("prepare_pending");
+});
+
+test("a recovered prepare the node left part way (pending) re-sends the identical prepare to resume it", async () => {
+  const attempt = preparePending();
+  const h = nodeAnswering(attempt, "pending");
+  expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
+  expect(h.sent).toHaveLength(2);
+  expect(operationOf(h.sent[0])).toBe("status");
+  expect(JSON.stringify(h.sent[1])).toBe(attempt.row.prepareRequest);
+});
+
+test("a recovered prepare the node refused is only read, never re-sent", async () => {
+  const attempt = preparePending();
+  const h = nodeAnswering(attempt, "pending");
+  h.deps.request = async (_node, _verb, params) => {
+    h.sent.push(params);
+    return { ok: true, data: { version: "agentpod.bench-coordinator.v1", operation: "status", state: "refused", code: "unavailable" } };
+  };
+  expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
+  expect(h.sent).toHaveLength(1);
+});
+
+test("unknown never re-sends anything after prepare: execute stays a status read", async () => {
+  const attempt = executePending();
+  const h = nodeAnswering(attempt, "unknown");
+  expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
+  expect(h.sent).toHaveLength(1);
+  expect(operationOf(h.sent[0])).toBe("status");
+});
+
+test("each node call waits as long as its own operation needs, not a flat 15 seconds", async () => {
+  const attempt = preparePending();
+  const h = nodeAnswering(attempt, "unknown");
+  const waits: Array<[string, number | undefined]> = [];
+  const answer = h.deps.request;
+  h.deps.request = async (node, verb, params, opts) => {
+    waits.push([operationOf(params), opts?.timeoutMs]);
+    return answer(node, verb, params, opts);
+  };
+  await driveCheckpointAttempt(attempt, h.client, false, h.deps);
+  expect(waits).toEqual([["status", NODE_CALL_TIMEOUT_MS.status], ["prepare", NODE_CALL_TIMEOUT_MS.prepare]]);
+  waits.length = 0;
+  await driveCheckpointAttempt(executePending(), h.client, false, h.deps);
+  expect(waits).toEqual([["status", NODE_CALL_TIMEOUT_MS.status]]);
 });

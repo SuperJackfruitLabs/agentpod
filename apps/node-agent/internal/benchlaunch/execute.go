@@ -309,7 +309,10 @@ func (c Coordinator) Status(ctx context.Context, spec benchdispatch.SourceSpec) 
 	if err := c.Current(ctx, spec); errors.Is(err, ErrSuperseded) {
 		return c.retired(ctx, spec)
 	} else if err != nil || ctx.Err() != nil {
-		return benchcoordinator.Status{}, refuse("stale_owner")
+		// A current check that failed (a slow or unreachable hub) proves
+		// nothing. It stays parked: stale_owner is the hub's proof that this
+		// record retired itself, and only ErrSuperseded may say it.
+		return benchcoordinator.Status{}, benchdispatch.ErrPending
 	}
 	r, _, err := c.Journal.read(ctx, spec)
 	if errors.Is(err, errAbsent) {
@@ -336,6 +339,33 @@ func (c Coordinator) Status(ctx context.Context, spec benchdispatch.SourceSpec) 
 		return benchcoordinator.Status{State: r.Parked, RequiresReconciliation: true}, nil
 	}
 	return benchcoordinator.Status{State: "pending", RequiresReconciliation: true}, nil
+}
+
+// ErrLaunched refuses RetireUnlaunched: this record sent its run (even one
+// whose reply was lost), so retiring it here could not prove nothing ran.
+var ErrLaunched = errors.New("registered attempt sent its run; not retired without a run receipt")
+
+// RetireUnlaunched retires this exact record only while it provably launched
+// nothing. Under the bench lock it refuses a record whose run was sent, and
+// otherwise journals the veto first, so no run can be sent after it. Then it
+// winds down as retire does: release the lease the record holds with its own
+// token, mark the record stale_owner. A record already terminal answers its
+// own code; an absent one is errAbsent.
+func (c Coordinator) RetireUnlaunched(ctx context.Context, spec benchdispatch.SourceSpec) (benchcoordinator.Status, error) {
+	err := c.Journal.withRecord(ctx, spec, func(rec *record, active bool) (bool, error) {
+		if run := rec.step("run"); run != nil && run.Sent {
+			return false, ErrLaunched
+		}
+		if rec.terminal() || !active || rec.Cancelled {
+			return false, nil
+		}
+		rec.Cancelled = true
+		return true, nil
+	})
+	if err != nil {
+		return benchcoordinator.Status{}, err
+	}
+	return c.retired(ctx, spec)
 }
 
 // Cancel ends this exact attempt. It is authorised by the journal record's

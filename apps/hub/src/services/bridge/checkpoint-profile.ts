@@ -63,6 +63,8 @@ export type CheckpointRefusalReason =
   /** The agent client's bounded request to the source failed before a status was read. */
   | "http.timeout" | "http.network" | "http.encoding" | "http.size" | "http.body"
   | `current.${CheckpointRefusalCode}` | "current.error"
+  /** SuperPipeline's checkpoint service refused with this HTTP status, timed out, or sent an encoded body. */
+  | `service.status:${number}` | "service.timeout" | "service.encoding"
   | `node.state:${string}` | `node.target.${string}`;
 export class CheckpointRefused extends Error {
   /**

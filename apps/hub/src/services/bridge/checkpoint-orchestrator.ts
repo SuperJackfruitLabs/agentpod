@@ -21,6 +21,8 @@ import type { SuperpipelineClient } from "./superpipeline";
 import type { DispatchResult } from "./dispatch-types";
 import { createQuietLog, type QuietLog } from "./quiet-log";
 import { errorFacts, nodeCallReason } from "./checkpoint-log";
+import { nodeCallTimeoutMs } from "./checkpoint-node-call";
+import { checkpointActivity, postCheckpointActivity } from "./checkpoint-activity";
 
 const encode = (raw: string) => new TextEncoder().encode(raw);
 const hash = (raw: string) => createHash("sha256").update(raw, "utf8").digest("hex");
@@ -36,6 +38,8 @@ export function setParkedLogForTests(next: QuietLog): () => void {
   parkedLog = next;
   return () => { parkedLog = prior; };
 }
+/** Why each parked result parked, so the drive can say it on the card once. */
+const parkFacts = new WeakMap<DispatchResult, { phase: string; code: string; reason?: string }>();
 const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["code"] = "uncertain", error?: unknown): DispatchResult => {
   // The error that parked it, by class and redacted message (a refusal's own cause when it replaced one).
   const cause = error instanceof CheckpointRefused ? error.cause : error;
@@ -45,8 +49,10 @@ const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["cod
     "checkpoint dispatch parked for reconciliation", {
     tenantId: attempt.row.tenantId, boardId: attempt.row.boardId, runId: attempt.claim.runId,
     attemptId: attempt.row.attemptId, phase: attempt.row.phase, code, ...(reason === undefined ? {} : { reason }), ...facts });
-  return { status: "unreported", externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId,
+  const result: DispatchResult = { status: "unreported", externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId,
     reason: "Checkpoint dispatch requires reconciliation" };
+  parkFacts.set(result, { phase: attempt.row.phase, code, ...(reason === undefined ? {} : { reason }) });
+  return result;
 };
 
 /** Named terminal refusals keep the row parked but say why; nothing is re-sent. */
@@ -70,15 +76,17 @@ export interface CheckpointDriveDeps {
   authority(attempt: RetainedCheckpointAttempt): Promise<void>;
   request: typeof nodeRequest;
   service: typeof createCheckpointServiceClient;
+  advance: typeof advanceCheckpointAttempt;
 }
-const defaultDeps: CheckpointDriveDeps = { authority: current, request: nodeRequest, service: createCheckpointServiceClient };
+const defaultDeps: CheckpointDriveDeps = { authority: current, request: nodeRequest, service: createCheckpointServiceClient,
+  advance: advanceCheckpointAttempt };
 
 async function exchange(attempt: RetainedCheckpointAttempt, raw: string, deps: CheckpointDriveDeps): Promise<BenchCoordinatorResponse> {
   const sent = BenchCoordinatorRequest.parse(parseCheckpointJSON(encode(raw)));
   await deps.authority(attempt);
   // Broker correlates replies to the authenticated selected enrolled Node.
   // A timeout never causes this function to repeat the request.
-  const result = await deps.request(attempt.profile.target.node_id, BENCH_COORDINATOR_VERB, sent, { timeoutMs: 15_000 });
+  const result = await deps.request(attempt.profile.target.node_id, BENCH_COORDINATOR_VERB, sent, { timeoutMs: nodeCallTimeoutMs(sent.operation) });
   if (!result.ok) throw new CheckpointRefused("uncertain", nodeCallReason(result.error ?? ""), new Error(result.error ?? "no error"));
   const serialized = JSON.stringify(result.data);
   if (typeof serialized !== "string" || Buffer.byteLength(serialized, "utf8") > 262144) throw new CheckpointRefused("source");
@@ -93,11 +101,27 @@ function statusRequest(attempt: RetainedCheckpointAttempt): string {
 }
 
 /** One bounded pass through retained phases. sendPrepare is true only for the
- * successful original INSERT, never a lookup, restart or speculative retry.
+ * successful original INSERT, never a lookup, restart or speculative retry. A
+ * recovered prepare_pending re-sends the identical retained prepare only after
+ * the node's status says it never finished it (`unknown` or `pending`).
  */
 export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt, client: SuperpipelineClient,
   sendPrepare = false, deps: CheckpointDriveDeps = defaultDeps): Promise<DispatchResult> {
+  const result = await drive(initial, client, sendPrepare, deps);
+  // A park is said on the card once per attempt, phase and reason; the re-checks stay quiet.
+  const facts = parkFacts.get(result);
+  if (facts) await postCheckpointActivity(client, initial, `parked:${facts.phase}:${facts.code}:${facts.reason ?? ""}`,
+    checkpointActivity("parked", facts));
+  return result;
+}
+
+async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineClient,
+  sendPrepare: boolean, deps: CheckpointDriveDeps): Promise<DispatchResult> {
   let attempt = initial;
+  /** Said only by the pass whose compare-and-set committed the phase, after the commit. */
+  const say = async (committed: boolean, event: Parameters<typeof checkpointActivity>[0], facts?: Parameters<typeof checkpointActivity>[1]) => {
+    if (committed) await postCheckpointActivity(client, attempt, event, checkpointActivity(event, facts));
+  };
   let sendExecute = false; let sendSettlement = false;
   const service = deps.service(attempt.profile);
   try {
@@ -108,15 +132,25 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
       switch (attempt.row.phase) {
         case "prepare_pending": {
           await client.heartbeat(attempt.claim);
-          const response = await exchange(attempt, sendPrepare ? attempt.row.prepareRequest : statusRequest(attempt), deps);
+          let response = await exchange(attempt, sendPrepare ? attempt.row.prepareRequest : statusRequest(attempt), deps);
+          if (!sendPrepare && (response.state === "unknown" || response.state === "pending")) {
+            // The node never finished this prepare. `unknown`: it holds the exact prepare but never
+            // resolved it (its own current check or read-only choice failed), so it invoked no
+            // source effect. `pending`: it resolved it, but its launch stopped part way, for
+            // instance on its own current check after the reservation, before any bench call.
+            // Only the identical retained bytes are re-sent: the node accepts no other prepare for
+            // the attempt, resolves it once, hands off its effects once, and a registered launch
+            // resumes its journaled steps, never sending one twice. Both sides gate it on current.
+            response = await exchange(attempt, attempt.row.prepareRequest, deps);
+          }
           sendPrepare = false;
           if (response.state !== "prepared") return refusedOrParked(attempt, response);
-          const next = await advanceCheckpointAttempt(attempt, { phase: "prepared", prepared: canonicalCheckpoint(response.source) });
-          attempt = next.attempt; break;
+          const next = await deps.advance(attempt, { phase: "prepared", prepared: canonicalCheckpoint(response.source) });
+          attempt = next.attempt; await say(next.send, "prepared"); break;
         }
         case "prepared": {
           const { source } = await retainedCheckpointSource(attempt);
-          attempt = (await advanceCheckpointAttempt(attempt, { phase: "source_pending", source: canonicalCheckpoint(source) })).attempt;
+          attempt = (await deps.advance(attempt, { phase: "source_pending", source: canonicalCheckpoint(source) })).attempt;
           break;
         }
         case "source_pending": {
@@ -129,7 +163,7 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
           await deps.authority(attempt);
           const receipt = await service.admit(attempt.claim, source);
           await deps.authority(attempt);
-          attempt = (await advanceCheckpointAttempt(attempt, { phase: "admitted", sourceReceipt: canonicalCheckpoint(receipt) })).attempt;
+          attempt = (await deps.advance(attempt, { phase: "admitted", sourceReceipt: canonicalCheckpoint(receipt) })).attempt;
           break;
         }
         case "admitted": {
@@ -143,8 +177,8 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
           const execution = JSON.stringify(BenchCoordinatorRequest.parse({ version: attempt.request.version, operation: "execute",
             identity: attempt.request.identity, target: attempt.request.target, binding_sha256: prepared.binding_sha256,
             source_receipt: { run_id: receipt.runId, epoch: receipt.leaseEpoch, source_digest: receipt.sourceDigest, admitted_at: receipt.admittedAt } }));
-          const next = await advanceCheckpointAttempt(attempt, { phase: "execute_pending", executeRequest: execution, executeSHA256: hash(execution) });
-          attempt = next.attempt; sendExecute = next.send; break;
+          const next = await deps.advance(attempt, { phase: "execute_pending", executeRequest: execution, executeSHA256: hash(execution) });
+          attempt = next.attempt; sendExecute = next.send; await say(next.send, "running"); break;
         }
         case "execute_pending": {
           if (!attempt.row.executeRequest || hash(attempt.row.executeRequest) !== attempt.row.executeSHA256)
@@ -156,7 +190,10 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
           // Strict DTO validation precedes storage; report joins separately
           // require the exact original start, task outcome and final vector.
           await buildCheckpointSettlement(attempt, response.completion);
-          attempt = (await advanceCheckpointAttempt(attempt, { phase: "completed", completion: canonicalCheckpoint(response.completion) })).attempt;
+          const done = await deps.advance(attempt, { phase: "completed", completion: canonicalCheckpoint(response.completion) });
+          attempt = done.attempt;
+          await say(done.send, "completed");
+          await say(done.send, "pushed", { completion: response.completion });
           break;
         }
         case "completed": {
@@ -165,8 +202,8 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
           requireActiveSource(await service.source(attempt.claim), source);
           await deps.authority(attempt);
           const report = await buildCheckpointSettlement(attempt, parseCheckpointContextJSON(encode(attempt.row.completion)));
-          const next = await advanceCheckpointAttempt(attempt, { phase: "submission_pending", settlementBody: report.body, settlementSHA256: report.sha256 });
-          attempt = next.attempt; sendSettlement = next.send; break;
+          const next = await deps.advance(attempt, { phase: "submission_pending", settlementBody: report.body, settlementSHA256: report.sha256 });
+          attempt = next.attempt; sendSettlement = next.send; await say(next.send, "submitting"); break;
         }
         case "submission_pending": {
           if (!attempt.row.settlementBody || hash(attempt.row.settlementBody) !== attempt.row.settlementSHA256)
@@ -194,7 +231,7 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
           sendSettlement = false;
           if (!receipt) return parked(attempt);
           await deps.authority(attempt);
-          attempt = (await advanceCheckpointAttempt(attempt, { phase: "reported", settlementReceipt: canonicalCheckpoint(receipt) })).attempt;
+          attempt = (await deps.advance(attempt, { phase: "reported", settlementReceipt: canonicalCheckpoint(receipt) })).attempt;
           break;
         }
         case "reported": {

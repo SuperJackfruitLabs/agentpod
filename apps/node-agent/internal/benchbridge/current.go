@@ -28,6 +28,17 @@ var ErrCurrent = errors.New("checkpoint current authority unavailable; retain at
 // registered attempt clean up its own record.
 var ErrStale = fmt.Errorf("checkpoint attempt superseded: %w", ErrCurrent)
 
+// The hub's decision re-reads issuer authority, exchanges a plane grant and
+// reads the run on the board, so it takes seconds, not milliseconds: 4 s was
+// observed on staging against a 3 s header timeout, which failed every check.
+// A late reply only delays the node; the decision itself carries its own short
+// expiry, checked on arrival. The hub's node-call bounds assume this deadline
+// (hub checkpoint-node-call.ts, NODE_CURRENT_DEADLINE_MS).
+const (
+	currentHeaderTimeout = 15 * time.Second
+	currentDeadline      = 20 * time.Second
+)
+
 // HubCurrent contains the existing enrollment credential privately. It must
 // never enter a task environment, public DTO, source plan or error message.
 type HubCurrent struct {
@@ -61,12 +72,12 @@ func NewHubCurrent(hub, nodeID, nodeSecret string) (*HubCurrent, error) {
 		}
 	}
 	transport := &http.Transport{Proxy: nil, DisableCompression: true, DisableKeepAlives: true,
-		DialContext:         (&net.Dialer{Timeout: 3 * time.Second}).DialContext,
-		TLSHandshakeTimeout: 3 * time.Second, ResponseHeaderTimeout: 3 * time.Second, MaxResponseHeaderBytes: 16 << 10}
+		DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+		TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: currentHeaderTimeout, MaxResponseHeaderBytes: 16 << 10}
 	return &HubCurrent{endpoint: strings.TrimRight(u.String(), "/") + "/api/nodes/" + nodeID + "/bench-coordinator/current",
 		nodeID:        nodeID,
 		authorization: "Bearer " + nodeID + ":" + nodeSecret,
-		client: &http.Client{Transport: transport, Timeout: 5 * time.Second,
+		client: &http.Client{Transport: transport, Timeout: currentDeadline,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 

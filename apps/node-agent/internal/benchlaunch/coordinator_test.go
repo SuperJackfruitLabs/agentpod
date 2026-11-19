@@ -365,8 +365,10 @@ func TestUnavailableDecisionRetiresNothing(t *testing.T) {
 	tr := newTrial(t)
 	tr.prepare(t)
 	tr.stale.Store(true)
-	_, err := tr.c.Status(context.Background(), tr.spec)
-	wantCode(t, err, "stale_owner")
+	// Parked, not stale_owner: the hub reads stale_owner as proof the record retired itself.
+	if _, err := tr.c.Status(context.Background(), tr.spec); !errors.Is(err, benchdispatch.ErrPending) {
+		t.Fatal("an unreachable hub was answered as", err)
+	}
 	r, active := tr.record(t, tr.spec)
 	if r.Cancelled || !active || r.Phase != phasePrepared || tr.count(tr.posts, "release") != 0 {
 		t.Fatal("hub outage retired a live attempt")

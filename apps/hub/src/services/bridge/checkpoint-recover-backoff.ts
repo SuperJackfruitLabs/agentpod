@@ -4,7 +4,16 @@
  * The claim cycle itself keeps its own poll: ordinary claims are never held by this.
  */
 export const RECOVER_BASE_MS = 30_000;
-export const RECOVER_MAX_MS = 15 * 60_000;
+/**
+ * SuperPipeline reclaims a run whose heartbeat is older than this (its `HEARTBEAT_TIMEOUT_MS`).
+ * Every re-drive of a waiting attempt heartbeats its run, so the ceiling stays well under it.
+ */
+export const BOARD_HEARTBEAT_TIMEOUT_MS = 15 * 60_000;
+/**
+ * The ceiling. It was 15 minutes, the board's whole heartbeat window: an attempt waiting on a long
+ * prepare or execute could lose its run between two re-drives while the node was still working.
+ */
+export const RECOVER_MAX_MS = 5 * 60_000;
 
 export interface AttemptBackoff {
   /** True when the attempt may be driven now. */

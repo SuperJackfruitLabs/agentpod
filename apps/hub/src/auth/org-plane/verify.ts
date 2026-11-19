@@ -143,6 +143,27 @@ export function createPlaneVerifier(o: PlaneVerifierOptions): PlaneVerifier {
   };
 }
 
+/** Shared verifiers by fetch, then issuer, audience and key-set URL. The default fetch keys on this object. */
+const sharedVerifiers = new WeakMap<object, Map<string, PlaneVerifier>>();
+const defaultFetchKey = {};
+
+/**
+ * One verifier per issuer, audience and key-set URL (and injected fetch), kept for the process.
+ * A verifier made per request has no key set, so its first `verify` always fetches the JWKS: on
+ * the checkpoint path that was a key-set round trip inside every Node `current` decision. Sharing
+ * keeps only public keys; rotation is still honoured (an unknown `kid` refetches at once, a stale
+ * set is revalidated), so no token is ever accepted that a fresh verifier would refuse.
+ */
+export function sharedPlaneVerifier(o: PlaneVerifierOptions): PlaneVerifier {
+  const owner = o.fetch ?? defaultFetchKey;
+  let byKey = sharedVerifiers.get(owner);
+  if (!byKey) sharedVerifiers.set(owner, (byKey = new Map()));
+  const key = [o.issuer, o.audience, o.jwksUrl].join("\0");
+  let verifier = byKey.get(key);
+  if (!verifier) byKey.set(key, (verifier = createPlaneVerifier(o)));
+  return verifier;
+}
+
 let singleton: { plane: ReturnType<typeof orgPlane>; verifier: PlaneVerifier } | null = null;
 let override: PlaneVerifier | null = null;
 

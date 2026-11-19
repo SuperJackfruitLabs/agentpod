@@ -5,7 +5,7 @@ import { db } from "../../db/drizzle";
 import { bridgeAgents } from "../../db/schema/bridge";
 import { orgPlaneClient } from "../../auth/org-plane/client";
 import { orgPlane } from "../../auth/org-plane/config";
-import { createPlaneVerifier } from "../../auth/org-plane/verify";
+import { sharedPlaneVerifier } from "../../auth/org-plane/verify";
 import { createBridgePlaneCredential } from "./plane-credential";
 import { readCheckpointAuthority } from "./checkpoint-current";
 import { canonicalCheckpoint, parseCheckpointContextJSON } from "./checkpoint-json";
@@ -81,7 +81,7 @@ export async function checkpointAgentClient(configuration: CheckpointProfile): P
   const refusal = credentialRefusal(profile, source, deploymentSuperpipelineAudience());
   if (refusal || !source) throw new CheckpointRefused("authority", refusal ?? "credential.missing");
   const issuer = orgPlane();
-  const verifier = createPlaneVerifier({ issuer: issuer.issuer, audience: source.audience, jwksUrl: issuer.jwksUrl });
+  const verifier = sharedPlaneVerifier({ issuer: issuer.issuer, audience: source.audience, jwksUrl: issuer.jwksUrl });
   const snapshot = async () => {
     const current = await readCheckpointAuthority(profile);
     const [stored] = await db.select({ source: bridgeAgents.credentialSource }).from(bridgeAgents).where(and(
@@ -95,8 +95,8 @@ export async function checkpointAgentClient(configuration: CheckpointProfile): P
   const credential = createBridgePlaneCredential(source, selected, { snapshot,
     exchange: (principal, audience) => orgPlaneClient().agentToken(principal, audience), verify: async (token) => {
       const claims = await verifier.verify(token);
-      // The Node callback has a five-second whole-request deadline. Refuse a
-      // token too near expiry to cover that short-lived decision.
+      // A Node current decision expires two seconds after it is issued. Refuse
+      // a token too near expiry to cover the rest of that short-lived decision.
       return claims && claims.exp * 1000 > Date.now() + 10_000 ? claims : null;
     } });
   return new SuperpipelineClient({ baseUrl: profile.sourceOrigin, boardId: profile.target.board_id,

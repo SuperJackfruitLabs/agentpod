@@ -182,6 +182,13 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 	return spec, task, nil
 }
 
+// prepareResumes says whether a prepare drives the launch's Prepare: the one
+// call that claimed the effects, or any identical prepare of a registered
+// launch, whose journaled steps make a repeat a resume (see handle).
+func prepareResumes(claimed bool, p LocalProfile) bool {
+	return claimed || p.Launch == benchlaunch.Mode
+}
+
 // coordinator is the attempt lifecycle the handler drives. The grouped
 // context launch and the registered stdin launch both implement it.
 type coordinator interface {
@@ -235,6 +242,15 @@ func failed(r benchcoordinatorwire.Request, err error) (benchcoordinatorwire.Res
 }
 func pending(r benchcoordinatorwire.Request) benchcoordinatorwire.Response {
 	return benchcoordinatorwire.Response{Version: benchcoordinatorwire.Version, Operation: r.Operation, State: "pending", Identity: r.Identity, Target: r.Target}
+}
+
+// unresolved is the wire's "unknown": this node holds the attempt's exact
+// prepare but chose nothing and invoked no source effect for it, so it holds
+// nothing. It is the one status that lets the hub re-send that same prepare.
+func unresolved(r benchcoordinatorwire.Request) (benchcoordinatorwire.Response, error) {
+	response := pending(r)
+	response.State = "unknown"
+	return checkedResponse(r, response)
 }
 func refused(operation string) benchcoordinatorwire.Response {
 	return benchcoordinatorwire.Response{Version: benchcoordinatorwire.Version, Operation: operation, State: "refused", Code: "unavailable"}
@@ -309,8 +325,16 @@ func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, ra
 	if h.installed() != nil || managed(ctx, h.client) != nil {
 		return refused(r.Operation), ErrRegistry
 	}
+	return h.serve(ctx, r, raw)
+}
+
+// serve is everything after the installation and managed-host checks.
+func (h *Handler) serve(ctx context.Context, r benchcoordinatorwire.Request, raw []byte) (benchcoordinatorwire.Response, error) {
 	p, err := h.profile(r)
 	if err != nil {
+		if r.Operation == "status" {
+			return h.superseded(ctx, r)
+		}
 		return refused(r.Operation), err
 	}
 	if r.Operation == "ready" {
@@ -339,7 +363,12 @@ func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, ra
 			return pending(r), err
 		}
 		m := h.manager(r, p, intent, "prepare")
-		if send {
+		// The registered launch journals each step before it leaves and never
+		// resends one (a sent step is recovered by receipt lookup only), so the
+		// identical prepare may resume it: an attempt whose own current check
+		// failed after its reservation, before any SuperBench call, finishes
+		// here instead of waiting forever. The grouped launch only reads status.
+		if prepareResumes(send, p) {
 			source, err := m.Prepare(ctx, *intent.Spec, *intent.Task)
 			if err != nil {
 				return failed(r, err)
@@ -349,11 +378,14 @@ func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, ra
 		return h.status(ctx, r, p, intent)
 	}
 	intent, err := intents.Read(ctx, r)
-	if err != nil || intent.Spec == nil {
+	if err != nil {
 		return pending(r), ErrIntent
 	}
 	if r.Operation == "status" {
 		return h.status(ctx, r, p, intent)
+	}
+	if intent.Spec == nil {
+		return pending(r), ErrIntent
 	}
 	// Status and retries require the exact persisted source registration. An
 	// interrupted handoff before registration stays pending rather than regrowing.
@@ -394,6 +426,12 @@ func (h *Handler) status(ctx context.Context, r benchcoordinatorwire.Request, p 
 	// A registered attempt the hub has definitely superseded may still reach
 	// Status, which retires its own record (release, no run); see benchlaunch.
 	if intent.Spec == nil {
+		// Reserved and never resolved: the in-prepare current check or the
+		// read-only choice failed, so no source effect was ever invoked. The
+		// hub re-sends the identical retained prepare to finish it.
+		if intent.Phase == "reserved" {
+			return unresolved(r)
+		}
 		return refused(r.Operation), ErrCurrent
 	}
 	if err := h.check(ctx, r, p, intent, "observe"); err != nil && (!errors.Is(err, ErrStale) || p.Launch != benchlaunch.Mode) {
@@ -426,4 +464,62 @@ func statusResponse(r benchcoordinatorwire.Request, saved benchdispatch.SourceSp
 		return preparedResponse(r, *status.Source)
 	}
 	return pending(r), nil
+}
+
+// superseded answers status for an attempt whose target this node no longer
+// serves: a node build or pin change replaced the profile that prepared it, so
+// no prepare or execute can ever reach it again. The node retires its own
+// record and answers stale_owner, which the hub reads as the node's proof that
+// nothing is outstanding, but only when both keys agree and nothing launched:
+//
+//   - the hub's authenticated current decision for the attempt's own retained
+//     identity, target and profile is stale_owner (a hub that cannot be reached
+//     or answers anything else retires nothing), and
+//   - the record provably launched nothing: the intent never handed off its
+//     effects (reserved or resolved: no source call was ever made), or its
+//     registered journal record never sent the run. Retiring it releases the
+//     lease the record holds, with that record's token, and never runs.
+//
+// Everything else (no intent, a grouped launch, a sent run) stays refused
+// unavailable, parked for an owner or admin.
+func (h *Handler) superseded(ctx context.Context, r benchcoordinatorwire.Request) (benchcoordinatorwire.Response, error) {
+	if r.Identity == nil || r.Target == nil {
+		return refused(r.Operation), ErrRegistry
+	}
+	intent, err := IntentStore{Root: h.registry.IntentRoot}.Read(ctx, r)
+	if err != nil {
+		return refused(r.Operation), ErrRegistry
+	}
+	stored, err := benchcoordinatorwire.ParseRequest([]byte(intent.PrepareRequest))
+	if err != nil || stored.Task == nil {
+		return refused(r.Operation), ErrIntent
+	}
+	if err := h.check(ctx, r, LocalProfile{ID: stored.Task.ProfileID}, intent, "observe"); !errors.Is(err, ErrStale) {
+		return refused(r.Operation), ErrCurrent
+	}
+	if intent.Phase == "reserved" || intent.Phase == "resolved" {
+		return staleOwner(r), nil
+	}
+	if intent.Spec == nil {
+		return refused(r.Operation), ErrIntent
+	}
+	// Only the registered launch can retire on its own; its journal is the
+	// registry's, not the replaced profile's.
+	m := benchlaunch.Coordinator{Journal: benchlaunch.Journal{Root: filepath.Join(h.registry.StateRoot, "registered")}, Producer: h.client,
+		Current: func(context.Context, benchdispatch.SourceSpec) error { return benchlaunch.ErrSuperseded }}
+	status, err := m.RetireUnlaunched(ctx, *intent.Spec)
+	if err != nil {
+		if code, ok := benchlaunch.RefusalCode(err); ok && code == "stale_owner" {
+			return staleOwner(r), nil
+		}
+		return refused(r.Operation), err
+	}
+	// The veto is journaled and its release still outstanding: parked, retried.
+	return statusResponse(r, *intent.Spec, status)
+}
+
+func staleOwner(r benchcoordinatorwire.Request) benchcoordinatorwire.Response {
+	response := refused(r.Operation)
+	response.Code = "stale_owner"
+	return response
 }
