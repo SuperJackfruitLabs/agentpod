@@ -51,6 +51,10 @@ export type CheckpointRefusalReason =
   | "credential.missing" | "credential.principal" | "credential.organization" | "credential.audience"
   /** The exchanged grant was refused before any board request, e.g. `credential.claims.scope`. */
   | `credential.${BridgeCredentialRefusalReason}`
+  /** Recovering this station's unresolved attempt threw; checkpoint claims wait, ordinary ones do not. */
+  | `recover.${CheckpointRefusalCode}`
+  /** This station's attempt is still unresolved: one per station, so new checkpoint claims wait. */
+  | "attempt.unresolved"
   | "claim.tenant" | "claim.board" | "claim.agent" | "claim.reporter" | "claim.node" | "claim.checkpoint_repository"
   | "claim.executor" | "claim.repositories"
   | "selection.identity" | "selection.target"

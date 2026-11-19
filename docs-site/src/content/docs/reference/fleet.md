@@ -2673,12 +2673,12 @@ fleet settings speech test
 The board roster: which agent claims from which board.
 
 ```text
-fleet bridge <list|add|set|rm|related-work> ...
+fleet bridge <list|add|set|rm|related-work|checkpoint-attempts|checkpoint-settle> ...
 ```
 
 This table is the gate on an agent doing anything at all: a staffed, online agent claims no card until a row points it at a board. No verb here prints a credential. See [Working a board](/use/boards/).
 
-Subcommands: [`list`](#fleet-bridge-list), [`add`](#fleet-bridge-add), [`set`](#fleet-bridge-set), [`rm`](#fleet-bridge-rm), [`related-work`](#fleet-bridge-related-work).
+Subcommands: [`list`](#fleet-bridge-list), [`add`](#fleet-bridge-add), [`set`](#fleet-bridge-set), [`rm`](#fleet-bridge-rm), [`related-work`](#fleet-bridge-related-work), [`checkpoint-attempts`](#fleet-bridge-checkpoint-attempts), [`checkpoint-settle`](#fleet-bridge-checkpoint-settle).
 
 `fleet bridge -h` prints:
 
@@ -2693,6 +2693,8 @@ usage:
                    [--credential-source none --token T]
   fleet bridge rm KEY
   fleet bridge related-work BOARD on|off
+  fleet bridge checkpoint-attempts
+  fleet bridge checkpoint-settle ATTEMPT --evidence TEXT
 ```
 
 **Needs:** A workspace admin's token. Anyone else is refused with 403.
@@ -2823,6 +2825,46 @@ The earlier work SuperLibrary finds for a claimed card, put into the card's prom
 
 ```sh
 fleet bridge related-work brd_0000000000000001 off
+```
+
+### fleet bridge checkpoint-attempts
+
+Unresolved checkpoint attempts in this workspace.
+
+```text
+fleet bridge checkpoint-attempts
+```
+
+Each attempt's phase, run and epoch; `superseded` when the installed profile has replaced the one it was made under; `effectPossible` once a source may have been admitted. Nothing here is a credential.
+
+**Needs:** A workspace admin's token. Anyone else is refused with 403.
+
+```sh
+fleet bridge checkpoint-attempts
+```
+
+### fleet bridge checkpoint-settle
+
+Settle one unresolved checkpoint attempt as retired, with evidence.
+
+```text
+fleet bridge checkpoint-settle ATTEMPT --evidence TEXT
+```
+
+For an attempt the hub cannot retire by itself. Deletes nothing: the attempt ends `retired` with your evidence beside what was already recorded, and the node is told it is no longer current. Without an ATTEMPT, or with evidence under 20 characters, exits 2 without calling the hub.
+
+| Argument | Meaning |
+|---|---|
+| `ATTEMPT` | an `attempt_` id from `fleet bridge checkpoint-attempts` |
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--evidence TEXT` | string | — | What you checked, and why nothing it started is still outstanding. **Required.** |
+
+**Needs:** A workspace admin's token. Anyone else is refused with 403.
+
+```sh
+fleet bridge checkpoint-settle attempt_0123 --evidence "node journal shows the record cancelled; no bench lease held"
 ```
 
 ## fleet principals
