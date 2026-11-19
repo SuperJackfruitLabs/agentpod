@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { BenchCoordinatorTarget } from "@agentpod/contract";
 import type { PendingCheckpointClaim } from "./checkpoint-claim";
+import type { BridgeCredentialRefusalReason } from "./plane-credential";
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(?![\s\S])/);
 const principal = z.string().regex(/^prn_[a-f0-9]{20}(?![\s\S])/);
@@ -48,6 +49,8 @@ export type CheckpointRefusalReason =
   | "issuer.occupant.missing" | "issuer.occupant.kind" | "issuer.occupant.suspended" | "issuer.occupant.organization"
   | "issuer.owner.missing" | "issuer.owner.suspended" | "issuer.owner.organization" | "issuer.grant"
   | "credential.missing" | "credential.principal" | "credential.organization" | "credential.audience"
+  /** The exchanged grant was refused before any board request, e.g. `credential.claims.scope`. */
+  | `credential.${BridgeCredentialRefusalReason}`
   | "claim.tenant" | "claim.board" | "claim.agent" | "claim.reporter" | "claim.node" | "claim.checkpoint_repository"
   | "claim.executor" | "claim.repositories"
   | "selection.identity" | "selection.target"

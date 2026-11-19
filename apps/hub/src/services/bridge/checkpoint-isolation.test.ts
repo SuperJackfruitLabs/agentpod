@@ -16,6 +16,7 @@ import { checkpointPrerequisiteError, CHECKPOINT_COORDINATOR_FLAG } from "./chec
 import { checkpointRuntime } from "./checkpoint-port";
 import { reportCheckpointPrerequisite } from "../../validate-config";
 import { SuperpipelineClient } from "./superpipeline";
+import { BridgeCredentialRefused } from "./plane-credential";
 import type { CheckpointDispatchPort } from "./checkpoint-dispatch";
 import type { AcpPort, DispatchDeps } from "./dispatch-types";
 import type { BridgeAgentConfig } from "./config";
@@ -156,4 +157,36 @@ test("without the control pair no checkpoint profile is loaded, with one explici
   process.env.ENFORCE_CONTROL_PAIR = "true";
   const info = spyOn(console, "log").mockImplementation(() => {});
   try { expect(runtime()).toBeDefined(); } finally { info.mockRestore(); }
+});
+
+test("a refused plane grant on the dedicated path is a named refusal, and the ordinary claim still runs", async () => {
+  // The dedicated checkpoint claim's grant is refused before any request (here: no `claim` scope);
+  // the ordinary claim's exchange then succeeds. Nothing reaches the board for the refused one.
+  const claims: Record<string, unknown>[] = [];
+  let exchanges = 0;
+  const client = new SuperpipelineClient({ baseUrl: "https://board.test", boardId: agent.boardId, token: "",
+    credential: async () => {
+      if (++exchanges === 1) throw new BridgeCredentialRefused("claims.scope");
+      return "grant";
+    },
+    fetch: async (_url, init) => {
+      claims.push(JSON.parse(init.body ?? "{}"));
+      return { status: 200, ok: true, json: async () => ({ claimed: false }) };
+    } });
+  const target = { tenantId: "tnt_x", sourceTenantId: "tnt_x", boardId: agent.boardId, stationId: agent.stationId,
+    agentId: "agt_x", nodeId: "node_x", hostId: "host_x", registryRevision: "r", benchProtocol: "superbench.v2",
+    coordinatorImplementationSHA256: "b".repeat(64), executionMode: "linux-cgroup-v2",
+    workerVersion: "agentpod.superbench-worker.v2", workerSHA256: "a".repeat(64) } as const;
+  const port: CheckpointDispatchPort = { ready: async () => target, current: async () => true,
+    dispatch: async () => { throw new Error("must not dispatch"); } };
+  const refused: unknown[] = [];
+  const result = await runOnce(deps(client, { checkpoint: port, checkpointRefused: (e) => refused.push(e) }));
+  expect(result.status).toBe("idle");
+  expect(refused).toHaveLength(1);
+  expect(refused[0]).toBeInstanceOf(CheckpointRefused);
+  expect(refused[0]).toMatchObject({ code: "authority", reason: "credential.claims.scope" });
+  // Exactly one request reached the board: the ordinary claim, with no checkpoint protocol.
+  expect(claims).toHaveLength(1);
+  expect(claims[0]).not.toHaveProperty("checkpointOnly");
+  expect(claims[0]).not.toHaveProperty("checkpointProtocol");
 });

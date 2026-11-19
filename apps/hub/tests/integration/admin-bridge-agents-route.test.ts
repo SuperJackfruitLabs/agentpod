@@ -41,7 +41,9 @@ import { adminBridgeAgentsRouter } from "../../src/routes/admin-bridge-agents";
 import * as salaamDispatch from "../../src/services/bridge/salaam-dispatch";
 import { readBridgeRoster } from "../../src/services/bridge/roster";
 import { createTestUser } from "../helpers/database";
-import { fakePlane } from "../helpers/fake-plane";
+import { fakePlane, fakePlaneJwks, signPlaneToken } from "../helpers/fake-plane";
+import { setOrgPlaneClientForTests } from "../../src/auth/org-plane/client";
+import { TEST_PLANE } from "../../src/auth/org-plane/config";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
 const NODE_ID = "node_bridge_routes_test";
@@ -273,6 +275,21 @@ describe("giving a legacy row a credential source", () => {
     const planeRecord = fakePlane.principals.get(principalId);
     if (!planeRecord) throw Error("fixture occupant missing");
     planeRecord.organizationId = organizationId;
+    // The plane's exchange, as Accounts answers it, with a grant scope the test can take away.
+    let scope: string | undefined;
+    const restorePlane = setOrgPlaneClientForTests({
+      ...fakePlane,
+      agentToken: async (principal, audience) => ({
+        expiresIn: 300,
+        accessToken: await signPlaneToken({ sub: principal, principalKind: "agent", aud: audience,
+          ent: ["superpipeline"], org: organizationId, ...(scope === undefined ? {} : { scope }) }),
+      }),
+    });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const address = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      return address === TEST_PLANE.jwksUrl ? Response.json(await fakePlaneJwks()) : realFetch(url, init);
+    }, { preconnect: realFetch.preconnect });
     try {
       await post({ ...valid(), mcpToken: MCP_TOKEN });
 
@@ -298,6 +315,15 @@ describe("giving a legacy row a credential source", () => {
       });
       expect(arbitrary.status).toBe(400);
 
+      // A grant with no `claim` scope: refused with a 400 that names the scope, row unchanged.
+      const unscoped = await patch("coder-kai", {
+        credentialSource: source("https://staging-app.superpipeline.dev"),
+      });
+      expect(unscoped.status).toBe(400);
+      expect(await jsonField(unscoped, "error")).toContain("(claims.scope): its grant carries no `claim` scope");
+      expect((await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]?.token).toBe(TOKEN);
+
+      scope = "claim";
       const res = await patch("coder-kai", {
         credentialSource: source("https://staging-app.superpipeline.dev"),
       });
@@ -316,6 +342,8 @@ describe("giving a legacy row a credential source", () => {
         "https://staging-app.superpipeline.dev",
       );
     } finally {
+      globalThis.fetch = realFetch;
+      restorePlane();
       fakePlane.remove(principalId);
       if (savedOrigin === undefined) delete process.env.SUPERPIPELINE_BASE_URL;
       else process.env.SUPERPIPELINE_BASE_URL = savedOrigin;

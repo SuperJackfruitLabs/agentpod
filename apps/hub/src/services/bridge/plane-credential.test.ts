@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { createBridgePlaneCredential } from "./plane-credential";
+import { BridgeCredentialRefused, createBridgePlaneCredential } from "./plane-credential";
 const source = {
   version: 1,
   kind: "station-plane",
@@ -71,3 +71,24 @@ test("revoked exchange never returns a bearer", async () => {
   });
   await expect(token()).rejects.toThrow();
 });
+
+// Each refusal names its closed reason, so the bridge can log why and back off.
+for (const [patch, reason] of [
+  [{ sub: "prn_bbbbbbbbbbbbbbbbbbbb" }, "claims.sub"],
+  [{ principalKind: "human" }, "claims.kind"],
+  [{ org: "org_11111111111111111111" }, "claims.org"],
+  [{ ent: [] }, "claims.ent"],
+  [{ scope: undefined }, "claims.scope"],
+  [{ scope: "run" }, "claims.scope"],
+  [{ exp: 1 }, "claims.expired"],
+] as const)
+  test(`a refused exchange names ${reason} for ${JSON.stringify(patch)}`, async () => {
+    const token = createBridgePlaneCredential(source, snapshot, {
+      snapshot: async () => snapshot,
+      exchange: async () => ({ accessToken: "token", expiresIn: 300 }),
+      verify: async () => ({ ...claims, ...patch }) as never,
+    });
+    const error = await token().then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(BridgeCredentialRefused);
+    expect((error as BridgeCredentialRefused).reason).toBe(reason);
+  });

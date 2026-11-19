@@ -7,6 +7,44 @@ export interface BridgeCredentialSnapshot {
   owner: string;
   enabled: boolean;
 }
+/**
+ * Why an exchanged plane grant was refused. A closed set of fixed words, safe to log: no token,
+ * claim value or identifier ever enters it.
+ */
+export type BridgeCredentialRefusalReason =
+  | "binding.changed" | "lifetime" | "claims.unverified" | "claims.kind" | "claims.sub" | "claims.org"
+  | "claims.ent" | "claims.scope" | "claims.expired" | "binding.expired";
+
+/** Thrown before any board request is sent: nothing was claimed or written with this grant. */
+export class BridgeCredentialRefused extends Error {
+  constructor(readonly reason: BridgeCredentialRefusalReason) {
+    super(`Bridge credential claims refused: ${reason}`);
+    this.name = "BridgeCredentialRefused";
+  }
+}
+
+/** The scope an exchanged grant must carry for the bridge to claim with it. */
+export const BRIDGE_CREDENTIAL_SCOPE = "claim";
+
+/**
+ * The first rule verified claims break for a station-plane source, or undefined. Shared by the
+ * spend path and roster admission, so a row is never admitted with a grant it could not spend.
+ */
+export function planeClaimsRefusal(
+  claims: OrgPlaneTokenClaims | null,
+  expected: { principalId: string; org: string | null },
+  now: number = Date.now(),
+): BridgeCredentialRefusalReason | undefined {
+  if (!claims) return "claims.unverified";
+  if (claims.principalKind !== "agent") return "claims.kind";
+  if (claims.sub !== expected.principalId) return "claims.sub";
+  if (claims.org !== expected.org) return "claims.org";
+  if (!claims.ent.includes("superpipeline")) return "claims.ent";
+  if (!claims.scope?.split(" ").includes(BRIDGE_CREDENTIAL_SCOPE)) return "claims.scope";
+  if (claims.exp * 1000 <= now) return "claims.expired";
+  return undefined;
+}
+
 export function createBridgePlaneCredential(
   source: BridgeCredentialSource,
   expected: BridgeCredentialSnapshot,
@@ -29,7 +67,7 @@ export function createBridgePlaneCredential(
       current.org !== parsed.organizationId ||
       JSON.stringify(current) !== JSON.stringify(expected)
     )
-      throw Error("Bridge station credential binding changed");
+      throw new BridgeCredentialRefused("binding.changed");
   }
   return async () => {
     await guard();
@@ -39,21 +77,13 @@ export function createBridgePlaneCredential(
       issued.expiresIn <= 0 ||
       issued.expiresIn > 300
     )
-      throw Error("Invalid bridge credential lifetime");
+      throw new BridgeCredentialRefused("lifetime");
     const claims = await deps.verify(issued.accessToken);
-    if (
-      !claims ||
-      claims.principalKind !== "agent" ||
-      claims.sub !== parsed.principalId ||
-      claims.org !== expected.org ||
-      !claims.ent.includes("superpipeline") ||
-      !claims.scope?.split(" ").includes("claim") ||
-      claims.exp * 1000 <= Date.now()
-    )
-      throw Error("Bridge credential claims refused");
+    const refusal = planeClaimsRefusal(claims, { principalId: parsed.principalId, org: expected.org });
+    if (refusal || !claims) throw new BridgeCredentialRefused(refusal ?? "claims.unverified");
     await guard();
     if (claims.exp * 1000 <= Date.now())
-      throw Error("Bridge credential expired during binding check");
+      throw new BridgeCredentialRefused("binding.expired");
     return issued.accessToken;
   };
 }

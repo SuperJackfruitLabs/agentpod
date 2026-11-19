@@ -291,6 +291,34 @@ function occupant() {
   return p;
 }
 
+/** The scope the fixture plane's exchanged grant carries; a test changes it to prove the check. */
+let grantScope: string | undefined = "claim";
+
+/**
+ * The organization plane's exchange as Accounts answers it: an agent grant for the audience, with
+ * the grant's scopes, and its signing keys served at the JWKS URL. Returns the restore.
+ */
+function installExchange(): () => void {
+  const restorePlane = setOrgPlaneClientForTests({
+    ...fakePlane,
+    agentToken: async (principal, audience) => ({
+      expiresIn: 300,
+      accessToken: await signPlaneToken({ sub: principal, principalKind: "agent", aud: audience,
+        ent: ["superpipeline"], org: ORGANIZATION, ...(grantScope === undefined ? {} : { scope: grantScope }) }),
+    }),
+  });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const address = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+    return address === TEST_PLANE.jwksUrl ? Response.json(await fakePlaneJwks()) : realFetch(url, init);
+  }, { preconnect: realFetch.preconnect });
+  return () => {
+    globalThis.fetch = realFetch;
+    restorePlane();
+    grantScope = "claim";
+  };
+}
+
 /** Map the tenant to an organization and seat the principal in a Salaam station, then restore. */
 async function withSalaamBinding(
   superpipeline: string | undefined,
@@ -316,9 +344,11 @@ async function withSalaamBinding(
   // The occupant as the organization plane knows it: an agent in the workspace's organization.
   fakePlane.addAgent({ id: PRINCIPAL });
   occupant().organizationId = ORGANIZATION;
+  const restoreExchange = installExchange();
   try {
     await body();
   } finally {
+    restoreExchange();
     fakePlane.remove(PRINCIPAL);
     if (priorSuperpipeline === undefined)
       delete process.env.SUPERPIPELINE_BASE_URL;
@@ -501,30 +531,32 @@ describe("a station-plane source is the occupant's identity, whatever the harnes
   });
 
   test("a hermes row's source is spent: the exchange runs and the binding check passes", async () => {
-    const restorePlane = setOrgPlaneClientForTests({
-      ...fakePlane,
-      agentToken: async (principal, audience) => ({
-        expiresIn: 300,
-        accessToken: await signPlaneToken({ sub: principal, principalKind: "agent", aud: audience,
-          ent: ["superpipeline"], scope: "claim", org: ORGANIZATION }),
-      }),
-    });
-    const realFetch = globalThis.fetch;
-    globalThis.fetch = Object.assign(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-      const address = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
-      return address === TEST_PLANE.jwksUrl ? Response.json(await fakePlaneJwks()) : realFetch(url, init);
-    }, { preconnect: realFetch.preconnect });
-    try {
-      await withSalaamBinding(PRODUCTION, async () => {
-        await create();
-        const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
-        if (!secret) throw Error("fixture roster secret missing");
-        expect(typeof (await bridgePlaneCredential(secret)())).toBe("string");
-      }, "hermes");
-    } finally {
-      globalThis.fetch = realFetch;
-      restorePlane();
-    }
+    await withSalaamBinding(PRODUCTION, async () => {
+      await create();
+      const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+      if (!secret) throw Error("fixture roster secret missing");
+      expect(typeof (await bridgePlaneCredential(secret)())).toBe("string");
+    }, "hermes");
+  });
+
+  test("a grant without the claim scope is refused up front, naming the scope, and the row is unchanged", async () => {
+    await withSalaamBinding(PRODUCTION, async () => {
+      await createBridgeAgent({ ...base() });
+      for (const scope of [undefined, "", "run"]) {
+        grantScope = scope;
+        await expect(
+          updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", { credentialSource: sourceFor(PRODUCTION) }),
+        ).rejects.toThrow("(claims.scope): its grant carries no `claim` scope");
+        await expect(create()).rejects.toThrow("(claims.scope)");
+      }
+      const [legacy] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+      expect(legacy?.token).toBe(TOKEN);
+      expect(legacy?.credentialSource).toBeNull();
+      grantScope = "claim run";
+      expect(
+        await updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", { credentialSource: sourceFor(PRODUCTION) }),
+      ).toBe(true);
+    }, "hermes");
   });
 
   test("an occupant that is not an agent principal is refused", async () => {

@@ -9,6 +9,8 @@ import { recoverPermissionWaits } from "./dispatch-recover";
 import { selectCheckpointDispatch } from "./checkpoint-dispatch";
 import { checkpointRefusalCode, checkpointRefusalReason } from "./checkpoint-isolation";
 import { SuperpipelineApiError } from "./superpipeline";
+import { BridgeCredentialRefused } from "./plane-credential";
+import { CheckpointRefused } from "./checkpoint-profile";
 
 export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   const { client, acp, agent } = deps;
@@ -50,7 +52,15 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     } catch (error) {
       // Preserve the loop's existing definitive credential-refusal halt.
       if (error instanceof SuperpipelineApiError && (error.status === 401 || error.status === 403)) throw error;
-      return { status: "unreported", reason: "Checkpoint dispatch requires reconciliation" };
+      // A refused plane grant is refused before any board request is sent, so nothing was claimed
+      // and nothing needs reconciling. It is a checkpoint refusal like any other (#911): named,
+      // rate-limited, and the cycle goes on to the ordinary claim. This used to become a silent
+      // `unreported`, which the loop re-ran at once: a tight loop with no line and no claim.
+      if (!(error instanceof BridgeCredentialRefused))
+        return { status: "unreported", reason: "Checkpoint dispatch requires reconciliation" };
+      const refused = new CheckpointRefused("authority", `credential.${error.reason}`);
+      if (deps.checkpointRefused) deps.checkpointRefused(refused);
+      else log("checkpoint dispatch refused; ordinary claims continue", { code: refused.code, reason: refused.reason });
     }
   }
 
