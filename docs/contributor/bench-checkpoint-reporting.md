@@ -200,6 +200,10 @@ The service client validates raw strict receipts from the dedicated
 `POST /checkpoint-settlements` and `GET /checkpoint` endpoints. It recognizes only the
 exact authenticated `CHECKPOINT_RECEIPT_MISSING` response as receipt absence.
 Disabled, unknown-board, expired, foreign, malformed or lost responses park.
+A refused answer parks with reason `service.status:<status>` and logs that status
+and the board's error body, bounded and redacted (`checkpoint service:
+service.status`); a timeout is `service.timeout`. The body is only logged: it
+decides nothing and never reaches the wire.
 The entire canonical submission, including handoff/outcome, must be retained
 before POST; both its request digest and the observation-only report digest are
 checked on a receipt. No child execution is repeated to recover a report reply.

@@ -9,7 +9,7 @@ import { parseCheckpointSource, parseSourceReceipt, parseSourceSnapshot, require
   type CheckpointSource, type CheckpointSourceReceipt, type CheckpointSourceSnapshot } from "./checkpoint-source";
 
 import { checkpointSettlementSchema, checkedCheckpointReceipt, type CheckpointReceipt } from "./checkpoint-settlement-data";
-import { noteCheckpoint } from "./checkpoint-log";
+import { noteCheckpoint, redact } from "./checkpoint-log";
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 interface Options { plane?: OrgPlaneConfig; fetch?: Fetch }
@@ -42,6 +42,28 @@ async function boundedBody(response: Response): Promise<Uint8Array> {
   const out = new Uint8Array(size); let offset = 0;
   for (const part of parts) { out.set(part, offset); offset += part.byteLength; }
   return out;
+}
+
+/** What SuperPipeline answered when it refused: its status and its redacted, bounded body. */
+export class CheckpointServiceStatusError extends Error {
+  constructor(readonly status: number, body: string) {
+    super(`SuperPipeline answered ${status}: ${body}`);
+    this.name = "CheckpointServiceStatusError";
+  }
+}
+
+/**
+ * A refused answer, named. A settlement POST that came back 500 used to park as a bare
+ * `uncertain`: no status, no body. The body is the board's own error text, so it is read
+ * bounded, redacted and only logged; it never decides anything and never reaches the wire.
+ */
+async function statusRefusal(code: "authority" | "unavailable" | "uncertain", response: Response, kind: string): Promise<CheckpointRefused> {
+  let body: string;
+  try { body = redact(new TextDecoder().decode(await boundedBody(response))); }
+  catch (error) { body = "(body unreadable)"; noteCheckpoint("service", "service.status.body", { kind, status: response.status }, error); }
+  const cause = new CheckpointServiceStatusError(response.status, body);
+  noteCheckpoint("service", "service.status", { kind, status: response.status }, cause);
+  return new CheckpointRefused(code, `service.status:${response.status}`, cause);
 }
 
 /** Explicit construction only; the proposed installation flag is off by default.
@@ -77,7 +99,7 @@ export function createCheckpointServiceClient(configuration: CheckpointProfile, 
     const signal = AbortSignal.timeout(5_000);
     let timerListener: (() => void) | undefined;
     const aborted = new Promise<never>((_, reject) => {
-      timerListener = () => reject(new CheckpointRefused(body === undefined ? "unavailable" : "uncertain"));
+      timerListener = () => reject(new CheckpointRefused(body === undefined ? "unavailable" : "uncertain", "service.timeout"));
       signal.addEventListener("abort", timerListener, { once: true });
     });
     try {
@@ -87,7 +109,7 @@ export function createCheckpointServiceClient(configuration: CheckpointProfile, 
             authorization: `Bearer ${token}`, accept: "application/json", "accept-encoding": "identity",
             ...(body === undefined ? {} : { "content-type": "application/json" }),
           }, ...(body === undefined ? {} : { body }) });
-        if (response.status === 401 || response.status === 403) throw new CheckpointRefused("authority");
+        if (response.status === 401 || response.status === 403) throw await statusRefusal("authority", response, kind);
         if (kind === "receipt" && response.status === 404) {
           const missingBody = await boundedBody(response);
           if (canonicalCheckpoint(parseCheckpointJSON(missingBody)) !== canonicalCheckpoint({ error: { code: "CHECKPOINT_RECEIPT_MISSING" } }))
@@ -95,8 +117,9 @@ export function createCheckpointServiceClient(configuration: CheckpointProfile, 
           missing = true;
           return missingBody;
         }
-        if (response.status !== 200 || response.headers.get("content-encoding") && response.headers.get("content-encoding") !== "identity")
-          throw new CheckpointRefused(body === undefined ? "unavailable" : "uncertain");
+        if (response.status !== 200) throw await statusRefusal(body === undefined ? "unavailable" : "uncertain", response, kind);
+        if (response.headers.get("content-encoding") && response.headers.get("content-encoding") !== "identity")
+          throw new CheckpointRefused(body === undefined ? "unavailable" : "uncertain", "service.encoding");
         return boundedBody(response);
       })()]);
       // A service JWT expiring during the await cannot support a fresh observation.

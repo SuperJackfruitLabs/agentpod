@@ -9,6 +9,9 @@ import fixture from "./checkpoint-contract/claim.fixture.json";
 import canonicals from "./checkpoint-contract/settlement-canonical.fixture.json";
 import { fakePlaneJwks, signPlaneToken, TEST_ORG } from "../../../tests/helpers/fake-plane";
 import { TEST_PLANE } from "../../auth/org-plane/config";
+import { CheckpointRefused } from "./checkpoint-profile";
+import { errorFacts, setCheckpointLogForTests } from "./checkpoint-log";
+import { createQuietLog } from "./quiet-log";
 
 function inputs() {
   const policy = { ...fixture.pending.policy, reporterPrincipalId: "prn_" + "a".repeat(20) };
@@ -189,4 +192,34 @@ test("clients built per Node decision share one key set: the JWKS is fetched onc
   for (let i = 0; i < 3; i++)
     requireActiveSource(await createCheckpointServiceClient(input.profile, { plane: TEST_PLANE, fetch }).source(input.claim), input.source);
   expect(jwks).toBe(1);
+});
+
+test("a settlement the board refuses with a 5xx is named: its status, its redacted body, and still uncertain", async () => {
+  const lines: Array<Record<string, unknown> | undefined> = [];
+  const restore = setCheckpointLogForTests(createQuietLog((_m, meta) => lines.push(meta), { now: () => 0 }));
+  try {
+    const h = await harness(); const s = await settlementFixture(h);
+    let posts = 0;
+    h.response(async () => { posts++; return Response.json({ error: { code: "INTERNAL", message: "db write failed for Bearer abc.def" } }, { status: 500 }); });
+    const refused = await h.client.settle(h.claim, s.body).then(() => undefined, (error: unknown) => error);
+    expect(refused).toBeInstanceOf(CheckpointRefused);
+    if (!(refused instanceof CheckpointRefused)) throw new Error("not refused");
+    // Still a park the next cycle reconciles by receipt, never a resend from here.
+    expect(refused.code).toBe("uncertain");
+    expect(refused.reason).toBe("service.status:500");
+    expect(posts).toBe(1);
+    // What the orchestrator's park logs: the cause's class, status and body.
+    const facts = errorFacts(refused.cause);
+    expect(facts).toMatchObject({ errorClass: "CheckpointServiceStatusError", status: 500 });
+    expect(facts.error).toContain("db write failed");
+    expect(facts.error).not.toContain("abc.def");
+    expect(lines).toContainEqual(expect.objectContaining({ site: "service", reason: "service.status", kind: "settlement", status: 500 }));
+  } finally { restore(); }
+});
+
+test("an unauthorized source read names its status too", async () => {
+  const h = await harness();
+  h.response(async () => Response.json({ error: { code: "FORBIDDEN" } }, { status: 403 }));
+  const refused = await h.client.source(h.claim).then(() => undefined, (error: unknown) => error);
+  expect(refused).toMatchObject({ code: "authority", reason: "service.status:403" });
 });
