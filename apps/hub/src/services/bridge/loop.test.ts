@@ -407,25 +407,25 @@ describe("a wake ends the idle wait", () => {
   });
 });
 
-describe("a cycle that claims nothing says why, and never spins", () => {
-  /** Run the loop until `cycles` cycles have run, recording sleeps and log lines. */
-  async function drive(run: () => Promise<DispatchResult>, cycles: number) {
-    let n = 0;
-    const slept: number[] = [];
-    const lines: Array<{ message: string; meta?: Record<string, unknown> }> = [];
-    const loop = startAgentLoop({
-      run: async () => { n++; return run(); },
-      pollMs: 5_000,
-      backoffMs: 30_000,
-      now: () => 0,
-      sleep: async (ms) => { slept.push(ms); },
-      log: (message, meta) => { if (message !== "cycle") lines.push({ message, ...(meta ? { meta } : {}) }); },
-    });
-    while (n < cycles) await Promise.resolve();
-    await loop.stop();
-    return { slept, lines, cycles: n };
-  }
+/** Run the loop until `cycles` cycles have run, recording sleeps and log lines. */
+async function drive(run: () => Promise<DispatchResult>, cycles: number) {
+  let n = 0;
+  const slept: number[] = [];
+  const lines: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+  const loop = startAgentLoop({
+    run: async () => { n++; return run(); },
+    pollMs: 5_000,
+    backoffMs: 30_000,
+    now: () => 0,
+    sleep: async (ms) => { slept.push(ms); },
+    log: (message, meta) => { if (message !== "cycle") lines.push({ message, ...(meta ? { meta } : {}) }); },
+  });
+  while (n < cycles) await Promise.resolve();
+  await loop.stop();
+  return { slept, lines, cycles: n };
+}
 
+describe("a cycle that claims nothing says why, and never spins", () => {
   test("a refused plane grant names its reason once and backs off every cycle", async () => {
     const { slept, lines, cycles } = await drive(async () => { throw new BridgeCredentialRefused("claims.scope"); }, 5);
     expect(slept.slice(0, cycles - 1).every((ms) => ms === 30_000)).toBe(true);
