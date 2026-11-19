@@ -122,10 +122,10 @@ test("a changed trusted source tenant pin refuses the claim before any context f
   expect(h.dispatched).toHaveLength(0);
 });
 
-test("a named capacity refusal from the port reaches the caller unchanged", async () => {
+test("a capacity refusal the port released reaches the caller unchanged", async () => {
   const h = harness();
-  const refusal: DispatchResult = { status: "unreported", externalRunId: fixture.pending.runId, attemptId: "attempt-fixture",
-    reason: "SuperBench capacity exhausted; the attempt stays parked and is not retried" };
+  const refusal: DispatchResult = { status: "released", externalRunId: fixture.pending.runId, attemptId: "attempt-fixture",
+    reason: "Checkpoint released: SuperBench capacity is exhausted. Nothing ran; the card is free for a new claim." };
   h.port.dispatch = async (value) => { h.dispatched.push(value); return refusal; };
   const selection = await selectCheckpointDispatch(h.port, identity);
   expect(await selection?.dispatch(h.client, parsePendingCheckpointClaim(fixture.pending))).toEqual(refusal);

@@ -139,6 +139,61 @@ re-check. An activity is posted after the commit and its failure is only
 logged (`checkpoint activity: activity.post`): the ledger, the node and the
 settlement never wait on it or read it back.
 
+## When the node refuses
+
+The node's registered launch answers a closed set of refusal codes
+(BENCH_REGISTERED_LAUNCH.md, "Failure and retry paths"). Some come only from a
+journal record the node holds as terminal, after it released what the record
+held: that attempt can never complete, and parking it kept the card `working`
+on heartbeats forever. Others are said about the moment and can still turn into
+a completion. The Hub rules each code by the phase that asked
+(`checkpoint-refusal.ts`, `CHECKPOINT_REFUSAL_RULINGS`); a code or phase the
+table does not name parks.
+
+| Code | `prepare_pending` | `execute_pending` | Why |
+| --- | --- | --- | --- |
+| `verification_failed` | failed | failed | A worker crash, a result or receipt that did not verify, or a producer reply that did not parse. Journaled terminal, lease released |
+| `unsupported` | failed | failed | The producer refused the request (`invalid_request`, `not_found`): nothing ran, and the same request would be refused again |
+| `capacity_exhausted` | released | released | SuperBench refused create, lease or run for capacity: terminal, nothing ran |
+| `conflict` | released | parked | Before execute, another holder owns the bench and nothing of this attempt ran. After it, only a journal step that does not match its own bytes, which proves nothing about the run |
+| `stale_owner` | parked | parked | Also what the node answers when its own current check cannot reach the Hub. A superseded attempt is retired with evidence (below), never here |
+| `unavailable` | parked | parked | The node's catch-all for an internal error, a registry it cannot load or a refused current check |
+| `invalid`, `unauthorized`, `pending` | parked | parked | In the contract but never sent by the node's coordinator; not guessed at |
+
+- **Failed** settles the run on SuperPipeline as failed through the ordinary run
+  verb, `POST /v1/boards/:board/runs/:run/fail` with the lease epoch and a
+  one-sentence reason that names the code. The board ends the run `crashed`
+  with that `failure_reason`, posts `card.failed` and applies its own retry
+  policy. A checkpoint stage refuses `complete`, never `fail`.
+- **Released** hands the card back without penalty, `POST …/runs/:run/release`:
+  the card is claimable again.
+- **Parked** stays on its phase, logged and shown on the card with reason
+  `node.state:refused.<code>`, and is read again on the next backoff.
+
+Neither ruling ever reports a pass: no settlement is built and `complete` is
+never sent.
+
+A ruled refusal is held before anything is said. The attempt moves by
+compare-and-set from the phase it was read in to `failure_pending`, with an
+immutable `failure` cell: the code, the ruling, the sentence, the phase and the
+node's exact reply. Only `prepare_pending` and `execute_pending` can take one;
+they are the only phases that ask the node. Then, while the lease is still the
+Hub's, the card is told (`checkpoint.failed` or `checkpoint.released`, with the
+sentence and the code), the run is failed or released, and the attempt ends
+`failed` with a `failure_report` saying how: `fail`, `release`, or
+`lease_ended` when the board answered `STALE_LEASE` because it had already ended
+the run. `failed` is terminal, so the station takes a fresh checkpoint claim.
+Any other answer from the board (a 5xx, `NOT_RUN_OWNER`) leaves the attempt in
+`failure_pending`; the next pass tells the board again from the held failure and
+never asks the node. An owner or admin may still settle a `failure_pending`
+attempt as `retired`; a `failed` one cannot be settled.
+
+Known limits: a `failure_pending` attempt whose profile is then replaced is
+parked as `superseded.effect_possible` for an operator. A prepare whose
+SuperBench reply did not parse answers `verification_failed` without journaling
+the record terminal, so the node may keep that record's lease until a newer
+attempt on the same card retires it.
+
 ## Waiting on the node
 
 A coordinator call that outlasts the Hub's wait is not a failure. The broker

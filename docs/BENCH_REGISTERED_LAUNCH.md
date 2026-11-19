@@ -256,10 +256,13 @@ unreachable hub) leaves the record parked (`pending`); only an authenticated
 `stale_owner` decision makes it retire and answer `stale_owner`.
 
 The coordinator wire (`agentpod.bench-coordinator.v1`) is unchanged except for one
-new refusal code, `capacity_exhausted`. The hub orchestrator reports it as an
-unreported attempt whose reason names exhausted capacity, and never re-sends
-`prepare` or `execute`: every later cycle sends `status`, which returns the same
-terminal refusal from the journal.
+new refusal code, `capacity_exhausted`. The hub never re-sends `prepare` or
+`execute` after a refusal: later cycles send `status`, which returns the same
+terminal refusal from the journal. A terminal refusal ends the hub's attempt:
+`verification_failed` and `unsupported` fail the run, `capacity_exhausted`
+releases the card for a new claim (contributor/bench-checkpoint-reporting.md,
+"When the node refuses"). The reply a node sends after a worker crash is pinned
+in `packages/contract/src/fixtures/bench-coordinator-node-refusals-v1.json`.
 
 ## Known gaps
 

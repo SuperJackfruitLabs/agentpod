@@ -160,8 +160,8 @@ export interface CheckpointRetirement {
 
 /** Phases in which no SuperPipeline-side effect can exist yet: no source was admitted. */
 export const NO_PRODUCER_EFFECT_PHASES: ReadonlySet<string> = new Set(["prepare_pending", "prepared"]);
-/** Phases that end an attempt. Neither blocks a new one. */
-const TERMINAL_PHASES: ReadonlySet<string> = new Set(["reported", "retired"]);
+/** Phases that end an attempt. None blocks a new one. */
+export const CHECKPOINT_TERMINAL_PHASES: ReadonlySet<string> = new Set(["reported", "retired", "failed"]);
 
 /**
  * End an unreported attempt as `retired`, with the evidence. Compare-and-set on the phase it was
@@ -170,7 +170,7 @@ const TERMINAL_PHASES: ReadonlySet<string> = new Set(["reported", "retired"]);
  */
 export async function retireCheckpointAttempt(attempt: RetainedCheckpointAttempt,
   retirement: Omit<CheckpointRetirement, "version" | "phase" | "at">): Promise<boolean> {
-  if (TERMINAL_PHASES.has(attempt.row.phase)) return false;
+  if (CHECKPOINT_TERMINAL_PHASES.has(attempt.row.phase)) return false;
   const body: CheckpointRetirement = { version: "agentpod.checkpoint-retirement.v1", ...retirement,
     phase: attempt.row.phase, at: new Date().toISOString() };
   const value = canonicalCheckpoint(body);
@@ -187,7 +187,7 @@ export async function retireCheckpointAttempt(attempt: RetainedCheckpointAttempt
 export async function unresolvedCheckpointAttempts(tenantId: string): Promise<CheckpointDispatchRow[]> {
   const rows = await db.select().from(checkpointDispatches).where(eq(checkpointDispatches.tenantId, tenantId))
     .orderBy(asc(checkpointDispatches.createdAt));
-  return rows.filter((row) => !TERMINAL_PHASES.has(row.phase));
+  return rows.filter((row) => !CHECKPOINT_TERMINAL_PHASES.has(row.phase));
 }
 
 /** The unresolved attempt on a station, and whether the installed profile has replaced the one it was made under. */
@@ -203,8 +203,81 @@ export interface PendingCheckpoint { attempt: RetainedCheckpointAttempt; superse
 export async function pendingCheckpointAttempt(profile: CheckpointProfile): Promise<PendingCheckpoint | undefined> {
   const rows = await db.select().from(checkpointDispatches).where(and(
     eq(checkpointDispatches.tenantId, profile.target.tenant_id), eq(checkpointDispatches.boardId, profile.target.board_id)));
-  const pending = rows.filter((row) => !TERMINAL_PHASES.has(row.phase) && checked(row).profile.target.station_id === profile.target.station_id);
+  const pending = rows.filter((row) => !CHECKPOINT_TERMINAL_PHASES.has(row.phase) && checked(row).profile.target.station_id === profile.target.station_id);
   if (pending.length > 1) throw new CheckpointRefused("uncertain");
   const [row] = pending;
   return row ? { attempt: checked(row), superseded: row.profile !== canonicalCheckpoint(profile) } : undefined;
+}
+
+/** What a definite node refusal does to the attempt and its card (checkpoint-refusal.ts holds the ruling). */
+export type CheckpointFailureDisposition =
+  /** The run is settled on SuperPipeline as failed, with the reason: `POST …/runs/:id/fail`. */
+  | "failed"
+  /** Nothing ran and the refusal is about the moment, not the work: the card is handed back for a new claim. */
+  | "released";
+export interface CheckpointFailure {
+  version: "agentpod.checkpoint-failure.v1";
+  /** The node's closed refusal code. */
+  code: string;
+  disposition: CheckpointFailureDisposition;
+  /** The sentence the card shows, and the run's failure reason. */
+  reason: string;
+  /** The phase the attempt was in when the node refused it. */
+  phase: string;
+  by: "hub";
+  at: string;
+  /** The node's exact reply. */
+  evidence: string;
+}
+export interface CheckpointFailureReport {
+  version: "agentpod.checkpoint-failure-report.v1";
+  /** `fail` or `release` were accepted; `lease_ended` means the board already ended the run (STALE_LEASE). */
+  outcome: "fail" | "release" | "lease_ended";
+  at: string;
+}
+
+/** The only phases that ask the node, so the only ones a node refusal can end. */
+export const NODE_REFUSABLE_PHASES: ReadonlySet<string> = new Set(["prepare_pending", "execute_pending"]);
+
+/**
+ * Hold a definite node refusal on the attempt, before anything is said to SuperPipeline:
+ * compare-and-set from the phase it was read in to `failure_pending`, with the ruling and the node's
+ * exact reply. A raced pass that finds the same failure already held gets it back without `send`.
+ */
+export async function failCheckpointAttempt(attempt: RetainedCheckpointAttempt,
+  failure: Pick<CheckpointFailure, "code" | "disposition" | "reason" | "evidence">): Promise<{ attempt: RetainedCheckpointAttempt; send: boolean }> {
+  if (!NODE_REFUSABLE_PHASES.has(attempt.row.phase)) throw new CheckpointRefused("stale");
+  const body: CheckpointFailure = { version: "agentpod.checkpoint-failure.v1", ...failure, phase: attempt.row.phase,
+    by: "hub", at: new Date().toISOString() };
+  const value = canonicalCheckpoint(body);
+  if (Buffer.byteLength(value, "utf8") > 262144) throw new CheckpointRefused("invalid");
+  const [updated] = await db.update(checkpointDispatches).set({ phase: "failure_pending", failure: value, updatedAt: new Date() })
+    .where(and(eq(checkpointDispatches.tenantId, attempt.row.tenantId), eq(checkpointDispatches.attemptId, attempt.row.attemptId),
+      eq(checkpointDispatches.prepareSHA256, attempt.row.prepareSHA256), eq(checkpointDispatches.phase, attempt.row.phase))).returning();
+  if (updated) {
+    log.info("checkpoint attempt failed by the node", { tenantId: updated.tenantId, boardId: updated.boardId,
+      runId: updated.runId, attemptId: updated.attemptId, from: attempt.row.phase, code: failure.code, disposition: failure.disposition });
+    return { attempt: checked(updated), send: true };
+  }
+  const current = await readCheckpointAttempt(attempt.row.tenantId, attempt.row.attemptId);
+  if (!current || (current.row.phase !== "failure_pending" && current.row.phase !== "failed")) throw new CheckpointRefused("stale");
+  return { attempt: current, send: false };
+}
+
+/** End a `failure_pending` attempt as `failed`, once SuperPipeline has been told. Compare-and-set. */
+export async function closeFailedCheckpointAttempt(attempt: RetainedCheckpointAttempt,
+  outcome: CheckpointFailureReport["outcome"]): Promise<{ attempt: RetainedCheckpointAttempt; send: boolean }> {
+  if (attempt.row.phase !== "failure_pending") throw new CheckpointRefused("stale");
+  const report: CheckpointFailureReport = { version: "agentpod.checkpoint-failure-report.v1", outcome, at: new Date().toISOString() };
+  const [updated] = await db.update(checkpointDispatches).set({ phase: "failed", failureReport: canonicalCheckpoint(report), updatedAt: new Date() })
+    .where(and(eq(checkpointDispatches.tenantId, attempt.row.tenantId), eq(checkpointDispatches.attemptId, attempt.row.attemptId),
+      eq(checkpointDispatches.prepareSHA256, attempt.row.prepareSHA256), eq(checkpointDispatches.phase, "failure_pending"))).returning();
+  if (updated) {
+    log.info("checkpoint attempt ended failed", { tenantId: updated.tenantId, boardId: updated.boardId,
+      runId: updated.runId, attemptId: updated.attemptId, outcome });
+    return { attempt: checked(updated), send: true };
+  }
+  const current = await readCheckpointAttempt(attempt.row.tenantId, attempt.row.attemptId);
+  if (!current || current.row.phase !== "failed") throw new CheckpointRefused("stale");
+  return { attempt: current, send: false };
 }
