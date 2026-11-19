@@ -67,6 +67,17 @@ export interface AgentLoopOptions {
   relogMs?: number;
 }
 
+export interface LoopHandle {
+  /**
+   * Resolves once the loop has left its current cycle. With `handover`, the current cycle is also
+   * asked to yield strict work it is driving, so a rebuilt loop can resume it (#776); without it,
+   * the cycle drains as before.
+   */
+  stop(opts?: { handover?: boolean }): Promise<void>;
+  /** Resolves when the loop exits on its own — a fault, or a stop. */
+  done: Promise<void>;
+}
+
 const defaultSleep = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
     if (signal.aborted) return resolve();
