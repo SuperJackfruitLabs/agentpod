@@ -484,3 +484,17 @@ describe("createQuietLog", () => {
     expect(lines).toEqual([{ message: "A", meta: {} }, { message: "B", meta: {} }, { message: "A", meta: { suppressed: 1 } }]);
   });
 });
+
+test("a cycle that throws names the error's class and redacted message, once per class per interval", async () => {
+  let n = 0;
+  const lines: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+  const loop = startAgentLoop({
+    run: async () => { n++; throw new TypeError("fetch failed for Bearer abc"); },
+    backoffMs: 30_000, now: () => 0, sleep: async () => {},
+    log: (message, meta) => { if (message !== "cycle") lines.push({ message, ...(meta ? { meta } : {}) }); },
+  });
+  while (n < 4) await Promise.resolve();
+  await loop.stop();
+  expect(lines).toEqual([{ message: "a claim cycle threw; backing off",
+    meta: { errorClass: "TypeError", error: "fetch failed for Bearer [redacted]" } }]);
+});

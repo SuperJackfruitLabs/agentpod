@@ -21,6 +21,8 @@ import { claimRefusal, CheckpointRefused, parseCheckpointProfile, requireCheckpo
   type CheckpointRefusalReason } from "./checkpoint-profile";
 import { parsePendingCheckpointClaim, type PendingCheckpointClaim } from "./checkpoint-claim";
 import { createCheckpointRefusalLog } from "./checkpoint-isolation";
+import { setCheckpointLogForTests } from "./checkpoint-log";
+import { createQuietLog } from "./quiet-log";
 
 const envKeys = ["ENFORCE_CONTROL_PAIR", "PROPOSED_CHECKPOINT_COORDINATOR", "PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE"] as const;
 const priorEnv = Object.fromEntries(envKeys.map((k) => [k, process.env[k]]));
@@ -260,4 +262,25 @@ test("ready refuses another station's identity before asking the node", async ()
 });
 test("ready with the pinned target and current authority selects it", async () => {
   expect(await readyRefusal({ ...available, target: profile.target }, authorized)).toBeUndefined();
+});
+
+// ─── a current re-read never answers a bare false ───────────────────────────
+test("a current re-read that refuses names its reason, and an unexpected error its class", async () => {
+  const lines: Array<Record<string, unknown>> = [];
+  const restore = setCheckpointLogForTests(createQuietLog((_m, meta) => lines.push(meta ?? {}), { now: () => 0 }));
+  const runtime = installedRuntime();
+  const selected = { tenantId: t.tenant_id, sourceTenantId: profile.sourceTenantId, boardId: t.board_id, agentId: t.agent_id,
+    stationId: t.station_id, nodeId: t.node_id, hostId: t.host_id, registryRevision: t.registry_sha256,
+    benchProtocol: t.bench_protocol, coordinatorImplementationSHA256: t.coordinator_implementation_sha256,
+    executionMode: t.execution_mode, workerVersion: t.worker_version, workerSHA256: t.worker_sha256 };
+  let failure: Error = new CheckpointRefused("authority", "node.last_seen");
+  const read = spyOn(currentAuthority, "readCheckpointAuthority").mockImplementation(async () => { throw failure; });
+  try {
+    expect(await runtime.port.current(selected)).toBe(false);
+    expect(lines).toContainEqual(expect.objectContaining({ site: "current", reason: "node.last_seen" }));
+    failure = new Error("connection reset by peer");
+    expect(await runtime.port.current(selected)).toBe(false);
+    expect(lines).toContainEqual(expect.objectContaining({ site: "current", reason: "current.error", errorClass: "Error",
+      error: "connection reset by peer" }));
+  } finally { read.mockRestore(); restore(); }
 });

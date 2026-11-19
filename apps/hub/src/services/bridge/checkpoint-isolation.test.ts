@@ -96,8 +96,12 @@ test("a refusal repeated every cycle is logged once per reason, then once per in
   // A different reason is its own line at once.
   refused(new CheckpointRefused("stale"));
   expect(lines.at(-1)).toEqual({ code: "stale" });
-  refused(new Error("network"));
-  expect(lines.at(-1)).toEqual({ code: "unavailable" });
+  // An error that is not a closed refusal is named by its class and redacted message, never as a bare code.
+  refused(new Error("network down for Bearer abc.def"));
+  expect(lines.at(-1)).toEqual({ code: "unavailable", errorClass: "Error", error: "network down for Bearer [redacted]" });
+  // A refusal that replaced an error names the error it replaced.
+  refused(new CheckpointRefused("unavailable", "http.timeout", Object.assign(new Error("The operation timed out."), { name: "TimeoutError" })));
+  expect(lines.at(-1)).toEqual({ code: "unavailable", reason: "http.timeout", errorClass: "TimeoutError", error: "The operation timed out." });
 });
 
 // ─── startup prerequisite ───────────────────────────────────────────────────

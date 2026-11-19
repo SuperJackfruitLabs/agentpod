@@ -48,8 +48,9 @@ test("a superseded attempt past the point of producer effect is parked without a
 });
 
 test("an unreachable node or a raced row retires nothing", async () => {
+  // The node's failure is kept, by class and message, for the park's log line.
   expect(await resolveSupersededAttempt(attemptIn("prepare_pending"), deps(new Error("offline")).d))
-    .toEqual({ outcome: "parked", reason: "superseded.node_unreachable" });
+    .toEqual({ outcome: "parked", reason: "superseded.node_unreachable", error: { errorClass: "Error", error: "offline" } });
   expect(await resolveSupersededAttempt(attemptIn("prepare_pending"), deps(unknown, false).d))
     .toEqual({ outcome: "parked", reason: "superseded.node_raced" });
 });
