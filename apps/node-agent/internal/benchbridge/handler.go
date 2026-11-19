@@ -317,8 +317,16 @@ func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, ra
 	if h.installed() != nil || managed(ctx, h.client) != nil {
 		return refused(r.Operation), ErrRegistry
 	}
+	return h.serve(ctx, r, raw)
+}
+
+// serve is everything after the installation and managed-host checks.
+func (h *Handler) serve(ctx context.Context, r benchcoordinatorwire.Request, raw []byte) (benchcoordinatorwire.Response, error) {
 	p, err := h.profile(r)
 	if err != nil {
+		if r.Operation == "status" {
+			return h.superseded(ctx, r)
+		}
 		return refused(r.Operation), err
 	}
 	if r.Operation == "ready" {
@@ -443,4 +451,62 @@ func statusResponse(r benchcoordinatorwire.Request, saved benchdispatch.SourceSp
 		return preparedResponse(r, *status.Source)
 	}
 	return pending(r), nil
+}
+
+// superseded answers status for an attempt whose target this node no longer
+// serves: a node build or pin change replaced the profile that prepared it, so
+// no prepare or execute can ever reach it again. The node retires its own
+// record and answers stale_owner, which the hub reads as the node's proof that
+// nothing is outstanding, but only when both keys agree and nothing launched:
+//
+//   - the hub's authenticated current decision for the attempt's own retained
+//     identity, target and profile is stale_owner (a hub that cannot be reached
+//     or answers anything else retires nothing), and
+//   - the record provably launched nothing: the intent never handed off its
+//     effects (reserved or resolved: no source call was ever made), or its
+//     registered journal record never sent the run. Retiring it releases the
+//     lease the record holds, with that record's token, and never runs.
+//
+// Everything else (no intent, a grouped launch, a sent run) stays refused
+// unavailable, parked for an owner or admin.
+func (h *Handler) superseded(ctx context.Context, r benchcoordinatorwire.Request) (benchcoordinatorwire.Response, error) {
+	if r.Identity == nil || r.Target == nil {
+		return refused(r.Operation), ErrRegistry
+	}
+	intent, err := IntentStore{Root: h.registry.IntentRoot}.Read(ctx, r)
+	if err != nil {
+		return refused(r.Operation), ErrRegistry
+	}
+	stored, err := benchcoordinatorwire.ParseRequest([]byte(intent.PrepareRequest))
+	if err != nil || stored.Task == nil {
+		return refused(r.Operation), ErrIntent
+	}
+	if err := h.check(ctx, r, LocalProfile{ID: stored.Task.ProfileID}, intent, "observe"); !errors.Is(err, ErrStale) {
+		return refused(r.Operation), ErrCurrent
+	}
+	if intent.Phase == "reserved" || intent.Phase == "resolved" {
+		return staleOwner(r), nil
+	}
+	if intent.Spec == nil {
+		return refused(r.Operation), ErrIntent
+	}
+	// Only the registered launch can retire on its own; its journal is the
+	// registry's, not the replaced profile's.
+	m := benchlaunch.Coordinator{Journal: benchlaunch.Journal{Root: filepath.Join(h.registry.StateRoot, "registered")}, Producer: h.client,
+		Current: func(context.Context, benchdispatch.SourceSpec) error { return benchlaunch.ErrSuperseded }}
+	status, err := m.RetireUnlaunched(ctx, *intent.Spec)
+	if err != nil {
+		if code, ok := benchlaunch.RefusalCode(err); ok && code == "stale_owner" {
+			return staleOwner(r), nil
+		}
+		return refused(r.Operation), err
+	}
+	// The veto is journaled and its release still outstanding: parked, retried.
+	return statusResponse(r, *intent.Spec, status)
+}
+
+func staleOwner(r benchcoordinatorwire.Request) benchcoordinatorwire.Response {
+	response := refused(r.Operation)
+	response.Code = "stale_owner"
+	return response
 }

@@ -133,6 +133,18 @@ released), and marks the record terminal (`Cancelled`, `stale_owner`).
 | `Prepare` of a newer attempt on the same card | its own decision is current while an older record still owns the bench | the newer attempt's current decision. The older record is retired first; the newer one reserves once it is terminal, otherwise `pending` |
 | `Execute` | stale decision | refuses with `stale_owner` and sends nothing; it does not retire |
 
+A `status` for an attempt whose target the node no longer serves (a node build
+or pin change replaced its profile) can never prepare or execute again. The
+node retires its own record and answers `refused` `stale_owner` only when two
+keys agree: the hub's authenticated current decision for the attempt's own
+retained identity, target and profile is `stale_owner`, and the record provably
+launched nothing. That is an intent that never handed off its effects (no source
+call was made), or a registered journal record whose run was never sent: the
+veto is journaled first and the record's lease released with its own token. A
+sent run, a grouped launch, or no intent at all stays `refused` `unavailable`
+for an owner or admin. The hub's superseded-attempt path then retires the
+attempt with this reply as its evidence.
+
 The veto covers any record that still holds its lease, including one already
 refused (for example `capacity_exhausted` whose first release failed) or
 completed. It authorises release and cancel only, never a run.

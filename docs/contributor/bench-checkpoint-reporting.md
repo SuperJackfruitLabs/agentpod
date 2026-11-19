@@ -162,7 +162,9 @@ lets the change make it disappear; it is resolved, with evidence, as follows.
 - **Superseded is a definite change.** When a loaded installation holds a different
   profile for the attempt's station, the Hub's current-decision answers `stale_owner`
   for the old attempt, so the node retires its own record (it releases what the
-  record holds and never runs). A profile file that failed to load is never treated
+  record holds and never runs). That holds after the node itself was upgraded too:
+  a node whose registry no longer serves the attempt's target still answers its
+  `status`, with `stale_owner`, when nothing launched (BENCH_REGISTERED_LAUNCH.md). A profile file that failed to load is never treated
   as superseded.
 - **The Hub retires it when the evidence proves nothing is outstanding.** Only in
   `prepare_pending` or `prepared`, where no source was admitted to SuperPipeline and
