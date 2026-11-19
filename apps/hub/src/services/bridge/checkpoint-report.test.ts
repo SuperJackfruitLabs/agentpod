@@ -45,7 +45,7 @@ async function fixture() {
     profile: canonicalCheckpoint(profile), claim: canonicalCheckpoint(claim), authority: "retained-by-real-ledger",
     prepareRequest: JSON.stringify(request), prepareSHA256: "e".repeat(64), phase: "completed",
     prepared: canonicalCheckpoint(completion.source), source: null, sourceReceipt: null, executeRequest: null,
-    executeSHA256: null, completion: null, settlementBody: null, settlementSHA256: null, settlementReceipt: null, retirement: null,
+    executeSHA256: null, completion: null, settlementBody: null, settlementSHA256: null, settlementReceipt: null, retirement: null, failure: null, failureReport: null,
     createdAt: new Date(0), updatedAt: new Date(0) } };
   return { attempt, completion };
 }

@@ -16,8 +16,8 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { resolveTenantId } from "../auth/tenant";
 import { logAdminAction } from "../models/admin-audit-log";
-import { canonicalCheckpoint, checkpointProfileSuperseded, NO_PRODUCER_EFFECT_PHASES, readCheckpointAttempt,
-  retireCheckpointAttempt, unresolvedCheckpointAttempts } from "../services/bridge";
+import { canonicalCheckpoint, CHECKPOINT_TERMINAL_PHASES, checkpointProfileSuperseded, NO_PRODUCER_EFFECT_PHASES,
+  readCheckpointAttempt, retireCheckpointAttempt, unresolvedCheckpointAttempts } from "../services/bridge";
 
 const settleSchema = z.object({
   /** The attempt id again: a settlement names exactly what it settles. */
@@ -49,7 +49,7 @@ export const adminCheckpointAttemptsRouter = new Hono()
     if (confirm !== attemptId) return c.json({ error: "confirm must repeat the attempt id being settled" }, 400);
     const attempt = await readCheckpointAttempt(tenantId, attemptId).catch(() => undefined);
     if (!attempt) return c.json({ error: "no such checkpoint attempt in this workspace" }, 404);
-    if (attempt.row.phase === "reported" || attempt.row.phase === "retired")
+    if (CHECKPOINT_TERMINAL_PHASES.has(attempt.row.phase))
       return c.json({ error: `the attempt is already ${attempt.row.phase}` }, 409);
     const userId = c.get("user").id;
     const settled = await retireCheckpointAttempt(attempt, { reason: "operator", by: userId, evidence });

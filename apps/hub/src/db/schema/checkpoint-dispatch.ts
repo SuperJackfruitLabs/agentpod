@@ -15,12 +15,18 @@ export const checkpointDispatches = pgTable("checkpoint_dispatches", {
   settlementReceipt: text("settlement_receipt"),
   /** Set once, with the phase `retired`: why the attempt was settled without a report, and on what evidence. */
   retirement: text("retirement"),
+  /** Set once, with the phase `failure_pending`: the node's definite refusal, the ruling on it and its exact reply. */
+  failure: text("failure"),
+  /** Set once, with the phase `failed`: how SuperPipeline was told of the failure. */
+  failureReport: text("failure_report"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.tenantId, t.attemptId] }),
   uniqueIndex("checkpoint_dispatches_run_epoch_idx").on(t.tenantId, t.boardId, t.runId, t.leaseEpoch),
   check("checkpoint_dispatches_epoch", sql`${t.leaseEpoch} > 0 AND ${t.leaseEpoch} <= 9007199254740991`),
-  check("checkpoint_dispatches_phase", sql`${t.phase} IN ('prepare_pending','prepared','source_pending','admitted','execute_pending','completed','submission_pending','reported','retired')`),
+  check("checkpoint_dispatches_phase", sql`${t.phase} IN ('prepare_pending','prepared','source_pending','admitted','execute_pending','completed','submission_pending','reported','retired','failure_pending','failed')`),
   check("checkpoint_dispatches_retirement", sql`(${t.phase} = 'retired') = (${t.retirement} IS NOT NULL)`),
+  check("checkpoint_dispatches_failure", sql`(${t.phase} NOT IN ('failure_pending','failed') OR ${t.failure} IS NOT NULL) AND (${t.failure} IS NULL OR ${t.phase} IN ('failure_pending','failed','retired'))`),
+  check("checkpoint_dispatches_failure_report", sql`(${t.phase} = 'failed') = (${t.failureReport} IS NOT NULL)`),
 ]);
 export type CheckpointDispatchRow = typeof checkpointDispatches.$inferSelect;

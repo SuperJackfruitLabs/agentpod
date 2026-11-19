@@ -6,7 +6,7 @@ function row(): RetainedCheckpointAttempt["row"] {
   return { tenantId: "tenant", boardId: "brd_ABC123", runId: "run_ABC123", leaseEpoch: 7, attemptId: "attempt-fixture",
     profile: "{}", claim: "{}", authority: "authority-1", prepareRequest: "{}", prepareSHA256: "e".repeat(64), phase: "execute_pending",
     prepared: null, source: null, sourceReceipt: null, executeRequest: null, executeSHA256: null, completion: null,
-    settlementBody: null, settlementSHA256: null, settlementReceipt: null, retirement: null, createdAt: new Date(0), updatedAt: new Date(0) };
+    settlementBody: null, settlementSHA256: null, settlementReceipt: null, retirement: null, failure: null, failureReport: null, createdAt: new Date(0), updatedAt: new Date(0) };
 }
 
 test("an unchanged row stays current", () => {

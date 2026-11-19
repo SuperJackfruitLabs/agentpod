@@ -35,7 +35,7 @@ export {
   updateBridgeAgent,
 } from "./roster";
 export { BridgeRosterRefusal } from "./credential-audience";
-export { NO_PRODUCER_EFFECT_PHASES, readCheckpointAttempt, retireCheckpointAttempt, unresolvedCheckpointAttempts } from "./checkpoint-ledger";
+export { CHECKPOINT_TERMINAL_PHASES, NO_PRODUCER_EFFECT_PHASES, readCheckpointAttempt, retireCheckpointAttempt, unresolvedCheckpointAttempts } from "./checkpoint-ledger";
 export { canonicalCheckpoint } from "./checkpoint-json";
 export { checkpointProfileSuperseded } from "./checkpoint-profiles";
 export { probeSalaamWork, settleNeverDispatchedSalaamWork } from "./salaam-dispatch";
