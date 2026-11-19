@@ -593,8 +593,8 @@ A roster row authenticates to superpipeline one of two ways:
 - **A legacy token** (`token_encrypted`, plus an optional run-only token). A `spa_` token a human
   minted and pasted in. It is a long-lived bearer, stored encrypted, spent as is.
 - **A plane credential source** (`credential_source`). No secret at all: version 1 of
-  `station-plane` names the agent's own principal (`prn_…`, the occupant of the row's Salaam
-  station), the workspace's organization (`org_…`) and the superpipeline audience. On every board
+  `station-plane` names the agent's own principal (`prn_…`, the occupant of the row's station,
+  whatever its harness), the workspace's organization (`org_…`) and the superpipeline audience. On every board
   request the hub asks the organization plane for a short-lived agent grant for that principal and
   audience, verifies its signature, issuer, audience and organization, rechecks the roster, station
   occupant and owner around the exchange, and never stores or logs the grant. This is what the
@@ -606,8 +606,10 @@ coordinator only works with a source; on a token row it refuses every cycle with
 
 The hub admits a source only when:
 
-- its station is a Salaam station whose occupant is the source's principal;
+- the row's station is occupied by the source's principal (any harness: Salaam, Hermes, or another);
 - the workspace is mapped to the organization plane, and its organization is the source's;
+- the organization plane, asked fresh, says that principal is an unsuspended **agent** in that
+  organization;
 - its audience is **this deployment's** superpipeline audience, the origin of
   `SUPERPIPELINE_BASE_URL`. That is a set of one: a staging hub admits only the staging audience
   and production only its own. With `SUPERPIPELINE_BASE_URL` unset or not `https`, no source is
@@ -634,7 +636,12 @@ AGENTPOD_HUB=https://hub.agentpod.dev fleet bridge set KEY \
 The same change is `PATCH /api/admin/bridge/agents/KEY` with
 `{"credentialSource": {"version": 1, "kind": "station-plane", "principalId": "prn_…",
 "organizationId": "org_…", "audience": "<this hub's superpipeline origin>"}}`. A refusal names
-the rule it broke, including the audience the hub expected. `fleet bridge list` shows the source
+the one rule it broke: the occupant, the workspace mapping, the organization, the principal's kind,
+or the audience the hub expected.
+
+A source row holds no run-only token either, so a harness that completes its own card over MCP
+with that token (Hermes and the other ACP harnesses) loses those board tools on a source row. A
+row that only does checkpoint work does not need them. `fleet bridge list` shows the source
 it stored. To go back to a token, `fleet bridge set KEY --credential-source none --token spa_…`.
 
 The organization plane must also be willing to mint an agent grant for that audience: the

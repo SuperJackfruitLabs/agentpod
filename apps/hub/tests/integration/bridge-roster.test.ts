@@ -34,10 +34,14 @@ import { stations } from "../../src/db/schema/stations";
 import { nodes } from "../../src/db/schema/nodes";
 import { tenants, BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
+import { fakePlane, fakePlaneJwks, signPlaneToken } from "../helpers/fake-plane";
+import { setOrgPlaneClientForTests } from "../../src/auth/org-plane/client";
+import { TEST_PLANE } from "../../src/auth/org-plane/config";
 import { createTestUser } from "../helpers/database";
 import {
   createBridgeAgent,
   deleteBridgeAgent,
+  bridgePlaneCredential,
   listBridgeAgents,
   readBridgeRoster,
   updateBridgeAgent,
@@ -280,10 +284,18 @@ const sourceFor = (audience: string) => ({
   audience,
 });
 
+/** The occupant's plane record, for a test to change. */
+function occupant() {
+  const p = fakePlane.principals.get(PRINCIPAL);
+  if (!p) throw Error("fixture occupant missing");
+  return p;
+}
+
 /** Map the tenant to an organization and seat the principal in a Salaam station, then restore. */
 async function withSalaamBinding(
   superpipeline: string | undefined,
   body: () => Promise<void>,
+  harness = "salaam",
 ) {
   const [tenant] = await db
     .select()
@@ -299,11 +311,15 @@ async function withSalaamBinding(
     .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
   await db
     .update(stations)
-    .set({ harness: "salaam", principalId: PRINCIPAL })
+    .set({ harness, principalId: PRINCIPAL })
     .where(eq(stations.id, STATION_ID));
+  // The occupant as the organization plane knows it: an agent in the workspace's organization.
+  fakePlane.addAgent({ id: PRINCIPAL });
+  occupant().organizationId = ORGANIZATION;
   try {
     await body();
   } finally {
+    fakePlane.remove(PRINCIPAL);
     if (priorSuperpipeline === undefined)
       delete process.env.SUPERPIPELINE_BASE_URL;
     else process.env.SUPERPIPELINE_BASE_URL = priorSuperpipeline;
@@ -456,5 +472,105 @@ test("a legacy token row upgrades in place to a credential source, and the token
     expect(secret?.token).toBe("");
     expect(secret?.mcpToken).toBeNull();
     expect(secret?.credentialSource).toEqual(sourceFor(STAGING));
+  });
+});
+
+/** A source row for the fixture occupant, at the production audience. */
+const create = () =>
+  createBridgeAgent({ ...base(), token: undefined, credentialSource: sourceFor(PRODUCTION) });
+
+describe("a station-plane source is the occupant's identity, whatever the harness", () => {
+
+  test("a hermes station whose occupant is an agent of the mapped organization is admitted", async () => {
+    await withSalaamBinding(PRODUCTION, async () => {
+      await create();
+      const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+      expect(secret?.credentialSource).toEqual(sourceFor(PRODUCTION));
+      expect(secret?.token).toBe("");
+    }, "hermes");
+  });
+
+  test("a legacy hermes row upgrades in place", async () => {
+    await withSalaamBinding(PRODUCTION, async () => {
+      await createBridgeAgent({ ...base(), mcpToken: MCP_TOKEN });
+      expect(
+        await updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", { credentialSource: sourceFor(PRODUCTION) }),
+      ).toBe(true);
+      expect((await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]?.credentialSource).toEqual(sourceFor(PRODUCTION));
+    }, "hermes");
+  });
+
+  test("a hermes row's source is spent: the exchange runs and the binding check passes", async () => {
+    const restorePlane = setOrgPlaneClientForTests({
+      ...fakePlane,
+      agentToken: async (principal, audience) => ({
+        expiresIn: 300,
+        accessToken: await signPlaneToken({ sub: principal, principalKind: "agent", aud: audience,
+          ent: ["superpipeline"], scope: "claim", org: ORGANIZATION }),
+      }),
+    });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const address = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      return address === TEST_PLANE.jwksUrl ? Response.json(await fakePlaneJwks()) : realFetch(url, init);
+    }, { preconnect: realFetch.preconnect });
+    try {
+      await withSalaamBinding(PRODUCTION, async () => {
+        await create();
+        const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+        if (!secret) throw Error("fixture roster secret missing");
+        expect(typeof (await bridgePlaneCredential(secret)())).toBe("string");
+      }, "hermes");
+    } finally {
+      globalThis.fetch = realFetch;
+      restorePlane();
+    }
+  });
+
+  test("an occupant that is not an agent principal is refused", async () => {
+    await withSalaamBinding(PRODUCTION, async () => {
+      occupant().kind = "human";
+      await expect(create()).rejects.toThrow("the occupant is a human principal, not an agent");
+    }, "hermes");
+  });
+
+  test("an occupant the plane places in another organization is refused", async () => {
+    await withSalaamBinding(PRODUCTION, async () => {
+      occupant().organizationId = "org_ffffffffffffffffffff";
+      await expect(create()).rejects.toThrow("the occupant belongs to another organization");
+    }, "hermes");
+  });
+
+  test("a source naming another organization than the workspace's is refused", async () => {
+    await withSalaamBinding(PRODUCTION, async () => {
+      await expect(
+        createBridgeAgent({
+          ...base(),
+          token: undefined,
+          credentialSource: { ...sourceFor(PRODUCTION), organizationId: "org_ffffffffffffffffffff" },
+        }),
+      ).rejects.toThrow("the organization is not this workspace's");
+    }, "hermes");
+  });
+
+  test("a source naming someone other than the station's occupant is refused", async () => {
+    await withSalaamBinding(PRODUCTION, async () => {
+      await expect(
+        createBridgeAgent({
+          ...base(),
+          token: undefined,
+          credentialSource: { ...sourceFor(PRODUCTION), principalId: "prn_ffffffffffffffffffff" },
+        }),
+      ).rejects.toThrow("the principal is not this station's occupant");
+    }, "hermes");
+  });
+
+  test("a suspended or unknown occupant is refused", async () => {
+    await withSalaamBinding(PRODUCTION, async () => {
+      occupant().suspended = true;
+      await expect(create()).rejects.toThrow("the occupant is suspended");
+      fakePlane.remove(PRINCIPAL);
+      await expect(create()).rejects.toThrow("not a principal at the organization plane");
+    }, "hermes");
   });
 });

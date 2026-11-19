@@ -41,6 +41,7 @@ import { adminBridgeAgentsRouter } from "../../src/routes/admin-bridge-agents";
 import * as salaamDispatch from "../../src/services/bridge/salaam-dispatch";
 import { readBridgeRoster } from "../../src/services/bridge/roster";
 import { createTestUser } from "../helpers/database";
+import { fakePlane } from "../helpers/fake-plane";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
 const NODE_ID = "node_bridge_routes_test";
@@ -251,7 +252,7 @@ describe("giving a legacy row a credential source", () => {
     audience,
   });
 
-  test("PATCH upgrades the row in place to this deployment's audience only, and never echoes a token", async () => {
+  test("PATCH upgrades a hermes row in place to this deployment's audience only, and never echoes a token", async () => {
     const [tenant] = await db
       .select()
       .from(tenants)
@@ -265,8 +266,13 @@ describe("giving a legacy row a credential source", () => {
       .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
     await db
       .update(stations)
-      .set({ harness: "salaam", principalId })
+      .set({ principalId })
       .where(eq(stations.id, STATION_ID));
+    // The fixture station runs hermes: a source is the occupant's identity, whatever the harness.
+    fakePlane.addAgent({ id: principalId });
+    const planeRecord = fakePlane.principals.get(principalId);
+    if (!planeRecord) throw Error("fixture occupant missing");
+    planeRecord.organizationId = organizationId;
     try {
       await post({ ...valid(), mcpToken: MCP_TOKEN });
 
@@ -278,6 +284,14 @@ describe("giving a legacy row a credential source", () => {
         "this deployment's SuperPipeline audience, https://staging-app.superpipeline.dev",
       );
       expect((await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]?.token).toBe(TOKEN);
+
+      const stranger = await patch("coder-kai", {
+        credentialSource: { ...source("https://staging-app.superpipeline.dev"), principalId: "prn_ffffffffffffffffffff" },
+      });
+      expect(stranger.status).toBe(400);
+      expect(await jsonField(stranger, "error")).toBe(
+        "Station-plane source: the principal is not this station's occupant",
+      );
 
       const arbitrary = await patch("coder-kai", {
         credentialSource: source("https://attacker.test/path"),
@@ -302,6 +316,7 @@ describe("giving a legacy row a credential source", () => {
         "https://staging-app.superpipeline.dev",
       );
     } finally {
+      fakePlane.remove(principalId);
       if (savedOrigin === undefined) delete process.env.SUPERPIPELINE_BASE_URL;
       else process.env.SUPERPIPELINE_BASE_URL = savedOrigin;
       await db

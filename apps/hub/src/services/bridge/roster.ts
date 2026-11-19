@@ -37,7 +37,7 @@ import { BridgeRosterRefusal, parseDeploymentCredentialSource } from "./credenti
 import { tenants } from "../../db/schema/tenants";
 import { orgPlane } from "../../auth/org-plane/config";
 import { createPlaneVerifier } from "../../auth/org-plane/verify";
-import { orgPlaneClient } from "../../auth/org-plane/client";
+import { orgPlaneClient, type PlanePrincipal } from "../../auth/org-plane/client";
 import {
   createBridgePlaneCredential,
   type BridgeCredentialSnapshot,
@@ -465,16 +465,49 @@ async function validateCredentialInput(
     .from(tenants)
     .where(eq(tenants.id, tenantId))
     .limit(1);
-  if (
-    !station ||
-    station.harness !== "salaam" ||
-    station.principalId !== source.principalId ||
-    tenant?.externalSource !== "org-plane" ||
-    tenant.externalId !== source.organizationId
-  )
+  // Any harness: the source is the occupant's own plane identity, and nothing here depends on
+  // what runs at the station. It was Salaam-only because Salaam durable work shipped it first;
+  // Salaam execution authority (`services/salaam/authority.ts`) keeps its own Salaam rule.
+  // Each refusal names the one condition that failed.
+  if (!station)
+    throw new BridgeRosterRefusal("Station-plane source: no such station in this workspace");
+  if (!station.principalId)
+    throw new BridgeRosterRefusal("Station-plane source: the station has no occupant");
+  if (station.principalId !== source.principalId)
     throw new BridgeRosterRefusal(
-      "Station-plane source requires the exact Salaam occupant and mapped organization",
+      "Station-plane source: the principal is not this station's occupant",
     );
+  if (tenant?.externalSource !== "org-plane")
+    throw new BridgeRosterRefusal(
+      "Station-plane source: this workspace is not mapped to the organization plane",
+    );
+  if (tenant.externalId !== source.organizationId)
+    throw new BridgeRosterRefusal(
+      "Station-plane source: the organization is not this workspace's",
+    );
+  // A fresh read, not the display cache: the exchange spends this principal as an agent.
+  let principal: PlanePrincipal | null;
+  try {
+    principal = await orgPlaneClient().getPrincipal(source.principalId);
+  } catch {
+    throw new BridgeRosterRefusal(
+      "Station-plane source: the organization plane could not be asked about the occupant; nothing was changed",
+    );
+  }
+  if (!principal)
+    throw new BridgeRosterRefusal(
+      "Station-plane source: the occupant is not a principal at the organization plane",
+    );
+  if (principal.kind !== "agent")
+    throw new BridgeRosterRefusal(
+      `Station-plane source: the occupant is a ${principal.kind} principal, not an agent`,
+    );
+  if (principal.organizationId !== source.organizationId)
+    throw new BridgeRosterRefusal(
+      "Station-plane source: the occupant belongs to another organization",
+    );
+  if (principal.suspended)
+    throw new BridgeRosterRefusal("Station-plane source: the occupant is suspended");
 }
 
 /** No exchanged bearer is persisted. A new signed grant is acquired for each board request. */
@@ -509,12 +542,7 @@ export function bridgePlaneCredential(
         ),
       )
       .limit(1);
-    if (
-      !row ||
-      row.station.harness !== "salaam" ||
-      row.tenant.externalSource !== "org-plane"
-    )
-      return null;
+    if (!row || row.tenant.externalSource !== "org-plane") return null;
     return {
       revision: revisionOf(row.agent),
       principalId: row.station.principalId,
