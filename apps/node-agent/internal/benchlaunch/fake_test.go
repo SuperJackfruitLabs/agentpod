@@ -53,6 +53,11 @@ type fakeBench struct {
 	failCreate   bool   // the next create fails and leaves the bench stuck with a grant
 	holdRecreate bool   // the host has not freed the stuck tree: a create stays a conflict
 	sameRecreate bool   // a create over a stuck bench reports the old bench_id (a producer fault)
+	// absent: the key has no bench yet. A specific-key status answers the
+	// contract's not_found (never an empty inventory) and a create makes it.
+	absent bool
+	// statusDown: status answers the contract's unavailable.
+	statusDown bool
 }
 type receipt struct {
 	digest string
@@ -207,8 +212,20 @@ func (f *fakeBench) act(ctx context.Context, spec benchdispatch.SourceSpec, r be
 	if f.reclaim != "" && op != "status" && op != "create" {
 		return 409, envelope(op, r.RequestID, false, nil, "conflict")
 	}
+	if op == "status" && (f.absent || f.statusDown) {
+		name := "error-404-not_found"
+		if f.statusDown {
+			name = "error-503-unavailable"
+		}
+		return corpusStatusError(f.t, name)
+	}
 	switch op {
 	case "create":
+		if f.absent {
+			f.absent, f.effects[op] = false, f.effects[op]+1
+			m := benchworkspace.Mutation{Workspace: f.workspace(spec, false, strings.Repeat("2", 32), fakeCommitA, fakeCommitB), RootPath: "/data/benches/" + spec.BenchKey}
+			return 200, envelope(op, r.RequestID, true, m, "")
+		}
 		if f.failCreate {
 			f.failCreate, f.effects[op] = false, f.effects[op]+1
 			f.stuck, f.initToken, f.stopped = "initializing", strings.Repeat("7", 32), false

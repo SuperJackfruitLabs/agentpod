@@ -151,7 +151,9 @@ func (c Coordinator) initializationToken(ctx context.Context, spec benchdispatch
 }
 
 // inspect reads the key's one workspace. ok is false when the reply could not
-// be read; a key with no workspace is ok with a nil workspace.
+// be read; a key with no workspace is ok with a nil workspace. A key with no
+// bench at all (the contract's not_found on a specific-key status) is also ok
+// with a nil workspace: there is no owner to stop, and the create decides.
 func (c Coordinator) inspect(ctx context.Context, spec benchdispatch.SourceSpec) (*benchworkspace.WorkspaceInventory, bool) {
 	request := benchworkspace.Request{Version: benchworkspace.Version, Operation: "status", Key: spec.BenchKey}
 	raw, _ := json.Marshal(request)
@@ -160,6 +162,9 @@ func (c Coordinator) inspect(ctx context.Context, spec benchdispatch.SourceSpec)
 		return nil, false
 	}
 	reply, err := benchworkspace.ParseResponse(body, status, request)
+	if err == nil && benchworkspace.KeyAbsent(request, reply) {
+		return nil, true
+	}
 	inventory, ok := reply.Result.(*benchworkspace.Status)
 	if err != nil || !ok || len(inventory.Benches) > 1 {
 		return nil, false

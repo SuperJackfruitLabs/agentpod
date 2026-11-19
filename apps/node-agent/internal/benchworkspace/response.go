@@ -196,3 +196,14 @@ type HostStatus struct {
 }
 
 func (*HostStatus) responseResult() {}
+
+// KeyAbsent reports a definite answer that the key has no bench. The contract
+// answers a specific-key status with exactly that key's record or not_found,
+// so not_found on such a status is absence, not an error. Every other reply
+// is not: unavailable and the rest are unknowns, a not_found without the
+// status operation (an unknown route or version) says nothing about the key,
+// and a global status (no key) never answers not_found.
+func KeyAbsent(request Request, reply Response) bool {
+	return request.Operation == "status" && request.Key != "" && reply.Operation == "status" && !reply.OK &&
+		reply.Error != nil && reply.Error.Code == "not_found"
+}
