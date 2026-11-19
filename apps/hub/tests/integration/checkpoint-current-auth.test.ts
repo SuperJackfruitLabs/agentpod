@@ -13,7 +13,7 @@ import { bridgeAgents } from "../../src/db/schema/bridge";
 import { checkpointDispatches } from "../../src/db/schema/checkpoint-dispatch";
 import { checkpointCurrentRoutes } from "../../src/routes/checkpoint-current";
 import { connectionManager, handleNodeMessage } from "../../src/services/broker";
-import { checkpointProfileId, parseCheckpointProfile } from "../../src/services/bridge/checkpoint-profile";
+import { CheckpointRefused, checkpointProfileId, parseCheckpointProfile } from "../../src/services/bridge/checkpoint-profile";
 import { readCheckpointAttempt, reserveCheckpointAttempt } from "../../src/services/bridge/checkpoint-ledger";
 import { driveCheckpointAttempt } from "../../src/services/bridge/checkpoint-orchestrator";
 import { checkpointAgentClient } from "../../src/services/bridge/checkpoint-agent-client";
@@ -37,7 +37,7 @@ const tenantId = "fleet_" + suffix, nodeId = "node_" + suffix, stationId = "stat
 const owner = "prn_" + suffix, occupant = "prn_" + suffix.slice(1) + "f";
 const secret = "fixture-node-secret-" + suffix;
 const app = new Hono().route("/api", checkpointCurrentRoutes);
-const initialEnvironment = { flag: process.env.PROPOSED_CHECKPOINT_COORDINATOR, file: process.env.PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE, control: process.env.ENFORCE_CONTROL_PAIR };
+const initialEnvironment = { flag: process.env.PROPOSED_CHECKPOINT_COORDINATOR, file: process.env.PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE, control: process.env.ENFORCE_CONTROL_PAIR, superpipeline: process.env.SUPERPIPELINE_BASE_URL };
 let root = "";
 const profile = parseCheckpointProfile({ version: "agentpod.checkpoint-profile.v1", organizationId: organizationId,
   sourceTenantId: claimFixture.pending.tenantId, sourceOrigin: "https://pipeline.test", sourceAudience: "https://app.superpipeline.dev",
@@ -63,6 +63,8 @@ const encode = (s: string) => new TextEncoder().encode(s);
 beforeAll(async () => {
   await ensurePgMigrations();
   process.env.ENFORCE_CONTROL_PAIR = "true";
+  // The deployment's SuperPipeline, whose origin is the only audience a credential source may name.
+  process.env.SUPERPIPELINE_BASE_URL = "https://app.superpipeline.dev/";
   fakePlane.addAgent({ id: occupant }); fakePlane.addHuman({ id: owner, grant: { mayDispatch: [occupant] } });
   for (const id of [occupant, owner]) {
     const principal = fakePlane.principals.get(id);
@@ -104,7 +106,7 @@ afterAll(async () => {
   await db.delete(stations).where(eq(stations.tenantId, tenantId));
   await db.delete(nodes).where(eq(nodes.tenantId, tenantId));
   fakePlane.remove(owner); fakePlane.remove(occupant); if (root) rmSync(root, { recursive: true, force: true });
-  for (const [name, value] of [["PROPOSED_CHECKPOINT_COORDINATOR", initialEnvironment.flag], ["PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE", initialEnvironment.file], ["ENFORCE_CONTROL_PAIR", initialEnvironment.control]])
+  for (const [name, value] of [["PROPOSED_CHECKPOINT_COORDINATOR", initialEnvironment.flag], ["PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE", initialEnvironment.file], ["ENFORCE_CONTROL_PAIR", initialEnvironment.control], ["SUPERPIPELINE_BASE_URL", initialEnvironment.superpipeline]])
     if (name) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
 });
 async function current(overrides: Record<string, unknown> = {}, credential = nodeId + ":" + secret) {
@@ -262,6 +264,33 @@ test.each(["none", "prepare", "execute", "settlement", "before-settlement", "bef
     contextClaim = claim;
     extraFetch = async () => { throw new Error("unexpected private auth fixture request"); };
     connectionManager.register(nodeId, () => {});
+  }
+});
+
+test("the agent client builds from a valid source only on the deployment that source names", async () => {
+  const reasons: Array<string | undefined> = [];
+  const refusedWith = async () => {
+    try { await checkpointAgentClient(profile); return "built"; }
+    catch (error) { if (!(error instanceof CheckpointRefused)) throw error; reasons.push(error.reason); return error.code; }
+  };
+  try {
+    expect(await checkpointAgentClient(profile)).toBeDefined();
+    // A staging hub refuses the production audience the row and the profile both name.
+    process.env.SUPERPIPELINE_BASE_URL = "https://staging-app.superpipeline.dev";
+    expect(await refusedWith()).toBe("authority");
+    delete process.env.SUPERPIPELINE_BASE_URL;
+    expect(await refusedWith()).toBe("authority");
+    process.env.SUPERPIPELINE_BASE_URL = "https://app.superpipeline.dev";
+    // A legacy token row carries no source: still refused, before any exchange.
+    await db.update(bridgeAgents).set({ credentialSource: null, tokenEncrypted: "legacy-ciphertext" })
+      .where(eq(bridgeAgents.tenantId, tenantId));
+    expect(await refusedWith()).toBe("authority");
+    expect(reasons).toEqual(["credential.audience", "credential.audience", "credential.missing"]);
+  } finally {
+    process.env.SUPERPIPELINE_BASE_URL = "https://app.superpipeline.dev/";
+    await db.update(bridgeAgents).set({ tokenEncrypted: "", credentialSource: { version: 1, kind: "station-plane",
+      principalId: occupant, organizationId: organizationId, audience: "https://app.superpipeline.dev" } })
+      .where(eq(bridgeAgents.tenantId, tenantId));
   }
 });
 

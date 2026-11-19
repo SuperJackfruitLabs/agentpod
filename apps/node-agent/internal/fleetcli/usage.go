@@ -27,6 +27,8 @@ const BridgeUsage = `usage:
                    [--mode M] [--concurrency N] [--profile P] [--wait-ms N] [--enabled true|false]
   fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                    [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
+                   [--credential-source station-plane --principal P --organization O --audience A]
+                   [--credential-source none --token T]
   fleet bridge rm KEY
   fleet bridge related-work BOARD on|off`
 

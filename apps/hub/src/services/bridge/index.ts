@@ -34,6 +34,7 @@ export {
   readBridgeRoster,
   updateBridgeAgent,
 } from "./roster";
+export { BridgeRosterRefusal } from "./credential-audience";
 export { probeSalaamWork, settleNeverDispatchedSalaamWork } from "./salaam-dispatch";
 export { traceDeliveryEvidence } from "./salaam-trace";
 export { bridgeReadiness } from "./station-readiness";

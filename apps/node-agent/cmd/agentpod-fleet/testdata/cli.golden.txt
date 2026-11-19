@@ -2202,6 +2202,8 @@ usage:
                    [--mode M] [--concurrency N] [--profile P] [--wait-ms N] [--enabled true|false]
   fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                    [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
+                   [--credential-source station-plane --principal P --organization O --audience A]
+                   [--credential-source none --token T]
   fleet bridge rm KEY
   fleet bridge related-work BOARD on|off
 --- stderr
@@ -2223,10 +2225,14 @@ exit 0
 --- stdout
 --- stderr
 Usage of fleet bridge:
+  -audience string
+    	this deployment's SuperPipeline origin (station-plane)
   -board string
     	SuperPipeline board id
   -concurrency int
     	max cards at once
+  -credential-source string
+    	station-plane, or none to return to a token (set)
   -enabled string
     	true or false
   -key string
@@ -2235,6 +2241,10 @@ Usage of fleet bridge:
     	run-scoped token the harness spends
   -mode string
     	permission mode
+  -organization string
+    	the workspace's org_ id (station-plane)
+  -principal string
+    	the station occupant's prn_ id (station-plane)
   -profile string
     	profile key
   -station string
@@ -2256,6 +2266,8 @@ usage:
                    [--mode M] [--concurrency N] [--profile P] [--wait-ms N] [--enabled true|false]
   fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                    [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
+                   [--credential-source station-plane --principal P --organization O --audience A]
+                   [--credential-source none --token T]
   fleet bridge rm KEY
   fleet bridge related-work BOARD on|off
 
@@ -2283,6 +2295,8 @@ usage:
                    [--mode M] [--concurrency N] [--profile P] [--wait-ms N] [--enabled true|false]
   fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                    [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
+                   [--credential-source station-plane --principal P --organization O --audience A]
+                   [--credential-source none --token T]
   fleet bridge rm KEY
   fleet bridge related-work BOARD on|off
 

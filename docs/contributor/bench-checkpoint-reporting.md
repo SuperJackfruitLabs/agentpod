@@ -56,6 +56,17 @@ Two prerequisites must hold before the coordinator can select any work:
 - **A dispatch grant for each checkpoint agent.** The profile's owner principal
   must carry the occupant agent's principal ID in its issuer `mayDispatch`
   claim. Without it every selection refuses with `authority`.
+- **A plane credential source on the checkpoint agent's roster row.** The
+  checkpoint client spends no stored token. It exchanges the occupant's own plane
+  identity for a short-lived, verified grant on each request, so the row named by
+  the profile's `agentKey` must carry a `station-plane` credential source. A
+  legacy token row (`credential_source` NULL) refuses every cycle with `authority`
+  and reason `credential.missing`, before the Node is asked anything. The source
+  names the occupant principal, the workspace organization and this deployment's
+  SuperPipeline audience: the origin of the Hub's `SUPERPIPELINE_BASE_URL`, and
+  nothing else. It must also equal the profile's `sourceAudience`. See
+  [DEPLOYMENT.md → Giving an agent a plane credential source](../DEPLOYMENT.md#giving-an-agent-a-plane-credential-source)
+  for the command on staging and on production.
 
 A refusal is scoped to checkpoint work. A refused selection or checkpoint client
 never ends the agent's claim cycle: the cycle continues with an ordinary claim,
@@ -77,7 +88,9 @@ still `authority`, and the reason never contains an identifier, token or raw err
 | `node.status`, `node.offline`, `node.last_seen` | The node row is not online, the Hub has no live session for it, or its last heartbeat is older than 45 seconds |
 | `issuer.occupant.*`, `issuer.owner.*` | The issuer does not return the principal, or it is suspended, in another organization, or the occupant is not an agent |
 | `issuer.grant` | The owner's `mayDispatch` does not cover the occupant |
-| `credential.missing`, `credential.principal`, `credential.organization`, `credential.audience` | The roster row has no plane credential source, or it differs from the profile's occupant, organization or `sourceAudience` |
+| `credential.missing` | The roster row has no plane credential source (a legacy token row), or the stored source does not parse |
+| `credential.principal`, `credential.organization` | The source differs from the profile's occupant or organization |
+| `credential.audience` | The source's audience is not this Hub's configured SuperPipeline audience (the origin of `SUPERPIPELINE_BASE_URL`; unset admits none), or differs from the profile's `sourceAudience` |
 | `selection.identity`, `selection.target` | The cycle asked about another station, or about a target that is not the profile's |
 | `node.state:<state>.<code>` | The node's ready reply was not `available`, for example `node.state:refused.unavailable` |
 | `node.target.<field>` | The node advertised a target that differs from the profile's in that field |

@@ -268,30 +268,62 @@ describe("the roster is tenant-scoped, which the env var had no way to be", () =
   });
 });
 
-test("station-plane roster stores binding only, rejects drift and can always disable", async () => {
+const PRINCIPAL = "prn_12345678901234567890";
+const ORGANIZATION = "org_12345678901234567890";
+const PRODUCTION = "https://app.superpipeline.dev";
+const STAGING = "https://staging-app.superpipeline.dev";
+const sourceFor = (audience: string) => ({
+  version: 1 as const,
+  kind: "station-plane" as const,
+  principalId: PRINCIPAL,
+  organizationId: ORGANIZATION,
+  audience,
+});
+
+/** Map the tenant to an organization and seat the principal in a Salaam station, then restore. */
+async function withSalaamBinding(
+  superpipeline: string | undefined,
+  body: () => Promise<void>,
+) {
   const [tenant] = await db
     .select()
     .from(tenants)
     .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
   if (!tenant) throw Error("fixture tenant missing");
-  const principalId = "prn_12345678901234567890";
-  const organizationId = "org_12345678901234567890";
-  const source = {
-    version: 1 as const,
-    kind: "station-plane" as const,
-    principalId,
-    organizationId,
-    audience: "https://app.superpipeline.dev" as const,
-  };
+  const priorSuperpipeline = process.env.SUPERPIPELINE_BASE_URL;
+  if (superpipeline === undefined) delete process.env.SUPERPIPELINE_BASE_URL;
+  else process.env.SUPERPIPELINE_BASE_URL = superpipeline;
   await db
     .update(tenants)
-    .set({ externalSource: "org-plane", externalId: organizationId })
+    .set({ externalSource: "org-plane", externalId: ORGANIZATION })
     .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
   await db
     .update(stations)
-    .set({ harness: "salaam", principalId })
+    .set({ harness: "salaam", principalId: PRINCIPAL })
     .where(eq(stations.id, STATION_ID));
   try {
+    await body();
+  } finally {
+    if (priorSuperpipeline === undefined)
+      delete process.env.SUPERPIPELINE_BASE_URL;
+    else process.env.SUPERPIPELINE_BASE_URL = priorSuperpipeline;
+    await db
+      .update(stations)
+      .set({ harness: "hermes", principalId: null })
+      .where(eq(stations.id, STATION_ID));
+    await db
+      .update(tenants)
+      .set({
+        externalSource: tenant.externalSource,
+        externalId: tenant.externalId,
+      })
+      .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
+  }
+}
+
+test("station-plane roster stores binding only, rejects drift and can always disable", async () => {
+  const source = sourceFor(PRODUCTION);
+  await withSalaamBinding(PRODUCTION, async () => {
     await expect(
       createBridgeAgent({ ...base(), credentialSource: source }),
     ).rejects.toThrow("cannot store tokens");
@@ -341,17 +373,88 @@ test("station-plane roster stores binding only, rejects drift and can always dis
         token: TOKEN,
       }),
     ).toBe(true);
-  } finally {
-    await db
-      .update(stations)
-      .set({ harness: "hermes", principalId: null })
-      .where(eq(stations.id, STATION_ID));
-    await db
-      .update(tenants)
-      .set({
-        externalSource: tenant.externalSource,
-        externalId: tenant.externalId,
-      })
-      .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
-  }
+  });
+});
+
+describe("a credential source names this deployment's SuperPipeline audience, and no other", () => {
+  test("a staging hub admits the staging audience and refuses production's", async () => {
+    await withSalaamBinding(`${STAGING}/`, async () => {
+      await expect(
+        createBridgeAgent({
+          ...base(),
+          token: undefined,
+          credentialSource: sourceFor(PRODUCTION),
+        }),
+      ).rejects.toThrow(`this deployment's SuperPipeline audience, ${STAGING}`);
+      await createBridgeAgent({
+        ...base(),
+        token: undefined,
+        credentialSource: sourceFor(STAGING),
+      });
+      const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+      expect(secret?.credentialSource).toEqual(sourceFor(STAGING));
+    });
+  });
+
+  test("a hub with no SuperPipeline configured admits no source", async () => {
+    await withSalaamBinding(undefined, async () => {
+      await expect(
+        createBridgeAgent({
+          ...base(),
+          token: undefined,
+          credentialSource: sourceFor(PRODUCTION),
+        }),
+      ).rejects.toThrow("admits no station-plane credential source");
+    });
+  });
+
+  test("a stored source for another deployment is never read as spendable", async () => {
+    const unreadable: string[] = [];
+    await withSalaamBinding(PRODUCTION, async () => {
+      await createBridgeAgent({
+        ...base(),
+        token: undefined,
+        credentialSource: sourceFor(PRODUCTION),
+      });
+      process.env.SUPERPIPELINE_BASE_URL = STAGING;
+      expect(
+        await readBridgeRoster(BOOTSTRAP_TENANT_ID, (key) =>
+          unreadable.push(key),
+        ),
+      ).toHaveLength(0);
+    });
+    expect(unreadable).toEqual(["coder-kai"]);
+  });
+});
+
+test("a legacy token row upgrades in place to a credential source, and the token goes", async () => {
+  await withSalaamBinding(STAGING, async () => {
+    await createBridgeAgent({ ...base(), mcpToken: MCP_TOKEN });
+    // The deployment's audience only: a production source on a staging hub leaves the row alone.
+    await expect(
+      updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", {
+        credentialSource: sourceFor(PRODUCTION),
+      }),
+    ).rejects.toThrow("SuperPipeline audience");
+    const [unchanged] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+    expect(unchanged?.token).toBe(TOKEN);
+    expect(unchanged?.credentialSource).toBeNull();
+
+    expect(
+      await updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", {
+        credentialSource: sourceFor(STAGING),
+      }),
+    ).toBe(true);
+    const [row] = await db
+      .select()
+      .from(bridgeAgents)
+      .where(eq(bridgeAgents.key, "coder-kai"));
+    expect(row?.credentialSource).toEqual(sourceFor(STAGING));
+    expect(row?.tokenEncrypted).toBe("");
+    expect(row?.mcpTokenEncrypted).toBeNull();
+    const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+    expect(secret?.token).toBe("");
+    expect(secret?.mcpToken).toBeNull();
+    expect(secret?.credentialSource).toEqual(sourceFor(STAGING));
+  });
 });

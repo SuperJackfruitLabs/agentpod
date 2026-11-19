@@ -2689,6 +2689,8 @@ usage:
                    [--mode M] [--concurrency N] [--profile P] [--wait-ms N] [--enabled true|false]
   fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                    [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
+                   [--credential-source station-plane --principal P --organization O --audience A]
+                   [--credential-source none --token T]
   fleet bridge rm KEY
   fleet bridge related-work BOARD on|off
 ```
@@ -2752,9 +2754,11 @@ Change some fields of a roster row; the rest stay.
 ```text
 fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                  [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
+                 [--credential-source station-plane --principal P --organization O --audience A]
+                 [--credential-source none --token T]
 ```
 
-Refuses a change with no fields, which the hub would otherwise answer 200 for and change nothing.
+Refuses a change with no fields, which the hub would otherwise answer 200 for and change nothing. `--credential-source station-plane` gives a token row a plane credential source in place: the hub exchanges the agent's own identity for a short-lived grant on each board request and drops the stored tokens. The principal must occupy the row's Salaam station, the organization must be the workspace's, and the audience must be the hub's own SuperPipeline origin (`SUPERPIPELINE_BASE_URL`); anything else is refused. `--credential-source none` returns the row to a token and needs `--token`.
 
 | Argument | Meaning |
 |---|---|
@@ -2765,6 +2769,10 @@ Refuses a change with no fields, which the hub would otherwise answer 200 for an
 | `--board B` | string | — | SuperPipeline board id. |
 | `--station S` | string | — | Station id the work runs on. |
 | `--token T` | string | — | SuperPipeline agent token (claims). |
+| `--credential-source station-plane\|none` | string | — | Station-plane, or none to return to a token (set). |
+| `--principal P` | string | — | The station occupant's prn_ id (station-plane). |
+| `--organization O` | string | — | The workspace's org_ id (station-plane). |
+| `--audience A` | string | — | This deployment's SuperPipeline origin (station-plane). |
 | `--mcp-token M` | string | — | Run-scoped token the harness spends. |
 | `--mode M` | string | — | Permission mode. |
 | `--concurrency N` | int | `0` | Max cards at once; 0 leaves the hub's value. |

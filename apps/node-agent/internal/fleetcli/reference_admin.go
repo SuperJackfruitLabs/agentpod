@@ -87,14 +87,23 @@ var adminCommands = []clidoc.Command{
 	},
 	{
 		Path: "bridge set", Summary: "Change some fields of a roster row; the rest stay.",
-		Synopsis: "fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]\n                 [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]",
-		Detail:   "Refuses a change with no fields, which the hub would otherwise answer 200 for and change nothing.",
+		Synopsis: "fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]\n                 [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]\n                 [--credential-source station-plane --principal P --organization O --audience A]\n                 [--credential-source none --token T]",
+		Detail: "Refuses a change with no fields, which the hub would otherwise answer 200 for and change nothing. " +
+			"`--credential-source station-plane` gives a token row a plane credential source in place: the hub " +
+			"exchanges the agent's own identity for a short-lived grant on each board request and drops the stored " +
+			"tokens. The principal must occupy the row's Salaam station, the organization must be the workspace's, " +
+			"and the audience must be the hub's own SuperPipeline origin (`SUPERPIPELINE_BASE_URL`); anything else " +
+			"is refused. `--credential-source none` returns the row to a token and needs `--token`.",
 		Args:     []clidoc.Arg{{Name: "KEY", Meaning: "the roster key"}},
 		Handlers: []string{"fleetBridge"},
 		Flags: append([]clidoc.Flag{
 			{Name: "board", Arg: "B"},
 			{Name: "station", Arg: "S"},
 			{Name: "token", Arg: "T"},
+			{Name: "credential-source", Arg: "station-plane|none"},
+			{Name: "principal", Arg: "P"},
+			{Name: "organization", Arg: "O"},
+			{Name: "audience", Arg: "A"},
 		}, bridgeOptional()...),
 		Example: "fleet bridge set reviewer --board brd_456",
 	},

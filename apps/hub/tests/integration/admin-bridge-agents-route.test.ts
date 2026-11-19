@@ -36,7 +36,7 @@ import { db } from "../../src/db/drizzle";
 import { bridgeAgents } from "../../src/db/schema/bridge";
 import { stations } from "../../src/db/schema/stations";
 import { nodes } from "../../src/db/schema/nodes";
-import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
+import { BOOTSTRAP_TENANT_ID, tenants } from "../../src/db/schema/tenants";
 import { adminBridgeAgentsRouter } from "../../src/routes/admin-bridge-agents";
 import * as salaamDispatch from "../../src/services/bridge/salaam-dispatch";
 import { readBridgeRoster } from "../../src/services/bridge/roster";
@@ -237,6 +237,82 @@ describe("editing one", () => {
     expect(
       (await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]!.mcpToken,
     ).toBeNull();
+  });
+});
+
+describe("giving a legacy row a credential source", () => {
+  const principalId = "prn_abcdefabcdefabcdefab";
+  const organizationId = "org_abcdefabcdefabcdefab";
+  const source = (audience: string) => ({
+    version: 1,
+    kind: "station-plane",
+    principalId,
+    organizationId,
+    audience,
+  });
+
+  test("PATCH upgrades the row in place to this deployment's audience only, and never echoes a token", async () => {
+    const [tenant] = await db
+      .select()
+      .from(tenants)
+      .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
+    if (!tenant) throw Error("fixture tenant missing");
+    const savedOrigin = process.env.SUPERPIPELINE_BASE_URL;
+    process.env.SUPERPIPELINE_BASE_URL = "https://staging-app.superpipeline.dev";
+    await db
+      .update(tenants)
+      .set({ externalSource: "org-plane", externalId: organizationId })
+      .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
+    await db
+      .update(stations)
+      .set({ harness: "salaam", principalId })
+      .where(eq(stations.id, STATION_ID));
+    try {
+      await post({ ...valid(), mcpToken: MCP_TOKEN });
+
+      const foreign = await patch("coder-kai", {
+        credentialSource: source("https://app.superpipeline.dev"),
+      });
+      expect(foreign.status).toBe(400);
+      expect(await jsonField(foreign, "error")).toContain(
+        "this deployment's SuperPipeline audience, https://staging-app.superpipeline.dev",
+      );
+      expect((await readBridgeRoster(BOOTSTRAP_TENANT_ID))[0]?.token).toBe(TOKEN);
+
+      const arbitrary = await patch("coder-kai", {
+        credentialSource: source("https://attacker.test/path"),
+      });
+      expect(arbitrary.status).toBe(400);
+
+      const res = await patch("coder-kai", {
+        credentialSource: source("https://staging-app.superpipeline.dev"),
+      });
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expect(text).not.toContain(TOKEN);
+      expect(text).not.toContain(MCP_TOKEN);
+      expect(JSON.parse(text).agent).toMatchObject({
+        hasToken: false,
+        hasMcpToken: false,
+        credentialSource: source("https://staging-app.superpipeline.dev"),
+      });
+      const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+      expect(secret?.token).toBe("");
+      expect(secret?.credentialSource?.audience).toBe(
+        "https://staging-app.superpipeline.dev",
+      );
+    } finally {
+      if (savedOrigin === undefined) delete process.env.SUPERPIPELINE_BASE_URL;
+      else process.env.SUPERPIPELINE_BASE_URL = savedOrigin;
+      await db
+        .update(stations)
+        .set({ harness: "hermes", principalId: null })
+        .where(eq(stations.id, STATION_ID));
+      await db
+        .update(tenants)
+        .set({ externalSource: tenant.externalSource, externalId: tenant.externalId })
+        .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
+    }
   });
 });
 

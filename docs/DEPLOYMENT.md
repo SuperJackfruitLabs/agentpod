@@ -475,7 +475,7 @@ Two variables turn it on, and both are required together; the rest are optional:
 | Variable | Meaning |
 |---|---|
 | `ENABLE_SUPERPIPELINE_BRIDGE` | The gate. `isBridgeEnabled()` compares against the **literal lowercase `true`** — `1`, `TRUE` and `yes` are off. Boot validation uses the looser `getEnvBool`, so `=1` is the one value that passes validation *and* starts nothing. |
-| `SUPERPIPELINE_BASE_URL` | Origin of the superpipeline deployment, e.g. `https://superpipeline.dev`. Trailing slashes are stripped. |
+| `SUPERPIPELINE_BASE_URL` | Origin of the superpipeline deployment's app, e.g. `https://app.superpipeline.dev` (staging: `https://staging-app.superpipeline.dev`). Trailing slashes are stripped. Its origin is also the **only** audience a roster row's plane credential source may name on this hub; see "Giving an agent a plane credential source". |
 | `SUPERPIPELINE_RELAY_CREDENTIAL_FILE` | Optional. A file holding one line `svc_<20 hex>:<secret>`: an Accounts service credential with the `approval-requests:relay` scope. Set and unreadable or malformed refuses the boot; unset means SuperToolkit approval requests do not reach chat (logged once at start). See "The decision relay". |
 | `SUPERPIPELINE_PUSH_SECRET` | Optional, and needs the Matrix bridge. The HMAC key a board signs its pushes with (`X-Superpipeline-Signature`). With it, the hub registers each board's push config itself, and pushes arrive at `POST /public/bridge/superpipeline/push` (gates, questions and the rest) and `POST /public/bridge/superpipeline/work` (`work.available`). Unset, nothing is registered, both routes answer 503, gates come by the five-minute sweep and work by the 5 s poll. |
 | `TREATY_RELAY_DELIVERY_SECRET` | Optional, and needs the Matrix bridge. The key the suite's event relay signs deliveries to `POST /public/bridge/superpipeline/events` with. Set, the relay is the only door for `gate.pending` and the push subscription leaves it out; unset, that route answers 503. |
@@ -552,7 +552,8 @@ audit of who added an agent.
 | Board | yes | The superpipeline board to claim from, `brd_<16 hex>`. |
 | Station | yes | Chosen from the adopted fleet. A composite foreign key makes a station in another tenant unrepresentable. |
 | Permission mode | no (default `full-auto`) | **An edit policy, not an execution policy** — see the warning below. `full-auto` never asks. `accept-edits` auto-approves edits in the workspace. `ask` asks about edits. Anything actually asked about parks the card in `input-required` until a person answers. |
-| Claim credential | yes | The agent's own superpipeline token. Stored AES-256-GCM; it cannot be read back, only replaced. |
+| Claim credential | yes, unless a credential source is set | The agent's own superpipeline token. Stored AES-256-GCM; it cannot be read back, only replaced. |
+| Credential source | no | A `station-plane` plane identity instead of a token: see "Giving an agent a plane credential source" below. Holds no secret. A row has either this or a token, never both. Required for checkpoint dispatch. |
 | Run-only credential | no | Lets the agent complete or block **its own card** over MCP. Mint it with **Issue a run-only token** in superpipeline — not the claim credential, which could take a second card while working the first. |
 | Permission wait | no (default **30 minutes**) | How long a human has to answer before the run gives up. |
 | Concurrency | no | How many of this agent's runs may be in flight. superpipeline defaults to 1. |
@@ -584,6 +585,61 @@ hub log:
 That line is what replaces the old boot-time refusal. `validateConfig()` runs before
 `initDatabase()`, so it cannot read the table; what it still checks is the base URL and the
 encryption key.
+
+### Giving an agent a plane credential source
+
+A roster row authenticates to superpipeline one of two ways:
+
+- **A legacy token** (`token_encrypted`, plus an optional run-only token). A `spa_` token a human
+  minted and pasted in. It is a long-lived bearer, stored encrypted, spent as is.
+- **A plane credential source** (`credential_source`). No secret at all: version 1 of
+  `station-plane` names the agent's own principal (`prn_…`, the occupant of the row's Salaam
+  station), the workspace's organization (`org_…`) and the superpipeline audience. On every board
+  request the hub asks the organization plane for a short-lived agent grant for that principal and
+  audience, verifies its signature, issuer, audience and organization, rechecks the roster, station
+  occupant and owner around the exchange, and never stores or logs the grant. This is what the
+  accepted "an agent is a principal" decision requires.
+
+A row has exactly one of the two: the database refuses a source next to a token. The checkpoint
+coordinator only works with a source; on a token row it refuses every cycle with
+`credential.missing` ([bench-checkpoint-reporting.md](contributor/bench-checkpoint-reporting.md)).
+
+The hub admits a source only when:
+
+- its station is a Salaam station whose occupant is the source's principal;
+- the workspace is mapped to the organization plane, and its organization is the source's;
+- its audience is **this deployment's** superpipeline audience, the origin of
+  `SUPERPIPELINE_BASE_URL`. That is a set of one: a staging hub admits only the staging audience
+  and production only its own. With `SUPERPIPELINE_BASE_URL` unset or not `https`, no source is
+  admitted, and a stored source naming another audience is never spent.
+
+**Upgrading an existing token row** happens in place, as a workspace owner or admin, with no
+database edit. The stored tokens are dropped in the same write. Read the principal from the
+station's occupant in the console and the organization from the workspace. For the checkpoint
+agent they are the profile's `occupantPrincipalId` and `organizationId`, and the audience is its
+`sourceAudience`. Then:
+
+```sh
+# Staging: point fleet at the staging hub.
+AGENTPOD_HUB=https://staging-hub.agentpod.dev fleet bridge set KEY \
+  --credential-source station-plane --principal prn_… --organization org_… \
+  --audience https://staging-app.superpipeline.dev
+
+# Production.
+AGENTPOD_HUB=https://hub.agentpod.dev fleet bridge set KEY \
+  --credential-source station-plane --principal prn_… --organization org_… \
+  --audience https://app.superpipeline.dev
+```
+
+The same change is `PATCH /api/admin/bridge/agents/KEY` with
+`{"credentialSource": {"version": 1, "kind": "station-plane", "principalId": "prn_…",
+"organizationId": "org_…", "audience": "<this hub's superpipeline origin>"}}`. A refusal names
+the rule it broke, including the audience the hub expected. `fleet bridge list` shows the source
+it stored. To go back to a token, `fleet bridge set KEY --credential-source none --token spa_…`.
+
+The organization plane must also be willing to mint an agent grant for that audience: the
+audience has to be registered with the issuer the hub uses (`ORG_PLANE_ISSUER`). If it is not,
+the exchange fails and every request with the row fails closed.
 
 
 

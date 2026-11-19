@@ -11,6 +11,7 @@ import { readCheckpointAuthority } from "./checkpoint-current";
 import { canonicalCheckpoint, parseCheckpointContextJSON } from "./checkpoint-json";
 import { CheckpointRefused, parseCheckpointProfile, type CheckpointProfile, type CheckpointRefusalReason } from "./checkpoint-profile";
 import { SuperpipelineClient, type Fetcher } from "./superpipeline";
+import { deploymentSuperpipelineAudience } from "./credential-audience";
 
 const boundedFetch: Fetcher = async (url, init) => {
   try {
@@ -37,13 +38,17 @@ const boundedFetch: Fetcher = async (url, init) => {
 
 /**
  * The first pin the roster row's plane credential source breaks. A token row (no credential
- * source) or one the contract cannot parse is `credential.missing`. Exported for tests.
+ * source) or one the contract cannot parse is `credential.missing`. The audience must be this
+ * deployment's configured SuperPipeline audience (`deploymentAudience`, null when unconfigured)
+ * and the profile's, so a profile cannot select another plane. Exported for tests.
  */
-export function credentialRefusal(profile: CheckpointProfile, source: BridgeCredentialSource | undefined): CheckpointRefusalReason | undefined {
+export function credentialRefusal(profile: CheckpointProfile, source: BridgeCredentialSource | undefined,
+  deploymentAudience: string | null): CheckpointRefusalReason | undefined {
   if (!source) return "credential.missing";
   if (source.principalId !== profile.occupantPrincipalId) return "credential.principal";
   if (source.organizationId !== profile.organizationId) return "credential.organization";
-  if (source.audience !== profile.sourceAudience) return "credential.audience";
+  if (!deploymentAudience || source.audience !== deploymentAudience || source.audience !== profile.sourceAudience)
+    return "credential.audience";
   return undefined;
 }
 
@@ -53,7 +58,7 @@ export async function checkpointAgentClient(configuration: CheckpointProfile): P
   const [row] = await db.select({ source: bridgeAgents.credentialSource }).from(bridgeAgents).where(and(
     eq(bridgeAgents.tenantId, profile.target.tenant_id), eq(bridgeAgents.key, profile.agentKey), eq(bridgeAgents.enabled, true)));
   const source = BridgeCredentialSource.safeParse(row?.source).data;
-  const refusal = credentialRefusal(profile, source);
+  const refusal = credentialRefusal(profile, source, deploymentSuperpipelineAudience());
   if (refusal || !source) throw new CheckpointRefused("authority", refusal ?? "credential.missing");
   const issuer = orgPlane();
   const verifier = createPlaneVerifier({ issuer: issuer.issuer, audience: source.audience, jwksUrl: issuer.jwksUrl });
