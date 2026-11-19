@@ -185,7 +185,9 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 // prepareResumes says whether a prepare drives the launch's Prepare: the one
 // call that claimed the effects, or any identical prepare of a registered
 // launch, whose journaled steps make a repeat a resume (see handle).
-func prepareResumes(claimed bool, p LocalProfile) bool { return claimed || p.Launch == benchlaunch.Mode }
+func prepareResumes(claimed bool, p LocalProfile) bool {
+	return claimed || p.Launch == benchlaunch.Mode
+}
 
 // coordinator is the attempt lifecycle the handler drives. The grouped
 // context launch and the registered stdin launch both implement it.
@@ -241,6 +243,7 @@ func failed(r benchcoordinatorwire.Request, err error) (benchcoordinatorwire.Res
 func pending(r benchcoordinatorwire.Request) benchcoordinatorwire.Response {
 	return benchcoordinatorwire.Response{Version: benchcoordinatorwire.Version, Operation: r.Operation, State: "pending", Identity: r.Identity, Target: r.Target}
 }
+
 // unresolved is the wire's "unknown": this node holds the attempt's exact
 // prepare but chose nothing and invoked no source effect for it, so it holds
 // nothing. It is the one status that lets the hub re-send that same prepare.
