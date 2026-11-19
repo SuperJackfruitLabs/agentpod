@@ -127,6 +127,49 @@ run/epoch and policy around awaits; snapshot caching does not cache authority.
 These settings provision no credentials, policy or capability; no profile or
 environment setting is installed by this change.
 
+## An attempt under a replaced profile
+
+A node build or pin change replaces the installed profile while an attempt made
+under the old one is unresolved. The ledger never relabels that attempt and never
+lets the change make it disappear; it is resolved, with evidence, as follows.
+
+- **One unresolved attempt per station.** The node holds one bench per station and a
+  newer prepare waits on the older record, so while an attempt is unresolved the
+  station's new checkpoint claims wait. The wait is logged as a checkpoint refusal
+  (`uncertain`, reason `attempt.unresolved`, or `recover.<code>` when recovery itself
+  threw), rate-limited like any other. Ordinary claims continue in the same cycle.
+  Re-driving the attempt backs off from 30 seconds to 15 minutes.
+- **Superseded is a definite change.** When a loaded installation holds a different
+  profile for the attempt's station, the Hub's current-decision answers `stale_owner`
+  for the old attempt, so the node retires its own record (it releases what the
+  record holds and never runs). A profile file that failed to load is never treated
+  as superseded.
+- **The Hub retires it when the evidence proves nothing is outstanding.** Only in
+  `prepare_pending` or `prepared`, where no source was admitted to SuperPipeline and
+  no run could launch, and only on the node's `status` for the attempt's exact
+  retained identity: `unknown` while `prepare_pending` (the node never journaled the
+  prepare), or a terminal `refused`/`stale_owner` (the node retired its record). The
+  attempt ends in the terminal phase `retired`, with an immutable `retirement` holding
+  the reason (`superseded.no_record` or `superseded.node_retired`), the phase it left
+  and the node's exact reply. The station then takes a fresh claim under the current
+  profile.
+- **Everything else stays parked, named**, logged once per attempt and reason as
+  `superseded checkpoint attempt parked; an owner or admin can settle it`
+  (`superseded.effect_possible`, `superseded.node:<state>`,
+  `superseded.node_unreachable`).
+- **An owner or admin settles a parked attempt explicitly.**
+  `fleet bridge checkpoint-attempts` lists the workspace's unresolved attempts with
+  their phase, `superseded` and `effectPossible`.
+  `fleet bridge checkpoint-settle ATTEMPT --evidence "…"` ends one as `retired` with
+  reason `operator`, the operator's principal and their evidence (what they checked
+  on the node and the board, and why nothing is still running). It is audited, and
+  afterwards the Hub answers the node `stale_owner` for it. The API is
+  `GET /api/admin/checkpoint/attempts` and
+  `POST /api/admin/checkpoint/attempts/:attemptId/settle` with
+  `{"confirm": "<attempt id>", "evidence": "…"}`.
+- **Nothing is deleted.** `retired` and `reported` are terminal, a retirement can
+  never change, and every evidence cell the attempt already held stays as it was.
+
 The `bridge-checkpoint` structured logs report profile availability, successfully
 committed attempt phases, and parking with closed refusal codes. Work identifiers
 allow an operator to join the phase to its ledger row. These log events exclude

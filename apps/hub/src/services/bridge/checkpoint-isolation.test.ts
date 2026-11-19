@@ -190,3 +190,45 @@ test("a refused plane grant on the dedicated path is a named refusal, and the or
   expect(claims[0]).not.toHaveProperty("checkpointOnly");
   expect(claims[0]).not.toHaveProperty("checkpointProtocol");
 });
+
+// ─── an unresolved attempt holds checkpoint claims only ─────────────────────
+const pinnedTarget = { tenantId: "tnt_x", sourceTenantId: "tnt_x", boardId: agent.boardId, stationId: agent.stationId,
+  agentId: "agt_x", nodeId: "node_x", hostId: "host_x", registryRevision: "r", benchProtocol: "superbench.v2",
+  coordinatorImplementationSHA256: "b".repeat(64), executionMode: "linux-cgroup-v2",
+  workerVersion: "agentpod.superbench-worker.v2", workerSHA256: "a".repeat(64) } as const;
+const recovering = (recover: CheckpointDispatchPort["recover"]): CheckpointDispatchPort => ({
+  ready: async () => pinnedTarget, current: async () => true, recover,
+  dispatch: async () => { throw new Error("must not dispatch"); } });
+
+test("a recover() that throws (a superseded profile) is named, and the ordinary claim still runs", async () => {
+  const { client, claims } = ordinaryClient();
+  const refused: unknown[] = [];
+  const result = await runOnce(deps(client, { checkpoint: recovering(async () => { throw new CheckpointRefused("stale"); }),
+    checkpointRefused: (e) => refused.push(e) }));
+  expect(result.status).toBe("idle");
+  expect(refused).toHaveLength(1);
+  expect(refused[0]).toMatchObject({ code: "uncertain", reason: "recover.stale" });
+  // Exactly one claim, and it is the ordinary one: no checkpoint claim while the attempt is unresolved.
+  expect(claims).toHaveLength(1);
+  expect(claims[0]).not.toHaveProperty("checkpointOnly");
+});
+
+test("an attempt still unresolved holds new checkpoint claims, explicitly, and ordinary claims continue", async () => {
+  const { client, claims } = ordinaryClient();
+  const refused: unknown[] = [];
+  const parked = { status: "unreported", attemptId: "attempt_old", reason: "Checkpoint dispatch requires reconciliation" } as const;
+  const result = await runOnce(deps(client, { checkpoint: recovering(async () => parked), checkpointRefused: (e) => refused.push(e) }));
+  expect(result.status).toBe("idle");
+  expect(refused).toHaveLength(1);
+  expect(refused[0]).toMatchObject({ code: "uncertain", reason: "attempt.unresolved" });
+  expect(claims).toHaveLength(1);
+  expect(claims[0]).not.toHaveProperty("checkpointOnly");
+  expect(claims[0]).not.toHaveProperty("checkpointProtocol");
+});
+
+test("a recovered attempt that finished is the cycle's outcome; nothing else is claimed", async () => {
+  const { client, claims } = ordinaryClient();
+  const done = { status: "reported", attemptId: "attempt_old", externalRunId: "run_old" } as const;
+  expect(await runOnce(deps(client, { checkpoint: recovering(async () => done), checkpointRefused: () => {} }))).toEqual(done);
+  expect(claims).toHaveLength(0);
+});

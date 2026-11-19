@@ -1,7 +1,7 @@
 /** Durable once-only preparation intent. Pending rows never authorize a fresh attempt. */
 import { createHash, randomBytes } from "node:crypto";
 import { createLogger } from "../../utils/logger";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { parseBenchCoordinatorRequest, type BenchCoordinatorRequest } from "@agentpod/contract";
 import { db } from "../../db/drizzle";
 import { checkpointDispatches, type CheckpointDispatchRow } from "../../db/schema/checkpoint-dispatch";
@@ -185,9 +185,9 @@ export async function retireCheckpointAttempt(attempt: RetainedCheckpointAttempt
 
 /** The unresolved attempts of one tenant, oldest first, for an operator to inspect. */
 export async function unresolvedCheckpointAttempts(tenantId: string): Promise<CheckpointDispatchRow[]> {
-  const rows = await db.select().from(checkpointDispatches).where(eq(checkpointDispatches.tenantId, tenantId));
-  return rows.filter((row) => !TERMINAL_PHASES.has(row.phase))
-    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const rows = await db.select().from(checkpointDispatches).where(eq(checkpointDispatches.tenantId, tenantId))
+    .orderBy(asc(checkpointDispatches.createdAt));
+  return rows.filter((row) => !TERMINAL_PHASES.has(row.phase));
 }
 
 /** The unresolved attempt on a station, and whether the installed profile has replaced the one it was made under. */

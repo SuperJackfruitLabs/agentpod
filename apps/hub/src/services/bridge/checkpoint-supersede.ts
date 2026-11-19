@@ -32,13 +32,30 @@ export type SupersededResolution =
   | { outcome: "retired"; reason: CheckpointRetirementReason }
   | { outcome: "parked"; reason: SupersededParkReason };
 
-export interface SupersedeDeps {
-  status(attempt: RetainedCheckpointAttempt): Promise<BenchCoordinatorResponse>;
-  retire: typeof retireCheckpointAttempt;
+/** What a status reply says, as far as resolving is concerned. */
+export interface NodeStatusSummary {
+  state: string;
+  code?: string;
+  /** The node's exact reply, kept as the retirement's evidence. */
+  evidence?: string;
+}
+
+/** The attempt as this path reads it: its phase. Generic so tests need no ledger row. */
+interface Phased { row: { phase: string } }
+
+export interface SupersedeDeps<A extends Phased = RetainedCheckpointAttempt> {
+  status(attempt: A): Promise<NodeStatusSummary>;
+  retire(attempt: A, retirement: { reason: CheckpointRetirementReason; by: string; evidence: string }): Promise<boolean>;
 }
 
 /** The node's status for the attempt's exact retained identity and target. Never prepare, never execute. */
-async function nodeStatus(attempt: RetainedCheckpointAttempt): Promise<BenchCoordinatorResponse> {
+async function nodeStatus(attempt: RetainedCheckpointAttempt): Promise<NodeStatusSummary> {
+  const reply = await nodeStatusReply(attempt);
+  const summary: NodeStatusSummary = { state: reply.state, evidence: JSON.stringify(reply) };
+  if ("code" in reply) summary.code = reply.code;
+  return summary;
+}
+async function nodeStatusReply(attempt: RetainedCheckpointAttempt): Promise<BenchCoordinatorResponse> {
   const sent = BenchCoordinatorRequest.parse({ version: attempt.request.version, operation: "status",
     identity: attempt.request.identity, target: attempt.request.target });
   const reply = await nodeRequest(attempt.request.target.node_id, BENCH_COORDINATOR_VERB, sent, { timeoutMs: 15_000 });
@@ -51,21 +68,23 @@ async function nodeStatus(attempt: RetainedCheckpointAttempt): Promise<BenchCoor
 const defaults: SupersedeDeps = { status: nodeStatus, retire: retireCheckpointAttempt };
 
 /** Which node reply proves nothing is outstanding, for this phase. Exported for tests. */
-export function provenEffectFree(phase: string, reply: BenchCoordinatorResponse): CheckpointRetirementReason | undefined {
+export function provenEffectFree(phase: string, reply: NodeStatusSummary): CheckpointRetirementReason | undefined {
   if (!NO_PRODUCER_EFFECT_PHASES.has(phase)) return undefined;
-  if (reply.state === "refused" && "code" in reply && reply.code === "stale_owner") return "superseded.node_retired";
+  if (reply.state === "refused" && reply.code === "stale_owner") return "superseded.node_retired";
   // A prepared attempt that the node no longer knows may still hold a lease: not proof.
   if (reply.state === "unknown" && phase === "prepare_pending") return "superseded.no_record";
   return undefined;
 }
 
-export async function resolveSupersededAttempt(attempt: RetainedCheckpointAttempt,
-  deps: SupersedeDeps = defaults): Promise<SupersededResolution> {
+export function resolveSupersededAttempt(attempt: RetainedCheckpointAttempt): Promise<SupersededResolution>;
+export function resolveSupersededAttempt<A extends Phased>(attempt: A, deps: SupersedeDeps<A>): Promise<SupersededResolution>;
+export async function resolveSupersededAttempt(attempt: Phased,
+  deps: SupersedeDeps<Phased> = defaults): Promise<SupersededResolution> {
   if (!NO_PRODUCER_EFFECT_PHASES.has(attempt.row.phase)) return { outcome: "parked", reason: "superseded.effect_possible" };
-  let reply: BenchCoordinatorResponse;
+  let reply: NodeStatusSummary;
   try { reply = await deps.status(attempt); } catch { return { outcome: "parked", reason: "superseded.node_unreachable" }; }
   const reason = provenEffectFree(attempt.row.phase, reply);
-  if (!reason) return { outcome: "parked", reason: `superseded.node:${reply.state}${"code" in reply ? "." + reply.code : ""}` };
-  const retired = await deps.retire(attempt, { reason, by: "hub", evidence: JSON.stringify(reply) });
+  if (!reason) return { outcome: "parked", reason: `superseded.node:${reply.state}${reply.code === undefined ? "" : "." + reply.code}` };
+  const retired = await deps.retire(attempt, { reason, by: "hub", evidence: reply.evidence ?? JSON.stringify(reply) });
   return retired ? { outcome: "retired", reason } : { outcome: "parked", reason: "superseded.node_raced" };
 }
