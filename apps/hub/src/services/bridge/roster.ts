@@ -40,6 +40,9 @@ import { createPlaneVerifier } from "../../auth/org-plane/verify";
 import { orgPlaneClient, type PlanePrincipal } from "../../auth/org-plane/client";
 import {
   createBridgePlaneCredential,
+  missingBridgeScopes,
+  planeClaimsRefusal,
+  type BridgeCredentialRefusalReason,
   type BridgeCredentialSnapshot,
 } from "./plane-credential";
 
@@ -508,6 +511,49 @@ async function validateCredentialInput(
     );
   if (principal.suspended)
     throw new BridgeRosterRefusal("Station-plane source: the occupant is suspended");
+  await requireSpendableGrant(source);
+}
+
+/** What an operator does about each refusal of a trial exchange. */
+const GRANT_REFUSAL: Partial<Record<BridgeCredentialRefusalReason, string>> = {
+  "claims.ent": "its grant is not entitled to superpipeline at the organization plane",
+  "claims.kind": "the plane did not issue it as an agent",
+  "claims.org": "the plane issued it for another organization",
+  "claims.sub": "the plane issued it for another principal",
+  "claims.unverified": "it did not verify against the organization plane's keys and this audience",
+  "claims.expired": "it was already expired",
+};
+
+/**
+ * Exchange once, now, exactly as every board request will, and refuse the row unless that grant
+ * would be spent. Without it a row whose agent's grant lacks the `claim` scope is stored, and every
+ * cycle after it is refused. The grant is verified and dropped: never stored, never logged.
+ */
+async function requireSpendableGrant(source: BridgeCredentialSource): Promise<void> {
+  const cfg = orgPlane();
+  let reason: BridgeCredentialRefusalReason | undefined;
+  let missing: string[] = [];
+  try {
+    const issued = await orgPlaneClient().agentToken(source.principalId, source.audience);
+    const claims = await createPlaneVerifier({ issuer: cfg.issuer, jwksUrl: cfg.jwksUrl, audience: source.audience })
+      .verify(issued.accessToken);
+    reason = planeClaimsRefusal(claims, { principalId: source.principalId, org: source.organizationId });
+    if (claims) missing = missingBridgeScopes(claims);
+  } catch {
+    throw new BridgeRosterRefusal(
+      "Station-plane source: the organization plane would not exchange a grant for the occupant at this audience; nothing was changed",
+    );
+  }
+  // Scopes first, and every one that is missing: `claim` and `run` are both SuperPipeline agent
+  // scopes, and an operator fixing one should not find the other on the next attempt.
+  if (missing.length > 0 && (reason === undefined || reason === "claims.scope"))
+    throw new BridgeRosterRefusal(
+      `Station-plane source: a trial exchange for the occupant was refused (claims.scope): its grant is missing the ${missing.map((s) => `\`${s}\``).join(" and ")} scope${missing.length > 1 ? "s" : ""}; add ${missing.length > 1 ? "them" : "it"} to the agent's grant scopes at the organization plane; nothing was changed`,
+    );
+  if (reason)
+    throw new BridgeRosterRefusal(
+      `Station-plane source: a trial exchange for the occupant was refused (${reason}): ${GRANT_REFUSAL[reason] ?? "the grant cannot be spent"}; nothing was changed`,
+    );
 }
 
 /** No exchanged bearer is persisted. A new signed grant is acquired for each board request. */

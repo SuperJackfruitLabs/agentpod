@@ -9,6 +9,8 @@ import { recoverPermissionWaits } from "./dispatch-recover";
 import { selectCheckpointDispatch } from "./checkpoint-dispatch";
 import { checkpointRefusalCode, checkpointRefusalReason } from "./checkpoint-isolation";
 import { SuperpipelineApiError } from "./superpipeline";
+import { BridgeCredentialRefused } from "./plane-credential";
+import { CheckpointRefused } from "./checkpoint-profile";
 
 export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   const { client, acp, agent } = deps;
@@ -39,9 +41,28 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     dedicated = undefined;
   }
   if (dedicated) {
+    const refuse = (refused: CheckpointRefused) => {
+      if (deps.checkpointRefused) deps.checkpointRefused(refused);
+      else log("checkpoint dispatch refused; ordinary claims continue", { code: refused.code, reason: refused.reason });
+    };
+    // **An unresolved attempt holds this station's checkpoint claims, and nothing else (#911).**
+    // One unresolved attempt per station is the ledger's invariant (the node holds one bench per
+    // station and a newer prepare waits on the older record), so a new checkpoint claim waits,
+    // named. Ordinary claims do not: recovering one card's attempt used to end every cycle, so a
+    // stale attempt stopped the agent claiming anything at all.
+    let resumed: DispatchResult | undefined;
+    let held = false;
     try {
-      const resumed = await dedicated.recover();
-      if (resumed) return resumed;
+      resumed = await dedicated.recover();
+    } catch (error) {
+      if (error instanceof SuperpipelineApiError && (error.status === 401 || error.status === 403)) throw error;
+      refuse(new CheckpointRefused("uncertain", error instanceof BridgeCredentialRefused ? `credential.${error.reason}`
+        : `recover.${error instanceof CheckpointRefused ? error.code : "unavailable"}`));
+      held = true;
+    }
+    if (resumed && resumed.status !== "unreported") return resumed;
+    if (resumed) { refuse(new CheckpointRefused("uncertain", "attempt.unresolved")); held = true; }
+    if (!held) try {
       const work = await client.claim({ maxConcurrency: agent.maxConcurrency, profileKey: agent.profileKey,
         checkpointProtocol: dedicated.protocol, checkpointOnly: true });
       if (!work) return { status: "idle" };
@@ -50,7 +71,13 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     } catch (error) {
       // Preserve the loop's existing definitive credential-refusal halt.
       if (error instanceof SuperpipelineApiError && (error.status === 401 || error.status === 403)) throw error;
-      return { status: "unreported", reason: "Checkpoint dispatch requires reconciliation" };
+      // A refused plane grant is refused before any board request is sent, so nothing was claimed
+      // and nothing needs reconciling. It is a checkpoint refusal like any other (#911): named,
+      // rate-limited, and the cycle goes on to the ordinary claim. This used to become a silent
+      // `unreported`, which the loop re-ran at once: a tight loop with no line and no claim.
+      if (!(error instanceof BridgeCredentialRefused))
+        return { status: "unreported", reason: "Checkpoint dispatch requires reconciliation" };
+      refuse(new CheckpointRefused("authority", `credential.${error.reason}`));
     }
   }
 

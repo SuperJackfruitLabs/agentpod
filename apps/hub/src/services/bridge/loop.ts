@@ -24,11 +24,21 @@ import { createLogger } from "../../utils/logger";
 import { onWorkAvailable } from "./work-wake";
 import { checkpointRuntime } from "./checkpoint-port";
 import { checkpointCycle, createCheckpointRefusalLog } from "./checkpoint-isolation";
+import { createQuietLog } from "./quiet-log";
+
+export { createQuietLog } from "./quiet-log";
+import { BridgeCredentialRefused } from "./plane-credential";
 
 /** How long to wait after a claim that found nothing. */
 const DEFAULT_POLL_MS = 5_000;
 /** How long to wait after an error, so a broken board is not hammered. */
 const DEFAULT_BACKOFF_MS = 30_000;
+/**
+ * The ceiling on a parked attempt's backoff. An attempt parked for reconciliation is re-checked
+ * at the backoff, then twice that, and so on up to this, so a long-parked attempt is looked at a
+ * few times an hour rather than every cycle.
+ */
+const DEFAULT_MAX_PARKED_BACKOFF_MS = 15 * 60_000;
 
 export interface AgentLoopOptions {
   /**
@@ -49,6 +59,12 @@ export interface AgentLoopOptions {
    * may have raced the card. Absent: the poll alone, as before.
    */
   wake?: (wake: () => void) => () => void;
+  /** The ceiling on the exponential backoff for an attempt that stays parked. */
+  maxBackoffMs?: number;
+  /** Test seam for the quiet-outcome log's clock. */
+  now?: () => number;
+  /** How long a repeated quiet outcome stays unlogged. Default: the checkpoint refusal interval. */
+  relogMs?: number;
 }
 
 export interface LoopHandle {
@@ -84,6 +100,7 @@ const defaultSleep = (ms: number, signal: AbortSignal): Promise<void> =>
 export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
   const sleep = opts.sleep ?? defaultSleep;
   const log = opts.log ?? (() => {});
+  const quiet = createQuietLog(log, { ...(opts.now ? { now: opts.now } : {}), ...(opts.relogMs ? { relogMs: opts.relogMs } : {}) });
   const controller = new AbortController();
   const handover = new AbortController();
   // The idle wait in progress, so a wake can end it; a wake with none in progress is remembered.
@@ -115,6 +132,9 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
   const done = (async () => {
     let cycle = 0;
     let lastFailedRun: string | undefined;
+    // The unreported outcome last seen and how many cycles in a row it has repeated.
+    let parkedKey: string | undefined;
+    let parkedStreak = 0;
     while (!controller.signal.aborted) {
       // **Liveness, not decoration.** Twice now a bridge agent has stopped and left nothing
       // behind: a 401 retried into noise, then a cycle that never came back. Both were invisible
@@ -160,6 +180,15 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
           // is the signal — the agent stops claiming, and the line above says why.
           return;
         }
+        // A refused plane grant is refused before any request is sent (an exchange that came back
+        // without the `claim` scope, a binding that changed). It will not come right by itself on
+        // the next cycle, so it is named once, then once per interval, and backed off.
+        if (err instanceof BridgeCredentialRefused) {
+          quiet(`credential:${err.reason}`, "the agent's plane credential was refused; nothing was claimed, backing off",
+            { reason: err.reason });
+          await sleep(opts.backoffMs ?? DEFAULT_BACKOFF_MS, controller.signal);
+          continue;
+        }
         log("a claim cycle threw", { error: String(err) });
         await sleep(opts.backoffMs ?? DEFAULT_BACKOFF_MS, controller.signal);
         continue;
@@ -194,9 +223,36 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
       }
 
       if (result.status === "idle") {
+        // Nothing to claim is a reason too, recorded once per interval rather than every poll.
+        quiet("idle", "no claim this cycle: nothing to claim", { status: "idle" });
         await idle();
         continue;
       }
+
+      // **Never silent, never immediate.** `unreported` used to fall through to the next cycle with
+      // no line and no wait. From a dedicated checkpoint path that parks every cycle, that was a
+      // spin of about two cycles a second that nothing in the log admitted to.
+      // The same attempt parked again doubles the wait, up to a ceiling: reconciliation that did not
+      // resolve in one backoff rarely resolves in the next, and each check costs authority reads,
+      // a node round trip and a log line in the orchestrator.
+      if (result.status === "unreported") {
+        const key = `${result.attemptId ?? result.externalRunId ?? ""}:${result.reason ?? ""}`;
+        parkedStreak = key === parkedKey ? parkedStreak + 1 : 1;
+        parkedKey = key;
+        const base = opts.backoffMs ?? DEFAULT_BACKOFF_MS;
+        const wait = Math.min(base * 2 ** Math.min(parkedStreak - 1, 30), opts.maxBackoffMs ?? DEFAULT_MAX_PARKED_BACKOFF_MS);
+        quiet(`unreported:${result.reason ?? ""}`, "the cycle ended unreported; backing off", {
+          status: result.status,
+          ...(result.externalRunId === undefined ? {} : { run: result.externalRunId }),
+          ...(result.attemptId === undefined ? {} : { attempt: result.attemptId }),
+          ...(result.reason === undefined ? {} : { reason: result.reason }),
+          backoffMs: wait,
+        });
+        await sleep(wait, controller.signal);
+        continue;
+      }
+      parkedKey = undefined;
+      parkedStreak = 0;
 
       // **The anti-storm rule.** Both of these mean the work could not start,
       // and both leave the card claimable — so the next cycle would claim it

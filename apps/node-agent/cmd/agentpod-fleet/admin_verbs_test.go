@@ -26,6 +26,8 @@ func TestAdminVerbsUseTheHubRoutes(t *testing.T) {
 		{"bridge add", []string{"bridge", "add", "--key", "k", "--board", "brd_1", "--station", "st_1", "--token", "spa_x"}, "POST", "/api/admin/bridge/agents"},
 		{"bridge set", []string{"bridge", "set", "k", "--board", "brd_2"}, "PATCH", "/api/admin/bridge/agents/k"},
 		{"bridge rm", []string{"bridge", "rm", "k"}, "DELETE", "/api/admin/bridge/agents/k"},
+		{"bridge checkpoint-attempts", []string{"bridge", "checkpoint-attempts"}, "GET", "/api/admin/checkpoint/attempts"},
+		{"bridge checkpoint-settle", []string{"bridge", "checkpoint-settle", "attempt_1", "--evidence", "node journal shows the record cancelled"}, "POST", "/api/admin/checkpoint/attempts/attempt_1/settle"},
 
 		{"grants list", []string{"grants", "list"}, "GET", "/api/admin/grants"},
 		{"grants show", []string{"grants", "show", "prn_1"}, "GET", "/api/admin/grants/prn_1"},
@@ -282,5 +284,35 @@ func TestPrincipalsAddCredentialSendsTheClient(t *testing.T) {
 
 	if _, code := run(t, bin, env, "principals", "add-credential", "prn_1"); code != 2 {
 		t.Errorf("add-credential without --client: exit = %d, want 2", code)
+	}
+}
+
+// TestBridgeCheckpointSettleRefusesWithoutEvidence: a settlement with no evidence never leaves the
+// client. Settling ends an attempt the hub could not prove resolved; it must say why.
+func TestBridgeCheckpointSettleRefusesWithoutEvidence(t *testing.T) {
+	bin := build(t)
+	var mu sync.Mutex
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		called = true
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	env := []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}
+	for name, args := range map[string][]string{
+		"no attempt":     {"bridge", "checkpoint-settle"},
+		"no evidence":    {"bridge", "checkpoint-settle", "attempt_1"},
+		"short evidence": {"bridge", "checkpoint-settle", "attempt_1", "--evidence", "looked"},
+	} {
+		if _, code := run(t, bin, env, args...); code != 2 {
+			t.Errorf("%s: exit = %d, want 2", name, code)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if called {
+		t.Errorf("sent a settlement without evidence")
 	}
 }

@@ -19,13 +19,26 @@ import { checkpointRefusal } from "./checkpoint-refusal";
 import { checkedCheckpointReceipt } from "./checkpoint-settlement-data";
 import type { SuperpipelineClient } from "./superpipeline";
 import type { DispatchResult } from "./dispatch-types";
+import { createQuietLog, type QuietLog } from "./quiet-log";
 
 const encode = (raw: string) => new TextEncoder().encode(raw);
 const hash = (raw: string) => createHash("sha256").update(raw, "utf8").digest("hex");
 const log = createLogger("bridge-checkpoint");
+/**
+ * A parked attempt is re-checked every backoff until it resolves, so its line is said once per
+ * attempt, phase and code, then once per interval with a count, never once per re-check.
+ */
+let parkedLog = createQuietLog((message, meta) => log.warn(message, meta));
+/** Test seam: a fresh rate limit with its own clock. Returns the restore. */
+export function setParkedLogForTests(next: QuietLog): () => void {
+  const prior = parkedLog;
+  parkedLog = next;
+  return () => { parkedLog = prior; };
+}
 const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["code"] = "uncertain"): DispatchResult => {
-  log.warn("checkpoint dispatch parked for reconciliation", { tenantId: attempt.row.tenantId,
-    boardId: attempt.row.boardId, runId: attempt.claim.runId, attemptId: attempt.row.attemptId, phase: attempt.row.phase, code });
+  parkedLog([attempt.row.attemptId, attempt.row.phase, code].join("\0"), "checkpoint dispatch parked for reconciliation", {
+    tenantId: attempt.row.tenantId, boardId: attempt.row.boardId, runId: attempt.claim.runId,
+    attemptId: attempt.row.attemptId, phase: attempt.row.phase, code });
   return { status: "unreported", externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId,
     reason: "Checkpoint dispatch requires reconciliation" };
 };

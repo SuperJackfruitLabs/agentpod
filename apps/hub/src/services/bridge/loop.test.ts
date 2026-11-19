@@ -12,7 +12,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { BRIDGE_ENV_FLAG } from "./config";
 import type { DispatchResult } from "./dispatch";
 import { SuperpipelineApiError } from "./superpipeline";
-import { bridgeLogLevel, startAgentLoop, startSuperpipelineBridge } from "./loop";
+import { BridgeCredentialRefused } from "./plane-credential";
+import { bridgeLogLevel, createQuietLog, startAgentLoop, startSuperpipelineBridge } from "./loop";
 
 const saved = process.env[BRIDGE_ENV_FLAG];
 afterEach(() => {
@@ -403,5 +404,83 @@ describe("a wake ends the idle wait", () => {
     await settle();
     expect(s.calls.length).toBe(1);
     await loop.stop();
+  });
+});
+
+/** Run the loop until `cycles` cycles have run, recording sleeps and log lines. */
+async function drive(run: () => Promise<DispatchResult>, cycles: number) {
+  let n = 0;
+  const slept: number[] = [];
+  const lines: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+  const loop = startAgentLoop({
+    run: async () => { n++; return run(); },
+    pollMs: 5_000,
+    backoffMs: 30_000,
+    now: () => 0,
+    sleep: async (ms) => { slept.push(ms); },
+    log: (message, meta) => { if (message !== "cycle") lines.push({ message, ...(meta ? { meta } : {}) }); },
+  });
+  while (n < cycles) await Promise.resolve();
+  await loop.stop();
+  return { slept, lines, cycles: n };
+}
+
+describe("a cycle that claims nothing says why, and never spins", () => {
+  test("a refused plane grant names its reason once and backs off every cycle", async () => {
+    const { slept, lines, cycles } = await drive(async () => { throw new BridgeCredentialRefused("claims.scope"); }, 5);
+    expect(slept.slice(0, cycles - 1).every((ms) => ms === 30_000)).toBe(true);
+    const refused = lines.filter((l) => l.message.startsWith("the agent's plane credential was refused"));
+    expect(refused).toHaveLength(1);
+    expect(refused[0]?.meta).toEqual({ reason: "claims.scope" });
+    // Not the generic throw line, which carries the raw error every backoff.
+    expect(lines.some((l) => l.message === "a claim cycle threw")).toBe(false);
+  });
+
+  test("an unreported cycle is logged once with its reason and backs off: no tight loop", async () => {
+    const parked = { status: "unreported", reason: "Checkpoint dispatch requires reconciliation" } as const;
+    const { slept, lines, cycles } = await drive(async () => parked, 5);
+    // A backoff after every cycle: before this, the next cycle began at once and nothing was logged.
+    expect(slept.length).toBeGreaterThanOrEqual(cycles - 1);
+    expect(slept.every((ms) => ms >= 30_000)).toBe(true);
+    const logged = lines.filter((l) => l.message === "the cycle ended unreported; backing off");
+    expect(logged).toHaveLength(1);
+    expect(logged[0]?.meta).toMatchObject({ status: "unreported", reason: parked.reason });
+  });
+
+  test("the same attempt parked again backs off exponentially, to a ceiling, and resets", async () => {
+    const parked = { status: "unreported", attemptId: "attempt_1", reason: "Checkpoint dispatch requires reconciliation" } as const;
+    const script: DispatchResult[] = [...Array.from({ length: 8 }, () => parked), { status: "reported" }, parked];
+    let i = 0;
+    const slept: number[] = [];
+    const loop = startAgentLoop({
+      run: async () => script[i++] ?? { status: "idle" },
+      backoffMs: 30_000,
+      maxBackoffMs: 15 * 60_000,
+      sleep: async (ms) => { slept.push(ms); },
+    });
+    while (i < script.length + 1) await Promise.resolve();
+    await loop.stop();
+    expect(slept.slice(0, 8)).toEqual([30_000, 60_000, 120_000, 240_000, 480_000, 900_000, 900_000, 900_000]);
+    // Another outcome in between starts the next park from the base again.
+    expect(slept[8]).toBe(30_000);
+  });
+
+  test("an idle cycle is recorded once per interval, not every poll", async () => {
+    const { lines } = await drive(async () => ({ status: "idle" }), 5);
+    expect(lines.filter((l) => l.message === "no claim this cycle: nothing to claim")).toHaveLength(1);
+  });
+});
+
+describe("createQuietLog", () => {
+  test("logs each key once, then again after the interval with what it suppressed", () => {
+    let t = 0;
+    const lines: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+    const quiet = createQuietLog((message, meta) => lines.push({ message, ...(meta ? { meta } : {}) }), { now: () => t, relogMs: 100 });
+    quiet("a", "A");
+    quiet("a", "A");
+    quiet("b", "B");
+    t = 150;
+    quiet("a", "A");
+    expect(lines).toEqual([{ message: "A", meta: {} }, { message: "B", meta: {} }, { message: "A", meta: { suppressed: 1 } }]);
   });
 });

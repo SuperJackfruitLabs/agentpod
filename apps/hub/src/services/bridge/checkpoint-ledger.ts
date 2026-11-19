@@ -1,7 +1,7 @@
 /** Durable once-only preparation intent. Pending rows never authorize a fresh attempt. */
 import { createHash, randomBytes } from "node:crypto";
 import { createLogger } from "../../utils/logger";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { parseBenchCoordinatorRequest, type BenchCoordinatorRequest } from "@agentpod/contract";
 import { db } from "../../db/drizzle";
 import { checkpointDispatches, type CheckpointDispatchRow } from "../../db/schema/checkpoint-dispatch";
@@ -138,18 +138,73 @@ export async function advanceCheckpointAttempt(attempt: RetainedCheckpointAttemp
   return { attempt: current, send: false };
 }
 
-/** A pending old owner blocks fresh claims; it is never relabelled as a new run. */
-export async function pendingCheckpointAttempt(profile: CheckpointProfile): Promise<RetainedCheckpointAttempt | undefined> {
+/** Why a retained attempt ended without a report. A closed set; the evidence is stored beside it. */
+export type CheckpointRetirementReason =
+  /** Superseded profile; the node, asked by status, holds no record of the attempt. */
+  | "superseded.no_record"
+  /** Superseded profile; the node retired its own record (a terminal `stale_owner`). */
+  | "superseded.node_retired"
+  /** An owner or admin settled it explicitly, with their own evidence. */
+  | "operator";
+export interface CheckpointRetirement {
+  version: "agentpod.checkpoint-retirement.v1";
+  reason: CheckpointRetirementReason;
+  /** The phase the attempt was in when it was retired. */
+  phase: string;
+  /** "hub" for a reconciliation the ledger proved; the operator's principal for an explicit settlement. */
+  by: string;
+  at: string;
+  /** The node's exact status reply, or the operator's statement. */
+  evidence: string;
+}
+
+/** Phases in which no SuperPipeline-side effect can exist yet: no source was admitted. */
+export const NO_PRODUCER_EFFECT_PHASES: ReadonlySet<string> = new Set(["prepare_pending", "prepared"]);
+/** Phases that end an attempt. Neither blocks a new one. */
+const TERMINAL_PHASES: ReadonlySet<string> = new Set(["reported", "retired"]);
+
+/**
+ * End an unreported attempt as `retired`, with the evidence. Compare-and-set on the phase it was
+ * read in: a row that moved on meanwhile is not retired. The row and its evidence stay; nothing is
+ * deleted, and the trigger refuses retiring a reported row or changing a retirement.
+ */
+export async function retireCheckpointAttempt(attempt: RetainedCheckpointAttempt,
+  retirement: Omit<CheckpointRetirement, "version" | "phase" | "at">): Promise<boolean> {
+  if (TERMINAL_PHASES.has(attempt.row.phase)) return false;
+  const body: CheckpointRetirement = { version: "agentpod.checkpoint-retirement.v1", ...retirement,
+    phase: attempt.row.phase, at: new Date().toISOString() };
+  const value = canonicalCheckpoint(body);
+  if (Buffer.byteLength(value, "utf8") > 262144) throw new CheckpointRefused("invalid");
+  const [updated] = await db.update(checkpointDispatches).set({ phase: "retired", retirement: value, updatedAt: new Date() })
+    .where(and(eq(checkpointDispatches.tenantId, attempt.row.tenantId), eq(checkpointDispatches.attemptId, attempt.row.attemptId),
+      eq(checkpointDispatches.prepareSHA256, attempt.row.prepareSHA256), eq(checkpointDispatches.phase, attempt.row.phase))).returning();
+  if (updated) log.info("checkpoint attempt retired", { tenantId: updated.tenantId, boardId: updated.boardId,
+    runId: updated.runId, attemptId: updated.attemptId, from: attempt.row.phase, reason: retirement.reason });
+  return Boolean(updated);
+}
+
+/** The unresolved attempts of one tenant, oldest first, for an operator to inspect. */
+export async function unresolvedCheckpointAttempts(tenantId: string): Promise<CheckpointDispatchRow[]> {
+  const rows = await db.select().from(checkpointDispatches).where(eq(checkpointDispatches.tenantId, tenantId))
+    .orderBy(asc(checkpointDispatches.createdAt));
+  return rows.filter((row) => !TERMINAL_PHASES.has(row.phase));
+}
+
+/** The unresolved attempt on a station, and whether the installed profile has replaced the one it was made under. */
+export interface PendingCheckpoint { attempt: RetainedCheckpointAttempt; superseded: boolean }
+
+/**
+ * A pending old owner blocks fresh claims; it is never relabelled as a new run. One unresolved
+ * attempt per station is an invariant, not a preference: the node holds one bench per station,
+ * and a newer prepare waits on the older record anyway. An attempt made under a different profile
+ * is returned as `superseded`, never dropped: a changed profile cannot make an unresolved old
+ * reservation disappear, only a retirement with evidence can.
+ */
+export async function pendingCheckpointAttempt(profile: CheckpointProfile): Promise<PendingCheckpoint | undefined> {
   const rows = await db.select().from(checkpointDispatches).where(and(
     eq(checkpointDispatches.tenantId, profile.target.tenant_id), eq(checkpointDispatches.boardId, profile.target.board_id)));
-  const pending = rows.filter((row) => {
-    if (row.phase === "reported") return false;
-    const original = checked(row);
-    if (original.profile.target.station_id !== profile.target.station_id) return false;
-    // A changed profile cannot make an unresolved old reservation disappear.
-    if (row.profile !== canonicalCheckpoint(profile)) throw new CheckpointRefused("stale");
-    return true;
-  });
+  const pending = rows.filter((row) => !TERMINAL_PHASES.has(row.phase) && checked(row).profile.target.station_id === profile.target.station_id);
   if (pending.length > 1) throw new CheckpointRefused("uncertain");
-  return pending[0] ? checked(pending[0]) : undefined;
+  const [row] = pending;
+  return row ? { attempt: checked(row), superseded: row.profile !== canonicalCheckpoint(profile) } : undefined;
 }

@@ -5,7 +5,7 @@ import { BenchCoordinatorCurrentResponse, BenchCoordinatorPrepared, benchCoordin
 import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON } from "./checkpoint-json";
 import { readCheckpointAttempt, type RetainedCheckpointAttempt } from "./checkpoint-ledger";
 import { checkpointProfileId, CheckpointRefused } from "./checkpoint-profile";
-import { requireInstalledCheckpointProfile } from "./checkpoint-profiles";
+import { checkpointProfileSuperseded, requireInstalledCheckpointProfile } from "./checkpoint-profiles";
 import { readCheckpointAuthority } from "./checkpoint-current";
 import { checkpointAgentClient } from "./checkpoint-agent-client";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
@@ -60,6 +60,10 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array)
       canonicalCheckpoint(request.target) !== canonicalCheckpoint(attempt.request.target) ||
       request.profile_id !== checkpointProfileId(attempt.profile) || request.prepare_request_sha256 !== attempt.row.prepareSHA256)
       return refused("stale_owner");
+    // A loaded installation that replaced this attempt's profile is a definite change: no installed
+    // profile can ever authorize it again. stale_owner lets the node retire its own record (release
+    // what it holds, never run). An unreadable installation stays `unavailable` below.
+    if (attempt.row.phase === "retired" || checkpointProfileSuperseded(attempt.profile)) return refused("stale_owner");
     requireInstalledCheckpointProfile(attempt.profile);
     const authority = await readCheckpointAuthority(attempt.profile);
     if (canonicalCheckpoint(authority) !== attempt.row.authority) return refused("stale_owner");

@@ -925,6 +925,13 @@
       "when": 1792580400021,
       "tag": "0131_checkpoint_dispatches",
       "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1792580400022,
+      "tag": "0132_checkpoint_retirement",
+      "breakpoints": true
     }
   ]
 }

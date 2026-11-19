@@ -30,7 +30,9 @@ const BridgeUsage = `usage:
                    [--credential-source station-plane --principal P --organization O --audience A]
                    [--credential-source none --token T]
   fleet bridge rm KEY
-  fleet bridge related-work BOARD on|off`
+  fleet bridge related-work BOARD on|off
+  fleet bridge checkpoint-attempts
+  fleet bridge checkpoint-settle ATTEMPT --evidence TEXT`
 
 const ConfigUsage = `usage:
   fleet config settings                                         every setting the fleet can declare

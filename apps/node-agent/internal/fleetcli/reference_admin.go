@@ -61,7 +61,7 @@ var adminCommands = []clidoc.Command{
 	{
 		Path: "bridge", Group: "Administration",
 		Summary:  "The board roster: which agent claims from which board.",
-		Synopsis: "fleet bridge <list|add|set|rm|related-work> ...",
+		Synopsis: "fleet bridge <list|add|set|rm|related-work|checkpoint-attempts|checkpoint-settle> ...",
 		Help:     BridgeUsage,
 		Detail: "This table is the gate on an agent doing anything at all: a staffed, online agent " +
 			"claims no card until a row points it at a board. No verb here prints a credential. " +
@@ -123,6 +123,24 @@ var adminCommands = []clidoc.Command{
 		},
 		Handlers: []string{"fleetBridge"},
 		Example:  "fleet bridge related-work brd_0000000000000001 off",
+	},
+	{
+		Path: "bridge checkpoint-attempts", Summary: "Unresolved checkpoint attempts in this workspace.",
+		Synopsis: "fleet bridge checkpoint-attempts",
+		Detail: "Each attempt's phase, run and epoch; `superseded` when the installed profile has replaced the one " +
+			"it was made under; `effectPossible` once a source may have been admitted. Nothing here is a credential.",
+		Example: "fleet bridge checkpoint-attempts",
+	},
+	{
+		Path: "bridge checkpoint-settle", Summary: "Settle one unresolved checkpoint attempt as retired, with evidence.",
+		Synopsis: "fleet bridge checkpoint-settle ATTEMPT --evidence TEXT",
+		Detail: "For an attempt the hub cannot retire by itself. Deletes nothing: the attempt ends `retired` with your " +
+			"evidence beside what was already recorded, and the node is told it is no longer current. Without an " +
+			"ATTEMPT, or with evidence under 20 characters, exits 2 without calling the hub.",
+		Args:     []clidoc.Arg{{Name: "ATTEMPT", Meaning: "an `attempt_` id from `fleet bridge checkpoint-attempts`"}},
+		Handlers: []string{"fleetBridgeCheckpointSettle"},
+		Flags:    []clidoc.Flag{{Name: "evidence", Arg: "TEXT", Required: true}},
+		Example:  "fleet bridge checkpoint-settle attempt_0123 --evidence \"node journal shows the record cancelled; no bench lease held\"",
 	},
 	{
 		Path: "principals", Group: "Administration",

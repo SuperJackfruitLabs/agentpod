@@ -100,6 +100,10 @@ func fleetBridge(args []string) {
 		fleetSkillJSON(http.MethodDelete, base+"/"+url.PathEscape(args[1]), nil)
 	case "related-work":
 		fleetBridgeRelatedWork(args[1:])
+	case "checkpoint-attempts":
+		fleetGet("/api/admin/checkpoint/attempts", args)
+	case "checkpoint-settle":
+		fleetBridgeCheckpointSettle(args[1:])
 	default:
 		fmt.Fprintln(os.Stderr, fleetcli.BridgeUsage)
 		os.Exit(2)

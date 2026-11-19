@@ -64,7 +64,11 @@ Two prerequisites must hold before the coordinator can select any work:
   and reason `credential.missing`, before the Node is asked anything. The source
   names the occupant principal, the workspace organization and this deployment's
   SuperPipeline audience: the origin of the Hub's `SUPERPIPELINE_BASE_URL`, and
-  nothing else. It must also equal the profile's `sourceAudience`. See
+  nothing else. It must also equal the profile's `sourceAudience`. The agent's
+  grant at the organization plane must carry SuperPipeline's agent scopes,
+  `claim` and `run`: the exchanged grant takes its scopes from it, and one
+  without `claim` is refused on every request (`credential.claims.scope`).
+  Setting the source checks for both up front and names any that is missing. See
   [DEPLOYMENT.md → Giving an agent a plane credential source](../DEPLOYMENT.md#giving-an-agent-a-plane-credential-source)
   for the command on staging and on production.
 
@@ -90,6 +94,7 @@ still `authority`, and the reason never contains an identifier, token or raw err
 | `issuer.grant` | The owner's `mayDispatch` does not cover the occupant |
 | `credential.missing` | The roster row has no plane credential source (a legacy token row), or the stored source does not parse |
 | `credential.principal`, `credential.organization` | The source differs from the profile's occupant or organization |
+| `credential.claims.scope`, `credential.claims.ent`, `credential.binding.changed`, … | The exchanged plane grant was refused before any request: no `claim` scope, no `superpipeline` entitlement, a binding that changed. Nothing was claimed, so the cycle goes on to ordinary claims |
 | `credential.audience` | The source's audience is not this Hub's configured SuperPipeline audience (the origin of `SUPERPIPELINE_BASE_URL`; unset admits none), or differs from the profile's `sourceAudience` |
 | `selection.identity`, `selection.target` | The cycle asked about another station, or about a target that is not the profile's |
 | `node.state:<state>.<code>` | The node's ready reply was not `available`, for example `node.state:refused.unavailable` |
@@ -121,6 +126,49 @@ rechecks the literal flag, current issuer/control pair, selected station/node,
 run/epoch and policy around awaits; snapshot caching does not cache authority.
 These settings provision no credentials, policy or capability; no profile or
 environment setting is installed by this change.
+
+## An attempt under a replaced profile
+
+A node build or pin change replaces the installed profile while an attempt made
+under the old one is unresolved. The ledger never relabels that attempt and never
+lets the change make it disappear; it is resolved, with evidence, as follows.
+
+- **One unresolved attempt per station.** The node holds one bench per station and a
+  newer prepare waits on the older record, so while an attempt is unresolved the
+  station's new checkpoint claims wait. The wait is logged as a checkpoint refusal
+  (`uncertain`, reason `attempt.unresolved`, or `recover.<code>` when recovery itself
+  threw), rate-limited like any other. Ordinary claims continue in the same cycle.
+  Re-driving the attempt backs off from 30 seconds to 15 minutes.
+- **Superseded is a definite change.** When a loaded installation holds a different
+  profile for the attempt's station, the Hub's current-decision answers `stale_owner`
+  for the old attempt, so the node retires its own record (it releases what the
+  record holds and never runs). A profile file that failed to load is never treated
+  as superseded.
+- **The Hub retires it when the evidence proves nothing is outstanding.** Only in
+  `prepare_pending` or `prepared`, where no source was admitted to SuperPipeline and
+  no run could launch, and only on the node's `status` for the attempt's exact
+  retained identity: `unknown` while `prepare_pending` (the node never journaled the
+  prepare), or a terminal `refused`/`stale_owner` (the node retired its record). The
+  attempt ends in the terminal phase `retired`, with an immutable `retirement` holding
+  the reason (`superseded.no_record` or `superseded.node_retired`), the phase it left
+  and the node's exact reply. The station then takes a fresh claim under the current
+  profile.
+- **Everything else stays parked, named**, logged once per attempt and reason as
+  `superseded checkpoint attempt parked; an owner or admin can settle it`
+  (`superseded.effect_possible`, `superseded.node:<state>`,
+  `superseded.node_unreachable`).
+- **An owner or admin settles a parked attempt explicitly.**
+  `fleet bridge checkpoint-attempts` lists the workspace's unresolved attempts with
+  their phase, `superseded` and `effectPossible`.
+  `fleet bridge checkpoint-settle ATTEMPT --evidence "…"` ends one as `retired` with
+  reason `operator`, the operator's principal and their evidence (what they checked
+  on the node and the board, and why nothing is still running). It is audited, and
+  afterwards the Hub answers the node `stale_owner` for it. The API is
+  `GET /api/admin/checkpoint/attempts` and
+  `POST /api/admin/checkpoint/attempts/:attemptId/settle` with
+  `{"confirm": "<attempt id>", "evidence": "…"}`.
+- **Nothing is deleted.** `retired` and `reported` are terminal, a retirement can
+  never change, and every evidence cell the attempt already held stays as it was.
 
 The `bridge-checkpoint` structured logs report profile availability, successfully
 committed attempt phases, and parking with closed refusal codes. Work identifiers

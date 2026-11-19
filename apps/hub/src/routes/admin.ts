@@ -31,6 +31,7 @@ import { adminPrincipalsRouter } from "./admin-principals";
 import { agentsAdminRouter } from "./agents-admin";
 import { adminBridgeAgentsRouter } from "./admin-bridge-agents";
 import { adminBridgeBoardsRouter } from "./admin-bridge-boards";
+import { adminCheckpointAttemptsRouter } from "./admin-checkpoint-attempts";
 import { adminTranscriptionRoutes } from "./transcription-settings";
 import { adminSpeechRoutes } from "./speech-settings";
 
@@ -91,6 +92,8 @@ adminRouter.route("/principals", adminPrincipalsRouter);
 adminRouter.route("/bridge/agents", adminBridgeAgentsRouter);
 // Per-board bridge settings: today the "Related prior work" switch. Same guard, same reason.
 adminRouter.route("/bridge/boards", adminBridgeBoardsRouter);
+// Unresolved checkpoint attempts: inspect, and settle one explicitly with evidence. Same guard.
+adminRouter.route("/checkpoint/attempts", adminCheckpointAttemptsRouter);
 
 // Creating an agent, and putting it in a station. Mounted at the root of
 // `/api/admin` because it owns two path families — `/agents` and

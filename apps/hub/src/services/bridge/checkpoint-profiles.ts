@@ -95,6 +95,17 @@ function loadInstallation(): readonly CheckpointProfile[] {
   }
 }
 
+/**
+ * True only when a successfully loaded installation holds a DIFFERENT profile for the same station:
+ * an operator replaced the pins (a node build or pin change). A failed or absent load is never
+ * proof, so an unreadable profile file cannot make every live attempt look superseded.
+ */
+export function checkpointProfileSuperseded(profile: CheckpointProfile): boolean {
+  const installed = installedCheckpointProfiles().find((value) => value.target.tenant_id === profile.target.tenant_id &&
+    value.target.board_id === profile.target.board_id && value.target.station_id === profile.target.station_id);
+  return installed !== undefined && canonicalCheckpoint(installed) !== canonicalCheckpoint(profile);
+}
+
 export function requireInstalledCheckpointProfile(profile: CheckpointProfile): void {
   const installed = installedCheckpointProfiles().find((value) => value.target.tenant_id === profile.target.tenant_id &&
     value.target.board_id === profile.target.board_id && value.target.station_id === profile.target.station_id);

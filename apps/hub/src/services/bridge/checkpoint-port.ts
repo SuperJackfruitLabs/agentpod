@@ -10,6 +10,17 @@ import { checkpointProfileId, CheckpointRefused, requireCheckpointProfileClaim, 
 import { checkpointAgentClient } from "./checkpoint-agent-client";
 import { pendingCheckpointAttempt, reserveCheckpointAttempt } from "./checkpoint-ledger";
 import { driveCheckpointAttempt } from "./checkpoint-orchestrator";
+import { resolveSupersededAttempt } from "./checkpoint-supersede";
+import { createAttemptBackoff } from "./checkpoint-recover-backoff";
+import { createLogger } from "../../utils/logger";
+import { createQuietLog } from "./quiet-log";
+
+const log = createLogger("bridge-checkpoint");
+/** A superseded attempt that stays parked is named once per attempt and reason, then once per interval. */
+const supersededLog = createQuietLog((message, meta) => log.warn(message, meta));
+/** What recover returns while an attempt waits out its backoff: unresolved, so checkpoint claims stay held. */
+const held = (attemptId: string, runId: string) => ({ status: "unreported" as const, externalRunId: runId, attemptId,
+  reason: "Checkpoint dispatch requires reconciliation" });
 import type { CheckpointDispatchPort, CheckpointTarget } from "./checkpoint-dispatch";
 import type { SuperpipelineClient } from "./superpipeline";
 
@@ -56,6 +67,7 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
   if (!found) return undefined;
   const profile: CheckpointProfile = found;
   const selected = target(profile);
+  const backoff = createAttemptBackoff();
   async function refusal(value: CheckpointTarget): Promise<CheckpointRefusalReason | undefined> {
     try {
       if (canonicalCheckpoint(value) !== canonicalCheckpoint(selected)) return "selection.target";
@@ -94,7 +106,30 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
     recover: async () => {
       await requireCurrent(selected);
       const pending = await pendingCheckpointAttempt(profile);
-      return pending ? driveCheckpointAttempt(pending, await checkpointAgentClient(profile)) : undefined;
+      if (!pending) { backoff.clear(); return undefined; }
+      const { attempt } = pending;
+      const key = `${attempt.row.attemptId}:${attempt.row.phase}`;
+      if (!backoff.due(key)) return held(attempt.row.attemptId, attempt.claim.runId);
+      if (pending.superseded) {
+        // Made under a profile this installation has replaced: it can never be driven again, only
+        // resolved. Retired with the node's evidence when that proves nothing is outstanding;
+        // otherwise parked, named, for an owner or admin to settle (`/api/admin/checkpoint/attempts`).
+        const resolution = await resolveSupersededAttempt(attempt);
+        const meta = { tenantId: attempt.row.tenantId, boardId: attempt.row.boardId, runId: attempt.claim.runId,
+          attemptId: attempt.row.attemptId, phase: attempt.row.phase, reason: resolution.reason };
+        if (resolution.outcome === "retired") {
+          log.info("superseded checkpoint attempt retired; the station is free for a fresh claim", meta);
+          backoff.clear();
+          return undefined;
+        }
+        supersededLog(`${attempt.row.attemptId}:${resolution.reason}`,
+          "superseded checkpoint attempt parked; an owner or admin can settle it", meta);
+        backoff.parked(key);
+        return held(attempt.row.attemptId, attempt.claim.runId);
+      }
+      const result = await driveCheckpointAttempt(attempt, await checkpointAgentClient(profile));
+      if (result.status === "unreported") backoff.parked(key); else backoff.clear();
+      return result;
     },
     dispatch: async ({ target: chosen, claim }) => {
       requireCheckpointProfileClaim(profile, claim);
