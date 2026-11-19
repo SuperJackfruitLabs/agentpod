@@ -11,29 +11,49 @@ import { readCheckpointAuthority } from "./checkpoint-current";
 import { canonicalCheckpoint, parseCheckpointContextJSON } from "./checkpoint-json";
 import { CheckpointRefused, parseCheckpointProfile, type CheckpointProfile, type CheckpointRefusalReason } from "./checkpoint-profile";
 import { SuperpipelineClient, type Fetcher } from "./superpipeline";
+import { noteCheckpoint } from "./checkpoint-log";
 import { deploymentSuperpipelineAudience } from "./credential-audience";
+
+/** Which part of a bounded request failed, as a closed reason. Exported for tests. */
+export function httpFailureReason(error: unknown): "http.timeout" | "http.network" | "http.encoding" | "http.size" | "http.body" {
+  if (error instanceof CheckpointRefused && (error.reason === "http.encoding" || error.reason === "http.size")) return error.reason;
+  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) return "http.timeout";
+  if (error instanceof SyntaxError || error instanceof CheckpointRefused) return "http.body";
+  return "http.network";
+}
+
+/** The request path only: no query, no host secrets. */
+const pathOf = (url: string) => { try { return new URL(url).pathname; } catch { return "unparsable"; } }; // silent-catch-ok: a label for the log line, never a decision
 
 const boundedFetch: Fetcher = async (url, init) => {
   try {
     const response = await fetch(url, { ...init, redirect: "error", credentials: "omit", headers: { ...init.headers, accept: "application/json", "accept-encoding": "identity" }, signal: AbortSignal.timeout(5_000) });
-    if (!response.ok) return { status: response.status, ok: false, json: async () => ({ error: "CHECKPOINT_REQUEST_REFUSED" }) };
+    if (!response.ok) {
+      // The board's own error body is not read (it is not trusted on this path); its status is named here.
+      noteCheckpoint("http", "http.status", { status: response.status, path: pathOf(url) });
+      return { status: response.status, ok: false, json: async () => ({ error: "CHECKPOINT_REQUEST_REFUSED" }) };
+    }
     const reader = response.body?.getReader();
     if (!reader || response.headers.get("content-encoding") && response.headers.get("content-encoding") !== "identity")
-      throw new CheckpointRefused("unavailable");
+      throw new CheckpointRefused("unavailable", "http.encoding");
     const parts: Uint8Array[] = []; let count = 0;
     try {
       for (;;) {
         const chunk = await reader.read(); if (chunk.done) break;
         count += chunk.value.byteLength;
-        if (count > 262144) throw new CheckpointRefused("unavailable");
+        if (count > 262144) throw new CheckpointRefused("unavailable", "http.size");
         parts.push(chunk.value);
       }
-    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); } // silent-catch-ok: releasing a reader already read or failed
     const raw = new Uint8Array(count); let position = 0;
     for (const part of parts) { raw.set(part, position); position += part.byteLength; }
     const value = parseCheckpointContextJSON(raw);
     return { status: response.status, ok: true, json: async () => value };
-  } catch { throw new CheckpointRefused("unavailable"); }
+  } catch (error) {
+    const reason = httpFailureReason(error);
+    noteCheckpoint("http", reason, { path: pathOf(url) }, error);
+    throw new CheckpointRefused("unavailable", reason, error);
+  }
 };
 
 /**

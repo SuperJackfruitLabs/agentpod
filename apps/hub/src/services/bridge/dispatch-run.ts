@@ -11,6 +11,7 @@ import { checkpointRefusalCode, checkpointRefusalReason } from "./checkpoint-iso
 import { SuperpipelineApiError } from "./superpipeline";
 import { BridgeCredentialRefused } from "./plane-credential";
 import { CheckpointRefused } from "./checkpoint-profile";
+import { errorFacts, noteCheckpoint } from "./checkpoint-log";
 
 export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   const { client, acp, agent } = deps;
@@ -36,7 +37,8 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     else {
       const reason = checkpointRefusalReason(error);
       log("checkpoint dispatch refused; ordinary claims continue",
-        { code: checkpointRefusalCode(error), ...(reason === undefined ? {} : { reason }) });
+        { code: checkpointRefusalCode(error), ...(reason === undefined ? {} : { reason }),
+          ...(error instanceof CheckpointRefused ? {} : errorFacts(error)) });
     }
     dedicated = undefined;
   }
@@ -57,7 +59,7 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     } catch (error) {
       if (error instanceof SuperpipelineApiError && (error.status === 401 || error.status === 403)) throw error;
       refuse(new CheckpointRefused("uncertain", error instanceof BridgeCredentialRefused ? `credential.${error.reason}`
-        : `recover.${error instanceof CheckpointRefused ? error.code : "unavailable"}`));
+        : `recover.${error instanceof CheckpointRefused ? error.code : "unavailable"}`, error));
       held = true;
     }
     if (resumed && resumed.status !== "unreported") return resumed;
@@ -66,7 +68,10 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
       const work = await client.claim({ maxConcurrency: agent.maxConcurrency, profileKey: agent.profileKey,
         checkpointProtocol: dedicated.protocol, checkpointOnly: true });
       if (!work) return { status: "idle" };
-      if (!work.checkpointClaim) return { status: "unreported", reason: "Checkpoint dispatch requires reconciliation" };
+      if (!work.checkpointClaim) {
+        noteCheckpoint("claim", "claim.no_checkpoint_claim", { runId: work.runId });
+        return { status: "unreported", reason: "Checkpoint dispatch requires reconciliation" };
+      }
       return dedicated.dispatch(client, work.checkpointClaim);
     } catch (error) {
       // Preserve the loop's existing definitive credential-refusal halt.
@@ -75,8 +80,11 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
       // and nothing needs reconciling. It is a checkpoint refusal like any other (#911): named,
       // rate-limited, and the cycle goes on to the ordinary claim. This used to become a silent
       // `unreported`, which the loop re-ran at once: a tight loop with no line and no claim.
-      if (!(error instanceof BridgeCredentialRefused))
+      if (!(error instanceof BridgeCredentialRefused)) {
+        // The claim may have landed: park, but say what failed.
+        noteCheckpoint("claim", "claim.error", {}, error);
         return { status: "unreported", reason: "Checkpoint dispatch requires reconciliation" };
+      }
       refuse(new CheckpointRefused("authority", `credential.${error.reason}`));
     }
   }

@@ -433,7 +433,7 @@ describe("a cycle that claims nothing says why, and never spins", () => {
     expect(refused).toHaveLength(1);
     expect(refused[0]?.meta).toEqual({ reason: "claims.scope" });
     // Not the generic throw line, which carries the raw error every backoff.
-    expect(lines.some((l) => l.message === "a claim cycle threw")).toBe(false);
+    expect(lines.some((l) => l.message.startsWith("a claim cycle threw"))).toBe(false);
   });
 
   test("an unreported cycle is logged once with its reason and backs off: no tight loop", async () => {

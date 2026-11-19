@@ -18,6 +18,7 @@
  */
 import { BENCH_COORDINATOR_VERB, BenchCoordinatorRequest, parseBenchCoordinatorResponse, type BenchCoordinatorResponse } from "@agentpod/contract";
 import { request as nodeRequest } from "../broker";
+import { errorFacts } from "./checkpoint-log";
 import { NO_PRODUCER_EFFECT_PHASES, retireCheckpointAttempt, type CheckpointRetirementReason,
   type RetainedCheckpointAttempt } from "./checkpoint-ledger";
 
@@ -30,7 +31,7 @@ export type SupersededParkReason =
 
 export type SupersededResolution =
   | { outcome: "retired"; reason: CheckpointRetirementReason }
-  | { outcome: "parked"; reason: SupersededParkReason };
+  | { outcome: "parked"; reason: SupersededParkReason; error?: Record<string, unknown> };
 
 /** What a status reply says, as far as resolving is concerned. */
 export interface NodeStatusSummary {
@@ -59,7 +60,7 @@ async function nodeStatusReply(attempt: RetainedCheckpointAttempt): Promise<Benc
   const sent = BenchCoordinatorRequest.parse({ version: attempt.request.version, operation: "status",
     identity: attempt.request.identity, target: attempt.request.target });
   const reply = await nodeRequest(attempt.request.target.node_id, BENCH_COORDINATOR_VERB, sent, { timeoutMs: 15_000 });
-  if (!reply.ok) throw new Error("status unavailable");
+  if (!reply.ok) throw new Error(`status unavailable: ${reply.error ?? "no error"}`);
   const raw = JSON.stringify(reply.data);
   if (typeof raw !== "string" || Buffer.byteLength(raw, "utf8") > 262144) throw new Error("status invalid");
   return parseBenchCoordinatorResponse(new TextEncoder().encode(raw), sent);
@@ -82,7 +83,8 @@ export async function resolveSupersededAttempt(attempt: Phased,
   deps: SupersedeDeps<Phased> = defaults): Promise<SupersededResolution> {
   if (!NO_PRODUCER_EFFECT_PHASES.has(attempt.row.phase)) return { outcome: "parked", reason: "superseded.effect_possible" };
   let reply: NodeStatusSummary;
-  try { reply = await deps.status(attempt); } catch { return { outcome: "parked", reason: "superseded.node_unreachable" }; }
+  try { reply = await deps.status(attempt); }
+  catch (error) { return { outcome: "parked", reason: "superseded.node_unreachable", error: errorFacts(error) }; }
   const reason = provenEffectFree(attempt.row.phase, reply);
   if (!reason) return { outcome: "parked", reason: `superseded.node:${reply.state}${reply.code === undefined ? "" : "." + reply.code}` };
   const retired = await deps.retire(attempt, { reason, by: "hub", evidence: reply.evidence ?? JSON.stringify(reply) });

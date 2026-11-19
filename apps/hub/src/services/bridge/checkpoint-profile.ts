@@ -57,12 +57,20 @@ export type CheckpointRefusalReason =
   | "attempt.unresolved"
   | "claim.tenant" | "claim.board" | "claim.agent" | "claim.reporter" | "claim.node" | "claim.checkpoint_repository"
   | "claim.executor" | "claim.repositories"
-  | "selection.identity" | "selection.target"
+  | "selection.identity" | "selection.target" | "selection.shape" | "selection.current"
+  /** The node call itself failed: the broker's timeout, an offline node, or another transport error. */
+  | "node.call.timeout" | "node.call.offline" | "node.call.error"
+  /** The agent client's bounded request to the source failed before a status was read. */
+  | "http.timeout" | "http.network" | "http.encoding" | "http.size" | "http.body"
   | `current.${CheckpointRefusalCode}` | "current.error"
   | `node.state:${string}` | `node.target.${string}`;
 export class CheckpointRefused extends Error {
-  constructor(readonly code: CheckpointRefusalCode, readonly reason?: CheckpointRefusalReason) {
-    super(`Checkpoint refused: ${code}`);
+  /**
+   * `cause` is the error this refusal replaced, kept so the log can name its class and redacted
+   * message (`checkpoint-log.ts`). It never reaches the wire.
+   */
+  constructor(readonly code: CheckpointRefusalCode, readonly reason?: CheckpointRefusalReason, cause?: unknown) {
+    super(`Checkpoint refused: ${code}`, cause === undefined ? undefined : { cause });
     this.name = "CheckpointRefused";
   }
 }

@@ -3,6 +3,8 @@ import { z } from "zod";
 import { CHECKPOINT_CLAIM_PROTOCOL, parsePendingCheckpointClaim, type PendingCheckpointClaim } from "./checkpoint-claim";
 import type { DispatchResult } from "./dispatch-types";
 import type { SuperpipelineClient } from "./superpipeline";
+import { noteCheckpoint } from "./checkpoint-log";
+import { CheckpointRefused } from "./checkpoint-profile";
 
 function scalars(value: string): boolean {
   for (const part of value) {
@@ -40,7 +42,14 @@ export interface CheckpointSelection {
   recover(): Promise<DispatchResult | undefined>;
   dispatch(client: SuperpipelineClient, claim: PendingCheckpointClaim): Promise<DispatchResult>;
 }
-const parked = (): DispatchResult => ({ status: "unreported", reason: "Checkpoint dispatch requires reconciliation" });
+/**
+ * A claimed checkpoint card that will not be dispatched this cycle. Never silent: the closed reason
+ * (and the error, when there is one) is logged before the park, so the loop's backoff is explained.
+ */
+const parked = (reason: string, meta: Record<string, unknown> = {}, error?: unknown): DispatchResult => {
+  noteCheckpoint("dispatch", reason, meta, error);
+  return { status: "unreported", reason: "Checkpoint dispatch requires reconciliation" };
+};
 
 function matches(target: CheckpointTarget, claim: PendingCheckpointClaim): boolean {
   return claim.tenantId === target.sourceTenantId && claim.boardId === target.boardId && claim.agentId === target.agentId &&
@@ -55,23 +64,27 @@ export async function selectCheckpointDispatch(port: CheckpointDispatchPort | un
   const raw = await port.ready(expected);
   if (raw === undefined) return undefined;
   const parsed = targetSchema.safeParse(raw);
-  if (!parsed.success) throw new Error("Checkpoint target unavailable");
+  if (!parsed.success) throw new CheckpointRefused("unavailable", "selection.shape");
   const target = Object.freeze(parsed.data);
   if (target.tenantId !== expected.tenantId || target.boardId !== expected.boardId || target.stationId !== expected.stationId ||
-    !await port.current(target)) throw new Error("Checkpoint target unavailable");
+    !await port.current(target)) throw new CheckpointRefused("unavailable", "selection.current");
   return Object.freeze({
     protocol: CHECKPOINT_CLAIM_PROTOCOL,
     recover: () => port.recover?.() ?? Promise.resolve(undefined),
     async dispatch(client: SuperpipelineClient, value: PendingCheckpointClaim): Promise<DispatchResult> {
       // Once claimed, never release/stop/report on uncertain ownership, and never select ACP as a fallback.
+      let runId: string | undefined;
       try {
         const claim = parsePendingCheckpointClaim(value);
-        if (!matches(target, claim) || !await port.current(target)) return parked();
+        runId = claim.runId;
+        const meta = { boardId: claim.boardId, runId };
+        if (!matches(target, claim)) return parked("claim.mismatch", meta);
+        if (!await port.current(target)) return parked("current.before_context", meta);
         await client.context(claim.runId, claim);
-        if (!await port.current(target)) return parked();
+        if (!await port.current(target)) return parked("current.after_context", meta);
         // Fresh parsed copy: a callback cannot mutate the client's retained pending observation.
         return await port.dispatch(Object.freeze({ target, claim: parsePendingCheckpointClaim(claim) }));
-      } catch { return parked(); }
+      } catch (error) { return parked("error", runId === undefined ? {} : { runId }, error); }
     },
   });
 }

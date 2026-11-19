@@ -8,6 +8,7 @@ import { checkpointProfileId, CheckpointRefused } from "./checkpoint-profile";
 import { checkpointProfileSuperseded, requireInstalledCheckpointProfile } from "./checkpoint-profiles";
 import { readCheckpointAuthority } from "./checkpoint-current";
 import { checkpointAgentClient } from "./checkpoint-agent-client";
+import { noteCheckpoint } from "./checkpoint-log";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { parseCheckpointSource, parseSourceReceipt, requireActiveSource, type CheckpointSourceSnapshot } from "./checkpoint-source";
 
@@ -109,5 +110,9 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array)
     if (active) requireActiveSource(active.snapshot, active.source, now);
     if (expires <= now) return refused("unavailable");
     return BenchCoordinatorCurrentResponse.parse({ ...base, issued_at_ms: now, expires_at_ms: Math.min(expires, now + 2000), decision: "current" });
-  } catch { return refused("unavailable"); }
+  } catch (error) {
+    // `unavailable` lets the node retry; the error behind it is named here, never on the wire.
+    noteCheckpoint("current-decision", "decision.error", { nodeId }, error);
+    return refused("unavailable");
+  }
 }
