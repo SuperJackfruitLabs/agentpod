@@ -74,7 +74,7 @@ function sentence(code: RefusalCode, phase: NodePhase): string {
 export function classifyCheckpointRefusal(phase: string, response: BenchCoordinatorResponse): CheckpointRefusalRuling | undefined {
   if (response.state !== "refused" || !("code" in response)) return undefined;
   if (phase !== "prepare_pending" && phase !== "execute_pending") return undefined;
-  const code = response.code as RefusalCode;
+  const code = response.code;
   const disposition = CHECKPOINT_REFUSAL_RULINGS[code]?.[phase];
   if (disposition === undefined || disposition === "parked") return undefined;
   return { code, disposition, reason: sentence(code, phase) };

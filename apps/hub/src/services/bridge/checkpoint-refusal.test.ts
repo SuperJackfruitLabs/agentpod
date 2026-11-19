@@ -38,7 +38,7 @@ test.each(Object.entries(RULING))("refusal %s is ruled per phase", async (code, 
 });
 
 test("the ruling covers every refusal code the contract admits, and no other", async () => {
-  expect(Object.keys(CHECKPOINT_REFUSAL_RULINGS).sort()).toEqual(Object.keys(RULING).sort());
+  expect(new Set(Object.keys(CHECKPOINT_REFUSAL_RULINGS))).toEqual(new Set(Object.keys(RULING)));
   // A code the contract does not know never reaches the ruling: the parse refuses it first.
   const c = fixture("unknown-refusal-code");
   await expect(parseBenchCoordinatorResponse(encode(c.value), BenchCoordinatorRequest.parse(c.request))).rejects.toThrow("Coordinator response refused");

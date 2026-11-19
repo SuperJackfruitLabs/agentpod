@@ -2,6 +2,7 @@
  * its original durable attempt; neither a child nor a request ID is replaced.
  */
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import { createLogger } from "../../utils/logger";
 import { BENCH_COORDINATOR_VERB, BenchCoordinatorRequest, parseBenchCoordinatorResponse,
   type BenchCoordinatorResponse } from "@agentpod/contract";
@@ -66,12 +67,14 @@ function parkedReply(attempt: RetainedCheckpointAttempt, response: BenchCoordina
 }
 
 /** The failure a `failure_pending` or `failed` row holds. */
+const heldFailureSchema = z.object({ version: z.literal("agentpod.checkpoint-failure.v1"), code: z.string().min(1),
+  disposition: z.enum(["failed", "released"]), reason: z.string().min(1), phase: z.string(), by: z.literal("hub"),
+  at: z.string(), evidence: z.string() }).strict();
 function heldFailure(attempt: RetainedCheckpointAttempt): CheckpointFailure {
   if (!attempt.row.failure) throw new CheckpointRefused("source");
-  const failure = parseCheckpointJSON(encode(attempt.row.failure)) as Partial<CheckpointFailure> | null;
-  if (failure?.version !== "agentpod.checkpoint-failure.v1" || (failure.disposition !== "failed" && failure.disposition !== "released") ||
-    typeof failure.reason !== "string" || typeof failure.code !== "string") throw new CheckpointRefused("source");
-  return failure as CheckpointFailure;
+  const parsed = heldFailureSchema.safeParse(parseCheckpointJSON(encode(attempt.row.failure)));
+  if (!parsed.success) throw new CheckpointRefused("source");
+  return parsed.data;
 }
 
 async function current(attempt: RetainedCheckpointAttempt): Promise<void> {

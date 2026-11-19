@@ -299,13 +299,13 @@ test("a capacity refusal releases the card for a new claim instead of parking it
   expect(result).toMatchObject({ status: "released", attemptId: attempt.row.attemptId });
 });
 
+const conflict = (operation: string) => ({ version: "agentpod.bench-coordinator.v1", operation, state: "refused", code: "conflict" });
 test("a conflict releases a preparing card, but parks once execute was sent", async () => {
   resetCheckpointActivityForTests();
-  const reply = (operation: string) => ({ version: "agentpod.bench-coordinator.v1", operation, state: "refused", code: "conflict" });
-  const prepare = harness(reply("prepare"));
+  const prepare = harness(conflict("prepare"));
   ledger(prepare.deps);
   expect((await driveCheckpointAttempt(preparePending(), recordingBoard().client, true, prepare.deps)).status).toBe("released");
-  const execute = harness(reply("status"));
+  const execute = harness(conflict("status"));
   const held = ledger(execute.deps);
   const board = recordingBoard();
   const result = await driveCheckpointAttempt(executePending(), board.client, false, execute.deps);
