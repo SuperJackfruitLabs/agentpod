@@ -236,6 +236,14 @@ func failed(r benchcoordinatorwire.Request, err error) (benchcoordinatorwire.Res
 func pending(r benchcoordinatorwire.Request) benchcoordinatorwire.Response {
 	return benchcoordinatorwire.Response{Version: benchcoordinatorwire.Version, Operation: r.Operation, State: "pending", Identity: r.Identity, Target: r.Target}
 }
+// unresolved is the wire's "unknown": this node holds the attempt's exact
+// prepare but chose nothing and invoked no source effect for it, so it holds
+// nothing. It is the one status that lets the hub re-send that same prepare.
+func unresolved(r benchcoordinatorwire.Request) (benchcoordinatorwire.Response, error) {
+	response := pending(r)
+	response.State = "unknown"
+	return checkedResponse(r, response)
+}
 func refused(operation string) benchcoordinatorwire.Response {
 	return benchcoordinatorwire.Response{Version: benchcoordinatorwire.Version, Operation: operation, State: "refused", Code: "unavailable"}
 }
@@ -349,11 +357,14 @@ func (h *Handler) handle(ctx context.Context, r benchcoordinatorwire.Request, ra
 		return h.status(ctx, r, p, intent)
 	}
 	intent, err := intents.Read(ctx, r)
-	if err != nil || intent.Spec == nil {
+	if err != nil {
 		return pending(r), ErrIntent
 	}
 	if r.Operation == "status" {
 		return h.status(ctx, r, p, intent)
+	}
+	if intent.Spec == nil {
+		return pending(r), ErrIntent
 	}
 	// Status and retries require the exact persisted source registration. An
 	// interrupted handoff before registration stays pending rather than regrowing.
@@ -394,6 +405,12 @@ func (h *Handler) status(ctx context.Context, r benchcoordinatorwire.Request, p 
 	// A registered attempt the hub has definitely superseded may still reach
 	// Status, which retires its own record (release, no run); see benchlaunch.
 	if intent.Spec == nil {
+		// Reserved and never resolved: the in-prepare current check or the
+		// read-only choice failed, so no source effect was ever invoked. The
+		// hub re-sends the identical retained prepare to finish it.
+		if intent.Phase == "reserved" {
+			return unresolved(r)
+		}
 		return refused(r.Operation), ErrCurrent
 	}
 	if err := h.check(ctx, r, p, intent, "observe"); err != nil && (!errors.Is(err, ErrStale) || p.Launch != benchlaunch.Mode) {

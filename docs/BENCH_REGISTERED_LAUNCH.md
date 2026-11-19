@@ -229,6 +229,12 @@ cancellation store is a follow-up.
 
 ## What the hub sees
 
+A `status` for an attempt whose prepare the node never resolved (its intent is
+reserved with no chosen spec, because the in-prepare current check or the
+read-only bench choice failed) answers `unknown`. Nothing was chosen and no
+source effect was invoked. The hub answers it by re-sending the identical
+retained prepare; any other prepare bytes for the attempt are refused.
+
 The coordinator wire (`agentpod.bench-coordinator.v1`) is unchanged except for one
 new refusal code, `capacity_exhausted`. The hub orchestrator reports it as an
 unreported attempt whose reason names exhausted capacity, and never re-sends

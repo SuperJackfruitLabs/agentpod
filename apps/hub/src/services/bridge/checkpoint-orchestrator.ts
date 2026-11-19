@@ -93,7 +93,9 @@ function statusRequest(attempt: RetainedCheckpointAttempt): string {
 }
 
 /** One bounded pass through retained phases. sendPrepare is true only for the
- * successful original INSERT, never a lookup, restart or speculative retry.
+ * successful original INSERT, never a lookup, restart or speculative retry. A
+ * recovered prepare_pending re-sends the identical retained prepare only after
+ * the node's status answers `unknown` (it never resolved that prepare).
  */
 export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt, client: SuperpipelineClient,
   sendPrepare = false, deps: CheckpointDriveDeps = defaultDeps): Promise<DispatchResult> {
@@ -108,7 +110,14 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
       switch (attempt.row.phase) {
         case "prepare_pending": {
           await client.heartbeat(attempt.claim);
-          const response = await exchange(attempt, sendPrepare ? attempt.row.prepareRequest : statusRequest(attempt), deps);
+          let response = await exchange(attempt, sendPrepare ? attempt.row.prepareRequest : statusRequest(attempt), deps);
+          if (!sendPrepare && response.state === "unknown") {
+            // The node holds this exact prepare but never resolved it (its own current check or
+            // read-only choice failed), so it invoked no source effect. Only the identical retained
+            // bytes are re-sent: the node accepts no other prepare for the attempt, resolves it once
+            // and hands off its effects at most once, and the send is current-gated on both sides.
+            response = await exchange(attempt, attempt.row.prepareRequest, deps);
+          }
           sendPrepare = false;
           if (response.state !== "prepared") return refusedOrParked(attempt, response);
           const next = await advanceCheckpointAttempt(attempt, { phase: "prepared", prepared: canonicalCheckpoint(response.source) });

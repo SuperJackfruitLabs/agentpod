@@ -127,3 +127,51 @@ test("a node call that times out parks the attempt naming the timeout, not a bar
       reason: "node.call.timeout", errorClass: "Error", error: "timeout" })]);
   } finally { restore(); }
 });
+
+/** The same attempt, still waiting on its prepare: the row a stranded staging attempt was left in. */
+function preparePending(): RetainedCheckpointAttempt {
+  const attempt = executePending();
+  const prepareRequest = attempt.row.prepareRequest;
+  return { ...attempt, row: { ...attempt.row, phase: "prepare_pending", executeRequest: null, executeSHA256: null,
+    prepareSHA256: createHash("sha256").update(prepareRequest, "utf8").digest("hex") } };
+}
+
+/** A node that answers status with `statusState` and a prepare with `pending`. */
+function nodeAnswering(attempt: RetainedCheckpointAttempt, statusState: "unknown" | "pending") {
+  const h = harness({});
+  h.deps.request = async (_node, _verb, params) => {
+    h.sent.push(params);
+    const operation = (params as { operation: string }).operation;
+    const state = operation === "status" ? statusState : "pending";
+    return { ok: true, data: { version: "agentpod.bench-coordinator.v1", operation, state,
+      identity: attempt.request.identity, target: attempt.request.target } };
+  };
+  return h;
+}
+
+test("a recovered prepare the node never resolved re-sends the identical retained prepare", async () => {
+  const attempt = preparePending();
+  const h = nodeAnswering(attempt, "unknown");
+  expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
+  expect(h.sent).toHaveLength(2);
+  expect((h.sent[0] as { operation: string }).operation).toBe("status");
+  // Byte for byte the retained request, so the node's digest fence and the Hub's current-decision both match it.
+  expect(JSON.stringify(h.sent[1])).toBe(attempt.row.prepareRequest);
+  expect(attempt.row.phase).toBe("prepare_pending");
+});
+
+test("a recovered prepare the node is still working on is only asked for status", async () => {
+  const attempt = preparePending();
+  const h = nodeAnswering(attempt, "pending");
+  expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
+  expect(h.sent).toHaveLength(1);
+  expect((h.sent[0] as { operation: string }).operation).toBe("status");
+});
+
+test("unknown never re-sends anything after prepare: execute stays a status read", async () => {
+  const attempt = executePending();
+  const h = nodeAnswering(attempt, "unknown");
+  expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
+  expect(h.sent).toHaveLength(1);
+  expect((h.sent[0] as { operation: string }).operation).toBe("status");
+});
