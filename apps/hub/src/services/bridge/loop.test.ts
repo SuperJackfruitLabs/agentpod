@@ -449,7 +449,7 @@ describe("a cycle that claims nothing says why, and never spins", () => {
 
   test("the same attempt parked again backs off exponentially, to a ceiling, and resets", async () => {
     const parked = { status: "unreported", attemptId: "attempt_1", reason: "Checkpoint dispatch requires reconciliation" } as const;
-    const script: DispatchResult[] = [...Array<DispatchResult>(8).fill(parked), { status: "reported" }, parked];
+    const script: DispatchResult[] = [...Array.from({ length: 8 }, () => parked), { status: "reported" }, parked];
     let i = 0;
     const slept: number[] = [];
     const loop = startAgentLoop({
