@@ -32,7 +32,8 @@ import { createLogger } from "../../utils/logger";
 import { superlibraryClient } from "../superlibrary";
 import { decrypt, encrypt } from "../../utils/encryption";
 import type { AcpSessionMode } from "@agentpod/contract";
-import { BridgeCredentialSource } from "../../../../../packages/contract/src/bridge-credential";
+import type { BridgeCredentialSource } from "../../../../../packages/contract/src/bridge-credential";
+import { BridgeRosterRefusal, parseDeploymentCredentialSource } from "./credential-audience";
 import { tenants } from "../../db/schema/tenants";
 import { orgPlane } from "../../auth/org-plane/config";
 import { createPlaneVerifier } from "../../auth/org-plane/verify";
@@ -238,8 +239,9 @@ export async function readBridgeRoster(
         maxConcurrency: agent.maxConcurrency,
         profileKey: agent.profileKey,
         tenantId: agent.tenantId,
+        // A source naming another deployment's audience is unreadable here, not spent.
         credentialSource: agent.credentialSource
-          ? BridgeCredentialSource.parse(agent.credentialSource)
+          ? parseDeploymentCredentialSource(agent.credentialSource)
           : null,
         token: agent.credentialSource
           ? ""
@@ -373,7 +375,7 @@ export async function updateBridgeAgent(
       : current.credentialSource;
   if (source) {
     if (patch.token !== undefined || patch.mcpToken)
-      throw new Error("Station-plane credentials cannot store tokens");
+      throw new BridgeRosterRefusal("Station-plane credentials cannot store tokens");
     if (!(patch.enabled === false && Object.keys(patch).length === 1)) {
       await validateCredentialInput(
         tenantId,
@@ -386,7 +388,7 @@ export async function updateBridgeAgent(
     set.tokenEncrypted = "";
     set.mcpTokenEncrypted = null;
   } else if (current.credentialSource && !patch.token?.startsWith("spa_"))
-    throw new Error(
+    throw new BridgeRosterRefusal(
       "A legacy credential is required when removing exchange source",
     );
   if (patch.credentialSource !== undefined)
@@ -447,12 +449,12 @@ async function validateCredentialInput(
 ) {
   if (!raw) {
     if (!token?.startsWith("spa_"))
-      throw new Error("A legacy agent credential is required");
+      throw new BridgeRosterRefusal("A legacy agent credential is required");
     return;
   }
-  const source = BridgeCredentialSource.parse(raw);
+  const source = parseDeploymentCredentialSource(raw);
   if (token !== undefined || mcpToken)
-    throw new Error("Station-plane credentials cannot store tokens");
+    throw new BridgeRosterRefusal("Station-plane credentials cannot store tokens");
   const [station] = await db
     .select()
     .from(stations)
@@ -470,7 +472,7 @@ async function validateCredentialInput(
     tenant?.externalSource !== "org-plane" ||
     tenant.externalId !== source.organizationId
   )
-    throw new Error(
+    throw new BridgeRosterRefusal(
       "Station-plane source requires the exact Salaam occupant and mapped organization",
     );
 }
@@ -479,7 +481,7 @@ async function validateCredentialInput(
 export function bridgePlaneCredential(
   agent: BridgeAgentSecrets,
 ): () => Promise<string> {
-  const source = BridgeCredentialSource.parse(agent.credentialSource);
+  const source = parseDeploymentCredentialSource(agent.credentialSource);
   if (!agent.tenantId) throw new Error("Station credential has no tenant");
   const tenantId = agent.tenantId;
   const cfg = orgPlane();

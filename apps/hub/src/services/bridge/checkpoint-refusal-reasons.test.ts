@@ -110,16 +110,32 @@ test.each<[CheckpointRefusalReason, PlanePrincipal | null, PlanePrincipal | null
 });
 
 // ─── roster credential source ───────────────────────────────────────────────
+const DEPLOYMENT = "https://app.superpipeline.dev";
+const STAGING = "https://staging-app.superpipeline.dev";
 const source = { version: 1, kind: "station-plane", principalId: profile.occupantPrincipalId,
-  organizationId: profile.organizationId, audience: "https://app.superpipeline.dev" } as const;
+  organizationId: profile.organizationId, audience: DEPLOYMENT } as const;
 test("a matching plane credential source names no reason", () => {
-  expect(credentialRefusal(profile, source)).toBeUndefined();
+  expect(credentialRefusal(profile, source, DEPLOYMENT)).toBeUndefined();
+});
+test("a staging deployment admits its own audience", () => {
+  const staging = { ...profile, sourceAudience: STAGING };
+  expect(credentialRefusal(staging, { ...source, audience: STAGING }, STAGING)).toBeUndefined();
 });
 test("the credential source names missing, principal, organization and audience", () => {
-  expect(credentialRefusal(profile, undefined)).toBe("credential.missing");
-  expect(credentialRefusal(profile, { ...source, principalId: "prn_" + "f".repeat(20) })).toBe("credential.principal");
-  expect(credentialRefusal(profile, { ...source, organizationId: "org_" + "f".repeat(20) })).toBe("credential.organization");
-  expect(credentialRefusal({ ...profile, sourceAudience: "https://other.example" }, source)).toBe("credential.audience");
+  expect(credentialRefusal(profile, undefined, DEPLOYMENT)).toBe("credential.missing");
+  expect(credentialRefusal(profile, undefined, null)).toBe("credential.missing");
+  expect(credentialRefusal(profile, { ...source, principalId: "prn_" + "f".repeat(20) }, DEPLOYMENT)).toBe("credential.principal");
+  expect(credentialRefusal(profile, { ...source, organizationId: "org_" + "f".repeat(20) }, DEPLOYMENT)).toBe("credential.organization");
+  expect(credentialRefusal({ ...profile, sourceAudience: "https://other.example" }, source, DEPLOYMENT)).toBe("credential.audience");
+});
+test("the audience must be the configured deployment's, whatever the profile says", () => {
+  // A production-audience source on a staging hub, even with a profile that agrees with the source.
+  expect(credentialRefusal(profile, source, STAGING)).toBe("credential.audience");
+  // A profile and source that agree on a plane this hub is not configured for.
+  const other = { ...profile, sourceAudience: "https://attacker.test" };
+  expect(credentialRefusal(other, { ...source, audience: "https://attacker.test" }, DEPLOYMENT)).toBe("credential.audience");
+  // An unconfigured hub admits no source at all.
+  expect(credentialRefusal(profile, source, null)).toBe("credential.audience");
 });
 
 // ─── claim pins ─────────────────────────────────────────────────────────────

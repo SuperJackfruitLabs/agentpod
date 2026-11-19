@@ -71,6 +71,9 @@ const WORKSPACE_ADMIN_ROUTES: Array<[string, string, unknown?]> = [
   ["PUT", `/api/admin/stations/${STATION_A}/agent`, { principalId: "prn_00000000000000000000" }],
   ["DELETE", `/api/admin/stations/${STATION_A}/agent`],
   ["GET", "/api/admin/bridge/agents"],
+  // Giving a roster row a credential source is the same workspace administration.
+  ["PATCH", "/api/admin/bridge/agents/wsa-absent", { credentialSource: { version: 1, kind: "station-plane",
+    principalId: "prn_00000000000000000000", organizationId: "org_00000000000000000000", audience: "https://app.superpipeline.dev" } }],
   ["PUT", "/api/admin/bridge/boards/brd_wsa", { relatedWork: true }],
   ["GET", "/api/nodes/telemetry"],
   ["POST", "/api/nodes/telemetry", { off: true }],

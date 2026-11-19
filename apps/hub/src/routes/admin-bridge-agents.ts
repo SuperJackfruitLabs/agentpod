@@ -27,6 +27,7 @@ import {
 import { BridgeCredentialSource } from "../../../../packages/contract/src/bridge-credential";
 import { resolveTenantId } from "../auth/tenant";
 import { createLogger } from "../utils/logger";
+import { BridgeRosterRefusal } from "../services/bridge/credential-audience";
 import {
   readBridgeRoster,
   bridgePlaneCredential,
@@ -211,9 +212,13 @@ export const adminBridgeAgentsRouter = new Hono()
  * **The raw text is never returned**, and that is not tidiness. Drizzle's message includes the
  * bound parameters, which for this table means the ENCRYPTED credential — so passing it through
  * would publish ciphertext to anyone who could provoke an insert error. An unrecognised failure
- * gets a flat sentence, and the real one goes to the log.
+ * gets a flat sentence, and the real one goes to the log. A `BridgeRosterRefusal` is the one
+ * exception: its message is a fixed sentence the roster wrote for the operator.
  */
 function refusal(err: unknown): string {
+  // The roster's own refusals are fixed sentences written to be read by the operator; they never
+  // carry a credential or a bound parameter.
+  if (err instanceof BridgeRosterRefusal) return err.message;
   const cause = (err as { cause?: { constraint_name?: string; code?: string } })
     ?.cause;
   switch (cause?.constraint_name) {
