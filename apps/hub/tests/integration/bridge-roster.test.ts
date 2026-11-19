@@ -475,9 +475,11 @@ test("a legacy token row upgrades in place to a credential source, and the token
   });
 });
 
+/** A source row for the fixture occupant, at the production audience. */
+const create = () =>
+  createBridgeAgent({ ...base(), token: undefined, credentialSource: sourceFor(PRODUCTION) });
+
 describe("a station-plane source is the occupant's identity, whatever the harness", () => {
-  const create = () =>
-    createBridgeAgent({ ...base(), token: undefined, credentialSource: sourceFor(PRODUCTION) });
 
   test("a hermes station whose occupant is an agent of the mapped organization is admitted", async () => {
     await withSalaamBinding(PRODUCTION, async () => {
