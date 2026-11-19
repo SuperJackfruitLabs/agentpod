@@ -7,12 +7,12 @@ import { stations } from "../../db/schema/stations";
 import { tenants } from "../../db/schema/tenants";
 import { nodes } from "../../db/schema/nodes";
 import { bridgeAgents } from "../../db/schema/bridge";
-import { orgPlaneClient } from "../../auth/org-plane/client";
+import { orgPlaneClient, type PlanePrincipal } from "../../auth/org-plane/client";
 import { grantAllowsPrincipal } from "../../auth/org-plane/grants";
 import { connectionManager } from "../broker";
 import { isControlPairEnforced } from "../control";
 import { canonicalCheckpoint } from "./checkpoint-json";
-import { CheckpointRefused, normalizeRosterProfileKey, type CheckpointProfile } from "./checkpoint-profile";
+import { CheckpointRefused, normalizeRosterProfileKey, type CheckpointProfile, type CheckpointRefusalReason } from "./checkpoint-profile";
 
 export interface CheckpointAuthority {
   organizationId: string;
@@ -36,21 +36,49 @@ const authoritySchema = z.object({ organizationId: text, tenantId: text, sourceT
   authorizationSnapshotId: z.string().regex(/^selected-auth:[a-f0-9]{64}(?![\s\S])/) }).strict();
 export function parseCheckpointAuthority(value: unknown): CheckpointAuthority {
   const parsed = authoritySchema.safeParse(value);
-  if (!parsed.success) throw new CheckpointRefused("authority");
+  if (!parsed.success) throw new CheckpointRefused("authority", "authority.shape");
   return parsed.data;
 }
 export interface RosterFacts {
   organizationId: string | null; source: string | null; nodeId: string; principalId: string | null; ownerPrincipalId: string;
   occupancyEpoch: number; profileKey: string | null; nodeStatus: string; lastSeenAt: Date | null;
 }
+/**
+ * The first pin the freshly read facts break, or undefined when they are exactly the profile's.
+ * No row at all is `facts.row`: the station, tenant, node, board or enabled roster row does not join. Exported for tests.
+ */
+export function factsRefusal(facts: RosterFacts | undefined, profile: CheckpointProfile, now: number): CheckpointRefusalReason | undefined {
+  if (!facts) return "facts.row";
+  if (!isControlPairEnforced()) return "facts.enforcement";
+  if (facts.source !== "org-plane") return "facts.tenant.source";
+  if (facts.organizationId !== profile.organizationId) return "facts.tenant.organization";
+  if (facts.nodeId !== profile.target.node_id) return "facts.node";
+  if (facts.principalId !== profile.occupantPrincipalId) return "facts.principal";
+  if (facts.ownerPrincipalId !== profile.ownerPrincipalId) return "facts.owner";
+  if (facts.occupancyEpoch !== profile.occupancyEpoch) return "facts.epoch";
+  if (normalizeRosterProfileKey(facts.profileKey) !== profile.profileKey) return "facts.profile";
+  if (facts.nodeStatus !== "online") return "node.status";
+  // The broker's sessions are keyed by node id (routes/gateway.ts registers the authenticated node id).
+  if (!connectionManager.isOnline(facts.nodeId)) return "node.offline";
+  if (facts.lastSeenAt === null || now - facts.lastSeenAt.getTime() < 0 || now - facts.lastSeenAt.getTime() > 45_000)
+    return "node.last_seen";
+  return undefined;
+}
 /** Whether the freshly read facts are exactly the profile's pins. Exported for tests. */
 export function factsMatchProfile(facts: RosterFacts, profile: CheckpointProfile, now: number): boolean {
-  return isControlPairEnforced() && facts.source === "org-plane" &&
-    facts.organizationId === profile.organizationId && facts.nodeId === profile.target.node_id &&
-    facts.principalId === profile.occupantPrincipalId && facts.ownerPrincipalId === profile.ownerPrincipalId &&
-    facts.occupancyEpoch === profile.occupancyEpoch && normalizeRosterProfileKey(facts.profileKey) === profile.profileKey &&
-    facts.nodeStatus === "online" && connectionManager.isOnline(facts.nodeId) && facts.lastSeenAt !== null &&
-    now - facts.lastSeenAt.getTime() >= 0 && now - facts.lastSeenAt.getTime() <= 45_000;
+  return factsRefusal(facts, profile, now) === undefined;
+}
+/** The first issuer fact that breaks the profile, or undefined when both principals stand. Exported for tests. */
+export function issuerRefusal(profile: CheckpointProfile, occupant: PlanePrincipal | null, owner: PlanePrincipal | null): CheckpointRefusalReason | undefined {
+  if (!occupant || occupant.id !== profile.occupantPrincipalId) return "issuer.occupant.missing";
+  if (occupant.kind !== "agent") return "issuer.occupant.kind";
+  if (occupant.suspended) return "issuer.occupant.suspended";
+  if (occupant.organizationId !== profile.organizationId) return "issuer.occupant.organization";
+  if (!owner || owner.id !== profile.ownerPrincipalId) return "issuer.owner.missing";
+  if (owner.suspended) return "issuer.owner.suspended";
+  if (owner.organizationId !== profile.organizationId) return "issuer.owner.organization";
+  if (!grantAllowsPrincipal(owner.grant, occupant.id)) return "issuer.grant";
+  return undefined;
 }
 async function currentFacts(profile: CheckpointProfile, exec: DbExecutor) {
   const target = profile.target;
@@ -66,8 +94,8 @@ async function currentFacts(profile: CheckpointProfile, exec: DbExecutor) {
     .innerJoin(bridgeAgents, and(eq(bridgeAgents.stationId, stations.id), eq(bridgeAgents.tenantId, stations.tenantId)))
     .where(and(eq(stations.id, target.station_id), eq(stations.tenantId, target.tenant_id),
       eq(bridgeAgents.key, profile.agentKey), eq(bridgeAgents.boardId, target.board_id), eq(bridgeAgents.enabled, true)));
-  if (!facts || !factsMatchProfile(facts, profile, Date.now()))
-    throw new CheckpointRefused("authority");
+  const refusal = factsRefusal(facts, profile, Date.now());
+  if (refusal || !facts) throw new CheckpointRefused("authority", refusal ?? "facts.row");
   return { organizationId: profile.organizationId, tenantId: facts.tenantId, sourceTenantId: profile.sourceTenantId,
     stationId: facts.stationId, nodeId: facts.nodeId, principalId: profile.occupantPrincipalId,
     ownerPrincipalId: profile.ownerPrincipalId, occupancyEpoch: facts.occupancyEpoch,
@@ -82,9 +110,8 @@ export async function readCheckpointAuthority(profile: CheckpointProfile, exec: 
   const [occupant, owner] = await Promise.all([
     orgPlaneClient().getPrincipal(profile.occupantPrincipalId), orgPlaneClient().getPrincipal(profile.ownerPrincipalId),
   ]);
-  if (!occupant || occupant.id !== profile.occupantPrincipalId || occupant.kind !== "agent" || occupant.suspended || occupant.organizationId !== profile.organizationId ||
-    !owner || owner.id !== profile.ownerPrincipalId || owner.suspended || owner.organizationId !== profile.organizationId ||
-    !grantAllowsPrincipal(owner.grant, occupant.id)) throw new CheckpointRefused("authority");
+  const issuer = issuerRefusal(profile, occupant, owner);
+  if (issuer || !owner) throw new CheckpointRefused("authority", issuer ?? "issuer.owner.missing");
   const after = await currentFacts(profile, exec);
   if (canonicalCheckpoint(before) !== canonicalCheckpoint(after)) throw new CheckpointRefused("stale");
   const snapshot = { ...after, ownerKind: owner.kind, ownerGrant: {

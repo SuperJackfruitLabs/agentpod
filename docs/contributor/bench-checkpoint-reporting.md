@@ -60,9 +60,29 @@ Two prerequisites must hold before the coordinator can select any work:
 A refusal is scoped to checkpoint work. A refused selection or checkpoint client
 never ends the agent's claim cycle: the cycle continues with an ordinary claim,
 which the board never answers with a checkpoint stage. Each distinct refusal code
-is logged once per agent as `checkpoint dispatch refused; ordinary claims continue`,
+and reason is logged once per agent as `checkpoint dispatch refused; ordinary claims continue`,
 then at most once every 15 minutes with the count suppressed meanwhile. Refusals
 still refuse; this changes only how far they reach and how often they are logged.
+
+An `authority` refusal also logs a `reason`, a fixed word that names the first
+pin that failed. The reason is for the Hub's log only: on the wire the refusal is
+still `authority`, and the reason never contains an identifier, token or raw error.
+
+| Reason | What failed |
+| --- | --- |
+| `facts.row` | No enabled roster row joins the pinned station, tenant, node and board |
+| `facts.enforcement` | `ENFORCE_CONTROL_PAIR` is not `true` |
+| `facts.tenant.source`, `facts.tenant.organization` | The tenant is not the pinned issuer organization |
+| `facts.node`, `facts.principal`, `facts.owner`, `facts.epoch`, `facts.profile` | The station's node, occupant, owner, occupancy epoch or roster profile differs from the pin |
+| `node.status`, `node.offline`, `node.last_seen` | The node row is not online, the Hub has no live session for it, or its last heartbeat is older than 45 seconds |
+| `issuer.occupant.*`, `issuer.owner.*` | The issuer does not return the principal, or it is suspended, in another organization, or the occupant is not an agent |
+| `issuer.grant` | The owner's `mayDispatch` does not cover the occupant |
+| `credential.missing`, `credential.principal`, `credential.organization`, `credential.audience` | The roster row has no plane credential source, or it differs from the profile's occupant, organization or `sourceAudience` |
+| `selection.identity`, `selection.target` | The cycle asked about another station, or about a target that is not the profile's |
+| `node.state:<state>.<code>` | The node's ready reply was not `available`, for example `node.state:refused.unavailable` |
+| `node.target.<field>` | The node advertised a target that differs from the profile's in that field |
+| `claim.*` | A claimed checkpoint policy breaks one of the profile's pins |
+| `current.<code>`, `current.error` | Re-reading current authority failed for a reason other than one of the above |
 `PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE` selects an absolute physical
 JSON file, at most 64 KiB, in a private directory. The file and directory must be
 owned by the service user or root and inaccessible to other users; symlinks are

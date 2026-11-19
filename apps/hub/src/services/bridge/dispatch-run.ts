@@ -7,7 +7,7 @@ import { probeReadiness } from "./dispatch-readiness";
 import { workClaimed } from "./dispatch-work";
 import { recoverPermissionWaits } from "./dispatch-recover";
 import { selectCheckpointDispatch } from "./checkpoint-dispatch";
-import { checkpointRefusalCode } from "./checkpoint-isolation";
+import { checkpointRefusalCode, checkpointRefusalReason } from "./checkpoint-isolation";
 import { SuperpipelineApiError } from "./superpipeline";
 
 export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
@@ -31,7 +31,11 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     });
   } catch (error) {
     if (deps.checkpointRefused) deps.checkpointRefused(error);
-    else log("checkpoint dispatch refused; ordinary claims continue", { code: checkpointRefusalCode(error) });
+    else {
+      const reason = checkpointRefusalReason(error);
+      log("checkpoint dispatch refused; ordinary claims continue",
+        { code: checkpointRefusalCode(error), ...(reason === undefined ? {} : { reason }) });
+    }
     dedicated = undefined;
   }
   if (dedicated) {
