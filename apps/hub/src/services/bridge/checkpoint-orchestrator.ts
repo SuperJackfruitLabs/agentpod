@@ -7,7 +7,8 @@ import { BENCH_COORDINATOR_VERB, BenchCoordinatorRequest, parseBenchCoordinatorR
   type BenchCoordinatorResponse } from "@agentpod/contract";
 import { request as nodeRequest } from "../broker";
 import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON, parseCheckpointContextJSON } from "./checkpoint-json";
-import { advanceCheckpointAttempt, type RetainedCheckpointAttempt } from "./checkpoint-ledger";
+import { advanceCheckpointAttempt, closeFailedCheckpointAttempt, failCheckpointAttempt, type CheckpointFailure,
+  type RetainedCheckpointAttempt } from "./checkpoint-ledger";
 import { retainedCheckpointSource } from "./checkpoint-current-decision";
 import { readCheckpointAuthority } from "./checkpoint-current";
 import { requireInstalledCheckpointProfile } from "./checkpoint-profiles";
@@ -15,9 +16,9 @@ import { CheckpointRefused } from "./checkpoint-profile";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { parseSourceReceipt, requireActiveSource } from "./checkpoint-source";
 import { buildCheckpointSettlement } from "./checkpoint-report";
-import { checkpointRefusal } from "./checkpoint-refusal";
+import { classifyCheckpointRefusal } from "./checkpoint-refusal";
 import { checkedCheckpointReceipt } from "./checkpoint-settlement-data";
-import type { SuperpipelineClient } from "./superpipeline";
+import { isLeaseSuperseded, type SuperpipelineClient } from "./superpipeline";
 import type { DispatchResult } from "./dispatch-types";
 import { createQuietLog, type QuietLog } from "./quiet-log";
 import { errorFacts, nodeCallReason } from "./checkpoint-log";
@@ -55,13 +56,22 @@ const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["cod
   return result;
 };
 
-/** Named terminal refusals keep the row parked but say why; nothing is re-sent. */
-function refusedOrParked(attempt: RetainedCheckpointAttempt, response: BenchCoordinatorResponse): DispatchResult {
-  const refusal = checkpointRefusal(response, { externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId });
-  if (!refusal) return parked(attempt);
-  log.warn("checkpoint dispatch refused", { tenantId: attempt.row.tenantId, boardId: attempt.row.boardId,
-    runId: attempt.claim.runId, attemptId: attempt.row.attemptId, phase: attempt.row.phase, code: "capacity_exhausted" });
-  return refusal;
+/**
+ * A reply that is neither the phase's success nor a definite refusal parks on its phase, as before;
+ * a refusal that does not prove the node's record terminal parks naming its code (checkpoint-refusal.ts).
+ */
+function parkedReply(attempt: RetainedCheckpointAttempt, response: BenchCoordinatorResponse): DispatchResult {
+  if (response.state !== "refused" || !("code" in response)) return parked(attempt);
+  return parked(attempt, "uncertain", new CheckpointRefused("uncertain", `node.state:refused.${response.code}`));
+}
+
+/** The failure a `failure_pending` or `failed` row holds. */
+function heldFailure(attempt: RetainedCheckpointAttempt): CheckpointFailure {
+  if (!attempt.row.failure) throw new CheckpointRefused("source");
+  const failure = parseCheckpointJSON(encode(attempt.row.failure)) as Partial<CheckpointFailure> | null;
+  if (failure?.version !== "agentpod.checkpoint-failure.v1" || (failure.disposition !== "failed" && failure.disposition !== "released") ||
+    typeof failure.reason !== "string" || typeof failure.code !== "string") throw new CheckpointRefused("source");
+  return failure as CheckpointFailure;
 }
 
 async function current(attempt: RetainedCheckpointAttempt): Promise<void> {
@@ -77,9 +87,12 @@ export interface CheckpointDriveDeps {
   request: typeof nodeRequest;
   service: typeof createCheckpointServiceClient;
   advance: typeof advanceCheckpointAttempt;
+  /** Hold a definite node refusal (`failure_pending`), and end it `failed` once the board is told. */
+  fail: typeof failCheckpointAttempt;
+  close: typeof closeFailedCheckpointAttempt;
 }
 const defaultDeps: CheckpointDriveDeps = { authority: current, request: nodeRequest, service: createCheckpointServiceClient,
-  advance: advanceCheckpointAttempt };
+  advance: advanceCheckpointAttempt, fail: failCheckpointAttempt, close: closeFailedCheckpointAttempt };
 
 async function exchange(attempt: RetainedCheckpointAttempt, raw: string, deps: CheckpointDriveDeps): Promise<BenchCoordinatorResponse> {
   const sent = BenchCoordinatorRequest.parse(parseCheckpointJSON(encode(raw)));
@@ -144,7 +157,11 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
             response = await exchange(attempt, attempt.row.prepareRequest, deps);
           }
           sendPrepare = false;
-          if (response.state !== "prepared") return refusedOrParked(attempt, response);
+          if (response.state !== "prepared") {
+            const ruling = classifyCheckpointRefusal(attempt.row.phase, response);
+            if (!ruling) return parkedReply(attempt, response);
+            attempt = (await deps.fail(attempt, { ...ruling, evidence: JSON.stringify(response) })).attempt; break;
+          }
           const next = await deps.advance(attempt, { phase: "prepared", prepared: canonicalCheckpoint(response.source) });
           attempt = next.attempt; await say(next.send, "prepared"); break;
         }
@@ -186,7 +203,13 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           await client.heartbeat(attempt.claim);
           const response = await exchange(attempt, sendExecute ? attempt.row.executeRequest : statusRequest(attempt), deps);
           sendExecute = false;
-          if (response.state !== "completed") return refusedOrParked(attempt, response);
+          if (response.state !== "completed") {
+            // A worker crash ends here: the node journaled the run refused and released its lease, so
+            // no later status can ever complete it. Held first, then the board is told (failure_pending).
+            const ruling = classifyCheckpointRefusal(attempt.row.phase, response);
+            if (!ruling) return parkedReply(attempt, response);
+            attempt = (await deps.fail(attempt, { ...ruling, evidence: JSON.stringify(response) })).attempt; break;
+          }
           // Strict DTO validation precedes storage; report joins separately
           // require the exact original start, task outcome and final vector.
           await buildCheckpointSettlement(attempt, response.completion);
@@ -233,6 +256,29 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           await deps.authority(attempt);
           attempt = (await deps.advance(attempt, { phase: "reported", settlementReceipt: canonicalCheckpoint(receipt) })).attempt;
           break;
+        }
+        case "failure_pending": {
+          // Said on the card while the lease is still ours, then the run is told. A lost reply is told
+          // again on the next pass; a run the board already ended (STALE_LEASE) is not ours to tell.
+          const failure = heldFailure(attempt);
+          await postCheckpointActivity(client, attempt, failure.disposition,
+            checkpointActivity(failure.disposition, { phase: failure.phase, code: failure.code, reason: failure.reason }));
+          let outcome: "fail" | "release" | "lease_ended";
+          try {
+            if (failure.disposition === "failed") await client.fail(attempt.claim, failure.reason);
+            else await client.release(attempt.claim);
+            outcome = failure.disposition === "failed" ? "fail" : "release";
+          } catch (error) {
+            if (!isLeaseSuperseded(error)) throw error;
+            outcome = "lease_ended";
+          }
+          attempt = (await deps.close(attempt, outcome)).attempt;
+          break;
+        }
+        case "failed": {
+          const failure = heldFailure(attempt);
+          return { status: failure.disposition, externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId,
+            reason: failure.reason };
         }
         case "reported": {
           if (!attempt.row.settlementReceipt || !attempt.row.settlementBody) throw new CheckpointRefused("source");

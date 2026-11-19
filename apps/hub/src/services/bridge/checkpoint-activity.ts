@@ -19,7 +19,7 @@ import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
 import type { SuperpipelineClient } from "./superpipeline";
 import { noteCheckpoint } from "./checkpoint-log";
 
-export type CheckpointActivityEvent = "prepared" | "running" | "completed" | "pushed" | "submitting" | "parked";
+export type CheckpointActivityEvent = "prepared" | "running" | "completed" | "pushed" | "submitting" | "parked" | "failed" | "released";
 
 /** The activity for an event, or undefined when there is nothing worth saying. Exported for tests. */
 export function checkpointActivity(event: CheckpointActivityEvent, facts: {
@@ -38,6 +38,11 @@ export function checkpointActivity(event: CheckpointActivityEvent, facts: {
         parameter: { commits: members.map((m) => ({ name: m.name, ref: m.task_ref, commit: m.commit })) } };
     }
     case "submitting": return { type: "action", action, body: "Checkpoint: submitting the result to the board." };
+    // A definite node refusal, said before the board is told: the sentence is the run's failure reason.
+    case "failed":
+    case "released":
+      return { type: "action", action, body: facts.reason ?? `Checkpoint ${event} (${facts.code ?? "refused"}).`,
+        parameter: { phase: facts.phase, code: facts.code } };
     case "parked": {
       const why = [facts.code, facts.reason].filter((part): part is string => !!part).join(", ");
       return { type: "action", action, body: `Checkpoint: waiting at ${facts.phase ?? "an unknown phase"}${why ? ` (${why})` : ""}; it is re-checked automatically.`,

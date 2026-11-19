@@ -1,0 +1,47 @@
+{
+  "description": "Replies the node's coordinator bridge sends for a registered-launch attempt it journaled as terminal. Pinned on the node by apps/node-agent/internal/benchbridge/refusal_wire_test.go (the bytes leave failed() exactly so) and read by the Hub's checkpoint orchestrator tests. Byte-for-byte what a node answers status with after a worker crashed during execute: create, lease, checkpoint and observe returned 200, the run returned 422, the release returned 200, and the journal reads refused / verification_failed / release done.",
+  "replies": [
+    {
+      "name": "worker-crash-status",
+      "request": {
+        "version": "agentpod.bench-coordinator.v1",
+        "operation": "status",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_ABC123",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      },
+      "value": {
+        "version": "agentpod.bench-coordinator.v1",
+        "operation": "status",
+        "state": "refused",
+        "code": "verification_failed"
+      }
+    }
+  ]
+}
