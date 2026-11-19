@@ -109,13 +109,20 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 	identity := benchdispatch.Identity(*r.Identity)
 	stable, _ := json.Marshal([]string{identity.TenantID, identity.BoardID, identity.CardID})
 	key := "cp_" + rawSHA(stable)
-	reply, err := h.client.Do(ctx, benchworkspace.Request{Version: benchworkspace.Version, Operation: "status", Key: key})
-	if err != nil || reply == nil {
-		return zero, benchdispatch.SourceTask{}, ErrIntent
-	}
-	inventory, ok := reply.Result.(*benchworkspace.Status)
-	if !ok {
-		return zero, benchdispatch.SourceTask{}, ErrIntent
+	request := benchworkspace.Request{Version: benchworkspace.Version, Operation: "status", Key: key}
+	reply, err := h.client.Do(ctx, request)
+	// A specific-key status answers that key's record or not_found: a card's
+	// first attempt finds no bench and creates it. Any other failure,
+	// unavailable included, proves nothing and leaves the prepare pending.
+	inventory := &benchworkspace.Status{}
+	if reply == nil || !benchworkspace.KeyAbsent(request, *reply) {
+		if err != nil || reply == nil {
+			return zero, benchdispatch.SourceTask{}, ErrIntent
+		}
+		var ok bool
+		if inventory, ok = reply.Result.(*benchworkspace.Status); !ok {
+			return zero, benchdispatch.SourceTask{}, ErrIntent
+		}
 	}
 	create, seen := true, false
 	for _, entry := range inventory.Benches {

@@ -279,7 +279,11 @@ func (c Coordinator) reclaimed(ctx context.Context, spec benchdispatch.SourceSpe
 	return w != nil && id != "" && w.BenchID == id && benchworkspace.Reclaim(w.Phase)
 }
 
-// bench reads the key's one workspace from a status reply, or nil.
+// bench reads the key's one workspace from a status reply, or nil. A key
+// SuperBench answers not_found for is nil too, on purpose: every caller reads
+// nil as "proves nothing" (no generation pinned, lease not shown gone, not
+// reclaimed). After a grant, absence could be a purged record as easily as a
+// never-made one, so it never stands in for a reclaimed generation.
 func (c Coordinator) bench(ctx context.Context, spec benchdispatch.SourceSpec) *benchworkspace.WorkspaceInventory {
 	request := benchworkspace.Request{Version: benchworkspace.Version, Operation: "status", Key: spec.BenchKey}
 	raw, _ := json.Marshal(request)
