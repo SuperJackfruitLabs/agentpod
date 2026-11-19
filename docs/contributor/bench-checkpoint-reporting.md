@@ -64,7 +64,10 @@ Two prerequisites must hold before the coordinator can select any work:
   and reason `credential.missing`, before the Node is asked anything. The source
   names the occupant principal, the workspace organization and this deployment's
   SuperPipeline audience: the origin of the Hub's `SUPERPIPELINE_BASE_URL`, and
-  nothing else. It must also equal the profile's `sourceAudience`. See
+  nothing else. It must also equal the profile's `sourceAudience`. The agent's
+  grant at the organization plane must carry the `claim` scope: the exchanged
+  grant takes its scopes from it, and one without `claim` is refused on every
+  request (`credential.claims.scope`). Setting the source checks this up front. See
   [DEPLOYMENT.md → Giving an agent a plane credential source](../DEPLOYMENT.md#giving-an-agent-a-plane-credential-source)
   for the command on staging and on production.
 
@@ -90,6 +93,7 @@ still `authority`, and the reason never contains an identifier, token or raw err
 | `issuer.grant` | The owner's `mayDispatch` does not cover the occupant |
 | `credential.missing` | The roster row has no plane credential source (a legacy token row), or the stored source does not parse |
 | `credential.principal`, `credential.organization` | The source differs from the profile's occupant or organization |
+| `credential.claims.scope`, `credential.claims.ent`, `credential.binding.changed`, … | The exchanged plane grant was refused before any request: no `claim` scope, no `superpipeline` entitlement, a binding that changed. Nothing was claimed, so the cycle goes on to ordinary claims |
 | `credential.audience` | The source's audience is not this Hub's configured SuperPipeline audience (the origin of `SUPERPIPELINE_BASE_URL`; unset admits none), or differs from the profile's `sourceAudience` |
 | `selection.identity`, `selection.target` | The cycle asked about another station, or about a target that is not the profile's |
 | `node.state:<state>.<code>` | The node's ready reply was not `available`, for example `node.state:refused.unavailable` |

@@ -610,6 +610,12 @@ The hub admits a source only when:
 - the workspace is mapped to the organization plane, and its organization is the source's;
 - the organization plane, asked fresh, says that principal is an unsuspended **agent** in that
   organization;
+- **a trial exchange succeeds**: the hub asks the plane for a grant exactly as every board request
+  will, verifies it, and drops it. The grant must be an agent grant for this principal and
+  organization, entitled to `superpipeline`, and carry the **`claim` scope**. The scope comes from
+  the agent's grant at the organization plane, so an agent whose grant has `scopes: []` is refused
+  with `(claims.scope): its grant carries no \`claim\` scope` and the row is left unchanged. Give
+  the agent's grant the `claim` scope in Accounts first;
 - its audience is **this deployment's** superpipeline audience, the origin of
   `SUPERPIPELINE_BASE_URL`. That is a set of one: a staging hub admits only the staging audience
   and production only its own. With `SUPERPIPELINE_BASE_URL` unset or not `https`, no source is
@@ -646,7 +652,15 @@ it stored. To go back to a token, `fleet bridge set KEY --credential-source none
 
 The organization plane must also be willing to mint an agent grant for that audience: the
 audience has to be registered with the issuer the hub uses (`ORG_PLANE_ISSUER`). If it is not,
-the exchange fails and every request with the row fails closed.
+the trial exchange fails and the row is refused.
+
+If a grant changes after the row is set (its `claim` scope removed, the agent suspended), each
+cycle is refused before any request is sent. The bridge logs
+`the agent's plane credential was refused; nothing was claimed, backing off` with a closed
+`reason` (for example `claims.scope`) once, then once every 15 minutes with a `suppressed`
+count, and waits out the 30-second backoff between cycles. On the checkpoint path the same
+refusal is logged as `checkpoint dispatch refused; ordinary claims continue` with reason
+`credential.claims.scope`.
 
 
 
