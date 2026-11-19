@@ -28,6 +28,7 @@ import { createQuietLog } from "./quiet-log";
 
 export { createQuietLog } from "./quiet-log";
 import { BridgeCredentialRefused } from "./plane-credential";
+import { errorFacts } from "./checkpoint-log";
 
 /** How long to wait after a claim that found nothing. */
 const DEFAULT_POLL_MS = 5_000;
@@ -189,7 +190,10 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
           await sleep(opts.backoffMs ?? DEFAULT_BACKOFF_MS, controller.signal);
           continue;
         }
-        log("a claim cycle threw", { error: String(err) });
+        // Named by class and redacted message, once per class per interval: a cycle that throws
+        // every backoff is one line every fifteen minutes with a count, not 2,880 a day.
+        const facts = errorFacts(err);
+        quiet(`threw:${facts.errorClass}`, "a claim cycle threw; backing off", { ...facts });
         await sleep(opts.backoffMs ?? DEFAULT_BACKOFF_MS, controller.signal);
         continue;
       }
@@ -452,7 +456,7 @@ export async function startSuperpipelineBridge(
       });
     } catch (err) {
       // A database blip must not kill the supervisor: the next tick tries again.
-      log("the roster could not be read", { error: String(err) });
+      log("the roster could not be read", { ...errorFacts(err) });
     }
   };
 

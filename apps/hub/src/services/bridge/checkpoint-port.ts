@@ -23,6 +23,7 @@ const held = (attemptId: string, runId: string) => ({ status: "unreported" as co
   reason: "Checkpoint dispatch requires reconciliation" });
 import type { CheckpointDispatchPort, CheckpointTarget } from "./checkpoint-dispatch";
 import type { SuperpipelineClient } from "./superpipeline";
+import { nodeCallReason, noteCheckpoint } from "./checkpoint-log";
 
 function target(profile: CheckpointProfile): CheckpointTarget {
   const t = profile.target;
@@ -75,10 +76,18 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
       await readCheckpointAuthority(profile);
       requireInstalledCheckpointProfile(profile);
       return undefined;
-    } catch (error) { return currentRefusalReason(error); }
+    } catch (error) {
+      const reason = currentRefusalReason(error);
+      // A refusal names itself; anything else is named by class and redacted message here.
+      if (!(error instanceof CheckpointRefused)) noteCheckpoint("current", reason, { stationId }, error);
+      return reason;
+    }
   }
   async function current(value: CheckpointTarget): Promise<boolean> {
-    return await refusal(value) === undefined;
+    const reason = await refusal(value);
+    // A boolean answer used to drop the reason: the dispatch parked with nothing said.
+    if (reason) noteCheckpoint("current", reason, { stationId });
+    return reason === undefined;
   }
   /** The wire code stays `authority`; the reason is for the Hub's log. */
   async function requireCurrent(value: CheckpointTarget): Promise<void> {
@@ -94,7 +103,11 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
       const request = BenchCoordinatorRequest.parse({ version: "agentpod.bench-coordinator.v1", operation: "ready",
         tenant_id: tenantId, board_id: boardId, station_id: stationId });
       const reply = await nodeRequest(profile.target.node_id, BENCH_COORDINATOR_VERB, request, { timeoutMs: 5000 });
-      if (!reply.ok) throw new CheckpointRefused("unavailable");
+      if (!reply.ok) {
+        const reason = nodeCallReason(reply.error ?? "");
+        noteCheckpoint("ready", reason, { nodeId: profile.target.node_id }, new Error(reply.error ?? "no error"));
+        throw new CheckpointRefused("unavailable", reason);
+      }
       const raw = JSON.stringify(reply.data);
       if (typeof raw !== "string" || Buffer.byteLength(raw, "utf8") > 262144) throw new CheckpointRefused("invalid");
       const parsed = await parseBenchCoordinatorResponse(new TextEncoder().encode(raw), request);
@@ -116,7 +129,8 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
         // otherwise parked, named, for an owner or admin to settle (`/api/admin/checkpoint/attempts`).
         const resolution = await resolveSupersededAttempt(attempt);
         const meta = { tenantId: attempt.row.tenantId, boardId: attempt.row.boardId, runId: attempt.claim.runId,
-          attemptId: attempt.row.attemptId, phase: attempt.row.phase, reason: resolution.reason };
+          attemptId: attempt.row.attemptId, phase: attempt.row.phase, reason: resolution.reason,
+          ...(resolution.outcome === "parked" && resolution.error ? resolution.error : {}) };
         if (resolution.outcome === "retired") {
           log.info("superseded checkpoint attempt retired; the station is free for a fresh claim", meta);
           backoff.clear();

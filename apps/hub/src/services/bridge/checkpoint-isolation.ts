@@ -7,6 +7,13 @@
 import { CheckpointRefused, type CheckpointRefusalReason } from "./checkpoint-profile";
 import type { CheckpointDispatchPort } from "./checkpoint-dispatch";
 import type { SuperpipelineClient } from "./superpipeline";
+import { errorFacts } from "./checkpoint-log";
+
+/** The error a refusal stands for: its own cause when it replaced one, else itself when it is not a refusal. */
+function underlying(error: unknown): unknown {
+  if (error instanceof CheckpointRefused) return error.cause;
+  return error;
+}
 
 /** How long a repeated refusal with the same reason stays quiet before it is logged again. */
 export const CHECKPOINT_REFUSAL_RELOG_MS = 15 * 60_000;
@@ -38,7 +45,11 @@ export function createCheckpointRefusalLog(
   return (error) => {
     const code = checkpointRefusalCode(error);
     const reason = checkpointRefusalReason(error);
-    const key = reason === undefined ? code : code + "\0" + reason;
+    // An error that is not a closed refusal (or a refusal that replaced one) is named by its class
+    // and redacted message, so "unavailable" is never the whole story.
+    const cause = underlying(error);
+    const facts = cause === undefined ? undefined : errorFacts(cause);
+    const key = [code, reason ?? "", facts?.errorClass ?? ""].join("\0");
     const at = now();
     const last = seen.get(key);
     if (last && at - last.at < relogMs) {
@@ -49,6 +60,7 @@ export function createCheckpointRefusalLog(
     log("checkpoint dispatch refused; ordinary claims continue", {
       code,
       ...(reason === undefined ? {} : { reason }),
+      ...facts,
       ...(last ? { suppressed: last.suppressed } : {}),
     });
   };

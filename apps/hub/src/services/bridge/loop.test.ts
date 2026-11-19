@@ -433,7 +433,7 @@ describe("a cycle that claims nothing says why, and never spins", () => {
     expect(refused).toHaveLength(1);
     expect(refused[0]?.meta).toEqual({ reason: "claims.scope" });
     // Not the generic throw line, which carries the raw error every backoff.
-    expect(lines.some((l) => l.message === "a claim cycle threw")).toBe(false);
+    expect(lines.some((l) => l.message.startsWith("a claim cycle threw"))).toBe(false);
   });
 
   test("an unreported cycle is logged once with its reason and backs off: no tight loop", async () => {
@@ -483,4 +483,18 @@ describe("createQuietLog", () => {
     quiet("a", "A");
     expect(lines).toEqual([{ message: "A", meta: {} }, { message: "B", meta: {} }, { message: "A", meta: { suppressed: 1 } }]);
   });
+});
+
+test("a cycle that throws names the error's class and redacted message, once per class per interval", async () => {
+  let n = 0;
+  const lines: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+  const loop = startAgentLoop({
+    run: async () => { n++; throw new TypeError("fetch failed for Bearer abc"); },
+    backoffMs: 30_000, now: () => 0, sleep: async () => {},
+    log: (message, meta) => { if (message !== "cycle") lines.push({ message, ...(meta ? { meta } : {}) }); },
+  });
+  while (n < 4) await Promise.resolve();
+  await loop.stop();
+  expect(lines).toEqual([{ message: "a claim cycle threw; backing off",
+    meta: { errorClass: "TypeError", error: "fetch failed for Bearer [redacted]" } }]);
 });

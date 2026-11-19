@@ -4,6 +4,8 @@ import { parsePendingCheckpointClaim } from "./checkpoint-claim";
 import fixture from "./checkpoint-contract/claim.fixture.json";
 import { SuperpipelineClient } from "./superpipeline";
 import type { DispatchResult } from "./dispatch-types";
+import { setCheckpointLogForTests } from "./checkpoint-log";
+import { createQuietLog } from "./quiet-log";
 
 const identity = { tenantId: "fleet_hub_fixture", boardId: fixture.pending.boardId, stationId: "station_pilot01" };
 function target(): CheckpointTarget { return { ...identity, sourceTenantId: fixture.pending.tenantId, agentId: fixture.pending.agentId, nodeId: "node_pilot01",
@@ -40,7 +42,7 @@ test.each(["tenantId", "boardId", "stationId", "workerVersion", "benchProtocol",
   "readiness refuses foreign or unsupported %s before any claim", async (field) => {
     const h = harness();
     Object.assign(h.observed, { [field]: "foreign" });
-    await expect(selectCheckpointDispatch(h.port, identity)).rejects.toThrow("Checkpoint target unavailable");
+    await expect(selectCheckpointDispatch(h.port, identity)).rejects.toMatchObject({ code: "unavailable" });
     expect(h.calls).toHaveLength(0);
     expect(h.dispatched).toHaveLength(0);
   },
@@ -128,4 +130,37 @@ test("a named capacity refusal from the port reaches the caller unchanged", asyn
   const selection = await selectCheckpointDispatch(h.port, identity);
   expect(await selection?.dispatch(h.client, parsePendingCheckpointClaim(fixture.pending))).toEqual(refusal);
   expect(h.dispatched).toHaveLength(1);
+});
+
+// ─── a park always says why ──────────────────────────────────────────────────
+function captureCheckpointLog() {
+  const lines: Array<Record<string, unknown>> = [];
+  const restore = setCheckpointLogForTests(createQuietLog((_m, meta) => lines.push(meta ?? {}), { now: () => 0 }));
+  return { lines, restore };
+}
+
+test("a claimed card the current re-read refuses is parked, and the park is named", async () => {
+  const h = harness();
+  const selected = await selectCheckpointDispatch(h.port, identity);
+  if (!selected) throw new Error("fixture selection missing");
+  const log = captureCheckpointLog();
+  try {
+    h.invalidate();
+    expect((await selected.dispatch(h.client, parsePendingCheckpointClaim(fixture.pending))).status).toBe("unreported");
+    expect(log.lines).toEqual([expect.objectContaining({ site: "dispatch", reason: "current.before_context",
+      runId: fixture.pending.runId })]);
+  } finally { log.restore(); }
+});
+
+test("a dispatch that throws is parked with the error's class and redacted message", async () => {
+  const h = harness();
+  const selected = await selectCheckpointDispatch(h.port, identity);
+  if (!selected) throw new Error("fixture selection missing");
+  h.port.dispatch = async () => { throw new TypeError("fetch failed with Bearer eyJhbGciOi.eyJzdWIi.c2ln for spa_abc123"); };
+  const log = captureCheckpointLog();
+  try {
+    expect((await selected.dispatch(h.client, parsePendingCheckpointClaim(fixture.pending))).status).toBe("unreported");
+    expect(log.lines).toEqual([expect.objectContaining({ site: "dispatch", reason: "error", errorClass: "TypeError",
+      error: "fetch failed with Bearer [redacted] for spa_[redacted]" })]);
+  } finally { log.restore(); }
 });

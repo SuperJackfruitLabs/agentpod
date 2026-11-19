@@ -1,0 +1,47 @@
+/** The silent-catch detector, shared by tests/unit/no-silent-catch.test.ts and the PR audit. */
+import { join } from "node:path";
+
+export const SOURCE_ROOT = join(import.meta.dir, "../../src");
+export const CHECKPOINT_PATH = [
+  "services/bridge/checkpoint-dispatch.ts", "services/bridge/checkpoint-port.ts", "services/bridge/checkpoint-current.ts",
+  "services/bridge/checkpoint-isolation.ts", "services/bridge/checkpoint-agent-client.ts", "services/bridge/dispatch-run.ts",
+  "services/bridge/loop.ts", "services/bridge/plane-credential.ts", "services/bridge/checkpoint-orchestrator.ts",
+  "services/bridge/checkpoint-supersede.ts", "services/bridge/checkpoint-service-client.ts",
+  "services/bridge/checkpoint-current-decision.ts", "services/bridge/checkpoint-profiles.ts",
+  "services/bridge/checkpoint-ledger.ts", "services/bridge/checkpoint-log.ts", "services/broker/broker.ts",
+];
+
+/** A call that says something: the checkpoint log, a refusal log handed the error, a quiet or plain log. */
+const SAYS = [/\bnoteCheckpoint\(/, /\brefuse\(/, /\bcheckpointRefused\(/, /\brefused\((error|err)\)/, /\bquiet\(/,
+  /\bparkedLog\(/, /\bsupersededLog\(/, /\blog\(/, /\blog\.(info|warn|error)\(/, /\berrorFacts\(/,
+  /\bparked\([^)]*\b(error|err)\)/];
+/** A throw that hands the error on: rethrown as is, or wrapped with it as the cause. */
+const PASSES_ON = /^throw (error|err)$|,\s*(error|err)\)$/;
+
+/** Every catch in `source`: its line and the text that handles it (a block body or a `.catch` argument). */
+export function catches(source: string): Array<{ line: number; head: string; body: string }> {
+  const found: Array<{ line: number; head: string; body: string }> = [];
+  const pattern = /\bcatch\b\s*(\([^)]*\))?\s*\{|\.catch\(/g;
+  for (let match = pattern.exec(source); match; match = pattern.exec(source)) {
+    const open = match[0].endsWith("{") ? "{" : "(";
+    const close = open === "{" ? "}" : ")";
+    let depth = 1; let i = match.index + match[0].length;
+    for (; i < source.length && depth > 0; i++) {
+      if (source[i] === open) depth++;
+      else if (source[i] === close) depth--;
+    }
+    const line = source.slice(0, match.index).split("\n").length;
+    found.push({ line, head: source.split("\n")[line - 1] ?? "", body: source.slice(match.index + match[0].length, i - 1) });
+  }
+  return found;
+}
+
+/** Whether a catch is handled (not silent). */
+export function handled(c: { head: string; body: string }): boolean {
+  if (/silent-catch-ok:/.test(c.head) || /silent-catch-ok:/.test(c.body)) return true;
+  if (SAYS.some((p) => p.test(c.body))) return true;
+  // Otherwise it must only hand the error on: every throw passes it, and nothing returns instead.
+  const throws = (c.body.match(/\bthrow\b[^;}]*/g) ?? []).map((t) => t.trim());
+  return throws.length > 0 && throws.every((t) => PASSES_ON.test(t)) && !/\breturn\b/.test(c.body);
+}
+

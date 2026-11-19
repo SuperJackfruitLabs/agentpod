@@ -9,6 +9,7 @@ import { parseCheckpointSource, parseSourceReceipt, parseSourceSnapshot, require
   type CheckpointSource, type CheckpointSourceReceipt, type CheckpointSourceSnapshot } from "./checkpoint-source";
 
 import { checkpointSettlementSchema, checkedCheckpointReceipt, type CheckpointReceipt } from "./checkpoint-settlement-data";
+import { noteCheckpoint } from "./checkpoint-log";
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 interface Options { plane?: OrgPlaneConfig; fetch?: Fetch }
@@ -37,7 +38,7 @@ async function boundedBody(response: Response): Promise<Uint8Array> {
       if (size > 65_536) throw new CheckpointRefused("source");
       parts.push(next.value);
     }
-  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); } // silent-catch-ok: releasing a reader already read or failed
   const out = new Uint8Array(size); let offset = 0;
   for (const part of parts) { out.set(part, offset); offset += part.byteLength; }
   return out;
@@ -59,7 +60,10 @@ export function createCheckpointServiceClient(configuration: CheckpointProfile, 
     // No automatic retry, redirect, ambient cookie, private error body, or token exposure.
     let token: string;
     try { token = (await issuer.serviceToken(profile.sourceAudience)).accessToken; }
-    catch { throw new CheckpointRefused("authority"); }
+    catch (error) {
+      noteCheckpoint("service", "service.token", { audience: profile.sourceAudience }, error);
+      throw new CheckpointRefused("authority", undefined, error);
+    }
     const claims = await verifier.verify(token);
     if (!claims || claims.principalKind !== "service" || claims.sub !== profile.reporterPrincipalId ||
       claims.org !== profile.organizationId || !claims.ent.includes("superpipeline") || claims.act !== undefined ||
@@ -100,7 +104,8 @@ export function createCheckpointServiceClient(configuration: CheckpointProfile, 
       return { raw, expiresAtMs: claims.exp * 1000, missing };
     } catch (error) {
       if (error instanceof CheckpointRefused) throw error;
-      throw new CheckpointRefused(body === undefined ? "unavailable" : "uncertain");
+      noteCheckpoint("service", body === undefined ? "service.read" : "service.write", { kind }, error);
+      throw new CheckpointRefused(body === undefined ? "unavailable" : "uncertain", undefined, error);
     } finally { if (timerListener) signal.removeEventListener("abort", timerListener); }
   }
   function retainedBody(value: PendingCheckpointClaim, body: string): PendingCheckpointClaim {

@@ -56,7 +56,7 @@ export function readCheckpointProfiles(env: Record<string, string | undefined> =
     const names = profiles.map((profile) => [profile.target.tenant_id, profile.target.board_id, profile.target.station_id].join("\0"));
     if (new Set(names).size !== names.length) throw new CheckpointRefused("invalid");
     return Object.freeze(profiles);
-  } catch { throw new CheckpointRefused("unavailable"); }
+  } catch (error) { throw new CheckpointRefused("unavailable", undefined, error); }
 }
 
 const log = createLogger("bridge-checkpoint");
@@ -88,9 +88,13 @@ function loadInstallation(): readonly CheckpointProfile[] {
     const profiles = readCheckpointProfiles();
     log.info("checkpoint profile snapshot loaded", { profiles: profiles.length, reload: "restart-required" });
     return profiles;
-  } catch {
-    // Neither private filenames, profile contents nor raw exceptions enter logs.
-    log.warn("checkpoint profile snapshot unavailable; dedicated dispatch disabled", { code: "unavailable", reload: "restart-required" });
+  } catch (error) {
+    // Neither private filenames, profile contents nor raw messages enter logs: a message can quote
+    // the path or the file. The error's class and its closed code (an fs errno, a refusal code) do.
+    const cause = error instanceof CheckpointRefused ? error.cause : error;
+    const errno: unknown = cause instanceof Error ? Reflect.get(cause, "code") : undefined;
+    log.warn("checkpoint profile snapshot unavailable; dedicated dispatch disabled", { code: "unavailable", reload: "restart-required",
+      errorClass: cause instanceof Error ? cause.name : typeof cause, ...(typeof errno === "string" ? { errno } : {}) });
     return Object.freeze([]);
   }
 }

@@ -20,6 +20,7 @@ import { checkedCheckpointReceipt } from "./checkpoint-settlement-data";
 import type { SuperpipelineClient } from "./superpipeline";
 import type { DispatchResult } from "./dispatch-types";
 import { createQuietLog, type QuietLog } from "./quiet-log";
+import { errorFacts, nodeCallReason } from "./checkpoint-log";
 
 const encode = (raw: string) => new TextEncoder().encode(raw);
 const hash = (raw: string) => createHash("sha256").update(raw, "utf8").digest("hex");
@@ -35,10 +36,15 @@ export function setParkedLogForTests(next: QuietLog): () => void {
   parkedLog = next;
   return () => { parkedLog = prior; };
 }
-const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["code"] = "uncertain"): DispatchResult => {
-  parkedLog([attempt.row.attemptId, attempt.row.phase, code].join("\0"), "checkpoint dispatch parked for reconciliation", {
+const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["code"] = "uncertain", error?: unknown): DispatchResult => {
+  // The error that parked it, by class and redacted message (a refusal's own cause when it replaced one).
+  const cause = error instanceof CheckpointRefused ? error.cause : error;
+  const facts = cause === undefined ? undefined : errorFacts(cause);
+  const reason = error instanceof CheckpointRefused ? error.reason : undefined;
+  parkedLog([attempt.row.attemptId, attempt.row.phase, code, reason ?? "", facts?.errorClass ?? ""].join("\0"),
+    "checkpoint dispatch parked for reconciliation", {
     tenantId: attempt.row.tenantId, boardId: attempt.row.boardId, runId: attempt.claim.runId,
-    attemptId: attempt.row.attemptId, phase: attempt.row.phase, code });
+    attemptId: attempt.row.attemptId, phase: attempt.row.phase, code, ...(reason === undefined ? {} : { reason }), ...facts });
   return { status: "unreported", externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId,
     reason: "Checkpoint dispatch requires reconciliation" };
 };
@@ -73,7 +79,7 @@ async function exchange(attempt: RetainedCheckpointAttempt, raw: string, deps: C
   // Broker correlates replies to the authenticated selected enrolled Node.
   // A timeout never causes this function to repeat the request.
   const result = await deps.request(attempt.profile.target.node_id, BENCH_COORDINATOR_VERB, sent, { timeoutMs: 15_000 });
-  if (!result.ok) throw new CheckpointRefused("uncertain");
+  if (!result.ok) throw new CheckpointRefused("uncertain", nodeCallReason(result.error ?? ""), new Error(result.error ?? "no error"));
   const serialized = JSON.stringify(result.data);
   if (typeof serialized !== "string" || Buffer.byteLength(serialized, "utf8") > 262144) throw new CheckpointRefused("source");
   const response = await parseBenchCoordinatorResponse(encode(serialized), sent);
@@ -201,5 +207,5 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
     }
     return attempt.row.phase === "reported" ? { status: "reported", externalRunId: attempt.claim.runId,
       attemptId: attempt.row.attemptId } : parked(attempt);
-  } catch (error) { return parked(attempt, error instanceof CheckpointRefused ? error.code : "unavailable"); }
+  } catch (error) { return parked(attempt, error instanceof CheckpointRefused ? error.code : "unavailable", error); }
 }

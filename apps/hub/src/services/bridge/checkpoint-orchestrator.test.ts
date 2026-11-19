@@ -114,3 +114,16 @@ test("an attempt parked on every re-check is logged once per phase and code, the
     expect(lines[1]).toMatchObject({ suppressed: 4 });
   } finally { restore(); }
 });
+
+test("a node call that times out parks the attempt naming the timeout, not a bare uncertain", async () => {
+  const lines: Array<Record<string, unknown> | undefined> = [];
+  const restore = setParkedLogForTests(createQuietLog((_m, meta) => lines.push(meta), { now: () => 0 }));
+  try {
+    const attempt = executePending();
+    const h = harness({});
+    h.deps.request = async () => ({ ok: false, error: "timeout" });
+    expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
+    expect(lines).toEqual([expect.objectContaining({ attemptId: attempt.row.attemptId, code: "uncertain",
+      reason: "node.call.timeout", errorClass: "Error", error: "timeout" })]);
+  } finally { restore(); }
+});
