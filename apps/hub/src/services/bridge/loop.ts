@@ -193,7 +193,7 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
         // Named by class and redacted message, once per class per interval: a cycle that throws
         // every backoff is one line every fifteen minutes with a count, not 2,880 a day.
         const facts = errorFacts(err);
-        quiet(`threw:${String(facts.errorClass)}`, "a claim cycle threw; backing off", facts);
+        quiet(`threw:${facts.errorClass}`, "a claim cycle threw; backing off", { ...facts });
         await sleep(opts.backoffMs ?? DEFAULT_BACKOFF_MS, controller.signal);
         continue;
       }
@@ -456,7 +456,7 @@ export async function startSuperpipelineBridge(
       });
     } catch (err) {
       // A database blip must not kill the supervisor: the next tick tries again.
-      log("the roster could not be read", errorFacts(err));
+      log("the roster could not be read", { ...errorFacts(err) });
     }
   };
 

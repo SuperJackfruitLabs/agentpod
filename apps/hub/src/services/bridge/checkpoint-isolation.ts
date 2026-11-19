@@ -48,8 +48,8 @@ export function createCheckpointRefusalLog(
     // An error that is not a closed refusal (or a refusal that replaced one) is named by its class
     // and redacted message, so "unavailable" is never the whole story.
     const cause = underlying(error);
-    const facts = cause === undefined ? {} : errorFacts(cause);
-    const key = [code, reason ?? "", String(facts.errorClass ?? "")].join("\0");
+    const facts = cause === undefined ? undefined : errorFacts(cause);
+    const key = [code, reason ?? "", facts?.errorClass ?? ""].join("\0");
     const at = now();
     const last = seen.get(key);
     if (last && at - last.at < relogMs) {

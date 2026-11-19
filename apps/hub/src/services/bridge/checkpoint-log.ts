@@ -39,14 +39,26 @@ export function redact(text: string): string {
     .slice(0, 300);
 }
 
+export interface ErrorFacts {
+  errorClass: string;
+  error: string;
+  errorCode?: string | number;
+  errorReason?: string | number;
+  status?: string | number;
+}
+
 /** The error's class, its redacted message, and any closed code it carries. Never its stack or cause chain. */
-export function errorFacts(error: unknown): Record<string, unknown> {
-  if (!(error instanceof Error)) return { errorClass: typeof error, error: redact(String(error)) };
-  const facts: Record<string, unknown> = { errorClass: error.name || error.constructor.name, error: redact(error.message) };
-  for (const key of ["code", "reason", "status"] as const) {
+export function errorFacts(error: unknown): ErrorFacts {
+  if (!(error instanceof Error)) return { errorClass: typeof error, error: redact(typeof error === "string" ? error : JSON.stringify(error) ?? "undefined") };
+  const facts: ErrorFacts = { errorClass: error.name || error.constructor.name, error: redact(error.message) };
+  const scalar = (key: string): string | number | undefined => {
     const value: unknown = Reflect.get(error, key);
-    if (typeof value === "string" || typeof value === "number") facts[key === "code" ? "errorCode" : key === "reason" ? "errorReason" : "status"] = value;
-  }
+    return typeof value === "string" || typeof value === "number" ? value : undefined;
+  };
+  const code = scalar("code"), reason = scalar("reason"), status = scalar("status");
+  if (code !== undefined) facts.errorCode = code;
+  if (reason !== undefined) facts.errorReason = reason;
+  if (status !== undefined) facts.status = status;
   return facts;
 }
 
@@ -56,7 +68,7 @@ export function errorFacts(error: unknown): Record<string, unknown> {
  * error class, then once per interval with the count suppressed.
  */
 export function noteCheckpoint(site: string, reason: string, meta: Record<string, unknown> = {}, error?: unknown): void {
-  const facts = error === undefined ? {} : errorFacts(error);
-  quiet([site, reason, String(facts.errorClass ?? "")].join("\0"), `checkpoint ${site}: ${reason}`,
+  const facts = error === undefined ? undefined : errorFacts(error);
+  quiet([site, reason, facts?.errorClass ?? ""].join("\0"), `checkpoint ${site}: ${reason}`,
     { site, reason, ...meta, ...facts });
 }

@@ -18,7 +18,7 @@
  */
 import { BENCH_COORDINATOR_VERB, BenchCoordinatorRequest, parseBenchCoordinatorResponse, type BenchCoordinatorResponse } from "@agentpod/contract";
 import { request as nodeRequest } from "../broker";
-import { errorFacts } from "./checkpoint-log";
+import { errorFacts, type ErrorFacts } from "./checkpoint-log";
 import { NO_PRODUCER_EFFECT_PHASES, retireCheckpointAttempt, type CheckpointRetirementReason,
   type RetainedCheckpointAttempt } from "./checkpoint-ledger";
 
@@ -31,7 +31,7 @@ export type SupersededParkReason =
 
 export type SupersededResolution =
   | { outcome: "retired"; reason: CheckpointRetirementReason }
-  | { outcome: "parked"; reason: SupersededParkReason; error?: Record<string, unknown> };
+  | { outcome: "parked"; reason: SupersededParkReason; error?: ErrorFacts };
 
 /** What a status reply says, as far as resolving is concerned. */
 export interface NodeStatusSummary {

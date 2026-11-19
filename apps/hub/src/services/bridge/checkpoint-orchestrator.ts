@@ -39,9 +39,9 @@ export function setParkedLogForTests(next: QuietLog): () => void {
 const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["code"] = "uncertain", error?: unknown): DispatchResult => {
   // The error that parked it, by class and redacted message (a refusal's own cause when it replaced one).
   const cause = error instanceof CheckpointRefused ? error.cause : error;
-  const facts = cause === undefined ? {} : errorFacts(cause);
+  const facts = cause === undefined ? undefined : errorFacts(cause);
   const reason = error instanceof CheckpointRefused ? error.reason : undefined;
-  parkedLog([attempt.row.attemptId, attempt.row.phase, code, reason ?? "", String(facts.errorClass ?? "")].join("\0"),
+  parkedLog([attempt.row.attemptId, attempt.row.phase, code, reason ?? "", facts?.errorClass ?? ""].join("\0"),
     "checkpoint dispatch parked for reconciliation", {
     tenantId: attempt.row.tenantId, boardId: attempt.row.boardId, runId: attempt.claim.runId,
     attemptId: attempt.row.attemptId, phase: attempt.row.phase, code, ...(reason === undefined ? {} : { reason }), ...facts });
