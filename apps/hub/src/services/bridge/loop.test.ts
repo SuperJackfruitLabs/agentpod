@@ -439,12 +439,30 @@ describe("a cycle that claims nothing says why, and never spins", () => {
   test("an unreported cycle is logged once with its reason and backs off: no tight loop", async () => {
     const parked = { status: "unreported", reason: "Checkpoint dispatch requires reconciliation" } as const;
     const { slept, lines, cycles } = await drive(async () => parked, 5);
-    // One backoff per cycle: before this, the next cycle began at once and nothing was logged.
+    // A backoff after every cycle: before this, the next cycle began at once and nothing was logged.
     expect(slept.length).toBeGreaterThanOrEqual(cycles - 1);
-    expect(slept.slice(0, cycles - 1).every((ms) => ms === 30_000)).toBe(true);
+    expect(slept.every((ms) => ms >= 30_000)).toBe(true);
     const logged = lines.filter((l) => l.message === "the cycle ended unreported; backing off");
     expect(logged).toHaveLength(1);
     expect(logged[0]?.meta).toMatchObject({ status: "unreported", reason: parked.reason });
+  });
+
+  test("the same attempt parked again backs off exponentially, to a ceiling, and resets", async () => {
+    const parked = { status: "unreported", attemptId: "attempt_1", reason: "Checkpoint dispatch requires reconciliation" } as const;
+    const script: DispatchResult[] = [...Array<DispatchResult>(8).fill(parked), { status: "reported" }, parked];
+    let i = 0;
+    const slept: number[] = [];
+    const loop = startAgentLoop({
+      run: async () => script[i++] ?? { status: "idle" },
+      backoffMs: 30_000,
+      maxBackoffMs: 15 * 60_000,
+      sleep: async (ms) => { slept.push(ms); },
+    });
+    while (i < script.length + 1) await Promise.resolve();
+    await loop.stop();
+    expect(slept.slice(0, 8)).toEqual([30_000, 60_000, 120_000, 240_000, 480_000, 900_000, 900_000, 900_000]);
+    // Another outcome in between starts the next park from the base again.
+    expect(slept[8]).toBe(30_000);
   });
 
   test("an idle cycle is recorded once per interval, not every poll", async () => {

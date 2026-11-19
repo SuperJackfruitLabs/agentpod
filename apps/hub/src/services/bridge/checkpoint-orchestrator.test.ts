@@ -6,7 +6,8 @@ import { TEST_PLANE } from "../../auth/org-plane/config";
 import { checkpointPolicyDigest, parsePendingCheckpointClaim } from "./checkpoint-claim";
 import { canonicalCheckpoint } from "./checkpoint-json";
 import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
-import { driveCheckpointAttempt, type CheckpointDriveDeps } from "./checkpoint-orchestrator";
+import { driveCheckpointAttempt, setParkedLogForTests, type CheckpointDriveDeps } from "./checkpoint-orchestrator";
+import { createQuietLog } from "./quiet-log";
 import { parseCheckpointProfile } from "./checkpoint-profile";
 import { CAPACITY_REASON } from "./checkpoint-refusal";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
@@ -89,4 +90,27 @@ test("a node-internal parked state arrives as pending and parks the row", async 
   // It parked because it parsed as pending, not because parsing failed.
   const parsed = await parseBenchCoordinatorResponse(new TextEncoder().encode(JSON.stringify(reply)), BenchCoordinatorRequest.parse(h.sent[0]));
   expect(parsed.state).toBe("pending");
+});
+
+test("an attempt parked on every re-check is logged once per phase and code, then once per interval", async () => {
+  const pending = corpus.responses.find((c) => c.name === "pending");
+  if (!pending) throw new Error("shared pending fixture missing");
+  let t = 0;
+  const lines: Array<Record<string, unknown> | undefined> = [];
+  const restore = setParkedLogForTests(createQuietLog((_m, meta) => lines.push(meta), { now: () => t, relogMs: 1_000 }));
+  try {
+    const attempt = executePending();
+    const reply = { ...pending.value, identity: attempt.request.identity, target: attempt.request.target };
+    for (let i = 0; i < 5; i++) {
+      const h = harness(reply);
+      expect((await driveCheckpointAttempt(attempt, h.client, false, h.deps)).status).toBe("unreported");
+    }
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ attemptId: attempt.row.attemptId, phase: "execute_pending", code: "uncertain" });
+    t = 2_000;
+    const h = harness(reply);
+    await driveCheckpointAttempt(attempt, h.client, false, h.deps);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toMatchObject({ suppressed: 4 });
+  } finally { restore(); }
 });
