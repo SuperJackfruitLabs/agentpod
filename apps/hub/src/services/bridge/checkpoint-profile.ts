@@ -33,8 +33,28 @@ const profileSchema = z.object({
   new Set(value.repositories.map((member) => member.repositorySHA256)).size === value.repositories.length &&
   new Set(value.repositories.map((member) => member.provider + "/" + member.repository)).size === value.repositories.length);
 export type CheckpointProfile = z.infer<typeof profileSchema>;
+export type CheckpointRefusalCode = "invalid" | "authority" | "unavailable" | "uncertain" | "source" | "stale";
+/**
+ * Why a selection was refused, for the Hub's own log only. A closed set of fixed words: no
+ * identifier, token, path or raw exception ever enters it, and it never reaches the wire, where
+ * the refusal stays its `code` alone. `node.state:` and `node.target.` take their suffix from the
+ * contract's closed enums and the target schema's own field names.
+ */
+export type CheckpointRefusalReason =
+  | "authority.shape"
+  | "facts.row" | "facts.enforcement" | "facts.tenant.source" | "facts.tenant.organization" | "facts.node"
+  | "facts.principal" | "facts.owner" | "facts.epoch" | "facts.profile"
+  | "node.status" | "node.offline" | "node.last_seen"
+  | "issuer.occupant.missing" | "issuer.occupant.kind" | "issuer.occupant.suspended" | "issuer.occupant.organization"
+  | "issuer.owner.missing" | "issuer.owner.suspended" | "issuer.owner.organization" | "issuer.grant"
+  | "credential.missing" | "credential.principal" | "credential.organization" | "credential.audience"
+  | "claim.tenant" | "claim.board" | "claim.agent" | "claim.reporter" | "claim.node" | "claim.checkpoint_repository"
+  | "claim.executor" | "claim.repositories"
+  | "selection.identity" | "selection.target"
+  | `current.${CheckpointRefusalCode}` | "current.error"
+  | `node.state:${string}` | `node.target.${string}`;
 export class CheckpointRefused extends Error {
-  constructor(readonly code: "invalid" | "authority" | "unavailable" | "uncertain" | "source" | "stale") {
+  constructor(readonly code: CheckpointRefusalCode, readonly reason?: CheckpointRefusalReason) {
     super(`Checkpoint refused: ${code}`);
     this.name = "CheckpointRefused";
   }
@@ -49,16 +69,25 @@ export function parseCheckpointProfile(value: unknown): CheckpointProfile {
   Object.freeze(parsed.data.target);
   return Object.freeze(parsed.data);
 }
-export function requireCheckpointProfileClaim(profile: CheckpointProfile, claim: PendingCheckpointClaim): void {
+/** The first pin a claim breaks, or undefined when it is this profile's claim. Exported for tests. */
+export function claimRefusal(profile: CheckpointProfile, claim: PendingCheckpointClaim): CheckpointRefusalReason | undefined {
   const t = profile.target; const p = claim.policy;
-  if (claim.tenantId !== profile.sourceTenantId || claim.boardId !== t.board_id || claim.agentId !== t.agent_id ||
-    p.reporterPrincipalId !== profile.reporterPrincipalId || p.nodeId !== t.node_id ||
-    p.checkpointRepository !== profile.checkpointRepository ||
-    !p.executors.some((executor) => executor.agentId === t.agent_id && executor.stationId === t.station_id) ||
-    p.repositories.length !== profile.repositories.length || p.repositories.some((member, index) => {
-      const pin = profile.repositories[index];
-      return pin?.name !== member.name || pin.provider !== member.provider || pin.repository !== member.repository;
-    })) throw new CheckpointRefused("authority");
+  if (claim.tenantId !== profile.sourceTenantId) return "claim.tenant";
+  if (claim.boardId !== t.board_id) return "claim.board";
+  if (claim.agentId !== t.agent_id) return "claim.agent";
+  if (p.reporterPrincipalId !== profile.reporterPrincipalId) return "claim.reporter";
+  if (p.nodeId !== t.node_id) return "claim.node";
+  if (p.checkpointRepository !== profile.checkpointRepository) return "claim.checkpoint_repository";
+  if (!p.executors.some((executor) => executor.agentId === t.agent_id && executor.stationId === t.station_id)) return "claim.executor";
+  if (p.repositories.length !== profile.repositories.length || p.repositories.some((member, index) => {
+    const pin = profile.repositories[index];
+    return pin?.name !== member.name || pin.provider !== member.provider || pin.repository !== member.repository;
+  })) return "claim.repositories";
+  return undefined;
+}
+export function requireCheckpointProfileClaim(profile: CheckpointProfile, claim: PendingCheckpointClaim): void {
+  const reason = claimRefusal(profile, claim);
+  if (reason) throw new CheckpointRefused("authority", reason);
 }
 
 /** Select the Node coordinator independently of the bridge harness profile. */

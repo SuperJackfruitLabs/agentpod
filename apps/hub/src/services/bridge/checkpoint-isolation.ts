@@ -4,7 +4,7 @@
  * stage (a claim without the checkpoint protocol cannot select one). What authority requires
  * is unchanged here; this only decides how far a refusal reaches and how often it is logged.
  */
-import { CheckpointRefused } from "./checkpoint-profile";
+import { CheckpointRefused, type CheckpointRefusalReason } from "./checkpoint-profile";
 import type { CheckpointDispatchPort } from "./checkpoint-dispatch";
 import type { SuperpipelineClient } from "./superpipeline";
 
@@ -18,8 +18,13 @@ export function checkpointRefusalCode(error: unknown): string {
   return error instanceof CheckpointRefused ? error.code : "unavailable";
 }
 
+/** The refusal's closed sub-reason, when it names one. Never on the wire; for this log only. */
+export function checkpointRefusalReason(error: unknown): CheckpointRefusalReason | undefined {
+  return error instanceof CheckpointRefused ? error.reason : undefined;
+}
+
 /**
- * Logs a refusal once per distinct reason, then again at most once per `relogMs` with the count
+ * Logs a refusal once per distinct reason (its code and, when it names one, its sub-reason), then again at most once per `relogMs` with the count
  * it suppressed meanwhile. A claim cycle every few seconds must not become a log line every few
  * seconds forever. Neither raw exceptions nor private profile fields enter the line.
  */
@@ -32,15 +37,18 @@ export function createCheckpointRefusalLog(
   const seen = new Map<string, { at: number; suppressed: number }>();
   return (error) => {
     const code = checkpointRefusalCode(error);
+    const reason = checkpointRefusalReason(error);
+    const key = reason === undefined ? code : code + "\0" + reason;
     const at = now();
-    const last = seen.get(code);
+    const last = seen.get(key);
     if (last && at - last.at < relogMs) {
       last.suppressed++;
       return;
     }
-    seen.set(code, { at, suppressed: 0 });
+    seen.set(key, { at, suppressed: 0 });
     log("checkpoint dispatch refused; ordinary claims continue", {
       code,
+      ...(reason === undefined ? {} : { reason }),
       ...(last ? { suppressed: last.suppressed } : {}),
     });
   };
