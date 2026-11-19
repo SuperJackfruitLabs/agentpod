@@ -42,10 +42,16 @@ Two switches must both be set. Neither is set by default.
 The Hub side of the coordinator has its own prerequisites, described in
 [bench-checkpoint-reporting.md](contributor/bench-checkpoint-reporting.md):
 `PROPOSED_CHECKPOINT_COORDINATOR=true` with a private profile file,
-`ENFORCE_CONTROL_PAIR=true`, and a dispatch grant (`mayDispatch`) from each
-profile's owner for its agent. Without `ENFORCE_CONTROL_PAIR=true` the Hub logs a
+`ENFORCE_CONTROL_PAIR=true`, a dispatch grant (`mayDispatch`) from each
+profile's owner for its agent, and a `station-plane` credential source on that
+agent's roster row. Without `ENFORCE_CONTROL_PAIR=true` the Hub logs a
 startup error and loads no checkpoint profile, so no registered launch is reached;
-ordinary dispatch continues.
+ordinary dispatch continues. A roster row that still holds a legacy token refuses
+every checkpoint cycle with `authority` (`credential.missing`) before `ready` reaches
+the Node, so nothing here is reached either. Give the row a source with
+`fleet bridge set KEY --credential-source station-plane …`, whose audience is the
+Hub's own SuperPipeline origin; see
+[DEPLOYMENT.md → Giving an agent a plane credential source](DEPLOYMENT.md#giving-an-agent-a-plane-credential-source).
 
 ## Sequence
 

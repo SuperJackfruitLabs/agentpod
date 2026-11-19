@@ -65,7 +65,6 @@
     "GET /api/stations/:stationId/transcription",
     "GET /health",
     "GET /public/nodes/gateway",
-    "PATCH /api/admin/bridge/agents/:key",
     "PATCH /api/stations/:id/forge-api/:grantId/policy",
     "POST /_matrix/push/v1/notify",
     "POST /api/acp/sessions/:sessionId/resume",
