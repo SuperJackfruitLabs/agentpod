@@ -101,7 +101,7 @@ func (c Coordinator) advance(ctx context.Context, spec benchdispatch.SourceSpec)
 		return zero, c.terminate(ctx, spec, "verification_failed", true)
 	}
 	outcome, _ := reply.Result.(*benchworkspace.FiniteRunOutcome)
-	held := outcome == nil || heldBy(spec, &outcome.Mutation)
+	held := outcome == nil || retains(spec, &outcome.Mutation)
 	if !reply.OK && outcome == nil {
 		code := refusalFor(reply.Error.Code)
 		return zero, c.terminate(ctx, spec, code, code != "stale_owner")

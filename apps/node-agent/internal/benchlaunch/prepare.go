@@ -81,6 +81,20 @@ func heldBy(spec benchdispatch.SourceSpec, m *benchworkspace.Mutation) bool {
 	return w.Key == spec.BenchKey && w.Phase == "ready" && w.TransferState == "" && w.Pending == nil && w.Archive == nil && w.MemberCount == len(spec.Repositories) && w.CheckpointRepository == spec.CheckpointRepository && w.Lease != nil && w.Lease.Holder == spec.Holder && !w.Lease.StopRequested && (w.Lease.Execution == nil || w.Lease.Execution.Phase == "stopped")
 }
 
+// retains reports whether a reply still shows this attempt's holder on the
+// bench's lease, in any stopped state. A run killed under it (a benchd restart)
+// answers with the lease stopped and stop_requested: heldBy rightly refuses to
+// continue on that lease, but it is still ours to release with our own token.
+// Release is token-scoped, so claiming too much is safe (a lease already gone
+// is recorded done); claiming too little leaves the lease held forever.
+func retains(spec benchdispatch.SourceSpec, m *benchworkspace.Mutation) bool {
+	if m == nil {
+		return false
+	}
+	w := m.Workspace
+	return w.Key == spec.BenchKey && w.Lease != nil && w.Lease.Holder == spec.Holder
+}
+
 // Prepare acquires the lease, observes the registration and binds the exact
 // profiled run request. It launches nothing.
 func (c Coordinator) Prepare(ctx context.Context, spec benchdispatch.SourceSpec, task benchdispatch.SourceTask) (benchcoordinator.Prepared, error) {

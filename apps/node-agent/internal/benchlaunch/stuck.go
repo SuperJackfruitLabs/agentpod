@@ -134,7 +134,7 @@ func (c Coordinator) initializationToken(ctx context.Context, spec benchdispatch
 			if err != nil {
 				continue
 			}
-			if status, body, err = c.recover(ctx, call{lookup: &lookup}); err != nil || uncertain(body) {
+			if status, body, err = c.recover(ctx, call{lookup: &lookup}); err != nil || uncertain(body, true) {
 				continue
 			}
 		}
