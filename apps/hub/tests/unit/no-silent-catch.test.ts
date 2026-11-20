@@ -15,7 +15,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CHECKPOINT_PATH, SOURCE_ROOT, catches, handled } from "../helpers/silent-catch";
+import { CHECKPOINT_PATH, COMPLETED_PATH, SOURCE_ROOT, catches, handled, unnamedRefusals } from "../helpers/silent-catch";
 
 const root = SOURCE_ROOT;
 
@@ -43,4 +43,26 @@ test("the detector itself finds a silent catch, and accepts the handled forms", 
     "x.catch(() => {}); // silent-catch-ok: releasing a reader",
   ].join("\n"));
   expect(fine.map(handled)).toEqual([true, true, true, true]);
+});
+
+test("every refusal on the completed path names its closed reason", () => {
+  const unnamed: string[] = [];
+  for (const file of COMPLETED_PATH) {
+    const source = readFileSync(join(root, file), "utf8");
+    for (const r of unnamedRefusals(source)) unnamed.push(`${file}:${r.line}  ${r.text}`);
+  }
+  expect(unnamed).toEqual([]);
+});
+
+test("the unnamed-refusal detector finds a bare code and a reason left undefined, and accepts a named one", () => {
+  const found = unnamedRefusals([
+    'throw new CheckpointRefused("source");',
+    'throw new CheckpointRefused( "stale" );',
+    'throw new CheckpointRefused("authority", undefined, error);',
+    'throw new CheckpointRefused(body === undefined ? "unavailable" : "uncertain");',
+    'throw new CheckpointRefused("source", "settlement.unchanged");',
+    'throw new CheckpointRefused("uncertain", nodeCallReason(e), error);',
+    'const refuse = (why) => new CheckpointRefused("source", `settlement.${why}`, cause);',
+  ].join("\n"));
+  expect(found.map((r) => r.line)).toEqual([1, 2, 3, 4]);
 });

@@ -46,3 +46,24 @@ export function handled(c: { head: string; body: string }): boolean {
   return throws.length > 0 && throws.every((t) => PASSES_ON.test(t)) && !/\breturn\b/.test(c.body);
 }
 
+
+/**
+ * The files a completed attempt runs through: the orchestrator's completed, submission and reported
+ * phases, the settlement builder and its checks, the source projection and the ledger. A refusal
+ * thrown here parks or ends the attempt, so it must say why: a staging attempt sat parked for an hour
+ * as a bare `source` because the settlement builder named nothing.
+ */
+export const COMPLETED_PATH = [
+  "services/bridge/checkpoint-orchestrator.ts", "services/bridge/checkpoint-report.ts", "services/bridge/checkpoint-settlement-data.ts",
+  "services/bridge/checkpoint-source.ts", "services/bridge/checkpoint-current-decision.ts", "services/bridge/checkpoint-ledger.ts",
+  "services/bridge/checkpoint-service-client.ts",
+];
+
+/** Every `new CheckpointRefused(...)` in `source` that names no reason: its line and text. */
+export function unnamedRefusals(source: string): Array<{ line: number; text: string }> {
+  const found: Array<{ line: number; text: string }> = [];
+  const pattern = /new CheckpointRefused\(\s*([^,()]+?)\s*(?:\)|,\s*undefined\b)/g;
+  for (let match = pattern.exec(source); match; match = pattern.exec(source))
+    found.push({ line: source.slice(0, match.index).split("\n").length, text: match[0] });
+  return found;
+}
