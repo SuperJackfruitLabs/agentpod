@@ -55,3 +55,34 @@ func TestTerminalRefusalReachesTheWireAsTheRecordedReply(t *testing.T) {
 		}
 	}
 }
+
+// A completed reply the hub cannot settle (completed-unchanged: a clean run
+// with no new commit) is still a valid wire reply from this node: the hub's
+// test ends the attempt failed on exactly these bytes, so they must be bytes
+// this bridge could send.
+func TestRecordedCompletedRepliesAreValidWireReplies(t *testing.T) {
+	raw, err := os.ReadFile("../../../../packages/contract/src/fixtures/bench-coordinator-node-completions-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var corpus struct {
+		Replies []struct {
+			Name    string          `json:"name"`
+			Request json.RawMessage `json:"request"`
+			Value   json.RawMessage `json:"value"`
+		} `json:"replies"`
+	}
+	if err = json.Unmarshal(raw, &corpus); err != nil || len(corpus.Replies) == 0 {
+		t.Fatal("recorded node completions missing", err)
+	}
+	for _, c := range corpus.Replies {
+		request, err := benchcoordinatorwire.ParseRequest(c.Request)
+		if err != nil {
+			t.Fatal(c.Name, err)
+		}
+		response, err := benchcoordinatorwire.ParseResponse(c.Value, request)
+		if err != nil || response.State != "completed" || response.Completion == nil {
+			t.Fatal(c.Name, "is not a completed wire reply", err)
+		}
+	}
+}
