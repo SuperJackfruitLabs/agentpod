@@ -19,8 +19,9 @@
  * Neither ruling ever reports a pass: a failure settles nothing as complete. The table is the whole
  * ruling; a code or phase it does not name parks.
  */
-import type { BenchCoordinatorResponse } from "@agentpod/contract";
+import type { BenchCoordinatorCompletion, BenchCoordinatorResponse } from "@agentpod/contract";
 import type { CheckpointFailureDisposition } from "./checkpoint-ledger";
+import { CheckpointRefused, type CheckpointSettlementRefusal } from "./checkpoint-profile";
 
 type RefusalCode = Extract<BenchCoordinatorResponse, { state: "refused"; code: string }>["code"];
 type NodePhase = "prepare_pending" | "execute_pending";
@@ -51,7 +52,8 @@ export const CHECKPOINT_REFUSAL_RULINGS: Readonly<Record<RefusalCode, Readonly<R
 };
 
 export interface CheckpointRefusalRuling {
-  code: RefusalCode;
+  /** The node's refusal code, or `settlement.<why>` for a completed reply that cannot be reported. */
+  code: RefusalCode | `settlement.${CheckpointSettlementRefusal}`;
   disposition: CheckpointFailureDisposition;
   /** One sentence for the card and the run's failure reason. Names the code; never an identifier. */
   reason: string;
@@ -78,4 +80,33 @@ export function classifyCheckpointRefusal(phase: string, response: BenchCoordina
   const disposition = CHECKPOINT_REFUSAL_RULINGS[code]?.[phase];
   if (disposition === undefined || disposition === "parked") return undefined;
   return { code, disposition, reason: sentence(code, phase) };
+}
+
+/**
+ * A completed node reply whose settlement cannot be built. The build reads only the attempt's immutable
+ * cells and the node's journaled completion, so every `settlement.*` refusal recurs on every pass: the
+ * run finished but cannot become a pass. Each one fails the run, with a sentence that says which.
+ * Anything else thrown while building (no reason, or not a settlement refusal) is not ruled and parks.
+ */
+export const SETTLEMENT_REFUSAL_SENTENCES: Readonly<Record<CheckpointSettlementRefusal, string>> = {
+  unchanged: "Checkpoint failed: the run finished but produced no change, and this stage requires one.",
+  task_outcome: "Checkpoint failed: the run finished but the task did not complete.",
+  foreign_source: "Checkpoint failed: the run finished, but its result does not belong to the source this card admitted.",
+  foreign_member: "Checkpoint failed: the run finished, but a pushed checkpoint is not on this card's repository or branch.",
+  completion: "Checkpoint failed: the run finished, but the node's completion is not one the Hub can report.",
+  retained_source: "Checkpoint failed: the run finished, but the attempt's retained prepared source does not check out.",
+  shape: "Checkpoint failed: the run finished, but its result does not make a valid settlement.",
+  size: "Checkpoint failed: the run finished, but its settlement is larger than the board accepts.",
+};
+
+const isSettlementRefusal = (why: string): why is CheckpointSettlementRefusal => Object.hasOwn(SETTLEMENT_REFUSAL_SENTENCES, why);
+
+export function classifySettlementRefusal(error: unknown, completion?: BenchCoordinatorCompletion): CheckpointRefusalRuling | undefined {
+  if (!(error instanceof CheckpointRefused) || !error.reason?.startsWith("settlement.")) return undefined;
+  const why = error.reason.slice("settlement.".length);
+  if (!isSettlementRefusal(why)) return undefined;
+  const key = why;
+  let reason = SETTLEMENT_REFUSAL_SENTENCES[key];
+  if (key === "task_outcome" && completion) reason = reason.replace("did not complete.", `did not complete (${completion.task.outcome}).`);
+  return { code: `settlement.${key}`, disposition: "failed", reason: `${reason} Nothing was reported as a pass.` };
 }

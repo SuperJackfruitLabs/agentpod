@@ -17,7 +17,7 @@ import { CheckpointRefused } from "./checkpoint-profile";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { parseSourceReceipt, requireActiveSource } from "./checkpoint-source";
 import { buildCheckpointSettlement } from "./checkpoint-report";
-import { classifyCheckpointRefusal } from "./checkpoint-refusal";
+import { classifyCheckpointRefusal, classifySettlementRefusal } from "./checkpoint-refusal";
 import { checkedCheckpointReceipt } from "./checkpoint-settlement-data";
 import { isLeaseSuperseded, type SuperpipelineClient } from "./superpipeline";
 import type { DispatchResult } from "./dispatch-types";
@@ -71,9 +71,9 @@ const heldFailureSchema = z.object({ version: z.literal("agentpod.checkpoint-fai
   disposition: z.enum(["failed", "released"]), reason: z.string().min(1), phase: z.string(), by: z.literal("hub"),
   at: z.string(), evidence: z.string() }).strict();
 function heldFailure(attempt: RetainedCheckpointAttempt): CheckpointFailure {
-  if (!attempt.row.failure) throw new CheckpointRefused("source");
+  if (!attempt.row.failure) throw new CheckpointRefused("source", "retained.failure");
   const parsed = heldFailureSchema.safeParse(parseCheckpointJSON(encode(attempt.row.failure)));
-  if (!parsed.success) throw new CheckpointRefused("source");
+  if (!parsed.success) throw new CheckpointRefused("source", "retained.failure");
   return parsed.data;
 }
 
@@ -81,7 +81,7 @@ async function current(attempt: RetainedCheckpointAttempt): Promise<void> {
   requireInstalledCheckpointProfile(attempt.profile);
   const authority = await readCheckpointAuthority(attempt.profile);
   requireInstalledCheckpointProfile(attempt.profile);
-  if (canonicalCheckpoint(authority) !== attempt.row.authority) throw new CheckpointRefused("stale");
+  if (canonicalCheckpoint(authority) !== attempt.row.authority) throw new CheckpointRefused("stale", "authority.changed");
 }
 
 /** The Hub's effects, injectable so the phase logic can be tested without a broker or ledger database. */
@@ -105,7 +105,7 @@ async function exchange(attempt: RetainedCheckpointAttempt, raw: string, deps: C
   const result = await deps.request(attempt.profile.target.node_id, BENCH_COORDINATOR_VERB, sent, { timeoutMs: nodeCallTimeoutMs(sent.operation) });
   if (!result.ok) throw new CheckpointRefused("uncertain", nodeCallReason(result.error ?? ""), new Error(result.error ?? "no error"));
   const serialized = JSON.stringify(result.data);
-  if (typeof serialized !== "string" || Buffer.byteLength(serialized, "utf8") > 262144) throw new CheckpointRefused("source");
+  if (typeof serialized !== "string" || Buffer.byteLength(serialized, "utf8") > 262144) throw new CheckpointRefused("source", "node.reply.size");
   const response = await parseBenchCoordinatorResponse(encode(serialized), sent);
   await deps.authority(attempt);
   return response;
@@ -179,7 +179,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           await client.context(attempt.claim.runId, attempt.claim);
           await client.heartbeat(attempt.claim);
           const { source } = await retainedCheckpointSource(attempt);
-          if (attempt.row.source !== canonicalCheckpoint(source)) throw new CheckpointRefused("source");
+          if (attempt.row.source !== canonicalCheckpoint(source)) throw new CheckpointRefused("source", "retained.source");
           await deps.authority(attempt);
           const receipt = await service.admit(attempt.claim, source);
           await deps.authority(attempt);
@@ -188,10 +188,10 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
         }
         case "admitted": {
           const { prepared, source } = await retainedCheckpointSource(attempt);
-          if (!attempt.row.sourceReceipt) throw new CheckpointRefused("source");
+          if (!attempt.row.sourceReceipt) throw new CheckpointRefused("source", "retained.source_receipt");
           const receipt = parseSourceReceipt(encode(attempt.row.sourceReceipt));
           if (receipt.runId !== attempt.claim.runId || receipt.leaseEpoch !== attempt.claim.leaseEpoch ||
-            receipt.sourceDigest !== await checkpointDigest(source)) throw new CheckpointRefused("source");
+            receipt.sourceDigest !== await checkpointDigest(source)) throw new CheckpointRefused("source", "retained.source_receipt");
           requireActiveSource(await service.source(attempt.claim), source);
           await deps.authority(attempt);
           const execution = JSON.stringify(BenchCoordinatorRequest.parse({ version: attempt.request.version, operation: "execute",
@@ -202,7 +202,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
         }
         case "execute_pending": {
           if (!attempt.row.executeRequest || hash(attempt.row.executeRequest) !== attempt.row.executeSHA256)
-            throw new CheckpointRefused("source");
+            throw new CheckpointRefused("source", "retained.execute");
           await client.heartbeat(attempt.claim);
           const response = await exchange(attempt, sendExecute ? attempt.row.executeRequest : statusRequest(attempt), deps);
           sendExecute = false;
@@ -214,8 +214,15 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
             attempt = (await deps.fail(attempt, { ...ruling, evidence: JSON.stringify(response) })).attempt; break;
           }
           // Strict DTO validation precedes storage; report joins separately
-          // require the exact original start, task outcome and final vector.
-          await buildCheckpointSettlement(attempt, response.completion);
+          // require the exact original start, task outcome and final vector. The build reads only
+          // immutable inputs, so a refusal here always recurs: the run finished but cannot become a
+          // pass. It ends the attempt failed, as a definite node refusal does, never parked forever.
+          try { await buildCheckpointSettlement(attempt, response.completion); }
+          catch (error) {
+            const ruling = classifySettlementRefusal(error, response.completion);
+            if (!ruling) throw error;
+            attempt = (await deps.fail(attempt, { ...ruling, evidence: JSON.stringify(response) })).attempt; break;
+          }
           const done = await deps.advance(attempt, { phase: "completed", completion: canonicalCheckpoint(response.completion) });
           attempt = done.attempt;
           await say(done.send, "completed");
@@ -223,7 +230,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           break;
         }
         case "completed": {
-          if (!attempt.row.completion) throw new CheckpointRefused("source");
+          if (!attempt.row.completion) throw new CheckpointRefused("source", "retained.completion");
           const { source } = await retainedCheckpointSource(attempt);
           requireActiveSource(await service.source(attempt.claim), source);
           await deps.authority(attempt);
@@ -233,7 +240,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
         }
         case "submission_pending": {
           if (!attempt.row.settlementBody || hash(attempt.row.settlementBody) !== attempt.row.settlementSHA256)
-            throw new CheckpointRefused("source");
+            throw new CheckpointRefused("source", "retained.settlement");
           const body = attempt.row.settlementBody;
           // Recover an existing effect first. Only the exact authenticated
           // missing-receipt response permits a new settlement attempt.
@@ -245,9 +252,9 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
             await client.context(attempt.claim.runId, attempt.claim);
             await client.heartbeat(attempt.claim);
             const { source } = await retainedCheckpointSource(attempt);
-            if (!attempt.row.completion) throw new CheckpointRefused("source");
+            if (!attempt.row.completion) throw new CheckpointRefused("source", "retained.completion");
             const report = await buildCheckpointSettlement(attempt, parseCheckpointContextJSON(encode(attempt.row.completion)));
-            if (report.body !== body || report.sha256 !== attempt.row.settlementSHA256) throw new CheckpointRefused("source");
+            if (report.body !== body || report.sha256 !== attempt.row.settlementSHA256) throw new CheckpointRefused("source", "retained.settlement");
             const snapshot = await service.source(attempt.claim);
             requireActiveSource(snapshot, source);
             await deps.authority(attempt);
@@ -284,11 +291,11 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
             reason: failure.reason };
         }
         case "reported": {
-          if (!attempt.row.settlementReceipt || !attempt.row.settlementBody) throw new CheckpointRefused("source");
+          if (!attempt.row.settlementReceipt || !attempt.row.settlementBody) throw new CheckpointRefused("source", "retained.receipt");
           checkedCheckpointReceipt(encode(attempt.row.settlementReceipt), attempt.row.settlementBody, attempt.profile.reporterPrincipalId);
           return { status: "reported", externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId };
         }
-        default: throw new CheckpointRefused("source");
+        default: throw new CheckpointRefused("source", "retained.phase");
       }
     }
     return attempt.row.phase === "reported" ? { status: "reported", externalRunId: attempt.claim.runId,

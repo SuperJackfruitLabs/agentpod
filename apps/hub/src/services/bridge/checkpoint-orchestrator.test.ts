@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 import { BenchCoordinatorRequest, parseBenchCoordinatorResponse } from "@agentpod/contract";
 import corpus from "../../../../../packages/contract/src/fixtures/bench-coordinator-v1.json";
 import nodeRefusals from "../../../../../packages/contract/src/fixtures/bench-coordinator-node-refusals-v1.json";
+import nodeCompletions from "../../../../../packages/contract/src/fixtures/bench-coordinator-node-completions-v1.json";
+import { completedAttemptFixture } from "./checkpoint-completed-attempt.test-fixture";
+import { CheckpointRefused } from "./checkpoint-profile";
 import { TEST_PLANE } from "../../auth/org-plane/config";
 import { checkpointPolicyDigest, parsePendingCheckpointClaim } from "./checkpoint-claim";
 import { canonicalCheckpoint } from "./checkpoint-json";
@@ -378,4 +381,97 @@ test("a run owned by another agent is never closed on: the failure stays held", 
   expect(held.failure).toBeDefined();
   expect(held.closed).toBeUndefined();
   expect(result.status).toBe("unreported");
+});
+
+// ---------------------------------------------------------------------------------------------
+// A completed reply whose settlement can never be built ends the attempt failed, never as a pass.
+// ---------------------------------------------------------------------------------------------
+
+/** The node's reply for a run that finished cleanly with no new commit (pinned on the node's wire in Go). */
+const completedUnchanged = (() => {
+  const found = nodeCompletions.replies.find((r) => r.name === "completed-unchanged");
+  if (!found) throw new Error("recorded node completion missing");
+  return found;
+})();
+
+test("a recorded completed-but-unchanged reply ends the attempt failed and fails the run: no change, and the stage requires one", async () => {
+  resetCheckpointActivityForTests();
+  const { attempt } = await completedAttemptFixture();
+  // The recording is for exactly this attempt: the node's reply parses against its status request.
+  const sentStatus = BenchCoordinatorRequest.parse({ version: attempt.request.version, operation: "status",
+    identity: attempt.request.identity, target: attempt.request.target });
+  expect(sentStatus).toEqual(BenchCoordinatorRequest.parse(completedUnchanged.request));
+  const h = harness(completedUnchanged.value);
+  const settled: string[] = [];
+  h.deps.service = (profile) => createCheckpointServiceClient(profile, { plane: TEST_PLANE,
+    fetch: async (url) => { settled.push(url); return new Response(null, { status: 500 }); } });
+  h.deps.advance = async () => { throw new Error("an unchanged run is never advanced to completed"); };
+  const held = ledger(h.deps);
+  const board = recordingBoard();
+  const result = await driveCheckpointAttempt(attempt, board.client, false, h.deps);
+
+  expect(h.sent.map(operationOf)).toEqual(["status"]);
+  expect(held.failure).toMatchObject({ code: "settlement.unchanged", disposition: "failed", phase: "execute_pending" });
+  expect(JSON.parse(String(held.failure?.evidence))).toEqual(completedUnchanged.value);
+  expect(board.verbs()).toEqual(["heartbeat", "activities", "fail"]);
+  const [, activity, fail] = board.calls;
+  expect(activity?.body).toMatchObject({ action: "checkpoint.failed", parameter: { phase: "execute_pending", code: "settlement.unchanged" } });
+  expect(String(fail?.body.reason)).toContain("the run finished but produced no change, and this stage requires one");
+  expect(fail?.body).toEqual({ leaseEpoch: attempt.claim.leaseEpoch, reason: activity?.body.body });
+  expect(held.closed).toBe("fail");
+  expect(result).toMatchObject({ status: "failed", attemptId: attempt.row.attemptId });
+  // Never a pass: no settlement or receipt request, no complete.
+  expect(settled).toEqual([]);
+  expect(board.verbs()).not.toContain("complete");
+});
+
+test("a completed reply whose task did not complete fails the run naming the outcome", async () => {
+  resetCheckpointActivityForTests();
+  const { attempt, completion } = await completedAttemptFixture();
+  const reply = { ...completedUnchanged.value, completion: { ...completion, task: { ...completion.task, outcome: "failed" } } };
+  const h = harness(reply);
+  const held = ledger(h.deps);
+  const board = recordingBoard();
+  const result = await driveCheckpointAttempt(attempt, board.client, false, h.deps);
+  expect(held.failure).toMatchObject({ code: "settlement.task_outcome", disposition: "failed" });
+  expect(String(board.calls.find((c) => c.path.endsWith("/fail"))?.body.reason)).toContain("did not complete (failed)");
+  expect(result.status).toBe("failed");
+});
+
+test("a changed completed reply is still advanced to completed, not failed", async () => {
+  resetCheckpointActivityForTests();
+  const { attempt, completion } = await completedAttemptFixture();
+  const first = completion.service.checkpoints[0];
+  if (!first) throw new Error("fixture checkpoint missing");
+  const changed = { ...completion, service: { ...completion.service,
+    checkpoints: [{ ...first, commit: "1".repeat(first.commit.length) }, ...completion.service.checkpoints.slice(1)] } };
+  const h = harness({ ...completedUnchanged.value, completion: changed });
+  const held = ledger(h.deps);
+  const advanced: string[] = [];
+  h.deps.advance = async (_attempt, evidence) => { advanced.push(evidence.phase); throw new CheckpointRefused("stale", "ledger.raced"); };
+  const board = recordingBoard();
+  const result = await driveCheckpointAttempt(attempt, board.client, false, h.deps);
+  expect(advanced).toEqual(["completed"]);
+  expect(held.failure).toBeUndefined();
+  // A raced commit is transient: parked, named, and nothing told.
+  expect(result.status).toBe("unreported");
+  expect(board.verbs()).not.toContain("fail");
+});
+
+test("a refusal after completion that is not a settlement refusal is transient: parked, never failed", async () => {
+  resetCheckpointActivityForTests();
+  const lines: Array<Record<string, unknown> | undefined> = [];
+  const restore = setParkedLogForTests(createQuietLog((_m, meta) => lines.push(meta), { now: () => 0 }));
+  try {
+    const { attempt } = await completedAttemptFixture();
+    const h = harness(completedUnchanged.value);
+    const held = ledger(h.deps);
+    // The authority re-read after the node answered fails: nothing about the run is decided by it.
+    let reads = 0;
+    h.deps.authority = async () => { if (++reads > 2) throw new CheckpointRefused("authority", "issuer.grant"); };
+    const result = await driveCheckpointAttempt(attempt, recordingBoard().client, false, h.deps);
+    expect(result.status).toBe("unreported");
+    expect(held.failure).toBeUndefined();
+    expect(lines).toEqual([expect.objectContaining({ code: "authority", reason: "issuer.grant" })]);
+  } finally { restore(); }
 });
