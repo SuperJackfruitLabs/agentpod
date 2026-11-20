@@ -10,8 +10,9 @@ import { canonicalCheckpoint } from "./checkpoint-json";
 import { checkpointAuthorityMatches, rosterAuthorityRevision, selectedCheckpointAuthority, type CheckpointAuthority,
   type RosterAuthorityFields } from "./checkpoint-current";
 
+const source = { version: 1, kind: "station-plane", principalId: "prn_occupant", organizationId: "org_1", audience: "https://app.superpipeline.dev" };
 const row: RosterAuthorityFields = { boardId: "brd_ABC123", stationId: "station_1", enabled: true, mode: "full-auto", profileKey: null,
-  credentialSource: { version: 1, kind: "station-plane", principalId: "prn_occupant", organizationId: "org_1", audience: "https://app.superpipeline.dev" } };
+  credentialSource: source };
 const owner = { kind: "human" as const, grant: { mayDispatch: ["prn_occupant"], mayGrantReach: false, scopes: [] } };
 const facts = (rosterRevision: string): Omit<CheckpointAuthority, "authorizationSnapshotId"> => ({ organizationId: "org_1",
   tenantId: "fleet_1", sourceTenantId: "tenant_1", stationId: "station_1", nodeId: "node_1", occupancyEpoch: 1,
@@ -34,7 +35,7 @@ test("the roster revision digests only the fields that bear on authority", () =>
   // The roster stores the default profile as NULL or "": the same default.
   expect(rosterAuthorityRevision({ ...row, profileKey: "" })).toBe(revision);
   for (const change of [{ boardId: "brd_OTHER1" }, { stationId: "station_2" }, { enabled: false }, { mode: "ask" }, { profileKey: "named" },
-    { credentialSource: { ...row.credentialSource as object, audience: "https://other.test" } }, { credentialSource: null }])
+    { credentialSource: { ...source, audience: "https://other.test" } }, { credentialSource: null }])
     expect(rosterAuthorityRevision({ ...row, ...change })).not.toBe(revision);
 });
 
