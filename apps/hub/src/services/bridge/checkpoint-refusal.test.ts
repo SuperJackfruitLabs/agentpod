@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { BenchCoordinatorRequest, parseBenchCoordinatorResponse, type BenchCoordinatorResponse } from "@agentpod/contract";
 import corpus from "../../../../../packages/contract/src/fixtures/bench-coordinator-v1.json";
-import { CHECKPOINT_REFUSAL_RULINGS, classifyCheckpointRefusal } from "./checkpoint-refusal";
+import { CHECKPOINT_REFUSAL_RULINGS, classifyCheckpointRefusal, classifySettlementRefusal, SETTLEMENT_REFUSAL_SENTENCES } from "./checkpoint-refusal";
+import { CheckpointRefused } from "./checkpoint-profile";
 
 const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
 const fixture = (name: string) => {
@@ -67,4 +68,26 @@ test("a reply that is not a refusal is never ruled", async () => {
     const response = await parseBenchCoordinatorResponse(encode(c.value), BenchCoordinatorRequest.parse(c.request));
     expect(classifyCheckpointRefusal("execute_pending", response)).toBeUndefined();
   }
+});
+
+const SETTLEMENT_REFUSALS = ["completion", "retained_source", "foreign_source", "task_outcome", "unchanged", "foreign_member", "shape", "size"] as const;
+test("every settlement refusal has a ruling", () => {
+  expect(new Set(Object.keys(SETTLEMENT_REFUSAL_SENTENCES))).toEqual(new Set(SETTLEMENT_REFUSALS));
+});
+test.each(SETTLEMENT_REFUSALS)("settlement refusal %s is deterministic: the run is failed, never passed", (why) => {
+  const ruling = classifySettlementRefusal(new CheckpointRefused("source", `settlement.${why}`));
+  expect(ruling).toMatchObject({ code: `settlement.${why}`, disposition: "failed" });
+  expect(ruling?.reason).toMatch(/^Checkpoint failed: the run finished/);
+  expect(ruling?.reason).toEndWith("Nothing was reported as a pass.");
+});
+
+test("the unchanged sentence says what happened", () => {
+  expect(classifySettlementRefusal(new CheckpointRefused("source", "settlement.unchanged"))?.reason)
+    .toBe("Checkpoint failed: the run finished but produced no change, and this stage requires one. Nothing was reported as a pass.");
+});
+
+test("anything after completion that is not a settlement refusal is transient: never ruled", () => {
+  for (const error of [new CheckpointRefused("stale", "ledger.raced"), new CheckpointRefused("stale", "source.inactive"),
+    new CheckpointRefused("unavailable", "service.error"), new CheckpointRefused("source"), new Error("boom"), undefined])
+    expect(classifySettlementRefusal(error)).toBeUndefined();
 });
