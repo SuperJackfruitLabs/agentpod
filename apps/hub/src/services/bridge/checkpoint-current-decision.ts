@@ -17,7 +17,7 @@ const hash = (raw: Uint8Array) => createHash("sha256").update(raw).digest("hex")
 
 /** Only the validated selected-node preparation can supply these source facts. */
 export async function retainedCheckpointSource(attempt: RetainedCheckpointAttempt) {
-  if (!attempt.row.prepared) throw new CheckpointRefused("source");
+  if (!attempt.row.prepared) throw new CheckpointRefused("source", "retained.prepared");
   const prepared = BenchCoordinatorPrepared.parse(parseCheckpointJSON(encode(attempt.row.prepared)));
   const b = prepared.binding; const i = b.identity;
   if (await benchCoordinatorBindingDigest(b) !== prepared.binding_sha256 || prepared.checkpoint_repository !== attempt.profile.checkpointRepository ||
@@ -26,7 +26,7 @@ export async function retainedCheckpointSource(attempt: RetainedCheckpointAttemp
     b.members.length !== attempt.profile.repositories.length || b.members.some((m, index) => {
       const pin = attempt.profile.repositories[index];
       return !pin || m.name !== pin.name || m.repository_sha256 !== pin.repositorySHA256 || m.object_format !== pin.objectFormat;
-    })) throw new CheckpointRefused("source");
+    })) throw new CheckpointRefused("source", "retained.binding");
   return { prepared, source: parseCheckpointSource({ binding: { boardId: i.board_id, cardId: i.card_id,
     stageKey: i.stage_id, runId: i.run_id, leaseEpoch: i.epoch, agentId: i.agent_id, stationId: i.station_id,
     nodeId: i.node_id, attemptId: i.attempt_id }, start: b.sources.map((m) => ({ name: m.name, commit: m.commit })),

@@ -26,16 +26,16 @@ export interface CheckpointServiceClient {
 
 async function boundedBody(response: Response): Promise<Uint8Array> {
   const length = response.headers.get("content-length");
-  if (length !== null && (!/^[0-9]+$/.test(length) || Number(length) > 65_536)) throw new CheckpointRefused("source");
+  if (length !== null && (!/^[0-9]+$/.test(length) || Number(length) > 65_536)) throw new CheckpointRefused("source", "service.body.length");
   const reader = response.body?.getReader();
-  if (!reader) throw new CheckpointRefused("source");
+  if (!reader) throw new CheckpointRefused("source", "service.body.reader");
   const parts: Uint8Array[] = []; let size = 0;
   try {
     for (;;) {
       const next = await reader.read();
       if (next.done) break;
       size += next.value.byteLength;
-      if (size > 65_536) throw new CheckpointRefused("source");
+      if (size > 65_536) throw new CheckpointRefused("source", "service.body.size");
       parts.push(next.value);
     }
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); } // silent-catch-ok: releasing a reader already read or failed
@@ -84,15 +84,15 @@ export function createCheckpointServiceClient(configuration: CheckpointProfile, 
     try { token = (await issuer.serviceToken(profile.sourceAudience)).accessToken; }
     catch (error) {
       noteCheckpoint("service", "service.token", { audience: profile.sourceAudience }, error);
-      throw new CheckpointRefused("authority", undefined, error);
+      throw new CheckpointRefused("authority", "service.grant", error);
     }
     const claims = await verifier.verify(token);
     if (!claims || claims.principalKind !== "service" || claims.sub !== profile.reporterPrincipalId ||
       claims.org !== profile.organizationId || !claims.ent.includes("superpipeline") || claims.act !== undefined ||
-      !(claims.scope?.split(/\s+/).includes(scope)) || claims.exp * 1000 <= Date.now()) throw new CheckpointRefused("authority");
+      !(claims.scope?.split(/\s+/).includes(scope)) || claims.exp * 1000 <= Date.now()) throw new CheckpointRefused("authority", "service.grant");
     if (claim.policy.reporterPrincipalId !== claims.sub || claim.tenantId !== profile.sourceTenantId ||
-      claim.boardId !== profile.target.board_id) throw new CheckpointRefused("authority");
-    if (body !== undefined && Buffer.byteLength(body, "utf8") > 65_536) throw new CheckpointRefused("invalid");
+      claim.boardId !== profile.target.board_id) throw new CheckpointRefused("authority", "service.claim");
+    if (body !== undefined && Buffer.byteLength(body, "utf8") > 65_536) throw new CheckpointRefused("invalid", "service.request.size");
     const suffix = kind === "source" ? "checkpoint-source" : kind === "settlement" ? "checkpoint-settlements" : "checkpoint";
     const path = `/v1/boards/${encodeURIComponent(claim.boardId)}/runs/${encodeURIComponent(claim.runId)}/${suffix}`;
     let missing = false;
@@ -113,7 +113,7 @@ export function createCheckpointServiceClient(configuration: CheckpointProfile, 
         if (kind === "receipt" && response.status === 404) {
           const missingBody = await boundedBody(response);
           if (canonicalCheckpoint(parseCheckpointJSON(missingBody)) !== canonicalCheckpoint({ error: { code: "CHECKPOINT_RECEIPT_MISSING" } }))
-            throw new CheckpointRefused("unavailable");
+            throw new CheckpointRefused("unavailable", "service.receipt_missing");
           missing = true;
           return missingBody;
         }
@@ -123,12 +123,12 @@ export function createCheckpointServiceClient(configuration: CheckpointProfile, 
         return boundedBody(response);
       })()]);
       // A service JWT expiring during the await cannot support a fresh observation.
-      if (claims.exp * 1000 <= Date.now()) throw new CheckpointRefused("authority");
+      if (claims.exp * 1000 <= Date.now()) throw new CheckpointRefused("authority", "service.grant.expired");
       return { raw, expiresAtMs: claims.exp * 1000, missing };
     } catch (error) {
       if (error instanceof CheckpointRefused) throw error;
       noteCheckpoint("service", body === undefined ? "service.read" : "service.write", { kind }, error);
-      throw new CheckpointRefused(body === undefined ? "unavailable" : "uncertain", undefined, error);
+      throw new CheckpointRefused(body === undefined ? "unavailable" : "uncertain", "service.error", error);
     } finally { if (timerListener) signal.removeEventListener("abort", timerListener); }
   }
   function retainedBody(value: PendingCheckpointClaim, body: string): PendingCheckpointClaim {
@@ -144,7 +144,7 @@ export function createCheckpointServiceClient(configuration: CheckpointProfile, 
         const pin = profile.repositories[index];
         return !pin || pin.name !== m.name || pin.provider !== m.provider || pin.repository !== m.repository || pin.objectFormat !== m.objectFormat ||
           m.branch !== "card/" + claim.cardId;
-      })) throw new CheckpointRefused("source");
+      })) throw new CheckpointRefused("source", "service.retained_body");
     return claim;
   }
   return {
@@ -174,7 +174,7 @@ export function createCheckpointServiceClient(configuration: CheckpointProfile, 
       const body = canonicalCheckpoint(source);
       const receipt = parseSourceReceipt((await exchange(claim, "checkpoints:submit", body)).raw);
       if (receipt.runId !== claim.runId || receipt.leaseEpoch !== claim.leaseEpoch ||
-        receipt.sourceDigest !== await checkpointDigest(source)) throw new CheckpointRefused("source");
+        receipt.sourceDigest !== await checkpointDigest(source)) throw new CheckpointRefused("source", "source.admission");
       return receipt;
     },
   };

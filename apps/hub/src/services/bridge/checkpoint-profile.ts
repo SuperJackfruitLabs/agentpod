@@ -65,7 +65,30 @@ export type CheckpointRefusalReason =
   | `current.${CheckpointRefusalCode}` | "current.error"
   /** SuperPipeline's checkpoint service refused with this HTTP status, timed out, or sent an encoded body. */
   | `service.status:${number}` | "service.timeout" | "service.encoding"
-  | `node.state:${string}` | `node.target.${string}`;
+  | `node.state:${string}` | `node.target.${string}`
+  /** The node's reply is larger than the Hub reads. */
+  | "node.reply.size"
+  /** Current authority no longer equals the attempt's retained authority. */
+  | "authority.changed"
+  /**
+   * The settlement could not be built from the node's completed reply. Its inputs are the attempt's
+   * immutable cells and the node's journaled completion, so each of these always fails for the attempt.
+   */
+  | `settlement.${CheckpointSettlementRefusal}`
+  /** A retained cell of the attempt row is missing or does not hold what its phase requires. */
+  | `retained.${"prepared" | "binding" | "source" | "source_receipt" | "execute" | "completion" | "settlement" | "receipt" | "failure" | "phase"}`
+  /** SuperPipeline's source projection: its shape, its binding to the claim, or a run no longer working on it. */
+  | "source.shape" | "source.binding" | "source.claim" | "source.inactive" | "source.receipt" | "source.admission"
+  /** A settlement receipt that does not parse or does not match the retained submission. */
+  | "receipt.shape" | "receipt.mismatch"
+  /** The checkpoint service client refused before or after a request (not a status from the board). */
+  | "service.body.length" | "service.body.reader" | "service.body.size" | "service.grant" | "service.grant.expired"
+  | "service.claim" | "service.request.size" | "service.receipt_missing" | "service.error" | "service.retained_body"
+  /** The attempt ledger: a phase that moved on, a raced write, an oversized cell or a broken row. */
+  | "ledger.phase" | "ledger.raced" | "ledger.size" | "ledger.row" | "ledger.reservation" | "ledger.request" | "ledger.station";
+/** Why a completed node reply cannot become a settlement. */
+export type CheckpointSettlementRefusal =
+  | "completion" | "retained_source" | "foreign_source" | "task_outcome" | "unchanged" | "foreign_member" | "shape" | "size";
 export class CheckpointRefused extends Error {
   /**
    * `cause` is the error this refusal replaced, kept so the log can name its class and redacted

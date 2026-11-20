@@ -26,7 +26,7 @@ export type CheckpointSourceReceipt = z.infer<typeof receiptSchema>;
 
 export function parseCheckpointSource(value: unknown): CheckpointSource {
   const parsed = sourceSchema.safeParse(value);
-  if (!parsed.success) throw new CheckpointRefused("source");
+  if (!parsed.success) throw new CheckpointRefused("source", "source.shape");
   return parsed.data;
 }
 export function sourceOf(snapshot: CheckpointSourceSnapshot): CheckpointSource {
@@ -41,28 +41,28 @@ export function requireSourceBinding(profile: CheckpointProfile, claim: PendingC
     source.start.length !== profile.repositories.length || source.start.some((member, index) => {
       const pin = profile.repositories[index];
       return pin?.name !== member.name || member.commit.length !== (pin.objectFormat === "sha1" ? 40 : 64);
-    })) throw new CheckpointRefused("source");
+    })) throw new CheckpointRefused("source", "source.binding");
 }
 export function parseSourceSnapshot(raw: Uint8Array, profile: CheckpointProfile, claim: PendingCheckpointClaim): CheckpointSourceSnapshot {
   const parsed = snapshotSchema.safeParse(parseCheckpointJSON(raw));
-  if (!parsed.success) throw new CheckpointRefused("source");
+  if (!parsed.success) throw new CheckpointRefused("source", "source.shape");
   const value = parsed.data;
   const actual = parsePendingCheckpointClaim({ version: claim.version, admissionState: "pending",
     tenantId: value.tenantId, boardId: value.binding.boardId, cardId: value.binding.cardId,
     stageKey: value.binding.stageKey, agentId: value.binding.agentId, runId: value.binding.runId,
     leaseEpoch: value.binding.leaseEpoch, policy: value.policy, policyDigest: value.policyDigest });
   requireSourceBinding(profile, actual, sourceOf(value));
-  if (canonicalCheckpoint(actual) !== canonicalCheckpoint(claim)) throw new CheckpointRefused("stale");
+  if (canonicalCheckpoint(actual) !== canonicalCheckpoint(claim)) throw new CheckpointRefused("stale", "source.claim");
   return value;
 }
 /** Only first publication uses this gate; an ended historical GET must never renew authority. */
 export function requireActiveSource(snapshot: CheckpointSourceSnapshot, expected: CheckpointSource, nowMs = Date.now()): void {
   if (snapshot.status !== "working" || !Number.isSafeInteger(nowMs) || nowMs < snapshot.lastHeartbeatMs ||
     nowMs - snapshot.lastHeartbeatMs >= 15 * 60 * 1000 ||
-    canonicalCheckpoint(sourceOf(snapshot)) !== canonicalCheckpoint(expected)) throw new CheckpointRefused("stale");
+    canonicalCheckpoint(sourceOf(snapshot)) !== canonicalCheckpoint(expected)) throw new CheckpointRefused("stale", "source.inactive");
 }
 export function parseSourceReceipt(raw: Uint8Array): CheckpointSourceReceipt {
   const parsed = receiptSchema.safeParse(parseCheckpointJSON(raw));
-  if (!parsed.success) throw new CheckpointRefused("source");
+  if (!parsed.success) throw new CheckpointRefused("source", "source.receipt");
   return parsed.data;
 }
