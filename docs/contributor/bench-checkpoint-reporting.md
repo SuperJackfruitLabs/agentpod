@@ -371,3 +371,21 @@ cancellation/reconciliation, acceptance of the remaining wire and issuer
 contracts, and operator provisioning remain required. This checkpoint does not enable the
 Developer Experience pilot or satisfy native laptop preparation. No generic ACP
 fallback or adoption of replacement-owner output is allowed.
+
+## What a roster edit changes
+
+The attempt's retained authority pins the roster row by `rosterRevision`, a
+`roster:<sha256>` digest of the row's fields that bear on authority: board,
+station, enabled, permission mode, profile and plane credential source. Loop
+tuning (`max_concurrency`, `permission_wait_ms`) and the other paths' tokens are
+not in it. Editing them restarts the bridge loop, as `updated_at` makes it, but
+the attempt stays current. Editing an authority field ends the attempt's
+authority (`authority.changed`, and the node's current check answers
+`stale_owner`).
+
+Attempts reserved before the digest retain the row's `updated_at` instant
+instead. Such an attempt still matches when that instant is the only change:
+every other retained field, and the authorization snapshot digest recomputed
+over it, must be exactly equal. The pins the Hub reads anyway (board, station,
+enabled row, profile) still hold. Only a mode or credential-source edit goes
+undetected for these older attempts.

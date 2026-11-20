@@ -11,7 +11,7 @@ import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON, parseCheckp
 import { advanceCheckpointAttempt, closeFailedCheckpointAttempt, failCheckpointAttempt, type CheckpointFailure,
   type RetainedCheckpointAttempt } from "./checkpoint-ledger";
 import { retainedCheckpointSource } from "./checkpoint-current-decision";
-import { readCheckpointAuthority } from "./checkpoint-current";
+import { checkpointAuthorityMatches, readCheckpointAuthority } from "./checkpoint-current";
 import { requireInstalledCheckpointProfile } from "./checkpoint-profiles";
 import { CheckpointRefused, type CheckpointRefusalReason } from "./checkpoint-profile";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
@@ -86,7 +86,7 @@ async function current(attempt: RetainedCheckpointAttempt): Promise<void> {
   requireInstalledCheckpointProfile(attempt.profile);
   const authority = await readCheckpointAuthority(attempt.profile);
   requireInstalledCheckpointProfile(attempt.profile);
-  if (canonicalCheckpoint(authority) !== attempt.row.authority) throw new CheckpointRefused("stale", "authority.changed");
+  if (!checkpointAuthorityMatches(authority, attempt.row.authority)) throw new CheckpointRefused("stale", "authority.changed");
 }
 
 /** The Hub's effects, injectable so the phase logic can be tested without a broker or ledger database. */
