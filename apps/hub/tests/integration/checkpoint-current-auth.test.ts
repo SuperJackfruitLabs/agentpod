@@ -141,6 +141,23 @@ test("default harness profile keeps exact DB ownership and independent coordinat
 });
 
 
+async function currentDecision() { const r = await current(); return (await parseBenchCoordinatorCurrentResponse(r.body, r.raw, Date.now())).decision; }
+// A concurrency edit on staging rebuilt the loop and stranded an in-flight attempt as authority.changed.
+test("a roster edit that bears no authority keeps the attempt current; an authority edit refuses it", async () => {
+  const [before] = await db.select({ updatedAt: bridgeAgents.updatedAt }).from(bridgeAgents).where(eq(bridgeAgents.tenantId, tenantId));
+  await db.update(bridgeAgents).set({ maxConcurrency: 3, permissionWaitMs: 1_000, updatedAt: new Date(Date.now() + 60_000) })
+    .where(eq(bridgeAgents.tenantId, tenantId));
+  try {
+    expect(await currentDecision()).toBe("current");
+    await db.update(bridgeAgents).set({ mode: "ask" }).where(eq(bridgeAgents.tenantId, tenantId));
+    expect(await currentDecision()).toBe("refused");
+  } finally {
+    await db.update(bridgeAgents).set({ maxConcurrency: null, permissionWaitMs: null, mode: "full-auto", updatedAt: before?.updatedAt })
+      .where(eq(bridgeAgents.tenantId, tenantId));
+  }
+  expect(await currentDecision()).toBe("current");
+});
+
 test("actual invalid Node credential never reaches issuer/source authority", async () => {
   const before = sourceReads; const result = await current({}, nodeId + ":wrong-secret");
   expect(result.response.status).toBe(401); expect(sourceReads).toBe(before);

@@ -58,6 +58,11 @@ type fakeBench struct {
 	absent bool
 	// statusDown: status answers the contract's unavailable.
 	statusDown bool
+	// killed: the run's payload is killed by a benchd restart. benchd stores
+	// this exact reply as the run's completed receipt and keeps the stopped
+	// lease; killedLive also delivers it, otherwise the reply is lost.
+	killed     []byte
+	killedLive bool
 }
 type receipt struct {
 	digest string
@@ -318,6 +323,14 @@ func (f *fakeBench) act(ctx context.Context, spec benchdispatch.SourceSpec, r be
 		}
 		f.lastCapsule, f.runArgs = capsule, append([]string(nil), r.Arguments...)
 		f.effects[op]++
+		if f.killed != nil {
+			typed, _ := finite.Digest()
+			f.receipts[r.RequestID] = receipt{digest: typed, status: 503, body: f.killed}
+			if f.killedLive {
+				return 503, f.killed
+			}
+			return 0, nil
+		}
 		if f.inProgress[op] {
 			delete(f.inProgress, op)
 			// The run keeps going; its receipt completes later.

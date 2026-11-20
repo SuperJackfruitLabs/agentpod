@@ -89,6 +89,26 @@ test("a node-internal parked state arrives as pending and parks the row", async 
   expect(parsed.state).toBe("pending");
 });
 
+// The staging park that said nothing: execute_pending, a node reply that is not completed, and no
+// reason in the log or on the card. Every non-completed node state parks naming it.
+test.each(["pending", "unknown", "superseded"])("execute_pending parks a node %s reply naming node.state", async (state) => {
+  const pending = corpus.responses.find((c) => c.name === "pending");
+  if (!pending) throw new Error("shared pending fixture missing");
+  resetCheckpointActivityForTests();
+  const lines: Array<Record<string, unknown> | undefined> = [];
+  const restore = setParkedLogForTests(createQuietLog((_m, meta) => lines.push(meta), { now: () => 0 }));
+  try {
+    const attempt = executePending();
+    const h = harness({ ...pending.value, state, identity: attempt.request.identity, target: attempt.request.target });
+    const board = recordingBoard();
+    const result = await driveCheckpointAttempt(attempt, board.client, false, h.deps);
+    expect(result).toMatchObject({ status: "unreported", reason: "Checkpoint dispatch requires reconciliation" });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ phase: "execute_pending", code: "uncertain", reason: `node.state:${state}` });
+    expect(JSON.stringify(board.calls)).toContain(`node.state:${state}`);
+  } finally { restore(); }
+});
+
 test("an attempt parked on every re-check is logged once per phase and code, then once per interval", async () => {
   const pending = corpus.responses.find((c) => c.name === "pending");
   if (!pending) throw new Error("shared pending fixture missing");

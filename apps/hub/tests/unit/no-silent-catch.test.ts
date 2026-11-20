@@ -15,7 +15,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CHECKPOINT_PATH, COMPLETED_PATH, SOURCE_ROOT, catches, handled, unnamedRefusals } from "../helpers/silent-catch";
+import { CHECKPOINT_PATH, COMPLETED_PATH, SOURCE_ROOT, catches, handled, unnamedParks, unnamedRefusals } from "../helpers/silent-catch";
 
 const root = SOURCE_ROOT;
 
@@ -65,4 +65,24 @@ test("the unnamed-refusal detector finds a bare code and a reason left undefined
     'const refuse = (why) => new CheckpointRefused("source", `settlement.${why}`, cause);',
   ].join("\n"));
   expect(found.map((r) => r.line)).toEqual([1, 2, 3, 4]);
+});
+
+test("every park in the orchestrator passes the error that names it", () => {
+  const file = "services/bridge/checkpoint-orchestrator.ts";
+  const source = readFileSync(join(root, file), "utf8");
+  expect(unnamedParks(source).map((r) => `${file}:${r.line}  ${r.text}`)).toEqual([]);
+  // The helper itself takes no default code and no optional error, so a bare call cannot type-check.
+  expect(source).toMatch(/const parked = \(attempt: RetainedCheckpointAttempt, code: CheckpointRefused\["code"\], error: unknown\)/);
+});
+
+test("the unnamed-park detector finds a bare park and a code-only park, and accepts a named one", () => {
+  const found = unnamedParks([
+    "return parked(attempt);",
+    'return parked(attempt, "uncertain");',
+    "if (!receipt) return parked( attempt );",
+    'return parked(attempt, "uncertain", new CheckpointRefused("uncertain", `node.state:${why}`));',
+    'return parked(attempt, error instanceof CheckpointRefused ? error.code : "unavailable", error);',
+    'return parked(attempt, "uncertain", undefined);',
+  ].join("\n"));
+  expect(found.map((r) => r.line)).toEqual([1, 2, 3, 6]);
 });

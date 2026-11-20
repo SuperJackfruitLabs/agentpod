@@ -6,7 +6,7 @@ import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON } from "./ch
 import { readCheckpointAttempt, type RetainedCheckpointAttempt } from "./checkpoint-ledger";
 import { checkpointProfileId, CheckpointRefused } from "./checkpoint-profile";
 import { checkpointProfileSuperseded, requireInstalledCheckpointProfile } from "./checkpoint-profiles";
-import { readCheckpointAuthority } from "./checkpoint-current";
+import { checkpointAuthorityMatches, readCheckpointAuthority } from "./checkpoint-current";
 import { checkpointAgentClient } from "./checkpoint-agent-client";
 import { noteCheckpoint } from "./checkpoint-log";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
@@ -67,7 +67,7 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array)
     if (attempt.row.phase === "retired" || checkpointProfileSuperseded(attempt.profile)) return refused("stale_owner");
     requireInstalledCheckpointProfile(attempt.profile);
     const authority = await readCheckpointAuthority(attempt.profile);
-    if (canonicalCheckpoint(authority) !== attempt.row.authority) return refused("stale_owner");
+    if (!checkpointAuthorityMatches(authority, attempt.row.authority)) return refused("stale_owner");
     let expires = Date.now() + 5000;
     let active: { snapshot: CheckpointSourceSnapshot; source: ReturnType<typeof parseCheckpointSource> } | undefined;
     if (request.phase === "execute" || attempt.row.sourceReceipt !== null) {
@@ -103,7 +103,7 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array)
     const finalAuthority = await readCheckpointAuthority(attempt.profile);
     const final = await readCheckpointAttempt(request.identity.tenant_id, request.identity.attempt_id);
     requireInstalledCheckpointProfile(attempt.profile);
-    if (canonicalCheckpoint(finalAuthority) !== attempt.row.authority) return refused("stale_owner");
+    if (!checkpointAuthorityMatches(finalAuthority, attempt.row.authority)) return refused("stale_owner");
     const reread = finalRowDecision(attempt.row, final?.row);
     if (reread !== "current") return refused(reread);
     const now = Date.now();

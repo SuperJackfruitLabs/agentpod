@@ -67,3 +67,18 @@ export function unnamedRefusals(source: string): Array<{ line: number; text: str
     found.push({ line: source.slice(0, match.index).split("\n").length, text: match[0] });
   return found;
 }
+
+/**
+ * Every `parked(...)` call in `source` that passes no naming error: its line and text. A park with no
+ * reason logged `execute_pending`/`uncertain` and nothing else while a killed run held its card.
+ */
+export function unnamedParks(source: string): Array<{ line: number; text: string }> {
+  const found: Array<{ line: number; text: string }> = [];
+  const pattern = /\bparked\(\s*([^,()]+?)\s*(?:,\s*([^,()]+?|[^,()]*\([^()]*\)[^,()]*?)\s*)?\)/g;
+  for (let match = pattern.exec(source); match; match = pattern.exec(source))
+    found.push({ line: source.slice(0, match.index).split("\n").length, text: match[0] });
+  const undefinedError = /\bparked\([^;]*?,\s*undefined\s*\)/g;
+  for (let match = undefinedError.exec(source); match; match = undefinedError.exec(source))
+    found.push({ line: source.slice(0, match.index).split("\n").length, text: match[0] });
+  return found.toSorted((a, b) => a.line - b.line);
+}

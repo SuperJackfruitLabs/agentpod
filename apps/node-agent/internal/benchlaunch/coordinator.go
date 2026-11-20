@@ -89,9 +89,13 @@ func (k call) limit() int {
 	return benchworkspace.MaxResponse
 }
 
-// uncertain reports the producer's in-flight answers. They are never final:
-// growth calls recover through the receipt, other calls may be sent again.
-func uncertain(body []byte) bool {
+// uncertain reports the producer's in-flight answers. A live reply with one of
+// them is never final: growth calls recover through the receipt, other calls
+// may be sent again. A reply replayed from a completed receipt is the
+// operation's final outcome whatever its code (treaty: "A completed stored
+// failure is final"), so a stored unavailable ends the call; only a stored
+// operation_in_doubt still needs reconciliation and parks.
+func uncertain(body []byte, replayed bool) bool {
 	var peek struct {
 		Error *struct {
 			Code string `json:"code"`
@@ -101,8 +105,10 @@ func uncertain(body []byte) bool {
 		return false
 	}
 	switch peek.Error.Code {
-	case "in_progress", "operation_in_doubt", "unavailable":
+	case "in_progress", "operation_in_doubt":
 		return true
+	case "unavailable":
+		return !replayed
 	}
 	return false
 }
@@ -147,15 +153,17 @@ func (c Coordinator) send(ctx context.Context, spec benchdispatch.SourceSpec, k 
 	if err != nil || body != nil {
 		return status, body, err
 	}
+	replayed := false
 	if lookup {
 		status, body, err = c.recover(ctx, k)
+		replayed = err == nil
 	} else if transmit {
 		status, body, err = c.Producer.Post(ctx, k.path, k.contentType(), k.request, k.limit())
 	}
 	if err != nil {
 		return 0, nil, benchdispatch.ErrPending
 	}
-	if uncertain(body) {
+	if uncertain(body, replayed) {
 		return 0, nil, benchdispatch.ErrPending
 	}
 	// Journal the actual reply even when ctx ended during transport.
