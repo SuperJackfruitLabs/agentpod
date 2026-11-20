@@ -194,6 +194,46 @@ SuperBench reply did not parse answers `verification_failed` without journaling
 the record terminal, so the node may keep that record's lease until a newer
 attempt on the same card retires it.
 
+## When a completed run cannot be reported
+
+A node's `completed` reply is turned into a settlement before the attempt
+records `completed`. The builder (`checkpoint-report.ts`) reads only the
+attempt's immutable cells and the node's journaled completion, so a refusal
+there recurs on every pass: the run finished and can never become a pass. It
+ends the attempt exactly as a definite node refusal does (`failure_pending`,
+`checkpoint.failed`, `POST …/runs/:run/fail`, then `failed`), with code
+`settlement.<why>` and the node's whole reply as evidence. It is never reported
+as a pass.
+
+| Code | Run is failed with |
+| --- | --- |
+| `settlement.unchanged` | "the run finished but produced no change, and this stage requires one" (every member's final checkpoint equals its start and the policy has `allowUnchanged: false`) |
+| `settlement.task_outcome` | "the run finished but the task did not complete (`blocked` or `failed`)" |
+| `settlement.foreign_source` | its result is not for the source this card admitted |
+| `settlement.foreign_member` | a pushed checkpoint is not on this card's repository or branch |
+| `settlement.completion`, `.retained_source`, `.shape`, `.size` | the completion, the retained prepared source or the settlement does not check out |
+
+Everything else that can refuse after `completed` is transient or proves
+nothing about the run, so it stays parked and names its reason:
+
+| Where | Reason | Why it parks |
+| --- | --- | --- |
+| The current-authority re-read after the reply | `authority.changed`, `current.*`, `issuer.*`, … | Authority can come back; nothing about the run is decided by it |
+| Committing `completed` | `ledger.phase`, `ledger.raced` | Another pass moved the row; the next pass reads it |
+| `completed`: reading the source on the board | `service.status:<n>`, `service.timeout`, `service.error`, `service.grant`, `source.shape`, `source.binding`, `source.claim` | The board's answer, not the run's |
+| `completed`: the run is no longer working on the board | `source.inactive` | Its heartbeat is stale or the run ended; an owner or admin settles a run the board ended |
+| `submission_pending`, `reported`: receipt and settlement | `service.*`, `receipt.shape`, `receipt.mismatch`, `service.receipt_missing` | A settlement may already exist; it is reconciled by receipt, never repeated or failed |
+| Any phase: a retained cell missing or not matching | `retained.*` | Not reachable for a row the ledger wrote; parked for an operator, never guessed at |
+
+`completed` and later phases rebuild the same settlement that already passed in
+`execute_pending`, so they cannot hit a `settlement.*` refusal. The ledger
+takes a failure only from `prepare_pending` and `execute_pending`.
+
+A refusal on this path with no reason is refused by
+`tests/unit/no-silent-catch.test.ts`: every `new CheckpointRefused(...)` in
+the orchestrator, the builder and its checks, the source projection, the
+service client and the ledger names one.
+
 ## Waiting on the node
 
 A coordinator call that outlasts the Hub's wait is not a failure. The broker
