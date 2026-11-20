@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { BenchCoordinatorCompletion, BenchCoordinatorRequest, benchCoordinatorBindingDigest } from "@agentpod/contract";
 import corpus from "../../../../../packages/contract/src/fixtures/bench-coordinator-v1.json";
 import { buildCheckpointSettlement } from "./checkpoint-report";
-import { parseCheckpointProfile } from "./checkpoint-profile";
+import { CheckpointRefused, parseCheckpointProfile } from "./checkpoint-profile";
 import { checkpointPolicyDigest, parsePendingCheckpointClaim } from "./checkpoint-claim";
 import { canonicalCheckpoint } from "./checkpoint-json";
 import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
@@ -60,7 +60,9 @@ test("whole report uses only trusted logical repository mapping and exact source
   expect(result.body).not.toContain("repository_sha256");
   expect(result.body).not.toContain("control_grant_id");
 });
-test.each(["unreleased", "failed", "unchanged", "foreign-start", "foreign-repository", "unknown-capability"])("%s never becomes a settlement", async (kind) => {
+test.each([["unreleased", "settlement.completion"], ["failed", "settlement.task_outcome"], ["unchanged", "settlement.unchanged"],
+  ["foreign-start", "settlement.completion"], ["foreign-repository", "settlement.completion"],
+  ["unknown-capability", "settlement.completion"]])("%s never becomes a settlement, and says so (%s)", async (kind, reason) => {
   const { attempt, completion } = await fixture();
   const changed: unknown = kind === "unreleased" ? { ...completion, service: { ...completion.service, released: false } } :
     kind === "unchanged" ? { ...completion, service: { ...completion.service, checkpoints: completion.source.binding.sources } } :
@@ -68,5 +70,18 @@ test.each(["unreleased", "failed", "unchanged", "foreign-start", "foreign-reposi
     kind === "foreign-start" ? { ...completion, source: { ...completion.source, request_id: "foreign_request" } } :
     kind === "foreign-repository" ? { ...completion, service: { ...completion.service, checkpoints: completion.service.checkpoints.map((m) => ({ ...m, repository_sha256: "f".repeat(64) })) } } :
     { ...completion, lease_token: "not-a-real-token" };
-  await expect(buildCheckpointSettlement(attempt, changed)).rejects.toThrow("source");
+  const refused = await buildCheckpointSettlement(attempt, changed).then(() => undefined, (error: unknown) => error);
+  expect(refused).toBeInstanceOf(CheckpointRefused);
+  expect(refused).toMatchObject({ code: "source", reason });
+});
+
+test("a completion for another prepared source, or a member on another card's branch, says which", async () => {
+  const { attempt, completion } = await fixture();
+  const prepared = JSON.parse(attempt.row.prepared ?? "{}");
+  const otherSource = { ...attempt, row: { ...attempt.row, prepared: canonicalCheckpoint({ ...prepared, request_id: "another_request" }) } };
+  await expect(buildCheckpointSettlement(otherSource, completion)).rejects.toMatchObject({ reason: "settlement.foreign_source" });
+  const otherCard = { ...attempt, claim: { ...attempt.claim, cardId: "card_OTHER1" } };
+  await expect(buildCheckpointSettlement(otherCard, completion)).rejects.toMatchObject({ reason: "settlement.foreign_member" });
+  const noPrepared = { ...attempt, row: { ...attempt.row, prepared: null } };
+  await expect(buildCheckpointSettlement(noPrepared, completion)).rejects.toMatchObject({ reason: "settlement.retained_source" });
 });

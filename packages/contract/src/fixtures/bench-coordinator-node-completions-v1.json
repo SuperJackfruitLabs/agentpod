@@ -1,0 +1,221 @@
+{
+  "description": "Completed replies the node's coordinator bridge sends for a registered-launch attempt whose settlement the Hub cannot build. Accepted by the node's wire parser (apps/node-agent/internal/benchbridge/refusal_wire_test.go) and read by the Hub's checkpoint orchestrator tests. completed-unchanged: the run finished cleanly (task outcome complete, stopped, released) but made no new commit: every member's final checkpoint equals its start, on a stage whose policy has allowUnchanged false.",
+  "replies": [
+    {
+      "name": "completed-unchanged",
+      "request": {
+        "version": "agentpod.bench-coordinator.v1",
+        "operation": "status",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_aaaaaaaaaaaaaaaaaaaa",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "8b8f30672ef5b1ab0fc4e25ac24e3982d64a4043f7a32c93fabfea34dda30f28"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      },
+      "value": {
+        "version": "agentpod.bench-coordinator.v1",
+        "operation": "status",
+        "identity": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "card_id": "card_ABC123",
+          "stage_id": "write-test",
+          "run_id": "run_ABC123",
+          "epoch": 7,
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "attempt_id": "attempt-fixture",
+          "control_principal_id": "prn_aaaaaaaaaaaaaaaaaaaa",
+          "control_grant_id": "selected-authorization-fixture",
+          "policy_sha256": "8b8f30672ef5b1ab0fc4e25ac24e3982d64a4043f7a32c93fabfea34dda30f28"
+        },
+        "target": {
+          "tenant_id": "tenant-fixture",
+          "board_id": "brd_ABC123",
+          "agent_id": "agt_ABC123",
+          "station_id": "station-fixture",
+          "node_id": "node-fixture",
+          "host_id": "host-fixture",
+          "registry_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coordinator_implementation_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "execution_mode": "linux-cgroup-v2",
+          "bench_protocol": "superbench.v2",
+          "worker_version": "agentpod.superbench-worker.v2",
+          "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "state": "completed",
+        "completion": {
+          "source": {
+            "binding": {
+              "identity": {
+                "tenant_id": "tenant-fixture",
+                "board_id": "brd_ABC123",
+                "card_id": "card_ABC123",
+                "stage_id": "write-test",
+                "run_id": "run_ABC123",
+                "epoch": 7,
+                "agent_id": "agt_ABC123",
+                "station_id": "station-fixture",
+                "node_id": "node-fixture",
+                "attempt_id": "attempt-fixture",
+                "control_principal_id": "prn_aaaaaaaaaaaaaaaaaaaa",
+                "control_grant_id": "selected-authorization-fixture",
+                "policy_sha256": "8b8f30672ef5b1ab0fc4e25ac24e3982d64a4043f7a32c93fabfea34dda30f28"
+              },
+              "host_id": "host-fixture",
+              "bench_key": "Fixture_card",
+              "bench_id": "11111111111111111111111111111111",
+              "sources": [
+                {
+                  "name": "api",
+                  "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                },
+                {
+                  "name": "web",
+                  "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                }
+              ],
+              "members": [
+                {
+                  "name": "api",
+                  "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "object_format": "sha1",
+                  "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                },
+                {
+                  "name": "web",
+                  "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                  "task_ref": "refs/heads/card/card_ABC123",
+                  "object_format": "sha256",
+                  "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                }
+              ],
+              "checkpoint": {
+                "generation_id": "22222222222222222222222222222222",
+                "manifest_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+                "members": [
+                  {
+                    "name": "api",
+                    "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                  },
+                  {
+                    "name": "web",
+                    "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                  }
+                ],
+                "seal": "4444444444444444444444444444444444444444"
+              },
+              "operations": [
+                {
+                  "step": "create",
+                  "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                  "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                  "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                  "http_status": 200,
+                  "phase": "observed"
+                },
+                {
+                  "step": "lease",
+                  "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                  "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                  "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                  "http_status": 200,
+                  "phase": "observed"
+                },
+                {
+                  "step": "checkpoint",
+                  "request_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                  "body_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                  "response_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+                  "http_status": 200,
+                  "phase": "observed"
+                }
+              ],
+              "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+              "body_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+              "context_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "worker_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            },
+            "binding_sha256": "d5324ca39a536a5a98a7ef85ea4ae4154176a33debbf433bd25c37c2557174b1",
+            "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "checkpoint_repository": "api",
+            "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "service": {
+            "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "request_sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+            "body_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+            "response_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "worker_result_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "execution_id": "77777777777777777777777777777777",
+            "stopped": true,
+            "released": true,
+            "checkpoints": [
+              {
+                "name": "api",
+                "repository_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "task_ref": "refs/heads/card/card_ABC123",
+                "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              },
+              {
+                "name": "web",
+                "repository_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                "task_ref": "refs/heads/card/card_ABC123",
+                "commit": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+              }
+            ],
+            "kind": "grouped-v2",
+            "generation_id": "55555555555555555555555555555555",
+            "seal_commit": "6666666666666666666666666666666666666666",
+            "manifest_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          },
+          "task": {
+            "version": "agentpod.superbench-worker.v2",
+            "binding": {
+              "board_id": "brd_ABC123",
+              "card_id": "card_ABC123",
+              "run_id": "run_ABC123",
+              "epoch": 7
+            },
+            "outcome": "complete",
+            "handoff": {
+              "summary": "日本語 https://example.invalid/child-text is UNTRUSTED"
+            }
+          },
+          "source_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "source_receipt_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+        }
+      }
+    }
+  ]
+}

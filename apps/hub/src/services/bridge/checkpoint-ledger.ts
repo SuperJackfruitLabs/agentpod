@@ -41,7 +41,7 @@ function checked(row: CheckpointDispatchRow): RetainedCheckpointAttempt {
     authority.stationId !== profile.target.station_id || authority.nodeId !== profile.target.node_id ||
     authority.occupancyEpoch !== profile.occupancyEpoch || authority.agentKey !== profile.agentKey || authority.profileKey !== profile.profileKey ||
     request.task.profile_id !== checkpointProfileId(profile) || canonicalCheckpoint(request.target) !== canonicalCheckpoint(profile.target))
-    throw new CheckpointRefused("source");
+    throw new CheckpointRefused("source", "ledger.row");
   // The raw authority bytes are retained, not trusted as a new grant. Every
   // current check compares them to a fresh actual database/issuer observation.
   return { row, profile, claim, request };
@@ -57,7 +57,7 @@ function sameReservation(retained: RetainedCheckpointAttempt, profile: Checkpoin
   authority: CheckpointAuthority, task: PrepareRequest["task"]): void {
   if (retained.row.profile !== canonicalCheckpoint(profile) || retained.row.claim !== canonicalCheckpoint(claim) ||
     retained.row.authority !== canonicalCheckpoint(authority) ||
-    canonicalCheckpoint(retained.request.task) !== canonicalCheckpoint(task)) throw new CheckpointRefused("stale");
+    canonicalCheckpoint(retained.request.task) !== canonicalCheckpoint(task)) throw new CheckpointRefused("stale", "ledger.reservation");
 }
 
 /** Only send=true permits the first Prepare call. A commit with a lost reply
@@ -85,7 +85,7 @@ export async function reserveCheckpointAttempt(value: CheckpointProfile, pending
       node_id: profile.target.node_id, attempt_id: attemptId, control_principal_id: profile.ownerPrincipalId,
       control_grant_id: authority.authorizationSnapshotId, policy_sha256: claim.policyDigest,
     }, task: input })));
-  if (parsed.operation !== "prepare" || parsed.task.profile_id !== checkpointProfileId(profile)) throw new CheckpointRefused("invalid");
+  if (parsed.operation !== "prepare" || parsed.task.profile_id !== checkpointProfileId(profile)) throw new CheckpointRefused("invalid", "ledger.request");
   const request = JSON.stringify(parsed);
   const inserted = await db.insert(checkpointDispatches).values({ tenantId: profile.target.tenant_id, boardId: claim.boardId,
     runId: claim.runId, leaseEpoch: claim.leaseEpoch, attemptId, profile: canonicalCheckpoint(profile),
@@ -95,7 +95,7 @@ export async function reserveCheckpointAttempt(value: CheckpointProfile, pending
   const [raced] = await db.select().from(checkpointDispatches).where(and(
     eq(checkpointDispatches.tenantId, profile.target.tenant_id), eq(checkpointDispatches.boardId, claim.boardId),
     eq(checkpointDispatches.runId, claim.runId), eq(checkpointDispatches.leaseEpoch, claim.leaseEpoch)));
-  if (!raced) throw new CheckpointRefused("uncertain");
+  if (!raced) throw new CheckpointRefused("uncertain", "ledger.raced");
   const attempt = checked(raced);
   sameReservation(attempt, profile, claim, authority, input);
   return { attempt, send: false };
@@ -118,10 +118,10 @@ const predecessor = { prepared: "prepare_pending", source_pending: "prepared", a
 export async function advanceCheckpointAttempt(attempt: RetainedCheckpointAttempt, evidence: CheckpointAdvance): Promise<{
   attempt: RetainedCheckpointAttempt; send: boolean;
 }> {
-  if (attempt.row.phase !== predecessor[evidence.phase]) throw new CheckpointRefused("stale");
+  if (attempt.row.phase !== predecessor[evidence.phase]) throw new CheckpointRefused("stale", "ledger.phase");
   for (const [key, value] of Object.entries(evidence)) {
     if (key !== "phase" && (typeof value !== "string" || Buffer.byteLength(value, "utf8") > 262144))
-      throw new CheckpointRefused("invalid");
+      throw new CheckpointRefused("invalid", "ledger.size");
   }
   const [updated] = await db.update(checkpointDispatches).set({ ...evidence, updatedAt: new Date() }).where(and(
     eq(checkpointDispatches.tenantId, attempt.row.tenantId), eq(checkpointDispatches.attemptId, attempt.row.attemptId),
@@ -134,7 +134,7 @@ export async function advanceCheckpointAttempt(attempt: RetainedCheckpointAttemp
   }
   const current = await readCheckpointAttempt(attempt.row.tenantId, attempt.row.attemptId);
   if (!current || Object.entries(evidence).some(([key, value]) => Reflect.get(current.row, key) !== value))
-    throw new CheckpointRefused("stale");
+    throw new CheckpointRefused("stale", "ledger.raced");
   return { attempt: current, send: false };
 }
 
@@ -174,7 +174,7 @@ export async function retireCheckpointAttempt(attempt: RetainedCheckpointAttempt
   const body: CheckpointRetirement = { version: "agentpod.checkpoint-retirement.v1", ...retirement,
     phase: attempt.row.phase, at: new Date().toISOString() };
   const value = canonicalCheckpoint(body);
-  if (Buffer.byteLength(value, "utf8") > 262144) throw new CheckpointRefused("invalid");
+  if (Buffer.byteLength(value, "utf8") > 262144) throw new CheckpointRefused("invalid", "ledger.size");
   const [updated] = await db.update(checkpointDispatches).set({ phase: "retired", retirement: value, updatedAt: new Date() })
     .where(and(eq(checkpointDispatches.tenantId, attempt.row.tenantId), eq(checkpointDispatches.attemptId, attempt.row.attemptId),
       eq(checkpointDispatches.prepareSHA256, attempt.row.prepareSHA256), eq(checkpointDispatches.phase, attempt.row.phase))).returning();
@@ -204,7 +204,7 @@ export async function pendingCheckpointAttempt(profile: CheckpointProfile): Prom
   const rows = await db.select().from(checkpointDispatches).where(and(
     eq(checkpointDispatches.tenantId, profile.target.tenant_id), eq(checkpointDispatches.boardId, profile.target.board_id)));
   const pending = rows.filter((row) => !CHECKPOINT_TERMINAL_PHASES.has(row.phase) && checked(row).profile.target.station_id === profile.target.station_id);
-  if (pending.length > 1) throw new CheckpointRefused("uncertain");
+  if (pending.length > 1) throw new CheckpointRefused("uncertain", "ledger.station");
   const [row] = pending;
   return row ? { attempt: checked(row), superseded: row.profile !== canonicalCheckpoint(profile) } : undefined;
 }
@@ -217,7 +217,7 @@ export type CheckpointFailureDisposition =
   | "released";
 export interface CheckpointFailure {
   version: "agentpod.checkpoint-failure.v1";
-  /** The node's closed refusal code. */
+  /** The node's closed refusal code, or `settlement.<why>` for a completed reply that cannot be reported. */
   code: string;
   disposition: CheckpointFailureDisposition;
   /** The sentence the card shows, and the run's failure reason. */
@@ -246,11 +246,12 @@ export const NODE_REFUSABLE_PHASES: ReadonlySet<string> = new Set(["prepare_pend
  */
 export async function failCheckpointAttempt(attempt: RetainedCheckpointAttempt,
   failure: Pick<CheckpointFailure, "code" | "disposition" | "reason" | "evidence">): Promise<{ attempt: RetainedCheckpointAttempt; send: boolean }> {
-  if (!NODE_REFUSABLE_PHASES.has(attempt.row.phase)) throw new CheckpointRefused("stale");
+  if (!NODE_REFUSABLE_PHASES.has(attempt.row.phase)) throw new CheckpointRefused("stale", "ledger.phase");
   const body: CheckpointFailure = { version: "agentpod.checkpoint-failure.v1", ...failure, phase: attempt.row.phase,
     by: "hub", at: new Date().toISOString() };
   const value = canonicalCheckpoint(body);
-  if (Buffer.byteLength(value, "utf8") > 262144) throw new CheckpointRefused("invalid");
+  // The evidence is a whole node reply (at most 256 KiB, the Hub's read limit) plus the ruling around it.
+  if (Buffer.byteLength(value, "utf8") > 262144 + 16384) throw new CheckpointRefused("invalid", "ledger.size");
   const [updated] = await db.update(checkpointDispatches).set({ phase: "failure_pending", failure: value, updatedAt: new Date() })
     .where(and(eq(checkpointDispatches.tenantId, attempt.row.tenantId), eq(checkpointDispatches.attemptId, attempt.row.attemptId),
       eq(checkpointDispatches.prepareSHA256, attempt.row.prepareSHA256), eq(checkpointDispatches.phase, attempt.row.phase))).returning();
@@ -260,14 +261,14 @@ export async function failCheckpointAttempt(attempt: RetainedCheckpointAttempt,
     return { attempt: checked(updated), send: true };
   }
   const current = await readCheckpointAttempt(attempt.row.tenantId, attempt.row.attemptId);
-  if (!current || (current.row.phase !== "failure_pending" && current.row.phase !== "failed")) throw new CheckpointRefused("stale");
+  if (!current || (current.row.phase !== "failure_pending" && current.row.phase !== "failed")) throw new CheckpointRefused("stale", "ledger.raced");
   return { attempt: current, send: false };
 }
 
 /** End a `failure_pending` attempt as `failed`, once SuperPipeline has been told. Compare-and-set. */
 export async function closeFailedCheckpointAttempt(attempt: RetainedCheckpointAttempt,
   outcome: CheckpointFailureReport["outcome"]): Promise<{ attempt: RetainedCheckpointAttempt; send: boolean }> {
-  if (attempt.row.phase !== "failure_pending") throw new CheckpointRefused("stale");
+  if (attempt.row.phase !== "failure_pending") throw new CheckpointRefused("stale", "ledger.phase");
   const report: CheckpointFailureReport = { version: "agentpod.checkpoint-failure-report.v1", outcome, at: new Date().toISOString() };
   const [updated] = await db.update(checkpointDispatches).set({ phase: "failed", failureReport: canonicalCheckpoint(report), updatedAt: new Date() })
     .where(and(eq(checkpointDispatches.tenantId, attempt.row.tenantId), eq(checkpointDispatches.attemptId, attempt.row.attemptId),
@@ -278,6 +279,6 @@ export async function closeFailedCheckpointAttempt(attempt: RetainedCheckpointAt
     return { attempt: checked(updated), send: true };
   }
   const current = await readCheckpointAttempt(attempt.row.tenantId, attempt.row.attemptId);
-  if (!current || current.row.phase !== "failed") throw new CheckpointRefused("stale");
+  if (!current || current.row.phase !== "failed") throw new CheckpointRefused("stale", "ledger.raced");
   return { attempt: current, send: false };
 }

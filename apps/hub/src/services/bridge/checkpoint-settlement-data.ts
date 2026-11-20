@@ -42,7 +42,7 @@ export function checkedCheckpointReceipt(raw:Uint8Array,body:string,reporter:str
   const report=submitted.checkpoint;
   if(receipt.requestDigest!==hash(submitted)||receipt.reportDigest!==hash(report)||receipt.reportedBy!==reporter||
    receipt.settlementId!==report.settlementId||receipt.runId!==report.binding.runId||receipt.leaseEpoch!==report.binding.leaseEpoch||
-   canonicalCheckpoint(receipt.checkpoint)!==canonicalCheckpoint(report.checkpoint))throw new CheckpointRefused("source");
+   canonicalCheckpoint(receipt.checkpoint)!==canonicalCheckpoint(report.checkpoint))throw new CheckpointRefused("source","receipt.mismatch");
   return receipt;
- } catch { throw new CheckpointRefused("source"); }
+ } catch (error) { if (error instanceof CheckpointRefused) throw error; throw new CheckpointRefused("source","receipt.shape",error); }
 }
