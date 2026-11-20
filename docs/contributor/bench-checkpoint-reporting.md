@@ -152,7 +152,7 @@ table does not name parks.
 
 | Code | `prepare_pending` | `execute_pending` | Why |
 | --- | --- | --- | --- |
-| `verification_failed` | failed | failed | A worker crash, a result or receipt that did not verify, or a producer reply that did not parse. Journaled terminal, lease released |
+| `verification_failed` | failed | failed | A worker crash, a run killed before it finished (a SuperBench restart stores its reply as a final failure receipt), a result or receipt that did not verify, or a producer reply that did not parse. Journaled terminal, lease released |
 | `unsupported` | failed | failed | The producer refused the request (`invalid_request`, `not_found`): nothing ran, and the same request would be refused again |
 | `capacity_exhausted` | released | released | SuperBench refused create, lease or run for capacity: terminal, nothing ran |
 | `conflict` | released | parked | Before execute, another holder owns the bench and nothing of this attempt ran. After it, only a journal step that does not match its own bytes, which proves nothing about the run |
@@ -168,7 +168,11 @@ table does not name parks.
 - **Released** hands the card back without penalty, `POST …/runs/:run/release`:
   the card is claimable again.
 - **Parked** stays on its phase, logged and shown on the card with reason
-  `node.state:refused.<code>`, and is read again on the next backoff.
+  `node.state:refused.<code>`, and is read again on the next backoff. A reply
+  that is not a refusal and not the phase's success parks naming its state:
+  `node.state:pending`, `node.state:unknown`, `node.state:superseded`. No park
+  names nothing: one that throws without a reason parks as `drive.error`, with
+  the error's class in the log.
 
 Neither ruling ever reports a pass: no settlement is built and `complete` is
 never sent.
@@ -218,7 +222,7 @@ nothing about the run, so it stays parked and names its reason:
 
 | Where | Reason | Why it parks |
 | --- | --- | --- |
-| The current-authority re-read after the reply | `authority.changed`, `current.*`, `issuer.*`, … | Authority can come back; nothing about the run is decided by it |
+| The current-authority re-read after the reply | `authority.changed`, `authority.raced`, `current.*`, `issuer.*`, … | Authority can come back; nothing about the run is decided by it |
 | Committing `completed` | `ledger.phase`, `ledger.raced` | Another pass moved the row; the next pass reads it |
 | `completed`: reading the source on the board | `service.status:<n>`, `service.timeout`, `service.error`, `service.grant`, `source.shape`, `source.binding`, `source.claim` | The board's answer, not the run's |
 | `completed`: the run is no longer working on the board | `source.inactive` | Its heartbeat is stale or the run ended; an owner or admin settles a run the board ended |

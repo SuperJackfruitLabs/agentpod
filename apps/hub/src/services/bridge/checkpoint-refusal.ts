@@ -63,7 +63,7 @@ const where = (phase: NodePhase) => phase === "prepare_pending" ? "while prepari
 function sentence(code: RefusalCode, phase: NodePhase): string {
   switch (code) {
     case "verification_failed": return phase === "execute_pending"
-      ? "Checkpoint failed: the bench run did not verify (verification_failed): the worker crashed, or its result or receipt did not check out. Nothing was reported as a pass."
+      ? "Checkpoint failed: the bench run did not verify (verification_failed): the worker crashed or was stopped before it finished (for example by a SuperBench restart), or its result or receipt did not check out. Nothing was reported as a pass."
       : "Checkpoint failed: the bench could not be prepared (verification_failed). Nothing ran.";
     case "unsupported": return `Checkpoint failed: the bench refused the request as unsupported ${where(phase)}. Nothing ran.`;
     case "capacity_exhausted": return "Checkpoint released: SuperBench capacity is exhausted. Nothing ran; the card is free for a new claim.";

@@ -66,10 +66,18 @@ export type CheckpointRefusalReason =
   /** SuperPipeline's checkpoint service refused with this HTTP status, timed out, or sent an encoded body. */
   | `service.status:${number}` | "service.timeout" | "service.encoding"
   | `node.state:${string}` | `node.target.${string}`
+  /** The settlement's receipt was still absent after the submission: parked to read it again. */
+  | "service.receipt.absent"
+  /** The drive used every step of one pass without reaching a resting phase. */
+  | "drive.steps"
+  /** The drive threw something that names no reason; its class and redacted message are in the log facts. */
+  | "drive.error"
   /** The node's reply is larger than the Hub reads. */
   | "node.reply.size"
   /** Current authority no longer equals the attempt's retained authority. */
   | "authority.changed"
+  /** The roster/occupancy facts changed between the two reads of one authority check. */
+  | "authority.raced"
   /**
    * The settlement could not be built from the node's completed reply. Its inputs are the attempt's
    * immutable cells and the node's journaled completion, so each of these always fails for the attempt.

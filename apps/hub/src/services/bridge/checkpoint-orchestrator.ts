@@ -13,7 +13,7 @@ import { advanceCheckpointAttempt, closeFailedCheckpointAttempt, failCheckpointA
 import { retainedCheckpointSource } from "./checkpoint-current-decision";
 import { readCheckpointAuthority } from "./checkpoint-current";
 import { requireInstalledCheckpointProfile } from "./checkpoint-profiles";
-import { CheckpointRefused } from "./checkpoint-profile";
+import { CheckpointRefused, type CheckpointRefusalReason } from "./checkpoint-profile";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { parseSourceReceipt, requireActiveSource } from "./checkpoint-source";
 import { buildCheckpointSettlement } from "./checkpoint-report";
@@ -42,28 +42,33 @@ export function setParkedLogForTests(next: QuietLog): () => void {
 }
 /** Why each parked result parked, so the drive can say it on the card once. */
 const parkFacts = new WeakMap<DispatchResult, { phase: string; code: string; reason?: string }>();
-const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["code"] = "uncertain", error?: unknown): DispatchResult => {
+// Every park passes the error that names it: there is no default, so a call site cannot park unnamed.
+const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["code"], error: unknown): DispatchResult => {
   // The error that parked it, by class and redacted message (a refusal's own cause when it replaced one).
   const cause = error instanceof CheckpointRefused ? error.cause : error;
   const facts = cause === undefined ? undefined : errorFacts(cause);
-  const reason = error instanceof CheckpointRefused ? error.reason : undefined;
-  parkedLog([attempt.row.attemptId, attempt.row.phase, code, reason ?? "", facts?.errorClass ?? ""].join("\0"),
+  // A refusal or error that names nothing still parks named: `drive.error`, with its class in the facts.
+  const reason: CheckpointRefusalReason = (error instanceof CheckpointRefused ? error.reason : undefined) ?? "drive.error";
+  parkedLog([attempt.row.attemptId, attempt.row.phase, code, reason, facts?.errorClass ?? ""].join("\0"),
     "checkpoint dispatch parked for reconciliation", {
     tenantId: attempt.row.tenantId, boardId: attempt.row.boardId, runId: attempt.claim.runId,
-    attemptId: attempt.row.attemptId, phase: attempt.row.phase, code, ...(reason === undefined ? {} : { reason }), ...facts });
+    attemptId: attempt.row.attemptId, phase: attempt.row.phase, code, reason, ...facts });
   const result: DispatchResult = { status: "unreported", externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId,
     reason: "Checkpoint dispatch requires reconciliation" };
-  parkFacts.set(result, { phase: attempt.row.phase, code, ...(reason === undefined ? {} : { reason }) });
+  parkFacts.set(result, { phase: attempt.row.phase, code, reason });
   return result;
 };
 
 /**
- * A reply that is neither the phase's success nor a definite refusal parks on its phase, as before;
- * a refusal that does not prove the node's record terminal parks naming its code (checkpoint-refusal.ts).
+ * A reply that is neither the phase's success nor a definite refusal parks on its phase, as before,
+ * and always names the node's closed state: `node.state:<state>` (pending, unknown, superseded,
+ * prepared, ...) or, for a refusal that does not prove the node's record terminal,
+ * `node.state:refused.<code>` (checkpoint-refusal.ts). A park that names nothing reads as
+ * `execute_pending`/`uncertain` with no reason, which is how a killed run sat unexplained.
  */
 function parkedReply(attempt: RetainedCheckpointAttempt, response: BenchCoordinatorResponse): DispatchResult {
-  if (response.state !== "refused" || !("code" in response)) return parked(attempt);
-  return parked(attempt, "uncertain", new CheckpointRefused("uncertain", `node.state:refused.${response.code}`));
+  const why = response.state === "refused" && "code" in response ? `refused.${response.code}` : response.state;
+  return parked(attempt, "uncertain", new CheckpointRefused("uncertain", `node.state:${why}`));
 }
 
 /** The failure a `failure_pending` or `failed` row holds. */
@@ -262,7 +267,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
             receipt = await service.settle(attempt.claim, body);
           }
           sendSettlement = false;
-          if (!receipt) return parked(attempt);
+          if (!receipt) return parked(attempt, "uncertain", new CheckpointRefused("uncertain", "service.receipt.absent"));
           await deps.authority(attempt);
           attempt = (await deps.advance(attempt, { phase: "reported", settlementReceipt: canonicalCheckpoint(receipt) })).attempt;
           break;
@@ -299,6 +304,6 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
       }
     }
     return attempt.row.phase === "reported" ? { status: "reported", externalRunId: attempt.claim.runId,
-      attemptId: attempt.row.attemptId } : parked(attempt);
+      attemptId: attempt.row.attemptId } : parked(attempt, "uncertain", new CheckpointRefused("uncertain", "drive.steps"));
   } catch (error) { return parked(attempt, error instanceof CheckpointRefused ? error.code : "unavailable", error); }
 }

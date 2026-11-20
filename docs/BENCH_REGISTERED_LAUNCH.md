@@ -103,7 +103,8 @@ retry of the same attempt reaches the same journal record, never a new launch.
 | Failure | Detected by | What happens | Hub sees |
 | --- | --- | --- | --- |
 | Lost reply on create/lease/run | transport error, no complete body | step stays "sent"; nothing is resent. `status` performs a profiled receipt lookup with the same request ID and digest. `completed` replays the original bytes into step 9; `absent`, `in_progress`, `operation_in_doubt` stay parked | `pending` until the lookup returns `completed` |
-| Producer `in_progress` / `operation_in_doubt` / `unavailable` | parsed error code | same as a lost reply | `pending` |
+| Producer `in_progress` / `operation_in_doubt` / `unavailable`, live | parsed error code on the live reply | same as a lost reply | `pending` |
+| Run killed by a SuperBench restart | the run's completed receipt replays a stored `503 unavailable` whose result shows this holder's lease stopped with `stop_requested` (benchd logs `command failed; stopped lease retained: signal: killed`) | a completed receipt is final whatever its code (treaty "A completed stored failure is final"): terminal, never a pass, nothing resent, no `stop` (the execution is already stopped); the stopped lease is released with this record's token. A stored `operation_in_doubt` still parks | `refused` `verification_failed` |
 | Cancellation before launch | `Cancel` before step 8 | veto journaled first; held lease released with its token; no run is ever sent | `refused` `stale_owner` |
 | Cancellation mid-run | `Cancel` after step 8 | veto journaled; one cancel request targets the run's request ID and digest; `cancel_requested` is recorded as intent only. Later lookups observe the final receipt; its result is never published; the lease is released | `pending`, then `refused` `stale_owner` |
 | Context cancelled while waiting for the run reply | transport error | same as a lost reply; no resend | `pending` |

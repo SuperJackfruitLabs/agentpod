@@ -54,6 +54,8 @@ test("a terminal ruling says what happened in one sentence, naming the code", as
   const crash = classifyCheckpointRefusal("execute_pending", await parsed("verification_failed"));
   expect(crash?.reason).toContain("verification_failed");
   expect(crash?.reason).toContain("Nothing was reported as a pass");
+  // A run a SuperBench restart killed ends here too: the card says so.
+  expect(crash?.reason).toContain("stopped before it finished (for example by a SuperBench restart)");
 });
 
 test("only the two phases that ask the node take a ruling", async () => {
