@@ -29,7 +29,8 @@ test("the roster revision digests only the fields that bear on authority", () =>
   const revision = rosterAuthorityRevision(row);
   expect(revision).toMatch(/^roster:[a-f0-9]{64}$/);
   // Loop tuning and other paths' credentials are not inputs: a row carrying them digests the same.
-  expect(rosterAuthorityRevision({ ...row, maxConcurrency: 4, permissionWaitMs: 1, tokenEncrypted: "x", updatedAt: new Date() } as RosterAuthorityFields)).toBe(revision);
+  const wholeRow = { ...row, maxConcurrency: 4, permissionWaitMs: 1, tokenEncrypted: "x", updatedAt: new Date() };
+  expect(rosterAuthorityRevision(wholeRow)).toBe(revision);
   // The roster stores the default profile as NULL or "": the same default.
   expect(rosterAuthorityRevision({ ...row, profileKey: "" })).toBe(revision);
   for (const change of [{ boardId: "brd_OTHER1" }, { stationId: "station_2" }, { enabled: false }, { mode: "ask" }, { profileKey: "named" },
