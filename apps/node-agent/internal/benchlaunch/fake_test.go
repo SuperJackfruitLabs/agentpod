@@ -222,7 +222,7 @@ func (f *fakeBench) Post(ctx context.Context, path, contentType string, raw []by
 	if status == 0 {
 		return 0, nil, benchworkspace.ErrLost
 	}
-	if benchworkspace.Growth(op) && (status != 409 || !strings.Contains(string(body), "in_progress")) && !(f.barrier && op == "run") {
+	if benchworkspace.Growth(op) && (status != 409 || !strings.Contains(string(body), "in_progress")) && (!f.barrier || op != "run") {
 		f.receipts[request.RequestID] = receipt{digest: typed, status: status, body: body}
 	}
 	if f.loseAfter[op] {
