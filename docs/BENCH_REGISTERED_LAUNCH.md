@@ -173,7 +173,9 @@ From the first refused release the record reports it: its refusal and every
 parked status carry `detail.lease: "held"` and SuperBench's message, and the
 hub says on the card (`checkpoint.parked`, code `lease_held`), once per
 attempt, what an operator must do. When the board already ended the run the
-hub only logs it, since an activity would heartbeat the unbound run.
+hub only logs it, since an activity would heartbeat the unbound run. The card's
+next attempt waits on the held bench (`pending`, never a new lease or run) and
+its reply carries the same `detail.lease: "held"`, so its card says it too.
 
 The supported path, run as the bench host's operator (SuperBench's "Leases"
 concept and `bench workspace` reference):

@@ -566,8 +566,14 @@ func (c Coordinator) supersede(ctx context.Context, spec benchdispatch.SourceSpe
 	err = c.retire(ctx, *old)
 	// Only a terminal record frees the bench: while the older one still holds
 	// its lease (or its run is unresolved) the newer attempt waits, retryable.
-	if r, _, e := c.Journal.read(ctx, *old); e == nil && r.terminal() {
+	r, _, e := c.Journal.read(ctx, *old)
+	if e == nil && r.terminal() {
 		return nil
+	}
+	if e == nil && leaseHeld(r) {
+		// The older record's release is refused: the newer attempt waits on
+		// an operator, and says so.
+		return &HeldLease{Message: r.ReleaseRefusal}
 	}
 	if err == nil || isRefusalErr(err) {
 		return benchdispatch.ErrPending

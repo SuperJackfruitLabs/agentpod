@@ -50,6 +50,23 @@ func RefusalMessage(err error) string {
 	return ""
 }
 
+// HeldLease is a wait on a lease an older record on the same card still holds
+// because SuperBench refused its release. It is pending (errors.Is ErrPending);
+// it only says why, so the hub can name the operator's path.
+type HeldLease struct{ Message string }
+
+func (h *HeldLease) Error() string { return "bench lease held after a refused release" }
+func (h *HeldLease) Unwrap() error { return benchdispatch.ErrPending }
+
+// HeldLeaseOf reports a wait on a held lease, with SuperBench's message.
+func HeldLeaseOf(err error) (string, bool) {
+	var h *HeldLease
+	if errors.As(err, &h) {
+		return h.Message, true
+	}
+	return "", false
+}
+
 // RefusalLeaseHeld reports a terminal refusal whose record still holds its
 // lease after SuperBench refused the release.
 func RefusalLeaseHeld(err error) bool {

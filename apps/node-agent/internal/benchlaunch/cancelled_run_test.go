@@ -188,3 +188,23 @@ func TestARetiredRecordWithARefusedReleaseParksAsHeld(t *testing.T) {
 		t.Fatal("a retired record with a refused release did not report its held lease", status, err)
 	}
 }
+
+// The card's next attempt waits on the held bench and says why: pending with
+// the held lease, never a new lease or run, until an operator frees it.
+func TestANewerAttemptWaitingOnAHeldLeaseSaysSo(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.exit, tr.refuseRelease, tr.releaseMessage = 1, 100, "bench has uncommitted or untracked files"
+	_, err := tr.c.Execute(context.Background(), tr.spec, admitAll)
+	wantCode(t, err, "verification_failed")
+	next := nextAttempt(tr.spec)
+	tr.current.Store(&next)
+	_, err = tr.c.Prepare(context.Background(), next, tr.task)
+	message, held := HeldLeaseOf(err)
+	if !held || message != "bench has uncommitted or untracked files" || !errors.Is(err, benchdispatch.ErrPending) {
+		t.Fatal("the newer attempt did not wait naming the held lease", err)
+	}
+	if tr.count(tr.effects, "lease") != 1 || tr.count(tr.posts, "run") != 1 {
+		t.Fatal("the newer attempt reached the held bench")
+	}
+}

@@ -239,7 +239,11 @@ func failed(r benchcoordinatorwire.Request, err error) (benchcoordinatorwire.Res
 		response.Detail = detail(benchlaunch.RefusalMessage(err), benchlaunch.RefusalLeaseHeld(err))
 		return response, nil
 	}
-	return pending(r), err
+	response := pending(r)
+	if message, ok := benchlaunch.HeldLeaseOf(err); ok {
+		response.Detail = detail(message, true)
+	}
+	return response, err
 }
 
 // detail is the reply's account of why, or nil when there is nothing to say.
