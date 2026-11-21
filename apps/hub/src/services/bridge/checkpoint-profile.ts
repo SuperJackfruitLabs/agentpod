@@ -55,6 +55,8 @@ export type CheckpointRefusalReason =
   | `recover.${CheckpointRefusalCode}`
   /** This station's attempt is still unresolved: one per station, so new checkpoint claims wait. */
   | "attempt.unresolved"
+  /** The station's checkpoint claims wait after a SuperBench capacity refusal (checkpoint-capacity-backoff.ts). */
+  | "capacity.backoff"
   | "claim.tenant" | "claim.board" | "claim.agent" | "claim.reporter" | "claim.node" | "claim.checkpoint_repository"
   | "claim.executor" | "claim.repositories"
   | "selection.identity" | "selection.target" | "selection.shape" | "selection.current"

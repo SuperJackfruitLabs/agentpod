@@ -14,6 +14,7 @@ import { CheckpointRefused } from "./checkpoint-profile";
 import { checkpointCycle, createCheckpointRefusalLog, CHECKPOINT_REFUSAL_RELOG_MS } from "./checkpoint-isolation";
 import { checkpointPrerequisiteError, CHECKPOINT_COORDINATOR_FLAG } from "./checkpoint-profiles";
 import { checkpointRuntime } from "./checkpoint-port";
+import { CAPACITY_HOLD_REASON } from "./checkpoint-capacity-backoff";
 import { reportCheckpointPrerequisite } from "../../validate-config";
 import { SuperpipelineClient } from "./superpipeline";
 import { BridgeCredentialRefused } from "./plane-credential";
@@ -228,6 +229,17 @@ test("an attempt still unresolved holds new checkpoint claims, explicitly, and o
   expect(claims).toHaveLength(1);
   expect(claims[0]).not.toHaveProperty("checkpointOnly");
   expect(claims[0]).not.toHaveProperty("checkpointProtocol");
+});
+
+test("a capacity backoff holds new checkpoint claims, named capacity.backoff, and ordinary claims continue", async () => {
+  const { client, claims } = ordinaryClient();
+  const refused: unknown[] = [];
+  const hold = { status: "unreported", reason: CAPACITY_HOLD_REASON } as const;
+  const result = await runOnce(deps(client, { checkpoint: recovering(async () => hold), checkpointRefused: (e) => refused.push(e) }));
+  expect(result.status).toBe("idle");
+  expect(refused[0]).toMatchObject({ code: "uncertain", reason: "capacity.backoff" });
+  expect(claims).toHaveLength(1);
+  expect(claims[0]).not.toHaveProperty("checkpointOnly");
 });
 
 test("a recovered attempt that finished is the cycle's outcome; nothing else is claimed", async () => {

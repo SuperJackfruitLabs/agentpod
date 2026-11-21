@@ -18,6 +18,7 @@ import type { CheckpointReceipt } from "./checkpoint-settlement-data";
 import { createQuietLog } from "./quiet-log";
 import { resetCheckpointActivityForTests } from "./checkpoint-activity";
 import { NODE_CALL_TIMEOUT_MS } from "./checkpoint-node-call";
+import { capacityCard, createCapacityBackoff, CAPACITY_BACKOFF_BASE_MS, CAPACITY_RELEASE_CAP } from "./checkpoint-capacity-backoff";
 import { parseCheckpointProfile } from "./checkpoint-profile";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { SuperpipelineClient } from "./superpipeline";
@@ -374,6 +375,41 @@ test("a capacity refusal releases the card for a new claim instead of parking it
   expect(board.calls[2]?.body).toMatchObject({ action: "checkpoint.released" });
   expect(held.closed).toBe("release");
   expect(result).toMatchObject({ status: "released", attemptId: attempt.row.attemptId });
+});
+
+const capacityRefused = { version: "agentpod.bench-coordinator.v1", operation: "status", state: "refused", code: "capacity_exhausted" };
+test("a capacity release is counted for the card, and holds the station's checkpoint claims", async () => {
+  resetCheckpointActivityForTests();
+  let now = 0;
+  const capacity = createCapacityBackoff({ now: () => now });
+  const attempt = executePending();
+  const h = harness(capacityRefused);
+  h.deps.capacity = capacity;
+  ledger(h.deps);
+  const result = await driveCheckpointAttempt(attempt, recordingBoard().client, false, h.deps);
+  expect(result.status).toBe("released");
+  expect(capacity.heldUntil()).toBe(CAPACITY_BACKOFF_BASE_MS);
+  now = CAPACITY_BACKOFF_BASE_MS;
+  expect(capacity.heldUntil()).toBeUndefined();
+});
+
+test("the cap-th capacity refusal in a row fails the run instead of releasing it again", async () => {
+  resetCheckpointActivityForTests();
+  const capacity = createCapacityBackoff({ now: () => 0 });
+  const attempt = executePending();
+  for (let i = 1; i < CAPACITY_RELEASE_CAP; i++) capacity.refused(capacityCard(attempt.claim), false);
+  const h = harness(capacityRefused);
+  h.deps.capacity = capacity;
+  const held = ledger(h.deps);
+  const board = recordingBoard();
+  const result = await driveCheckpointAttempt(attempt, board.client, false, h.deps);
+  expect(held.failure).toMatchObject({ code: "capacity_exhausted", disposition: "failed" });
+  expect(board.verbs()).toEqual(["heartbeat", "run", "activities", "fail"]);
+  expect(String(board.calls[3]?.body.reason)).toContain(`exhausted on ${CAPACITY_RELEASE_CAP} attempts in a row`);
+  expect(result.status).toBe("failed");
+  // The station still waits before its next checkpoint claim, and the card's count starts again.
+  expect(capacity.heldUntil()).toBeDefined();
+  expect(capacity.capped(capacityCard(attempt.claim))).toBe(false);
 });
 
 const conflict = (operation: string) => ({ version: "agentpod.bench-coordinator.v1", operation, state: "refused", code: "conflict" });

@@ -18,7 +18,7 @@ import { CheckpointRefused, type CheckpointRefusalReason } from "./checkpoint-pr
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { parseSourceReceipt, requireActiveSource } from "./checkpoint-source";
 import { buildCheckpointSettlement } from "./checkpoint-report";
-import { benchMessage, classifyCheckpointRefusal, classifySettlementRefusal } from "./checkpoint-refusal";
+import { benchMessage, classifyCheckpointRefusal, classifySettlementRefusal, type CheckpointRefusalRuling } from "./checkpoint-refusal";
 import { checkedCheckpointReceipt } from "./checkpoint-settlement-data";
 import { isLeaseSuperseded, type SuperpipelineClient } from "./superpipeline";
 import type { DispatchResult } from "./dispatch-types";
@@ -26,6 +26,7 @@ import { createQuietLog, type QuietLog } from "./quiet-log";
 import { errorFacts, nodeCallReason, noteCheckpoint } from "./checkpoint-log";
 import { nodeCallTimeoutMs } from "./checkpoint-node-call";
 import { checkpointActivity, postCheckpointActivity } from "./checkpoint-activity";
+import { capacityCard, CAPACITY_RELEASE_CAP, type CapacityBackoff } from "./checkpoint-capacity-backoff";
 
 const encode = (raw: string) => new TextEncoder().encode(raw);
 const hash = (raw: string) => createHash("sha256").update(raw, "utf8").digest("hex");
@@ -53,7 +54,9 @@ const leaseHeld = (response: BenchCoordinatorResponse | undefined): boolean =>
 function retainedBenchKey(attempt: RetainedCheckpointAttempt): string | undefined {
   if (!attempt.row.prepared) return undefined;
   try {
-    const key: unknown = (JSON.parse(attempt.row.prepared) as { binding?: { bench_key?: unknown } }).binding?.bench_key;
+    const value: unknown = JSON.parse(attempt.row.prepared);
+    const binding: unknown = typeof value === "object" && value !== null ? Reflect.get(value, "binding") : undefined;
+    const key: unknown = typeof binding === "object" && binding !== null ? Reflect.get(binding, "bench_key") : undefined;
     return typeof key === "string" && /^cp_[a-f0-9]{64}$/.test(key) ? key : undefined;
   } catch (error) {
     noteCheckpoint("lease-held", "retained.prepared", { attemptId: attempt.row.attemptId }, error);
@@ -145,10 +148,28 @@ export interface CheckpointDriveDeps {
   /** End an attempt whose run the board ended (`retired`, with the board's answer and the node's reply). */
   retire: typeof retireCheckpointAttempt;
   now(): number;
+  /** The station's capacity backoff (checkpoint-capacity-backoff.ts). Without one, capacity releases are not counted. */
+  capacity?: CapacityBackoff;
 }
 const defaultDeps: CheckpointDriveDeps = { authority: current, request: nodeRequest, service: createCheckpointServiceClient,
   advance: advanceCheckpointAttempt, fail: failCheckpointAttempt, close: closeFailedCheckpointAttempt,
   retire: retireCheckpointAttempt, now: Date.now };
+/** The real effects, with a station's own pieces (its capacity backoff) added. */
+export function checkpointDriveDeps(overrides: Partial<CheckpointDriveDeps> = {}): CheckpointDriveDeps {
+  return { ...defaultDeps, ...overrides };
+}
+
+/**
+ * The cap on capacity releases: the card's `CAPACITY_RELEASE_CAP`-th capacity refusal in a row is failed
+ * instead of released, so the board's retry policy decides rather than the station re-claiming it.
+ */
+function capped(ruling: CheckpointRefusalRuling | undefined, attempt: RetainedCheckpointAttempt,
+  deps: CheckpointDriveDeps): CheckpointRefusalRuling | undefined {
+  if (ruling?.code !== "capacity_exhausted" || ruling.disposition !== "released" || !deps.capacity?.capped(capacityCard(attempt.claim)))
+    return ruling;
+  return { code: ruling.code, disposition: "failed", reason: `Checkpoint failed: SuperBench capacity was exhausted on ${CAPACITY_RELEASE_CAP} ` +
+    "attempts in a row for this card, so it is failed rather than released again; the board's retry policy decides. Nothing ran." };
+}
 
 async function exchange(attempt: RetainedCheckpointAttempt, raw: string, deps: CheckpointDriveDeps): Promise<BenchCoordinatorResponse> {
   const sent = BenchCoordinatorRequest.parse(parseCheckpointJSON(encode(raw)));
@@ -318,7 +339,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           }
           sendPrepare = false;
           if (response.state !== "prepared") {
-            const ruling = classifyCheckpointRefusal(attempt.row.phase, response);
+            const ruling = capped(classifyCheckpointRefusal(attempt.row.phase, response), attempt, deps);
             if (!ruling) return parkedReply(attempt, response);
             attempt = (await deps.fail(attempt, { ...ruling, evidence: JSON.stringify(response) })).attempt; break;
           }
@@ -366,7 +387,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           if (response.state !== "completed") {
             // A worker crash ends here: the node journaled the run refused and released its lease, so
             // no later status can ever complete it. Held first, then the board is told (failure_pending).
-            const ruling = classifyCheckpointRefusal(attempt.row.phase, response);
+            const ruling = capped(classifyCheckpointRefusal(attempt.row.phase, response), attempt, deps);
             if (!ruling) return parkedReply(attempt, response);
             attempt = (await deps.fail(attempt, { ...ruling, evidence: JSON.stringify(response) })).attempt; break;
           }
@@ -453,6 +474,9 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
             outcome = "lease_ended";
           }
           attempt = (await deps.close(attempt, outcome)).attempt;
+          // A capacity refusal holds the station's checkpoint claims for a while; anything else forgets the card.
+          if (failure.code === "capacity_exhausted") deps.capacity?.refused(capacityCard(attempt.claim), failure.disposition === "failed");
+          else deps.capacity?.clear(capacityCard(attempt.claim));
           break;
         }
         case "failed": {
@@ -463,6 +487,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
         case "reported": {
           if (!attempt.row.settlementReceipt || !attempt.row.settlementBody) throw new CheckpointRefused("source", "retained.receipt");
           checkedCheckpointReceipt(encode(attempt.row.settlementReceipt), attempt.row.settlementBody, attempt.profile.reporterPrincipalId);
+          deps.capacity?.clear(capacityCard(attempt.claim));
           return { status: "reported", externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId };
         }
         default: throw new CheckpointRefused("source", "retained.phase");

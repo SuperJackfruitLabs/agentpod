@@ -174,7 +174,8 @@ table does not name parks.
   with that `failure_reason`, posts `card.failed` and applies its own retry
   policy. A checkpoint stage refuses `complete`, never `fail`.
 - **Released** hands the card back without penalty, `POST …/runs/:run/release`:
-  the card is claimable again.
+  the card is claimable again. After a `capacity_exhausted` release the station
+  waits before its next checkpoint claim (below, "After a capacity refusal").
 - **Parked** stays on its phase, logged and shown on the card with reason
   `node.state:refused.<code>`, and is read again on the next backoff. A reply
   that is not a refusal and not the phase's success parks naming its state:
@@ -227,6 +228,29 @@ parked as `superseded.effect_possible` for an operator. A prepare whose
 SuperBench reply did not parse answers `verification_failed` without journaling
 the record terminal, so the node may keep that record's lease until a newer
 attempt on the same card retires it.
+
+### After a capacity refusal
+
+A capacity release made the card claimable at once, and the next claim cycle
+took it straight back: on staging one card reached 24 attempts in minutes, each
+refused for the same capacity. The wait lives in the Hub
+(`checkpoint-capacity-backoff.ts`) because SuperPipeline offers no per-claim
+hint: its release takes no "not before" and its claim cannot exclude a card.
+So the Hub cannot skip one card in a claim. It holds the station's checkpoint
+claims instead, which fits the cause: SuperBench capacity belongs to the bench
+host, so the next card on that host would be refused too. Ordinary claims go on,
+and the claim cycle names the wait as `capacity.backoff`.
+
+- The n-th capacity release in a row of a card holds the station for
+  1 minute × 2^(n−1), at most 15 minutes.
+- The 6th capacity refusal in a row of the same card is failed, not released:
+  "SuperBench capacity was exhausted on 6 attempts in a row for this card". The
+  board's retry policy and circuit breaker then decide, and a person sees it.
+  The card's count starts again; the station still waits.
+- Any other ending of the card's attempt (a pass, another failure) forgets it.
+
+Known limit: the counts are process memory, so a Hub restart forgets them and a
+card can take up to six more releases.
 
 ## When a completed run cannot be reported
 
