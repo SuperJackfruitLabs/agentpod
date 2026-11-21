@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"reflect"
 	"regexp"
+	"unicode"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$`)
@@ -187,6 +189,12 @@ func ParseResponse(raw []byte, request Request) (Response, error) {
 		return Response{}, ErrInvalid
 	}
 	names := []string{"version", "operation", "state"}
+	if r.Detail != nil {
+		if r.State != "refused" && r.State != "pending" || !validDetail(*r.Detail) {
+			return Response{}, ErrInvalid
+		}
+		names = append(names, "detail")
+	}
 	if r.State == "refused" {
 		if !one(r.Code, "invalid", "unsupported", "unavailable", "unauthorized", "stale_owner", "conflict", "pending", "verification_failed", "capacity_exhausted") || !fields(raw, append(names, "code")...) {
 			return Response{}, ErrInvalid
@@ -240,4 +248,24 @@ func ParseResponse(raw []byte, request Request) (Response, error) {
 		}
 	}
 	return r, nil
+}
+
+// validDetail admits a non-empty detail: lease, when present, is "held", and
+// message, when present, at most 256 UTF-8 bytes of printable text.
+func validDetail(d Detail) bool {
+	if d.Message == "" && d.Lease == "" || d.Lease != "" && d.Lease != "held" {
+		return false
+	}
+	if d.Message == "" {
+		return true
+	}
+	if len(d.Message) > 256 || !utf8.ValidString(d.Message) {
+		return false
+	}
+	for _, r := range d.Message {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }

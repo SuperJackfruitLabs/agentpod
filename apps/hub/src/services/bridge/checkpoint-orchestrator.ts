@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { createLogger } from "../../utils/logger";
 import { BENCH_COORDINATOR_VERB, BenchCoordinatorRequest, parseBenchCoordinatorResponse,
-  type BenchCoordinatorResponse } from "@agentpod/contract";
+  BenchCoordinatorResponse } from "@agentpod/contract";
 import { request as nodeRequest } from "../broker";
 import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON, parseCheckpointContextJSON } from "./checkpoint-json";
 import { advanceCheckpointAttempt, closeFailedCheckpointAttempt, failCheckpointAttempt, retireCheckpointAttempt,
@@ -18,7 +18,7 @@ import { CheckpointRefused, type CheckpointRefusalReason } from "./checkpoint-pr
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { parseSourceReceipt, requireActiveSource } from "./checkpoint-source";
 import { buildCheckpointSettlement } from "./checkpoint-report";
-import { classifyCheckpointRefusal, classifySettlementRefusal } from "./checkpoint-refusal";
+import { benchMessage, classifyCheckpointRefusal, classifySettlementRefusal, type CheckpointRefusalRuling } from "./checkpoint-refusal";
 import { checkedCheckpointReceipt } from "./checkpoint-settlement-data";
 import { isLeaseSuperseded, type SuperpipelineClient } from "./superpipeline";
 import type { DispatchResult } from "./dispatch-types";
@@ -26,6 +26,7 @@ import { createQuietLog, type QuietLog } from "./quiet-log";
 import { errorFacts, nodeCallReason, noteCheckpoint } from "./checkpoint-log";
 import { nodeCallTimeoutMs } from "./checkpoint-node-call";
 import { checkpointActivity, postCheckpointActivity } from "./checkpoint-activity";
+import { capacityCard, CAPACITY_RELEASE_CAP, type CapacityBackoff } from "./checkpoint-capacity-backoff";
 
 const encode = (raw: string) => new TextEncoder().encode(raw);
 const hash = (raw: string) => createHash("sha256").update(raw, "utf8").digest("hex");
@@ -42,7 +43,36 @@ export function setParkedLogForTests(next: QuietLog): () => void {
   return () => { parkedLog = prior; };
 }
 /** Why each parked result parked, and the attempt as it parked, so the drive can say it on the card once. */
-const parkFacts = new WeakMap<DispatchResult, { phase: string; code: string; reason?: string; attempt: RetainedCheckpointAttempt }>();
+const parkFacts = new WeakMap<DispatchResult, { phase: string; code: string; reason?: string; attempt: RetainedCheckpointAttempt;
+  held?: BenchCoordinatorResponse }>();
+
+/** The node says the attempt's own lease is still held because SuperBench refused its release. */
+const leaseHeld = (response: BenchCoordinatorResponse | undefined): boolean =>
+  !!response && "detail" in response && response.detail?.lease === "held";
+
+/** The bench's key from the attempt's retained prepare, when it has one. Only for naming it to an operator. */
+function retainedBenchKey(attempt: RetainedCheckpointAttempt): string | undefined {
+  if (!attempt.row.prepared) return undefined;
+  try {
+    const value: unknown = JSON.parse(attempt.row.prepared);
+    const binding: unknown = typeof value === "object" && value !== null ? Reflect.get(value, "binding") : undefined;
+    const key: unknown = typeof binding === "object" && binding !== null ? Reflect.get(binding, "bench_key") : undefined;
+    return typeof key === "string" && /^cp_[a-f0-9]{64}$/.test(key) ? key : undefined;
+  } catch (error) {
+    noteCheckpoint("lease-held", "retained.prepared", { attemptId: attempt.row.attemptId }, error);
+    return undefined;
+  }
+}
+
+/** Say on the card, once per attempt, that its bench lease is held and what an operator must do. */
+async function sayLeaseHeld(client: SuperpipelineClient, attempt: RetainedCheckpointAttempt, response: BenchCoordinatorResponse,
+  phase: string): Promise<void> {
+  const benchKey = retainedBenchKey(attempt);
+  log.warn("checkpoint bench lease held after a refused release; operator action needed", { tenantId: attempt.row.tenantId,
+    boardId: attempt.row.boardId, runId: attempt.claim.runId, attemptId: attempt.row.attemptId, phase, benchKey });
+  await postCheckpointActivity(client, attempt, "lease_held", checkpointActivity("lease_held",
+    { phase, benchKey, message: benchMessage(response) }));
+}
 // Every park passes the error that names it: there is no default, so a call site cannot park unnamed.
 const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["code"], error: unknown): DispatchResult => {
   // The error that parked it, by class and redacted message (a refusal's own cause when it replaced one).
@@ -68,8 +98,12 @@ const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["cod
  * `execute_pending`/`uncertain` with no reason, which is how a killed run sat unexplained.
  */
 function parkedReply(attempt: RetainedCheckpointAttempt, response: BenchCoordinatorResponse): DispatchResult {
-  const why = response.state === "refused" && "code" in response ? `refused.${response.code}` : response.state;
-  return parked(attempt, "uncertain", new CheckpointRefused("uncertain", `node.state:${why}`));
+  const why = (response.state === "refused" && "code" in response ? `refused.${response.code}` : response.state) +
+    (leaseHeld(response) ? ".lease_held" : "");
+  const result = parked(attempt, "uncertain", new CheckpointRefused("uncertain", `node.state:${why}`));
+  const facts = parkFacts.get(result);
+  if (facts && leaseHeld(response)) facts.held = response;
+  return result;
 }
 
 /** The failure a `failure_pending` or `failed` row holds. */
@@ -81,6 +115,18 @@ function heldFailure(attempt: RetainedCheckpointAttempt): CheckpointFailure {
   const parsed = heldFailureSchema.safeParse(parseCheckpointJSON(encode(attempt.row.failure)));
   if (!parsed.success) throw new CheckpointRefused("source", "retained.failure");
   return parsed.data;
+}
+
+/** The node reply a held failure was ruled on, when its evidence is one. */
+function heldEvidence(failure: CheckpointFailure): BenchCoordinatorResponse | undefined {
+  try {
+    const value: unknown = JSON.parse(failure.evidence);
+    const parsed = BenchCoordinatorResponse.safeParse(value);
+    return parsed.success ? parsed.data : undefined;
+  } catch (error) {
+    noteCheckpoint("lease-held", "failure.evidence", {}, error);
+    return undefined;
+  }
 }
 
 async function current(attempt: RetainedCheckpointAttempt): Promise<void> {
@@ -102,10 +148,28 @@ export interface CheckpointDriveDeps {
   /** End an attempt whose run the board ended (`retired`, with the board's answer and the node's reply). */
   retire: typeof retireCheckpointAttempt;
   now(): number;
+  /** The station's capacity backoff (checkpoint-capacity-backoff.ts). Without one, capacity releases are not counted. */
+  capacity?: CapacityBackoff;
 }
 const defaultDeps: CheckpointDriveDeps = { authority: current, request: nodeRequest, service: createCheckpointServiceClient,
   advance: advanceCheckpointAttempt, fail: failCheckpointAttempt, close: closeFailedCheckpointAttempt,
   retire: retireCheckpointAttempt, now: Date.now };
+/** The real effects, with a station's own pieces (its capacity backoff) added. */
+export function checkpointDriveDeps(overrides: Partial<CheckpointDriveDeps> = {}): CheckpointDriveDeps {
+  return { ...defaultDeps, ...overrides };
+}
+
+/**
+ * The cap on capacity releases: the card's `CAPACITY_RELEASE_CAP`-th capacity refusal in a row is failed
+ * instead of released, so the board's retry policy decides rather than the station re-claiming it.
+ */
+function capped(ruling: CheckpointRefusalRuling | undefined, attempt: RetainedCheckpointAttempt,
+  deps: CheckpointDriveDeps): CheckpointRefusalRuling | undefined {
+  if (ruling?.code !== "capacity_exhausted" || ruling.disposition !== "released" || !deps.capacity?.capped(capacityCard(attempt.claim)))
+    return ruling;
+  return { code: ruling.code, disposition: "failed", reason: `Checkpoint failed: SuperBench capacity was exhausted on ${CAPACITY_RELEASE_CAP} ` +
+    "attempts in a row for this card, so it is failed rather than released again; the board's retry policy decides. Nothing ran." };
+}
 
 async function exchange(attempt: RetainedCheckpointAttempt, raw: string, deps: CheckpointDriveDeps): Promise<BenchCoordinatorResponse> {
   const sent = BenchCoordinatorRequest.parse(parseCheckpointJSON(encode(raw)));
@@ -145,6 +209,7 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
   // board ended returned above: it is never written to, since an activity on an unbound run heartbeats it.
   if (facts) await postCheckpointActivity(client, initial, `parked:${facts.phase}:${facts.code}:${facts.reason ?? ""}`,
     checkpointActivity("parked", facts));
+  if (facts?.held) await sayLeaseHeld(client, facts.attempt, facts.held, facts.phase);
   return result;
 }
 
@@ -230,7 +295,10 @@ export async function endEndedRun(initial: RetainedCheckpointAttempt, ended: Run
     else if (deps.now() >= attempt.row.updatedAt.getTime() + attempt.request.task.timeout_seconds * 1000 + RUN_ENDED_GRACE_MS)
       reason = "run_ended.unconfirmed";
     else {
-      const why = node.reply ? `${node.reply.state}${"code" in node.reply ? "." + node.reply.code : ""}` : undefined;
+      const why = node.reply ? `${node.reply.state}${"code" in node.reply ? "." + node.reply.code : ""}${leaseHeld(node.reply) ? ".lease_held" : ""}` : undefined;
+      // The card is not written to (an activity would heartbeat the unbound run), so the log names the operator's path.
+      if (leaseHeld(node.reply)) log.warn("checkpoint run ended on the board, but its bench lease is held after a refused release; operator action needed",
+        { ...meta, benchKey: retainedBenchKey(attempt) });
       return parked(attempt, "uncertain", new CheckpointRefused("uncertain", why ? `run_ended.node:${why}` : "run_ended.node_unreachable"));
     }
     const evidence = JSON.stringify({ board: ended, node: node.reply ?? { error: node.error } });
@@ -271,7 +339,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           }
           sendPrepare = false;
           if (response.state !== "prepared") {
-            const ruling = classifyCheckpointRefusal(attempt.row.phase, response);
+            const ruling = capped(classifyCheckpointRefusal(attempt.row.phase, response), attempt, deps);
             if (!ruling) return parkedReply(attempt, response);
             attempt = (await deps.fail(attempt, { ...ruling, evidence: JSON.stringify(response) })).attempt; break;
           }
@@ -319,7 +387,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           if (response.state !== "completed") {
             // A worker crash ends here: the node journaled the run refused and released its lease, so
             // no later status can ever complete it. Held first, then the board is told (failure_pending).
-            const ruling = classifyCheckpointRefusal(attempt.row.phase, response);
+            const ruling = capped(classifyCheckpointRefusal(attempt.row.phase, response), attempt, deps);
             if (!ruling) return parkedReply(attempt, response);
             attempt = (await deps.fail(attempt, { ...ruling, evidence: JSON.stringify(response) })).attempt; break;
           }
@@ -393,6 +461,9 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           if (ended) return endEndedRun(attempt, ended, deps);
           await postCheckpointActivity(client, attempt, failure.disposition,
             checkpointActivity(failure.disposition, { phase: failure.phase, code: failure.code, reason: failure.reason }));
+          // The node ended its record but could not release the bench: say what an operator must do, while the lease is ours.
+          const evidence = heldEvidence(failure);
+          if (evidence && leaseHeld(evidence)) await sayLeaseHeld(client, attempt, evidence, failure.phase);
           let outcome: "fail" | "release" | "lease_ended";
           try {
             if (failure.disposition === "failed") await client.fail(attempt.claim, failure.reason);
@@ -403,6 +474,9 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
             outcome = "lease_ended";
           }
           attempt = (await deps.close(attempt, outcome)).attempt;
+          // A capacity refusal holds the station's checkpoint claims for a while; anything else forgets the card.
+          if (failure.code === "capacity_exhausted") deps.capacity?.refused(capacityCard(attempt.claim), failure.disposition === "failed");
+          else deps.capacity?.clear(capacityCard(attempt.claim));
           break;
         }
         case "failed": {
@@ -413,6 +487,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
         case "reported": {
           if (!attempt.row.settlementReceipt || !attempt.row.settlementBody) throw new CheckpointRefused("source", "retained.receipt");
           checkedCheckpointReceipt(encode(attempt.row.settlementReceipt), attempt.row.settlementBody, attempt.profile.reporterPrincipalId);
+          deps.capacity?.clear(capacityCard(attempt.claim));
           return { status: "reported", externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId };
         }
         default: throw new CheckpointRefused("source", "retained.phase");

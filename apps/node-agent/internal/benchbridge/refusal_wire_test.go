@@ -35,12 +35,20 @@ func TestTerminalRefusalReachesTheWireAsTheRecordedReply(t *testing.T) {
 			t.Fatal(c.Name, err)
 		}
 		var want struct {
-			Code string `json:"code"`
+			Code   string `json:"code"`
+			Detail *struct {
+				Message string `json:"message"`
+				Lease   string `json:"lease"`
+			} `json:"detail"`
 		}
 		if err = json.Unmarshal(c.Value, &want); err != nil || want.Code == "" {
 			t.Fatal(c.Name, "has no code", err)
 		}
-		response, err := failed(request, &benchlaunch.Refusal{Code: want.Code})
+		refusal := &benchlaunch.Refusal{Code: want.Code}
+		if want.Detail != nil {
+			refusal.Message, refusal.LeaseHeld = want.Detail.Message, want.Detail.Lease == "held"
+		}
+		response, err := failed(request, refusal)
 		got, _ := json.Marshal(transportOutcome(request, response, err))
 		if _, err = benchcoordinatorwire.ParseResponse(got, request); err != nil {
 			t.Fatal(c.Name, "left the bridge as an invalid wire response", err)

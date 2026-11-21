@@ -51,7 +51,7 @@ func (c Coordinator) Execute(ctx context.Context, spec benchdispatch.SourceSpec,
 		return *r.Completion, nil
 	case r.Phase == phaseRefused:
 		_ = c.cleanup(ctx, spec)
-		return benchcoordinator.Completion{}, refuse(r.Code)
+		return benchcoordinator.Completion{}, c.refusal(ctx, spec, r)
 	case r.Binding == nil:
 		return benchcoordinator.Completion{}, benchdispatch.ErrPending
 	case !active || r.Cancelled:
@@ -83,7 +83,7 @@ func (c Coordinator) advance(ctx context.Context, spec benchdispatch.SourceSpec)
 	}
 	if r.Phase == phaseRefused {
 		_ = c.cleanup(ctx, spec)
-		return zero, refuse(r.Code)
+		return zero, c.refusal(ctx, spec, r)
 	}
 	if s := r.step("run"); s == nil || !s.Sent {
 		return zero, benchdispatch.ErrPending
@@ -93,6 +93,9 @@ func (c Coordinator) advance(ctx context.Context, spec benchdispatch.SourceSpec)
 		return zero, err
 	}
 	status, body, err := c.send(ctx, spec, k)
+	if errors.Is(err, errCancelBarrier) {
+		return zero, c.cancelledRun(ctx, spec, r)
+	}
 	if err != nil {
 		return zero, err
 	}
@@ -104,13 +107,13 @@ func (c Coordinator) advance(ctx context.Context, spec benchdispatch.SourceSpec)
 	held := outcome == nil || retains(spec, &outcome.Mutation)
 	if !reply.OK && outcome == nil {
 		code := refusalFor(reply.Error.Code)
-		return zero, c.terminate(ctx, spec, code, code != "stale_owner")
+		return zero, c.refused(ctx, spec, reply.Error, code, code != "stale_owner")
 	}
 	if r.Cancelled {
 		return zero, c.terminate(ctx, spec, "stale_owner", held)
 	}
 	if !reply.OK {
-		return zero, c.terminate(ctx, spec, "verification_failed", held) // worker crash
+		return zero, c.refused(ctx, spec, reply.Error, "verification_failed", held) // worker crash, or a refused checkpoint
 	}
 	b := *r.Binding
 	w := outcome.Workspace
@@ -163,6 +166,50 @@ func (c Coordinator) advance(ctx context.Context, spec benchdispatch.SourceSpec)
 		return zero, refuse("stale_owner") // cancelled while the result was being checked
 	}
 	return completion, nil
+}
+
+// cancelledRun ends a record whose run lost its finalization race to a
+// cancellation barrier. SuperBench stores no reply for such a run, so its
+// receipt lookup answers cancel_requested for ever and no completion can ever
+// come; waiting for one held the stopped lease, and the Hub's attempt, for
+// ever. Treaty ("Cancellation does not release"; "A completed stored failure
+// is final") leaves the lease with its holder, so the holder winds it down:
+//
+//   - The bench must show this record's own lease fenced (stop_requested, its
+//     execution stopped), or no longer this holder's. Until it does the run may
+//     still be winding down: parked, and nothing is released or stopped.
+//   - The record ends refused, never completed: the result is never published.
+//     A record the hub vetoed ends stale_owner (the hub's proof it retired
+//     itself); one cancelled by anyone else ends verification_failed, since its
+//     run did not finish.
+//   - The stopped lease is released with this record's own token. No stop is
+//     sent (the execution is already stopped) and nothing is checkpointed to
+//     make the release succeed. A refused release keeps it held and retried.
+func (c Coordinator) cancelledRun(ctx context.Context, spec benchdispatch.SourceSpec, r record) error {
+	w := c.bench(ctx, spec)
+	if w == nil {
+		return errCancelBarrier
+	}
+	gone := w.Lease == nil || w.Lease.Holder != spec.Holder || r.BenchID != "" && w.BenchID != r.BenchID
+	stopped := !gone && w.Lease.StopRequested && w.Lease.Execution != nil && w.Lease.Execution.Phase == "stopped"
+	if !gone && !stopped {
+		return errCancelBarrier
+	}
+	code := "verification_failed"
+	if r.Cancelled {
+		code = "stale_owner"
+	}
+	log.Printf("bench %s: run %s was cancelled before its receipt was stored; ending the attempt %s and releasing its stopped lease", spec.BenchKey, spec.RunRequestID, code)
+	return c.terminate(ctx, spec, code, !gone)
+}
+
+// refusal is the record's terminal refusal as the journal now holds it (a
+// cleanup may have just recorded a refused release), or fallback's.
+func (c Coordinator) refusal(ctx context.Context, spec benchdispatch.SourceSpec, fallback record) error {
+	if r, _, err := c.Journal.read(ctx, spec); err == nil && r.Phase == phaseRefused {
+		return refusalOf(r)
+	}
+	return refusalOf(fallback)
 }
 
 // readback independently re-reads the producer's retained receipt for the run.
@@ -231,6 +278,11 @@ func (c Coordinator) cleanup(ctx context.Context, spec benchdispatch.SourceSpec)
 	if err == nil && reply.OK || c.leaseGone(ctx, spec, id) {
 		return done()
 	}
+	if err == nil {
+		if message := producerMessage(reply.Error); message != "" {
+			_ = c.mark(ctx, spec, func(r *record) bool { r.ReleaseRefusal = message; return true })
+		}
+	}
 	// A refused or malformed reply while we still hold the lease. Release is
 	// token-scoped and repeatable, so drop the saved reply and send it again
 	// next time; never replay a bad answer forever.
@@ -244,11 +296,18 @@ func (c Coordinator) cleanup(ctx context.Context, spec benchdispatch.SourceSpec)
 const releaseWarnAfter = 3
 
 func (c Coordinator) releaseFailed(ctx context.Context, spec benchdispatch.SourceSpec) {
-	failures := 0
-	_ = c.mark(ctx, spec, func(r *record) bool { r.ReleaseFailures++; failures = r.ReleaseFailures; return true })
-	if failures >= releaseWarnAfter {
-		log.Printf("bench %s: release refused %d times while the lease is still held; retrying, operator attention needed", spec.BenchKey, failures)
-	}
+	failures, message := 0, ""
+	_ = c.mark(ctx, spec, func(r *record) bool {
+		r.ReleaseFailures++
+		failures, message = r.ReleaseFailures, r.ReleaseRefusal
+		return true
+	})
+	// Said on every refusal: once the hub has ended the attempt, nothing but
+	// the card's next attempt retries this release, so an earlier silence
+	// left a held lease with no trace. The refusal (a dirty tree, for one)
+	// does not clear itself; docs/BENCH_REGISTERED_LAUNCH.md, "A refused
+	// release", names the supported operator path.
+	log.Printf("bench %s: release refused (%d) while the lease is still held: %q; operator attention needed: bench workspace stop_admin, then a root bench workspace run with the returned token that fixes the tree and checkpoints, then release", spec.BenchKey, failures, message)
 }
 
 // releaseStuck reports a record whose release keeps failing, so Status can
@@ -329,6 +388,9 @@ func (c Coordinator) Status(ctx context.Context, spec benchdispatch.SourceSpec) 
 		if _, ok := RefusalCode(err); ok || !r.Cancelled {
 			return benchcoordinator.Status{}, err
 		}
+		if after, _, e := c.Journal.read(ctx, spec); e == nil && leaseHeld(after) {
+			return benchcoordinator.Status{State: "release_refused", RequiresReconciliation: true, LeaseHeld: true, Message: after.ReleaseRefusal}, nil
+		}
 		return benchcoordinator.Status{State: "cancel_requested", RequiresReconciliation: true}, nil
 	}
 	if r.Binding != nil && !r.Cancelled {
@@ -378,11 +440,14 @@ func (c Coordinator) Cancel(ctx context.Context, spec benchdispatch.SourceSpec) 
 func (c Coordinator) retired(ctx context.Context, spec benchdispatch.SourceSpec) (benchcoordinator.Status, error) {
 	err := c.retire(ctx, spec)
 	if errors.Is(err, benchdispatch.ErrPending) {
-		state := "cancel_requested"
-		if r, _, e := c.Journal.read(ctx, spec); e == nil && releaseStuck(r) {
-			state = "release_refused" // the lease is still held and its release keeps failing
+		status := benchcoordinator.Status{State: "cancel_requested", RequiresReconciliation: true}
+		if r, _, e := c.Journal.read(ctx, spec); e == nil && leaseHeld(r) {
+			status.LeaseHeld, status.Message = true, r.ReleaseRefusal
+			if releaseStuck(r) {
+				status.State = "release_refused" // the lease is still held and its release keeps failing
+			}
 		}
-		return benchcoordinator.Status{State: state, RequiresReconciliation: true}, nil
+		return status, nil
 	}
 	if errors.Is(err, errAbsent) {
 		return benchcoordinator.Status{}, refuse("stale_owner")
@@ -423,7 +488,7 @@ func (c Coordinator) retire(ctx context.Context, spec benchdispatch.SourceSpec) 
 		if r.Phase == phaseCompleted {
 			return refuse("stale_owner")
 		}
-		return refuse(r.Code)
+		return refusalOf(r)
 	}
 	if r.Phase == phaseCompleted || r.Phase == phaseRefused {
 		if e := c.cleanup(ctx, spec); e != nil {
@@ -435,7 +500,7 @@ func (c Coordinator) retire(ctx context.Context, spec benchdispatch.SourceSpec) 
 		if r.Phase == phaseCompleted {
 			return refuse("stale_owner") // a completed result is not re-published to a stale caller
 		}
-		return refuse(r.Code)
+		return c.refusal(ctx, spec, r)
 	}
 	run := r.step("run")
 	if run == nil || !run.Sent {
@@ -456,8 +521,15 @@ func (c Coordinator) retire(ctx context.Context, spec benchdispatch.SourceSpec) 
 			return benchdispatch.ErrInvalid
 		}
 		raw, _ := json.Marshal(target)
+		sent := r.step("cancel") == nil || r.step("cancel").Response == nil
+		state := "unanswered"
 		if status, body, err := c.send(ctx, spec, call{name: "cancel", path: benchworkspace.PathOperations, cleanup: true, request: raw}); err == nil {
-			_, _ = benchworkspace.ParseCancelResponse(body, status, target) // intent only, never a fence
+			if reply, e := benchworkspace.ParseCancelResponse(body, status, target); e == nil && reply.OK && reply.Result != nil {
+				state = reply.Result.State // intent only, never a fence
+			}
+		}
+		if sent {
+			log.Printf("bench %s: hub retired run %s; cancel requested (%s), waiting for the run to stop", spec.BenchKey, spec.RunRequestID, state)
 		}
 	}
 	_, err = c.advance(ctx, spec)
@@ -494,8 +566,14 @@ func (c Coordinator) supersede(ctx context.Context, spec benchdispatch.SourceSpe
 	err = c.retire(ctx, *old)
 	// Only a terminal record frees the bench: while the older one still holds
 	// its lease (or its run is unresolved) the newer attempt waits, retryable.
-	if r, _, e := c.Journal.read(ctx, *old); e == nil && r.terminal() {
+	r, _, e := c.Journal.read(ctx, *old)
+	if e == nil && r.terminal() {
 		return nil
+	}
+	if e == nil && leaseHeld(r) {
+		// The older record's release is refused: the newer attempt waits on
+		// an operator, and says so.
+		return &HeldLease{Message: r.ReleaseRefusal}
 	}
 	if err == nil || isRefusalErr(err) {
 		return benchdispatch.ErrPending

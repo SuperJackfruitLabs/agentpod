@@ -5,11 +5,12 @@ import { request as nodeRequest } from "../broker";
 import { canonicalCheckpoint } from "./checkpoint-json";
 import { readCheckpointAuthority } from "./checkpoint-current";
 import { installedCheckpointProfiles, requireInstalledCheckpointProfile } from "./checkpoint-profiles";
-import { checkpointProfileId, CheckpointRefused, requireCheckpointProfileClaim, type CheckpointProfile,
+import { checkpointTask, CheckpointRefused, requireCheckpointProfileClaim, type CheckpointProfile,
   type CheckpointRefusalReason } from "./checkpoint-profile";
 import { checkpointAgentClient } from "./checkpoint-agent-client";
 import { pendingCheckpointAttempt, reserveCheckpointAttempt } from "./checkpoint-ledger";
-import { driveCheckpointAttempt, endEndedRun, RUN_ENDABLE_PHASES } from "./checkpoint-orchestrator";
+import { checkpointDriveDeps, driveCheckpointAttempt, endEndedRun, RUN_ENDABLE_PHASES } from "./checkpoint-orchestrator";
+import { capacityHold, createCapacityBackoff } from "./checkpoint-capacity-backoff";
 import { readRunEnded } from "./checkpoint-run-ended";
 import { resolveSupersededAttempt } from "./checkpoint-supersede";
 import { createAttemptBackoff } from "./checkpoint-recover-backoff";
@@ -71,6 +72,9 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
   const profile: CheckpointProfile = found;
   const selected = target(profile);
   const backoff = createAttemptBackoff();
+  /** After a capacity refusal this station's checkpoint claims wait, growing per card and bounded. */
+  const capacity = createCapacityBackoff();
+  const deps = checkpointDriveDeps({ capacity });
   async function refusal(value: CheckpointTarget): Promise<CheckpointRefusalReason | undefined> {
     try {
       if (canonicalCheckpoint(value) !== canonicalCheckpoint(selected)) return "selection.target";
@@ -121,7 +125,12 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
     recover: async () => {
       await requireCurrent(selected);
       const pending = await pendingCheckpointAttempt(profile);
-      if (!pending) { backoff.clear(); return undefined; }
+      if (!pending) {
+        backoff.clear();
+        // A card SuperBench just refused for capacity would be claimed straight back (the board offers it
+        // again at once): the station's checkpoint claims wait out its backoff instead. Ordinary claims go on.
+        return capacityHold(capacity);
+      }
       const { attempt } = pending;
       const key = `${attempt.row.attemptId}:${attempt.row.phase}`;
       if (!backoff.due(key)) return held(attempt.row.attemptId, attempt.claim.runId);
@@ -138,7 +147,7 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
       if (client && (RUN_ENDABLE_PHASES.has(attempt.row.phase) || attempt.row.phase === "failure_pending")) {
         const ended = await readRunEnded(client, attempt.claim);
         if (ended) {
-          const result = await endEndedRun(attempt, ended);
+          const result = await endEndedRun(attempt, ended, deps);
           if (result.status === "unreported") { backoff.parked(key); return result; }
           backoff.clear();
           return undefined;
@@ -162,7 +171,7 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
         backoff.parked(key);
         return held(attempt.row.attemptId, attempt.claim.runId);
       }
-      const result = await driveCheckpointAttempt(attempt, client ?? await checkpointAgentClient(profile));
+      const result = await driveCheckpointAttempt(attempt, client ?? await checkpointAgentClient(profile), false, deps);
       if (result.status === "unreported") backoff.parked(key); else backoff.clear();
       return result;
     },
@@ -178,9 +187,8 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
         ...(context.commentsOmitted === undefined ? {} : { commentsOmitted: context.commentsOmitted }),
         run: null, libraryTools: false }));
       await requireCurrent(chosen);
-      const reserved = await reserveCheckpointAttempt(profile, claim, { profile_id: checkpointProfileId(profile),
-        prompt, timeout_seconds: 1800 });
-      return driveCheckpointAttempt(reserved.attempt, client, reserved.send);
+      const reserved = await reserveCheckpointAttempt(profile, claim, checkpointTask(profile, prompt));
+      return driveCheckpointAttempt(reserved.attempt, client, reserved.send, deps);
     },
   } };
 }

@@ -22,6 +22,7 @@
 import type { BenchCoordinatorCompletion, BenchCoordinatorResponse } from "@agentpod/contract";
 import type { CheckpointFailureDisposition } from "./checkpoint-ledger";
 import { CheckpointRefused, type CheckpointSettlementRefusal } from "./checkpoint-profile";
+import { redact } from "./checkpoint-log";
 
 type RefusalCode = Extract<BenchCoordinatorResponse, { state: "refused"; code: string }>["code"];
 type NodePhase = "prepare_pending" | "execute_pending";
@@ -72,6 +73,38 @@ function sentence(code: RefusalCode, phase: NodePhase): string {
   }
 }
 
+/** At most this much of the bench's own words reaches the card and the run's failure reason. */
+export const MAX_BENCH_MESSAGE = 200;
+
+/**
+ * SuperBench's refusal text as the node relayed it (`detail.message`), safe for the card: redacted
+ * (checkpoint-log.ts), paths removed, whitespace collapsed and bounded. Undefined when there is none.
+ * Exported for tests.
+ */
+export function benchMessage(response: BenchCoordinatorResponse): string | undefined {
+  const raw = "detail" in response ? response.detail?.message : undefined;
+  if (!raw) return undefined;
+  const text = redact(raw).replace(/(?:^|\s)\/[^\s"'`;,]+/g, " [path]").replace(/\s+/g, " ").trim();
+  if (!text) return undefined;
+  return text.length > MAX_BENCH_MESSAGE ? `${text.slice(0, MAX_BENCH_MESSAGE - 1)}…` : text;
+}
+
+/**
+ * The sentence when SuperBench said why: its own words replace the guess. A refused checkpoint or
+ * release over uncommitted files used to read "the worker crashed or was stopped … (for example by a
+ * SuperBench restart)", which sent the operator looking for a restart that never happened.
+ */
+function benchSentence(code: RefusalCode, phase: NodePhase, message: string): string | undefined {
+  switch (code) {
+    case "verification_failed": case "unsupported": return phase === "execute_pending"
+      ? `Checkpoint failed: SuperBench refused the bench step after the run (${code}): "${message}". Nothing was reported as a pass.`
+      : `Checkpoint failed: SuperBench refused while preparing the bench (${code}): "${message}". Nothing ran.`;
+    case "capacity_exhausted": return `Checkpoint released: SuperBench capacity is exhausted ("${message}"). Nothing ran; the card is free for a new claim.`;
+    case "conflict": return `Checkpoint released: another attempt holds the bench (conflict: "${message}"). Nothing ran; the card is free for a new claim.`;
+    default: return undefined;
+  }
+}
+
 /** The ruling for a node reply in a phase that asked the node, or undefined when it stays parked. */
 export function classifyCheckpointRefusal(phase: string, response: BenchCoordinatorResponse): CheckpointRefusalRuling | undefined {
   if (response.state !== "refused" || !("code" in response)) return undefined;
@@ -79,7 +112,9 @@ export function classifyCheckpointRefusal(phase: string, response: BenchCoordina
   const code = response.code;
   const disposition = CHECKPOINT_REFUSAL_RULINGS[code]?.[phase];
   if (disposition === undefined || disposition === "parked") return undefined;
-  return { code, disposition, reason: sentence(code, phase) };
+  const message = benchMessage(response);
+  const reason = (message === undefined ? undefined : benchSentence(code, phase, message)) ?? sentence(code, phase);
+  return { code, disposition, reason };
 }
 
 /**

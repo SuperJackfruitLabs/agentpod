@@ -9,6 +9,7 @@ import { recoverPermissionWaits } from "./dispatch-recover";
 import { selectCheckpointDispatch } from "./checkpoint-dispatch";
 import { checkpointRefusalCode, checkpointRefusalReason } from "./checkpoint-isolation";
 import { SuperpipelineApiError } from "./superpipeline";
+import { CAPACITY_HOLD_REASON } from "./checkpoint-capacity-backoff";
 import { BridgeCredentialRefused } from "./plane-credential";
 import { CheckpointRefused } from "./checkpoint-profile";
 import { errorFacts, noteCheckpoint } from "./checkpoint-log";
@@ -63,7 +64,10 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
       held = true;
     }
     if (resumed && resumed.status !== "unreported") return resumed;
-    if (resumed) { refuse(new CheckpointRefused("uncertain", "attempt.unresolved")); held = true; }
+    if (resumed) {
+      refuse(new CheckpointRefused("uncertain", resumed.reason === CAPACITY_HOLD_REASON ? "capacity.backoff" : "attempt.unresolved"));
+      held = true;
+    }
     if (!held) try {
       const work = await client.claim({ maxConcurrency: agent.maxConcurrency, profileKey: agent.profileKey,
         checkpointProtocol: dedicated.protocol, checkpointOnly: true });

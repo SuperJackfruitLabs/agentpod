@@ -127,6 +127,14 @@ run/epoch and policy around awaits; snapshot caching does not cache authority.
 These settings provision no credentials, policy or capability; no profile or
 environment setting is installed by this change.
 
+The bench task the Hub reserves names the profile's checkpoint repository as
+`repository_name`, so the node's worker starts the harness inside that member.
+Without it the harness started in the bench's workspace root, wrote files outside
+every repository and left the tree dirty, and SuperBench then refused checkpoint
+and release. A profile whose checkpoint repository is missing or is not one of
+its repositories is refused at load, so a single-repository profile names its
+only repository.
+
 ## What the card shows
 
 Each phase the Hub commits posts one short activity to the card's live stream,
@@ -166,7 +174,8 @@ table does not name parks.
   with that `failure_reason`, posts `card.failed` and applies its own retry
   policy. A checkpoint stage refuses `complete`, never `fail`.
 - **Released** hands the card back without penalty, `POST …/runs/:run/release`:
-  the card is claimable again.
+  the card is claimable again. After a `capacity_exhausted` release the station
+  waits before its next checkpoint claim (below, "After a capacity refusal").
 - **Parked** stays on its phase, logged and shown on the card with reason
   `node.state:refused.<code>`, and is read again on the next backoff. A reply
   that is not a refusal and not the phase's success parks naming its state:
@@ -176,6 +185,26 @@ table does not name parks.
 
 Neither ruling ever reports a pass: no settlement is built and `complete` is
 never sent.
+
+**The bench's own words.** When SuperBench refused the step that ended the
+record, the node's refusal carries its message as `detail.message` (at most 256
+UTF-8 bytes, no control characters). The Hub redacts it (`redact`, and absolute
+paths become `[path]`), bounds it to 200 characters and puts it in the sentence,
+which is both the `checkpoint.failed` activity and the run's `failure_reason`.
+For example: `Checkpoint failed: SuperBench refused the bench step after the run
+(verification_failed): "bench has uncommitted or untracked files; commit or
+preserve them before checkpoint/release". Nothing was reported as a pass.`
+Without a message the sentence is the table's.
+
+**A held lease.** When SuperBench refused the release too, the node's reply
+also carries `detail.lease: "held"`. Before the board is told, the card gets a
+second activity, `checkpoint.parked` with code `lease_held`, naming the bench and
+the operator's path (BENCH_REGISTERED_LAUNCH.md, "A refused release"). A parked
+reply that carries it parks as `node.state:<state>.lease_held` and says the same
+once. After the board ended the run it parks as
+`run_ended.node:<state>.lease_held` and is only logged. Seen on staging: a checkpoint
+refused over a dirty tree read "the worker crashed or was stopped … (for example
+by a SuperBench restart)", and no restart had happened.
 
 A ruled refusal is held before anything is said. The attempt moves by
 compare-and-set from the phase it was read in to `failure_pending`, with an
@@ -199,6 +228,29 @@ parked as `superseded.effect_possible` for an operator. A prepare whose
 SuperBench reply did not parse answers `verification_failed` without journaling
 the record terminal, so the node may keep that record's lease until a newer
 attempt on the same card retires it.
+
+### After a capacity refusal
+
+A capacity release made the card claimable at once, and the next claim cycle
+took it straight back: on staging one card reached 24 attempts in minutes, each
+refused for the same capacity. The wait lives in the Hub
+(`checkpoint-capacity-backoff.ts`) because SuperPipeline offers no per-claim
+hint: its release takes no "not before" and its claim cannot exclude a card.
+So the Hub cannot skip one card in a claim. It holds the station's checkpoint
+claims instead, which fits the cause: SuperBench capacity belongs to the bench
+host, so the next card on that host would be refused too. Ordinary claims go on,
+and the claim cycle names the wait as `capacity.backoff`.
+
+- The n-th capacity release in a row of a card holds the station for
+  1 minute × 2^(n−1), at most 15 minutes.
+- The 6th capacity refusal in a row of the same card is failed, not released:
+  "SuperBench capacity was exhausted on 6 attempts in a row for this card". The
+  board's retry policy and circuit breaker then decide, and a person sees it.
+  The card's count starts again; the station still waits.
+- Any other ending of the card's attempt (a pass, another failure) forgets it.
+
+Known limit: the counts are process memory, so a Hub restart forgets them and a
+card can take up to six more releases.
 
 ## When a completed run cannot be reported
 
@@ -324,6 +376,16 @@ being deleted. Each is `run.unbound` or `run.not_found` on the next read.
   cancel and releases the lease once the run's receipt is in. The attempt ends
   `run_ended.stopped`, or `run_ended.unconfirmed` past the timeout and grace.
   The run's result is never settled.
+- A cancel that wins the run's finalization race leaves no receipt at all:
+  SuperBench refuses to store the reply (benchd: `receipt_save_failed`,
+  "operation cancellation requested") and the run's lookup answers
+  `cancel_requested` for ever. Seen on staging: the node waited for that
+  receipt, answered `pending` on every pass (`run_ended.node:pending` for over
+  20 minutes) and kept the stopped lease. The node now ends its record once the
+  bench shows its own lease `stop_requested` with the execution `stopped`, and
+  releases that lease with its own token (BENCH_REGISTERED_LAUNCH.md, "Run
+  cancelled before its reply was stored"). Its next reply is `stale_owner`, so
+  the attempt ends `run_ended.stopped`.
 - After the node completed, before the settlement: `run_ended`; nothing is
   submitted.
 - With a settlement pending: if the board holds its receipt the attempt is

@@ -120,7 +120,7 @@ func (c Coordinator) Prepare(ctx context.Context, spec benchdispatch.SourceSpec,
 	if r, _, err := c.Journal.read(ctx, spec); err != nil {
 		return zero, err
 	} else if r.Phase == phaseRefused {
-		return zero, refuse(r.Code)
+		return zero, refusalOf(r)
 	} else if r.Binding != nil {
 		return prepared(r)
 	}
@@ -157,7 +157,7 @@ func (c Coordinator) Prepare(ctx context.Context, spec benchdispatch.SourceSpec,
 				// generation. The journaled refusal is replayed, never resent.
 				return zero, c.park(ctx, spec, parkRefused)
 			}
-			return zero, c.terminate(ctx, spec, refusalFor(reply.Error.Code), false)
+			return zero, c.refused(ctx, spec, reply.Error, refusalFor(reply.Error.Code), false)
 		}
 		m := mutationOf(reply)
 		if m == nil || m.Workspace.Phase != "ready" || !m.Workspace.ReadyForAcquisition || m.Workspace.Lease != nil || m.RootPath != filepath.Join(spec.DataRoot, "benches", spec.BenchKey) ||
@@ -182,7 +182,7 @@ func (c Coordinator) Prepare(ctx context.Context, spec benchdispatch.SourceSpec,
 		if reply.Error.Code == "conflict" {
 			code = "conflict" // another holder owns the bench
 		}
-		return zero, c.terminate(ctx, spec, code, false)
+		return zero, c.refused(ctx, spec, reply.Error, code, false)
 	}
 	lease := mutationOf(reply)
 	if !heldBy(spec, lease) || lease.Grant == nil || lease.RootPath != filepath.Join(spec.DataRoot, "benches", spec.BenchKey) {
@@ -207,7 +207,7 @@ func (c Coordinator) Prepare(ctx context.Context, spec benchdispatch.SourceSpec,
 		return zero, err
 	}
 	if !reply.OK {
-		return zero, c.terminate(ctx, spec, refusalFor(reply.Error.Code), true)
+		return zero, c.refused(ctx, spec, reply.Error, refusalFor(reply.Error.Code), true)
 	}
 	cp := mutationOf(reply)
 	if !heldBy(spec, cp) || cp.Workspace.BenchID != lease.Workspace.BenchID || cp.Workspace.Checkpoint == nil || len(cp.Workspace.Checkpoint.Members) != len(spec.Repositories) {
@@ -292,7 +292,7 @@ func (c Coordinator) observe(ctx context.Context, spec benchdispatch.SourceSpec,
 		return zero, c.terminate(ctx, spec, "verification_failed", true)
 	}
 	if !reply.OK {
-		return zero, c.terminate(ctx, spec, refusalFor(reply.Error.Code), reply.Error.Code != "conflict" && reply.Error.Code != "forbidden")
+		return zero, c.refused(ctx, spec, reply.Error, refusalFor(reply.Error.Code), reply.Error.Code != "conflict" && reply.Error.Code != "forbidden")
 	}
 	o := *reply.Result
 	want := cp.Workspace.Checkpoint

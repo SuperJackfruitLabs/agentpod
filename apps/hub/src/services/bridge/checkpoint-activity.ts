@@ -19,11 +19,23 @@ import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
 import type { SuperpipelineClient } from "./superpipeline";
 import { noteCheckpoint } from "./checkpoint-log";
 
-export type CheckpointActivityEvent = "prepared" | "running" | "completed" | "pushed" | "submitting" | "parked" | "failed" | "released";
+export type CheckpointActivityEvent = "prepared" | "running" | "completed" | "pushed" | "submitting" | "parked" | "failed" | "released"
+  | "lease_held";
+
+/**
+ * The supported way to free a bench whose release SuperBench refused (SuperBench's leases and
+ * `bench workspace` reference): an operator stop returns the retained token, a root run with it fixes
+ * the tree and checkpoints (a successful run checkpoints and releases by default), then the lease is
+ * released if it is still held, and the bench may be reclaimed. Nothing in the Hub or node does this:
+ * the node never checkpoints interrupted work to make a release succeed.
+ */
+export const HELD_LEASE_OPERATOR_PATH = "`bench workspace stop_admin <key>`, then a root `bench workspace run --holder <holder> <key> -- <fix>` " +
+  "with the returned token (BENCH_LEASE_TOKEN) that commits or removes the stray files and checkpoints, then `bench workspace release` " +
+  "if `status` still shows the lease, and optionally `bench workspace reclaim <key>`";
 
 /** The activity for an event, or undefined when there is nothing worth saying. Exported for tests. */
 export function checkpointActivity(event: CheckpointActivityEvent, facts: {
-  completion?: BenchCoordinatorCompletion; phase?: string; code?: string; reason?: string;
+  completion?: BenchCoordinatorCompletion; phase?: string; code?: string; reason?: string; benchKey?: string; message?: string;
 } = {}): BoardActivity | undefined {
   const action = `checkpoint.${event}`;
   switch (event) {
@@ -43,6 +55,15 @@ export function checkpointActivity(event: CheckpointActivityEvent, facts: {
     case "released":
       return { type: "action", action, body: facts.reason ?? `Checkpoint ${event} (${facts.code ?? "refused"}).`,
         parameter: { phase: facts.phase, code: facts.code } };
+    // SuperBench refused to release the card's bench lease (a dirty tree, for one). The node keeps
+    // retrying, but the refusal does not clear itself: an operator must reconcile the bench.
+    case "lease_held": {
+      const bench = facts.benchKey ? `bench ${facts.benchKey}` : "this card's bench";
+      const said = facts.message ? ` ("${facts.message}")` : "";
+      return { type: "action", action: "checkpoint.parked",
+        body: `Checkpoint: ${bench} still holds this card's lease; SuperBench refused its release${said}. Operator action needed: ${HELD_LEASE_OPERATOR_PATH}.`,
+        parameter: { phase: facts.phase, code: "lease_held", ...(facts.benchKey ? { benchKey: facts.benchKey } : {}) } };
+    }
     case "parked": {
       const why = [facts.code, facts.reason].filter((part): part is string => !!part).join(", ");
       return { type: "action", action, body: `Checkpoint: waiting at ${facts.phase ?? "an unknown phase"}${why ? ` (${why})` : ""}; it is re-checked automatically.`,

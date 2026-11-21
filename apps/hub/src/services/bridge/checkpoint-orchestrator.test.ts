@@ -18,6 +18,7 @@ import type { CheckpointReceipt } from "./checkpoint-settlement-data";
 import { createQuietLog } from "./quiet-log";
 import { resetCheckpointActivityForTests } from "./checkpoint-activity";
 import { NODE_CALL_TIMEOUT_MS } from "./checkpoint-node-call";
+import { capacityCard, createCapacityBackoff, CAPACITY_BACKOFF_BASE_MS, CAPACITY_RELEASE_CAP } from "./checkpoint-capacity-backoff";
 import { parseCheckpointProfile } from "./checkpoint-profile";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { SuperpipelineClient } from "./superpipeline";
@@ -303,6 +304,51 @@ test("a recorded worker-crash reply ends the attempt failed and settles the run 
   expect(board.verbs()).not.toContain("complete");
 });
 
+const dirtyTree = (() => {
+  const found = nodeRefusals.replies.find((r) => r.name === "checkpoint-refused-dirty-tree-status");
+  if (!found) throw new Error("recorded node refusal missing");
+  return found;
+})();
+
+// Seen on staging: SuperBench refused the checkpoint and the release over files the harness left outside
+// the repository. The card said "the worker crashed or was stopped", and the held lease went unmentioned.
+test("a refused checkpoint with a held lease says the bench's words and names the operator's path", async () => {
+  resetCheckpointActivityForTests();
+  const attempt = executePending();
+  const h = harness(dirtyTree.value);
+  const held = ledger(h.deps);
+  const board = recordingBoard();
+  const result = await driveCheckpointAttempt(attempt, board.client, false, h.deps);
+  expect(result.status).toBe("failed");
+  expect(board.verbs()).toEqual(["heartbeat", "run", "activities", "activities", "fail"]);
+  const [, , failed, lease, fail] = board.calls;
+  const words = "bench has uncommitted or untracked files; commit or preserve them before checkpoint/release";
+  expect(failed?.body).toMatchObject({ action: "checkpoint.failed", parameter: { code: "verification_failed" } });
+  expect(String(failed?.body.body)).toContain(words);
+  expect(String(failed?.body.body)).not.toContain("crashed");
+  expect(fail?.body.reason).toBe(failed?.body.body);
+  expect(lease?.body).toMatchObject({ action: "checkpoint.parked", parameter: { phase: "execute_pending", code: "lease_held" } });
+  for (const step of ["bench workspace stop_admin", "bench workspace run", "bench workspace release", "bench workspace reclaim"])
+    expect(String(lease?.body.body)).toContain(step);
+  expect(String(lease?.body.body)).toContain(words);
+  expect(held.closed).toBe("fail");
+  expect(board.verbs()).not.toContain("complete");
+});
+
+test("a parked reply whose lease is held is said once on the card with the operator's path", async () => {
+  resetCheckpointActivityForTests();
+  const attempt = executePending();
+  const reply = { ...pendingStatus(attempt), detail: { lease: "held" } };
+  const h = harness(reply);
+  const board = recordingBoard((path) => path.endsWith(`/runs/${attempt.claim.runId}`)
+    ? { status: 200, body: runView(attempt.claim) } : { status: 200 });
+  for (let i = 0; i < 2; i++) expect((await driveCheckpointAttempt(attempt, board.client, false, h.deps)).status).toBe("unreported");
+  const activities = board.calls.filter((c) => c.path.endsWith("/activities")).map((c) => c.body);
+  expect(activities.map((a) => a.parameter)).toEqual([
+    expect.objectContaining({ code: "uncertain", reason: "node.state:pending.lease_held" }),
+    expect.objectContaining({ code: "lease_held" })]);
+});
+
 test("a verification failure while preparing fails the run too, and nothing was executed", async () => {
   resetCheckpointActivityForTests();
   const attempt = preparePending();
@@ -329,6 +375,41 @@ test("a capacity refusal releases the card for a new claim instead of parking it
   expect(board.calls[2]?.body).toMatchObject({ action: "checkpoint.released" });
   expect(held.closed).toBe("release");
   expect(result).toMatchObject({ status: "released", attemptId: attempt.row.attemptId });
+});
+
+const capacityRefused = { version: "agentpod.bench-coordinator.v1", operation: "status", state: "refused", code: "capacity_exhausted" };
+test("a capacity release is counted for the card, and holds the station's checkpoint claims", async () => {
+  resetCheckpointActivityForTests();
+  let now = 0;
+  const capacity = createCapacityBackoff({ now: () => now });
+  const attempt = executePending();
+  const h = harness(capacityRefused);
+  h.deps.capacity = capacity;
+  ledger(h.deps);
+  const result = await driveCheckpointAttempt(attempt, recordingBoard().client, false, h.deps);
+  expect(result.status).toBe("released");
+  expect(capacity.heldUntil()).toBe(CAPACITY_BACKOFF_BASE_MS);
+  now = CAPACITY_BACKOFF_BASE_MS;
+  expect(capacity.heldUntil()).toBeUndefined();
+});
+
+test("the cap-th capacity refusal in a row fails the run instead of releasing it again", async () => {
+  resetCheckpointActivityForTests();
+  const capacity = createCapacityBackoff({ now: () => 0 });
+  const attempt = executePending();
+  for (let i = 1; i < CAPACITY_RELEASE_CAP; i++) capacity.refused(capacityCard(attempt.claim), false);
+  const h = harness(capacityRefused);
+  h.deps.capacity = capacity;
+  const held = ledger(h.deps);
+  const board = recordingBoard();
+  const result = await driveCheckpointAttempt(attempt, board.client, false, h.deps);
+  expect(held.failure).toMatchObject({ code: "capacity_exhausted", disposition: "failed" });
+  expect(board.verbs()).toEqual(["heartbeat", "run", "activities", "fail"]);
+  expect(String(board.calls[3]?.body.reason)).toContain(`exhausted on ${CAPACITY_RELEASE_CAP} attempts in a row`);
+  expect(result.status).toBe("failed");
+  // The station still waits before its next checkpoint claim, and the card's count starts again.
+  expect(capacity.heldUntil()).toBeDefined();
+  expect(capacity.capped(capacityCard(attempt.claim))).toBe(false);
 });
 
 const conflict = (operation: string) => ({ version: "agentpod.bench-coordinator.v1", operation, state: "refused", code: "conflict" });

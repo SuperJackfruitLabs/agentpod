@@ -107,6 +107,7 @@ retry of the same attempt reaches the same journal record, never a new launch.
 | Run killed by a SuperBench restart | the run's completed receipt replays a stored `503 unavailable` whose result shows this holder's lease stopped with `stop_requested` (benchd logs `command failed; stopped lease retained: signal: killed`) | a completed receipt is final whatever its code (treaty "A completed stored failure is final"): terminal, never a pass, nothing resent, no `stop` (the execution is already stopped); the stopped lease is released with this record's token. A stored `operation_in_doubt` still parks | `refused` `verification_failed` |
 | Cancellation before launch | `Cancel` before step 8 | veto journaled first; held lease released with its token; no run is ever sent | `refused` `stale_owner` |
 | Cancellation mid-run | `Cancel` after step 8 | veto journaled; one cancel request targets the run's request ID and digest; `cancel_requested` is recorded as intent only. Later lookups observe the final receipt; its result is never published; the lease is released | `pending`, then `refused` `stale_owner` |
+| Run cancelled before its reply was stored | the run's receipt lookup answers `cancel_requested`: the cancellation barrier won, SuperBench refused to store the reply (benchd logs `receipt_save_failed`, "operation cancellation requested") and the lookup never upgrades it, so no completed receipt can ever come | a status read must show this holder's lease `stop_requested` with its execution `stopped` (or the lease no longer ours); until then it stays parked. Then the record ends refused, never completed, and the stopped lease is released with the record's own token. No `stop` is sent and nothing is checkpointed to make the release succeed (treaty: "Cancellation does not release") | `pending`, then `refused` `stale_owner` for a record the hub vetoed, `verification_failed` for a run cancelled by anyone else |
 | Context cancelled while waiting for the run reply | transport error | same as a lost reply; no resend | `pending` |
 | Stale holder | hub `current` check before every send and after every await; journal `active` pointer; producer `conflict`/`forbidden`; lease grant for another holder | no further send; lease not released by a non-owner. A definitely superseded record retires itself (see below) | `refused` `stale_owner` (a newer attempt gets `pending` until the older record is terminal) |
 | Capacity refusal | `capacity_exhausted` (HTTP 422) on create, lease or run | terminal for the attempt; never retried; a held lease is released | `refused` `capacity_exhausted` |
@@ -155,9 +156,46 @@ the run's receipt. A newer attempt's `prepare` frees the bench only once the
 older record is terminal; until then (lease still held, or run unresolved) it
 returns `pending`, retryable, and reaches nothing. A definite refusal of a
 release we still hold, or a reply that does not parse, is forgotten and sent again
-on the next cleanup; nothing replays a bad answer. Retries never stop, but after
-three failed releases each further failure is logged with the bench key and
-count, and `Status` reports `release_refused` instead of `cancel_requested`.
+on the next cleanup; nothing replays a bad answer. Retries never stop, and every
+failed release is logged with the bench key, the count and SuperBench's message.
+After three, `Status` reports `release_refused` instead of `cancel_requested`.
+
+### A refused release
+
+SuperBench refuses a release without a complete clean checkpoint vector: a
+dirty or untracked tree, a rejected push, an ambiguous state save. The refusal
+does not clear itself, and the node never checkpoints interrupted work to make
+the release succeed (treaty, "A completed stored failure is final"). Once the
+hub has ended the attempt only the card's next attempt retries the release, so
+staging saw four retries, then silence, and a lease still held.
+
+From the first refused release the record reports it: its refusal and every
+parked status carry `detail.lease: "held"` and SuperBench's message, and the
+hub says on the card (`checkpoint.parked`, code `lease_held`), once per
+attempt, what an operator must do. When the board already ended the run the
+hub only logs it, since an activity would heartbeat the unbound run. The card's
+next attempt waits on the held bench (`pending`, never a new lease or run) and
+its reply carries the same `detail.lease: "held"`, so its card says it too.
+
+The supported path, run as the bench host's operator (SuperBench's "Leases"
+concept and `bench workspace` reference):
+
+1. `bench workspace stop_admin <key>`. It fences the recorded scope and returns
+   the retained lease token; the lease stays held by the attempt's holder
+   (`cp_<attempt>`, shown by `bench workspace status <key>`).
+2. A root `bench workspace run --holder <holder> --request-id <fresh id> <key> --
+   <command>` with the returned token in `BENCH_LEASE_TOKEN`, no
+   `--repository-name`, whose command commits or removes the stray files. With
+   the default `--checkpoint`, a successful run checkpoints the member vector and
+   releases.
+3. `bench workspace status <key>`; only if the lease is still shown, `bench
+   workspace checkpoint` and `bench workspace release` with the same token.
+   Releasing twice can fail once the first cleared the lease.
+4. Optionally `bench workspace reclaim <key>` to delete the released tree. The
+   next attempt on the card creates the bench again.
+
+The node's next release for that record then finds the lease gone and ends the
+record clean.
 
 ### Reclaimed benches and generations
 
@@ -257,7 +295,11 @@ unreachable hub) leaves the record parked (`pending`); only an authenticated
 `stale_owner` decision makes it retire and answer `stale_owner`.
 
 The coordinator wire (`agentpod.bench-coordinator.v1`) is unchanged except for one
-new refusal code, `capacity_exhausted`. The hub never re-sends `prepare` or
+new refusal code, `capacity_exhausted`, and an optional `detail` on `refused` and
+`pending` replies: `detail.message` is SuperBench's own text for the refusal that
+ended the record (journaled as `producer_message`, or `release_refusal` for a
+refused release), at most 256 UTF-8 bytes with control characters removed. It
+says why; it never changes what the state or code means. The hub never re-sends `prepare` or
 `execute` after a refusal: later cycles send `status`, which returns the same
 terminal refusal from the journal. A terminal refusal ends the hub's attempt:
 `verification_failed` and `unsupported` fail the run, `capacity_exhausted`
