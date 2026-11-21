@@ -51,7 +51,7 @@ func (c Coordinator) Execute(ctx context.Context, spec benchdispatch.SourceSpec,
 		return *r.Completion, nil
 	case r.Phase == phaseRefused:
 		_ = c.cleanup(ctx, spec)
-		return benchcoordinator.Completion{}, refuse(r.Code)
+		return benchcoordinator.Completion{}, c.refusal(ctx, spec, r)
 	case r.Binding == nil:
 		return benchcoordinator.Completion{}, benchdispatch.ErrPending
 	case !active || r.Cancelled:
@@ -83,7 +83,7 @@ func (c Coordinator) advance(ctx context.Context, spec benchdispatch.SourceSpec)
 	}
 	if r.Phase == phaseRefused {
 		_ = c.cleanup(ctx, spec)
-		return zero, refuse(r.Code)
+		return zero, c.refusal(ctx, spec, r)
 	}
 	if s := r.step("run"); s == nil || !s.Sent {
 		return zero, benchdispatch.ErrPending
@@ -107,13 +107,13 @@ func (c Coordinator) advance(ctx context.Context, spec benchdispatch.SourceSpec)
 	held := outcome == nil || retains(spec, &outcome.Mutation)
 	if !reply.OK && outcome == nil {
 		code := refusalFor(reply.Error.Code)
-		return zero, c.terminate(ctx, spec, code, code != "stale_owner")
+		return zero, c.refused(ctx, spec, reply.Error, code, code != "stale_owner")
 	}
 	if r.Cancelled {
 		return zero, c.terminate(ctx, spec, "stale_owner", held)
 	}
 	if !reply.OK {
-		return zero, c.terminate(ctx, spec, "verification_failed", held) // worker crash
+		return zero, c.refused(ctx, spec, reply.Error, "verification_failed", held) // worker crash, or a refused checkpoint
 	}
 	b := *r.Binding
 	w := outcome.Workspace
@@ -203,6 +203,15 @@ func (c Coordinator) cancelledRun(ctx context.Context, spec benchdispatch.Source
 	return c.terminate(ctx, spec, code, !gone)
 }
 
+// refusal is the record's terminal refusal as the journal now holds it (a
+// cleanup may have just recorded a refused release), or fallback's.
+func (c Coordinator) refusal(ctx context.Context, spec benchdispatch.SourceSpec, fallback record) error {
+	if r, _, err := c.Journal.read(ctx, spec); err == nil && r.Phase == phaseRefused {
+		return refusalOf(r)
+	}
+	return refusalOf(fallback)
+}
+
 // readback independently re-reads the producer's retained receipt for the run.
 // It must hold the exact bytes we captured; anything else is not our result.
 func (c Coordinator) readback(ctx context.Context, spec benchdispatch.SourceSpec, k call, status int, body []byte) error {
@@ -268,6 +277,11 @@ func (c Coordinator) cleanup(ctx context.Context, spec benchdispatch.SourceSpec)
 	}
 	if err == nil && reply.OK || c.leaseGone(ctx, spec, id) {
 		return done()
+	}
+	if err == nil {
+		if message := producerMessage(reply.Error); message != "" {
+			_ = c.mark(ctx, spec, func(r *record) bool { r.ReleaseRefusal = message; return true })
+		}
 	}
 	// A refused or malformed reply while we still hold the lease. Release is
 	// token-scoped and repeatable, so drop the saved reply and send it again
@@ -464,7 +478,7 @@ func (c Coordinator) retire(ctx context.Context, spec benchdispatch.SourceSpec) 
 		if r.Phase == phaseCompleted {
 			return refuse("stale_owner")
 		}
-		return refuse(r.Code)
+		return refusalOf(r)
 	}
 	if r.Phase == phaseCompleted || r.Phase == phaseRefused {
 		if e := c.cleanup(ctx, spec); e != nil {
@@ -476,7 +490,7 @@ func (c Coordinator) retire(ctx context.Context, spec benchdispatch.SourceSpec) 
 		if r.Phase == phaseCompleted {
 			return refuse("stale_owner") // a completed result is not re-published to a stale caller
 		}
-		return refuse(r.Code)
+		return c.refusal(ctx, spec, r)
 	}
 	run := r.step("run")
 	if run == nil || !run.Sent {

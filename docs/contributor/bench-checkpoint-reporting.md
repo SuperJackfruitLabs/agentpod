@@ -185,6 +185,18 @@ table does not name parks.
 Neither ruling ever reports a pass: no settlement is built and `complete` is
 never sent.
 
+**The bench's own words.** When SuperBench refused the step that ended the
+record, the node's refusal carries its message as `detail.message` (at most 256
+UTF-8 bytes, no control characters). The Hub redacts it (`redact`, and absolute
+paths become `[path]`), bounds it to 200 characters and puts it in the sentence,
+which is both the `checkpoint.failed` activity and the run's `failure_reason`.
+For example: `Checkpoint failed: SuperBench refused the bench step after the run
+(verification_failed): "bench has uncommitted or untracked files; commit or
+preserve them before checkpoint/release". Nothing was reported as a pass.`
+Without a message the sentence is the table's. Seen on staging: a checkpoint
+refused over a dirty tree read "the worker crashed or was stopped … (for example
+by a SuperBench restart)", and no restart had happened.
+
 A ruled refusal is held before anything is said. The attempt moves by
 compare-and-set from the phase it was read in to `failure_pending`, with an
 immutable `failure` cell: the code, the ruling, the sentence, the phase and the

@@ -258,7 +258,11 @@ unreachable hub) leaves the record parked (`pending`); only an authenticated
 `stale_owner` decision makes it retire and answer `stale_owner`.
 
 The coordinator wire (`agentpod.bench-coordinator.v1`) is unchanged except for one
-new refusal code, `capacity_exhausted`. The hub never re-sends `prepare` or
+new refusal code, `capacity_exhausted`, and an optional `detail` on `refused` and
+`pending` replies: `detail.message` is SuperBench's own text for the refusal that
+ended the record (journaled as `producer_message`, or `release_refusal` for a
+refused release), at most 256 UTF-8 bytes with control characters removed. It
+says why; it never changes what the state or code means. The hub never re-sends `prepare` or
 `execute` after a refusal: later cycles send `status`, which returns the same
 terminal refusal from the journal. A terminal refusal ends the hub's attempt:
 `verification_failed` and `unsupported` fail the run, `capacity_exhausted`

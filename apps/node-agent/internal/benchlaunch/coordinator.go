@@ -9,7 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
@@ -25,10 +28,67 @@ type Producer interface {
 }
 
 // Refusal is a terminal decision for the attempt, with a coordinator wire code.
-type Refusal struct{ Code string }
+// Message is SuperBench's own bounded refusal text, when it gave one; it says
+// why, and never changes what the code means.
+type Refusal struct {
+	Code    string
+	Message string
+}
 
 func (r *Refusal) Error() string { return "registered launch refused: " + r.Code }
 func refuse(code string) error   { return &Refusal{Code: code} }
+
+// RefusalMessage reports the producer's message carried by a terminal refusal.
+func RefusalMessage(err error) string {
+	var r *Refusal
+	if errors.As(err, &r) {
+		return r.Message
+	}
+	return ""
+}
+
+// maxProducerMessage bounds SuperBench's message as its own envelope does
+// (256 UTF-8 bytes); anything longer is cut at a rune boundary.
+const maxProducerMessage = 256
+
+// producerMessage keeps SuperBench's refusal text safe to carry: valid UTF-8,
+// no control characters, whitespace collapsed, at most 256 bytes. SuperBench
+// replies carry no grants, tokens or root paths; the hub redacts again.
+func producerMessage(e *benchworkspace.APIError) string {
+	if e == nil {
+		return ""
+	}
+	var b strings.Builder
+	space := false
+	for _, r := range e.Message {
+		if r == utf8.RuneError || unicode.IsControl(r) || unicode.IsSpace(r) {
+			space = b.Len() > 0
+			continue
+		}
+		add := utf8.RuneLen(r)
+		if space {
+			add++
+		}
+		if b.Len()+add > maxProducerMessage {
+			break
+		}
+		if space {
+			b.WriteByte(' ')
+			space = false
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// refusalOf is the record's own terminal refusal, with what SuperBench said.
+func refusalOf(r record) error {
+	message := r.Producer
+	if message == "" {
+		message = r.ReleaseRefusal
+	}
+	return &Refusal{Code: r.Code, Message: message}
+}
 
 // RefusalCode reports the wire code of a terminal refusal, if err is one.
 func RefusalCode(err error) (string, bool) {
@@ -261,11 +321,20 @@ func (c Coordinator) mark(ctx context.Context, spec benchdispatch.SourceSpec, fn
 // owns a lease that it must release; release is attempted, then retried by
 // later status calls until it succeeds.
 func (c Coordinator) terminate(ctx context.Context, spec benchdispatch.SourceSpec, code string, held bool) error {
+	return c.terminateWith(ctx, spec, code, held, "")
+}
+
+// refused ends the record on a definite producer refusal, keeping its message.
+func (c Coordinator) refused(ctx context.Context, spec benchdispatch.SourceSpec, e *benchworkspace.APIError, code string, held bool) error {
+	return c.terminateWith(ctx, spec, code, held, producerMessage(e))
+}
+
+func (c Coordinator) terminateWith(ctx context.Context, spec benchdispatch.SourceSpec, code string, held bool, message string) error {
 	_ = c.mark(ctx, spec, func(r *record) bool {
 		if r.Phase == phaseRefused || r.Phase == phaseCompleted {
 			return false
 		}
-		r.Phase, r.Code = phaseRefused, code
+		r.Phase, r.Code, r.Producer = phaseRefused, code, message
 		if held && r.Release != "done" {
 			r.Release = "needed"
 		} else if !held && r.Release == "needed" {
@@ -275,7 +344,7 @@ func (c Coordinator) terminate(ctx context.Context, spec benchdispatch.SourceSpe
 	})
 	_ = c.cleanup(ctx, spec)
 	if r, _, err := c.Journal.read(ctx, spec); err == nil && r.Phase == phaseRefused {
-		return refuse(r.Code)
+		return refusalOf(r)
 	}
-	return refuse(code)
+	return &Refusal{Code: code, Message: message}
 }

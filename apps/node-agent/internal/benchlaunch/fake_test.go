@@ -73,6 +73,9 @@ type fakeBench struct {
 	barrierReply     []byte
 	barrierCancelled bool
 	stopLag          int
+	// refusalMessage replaces the failed run's error message (a crashed or
+	// refused run): SuperBench's own words for why.
+	refusalMessage string
 }
 type receipt struct {
 	digest string
@@ -407,7 +410,11 @@ func (f *fakeBench) runReceipt(spec benchdispatch.SourceSpec, finite benchworksp
 		w := f.workspace(spec, true, strings.Repeat("2", 32), fakeCommitA, fakeCommitB)
 		w.Lease = &benchworkspace.LeaseSummary{Holder: f.holder, Mode: "supervised", Execution: &execution}
 		result["workspace"] = w
-		return receipt{digest: typed, status: 422, body: envelope("run", finite.RequestID, false, result, "operation_failed")}
+		body := envelope("run", finite.RequestID, false, result, "operation_failed")
+		if f.refusalMessage != "" {
+			body = bytes.Replace(body, []byte(`"message":"refused"`), []byte(`"message":`+strconvQuote(f.refusalMessage)), 1)
+		}
+		return receipt{digest: typed, status: 422, body: body}
 	}
 	f.leased = false
 	result["workspace"] = f.workspace(spec, false, strings.Repeat("4", 32), "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", fakeCommitB)
@@ -415,3 +422,5 @@ func (f *fakeBench) runReceipt(spec benchdispatch.SourceSpec, finite benchworksp
 }
 
 func b64(raw []byte) string { return base64.StdEncoding.EncodeToString(raw) }
+
+func strconvQuote(s string) string { raw, _ := json.Marshal(s); return string(raw) }

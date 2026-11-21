@@ -141,8 +141,16 @@ export const BenchCoordinatorCurrentResponse = z.discriminatedUnion("decision", 
     code: z.enum(["unauthorized", "stale_owner", "unavailable", "pending", "invalid"]) }).strict(),
 ]).refine((r) => r.expires_at_ms > r.issued_at_ms && r.expires_at_ms - r.issued_at_ms <= 5000);
 export type BenchCoordinatorCurrentResponse = z.infer<typeof BenchCoordinatorCurrentResponse>;
+/**
+ * Why a refused or parked attempt is as it is, in the bench's own words: SuperBench's refusal text
+ * (at most 256 UTF-8 bytes, no control characters). It never changes what the state and code mean.
+ */
+export const BenchCoordinatorDetail = z.object({
+  message: z.string().min(1).refine((m) => new TextEncoder().encode(m).byteLength <= 256 && !/\p{Cc}/u.test(m)),
+}).strict();
+export type BenchCoordinatorDetail = z.infer<typeof BenchCoordinatorDetail>;
 const pending = z.object({ ...fixed, operation: z.enum(["prepare", "execute", "status"]), ...owned,
-  state: z.enum(["unknown", "pending", "superseded"]) }).strict();
+  state: z.enum(["unknown", "pending", "superseded"]), detail: BenchCoordinatorDetail.optional() }).strict();
 const prepared = z.object({ ...fixed, operation: z.enum(["prepare", "status"]), ...owned,
   state: z.literal("prepared"), source: BenchCoordinatorPrepared }).strict();
 const completed = z.object({ ...fixed, operation: z.enum(["execute", "status"]), ...owned,
@@ -153,7 +161,7 @@ export const BenchCoordinatorResponse = z.union([
     code: z.enum(["disabled", "unsupported", "offline", "unverified"]) }).strict(),
   z.object({ ...fixed, operation: z.enum(["ready", "prepare", "execute", "status"]), state: z.literal("refused"),
     code: z.enum(["invalid", "unsupported", "unavailable", "unauthorized", "stale_owner", "conflict", "pending", "verification_failed",
-      "capacity_exhausted"]) }).strict(),
+      "capacity_exhausted"]), detail: BenchCoordinatorDetail.optional() }).strict(),
   pending, prepared, completed,
 ]).refine((r) => {
   if (!("identity" in r)) return true;

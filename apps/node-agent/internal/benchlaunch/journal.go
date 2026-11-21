@@ -61,6 +61,13 @@ type record struct {
 	// ready and creates the key's next generation over. Set once, before
 	// any stop or create leaves. See stuck.go.
 	Stuck string `json:"stuck_bench_id,omitempty"`
+	// Producer is SuperBench's own message for the refusal that ended this
+	// record (for example a checkpoint refused over uncommitted files), and
+	// ReleaseRefusal its message for the latest refused release. Both are
+	// bounded and stripped of control characters (producerMessage); they
+	// travel to the hub as the refusal's detail, never as a code.
+	Producer       string `json:"producer_message,omitempty"`
+	ReleaseRefusal string `json:"release_refusal,omitempty"`
 	// Parked says why the attempt waits without sending: bench_stuck or
 	// recreate_refused. Status reports it in place of a plain pending.
 	Parked string `json:"parked,omitempty"`

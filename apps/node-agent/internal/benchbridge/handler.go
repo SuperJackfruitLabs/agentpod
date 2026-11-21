@@ -236,6 +236,9 @@ func failed(r benchcoordinatorwire.Request, err error) (benchcoordinatorwire.Res
 	if code, ok := benchlaunch.RefusalCode(err); ok {
 		response := refused(r.Operation)
 		response.Code = code
+		if message := benchlaunch.RefusalMessage(err); message != "" {
+			response.Detail = &benchcoordinatorwire.Detail{Message: message}
+		}
 		return response, nil
 	}
 	return pending(r), err

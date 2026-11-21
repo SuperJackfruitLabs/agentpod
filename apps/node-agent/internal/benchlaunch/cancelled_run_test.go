@@ -5,9 +5,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
 )
 
 // recordedCancelledRunReply is what benchd answered the run's own POST once a
@@ -109,5 +112,34 @@ func TestCancelledRunWithAnUnreadableBenchParks(t *testing.T) {
 	}
 	if tr.count(tr.posts, "release") != 0 || !tr.leased {
 		t.Fatal("a lease was released without seeing the execution stopped")
+	}
+}
+
+// A run whose checkpoint SuperBench refused (the harness left files outside
+// the repository) ends verification_failed with SuperBench's own words, so
+// the card says why instead of guessing at a crash or a restart.
+func TestRefusedCheckpointCarriesTheBenchsOwnMessage(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.exit, tr.refusalMessage = 1, "bench has uncommitted or untracked files; commit or preserve them before checkpoint/release\n\x00"
+	_, err := tr.c.Execute(context.Background(), tr.spec, admitAll)
+	wantCode(t, err, "verification_failed")
+	want := "bench has uncommitted or untracked files; commit or preserve them before checkpoint/release"
+	if got := RefusalMessage(err); got != want {
+		t.Fatalf("the refusal said %q", got)
+	}
+	if _, err = tr.c.Status(context.Background(), tr.spec); RefusalMessage(err) != want {
+		t.Fatal("a later status lost the bench's message", err)
+	}
+}
+
+func TestProducerMessageIsBoundedAndPrintable(t *testing.T) {
+	long := strings.Repeat("é", 200) // 400 bytes
+	got := producerMessage(&benchworkspace.APIError{Message: "  a\tb\x00c " + long})
+	if len(got) > maxProducerMessage || !utf8.ValidString(got) || strings.ContainsAny(got, "\t\x00") || !strings.HasPrefix(got, "a b c é") {
+		t.Fatalf("unsafe message %q (%d bytes)", got, len(got))
+	}
+	if producerMessage(nil) != "" {
+		t.Fatal("a missing error made a message")
 	}
 }

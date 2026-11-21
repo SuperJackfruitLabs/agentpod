@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { BenchCoordinatorRequest, parseBenchCoordinatorResponse, type BenchCoordinatorResponse } from "@agentpod/contract";
 import corpus from "../../../../../packages/contract/src/fixtures/bench-coordinator-v1.json";
-import { CHECKPOINT_REFUSAL_RULINGS, classifyCheckpointRefusal, classifySettlementRefusal, SETTLEMENT_REFUSAL_SENTENCES } from "./checkpoint-refusal";
+import { benchMessage, CHECKPOINT_REFUSAL_RULINGS, classifyCheckpointRefusal, classifySettlementRefusal, MAX_BENCH_MESSAGE, SETTLEMENT_REFUSAL_SENTENCES } from "./checkpoint-refusal";
 import { CheckpointRefused } from "./checkpoint-profile";
 
 const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
@@ -92,4 +92,34 @@ test("anything after completion that is not a settlement refusal is transient: n
   for (const error of [new CheckpointRefused("stale", "ledger.raced"), new CheckpointRefused("stale", "source.inactive"),
     new CheckpointRefused("unavailable", "service.error"), new CheckpointRefused("source"), new Error("boom"), undefined])
     expect(classifySettlementRefusal(error)).toBeUndefined();
+});
+
+const DIRTY = "bench has uncommitted or untracked files; commit or preserve them before checkpoint/release";
+async function withMessage(code: string, message: string): Promise<BenchCoordinatorResponse> {
+  return parseBenchCoordinatorResponse(encode({ ...refused(code), detail: { message } }),
+    BenchCoordinatorRequest.parse(fixture("capacity-refused").request));
+}
+
+// Seen on staging: SuperBench refused the checkpoint over files the harness left outside the repository,
+// and the card said the worker crashed or was stopped by a restart. Its own words now reach the card.
+test("a refusal with the bench's own message says it, not a guessed crash or restart", async () => {
+  const ruling = classifyCheckpointRefusal("execute_pending", await withMessage("verification_failed", DIRTY));
+  expect(ruling?.disposition).toBe("failed");
+  expect(ruling?.reason).toContain(DIRTY);
+  expect(ruling?.reason).not.toContain("crashed");
+  expect(ruling?.reason).not.toContain("restart");
+  expect(ruling?.reason).toContain("Nothing was reported as a pass.");
+  const prepare = classifyCheckpointRefusal("prepare_pending", await withMessage("verification_failed", DIRTY));
+  expect(prepare?.reason).toContain(DIRTY);
+  expect(prepare?.reason).toContain("Nothing ran.");
+  // Without a message the sentence is unchanged.
+  expect(classifyCheckpointRefusal("execute_pending", await parsed("verification_failed"))?.reason).toContain("crashed or was stopped");
+});
+
+test("the bench's message is redacted and bounded before it reaches the card", async () => {
+  const secret = `refused for token sk_${"a".repeat(24)} at /data/benches/cp_${"b".repeat(40)}/a`;
+  const reason = classifyCheckpointRefusal("execute_pending", await withMessage("verification_failed", secret))?.reason ?? "";
+  expect(reason).not.toContain("sk_a");
+  expect(reason).not.toContain("/data/benches");
+  expect(benchMessage(await withMessage("verification_failed", "y".repeat(250)))?.length).toBe(MAX_BENCH_MESSAGE);
 });
