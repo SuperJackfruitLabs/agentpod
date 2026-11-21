@@ -127,6 +127,14 @@ run/epoch and policy around awaits; snapshot caching does not cache authority.
 These settings provision no credentials, policy or capability; no profile or
 environment setting is installed by this change.
 
+The bench task the Hub reserves names the profile's checkpoint repository as
+`repository_name`, so the node's worker starts the harness inside that member.
+Without it the harness started in the bench's workspace root, wrote files outside
+every repository and left the tree dirty, and SuperBench then refused checkpoint
+and release. A profile whose checkpoint repository is missing or is not one of
+its repositories is refused at load, so a single-repository profile names its
+only repository.
+
 ## What the card shows
 
 Each phase the Hub commits posts one short activity to the card's live stream,

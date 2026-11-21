@@ -148,6 +148,23 @@ export function checkpointProfileId(profile: CheckpointProfile): string {
   return profile.coordinatorProfileId ?? profile.profileKey;
 }
 
+/** The task's own timeout: the producer stops a run at it, and the Hub's run-ended grace counts from it. */
+export const CHECKPOINT_TASK_TIMEOUT_SECONDS = 1800;
+
+/**
+ * The bench task for a claimed card. `repository_name` is the profile's checkpoint repository: the
+ * node's worker starts the harness inside that member, and without it in the workspace root, where a
+ * harness writes files outside every repository and leaves the bench's tree dirty, so checkpoint and
+ * release are refused. Loading a profile already refuses one whose checkpoint repository is missing or
+ * not one of its repositories, so a single-repository profile names its only repository here.
+ */
+export function checkpointTask(profile: CheckpointProfile, prompt: string): {
+  profile_id: string; prompt: string; timeout_seconds: number; repository_name: string;
+} {
+  return { profile_id: checkpointProfileId(profile), prompt, timeout_seconds: CHECKPOINT_TASK_TIMEOUT_SECONDS,
+    repository_name: profile.checkpointRepository };
+}
+
 /**
  * The roster stores a default harness profile as NULL (the admin API cannot store ""),
  * while a checkpoint profile spells the same default as "". One definition of "same profile".

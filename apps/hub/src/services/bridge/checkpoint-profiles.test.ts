@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { readCheckpointProfiles, requireInstalledCheckpointProfile, CHECKPOINT_COORDINATOR_FLAG } from "./checkpoint-profiles";
 import corpus from "../../../../../packages/contract/src/fixtures/bench-coordinator-v1.json";
 
-import { checkpointProfileId, parseCheckpointProfile } from "./checkpoint-profile";
+import { checkpointProfileId, checkpointTask, parseCheckpointProfile } from "./checkpoint-profile";
 import { canonicalCheckpoint } from "./checkpoint-json";
 import { checkpointRuntime } from "./checkpoint-port";
 const prior = { flag: process.env.PROPOSED_CHECKPOINT_COORDINATOR, file: process.env.PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE, pair: process.env.ENFORCE_CONTROL_PAIR };
@@ -117,4 +117,18 @@ test("a default harness profile requires a valid explicit coordinator identity",
   for (const coordinatorProfileId of ["", " invalid", "bad\n", null]) {
     expect(() => parseCheckpointProfile({ ...fixture(), profileKey: "", coordinatorProfileId })).toThrow("Checkpoint refused: invalid");
   }
+});
+
+test("the bench task names the checkpoint repository, so the harness never starts in the workspace root", () => {
+  const single = parseCheckpointProfile(fixture());
+  expect(checkpointTask(single, "do the card")).toEqual({ profile_id: "fixture", prompt: "do the card", timeout_seconds: 1800,
+    repository_name: "api" });
+  const repositories = [
+    { name: "api", provider: "forge", repository: "example/api", repositorySHA256: "e".repeat(64), objectFormat: "sha1" },
+    { name: "web", provider: "forge", repository: "example/web", repositorySHA256: "f".repeat(64), objectFormat: "sha1" }];
+  expect(checkpointTask(parseCheckpointProfile({ ...fixture(), repositories, checkpointRepository: "web" }), "x").repository_name).toBe("web");
+  // A multi-repository profile with no checkpoint repository, or one that is not a member, is refused at load.
+  const { checkpointRepository: _omitted, ...missing } = { ...fixture(), repositories };
+  expect(() => parseCheckpointProfile(missing)).toThrow();
+  expect(() => parseCheckpointProfile({ ...fixture(), repositories, checkpointRepository: "docs" })).toThrow();
 });
