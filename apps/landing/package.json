@@ -17,7 +17,7 @@
     "@astrojs/mdx": "^4.3.14",
     "@astrojs/sitemap": "^3.7.4",
     "@superjackfruitlabs/vibekit-frame": "^0.0.18",
-    "@superjackfruitlabs/vibekit-ui": "^0.0.20",
+    "@superjackfruitlabs/vibekit-ui": "^0.0.21",
     "astro": "^5.18.2",
     "three": "^0.186.1"
   },
