@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
@@ -161,6 +162,9 @@ func (c Coordinator) send(ctx context.Context, spec benchdispatch.SourceSpec, k 
 		status, body, err = c.Producer.Post(ctx, k.path, k.contentType(), k.request, k.limit())
 	}
 	if err != nil {
+		if k.name == "run" && errors.Is(err, errCancelBarrier) {
+			return 0, nil, err // still pending; advance decides whether the run is over
+		}
 		return 0, nil, benchdispatch.ErrPending
 	}
 	if uncertain(body, replayed) {
@@ -187,8 +191,18 @@ func (c Coordinator) send(ctx context.Context, spec benchdispatch.SourceSpec, k 
 	return status, body, nil
 }
 
+// errCancelBarrier is a receipt lookup answering cancel_requested: a
+// cancellation barrier won the run's finalization race. SuperBench refuses to
+// store the run's reply once the barrier is recorded (benchd logs
+// receipt_save_failed "operation cancellation requested"), and the lookup
+// never upgrades the barrier, so this receipt can never become completed. It
+// is still pending (errors.Is ErrPending): only advance, which reads the
+// bench, may end the record on it (see cancelledRun).
+var errCancelBarrier = fmt.Errorf("run cancellation barrier holds; its receipt will never be stored: %w", benchdispatch.ErrPending)
+
 // recover asks the producer's receipt store for the original reply. Only a
-// completed receipt is an answer; absence, progress or doubt stay parked.
+// completed receipt is an answer; absence, progress or doubt stay parked, and
+// a cancellation barrier is reported as errCancelBarrier.
 func (c Coordinator) recover(ctx context.Context, k call) (int, []byte, error) {
 	if k.lookup == nil {
 		return 0, nil, benchdispatch.ErrPending
@@ -210,6 +224,9 @@ func (c Coordinator) recover(ctx context.Context, k call) (int, []byte, error) {
 		parse = benchworkspace.ParseFiniteReceiptLookupResponse
 	}
 	reply, err := parse(body, status, *k.lookup)
+	if err == nil && reply.OK && reply.Result.State == "cancel_requested" {
+		return 0, nil, errCancelBarrier
+	}
 	if err != nil || !reply.OK || reply.Result.State != "completed" {
 		return 0, nil, benchdispatch.ErrPending
 	}

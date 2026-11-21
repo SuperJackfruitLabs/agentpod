@@ -324,6 +324,16 @@ being deleted. Each is `run.unbound` or `run.not_found` on the next read.
   cancel and releases the lease once the run's receipt is in. The attempt ends
   `run_ended.stopped`, or `run_ended.unconfirmed` past the timeout and grace.
   The run's result is never settled.
+- A cancel that wins the run's finalization race leaves no receipt at all:
+  SuperBench refuses to store the reply (benchd: `receipt_save_failed`,
+  "operation cancellation requested") and the run's lookup answers
+  `cancel_requested` for ever. Seen on staging: the node waited for that
+  receipt, answered `pending` on every pass (`run_ended.node:pending` for over
+  20 minutes) and kept the stopped lease. The node now ends its record once the
+  bench shows its own lease `stop_requested` with the execution `stopped`, and
+  releases that lease with its own token (BENCH_REGISTERED_LAUNCH.md, "Run
+  cancelled before its reply was stored"). Its next reply is `stale_owner`, so
+  the attempt ends `run_ended.stopped`.
 - After the node completed, before the settlement: `run_ended`; nothing is
   submitted.
 - With a settlement pending: if the board holds its receipt the attempt is

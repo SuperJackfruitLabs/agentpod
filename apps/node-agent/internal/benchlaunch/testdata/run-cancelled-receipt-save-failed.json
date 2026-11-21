@@ -1,0 +1,1 @@
+{"version":"superbench.v2","operation":"run","request_id":"run_x","ok":false,"error":{"code":"operation_in_doubt","message":"receipt save failed; inspect retained workspace state"}}

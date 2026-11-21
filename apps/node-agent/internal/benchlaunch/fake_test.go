@@ -63,6 +63,16 @@ type fakeBench struct {
 	// lease; killedLive also delivers it, otherwise the reply is lost.
 	killed     []byte
 	killedLive bool
+	// barrier: the run is cancelled mid-flight. benchd answers its POST with
+	// barrierReply (or loses it), stores no receipt for it (receipt_save_failed
+	// "operation cancellation requested"), and its lookup answers in_progress
+	// until a cancel arrives, then cancel_requested for ever. The lease stays
+	// held by this holder; once cancelled it shows stop_requested, with its
+	// execution running for stopLag more status reads, then stopped.
+	barrier          bool
+	barrierReply     []byte
+	barrierCancelled bool
+	stopLag          int
 }
 type receipt struct {
 	digest string
@@ -138,7 +148,12 @@ func (f *fakeBench) Post(ctx context.Context, path, contentType string, raw []by
 		var r benchworkspace.ReceiptLookupRequest
 		_ = json.Unmarshal(raw, &r)
 		result := benchworkspace.ReceiptLookupResult{TargetRequestID: r.TargetRequestID, TargetDigest: r.TargetDigest, State: "absent"}
-		if got, ok := f.receipts[r.TargetRequestID]; ok && got.digest == r.TargetDigest && f.lookup == "" {
+		if f.barrier && f.effects["run"] > 0 && strings.HasPrefix(r.TargetRequestID, "run") {
+			result.State = "in_progress"
+			if f.barrierCancelled {
+				result.State = "cancel_requested"
+			}
+		} else if got, ok := f.receipts[r.TargetRequestID]; ok && got.digest == r.TargetDigest && f.lookup == "" {
 			result.State, result.HTTPStatus, result.ResponseBody = "completed", got.status, string(got.body)
 			if f.tamperRead && strings.HasPrefix(r.TargetRequestID, "run") {
 				result.ResponseBody = strings.Replace(result.ResponseBody, `"log_truncated":false`, `"log_truncated":true`, 1)
@@ -160,6 +175,9 @@ func (f *fakeBench) Post(ctx context.Context, path, contentType string, raw []by
 			f.t.Fatal("invalid cancel sent")
 		}
 		f.cancels = append(f.cancels, c)
+		if f.barrier {
+			f.barrierCancelled = true
+		}
 		body, _ := json.Marshal(benchworkspace.CancelResponse{Version: benchworkspace.Version, Operation: "cancel", OK: true, Result: &benchworkspace.CancelObservation{TargetRequestID: c.TargetRequestID, TargetDigest: c.TargetDigest, State: "cancel_requested"}})
 		return 200, body, nil
 	}
@@ -199,7 +217,7 @@ func (f *fakeBench) Post(ctx context.Context, path, contentType string, raw []by
 	if status == 0 {
 		return 0, nil, benchworkspace.ErrLost
 	}
-	if benchworkspace.Growth(op) && (status != 409 || !strings.Contains(string(body), "in_progress")) {
+	if benchworkspace.Growth(op) && (status != 409 || !strings.Contains(string(body), "in_progress")) && !(f.barrier && op == "run") {
 		f.receipts[request.RequestID] = receipt{digest: typed, status: status, body: body}
 	}
 	if f.loseAfter[op] {
@@ -300,6 +318,13 @@ func (f *fakeBench) act(ctx context.Context, spec benchdispatch.SourceSpec, r be
 		if f.stuck != "" {
 			w = f.stuckWorkspace(spec)
 		}
+		if f.barrierCancelled && f.leased {
+			phase := "stopped"
+			if f.stopLag > 0 {
+				f.stopLag, phase = f.stopLag-1, "running"
+			}
+			w.Lease = &benchworkspace.LeaseSummary{Holder: f.holder, Mode: "supervised", StopRequested: true, Execution: &benchworkspace.Execution{ID: strings.Repeat("3", 32), Phase: phase}}
+		}
 		inv := map[string]any{"benches": []any{benchworkspace.WorkspaceInventory{Workspace: w, Kind: "workspace", Members: []benchworkspace.Member{{Name: "a", Branch: "card/x", Base: "main", ObjectFormat: "sha1", SourceCommit: fakeCommitA}, {Name: "b", Branch: "card/x", Base: "main", ObjectFormat: "sha1", SourceCommit: fakeCommitB}}}}}
 		if f.afterStatus != nil {
 			f.afterStatus()
@@ -323,6 +348,12 @@ func (f *fakeBench) act(ctx context.Context, spec benchdispatch.SourceSpec, r be
 		}
 		f.lastCapsule, f.runArgs = capsule, append([]string(nil), r.Arguments...)
 		f.effects[op]++
+		if f.barrier {
+			if f.barrierReply != nil {
+				return 503, f.barrierReply
+			}
+			return 0, nil
+		}
 		if f.killed != nil {
 			typed, _ := finite.Digest()
 			f.receipts[r.RequestID] = receipt{digest: typed, status: 503, body: f.killed}

@@ -93,6 +93,9 @@ func (c Coordinator) advance(ctx context.Context, spec benchdispatch.SourceSpec)
 		return zero, err
 	}
 	status, body, err := c.send(ctx, spec, k)
+	if errors.Is(err, errCancelBarrier) {
+		return zero, c.cancelledRun(ctx, spec, r)
+	}
 	if err != nil {
 		return zero, err
 	}
@@ -163,6 +166,41 @@ func (c Coordinator) advance(ctx context.Context, spec benchdispatch.SourceSpec)
 		return zero, refuse("stale_owner") // cancelled while the result was being checked
 	}
 	return completion, nil
+}
+
+// cancelledRun ends a record whose run lost its finalization race to a
+// cancellation barrier. SuperBench stores no reply for such a run, so its
+// receipt lookup answers cancel_requested for ever and no completion can ever
+// come; waiting for one held the stopped lease, and the Hub's attempt, for
+// ever. Treaty ("Cancellation does not release"; "A completed stored failure
+// is final") leaves the lease with its holder, so the holder winds it down:
+//
+//   - The bench must show this record's own lease fenced (stop_requested, its
+//     execution stopped), or no longer this holder's. Until it does the run may
+//     still be winding down: parked, and nothing is released or stopped.
+//   - The record ends refused, never completed: the result is never published.
+//     A record the hub vetoed ends stale_owner (the hub's proof it retired
+//     itself); one cancelled by anyone else ends verification_failed, since its
+//     run did not finish.
+//   - The stopped lease is released with this record's own token. No stop is
+//     sent (the execution is already stopped) and nothing is checkpointed to
+//     make the release succeed. A refused release keeps it held and retried.
+func (c Coordinator) cancelledRun(ctx context.Context, spec benchdispatch.SourceSpec, r record) error {
+	w := c.bench(ctx, spec)
+	if w == nil {
+		return errCancelBarrier
+	}
+	gone := w.Lease == nil || w.Lease.Holder != spec.Holder || r.BenchID != "" && w.BenchID != r.BenchID
+	stopped := !gone && w.Lease.StopRequested && w.Lease.Execution != nil && w.Lease.Execution.Phase == "stopped"
+	if !gone && !stopped {
+		return errCancelBarrier
+	}
+	code := "verification_failed"
+	if r.Cancelled {
+		code = "stale_owner"
+	}
+	log.Printf("bench %s: run %s was cancelled before its receipt was stored; ending the attempt %s and releasing its stopped lease", spec.BenchKey, spec.RunRequestID, code)
+	return c.terminate(ctx, spec, code, !gone)
 }
 
 // readback independently re-reads the producer's retained receipt for the run.
@@ -329,6 +367,9 @@ func (c Coordinator) Status(ctx context.Context, spec benchdispatch.SourceSpec) 
 		if _, ok := RefusalCode(err); ok || !r.Cancelled {
 			return benchcoordinator.Status{}, err
 		}
+		if after, _, e := c.Journal.read(ctx, spec); e == nil && releaseStuck(after) {
+			return benchcoordinator.Status{State: "release_refused", RequiresReconciliation: true}, nil
+		}
 		return benchcoordinator.Status{State: "cancel_requested", RequiresReconciliation: true}, nil
 	}
 	if r.Binding != nil && !r.Cancelled {
@@ -456,8 +497,15 @@ func (c Coordinator) retire(ctx context.Context, spec benchdispatch.SourceSpec) 
 			return benchdispatch.ErrInvalid
 		}
 		raw, _ := json.Marshal(target)
+		sent := r.step("cancel") == nil || r.step("cancel").Response == nil
+		state := "unanswered"
 		if status, body, err := c.send(ctx, spec, call{name: "cancel", path: benchworkspace.PathOperations, cleanup: true, request: raw}); err == nil {
-			_, _ = benchworkspace.ParseCancelResponse(body, status, target) // intent only, never a fence
+			if reply, e := benchworkspace.ParseCancelResponse(body, status, target); e == nil && reply.OK && reply.Result != nil {
+				state = reply.Result.State // intent only, never a fence
+			}
+		}
+		if sent {
+			log.Printf("bench %s: hub retired run %s; cancel requested (%s), waiting for the run to stop", spec.BenchKey, spec.RunRequestID, state)
 		}
 	}
 	_, err = c.advance(ctx, spec)
