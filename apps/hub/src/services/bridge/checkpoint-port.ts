@@ -9,7 +9,8 @@ import { checkpointProfileId, CheckpointRefused, requireCheckpointProfileClaim, 
   type CheckpointRefusalReason } from "./checkpoint-profile";
 import { checkpointAgentClient } from "./checkpoint-agent-client";
 import { pendingCheckpointAttempt, reserveCheckpointAttempt } from "./checkpoint-ledger";
-import { driveCheckpointAttempt } from "./checkpoint-orchestrator";
+import { driveCheckpointAttempt, endEndedRun, RUN_ENDABLE_PHASES } from "./checkpoint-orchestrator";
+import { readRunEnded } from "./checkpoint-run-ended";
 import { resolveSupersededAttempt } from "./checkpoint-supersede";
 import { createAttemptBackoff } from "./checkpoint-recover-backoff";
 import { createLogger } from "../../utils/logger";
@@ -124,6 +125,25 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
       const { attempt } = pending;
       const key = `${attempt.row.attemptId}:${attempt.row.phase}`;
       if (!backoff.due(key)) return held(attempt.row.attemptId, attempt.claim.runId);
+      // A client that cannot be built (no plane credential source, for one) asks nothing: a superseded
+      // attempt is still resolved below without it, and the drive builds and refuses as before.
+      const client = await checkpointAgentClient(profile).catch((error: unknown) => {
+        noteCheckpoint("recover", "board.client", { stationId, attemptId: attempt.row.attemptId }, error);
+        return undefined;
+      });
+      // First, read-only: has the board ended this attempt's run? A card moved off the stage, cancelled,
+      // deleted or reclaimed never comes back, so the attempt is ended rather than re-driven: no
+      // heartbeat keeps an unbound run alive, and the station is free for the next card's claim. This
+      // holds for a superseded attempt too, which is otherwise parked past `prepared` for an operator.
+      if (client && (RUN_ENDABLE_PHASES.has(attempt.row.phase) || attempt.row.phase === "failure_pending")) {
+        const ended = await readRunEnded(client, attempt.claim);
+        if (ended) {
+          const result = await endEndedRun(attempt, ended);
+          if (result.status === "unreported") { backoff.parked(key); return result; }
+          backoff.clear();
+          return undefined;
+        }
+      }
       if (pending.superseded) {
         // Made under a profile this installation has replaced: it can never be driven again, only
         // resolved. Retired with the node's evidence when that proves nothing is outstanding;
@@ -142,7 +162,7 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
         backoff.parked(key);
         return held(attempt.row.attemptId, attempt.claim.runId);
       }
-      const result = await driveCheckpointAttempt(attempt, await checkpointAgentClient(profile));
+      const result = await driveCheckpointAttempt(attempt, client ?? await checkpointAgentClient(profile));
       if (result.status === "unreported") backoff.parked(key); else backoff.clear();
       return result;
     },

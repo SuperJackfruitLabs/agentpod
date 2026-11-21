@@ -8,8 +8,9 @@ import { BENCH_COORDINATOR_VERB, BenchCoordinatorRequest, parseBenchCoordinatorR
   type BenchCoordinatorResponse } from "@agentpod/contract";
 import { request as nodeRequest } from "../broker";
 import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON, parseCheckpointContextJSON } from "./checkpoint-json";
-import { advanceCheckpointAttempt, closeFailedCheckpointAttempt, failCheckpointAttempt, type CheckpointFailure,
-  type RetainedCheckpointAttempt } from "./checkpoint-ledger";
+import { advanceCheckpointAttempt, closeFailedCheckpointAttempt, failCheckpointAttempt, retireCheckpointAttempt,
+  type CheckpointFailure, type CheckpointRetirementReason, type RetainedCheckpointAttempt } from "./checkpoint-ledger";
+import { readRunEnded, type RunEnded } from "./checkpoint-run-ended";
 import { retainedCheckpointSource } from "./checkpoint-current-decision";
 import { checkpointAuthorityMatches, readCheckpointAuthority } from "./checkpoint-current";
 import { requireInstalledCheckpointProfile } from "./checkpoint-profiles";
@@ -22,7 +23,7 @@ import { checkedCheckpointReceipt } from "./checkpoint-settlement-data";
 import { isLeaseSuperseded, type SuperpipelineClient } from "./superpipeline";
 import type { DispatchResult } from "./dispatch-types";
 import { createQuietLog, type QuietLog } from "./quiet-log";
-import { errorFacts, nodeCallReason } from "./checkpoint-log";
+import { errorFacts, nodeCallReason, noteCheckpoint } from "./checkpoint-log";
 import { nodeCallTimeoutMs } from "./checkpoint-node-call";
 import { checkpointActivity, postCheckpointActivity } from "./checkpoint-activity";
 
@@ -40,8 +41,8 @@ export function setParkedLogForTests(next: QuietLog): () => void {
   parkedLog = next;
   return () => { parkedLog = prior; };
 }
-/** Why each parked result parked, so the drive can say it on the card once. */
-const parkFacts = new WeakMap<DispatchResult, { phase: string; code: string; reason?: string }>();
+/** Why each parked result parked, and the attempt as it parked, so the drive can say it on the card once. */
+const parkFacts = new WeakMap<DispatchResult, { phase: string; code: string; reason?: string; attempt: RetainedCheckpointAttempt }>();
 // Every park passes the error that names it: there is no default, so a call site cannot park unnamed.
 const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["code"], error: unknown): DispatchResult => {
   // The error that parked it, by class and redacted message (a refusal's own cause when it replaced one).
@@ -55,7 +56,7 @@ const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["cod
     attemptId: attempt.row.attemptId, phase: attempt.row.phase, code, reason, ...facts });
   const result: DispatchResult = { status: "unreported", externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId,
     reason: "Checkpoint dispatch requires reconciliation" };
-  parkFacts.set(result, { phase: attempt.row.phase, code, reason });
+  parkFacts.set(result, { phase: attempt.row.phase, code, reason, attempt });
   return result;
 };
 
@@ -98,9 +99,13 @@ export interface CheckpointDriveDeps {
   /** Hold a definite node refusal (`failure_pending`), and end it `failed` once the board is told. */
   fail: typeof failCheckpointAttempt;
   close: typeof closeFailedCheckpointAttempt;
+  /** End an attempt whose run the board ended (`retired`, with the board's answer and the node's reply). */
+  retire: typeof retireCheckpointAttempt;
+  now(): number;
 }
 const defaultDeps: CheckpointDriveDeps = { authority: current, request: nodeRequest, service: createCheckpointServiceClient,
-  advance: advanceCheckpointAttempt, fail: failCheckpointAttempt, close: closeFailedCheckpointAttempt };
+  advance: advanceCheckpointAttempt, fail: failCheckpointAttempt, close: closeFailedCheckpointAttempt,
+  retire: retireCheckpointAttempt, now: Date.now };
 
 async function exchange(attempt: RetainedCheckpointAttempt, raw: string, deps: CheckpointDriveDeps): Promise<BenchCoordinatorResponse> {
   const sent = BenchCoordinatorRequest.parse(parseCheckpointJSON(encode(raw)));
@@ -129,11 +134,111 @@ function statusRequest(attempt: RetainedCheckpointAttempt): string {
 export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt, client: SuperpipelineClient,
   sendPrepare = false, deps: CheckpointDriveDeps = defaultDeps): Promise<DispatchResult> {
   const result = await drive(initial, client, sendPrepare, deps);
-  // A park is said on the card once per attempt, phase and reason; the re-checks stay quiet.
   const facts = parkFacts.get(result);
+  // A pass that parks asks the board, read-only, whether the run has ended. If it has, parking would
+  // wait forever (the run never comes back) and hold the station's checkpoint claims with it.
+  if (facts && RUN_ENDABLE_PHASES.has(facts.attempt.row.phase)) {
+    const ended = await readRunEnded(client, facts.attempt.claim);
+    if (ended) return endEndedRun(facts.attempt, ended, deps);
+  }
+  // A park is said on the card once per attempt, phase and reason; the re-checks stay quiet. A run the
+  // board ended returned above: it is never written to, since an activity on an unbound run heartbeats it.
   if (facts) await postCheckpointActivity(client, initial, `parked:${facts.phase}:${facts.code}:${facts.reason ?? ""}`,
     checkpointActivity("parked", facts));
   return result;
+}
+
+/**
+ * Phases whose run the board may end while the attempt waits. A park in one of them asks the board.
+ * `failure_pending` asks before it tells the board anything; `submission_pending` asks only after an
+ * authenticated missing receipt, because a settlement that landed ends the run too.
+ */
+export const RUN_ENDABLE_PHASES: ReadonlySet<string> = new Set(["prepare_pending", "prepared", "source_pending", "admitted",
+  "execute_pending", "completed"]);
+/** Nothing of the attempt is running: execute was never sent, or (`completed`) the node's run already finished. */
+const NOTHING_RUNNING_PHASES: ReadonlySet<string> = new Set(["prepare_pending", "prepared", "source_pending", "admitted", "completed"]);
+/**
+ * A node status that proves its record terminal: retired by the Hub's `stale_owner` decision (it sent
+ * one cancel for a launched run and released the lease), or ended by its own terminal refusal.
+ */
+const NODE_TERMINAL_CODES: ReadonlySet<string> = new Set(["stale_owner", "verification_failed", "unsupported", "capacity_exhausted"]);
+/** After execute: how long past the task's own timeout the Hub waits for the node to confirm it stopped. */
+export const RUN_ENDED_GRACE_MS = 15 * 60_000;
+
+/**
+ * Tell the node the run ended: one `status` for the attempt's exact retained identity. The node asks
+ * the Hub's current decision, which now answers `stale_owner`, so it retires its own record: it
+ * releases what the record holds and, for a launched run, sends one cancel (BENCH_REGISTERED_LAUNCH.md,
+ * "Stale attempts clean up after themselves"). Read-only on the wire; never prepare, never execute.
+ */
+async function tellNode(attempt: RetainedCheckpointAttempt, deps: CheckpointDriveDeps): Promise<
+  { reply: BenchCoordinatorResponse; error?: undefined } | { reply?: undefined; error: string }> {
+  const sent = BenchCoordinatorRequest.parse(parseCheckpointJSON(encode(statusRequest(attempt))));
+  const meta = { boardId: attempt.row.boardId, runId: attempt.claim.runId, attemptId: attempt.row.attemptId };
+  try {
+    const result = await deps.request(attempt.profile.target.node_id, BENCH_COORDINATOR_VERB, sent, { timeoutMs: nodeCallTimeoutMs("status") });
+    if (!result.ok) {
+      const reason = nodeCallReason(result.error ?? "");
+      noteCheckpoint("run-ended", reason, meta, new Error(result.error ?? "no error"));
+      return { error: reason };
+    }
+    const serialized = JSON.stringify(result.data);
+    if (typeof serialized !== "string" || Buffer.byteLength(serialized, "utf8") > 262144) return { error: "node.reply.size" };
+    return { reply: await parseBenchCoordinatorResponse(encode(serialized), sent) };
+  } catch (error) {
+    noteCheckpoint("run-ended", "node.reply", meta, error);
+    return { error: "node.reply" };
+  }
+}
+
+/**
+ * End an attempt whose run the board definitively ended (checkpoint-run-ended.ts), instead of parking
+ * it forever. Never reports a pass, and never tells the board anything: a run verb on a run whose card
+ * moved on would act on the card where it is now.
+ *
+ * - `failure_pending`: the held failure closes `failed`, outcome `run_ended`, with the board's answer.
+ * - Nothing running (before execute, or `completed`): the node is told, and the attempt ends `retired`
+ *   (`run_ended`) with the board's answer and the node's reply, whatever it was.
+ * - `execute_pending`: an effect is possible. The node is told (it cancels and releases), and the attempt
+ *   ends `retired` (`run_ended.stopped`) once its reply proves the record terminal. Until then it parks,
+ *   named, and is told again on the next pass; past the task's own timeout plus a grace period it ends
+ *   `run_ended.unconfirmed`, so one run the board ended cannot hold the station for ever.
+ * - `submission_pending` (after an authenticated missing receipt): `run_ended.unsettled`.
+ */
+export async function endEndedRun(initial: RetainedCheckpointAttempt, ended: RunEnded,
+  deps: CheckpointDriveDeps = defaultDeps): Promise<DispatchResult> {
+  const attempt = initial;
+  const phase = attempt.row.phase;
+  const ids = { externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId };
+  const meta = { tenantId: attempt.row.tenantId, boardId: attempt.row.boardId, runId: attempt.claim.runId,
+    attemptId: attempt.row.attemptId, phase, board: ended.reason };
+  try {
+    if (phase === "failure_pending") {
+      const closed = (await deps.close(attempt, "run_ended", ended)).attempt;
+      const failure = heldFailure(closed);
+      log.info("checkpoint run ended on the board; the held failure is closed and nothing was sent", meta);
+      return { status: failure.disposition, ...ids, reason: failure.reason };
+    }
+    if (!RUN_ENDABLE_PHASES.has(phase) && phase !== "submission_pending") throw new CheckpointRefused("source", "retained.phase");
+    const node = await tellNode(attempt, deps);
+    const terminal = node.reply?.state === "refused" && "code" in node.reply && NODE_TERMINAL_CODES.has(node.reply.code);
+    let reason: CheckpointRetirementReason;
+    if (phase === "submission_pending") reason = "run_ended.unsettled";
+    else if (NOTHING_RUNNING_PHASES.has(phase)) reason = "run_ended";
+    else if (terminal) reason = "run_ended.stopped";
+    // execute_pending committed this row's last update, so updatedAt is when execute was sent at the latest.
+    else if (deps.now() >= attempt.row.updatedAt.getTime() + attempt.request.task.timeout_seconds * 1000 + RUN_ENDED_GRACE_MS)
+      reason = "run_ended.unconfirmed";
+    else {
+      const why = node.reply ? `${node.reply.state}${"code" in node.reply ? "." + node.reply.code : ""}` : undefined;
+      return parked(attempt, "uncertain", new CheckpointRefused("uncertain", why ? `run_ended.node:${why}` : "run_ended.node_unreachable"));
+    }
+    const evidence = JSON.stringify({ board: ended, node: node.reply ?? { error: node.error } });
+    if (!await deps.retire(attempt, { reason, by: "hub", evidence }))
+      return parked(attempt, "stale", new CheckpointRefused("stale", "ledger.raced"));
+    log.info("checkpoint run ended on the board; the attempt is retired and the station is free", { ...meta, reason });
+    return { status: "released", ...ids, reason: `Checkpoint run ended on the board (${ended.reason}); the attempt is retired (${reason})` };
+  } catch (error) { return parked(attempt, error instanceof CheckpointRefused ? error.code : "unavailable", error); }
 }
 
 async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineClient,
@@ -250,6 +355,12 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           // Recover an existing effect first. Only the exact authenticated
           // missing-receipt response permits a new settlement attempt.
           let receipt = sendSettlement ? undefined : await service.receipt(attempt.claim, body);
+          if (!receipt && !sendSettlement) {
+            // The board holds no receipt (an authenticated CHECKPOINT_RECEIPT_MISSING). If it also ended
+            // the run, the settlement can never land: end the attempt instead of parking it forever.
+            const ended = await readRunEnded(client, attempt.claim);
+            if (ended) return endEndedRun(attempt, ended, deps);
+          }
           if (!receipt) {
             // T37 settlement is idempotent by the complete retained submission.
             // This reconciles a crash before POST, or an uncertain POST whose
@@ -276,6 +387,10 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           // Said on the card while the lease is still ours, then the run is told. A lost reply is told
           // again on the next pass; a run the board already ended (STALE_LEASE) is not ours to tell.
           const failure = heldFailure(attempt);
+          // Asked first: a run the board ended takes no verb. Its card may have moved on, and `fail` or
+          // `release` on that run would act on the card where it is now.
+          const ended = await readRunEnded(client, attempt.claim);
+          if (ended) return endEndedRun(attempt, ended, deps);
           await postCheckpointActivity(client, attempt, failure.disposition,
             checkpointActivity(failure.disposition, { phase: failure.phase, code: failure.code, reason: failure.reason }));
           let outcome: "fail" | "release" | "lease_ended";

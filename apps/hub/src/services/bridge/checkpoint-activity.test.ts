@@ -76,6 +76,8 @@ function deps(reply: unknown, committed: boolean): CheckpointDriveDeps {
     advance: async (attempt, evidence) => ({ attempt: { ...attempt, row: { ...attempt.row, ...evidence } }, send: committed }),
     fail: async () => { throw new Error("no refusal in this test"); },
     close: async () => { throw new Error("no refusal in this test"); },
+    retire: async () => { throw new Error("no retirement in this test"); },
+    now: () => 0,
   };
 }
 

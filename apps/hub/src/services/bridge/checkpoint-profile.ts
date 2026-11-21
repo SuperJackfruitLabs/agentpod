@@ -74,6 +74,11 @@ export type CheckpointRefusalReason =
   | "drive.error"
   /** The node's reply is larger than the Hub reads. */
   | "node.reply.size"
+  /**
+   * The board ended the run after execute was sent; the node, told, has not yet confirmed its record
+   * terminal (`run_ended.node:<state>[.<code>]`) or could not be reached. Told again on the next pass.
+   */
+  | "run_ended.node_unreachable" | `run_ended.node:${string}`
   /** Current authority no longer equals the attempt's retained authority. */
   | "authority.changed"
   /** The roster/occupancy facts changed between the two reads of one authority check. */
