@@ -275,6 +275,10 @@ in `packages/contract/src/fixtures/bench-coordinator-node-refusals-v1.json`.
 - The coordinator wire has no `cancel` operation. `Coordinator.Cancel` is a Node
   API, covered by tests; a hub caller (the board's cancel reaching the node) is a
   follow-up. Until then a newer attempt's `prepare`, or `status` after a
-  `stale_owner` decision, is what retires an abandoned record.
+  `stale_owner` decision, is what retires an abandoned record. When the board
+  ends an attempt's run (the card moved, cancelled, deleted or reclaimed), the
+  hub's current decision answers `stale_owner` and the hub sends that `status`
+  itself (contributor/bench-checkpoint-reporting.md, "When the board ends the
+  run").
 - None of this proves a provider-backed task. The installed payload home,
   provider configuration and a real fenced run still need live proof.
