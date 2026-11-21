@@ -469,6 +469,14 @@ export class SuperpipelineClient {
     return result as RunContext;
   }
 
+  /**
+   * The run as the board reports it, unvalidated (GET runs/:runId). Read only to learn whether the
+   * board has ended the run or unbound its card (checkpoint-run-ended.ts); never a work context.
+   */
+  async runRecord(runId: string): Promise<unknown> {
+    return await this.send("GET", `/v1/boards/${this.boardId}/runs/${encodeURIComponent(runId)}`);
+  }
+
   /** The runs of the card this run holds (superpipeline GET runs/:runId/attempts): the run's own
    * card only, never another; read-only. */
   async attempts(runId: string): Promise<unknown> {

@@ -145,7 +145,21 @@ export type CheckpointRetirementReason =
   /** Superseded profile; the node retired its own record (a terminal `stale_owner`). */
   | "superseded.node_retired"
   /** An owner or admin settled it explicitly, with their own evidence. */
-  | "operator";
+  | "operator"
+  /**
+   * The board definitively ended the run before execute was sent (or after the node's run already
+   * finished, in `completed`): nothing is running. The node was told to retire its record.
+   */
+  | "run_ended"
+  /** The board ended the run after execute was sent, and the node's record is terminal: it stopped and released. */
+  | "run_ended.stopped"
+  /**
+   * The board ended the run after execute was sent, and the node never confirmed it stopped within
+   * the task's own timeout and a grace period, so nothing of the run can still be executing.
+   */
+  | "run_ended.unconfirmed"
+  /** The board ended the run while a settlement was pending, and the board holds no receipt for it. */
+  | "run_ended.unsettled";
 export interface CheckpointRetirement {
   version: "agentpod.checkpoint-retirement.v1";
   reason: CheckpointRetirementReason;
@@ -231,9 +245,14 @@ export interface CheckpointFailure {
 }
 export interface CheckpointFailureReport {
   version: "agentpod.checkpoint-failure-report.v1";
-  /** `fail` or `release` were accepted; `lease_ended` means the board already ended the run (STALE_LEASE). */
-  outcome: "fail" | "release" | "lease_ended";
+  /**
+   * `fail` or `release` were accepted; `lease_ended` means the board already ended the run (STALE_LEASE);
+   * `run_ended` means the board's run view said it ended or its card moved on, so nothing was sent.
+   */
+  outcome: "fail" | "release" | "lease_ended" | "run_ended";
   at: string;
+  /** With `run_ended`: the board's answer (checkpoint-run-ended.ts). */
+  board?: { reason: string; board: Record<string, string | number | null> };
 }
 
 /** The only phases that ask the node, so the only ones a node refusal can end. */
@@ -267,9 +286,10 @@ export async function failCheckpointAttempt(attempt: RetainedCheckpointAttempt,
 
 /** End a `failure_pending` attempt as `failed`, once SuperPipeline has been told. Compare-and-set. */
 export async function closeFailedCheckpointAttempt(attempt: RetainedCheckpointAttempt,
-  outcome: CheckpointFailureReport["outcome"]): Promise<{ attempt: RetainedCheckpointAttempt; send: boolean }> {
+  outcome: CheckpointFailureReport["outcome"], board?: CheckpointFailureReport["board"]): Promise<{ attempt: RetainedCheckpointAttempt; send: boolean }> {
   if (attempt.row.phase !== "failure_pending") throw new CheckpointRefused("stale", "ledger.phase");
-  const report: CheckpointFailureReport = { version: "agentpod.checkpoint-failure-report.v1", outcome, at: new Date().toISOString() };
+  const report: CheckpointFailureReport = { version: "agentpod.checkpoint-failure-report.v1", outcome, at: new Date().toISOString(),
+    ...(board === undefined ? {} : { board }) };
   const [updated] = await db.update(checkpointDispatches).set({ phase: "failed", failureReport: canonicalCheckpoint(report), updatedAt: new Date() })
     .where(and(eq(checkpointDispatches.tenantId, attempt.row.tenantId), eq(checkpointDispatches.attemptId, attempt.row.attemptId),
       eq(checkpointDispatches.prepareSHA256, attempt.row.prepareSHA256), eq(checkpointDispatches.phase, "failure_pending"))).returning();

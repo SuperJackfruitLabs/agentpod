@@ -11,6 +11,7 @@ import { checkpointAgentClient } from "./checkpoint-agent-client";
 import { noteCheckpoint } from "./checkpoint-log";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { parseCheckpointSource, parseSourceReceipt, requireActiveSource, type CheckpointSourceSnapshot } from "./checkpoint-source";
+import { readRunEnded } from "./checkpoint-run-ended";
 
 const encode = (raw: string) => new TextEncoder().encode(raw);
 const hash = (raw: Uint8Array) => createHash("sha256").update(raw).digest("hex");
@@ -47,13 +48,45 @@ export function finalRowDecision(initial: AttemptRow, final: AttemptRow | undefi
   return JSON.stringify(final) === JSON.stringify(initial) ? "current" : "unavailable";
 }
 
-export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array) {
+/**
+ * Whether the board definitively ended the attempt's run. Asked only after a decision failed on an
+ * attempt whose identity matched; any failure to ask is not an answer. Injectable for tests.
+ */
+export type RunEndedCheck = (attempt: RetainedCheckpointAttempt) => Promise<boolean>;
+const boardEndedRun: RunEndedCheck = async (attempt) =>
+  (await readRunEnded(await checkpointAgentClient(attempt.profile), attempt.claim)) !== undefined;
+
+/**
+ * What a decision that failed answers. A run the board definitively ended (a card moved off the
+ * stage, cancelled, deleted or reclaimed) never comes back, so `unavailable` would have the node
+ * retry for ever: the staging sequence where every decision refused `context` and the node answered
+ * refused/unavailable. `stale_owner` lets the node retire its own record: it releases what the record
+ * holds and cancels a launched run, and never runs. Only the board's explicit answer counts, and only
+ * for a request already proven to be for exactly this attempt; a board that cannot be asked, or an
+ * unmatched request, stays `unavailable`. Exported for tests.
+ */
+export async function failedDecision<A extends { row: { attemptId: string }; claim: { runId: string } }>(nodeId: string,
+  matched: A | undefined, runEnded: (attempt: A) => Promise<boolean>): Promise<"stale_owner" | "unavailable"> {
+  if (!matched) return "unavailable";
+  try {
+    if (!await runEnded(matched)) return "unavailable";
+  } catch (error) {
+    noteCheckpoint("current-decision", "decision.run_ended.unread", { nodeId }, error);
+    return "unavailable";
+  }
+  noteCheckpoint("current-decision", "decision.run_ended", { nodeId, runId: matched.claim.runId, attemptId: matched.row.attemptId });
+  return "stale_owner";
+}
+
+export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array, runEnded: RunEndedCheck = boardEndedRun) {
   const request = parseBenchCoordinatorCurrentRequest(raw);
   const base = { version: request.version, nonce: request.nonce, request_sha256: hash(raw) };
   const refused = (code: "unauthorized" | "stale_owner" | "unavailable" | "pending" | "invalid") => {
     const now = Date.now();
     return BenchCoordinatorCurrentResponse.parse({ ...base, issued_at_ms: now, expires_at_ms: now + 1000, decision: "refused", code });
   };
+  /** The attempt, once the request is proven to be for exactly it. */
+  let matched: RetainedCheckpointAttempt | undefined;
   try {
     if (nodeId !== request.identity.node_id || nodeId !== request.target.node_id) return refused("unauthorized");
     const attempt = await readCheckpointAttempt(request.identity.tenant_id, request.identity.attempt_id);
@@ -61,6 +94,7 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array)
       canonicalCheckpoint(request.target) !== canonicalCheckpoint(attempt.request.target) ||
       request.profile_id !== checkpointProfileId(attempt.profile) || request.prepare_request_sha256 !== attempt.row.prepareSHA256)
       return refused("stale_owner");
+    matched = attempt;
     // A loaded installation that replaced this attempt's profile is a definite change: no installed
     // profile can ever authorize it again. stale_owner lets the node retire its own record (release
     // what it holds, never run). An unreadable installation stays `unavailable` below.
@@ -113,6 +147,6 @@ export async function checkpointCurrentDecision(nodeId: string, raw: Uint8Array)
   } catch (error) {
     // `unavailable` lets the node retry; the error behind it is named here, never on the wire.
     noteCheckpoint("current-decision", "decision.error", { nodeId }, error);
-    return refused("unavailable");
+    return refused(await failedDecision(nodeId, matched, runEnded));
   }
 }

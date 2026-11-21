@@ -25,13 +25,48 @@ export function httpFailureReason(error: unknown): "http.timeout" | "http.networ
 /** The request path only: no query, no host secrets. */
 const pathOf = (url: string) => { try { return new URL(url).pathname; } catch { return "unparsable"; } }; // silent-catch-ok: a label for the log line, never a decision
 
+/**
+ * The board's error codes a refusal may carry on this path: the ones that say the run ended or is
+ * someone else's (checkpoint-run-ended.ts, and `lease_ended` on a held failure). Nothing else of
+ * the board's error body is kept: no message, no other code. Exported for tests.
+ */
+export const BOARD_RUN_CODES: ReadonlySet<string> = new Set(["STALE_LEASE", "NOT_RUN_OWNER", "RUN_NOT_FOUND", "CARD_NOT_FOUND"]);
+
+/** The error body a refusal is handed on as: the closed code alone, or the fixed refusal. Exported for tests. */
+export function boardErrorBody(raw: string): { error: string | { code: string } } {
+  let code: unknown;
+  try { const parsed: unknown = JSON.parse(raw); code = Reflect.get(Object(Reflect.get(Object(parsed), "error")), "code"); }
+  catch { code = undefined; } // silent-catch-ok: an unparsable error body carries no code; the status is logged by the caller
+  return typeof code === "string" && BOARD_RUN_CODES.has(code) ? { error: { code } } : { error: "CHECKPOINT_REQUEST_REFUSED" };
+}
+
+/** At most 4 KiB of an error body; a longer or unreadable one carries no code. */
+async function errorText(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const parts: Uint8Array[] = []; let count = 0;
+  try {
+    for (;;) {
+      const chunk = await reader.read(); if (chunk.done) break;
+      count += chunk.value.byteLength;
+      if (count > 4096) return "";
+      parts.push(chunk.value);
+    }
+  } catch { return ""; } // silent-catch-ok: an unreadable error body carries no code; its status is logged by the caller
+  finally { await reader.cancel().catch(() => {}); reader.releaseLock(); } // silent-catch-ok: releasing a reader already read or failed
+  return Buffer.concat(parts).toString("utf8");
+}
+
 const boundedFetch: Fetcher = async (url, init) => {
   try {
     const response = await fetch(url, { ...init, redirect: "error", credentials: "omit", headers: { ...init.headers, accept: "application/json", "accept-encoding": "identity" }, signal: AbortSignal.timeout(5_000) });
     if (!response.ok) {
-      // The board's own error body is not read (it is not trusted on this path); its status is named here.
-      noteCheckpoint("http", "http.status", { status: response.status, path: pathOf(url) });
-      return { status: response.status, ok: false, json: async () => ({ error: "CHECKPOINT_REQUEST_REFUSED" }) };
+      // Only a closed code survives from the board's error body: before, the body was dropped whole,
+      // so a STALE_LEASE or RUN_NOT_FOUND never reached the attempt and a run the board ended parked.
+      const body = boardErrorBody(await errorText(response));
+      noteCheckpoint("http", "http.status", { status: response.status, path: pathOf(url),
+        ...(typeof body.error === "string" ? {} : { code: body.error.code }) });
+      return { status: response.status, ok: false, json: async () => body };
     }
     const reader = response.body?.getReader();
     if (!reader || response.headers.get("content-encoding") && response.headers.get("content-encoding") !== "identity")

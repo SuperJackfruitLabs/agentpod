@@ -24,7 +24,8 @@ import { adminCheckpointAttemptsRouter } from "../../src/routes/admin-checkpoint
 import { connectionManager } from "../../src/services/broker";
 import { checkpointProfileId, parseCheckpointProfile } from "../../src/services/bridge/checkpoint-profile";
 import { advanceCheckpointAttempt, closeFailedCheckpointAttempt, failCheckpointAttempt, pendingCheckpointAttempt,
-  readCheckpointAttempt, reserveCheckpointAttempt, type RetainedCheckpointAttempt } from "../../src/services/bridge/checkpoint-ledger";
+  readCheckpointAttempt, reserveCheckpointAttempt, retireCheckpointAttempt, type RetainedCheckpointAttempt } from "../../src/services/bridge/checkpoint-ledger";
+import { movedRunView } from "../../src/services/bridge/checkpoint-run-view.test-fixture";
 import { driveCheckpointAttempt } from "../../src/services/bridge/checkpoint-orchestrator";
 import { createCheckpointServiceClient } from "../../src/services/bridge/checkpoint-service-client";
 import { checkpointPolicyDigest, parsePendingCheckpointClaim } from "../../src/services/bridge/checkpoint-claim";
@@ -131,6 +132,7 @@ test("a recorded worker crash ends the attempt failed, fails the run with the re
     request: async (_node, _verb, params) => { sent.push(BenchCoordinatorRequest.parse(params).operation); return { ok: true, data: workerCrash }; },
     service: (p) => createCheckpointServiceClient(p, { plane: TEST_PLANE, fetch: async () => new Response(null, { status: 500 }) }),
     advance: advanceCheckpointAttempt, fail: failCheckpointAttempt, close: closeFailedCheckpointAttempt,
+    retire: retireCheckpointAttempt, now: Date.now,
   });
 
   expect(sent).toEqual(["status"]);
@@ -208,4 +210,43 @@ test("an operator may still retire a failure the board could not be told of", as
   expect(row?.phase).toBe("retired");
   expect(JSON.parse(row?.failure ?? "{}")).toMatchObject({ code: "verification_failed" });
   await rawSql`DELETE FROM admin_audit_log WHERE tenant_id = ${tenantId}`;
+});
+
+// The staging sequence on the real ledger: a prepare the node refused (refused/unavailable), then the
+// card moved off the bench stage. The attempt parked on every reconcile and held the station's
+// checkpoint claims, so no other card could take one. It now ends retired and the station is free.
+test("an attempt whose card moved off the stage is retired, and another card's checkpoint claim may prepare", async () => {
+  const claim = claimFor("m1");
+  const attempt = (await reserveCheckpointAttempt(profile, claim, task)).attempt;
+  expect((await pendingCheckpointAttempt(profile))?.attempt.row.attemptId).toBe(attempt.row.attemptId);
+  const calls: string[] = [];
+  const moved = new SuperpipelineClient({ baseUrl: "https://board.test", boardId: profile.target.board_id, token: "spa_fixture",
+    fetch: async (url) => {
+      const path = url.replace("https://board.test", "");
+      calls.push(path);
+      return { status: 200, ok: true, json: async () => path.endsWith(`/runs/${claim.runId}`) ? movedRunView(claim) : {} };
+    } });
+  const sent: string[] = [];
+  const result = await driveCheckpointAttempt(attempt, moved, false, {
+    authority: async () => {},
+    request: async (_node, _verb, params) => { sent.push(BenchCoordinatorRequest.parse(params).operation);
+      return { ok: true, data: { version: "agentpod.bench-coordinator.v1", operation: "status", state: "refused", code: "unavailable" } }; },
+    service: (p) => createCheckpointServiceClient(p, { plane: TEST_PLANE, fetch: async () => new Response(null, { status: 500 }) }),
+    advance: advanceCheckpointAttempt, fail: failCheckpointAttempt, close: closeFailedCheckpointAttempt,
+    retire: retireCheckpointAttempt, now: Date.now,
+  });
+  expect(result).toMatchObject({ status: "released", attemptId: attempt.row.attemptId });
+  expect(sent).toEqual(["status", "status"]);
+  const row = (await readCheckpointAttempt(tenantId, attempt.row.attemptId))?.row;
+  expect(row?.phase).toBe("retired");
+  const retirement = JSON.parse(row?.retirement ?? "{}");
+  expect(retirement).toMatchObject({ version: "agentpod.checkpoint-retirement.v1", reason: "run_ended", phase: "prepare_pending", by: "hub" });
+  expect(JSON.parse(retirement.evidence)).toMatchObject({ board: { reason: "run.unbound" }, node: { state: "refused", code: "unavailable" } });
+  // Nothing was said to the run: no fail, release, activity or complete.
+  expect(calls.filter((path) => !path.endsWith(`/runs/${claim.runId}`) && !path.endsWith("/heartbeat"))).toEqual([]);
+  // The station is free, and a checkpoint claim for another card reserves a fresh attempt.
+  expect(await pendingCheckpointAttempt(profile)).toBeUndefined();
+  const other = parsePendingCheckpointClaim({ ...claimFixture.pending, cardId: claimFixture.pending.cardId + "x",
+    runId: "run_" + suffix + "m2", policy, policyDigest: checkpointPolicyDigest(policy) });
+  expect((await reserveCheckpointAttempt(profile, other, task)).send).toBe(true);
 });

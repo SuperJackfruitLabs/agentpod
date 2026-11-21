@@ -9,7 +9,7 @@ export const CHECKPOINT_PATH = [
   "services/bridge/checkpoint-supersede.ts", "services/bridge/checkpoint-service-client.ts",
   "services/bridge/checkpoint-current-decision.ts", "services/bridge/checkpoint-profiles.ts",
   "services/bridge/checkpoint-ledger.ts", "services/bridge/checkpoint-log.ts", "services/broker/broker.ts",
-  "services/bridge/checkpoint-activity.ts",
+  "services/bridge/checkpoint-activity.ts", "services/bridge/checkpoint-run-ended.ts",
 ];
 
 /** A call that says something: the checkpoint log, a refusal log handed the error, a quiet or plain log. */
@@ -56,7 +56,7 @@ export function handled(c: { head: string; body: string }): boolean {
 export const COMPLETED_PATH = [
   "services/bridge/checkpoint-orchestrator.ts", "services/bridge/checkpoint-report.ts", "services/bridge/checkpoint-settlement-data.ts",
   "services/bridge/checkpoint-source.ts", "services/bridge/checkpoint-current-decision.ts", "services/bridge/checkpoint-ledger.ts",
-  "services/bridge/checkpoint-service-client.ts",
+  "services/bridge/checkpoint-service-client.ts", "services/bridge/checkpoint-run-ended.ts",
 ];
 
 /** Every `new CheckpointRefused(...)` in `source` that names no reason: its line and text. */

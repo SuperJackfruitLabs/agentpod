@@ -186,7 +186,9 @@ Hub's, the card is told (`checkpoint.failed` or `checkpoint.released`, with the
 sentence and the code), the run is failed or released, and the attempt ends
 `failed` with a `failure_report` saying how: `fail`, `release`, or
 `lease_ended` when the board answered `STALE_LEASE` because it had already ended
-the run. `failed` is terminal, so the station takes a fresh checkpoint claim.
+the run, or `run_ended` when the board's run view said the run ended or its card
+moved on before the board was told (below, "When the board ends the run").
+`failed` is terminal, so the station takes a fresh checkpoint claim.
 Any other answer from the board (a 5xx, `NOT_RUN_OWNER`) leaves the attempt in
 `failure_pending`; the next pass tells the board again from the held failure and
 never asks the node. An owner or admin may still settle a `failure_pending`
@@ -225,7 +227,7 @@ nothing about the run, so it stays parked and names its reason:
 | The current-authority re-read after the reply | `authority.changed`, `authority.raced`, `current.*`, `issuer.*`, … | Authority can come back; nothing about the run is decided by it |
 | Committing `completed` | `ledger.phase`, `ledger.raced` | Another pass moved the row; the next pass reads it |
 | `completed`: reading the source on the board | `service.status:<n>`, `service.timeout`, `service.error`, `service.grant`, `source.shape`, `source.binding`, `source.claim` | The board's answer, not the run's |
-| `completed`: the run is no longer working on the board | `source.inactive` | Its heartbeat is stale or the run ended; an owner or admin settles a run the board ended |
+| `completed`: the run is no longer working on the board | `source.inactive` | Its heartbeat is stale or the run ended. A run the board definitively ended ends the attempt on the same pass (below) |
 | `submission_pending`, `reported`: receipt and settlement | `service.*`, `receipt.shape`, `receipt.mismatch`, `service.receipt_missing` | A settlement may already exist; it is reconciled by receipt, never repeated or failed |
 | Any phase: a retained cell missing or not matching | `retained.*` | Not reachable for a row the ledger wrote; parked for an operator, never guessed at |
 
@@ -237,6 +239,105 @@ A refusal on this path with no reason is refused by
 `tests/unit/no-silent-catch.test.ts`: every `new CheckpointRefused(...)` in
 the orchestrator, the builder and its checks, the source projection, the
 service client and the ledger names one.
+
+## When the board ends the run
+
+The board can end an attempt's run while the attempt is unresolved, and then the
+run never comes back: a claim binds a card only to a new run id. Parking such an
+attempt waited forever, and because one unresolved attempt holds the station's
+checkpoint claims (`attempt.unresolved`), one orphan held back every other card.
+Seen on staging: a prepare the node refused (`refused`/`unavailable`), then the
+card was moved off the bench stage. Every current decision refused `context`, the
+node answered `refused`/`unavailable`, and the Hub parked it again on each
+reconcile. Moving the card back did not help, since the old run was gone.
+
+How a run ends on the board, and what the board then answers
+(`checkpoint-run-ended.ts` reads `GET /v1/boards/:board/runs/:run`):
+
+| What happened on the board | Run view (`GET runs/:run`) | Run verb (`heartbeat`, `fail`, `release`) | Hub reason |
+| --- | --- | --- | --- |
+| A person moves the card to another stage (`moveCard`), a route change or review cancels the card's wait, or a held approval is re-routed | `200`: the run stays `working`, the card's `currentRunId` is cleared (or later names a newer run) | Still accepted: the board checks only the run row. A `fail` or `release` acts on the card where it is now | `run.unbound` |
+| Moved to a last stage nobody works (`done`), rejected at a gate | `200`, `run.unbound` (the run row is not ended) | Accepted, as above | `run.unbound` |
+| The run was failed, released, blocked or submitted elsewhere, or completed | `200`: `status: "ended"` with its `outcome` | `409 STALE_LEASE` | `run.ended` |
+| The heartbeat lapsed for 15 minutes and the board reclaimed it | `200`: `ended`, outcome `reclaimed` | `409 STALE_LEASE` | `run.ended` |
+| The card was deleted (its runs are deleted with it) | `404 RUN_NOT_FOUND` (or `CARD_NOT_FOUND`) | `409 STALE_LEASE` | `run.not_found`, `card.not_found` |
+| A run view carrying another lease epoch | `200` | `409 STALE_LEASE` | `run.epoch` |
+| The run is another agent's | `403 NOT_RUN_OWNER` | `403 NOT_RUN_OWNER` | not an ending: parked |
+| The board is down, redeploying or slow | `5xx`, timeout | `5xx`, timeout | not an ending: parked |
+
+Only those explicit answers count. A 5xx, a timeout, a body that does not
+parse, `NOT_RUN_OWNER`, or a view about another run or card is not an answer,
+and the attempt keeps parking as before. The checkpoint client now keeps the
+board's error code, from the closed set `STALE_LEASE`, `NOT_RUN_OWNER`,
+`RUN_NOT_FOUND` and `CARD_NOT_FOUND` (at most 4 KiB is read, and nothing else
+of the body is kept). Before, it dropped every error body, so not even a held
+failure's `lease_ended` could happen in production.
+
+**When the Hub asks.** On every recovery pass, before driving the attempt (and
+before a superseded attempt is resolved); on any pass that is about to park in
+`prepare_pending`, `prepared`, `source_pending`, `admitted`, `execute_pending` or
+`completed`; in `failure_pending` before the board is told; and in
+`submission_pending` only after an authenticated `CHECKPOINT_RECEIPT_MISSING`,
+because a settlement that landed ends the run too. The read is a `GET`: it
+neither heartbeats the run nor touches the card. Once the board has ended the
+run, the Hub sends it nothing more, not even an activity. A verb on an unbound
+run would act on the card wherever it is now, and an activity would heartbeat it.
+
+**The current decision.** A node's current check that fails for an attempt it
+matched now asks the board too. When the board says the run ended, the decision
+answers `stale_owner` instead of `unavailable`, so the node retires its own
+record: it releases what the record holds, sends one cancel for a launched run,
+and never runs (BENCH_REGISTERED_LAUNCH.md, "Stale attempts clean up after
+themselves"). A board that cannot be asked leaves it `unavailable`.
+
+**The ruling.** The attempt reaches a terminal state, with the board's answer
+and the node's reply as evidence. It is never reported as a pass.
+
+| Phase when the board ended the run | What the Hub does | Attempt ends |
+| --- | --- | --- |
+| `prepare_pending`, `prepared`, `source_pending`, `admitted` (execute never sent: nothing ran) | Sends the node one `status`. The node's current decision is now `stale_owner`, so it retires its record and releases what it holds | `retired`, reason `run_ended`, on the same pass, whatever the node replied (an unreachable node included) |
+| `execute_pending` (an effect is possible) | Sends the node one `status` on each pass. Under `stale_owner` the node journals a veto, sends one cancel for the run and releases the lease once the run's receipt is in | `retired`, reason `run_ended.stopped`, once the node's reply proves its record terminal (`refused` with `stale_owner`, `verification_failed`, `unsupported` or `capacity_exhausted`). Until then it parks as `run_ended.node:<state>` or `run_ended.node_unreachable`, and is not written to the card |
+| `execute_pending`, the node never confirms | As above | `retired`, reason `run_ended.unconfirmed`, once the task's own timeout (`timeout_seconds`, from when execute was committed) plus 15 minutes has passed, since the producer stops a run at its timeout |
+| `completed` (the node's run finished, no settlement sent) | Sends the node one `status` | `retired`, reason `run_ended` |
+| `submission_pending`, the board holds no receipt | Sends the node one `status` | `retired`, reason `run_ended.unsettled`. A receipt the board holds is still recorded `reported`, even though the settled run has ended |
+| `failure_pending` | Tells the board nothing | `failed`, `failure_report` outcome `run_ended`, carrying the board's answer |
+
+`retired` and `failed` are terminal, so the station is free. A recovery pass
+that ended the attempt returns nothing, and the cycle goes straight on to a fresh
+checkpoint claim for any card; a pass that ended it inside a drive reports
+`released`, and the next cycle claims. An unresolved attempt whose run has ended holds the station's claims
+for at most one pass. The one exception is after execute, while the node is still
+winding the run down, and that wait is bounded by the task's timeout plus the
+grace period. The node's bench is per card (its key is the tenant, board and
+card), so nothing it still holds for the ended card blocks another card's
+prepare.
+
+**A board cancel, at each phase.** A cancel on the board is a person moving the
+card off the stage, a review or route change cancelling its wait, or the card
+being deleted. Each is `run.unbound` or `run.not_found` on the next read.
+
+- Before execute was sent: the next pass (at most one backoff later) retires the
+  attempt (`run_ended`) and tells the node, which releases its lease. Nothing
+  ran, and no source admission or execute is sent afterwards.
+- While the run executes: the node's next current check, before or after any
+  effect, gets `stale_owner`. The Hub's next pass tells the node, which sends one
+  cancel and releases the lease once the run's receipt is in. The attempt ends
+  `run_ended.stopped`, or `run_ended.unconfirmed` past the timeout and grace.
+  The run's result is never settled.
+- After the node completed, before the settlement: `run_ended`; nothing is
+  submitted.
+- With a settlement pending: if the board holds its receipt the attempt is
+  `reported` as usual; if not, `run_ended.unsettled`.
+- With a held failure: `failed`, outcome `run_ended`; the board is not told.
+
+Known limits. A node that cannot be reached when a nothing-running attempt is
+retired keeps that card's record and lease until its next `status` or a newer
+attempt's prepare on the same card: the Hub's current decision answers
+`stale_owner` for a retired attempt from then on, so either one retires it. A
+card moved off the stage leaves the board's run `working`, and once the Hub stops
+heartbeating it the board reclaims it after 15 minutes. That reclaim (like any
+verb on the run) acts on the card where it then is. This is SuperPipeline's
+behaviour, not the Hub's.
 
 ## Waiting on the node
 
@@ -289,7 +390,8 @@ lets the change make it disappear; it is resolved, with evidence, as follows.
 - **Everything else stays parked, named**, logged once per attempt and reason as
   `superseded checkpoint attempt parked; an owner or admin can settle it`
   (`superseded.effect_possible`, `superseded.node:<state>`,
-  `superseded.node_unreachable`).
+  `superseded.node_unreachable`). A superseded attempt whose run the board has
+  ended is ended first, as any other ("When the board ends the run").
 - **An owner or admin settles a parked attempt explicitly.**
   `fleet bridge checkpoint-attempts` lists the workspace's unresolved attempts with
   their phase, `superseded` and `effectPossible`.
