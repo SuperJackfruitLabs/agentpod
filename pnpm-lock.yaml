@@ -309,10 +309,10 @@ importers:
         version: 3.7.4
       '@superjackfruitlabs/vibekit-frame':
         specifier: ^0.0.18
-        version: 0.0.18(@superjackfruitlabs/vibekit-ui@0.0.20(@internationalized/date@3.12.4)(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@5.9.3)(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0)))(astro@5.18.2(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(rollup@4.62.4)(tsx@4.23.12)(typescript@5.9.3)(yaml@2.9.1))
+        version: 0.0.18(@superjackfruitlabs/vibekit-ui@0.0.21(@internationalized/date@3.12.4)(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@5.9.3)(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0)))(astro@5.18.2(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(rollup@4.62.4)(tsx@4.23.12)(typescript@5.9.3)(yaml@2.9.1))
       '@superjackfruitlabs/vibekit-ui':
-        specifier: ^0.0.20
-        version: 0.0.20(@internationalized/date@3.12.4)(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@5.9.3)(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))
+        specifier: ^0.0.21
+        version: 0.0.21(@internationalized/date@3.12.4)(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@5.9.3)(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))
       astro:
         specifier: ^5.18.2
         version: 5.18.2(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(rollup@4.62.4)(tsx@4.23.12)(typescript@5.9.3)(yaml@2.9.1)
@@ -2245,8 +2245,8 @@ packages:
       '@superjackfruitlabs/vibekit-ui': '>=0.0.18 <0.1.0'
       astro: '>=5.0.0'
 
-  '@superjackfruitlabs/vibekit-ui@0.0.20':
-    resolution: {integrity: sha512-qLUOhR4Z2fcmA3iqVTYM7EaZsXd1b0gxDMXbIRac29uMQ7ObjNoG3wca/mPs7+y1TG8gkCYhG9EApvBcnw/f3w==}
+  '@superjackfruitlabs/vibekit-ui@0.0.21':
+    resolution: {integrity: sha512-Ghsv/ZpjhnzrZsX7cZVeM0rRAFw9ol8cAgAWdswXA9AE4Zsn1jxEb9KAkIS0S5nDnLUv6a9Y/XzMc+wutgvltQ==}
     engines: {node: '>=22'}
     peerDependencies:
       svelte: ^5.56.0
@@ -7927,12 +7927,12 @@ snapshots:
 
   '@superjackfruitlabs/treaty-matrix-events@0.0.10': {}
 
-  '@superjackfruitlabs/vibekit-frame@0.0.18(@superjackfruitlabs/vibekit-ui@0.0.20(@internationalized/date@3.12.4)(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@5.9.3)(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0)))(astro@5.18.2(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(rollup@4.62.4)(tsx@4.23.12)(typescript@5.9.3)(yaml@2.9.1))':
+  '@superjackfruitlabs/vibekit-frame@0.0.18(@superjackfruitlabs/vibekit-ui@0.0.21(@internationalized/date@3.12.4)(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@5.9.3)(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0)))(astro@5.18.2(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(rollup@4.62.4)(tsx@4.23.12)(typescript@5.9.3)(yaml@2.9.1))':
     dependencies:
-      '@superjackfruitlabs/vibekit-ui': 0.0.20(@internationalized/date@3.12.4)(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@5.9.3)(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))
+      '@superjackfruitlabs/vibekit-ui': 0.0.21(@internationalized/date@3.12.4)(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@5.9.3)(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))
       astro: 5.18.2(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(rollup@4.62.4)(tsx@4.23.12)(typescript@5.9.3)(yaml@2.9.1)
 
-  '@superjackfruitlabs/vibekit-ui@0.0.20(@internationalized/date@3.12.4)(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@5.9.3)(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))':
+  '@superjackfruitlabs/vibekit-ui@0.0.21(@internationalized/date@3.12.4)(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@5.9.3)(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))':
     dependencies:
       '@fontsource-variable/archivo': 5.3.0
       '@fontsource-variable/azeret-mono': 5.3.0
