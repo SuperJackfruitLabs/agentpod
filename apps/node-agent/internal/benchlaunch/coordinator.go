@@ -33,6 +33,9 @@ type Producer interface {
 type Refusal struct {
 	Code    string
 	Message string
+	// LeaseHeld: the record still holds its lease because SuperBench refused
+	// the release. The record is retried, but an operator must reconcile.
+	LeaseHeld bool
 }
 
 func (r *Refusal) Error() string { return "registered launch refused: " + r.Code }
@@ -45,6 +48,13 @@ func RefusalMessage(err error) string {
 		return r.Message
 	}
 	return ""
+}
+
+// RefusalLeaseHeld reports a terminal refusal whose record still holds its
+// lease after SuperBench refused the release.
+func RefusalLeaseHeld(err error) bool {
+	var r *Refusal
+	return errors.As(err, &r) && r.LeaseHeld
 }
 
 // maxProducerMessage bounds SuperBench's message as its own envelope does
@@ -87,8 +97,12 @@ func refusalOf(r record) error {
 	if message == "" {
 		message = r.ReleaseRefusal
 	}
-	return &Refusal{Code: r.Code, Message: message}
+	return &Refusal{Code: r.Code, Message: message, LeaseHeld: leaseHeld(r)}
 }
+
+// leaseHeld is a record that still holds its lease after SuperBench refused
+// at least one release of it.
+func leaseHeld(r record) bool { return r.Release == "needed" && r.ReleaseFailures > 0 }
 
 // RefusalCode reports the wire code of a terminal refusal, if err is one.
 func RefusalCode(err error) (string, bool) {

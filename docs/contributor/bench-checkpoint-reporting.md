@@ -193,7 +193,15 @@ which is both the `checkpoint.failed` activity and the run's `failure_reason`.
 For example: `Checkpoint failed: SuperBench refused the bench step after the run
 (verification_failed): "bench has uncommitted or untracked files; commit or
 preserve them before checkpoint/release". Nothing was reported as a pass.`
-Without a message the sentence is the table's. Seen on staging: a checkpoint
+Without a message the sentence is the table's.
+
+**A held lease.** When SuperBench refused the release too, the node's reply
+also carries `detail.lease: "held"`. Before the board is told, the card gets a
+second activity, `checkpoint.parked` with code `lease_held`, naming the bench and
+the operator's path (BENCH_REGISTERED_LAUNCH.md, "A refused release"). A parked
+reply that carries it parks as `node.state:<state>.lease_held` and says the same
+once. After the board ended the run it parks as
+`run_ended.node:<state>.lease_held` and is only logged. Seen on staging: a checkpoint
 refused over a dirty tree read "the worker crashed or was stopped … (for example
 by a SuperBench restart)", and no restart had happened.
 

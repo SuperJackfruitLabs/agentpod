@@ -296,11 +296,18 @@ func (c Coordinator) cleanup(ctx context.Context, spec benchdispatch.SourceSpec)
 const releaseWarnAfter = 3
 
 func (c Coordinator) releaseFailed(ctx context.Context, spec benchdispatch.SourceSpec) {
-	failures := 0
-	_ = c.mark(ctx, spec, func(r *record) bool { r.ReleaseFailures++; failures = r.ReleaseFailures; return true })
-	if failures >= releaseWarnAfter {
-		log.Printf("bench %s: release refused %d times while the lease is still held; retrying, operator attention needed", spec.BenchKey, failures)
-	}
+	failures, message := 0, ""
+	_ = c.mark(ctx, spec, func(r *record) bool {
+		r.ReleaseFailures++
+		failures, message = r.ReleaseFailures, r.ReleaseRefusal
+		return true
+	})
+	// Said on every refusal: once the hub has ended the attempt, nothing but
+	// the card's next attempt retries this release, so an earlier silence
+	// left a held lease with no trace. The refusal (a dirty tree, for one)
+	// does not clear itself; docs/BENCH_REGISTERED_LAUNCH.md, "A refused
+	// release", names the supported operator path.
+	log.Printf("bench %s: release refused (%d) while the lease is still held: %q; operator attention needed: bench workspace stop_admin, then a root bench workspace run with the returned token that fixes the tree and checkpoints, then release", spec.BenchKey, failures, message)
 }
 
 // releaseStuck reports a record whose release keeps failing, so Status can
@@ -381,8 +388,8 @@ func (c Coordinator) Status(ctx context.Context, spec benchdispatch.SourceSpec) 
 		if _, ok := RefusalCode(err); ok || !r.Cancelled {
 			return benchcoordinator.Status{}, err
 		}
-		if after, _, e := c.Journal.read(ctx, spec); e == nil && releaseStuck(after) {
-			return benchcoordinator.Status{State: "release_refused", RequiresReconciliation: true}, nil
+		if after, _, e := c.Journal.read(ctx, spec); e == nil && leaseHeld(after) {
+			return benchcoordinator.Status{State: "release_refused", RequiresReconciliation: true, LeaseHeld: true, Message: after.ReleaseRefusal}, nil
 		}
 		return benchcoordinator.Status{State: "cancel_requested", RequiresReconciliation: true}, nil
 	}
@@ -433,11 +440,14 @@ func (c Coordinator) Cancel(ctx context.Context, spec benchdispatch.SourceSpec) 
 func (c Coordinator) retired(ctx context.Context, spec benchdispatch.SourceSpec) (benchcoordinator.Status, error) {
 	err := c.retire(ctx, spec)
 	if errors.Is(err, benchdispatch.ErrPending) {
-		state := "cancel_requested"
-		if r, _, e := c.Journal.read(ctx, spec); e == nil && releaseStuck(r) {
-			state = "release_refused" // the lease is still held and its release keeps failing
+		status := benchcoordinator.Status{State: "cancel_requested", RequiresReconciliation: true}
+		if r, _, e := c.Journal.read(ctx, spec); e == nil && leaseHeld(r) {
+			status.LeaseHeld, status.Message = true, r.ReleaseRefusal
+			if releaseStuck(r) {
+				status.State = "release_refused" // the lease is still held and its release keeps failing
+			}
 		}
-		return benchcoordinator.Status{State: state, RequiresReconciliation: true}, nil
+		return status, nil
 	}
 	if errors.Is(err, errAbsent) {
 		return benchcoordinator.Status{}, refuse("stale_owner")

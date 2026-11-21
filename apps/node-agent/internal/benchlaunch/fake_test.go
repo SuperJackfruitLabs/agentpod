@@ -76,6 +76,8 @@ type fakeBench struct {
 	// refusalMessage replaces the failed run's error message (a crashed or
 	// refused run): SuperBench's own words for why.
 	refusalMessage string
+	// releaseMessage is SuperBench's text for each refused release.
+	releaseMessage string
 }
 type receipt struct {
 	digest string
@@ -302,7 +304,11 @@ func (f *fakeBench) act(ctx context.Context, spec benchdispatch.SourceSpec, r be
 		}
 		if op == "release" && f.refuseRelease > 0 {
 			f.refuseRelease--
-			return 409, envelope(op, "", false, nil, "conflict")
+			body := envelope(op, "", false, nil, "conflict")
+			if f.releaseMessage != "" {
+				body = bytes.Replace(body, []byte(`"message":"refused"`), []byte(`"message":`+strconvQuote(f.releaseMessage)), 1)
+			}
+			return 409, body
 		}
 		if !f.leased || r.LeaseToken != f.token {
 			return 409, envelope(op, "", false, nil, "conflict")

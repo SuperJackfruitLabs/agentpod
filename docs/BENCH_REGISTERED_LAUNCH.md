@@ -156,9 +156,44 @@ the run's receipt. A newer attempt's `prepare` frees the bench only once the
 older record is terminal; until then (lease still held, or run unresolved) it
 returns `pending`, retryable, and reaches nothing. A definite refusal of a
 release we still hold, or a reply that does not parse, is forgotten and sent again
-on the next cleanup; nothing replays a bad answer. Retries never stop, but after
-three failed releases each further failure is logged with the bench key and
-count, and `Status` reports `release_refused` instead of `cancel_requested`.
+on the next cleanup; nothing replays a bad answer. Retries never stop, and every
+failed release is logged with the bench key, the count and SuperBench's message.
+After three, `Status` reports `release_refused` instead of `cancel_requested`.
+
+### A refused release
+
+SuperBench refuses a release without a complete clean checkpoint vector: a
+dirty or untracked tree, a rejected push, an ambiguous state save. The refusal
+does not clear itself, and the node never checkpoints interrupted work to make
+the release succeed (treaty, "A completed stored failure is final"). Once the
+hub has ended the attempt only the card's next attempt retries the release, so
+staging saw four retries, then silence, and a lease still held.
+
+From the first refused release the record reports it: its refusal and every
+parked status carry `detail.lease: "held"` and SuperBench's message, and the
+hub says on the card (`checkpoint.parked`, code `lease_held`), once per
+attempt, what an operator must do. When the board already ended the run the
+hub only logs it, since an activity would heartbeat the unbound run.
+
+The supported path, run as the bench host's operator (SuperBench's "Leases"
+concept and `bench workspace` reference):
+
+1. `bench workspace stop_admin <key>`. It fences the recorded scope and returns
+   the retained lease token; the lease stays held by the attempt's holder
+   (`cp_<attempt>`, shown by `bench workspace status <key>`).
+2. A root `bench workspace run --holder <holder> --request-id <fresh id> <key> --
+   <command>` with the returned token in `BENCH_LEASE_TOKEN`, no
+   `--repository-name`, whose command commits or removes the stray files. With
+   the default `--checkpoint`, a successful run checkpoints the member vector and
+   releases.
+3. `bench workspace status <key>`; only if the lease is still shown, `bench
+   workspace checkpoint` and `bench workspace release` with the same token.
+   Releasing twice can fail once the first cleared the lease.
+4. Optionally `bench workspace reclaim <key>` to delete the released tree. The
+   next attempt on the card creates the bench again.
+
+The node's next release for that record then finds the lease gone and ends the
+record clean.
 
 ### Reclaimed benches and generations
 

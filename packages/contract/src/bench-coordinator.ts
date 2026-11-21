@@ -142,12 +142,15 @@ export const BenchCoordinatorCurrentResponse = z.discriminatedUnion("decision", 
 ]).refine((r) => r.expires_at_ms > r.issued_at_ms && r.expires_at_ms - r.issued_at_ms <= 5000);
 export type BenchCoordinatorCurrentResponse = z.infer<typeof BenchCoordinatorCurrentResponse>;
 /**
- * Why a refused or parked attempt is as it is, in the bench's own words: SuperBench's refusal text
- * (at most 256 UTF-8 bytes, no control characters). It never changes what the state and code mean.
+ * Why a refused or parked attempt is as it is. `message` is SuperBench's own refusal text (at most 256
+ * UTF-8 bytes, no control characters). `lease: "held"` says the attempt's own lease is still held
+ * because SuperBench refused its release, so an operator must reconcile the bench. Never empty, and it
+ * never changes what the state and code mean.
  */
 export const BenchCoordinatorDetail = z.object({
-  message: z.string().min(1).refine((m) => new TextEncoder().encode(m).byteLength <= 256 && !/\p{Cc}/u.test(m)),
-}).strict();
+  message: z.string().min(1).refine((m) => new TextEncoder().encode(m).byteLength <= 256 && !/\p{Cc}/u.test(m)).optional(),
+  lease: z.literal("held").optional(),
+}).strict().refine((d) => d.message !== undefined || d.lease !== undefined);
 export type BenchCoordinatorDetail = z.infer<typeof BenchCoordinatorDetail>;
 const pending = z.object({ ...fixed, operation: z.enum(["prepare", "execute", "status"]), ...owned,
   state: z.enum(["unknown", "pending", "superseded"]), detail: BenchCoordinatorDetail.optional() }).strict();

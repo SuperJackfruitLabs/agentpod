@@ -143,3 +143,48 @@ func TestProducerMessageIsBoundedAndPrintable(t *testing.T) {
 		t.Fatal("a missing error made a message")
 	}
 }
+
+// A release SuperBench keeps refusing (the tree is dirty) used to be retried a
+// few times and then go quiet, with the lease held. The record now says so on
+// every reply: the refusal and later statuses carry lease held and the
+// bench's words, so the hub can name the operator's path.
+func TestARefusedReleaseIsReportedAsAHeldLease(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	const dirty = "bench has uncommitted or untracked files; commit or preserve them before checkpoint/release"
+	tr.exit, tr.refusalMessage = 1, dirty
+	tr.refuseRelease, tr.releaseMessage = 100, dirty
+	_, err := tr.c.Execute(context.Background(), tr.spec, admitAll)
+	wantCode(t, err, "verification_failed")
+	if !RefusalLeaseHeld(err) || RefusalMessage(err) != dirty || !tr.leased {
+		t.Fatal("a refused release was not reported as a held lease", RefusalLeaseHeld(err), RefusalMessage(err), tr.leased)
+	}
+	for i := 0; i < 3; i++ {
+		_, err = tr.c.Status(context.Background(), tr.spec)
+		wantCode(t, err, "verification_failed")
+		if !RefusalLeaseHeld(err) {
+			t.Fatal("a later status forgot the held lease", i)
+		}
+	}
+	if tr.count(tr.posts, "release") < 4 || tr.count(tr.effects, "release") != 0 {
+		t.Fatal("the release was not retried on each status", tr.count(tr.posts, "release"))
+	}
+	// Once an operator frees the tree, the next status releases and the record ends clean.
+	tr.refuseRelease = 0
+	_, err = tr.c.Status(context.Background(), tr.spec)
+	wantCode(t, err, "verification_failed")
+	if RefusalLeaseHeld(err) || tr.leased {
+		t.Fatal("a released lease was still reported held")
+	}
+}
+
+// A vetoed record whose release is refused parks naming the held lease.
+func TestARetiredRecordWithARefusedReleaseParksAsHeld(t *testing.T) {
+	tr := newTrial(t)
+	tr.prepare(t)
+	tr.refuseRelease, tr.releaseMessage = 100, "bench has uncommitted or untracked files"
+	status, err := tr.c.Cancel(context.Background(), tr.spec)
+	if err != nil || !status.LeaseHeld || status.Message != "bench has uncommitted or untracked files" {
+		t.Fatal("a retired record with a refused release did not report its held lease", status, err)
+	}
+}

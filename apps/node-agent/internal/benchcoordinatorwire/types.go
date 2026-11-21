@@ -151,12 +151,16 @@ type Request struct {
 	BindingSHA256 string    `json:"binding_sha256,omitempty"`
 	SourceReceipt *Receipt  `json:"source_receipt,omitempty"`
 }
+
 // Detail says why a refused (or parked) attempt is as it is, in the bench's
 // own words. It never changes what the state and code mean.
 type Detail struct {
 	// Message is SuperBench's own refusal text: at most 256 UTF-8 bytes, no
 	// control characters.
 	Message string `json:"message,omitempty"`
+	// Lease is "held" when the attempt's own lease is still held because
+	// SuperBench refused its release: an operator must reconcile the bench.
+	Lease string `json:"lease,omitempty"`
 }
 
 type Response struct {

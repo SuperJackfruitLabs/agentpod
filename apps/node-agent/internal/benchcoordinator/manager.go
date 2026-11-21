@@ -31,6 +31,11 @@ type Status struct {
 	Completion             *Completion                       `json:"completion,omitempty"`
 	Observations           []benchattempt.CleanupObservation `json:"observations,omitempty"`
 	RequiresReconciliation bool                              `json:"requires_reconciliation,omitempty"`
+	// LeaseHeld says the attempt's own lease is still held because SuperBench
+	// refused its release; Message is SuperBench's text for that refusal. The
+	// wire reports both as the parked reply's detail.
+	LeaseHeld bool   `json:"lease_held,omitempty"`
+	Message   string `json:"message,omitempty"`
 }
 
 func prepared(b benchdispatch.SourceBinding, spec benchdispatch.SourceSpec, d benchcanonical.Digests) Prepared {

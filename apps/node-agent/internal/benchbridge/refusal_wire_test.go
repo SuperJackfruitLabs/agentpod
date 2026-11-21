@@ -38,6 +38,7 @@ func TestTerminalRefusalReachesTheWireAsTheRecordedReply(t *testing.T) {
 			Code   string `json:"code"`
 			Detail *struct {
 				Message string `json:"message"`
+				Lease   string `json:"lease"`
 			} `json:"detail"`
 		}
 		if err = json.Unmarshal(c.Value, &want); err != nil || want.Code == "" {
@@ -45,7 +46,7 @@ func TestTerminalRefusalReachesTheWireAsTheRecordedReply(t *testing.T) {
 		}
 		refusal := &benchlaunch.Refusal{Code: want.Code}
 		if want.Detail != nil {
-			refusal.Message = want.Detail.Message
+			refusal.Message, refusal.LeaseHeld = want.Detail.Message, want.Detail.Lease == "held"
 		}
 		response, err := failed(request, refusal)
 		got, _ := json.Marshal(transportOutcome(request, response, err))

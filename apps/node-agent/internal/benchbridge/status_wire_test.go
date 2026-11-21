@@ -63,3 +63,46 @@ func TestInternalParkedStatesReachTheWireAsPending(t *testing.T) {
 		}
 	}
 }
+
+// A parked attempt whose lease is still held after a refused release leaves
+// the bridge as the shared corpus's pending-with-lease-held bytes.
+func TestAHeldLeaseReachesTheWireAsParkedDetail(t *testing.T) {
+	raw, err := os.ReadFile("../../../../packages/contract/src/fixtures/bench-coordinator-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var corpus struct {
+		Responses []struct {
+			Name    string          `json:"name"`
+			Request json.RawMessage `json:"request"`
+			Value   json.RawMessage `json:"value"`
+		} `json:"responses"`
+	}
+	if err = json.Unmarshal(raw, &corpus); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range corpus.Responses {
+		if c.Name != "pending-with-lease-held" {
+			continue
+		}
+		request, err := benchcoordinatorwire.ParseRequest(c.Request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := statusResponse(request, benchdispatch.SourceSpec{}, benchcoordinator.Status{State: "release_refused", RequiresReconciliation: true, LeaseHeld: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := json.Marshal(transportOutcome(request, response, err))
+		var x, y any
+		_ = json.Unmarshal(got, &x)
+		_ = json.Unmarshal(c.Value, &y)
+		ga, _ := json.Marshal(x)
+		gb, _ := json.Marshal(y)
+		if string(ga) != string(gb) {
+			t.Fatalf("a held lease left the bridge as\n%s\nnot\n%s", ga, gb)
+		}
+		return
+	}
+	t.Fatal("shared pending-with-lease-held fixture missing")
+}

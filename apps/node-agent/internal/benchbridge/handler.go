@@ -236,12 +236,22 @@ func failed(r benchcoordinatorwire.Request, err error) (benchcoordinatorwire.Res
 	if code, ok := benchlaunch.RefusalCode(err); ok {
 		response := refused(r.Operation)
 		response.Code = code
-		if message := benchlaunch.RefusalMessage(err); message != "" {
-			response.Detail = &benchcoordinatorwire.Detail{Message: message}
-		}
+		response.Detail = detail(benchlaunch.RefusalMessage(err), benchlaunch.RefusalLeaseHeld(err))
 		return response, nil
 	}
 	return pending(r), err
+}
+
+// detail is the reply's account of why, or nil when there is nothing to say.
+func detail(message string, leaseHeld bool) *benchcoordinatorwire.Detail {
+	if message == "" && !leaseHeld {
+		return nil
+	}
+	d := &benchcoordinatorwire.Detail{Message: message}
+	if leaseHeld {
+		d.Lease = "held"
+	}
+	return d
 }
 func pending(r benchcoordinatorwire.Request) benchcoordinatorwire.Response {
 	return benchcoordinatorwire.Response{Version: benchcoordinatorwire.Version, Operation: r.Operation, State: "pending", Identity: r.Identity, Target: r.Target}
@@ -466,7 +476,9 @@ func statusResponse(r benchcoordinatorwire.Request, saved benchdispatch.SourceSp
 	if status.State == "prepared" && status.Source != nil && r.Operation != "execute" {
 		return preparedResponse(r, *status.Source)
 	}
-	return pending(r), nil
+	response := pending(r)
+	response.Detail = detail(status.Message, status.LeaseHeld)
+	return response, nil
 }
 
 // superseded answers status for an attempt whose target this node no longer
