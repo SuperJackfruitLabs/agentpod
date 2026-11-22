@@ -328,14 +328,14 @@ test("a refused checkpoint with a held lease says the bench's words and names th
   expect(String(failed?.body.body)).not.toContain("crashed");
   expect(fail?.body.reason).toBe(failed?.body.body);
   expect(lease?.body).toMatchObject({ action: "checkpoint.parked", parameter: { phase: "execute_pending", code: "lease_held" } });
-  for (const step of ["bench workspace stop_admin", "bench workspace run", "bench workspace release", "bench workspace reclaim"])
+  for (const step of ["bench workspace stop_admin", "bench workspace renew_admin", "bench workspace run", "bench workspace release", "bench workspace reclaim"])
     expect(String(lease?.body.body)).toContain(step);
   expect(String(lease?.body.body)).toContain(words);
   expect(held.closed).toBe("fail");
   expect(board.verbs()).not.toContain("complete");
 });
 
-test("a parked reply whose lease is held is said once on the card with the operator's path", async () => {
+test("a parked reply whose lease is held is said once on the card with the operator's path, not also as a generic park", async () => {
   resetCheckpointActivityForTests();
   const attempt = executePending();
   const reply = { ...pendingStatus(attempt), detail: { lease: "held" } };
@@ -344,9 +344,8 @@ test("a parked reply whose lease is held is said once on the card with the opera
     ? { status: 200, body: runView(attempt.claim) } : { status: 200 });
   for (let i = 0; i < 2; i++) expect((await driveCheckpointAttempt(attempt, board.client, false, h.deps)).status).toBe("unreported");
   const activities = board.calls.filter((c) => c.path.endsWith("/activities")).map((c) => c.body);
-  expect(activities.map((a) => a.parameter)).toEqual([
-    expect.objectContaining({ code: "uncertain", reason: "node.state:pending.lease_held" }),
-    expect.objectContaining({ code: "lease_held" })]);
+  expect(activities.map((a) => a.parameter)).toEqual([expect.objectContaining({ code: "lease_held" })]);
+  expect(String(activities[0]?.body)).toContain("bench workspace renew_admin");
 });
 
 test("a verification failure while preparing fails the run too, and nothing was executed", async () => {

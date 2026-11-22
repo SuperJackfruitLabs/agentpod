@@ -207,9 +207,10 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
   }
   // A park is said on the card once per attempt, phase and reason; the re-checks stay quiet. A run the
   // board ended returned above: it is never written to, since an activity on an unbound run heartbeats it.
-  if (facts) await postCheckpointActivity(client, initial, `parked:${facts.phase}:${facts.code}:${facts.reason ?? ""}`,
-    checkpointActivity("parked", facts));
+  // A held lease is the more specific park: it alone is said, with the operator's path, not a generic one too.
   if (facts?.held) await sayLeaseHeld(client, facts.attempt, facts.held, facts.phase);
+  else if (facts) await postCheckpointActivity(client, initial, `parked:${facts.phase}:${facts.code}:${facts.reason ?? ""}`,
+    checkpointActivity("parked", facts));
   return result;
 }
 
