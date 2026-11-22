@@ -424,6 +424,14 @@ node did. The waits fit each operation (`checkpoint-node-call.ts`): `ready`
 task for up to its whole timeout, so the Hub never waits for it: a longer run is
 read with `status` on later cycles.
 
+Real runs take longer than the 60 second execute wait, so a run still going is
+said on the card as progress, not as a park: once per attempt, a
+`checkpoint.running` activity reading "the task is still running on the bench;
+its result is checked again shortly" (parameter `waiting: true` and the reason).
+That covers an `execute_pending` park on `node.call.timeout` and on a bare
+`node.state:pending` (no detail: no held lease and no message). Every other park
+keeps its `checkpoint.parked` wording.
+
 The node waits up to 20 seconds (15 for the headers) for each of the Hub's
 current decisions, and asks for one before and after every effect. A decision
 re-reads issuer authority, exchanges a plane grant and reads the run on the

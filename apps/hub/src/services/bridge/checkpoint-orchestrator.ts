@@ -25,7 +25,7 @@ import type { DispatchResult } from "./dispatch-types";
 import { createQuietLog, type QuietLog } from "./quiet-log";
 import { errorFacts, nodeCallReason, noteCheckpoint } from "./checkpoint-log";
 import { nodeCallTimeoutMs } from "./checkpoint-node-call";
-import { checkpointActivity, postCheckpointActivity } from "./checkpoint-activity";
+import { checkpointActivity, postCheckpointActivity, stillRunning } from "./checkpoint-activity";
 import { capacityCard, CAPACITY_RELEASE_CAP, type CapacityBackoff } from "./checkpoint-capacity-backoff";
 
 const encode = (raw: string) => new TextEncoder().encode(raw);
@@ -44,7 +44,7 @@ export function setParkedLogForTests(next: QuietLog): () => void {
 }
 /** Why each parked result parked, and the attempt as it parked, so the drive can say it on the card once. */
 const parkFacts = new WeakMap<DispatchResult, { phase: string; code: string; reason?: string; attempt: RetainedCheckpointAttempt;
-  held?: BenchCoordinatorResponse }>();
+  held?: BenchCoordinatorResponse; running?: boolean }>();
 
 /** The node says the attempt's own lease is still held because SuperBench refused its release. */
 const leaseHeld = (response: BenchCoordinatorResponse | undefined): boolean =>
@@ -103,6 +103,8 @@ function parkedReply(attempt: RetainedCheckpointAttempt, response: BenchCoordina
   const result = parked(attempt, "uncertain", new CheckpointRefused("uncertain", `node.state:${why}`));
   const facts = parkFacts.get(result);
   if (facts && leaseHeld(response)) facts.held = response;
+  // A bare pending names no problem: the node's run is unresolved, which while executing means it is still going.
+  if (facts && response.state === "pending" && !("detail" in response && response.detail)) facts.running = true;
   return result;
 }
 
@@ -209,8 +211,9 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
   // board ended returned above: it is never written to, since an activity on an unbound run heartbeats it.
   // A held lease is the more specific park: it alone is said, with the operator's path, not a generic one too.
   if (facts?.held) await sayLeaseHeld(client, facts.attempt, facts.held, facts.phase);
-  else if (facts) await postCheckpointActivity(client, initial, `parked:${facts.phase}:${facts.code}:${facts.reason ?? ""}`,
-    checkpointActivity("parked", facts));
+  // A run still going is said once, however its re-checks read (a timed-out wait, then a pending status).
+  else if (facts) await postCheckpointActivity(client, initial, stillRunning(facts) ? `still_running:${facts.phase}`
+    : `parked:${facts.phase}:${facts.code}:${facts.reason ?? ""}`, checkpointActivity("parked", facts));
   return result;
 }
 
