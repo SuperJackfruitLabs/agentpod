@@ -17,6 +17,15 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   in the station's occupant, the workspace's organization and its own SuperPipeline
   origin (`fleet bridge set KEY --credential-source station-plane` does the same for
   an existing row). The admission checks and the trial exchange are unchanged.
+- The node answers `bench.registry.status|set|remove` (capability
+  `bench.registry.manage`): the hub writes one stage's profile into the node's
+  private coordinator registry, atomically and validated as the whole new file, and
+  the coordinator reloads it with no restart. The reply carries the registry's
+  `registry_sha256` (the digest of the bytes now installed), the worker and
+  coordinator pins against the installed bytes, the bench daemon's reachability and
+  free space, and each served target; never a clone URL or an argument. A registry
+  may now hold no stage, and `repin` re-pins the worker and node digests after an
+  update. Host fields (socket, roots, worker path) are never written from the hub.
 
 - Proposed registered bench launch: a registry profile with `"launch": "registered-v1"`
   delivers the worker's task to the payload only as SuperBench finite stdin and
