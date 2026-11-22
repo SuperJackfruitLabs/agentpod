@@ -30,7 +30,7 @@ export type CheckpointActivityEvent = "prepared" | "running" | "completed" | "pu
  * released if it is still held, and the bench may be reclaimed. Nothing in the Hub or node does this:
  * the node never checkpoints interrupted work to make a release succeed.
  */
-export const HELD_LEASE_OPERATOR_PATH = "`bench workspace stop_admin <key>`, then a root `bench workspace renew_admin <key>`, then a root " +
+export const HELD_LEASE_OPERATOR_PATH = "`bench workspace stop_admin <key>`, then a root `bench workspace renew_admin --state <benchd state> --data <benchd data> <key>`, then a root " +
   "`bench workspace run --holder <holder> <key> -- <fix>` with the renewed token (BENCH_LEASE_TOKEN) that commits or removes the stray " +
   "files and checkpoints, then `bench workspace release` " +
   "if `status` still shows the lease, and optionally `bench workspace reclaim <key>`";

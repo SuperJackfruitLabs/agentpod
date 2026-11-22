@@ -183,9 +183,11 @@ concept and `bench workspace` reference):
 1. `bench workspace stop_admin <key>`. It fences the recorded scope; the lease
    stays held by the attempt's holder (`cp_<attempt>`, shown by
    `bench workspace status <key>`). A stopped token never launches again.
-2. A root `bench workspace renew_admin <key>`. It retires the stopped token and
-   prints its successor for the same holder (`grant_token`), with a fresh
-   continuation. Keep it out of logs.
+2. A root `bench workspace renew_admin --state <dir> --data <dir> <key>`, with
+   benchd's own state and data roots (it is a local verb, not a socket call, and
+   defaults to the CLI's roots). It retires the stopped token and prints its
+   successor for the same holder (`grant_token`), with a fresh continuation.
+   Keep it out of logs.
 3. A root `bench workspace run --holder <holder> --request-id <fresh id> <key> --
    <command>` with the renewed token in `BENCH_LEASE_TOKEN`, no
    `--repository-name`, whose command commits or removes the stray files. With
