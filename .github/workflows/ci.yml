@@ -177,6 +177,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # treaty.json at the root says what AgentPod produces and consumes and which treaty release it
+      # pins; `treaty verify` (the hub's @superjackfruitlabs/treaty-contracts, whose bin pnpm links
+      # under apps/hub) checks it against that release's registry. Here, not in a job of its own,
+      # because `hub` is a required check.
+      - name: Treaty verify
+        run: apps/hub/node_modules/.bin/treaty verify
+
       # In this job rather than one of its own: `hub` is a required check, and a
       # new job would not gate. Before the suite so a type error fails in
       # seconds under its own name, not as one red test among four thousand.
