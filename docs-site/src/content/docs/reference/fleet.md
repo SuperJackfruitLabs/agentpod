@@ -2894,9 +2894,11 @@ usage:
   fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-repo N
                        --repo name=N,provider=forge|github,repository=OWNER/REPO,clone=URL[,base=B][,format=sha1|sha256] ...
                        --worker PATH [--worker-arg A ...] [--env K=V ...] [--launch registered-v1|grouped]
+                       [--cards-choose [--default-repo N ...]]
                        [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin] [--keep-bench]
   fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkpoint-repo N] [--repo ... ...]
                        [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
+                       [--cards-choose[=false]] [--default-repo N ... | --no-default-repo]
                        [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh] [--keep-bench[=false]]
   fleet bench stage rm NAME
   fleet bench doctor NAME | --station S [--json]
@@ -2904,9 +2906,11 @@ usage:
 A stage is the node's private registry profile and the hub's checkpoint profile,
 written together: the node writes its registry and answers with its own
 registry_sha256, and the hub pins that. No restart, no hand-written JSON.
---repo is the stage's allow-list of repositories. Moving a stage to another
-board is one "stage set NAME --board B". A settled card's bench is reclaimed
-unless the stage is set --keep-bench.
+--repo is the stage's allow-list of repositories. With --cards-choose each
+card chooses a subset of it, and its bench holds only those; --default-repo is
+what a card that names none gets. Moving a stage to another board is one
+"stage set NAME --board B". A settled card's bench is reclaimed unless the
+stage is set --keep-bench.
 ```
 
 **Needs:** A workspace admin's token. Anyone else is refused with 403.
@@ -2957,10 +2961,11 @@ Set up one stage: roster row, node registry profile and hub profile.
 fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-repo N
                      --repo name=N,provider=P,repository=OWNER/REPO,clone=URL[,base=B][,format=F] ...
                      --worker PATH [--worker-arg A ...] [--env K=V ...] [--launch registered-v1|grouped]
+                     [--cards-choose [--default-repo N ...]]
                      [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin] [--keep-bench]
 ```
 
-In order, each step idempotent and each refusal naming the step: the station's roster row for the board (created as a `station-plane` source row, or upgraded to one); the node's registry profile (written atomically and reloaded; a refused change writes nothing); the hub's checkpoint profile, built from the station, the roster, the hub's own service grant (the reporter) and the node's reply. Other stages on the same node are re-pinned to the node's new digest in the same write. `--repo` is the stage's allow-list: a claim's policy names exactly these repositories. The reply prints the stage's `checkpointPolicy` for SuperPipeline and the steps still manual. `--source-tenant` is needed only for the workspace's first stage. Missing required flags are named together and exit 2.
+In order, each step idempotent and each refusal naming the step: the station's roster row for the board (created as a `station-plane` source row, or upgraded to one); the node's registry profile (written atomically and reloaded; a refused change writes nothing); the hub's checkpoint profile, built from the station, the roster, the hub's own service grant (the reporter) and the node's reply. Other stages on the same node are re-pinned to the node's new digest in the same write. `--repo` is the stage's allow-list: a claim's policy names exactly these repositories, unless `--cards-choose`: then each card chooses a subset of them in SuperPipeline, the hub's claims ask for claim protocol v2 and recompute the card's narrowing, and the node prepares each card's bench with only its choice. `--default-repo` (repeatable) is what a card that names none gets; it must hold `--checkpoint-repo` unless it is one repository. A card's choice is fixed once its bench exists. The reply prints the stage's `checkpointPolicy` (or, with `--cards-choose`, its `cardCheckpointPolicy`) for SuperPipeline and the steps still manual. `--source-tenant` is needed only for the workspace's first stage. Missing required flags are named together and exit 2.
 
 | Argument | Meaning |
 |---|---|
@@ -2982,6 +2987,8 @@ In order, each step idempotent and each refusal naming the step: the station's r
 | `--bridge-key K` | string | — | Roster key for the stage's bridge row (add). |
 | `--repin` | bool | `false` | Re-pin the node registry's worker and coordinator digests to the installed bytes. |
 | `--keep-bench` | bool | `false` | Keep a card's bench after its checkpoint settles; `--keep-bench`=false reclaims again (the default). |
+| `--cards-choose` | bool | `false` | Each card chooses its repositories from `--repo`, the allow-list (set: `--cards-choose`=false turns it off). |
+| `--default-repo N` | string | — | With `--cards-choose`: a repository a card that names none gets (repeatable). |
 
 **Needs:** A workspace admin's token. Anyone else is refused with 403.
 
@@ -2998,10 +3005,11 @@ Change one stage; the hub's pins and the node's target are re-derived.
 ```text
 fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkpoint-repo N] [--repo SPEC ...]
                      [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
+                     [--cards-choose[=false]] [--default-repo N ... | --no-default-repo]
                      [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh] [--keep-bench[=false]]
 ```
 
-Fields not given keep their value on the node and in the hub. `--board` moves the stage and its roster row to another board in one write. `--repo` replaces the whole allow-list. `--repin` re-pins the node's worker and coordinator digests after an update; `--refresh` re-derives the hub's pins (occupant, owner, occupancy epoch, roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its `--repo` list and `--worker` again. An attempt already running keeps its retained authority and is retired by the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file. Once a card's checkpoint settles, the hub reclaims its bench (its tree and quota) so the host does not fill; a card that comes back gets a fresh bench from its card branch. `--keep-bench` keeps settled benches for this stage instead, and `--keep-bench=false` returns to the default.
+Fields not given keep their value on the node and in the hub. `--board` moves the stage and its roster row to another board in one write. `--repo` replaces the whole allow-list. `--cards-choose` lets each card choose from it and `--cards-choose=false` stops that (and drops the default); `--default-repo` replaces the default and `--no-default-repo` removes it. `--repin` re-pins the node's worker and coordinator digests after an update; `--refresh` re-derives the hub's pins (occupant, owner, occupancy epoch, roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its `--repo` list and `--worker` again. An attempt already running keeps its retained authority and is retired by the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file. Once a card's checkpoint settles, the hub reclaims its bench (its tree and quota) so the host does not fill; a card that comes back gets a fresh bench from its card branch. `--keep-bench` keeps settled benches for this stage instead, and `--keep-bench=false` returns to the default.
 
 | Argument | Meaning |
 |---|---|
@@ -3018,6 +3026,9 @@ Fields not given keep their value on the node and in the hub. `--board` moves th
 | `--repin` | bool | `false` | Re-pin the node registry's worker and coordinator digests to the installed bytes. |
 | `--refresh` | bool | `false` | Re-derive the hub's pins and the node's target, changing nothing else (set). |
 | `--keep-bench` | bool | `false` | Keep a card's bench after its checkpoint settles; `--keep-bench`=false reclaims again (the default). |
+| `--cards-choose` | bool | `false` | Each card chooses its repositories from `--repo`, the allow-list (set: `--cards-choose`=false turns it off). |
+| `--default-repo N` | string | — | With `--cards-choose`: a repository a card that names none gets (repeatable). |
+| `--no-default-repo` | bool | `false` | Remove the stage's default repositories (set). |
 
 **Needs:** A workspace admin's token. Anyone else is refused with 403.
 

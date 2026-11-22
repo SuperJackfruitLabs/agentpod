@@ -85,10 +85,18 @@ const stageFields = {
   stageId: z.string().min(1).max(200).optional(),
   /**
    * The stage's allow-list of repositories, in any order (stored sorted by name). A claim's
-   * policy must name exactly these today; a later change lets a card choose a subset of them.
+   * policy names exactly these, unless `cardsChoose`: then each card chooses a subset of them.
    */
   repositories: z.array(BenchStageRepository).min(1).max(32),
   checkpointRepository: name,
+  /**
+   * Each card chooses its repositories from the allow-list (treaty `run-checkpoint-policy.v2`,
+   * `StageDef.cardCheckpointPolicy`). The hub's claims for the stage then ask for claim protocol v2,
+   * and the node prepares each card's bench with only its choice.
+   */
+  cardsChoose: z.boolean().optional(),
+  /** Only with `cardsChoose`: what a card that names none gets (the policy's `defaultRepositories`). */
+  defaultRepositories: z.array(name).min(1).max(32).optional(),
   worker: BenchStageWorker,
   /** Re-pin the node registry's worker and coordinator digests to the bytes installed now. */
   repin: z.boolean().optional(),
@@ -100,6 +108,9 @@ const distinctRepositories = (v: { repositories?: BenchStageRepository[]; checkp
   !v.repositories || (new Set(v.repositories.map((r) => r.name)).size === v.repositories.length &&
     new Set(v.repositories.map((r) => `${r.provider}/${r.repository}`)).size === v.repositories.length);
 
+const defaultsNeedChoice = (v: { cardsChoose?: boolean; defaultRepositories?: string[] }) =>
+  !v.defaultRepositories?.length || v.cardsChoose === true;
+
 export const BenchStageAddRequest = z.object({
   name: BenchStageName,
   /** The roster key for the stage's bridge row; default: the station's row on the board, else `name`. */
@@ -107,6 +118,7 @@ export const BenchStageAddRequest = z.object({
   ...stageFields,
 }).strict()
   .refine(distinctRepositories, "each repository appears once, by name and by OWNER/REPO")
+  .refine(defaultsNeedChoice, "default repositories are for a stage whose cards choose (--cards-choose)")
   .refine((v) => v.repositories.some((r) => r.name === v.checkpointRepository), "the checkpoint repository is one of the repositories");
 export type BenchStageAddRequest = z.infer<typeof BenchStageAddRequest>;
 
@@ -118,6 +130,10 @@ export const BenchStageSetRequest = z.object({
   stageId: stageFields.stageId,
   repositories: stageFields.repositories.optional(),
   checkpointRepository: name.optional(),
+  /** Turn per-card choice on or off. Off also drops the default. */
+  cardsChoose: z.boolean().optional(),
+  /** Replace the default; an empty list removes it. */
+  defaultRepositories: z.array(name).max(32).optional(),
   worker: BenchStageWorker.optional(),
   repin: z.boolean().optional(),
   keepBench: z.boolean().optional(),
@@ -140,6 +156,9 @@ export const BenchStageView = z.object({
   agentId: z.string(),
   checkpointRepository: z.string(),
   repositories: z.array(z.object({ name: z.string(), provider: z.string(), repository: z.string(), repositorySHA256: sha })),
+  /** Whether each card chooses a subset of `repositories`, and its default when it names none. */
+  cardsChoose: z.boolean(),
+  defaultRepositories: z.array(z.string()).optional(),
   registrySHA256: sha,
   /** Whether a settled card's bench is kept (`--keep-bench`) rather than reclaimed. */
   keepBench: z.boolean(),

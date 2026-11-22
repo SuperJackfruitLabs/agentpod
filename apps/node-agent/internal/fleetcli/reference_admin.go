@@ -186,13 +186,19 @@ var adminCommands = []clidoc.Command{
 		Synopsis: "fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-repo N\n" +
 			"                     --repo name=N,provider=P,repository=OWNER/REPO,clone=URL[,base=B][,format=F] ...\n" +
 			"                     --worker PATH [--worker-arg A ...] [--env K=V ...] [--launch registered-v1|grouped]\n" +
+			"                     [--cards-choose [--default-repo N ...]]\n" +
 			"                     [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin] [--keep-bench]",
 		Detail: "In order, each step idempotent and each refusal naming the step: the station's roster row for the board " +
 			"(created as a `station-plane` source row, or upgraded to one); the node's registry profile (written atomically " +
 			"and reloaded; a refused change writes nothing); the hub's checkpoint profile, built from the station, the roster, " +
 			"the hub's own service grant (the reporter) and the node's reply. Other stages on the same node are re-pinned to " +
 			"the node's new digest in the same write. `--repo` is the stage's allow-list: a claim's policy names exactly these " +
-			"repositories. The reply prints the stage's `checkpointPolicy` for SuperPipeline and the steps still manual. " +
+			"repositories, unless `--cards-choose`: then each card chooses a subset of them in SuperPipeline, the hub's " +
+			"claims ask for claim protocol v2 and recompute the card's narrowing, and the node prepares each card's bench " +
+			"with only its choice. `--default-repo` (repeatable) is what a card that names none gets; it must hold " +
+			"`--checkpoint-repo` unless it is one repository. A card's choice is fixed once its bench exists. The reply " +
+			"prints the stage's `checkpointPolicy` (or, with `--cards-choose`, its `cardCheckpointPolicy`) for " +
+			"SuperPipeline and the steps still manual. " +
 			"`--source-tenant` is needed only for the workspace's first stage. Missing required flags are named together and exit 2.",
 		Args:     []clidoc.Arg{{Name: "NAME", Meaning: "the stage's name: the node registry profile id and the coordinator profile id"}},
 		Handlers: []string{"fleetBenchStage"},
@@ -211,6 +217,8 @@ var adminCommands = []clidoc.Command{
 			{Name: "bridge-key", Arg: "K"},
 			{Name: "repin"},
 			{Name: "keep-bench"},
+			{Name: "cards-choose"},
+			{Name: "default-repo", Arg: "N", Repeatable: true},
 		},
 		Example: "fleet bench stage add review --board brd_0123456789abcdef --station stn_123 --agent agt_abc123 \\\n" +
 			"  --repo name=app,provider=forge,repository=example/app,clone=ssh://git@forge.example:2222/example/app.git,base=main \\\n" +
@@ -220,9 +228,12 @@ var adminCommands = []clidoc.Command{
 		Path: "bench stage set", Summary: "Change one stage; the hub's pins and the node's target are re-derived.",
 		Synopsis: "fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkpoint-repo N] [--repo SPEC ...]\n" +
 			"                     [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]\n" +
+			"                     [--cards-choose[=false]] [--default-repo N ... | --no-default-repo]\n" +
 			"                     [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh] [--keep-bench[=false]]",
 		Detail: "Fields not given keep their value on the node and in the hub. `--board` moves the stage and its roster row to " +
-			"another board in one write. `--repo` replaces the whole allow-list. `--repin` re-pins the node's worker and " +
+			"another board in one write. `--repo` replaces the whole allow-list. `--cards-choose` lets each card choose " +
+			"from it and `--cards-choose=false` stops that (and drops the default); `--default-repo` replaces the default " +
+			"and `--no-default-repo` removes it. `--repin` re-pins the node's worker and " +
 			"coordinator digests after an update; `--refresh` re-derives the hub's pins (occupant, owner, occupancy epoch, " +
 			"roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its " +
 			"`--repo` list and `--worker` again. An attempt already running keeps its retained authority and is retired by " +
@@ -242,6 +253,9 @@ var adminCommands = []clidoc.Command{
 			{Name: "repin"},
 			{Name: "refresh"},
 			{Name: "keep-bench"},
+			{Name: "cards-choose"},
+			{Name: "default-repo", Arg: "N", Repeatable: true},
+			{Name: "no-default-repo"},
 		},
 		Example: "fleet bench stage set review --board brd_fedcba9876543210",
 	},

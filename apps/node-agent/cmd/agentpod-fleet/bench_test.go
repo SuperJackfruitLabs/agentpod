@@ -104,6 +104,40 @@ func TestBenchStageSetSendsOnlyWhatWasAsked(t *testing.T) {
 	}
 }
 
+// TestBenchStageCardsChoose: --cards-choose and --default-repo mark a stage whose cards choose its
+// repositories; on set, only what is given is sent, and --cards-choose=false or --no-default-repo
+// turn them off.
+func TestBenchStageCardsChoose(t *testing.T) {
+	bin := build(t)
+	rec := &recorded{}
+	srv := rec.server(t, `{"ok":true}`)
+	env := []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}
+	if _, code := run(t, bin, env, "bench", "stage", "add", "review", "--board", "brd_0123456789abcdef", "--station", "st_1",
+		"--agent", "agt_abc123", "--checkpoint-repo", "app", "--worker", "/w", "--cards-choose", "--default-repo", "app",
+		"--repo", "name=api,provider=forge,repository=o/api,clone=/r/api", "--repo", "name=app,provider=forge,repository=o/app,clone=/r/app"); code != 0 {
+		t.Fatalf("add: exit = %d", code)
+	}
+	if _, _, _, body, _ := rec.snapshot(); body["cardsChoose"] != true || mustJSON(t, body["defaultRepositories"]) != `["app"]` {
+		t.Errorf("add body %v", body)
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--cards-choose"}, `{"cardsChoose":true}`},
+		{[]string{"--cards-choose=false"}, `{"cardsChoose":false}`},
+		{[]string{"--default-repo", "api", "--default-repo", "app"}, `{"defaultRepositories":["api","app"]}`},
+		{[]string{"--no-default-repo"}, `{"defaultRepositories":[]}`},
+	} {
+		if _, code := run(t, bin, env, append([]string{"bench", "stage", "set", "review"}, c.args...)...); code != 0 {
+			t.Fatalf("%v: exit = %d", c.args, code)
+		}
+		if _, _, _, body, _ := rec.snapshot(); mustJSON(t, body) != c.want {
+			t.Errorf("%v: body %v, want %s", c.args, body, c.want)
+		}
+	}
+}
+
 func TestBenchRefusalsNeverLeaveTheClient(t *testing.T) {
 	bin := build(t)
 	rec := &recorded{}
@@ -119,6 +153,8 @@ func TestBenchRefusalsNeverLeaveTheClient(t *testing.T) {
 		"set, nothing":          {"bench", "stage", "set", "review"},
 		"set, args no worker":   {"bench", "stage", "set", "review", "--worker-arg", "x"},
 		"set, bridge key":       {"bench", "stage", "set", "review", "--bridge-key", "k"},
+		"set, default and none": {"bench", "stage", "set", "review", "--default-repo", "app", "--no-default-repo"},
+		"add, no default":       append(append([]string{"bench", "stage", "add", "review", "--no-default-repo"}, full...), "--repo", "name=app,provider=forge,repository=o/a,clone=/r"),
 		"rm, no name":           {"bench", "stage", "rm"},
 		"doctor, nothing":       {"bench", "doctor"},
 		"doctor, both":          {"bench", "doctor", "review", "--station", "st_1"},

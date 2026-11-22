@@ -372,6 +372,32 @@ describe("a stage set up from the hub", () => {
     expect(await keepFor({ ...must(installedFor("review"), "review"), coordinatorProfileId: "file-only" })).toBe(false);
   });
 
+  test("a stage whose cards choose: claims ask for v2, and the printed policy is its cardCheckpointPolicy", async () => {
+    const Reply = z.object({ checkpointPolicy: z.object({ version: z.string() }).loose(), nextSteps: z.array(z.string()),
+      stage: BenchStageView });
+    const on = Reply.parse(await (await call("PATCH", "/stages/review", { cardsChoose: true, defaultRepositories: ["app"] })).json());
+    expect(on.checkpointPolicy).toMatchObject({ version: "superpipeline.checkpoint-policy.v2", repositorySelection: "card",
+      defaultRepositories: ["app"], repositories: [{ name: "app", provider: "forge", repository: "example/app" }], checkpointRepository: "app" });
+    expect(on.stage).toMatchObject({ cardsChoose: true, defaultRepositories: ["app"] });
+    expect(on.nextSteps.join("\n")).toContain("cardCheckpointPolicy");
+    expect(must(installedFor("review"), "card profile")).toMatchObject({ repositorySelection: "card", defaultRepositories: ["app"] });
+    expect(checkpointRuntime(tenantId, BOARD2, stationId, "review")?.port.choosesRepositories).toBe(true);
+    // The node's registry keeps the allow-list as it was: the choice is per prepare.
+    expect(node.profiles.get("review")?.repositories.map((r) => r.name)).toEqual(["app"]);
+
+    const off = Reply.parse(await (await call("PATCH", "/stages/review", { cardsChoose: false })).json());
+    expect(off.checkpointPolicy.version).toBe("superpipeline.checkpoint-policy.v1");
+    expect(off.stage.cardsChoose).toBe(false);
+    const fixed = must(installedFor("review"), "fixed profile");
+    expect(fixed.repositorySelection).toBeUndefined();
+    expect(fixed.defaultRepositories).toBeUndefined();
+    expect(checkpointRuntime(tenantId, BOARD2, stationId, "review")?.port.choosesRepositories).toBeUndefined();
+    // A default without per-card choice is refused before the node is asked.
+    node.requests = [];
+    expect((await call("PATCH", "/stages/review", { defaultRepositories: ["app"] })).status).toBe(400);
+    expect(node.requests).toEqual([]);
+  });
+
   test("a stage taken over from the file becomes the table's", async () => {
     const res = await call("PATCH", "/stages/legacy", { refresh: true });
     expect(res.status).toBe(200);

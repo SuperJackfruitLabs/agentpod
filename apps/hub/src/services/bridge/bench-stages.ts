@@ -159,10 +159,24 @@ function expectAnswer(answer: NodeAnswer): BenchRegistryStatus {
 
 interface PublicRepository { name: string; provider: "forge" | "github"; repository: string }
 
+/** Whether each card chooses its repositories from the stage's allow-list, and its default. */
+interface StageChoice { cardsChoose: boolean; defaultRepositories?: string[] }
+
+/** The stage's choice after a `set`: what it was, with what the request changes. Off drops the default. */
+function choiceAfter(before: CheckpointProfile, req: BenchStageSetRequest): StageChoice {
+  const cardsChoose = req.cardsChoose ?? before.repositorySelection === "card";
+  if (!cardsChoose) {
+    if (req.defaultRepositories?.length) refuse(400, "default repositories are for a stage whose cards choose (--cards-choose)");
+    return { cardsChoose };
+  }
+  const defaults = req.defaultRepositories ?? before.defaultRepositories;
+  return { cardsChoose, ...(defaults?.length ? { defaultRepositories: [...defaults] } : {}) };
+}
+
 function buildProfile(f: {
   name: string; tenantId: string; organizationId: string; sourceTenantId: string; audience: string; reporter: string;
   station: StationFacts; agentKey: string; profileKey: string | null; served: BenchRegistryProfileView;
-  repositories: PublicRepository[]; checkpointRepository: string;
+  repositories: PublicRepository[]; checkpointRepository: string; choice: StageChoice;
 }): CheckpointProfile {
   const t = f.served.target;
   if (t.tenant_id !== f.tenantId || t.station_id !== f.station.id || t.node_id !== f.station.nodeId)
@@ -180,11 +194,15 @@ function buildProfile(f: {
       ownerPrincipalId: f.station.ownerPrincipalId, occupantPrincipalId: f.station.principalId,
       agentKey: f.agentKey, profileKey: normalizeRosterProfileKey(f.profileKey), coordinatorProfileId: f.name,
       occupancyEpoch: f.station.occupancyEpoch, target: t, repositories, checkpointRepository: f.checkpointRepository,
+      ...(f.choice.cardsChoose ? { repositorySelection: "card" } : {}),
+      ...(f.choice.cardsChoose && f.choice.defaultRepositories?.length
+        ? { defaultRepositories: f.choice.defaultRepositories.toSorted() } : {}),
     });
   } catch (error) {
     if (error instanceof CheckpointRefused)
       return refuse(400, "the stage does not make a valid checkpoint profile (check the repository names, " +
-        "the checkpoint repository and that the station's owner and occupant are plane principals)");
+        "the checkpoint repository, that each default repository is one of them and holds the checkpoint " +
+        "repository unless it is the only one, and that the station's owner and occupant are plane principals)");
     throw error;
   }
 }
@@ -246,23 +264,35 @@ function view(profile: CheckpointProfile, origin: BenchStageView["origin"], stag
     stageId, agentKey: profile.agentKey, agentId: profile.target.agent_id, checkpointRepository: profile.checkpointRepository,
     repositories: profile.repositories.map((r) => ({ name: r.name, provider: r.provider, repository: r.repository,
       repositorySHA256: r.repositorySHA256 })),
+    cardsChoose: profile.repositorySelection === "card",
+    ...(profile.defaultRepositories ? { defaultRepositories: [...profile.defaultRepositories] } : {}),
     registrySHA256: profile.target.registry_sha256, keepBench, served, ...(detail ? { detail } : {}) };
 }
 
-/** The `checkpointPolicy` the SuperPipeline stage needs, for the operator to apply (no service route yet). */
+/**
+ * The policy the SuperPipeline stage needs, for the operator to apply (no service route yet): its
+ * `checkpointPolicy` (v1), or for a stage whose cards choose its `cardCheckpointPolicy` (v2), whose
+ * `repositories` is the allow-list.
+ */
 export function checkpointPolicyFor(profile: CheckpointProfile) {
-  return {
-    version: "superpipeline.checkpoint-policy.v1", kind: "superbench", allowUnchanged: false,
+  const common = {
+    kind: "superbench", allowUnchanged: false,
     repositories: profile.repositories.map((r) => ({ name: r.name, provider: r.provider, repository: r.repository })),
     checkpointRepository: profile.checkpointRepository, reporterPrincipalId: profile.reporterPrincipalId,
     nodeId: profile.target.node_id, executors: [{ agentId: profile.target.agent_id, stationId: profile.target.station_id }],
   };
+  if (profile.repositorySelection !== "card") return { version: "superpipeline.checkpoint-policy.v1", ...common };
+  return { version: "superpipeline.checkpoint-policy.v2", repositorySelection: "card", ...common,
+    ...(profile.defaultRepositories ? { defaultRepositories: [...profile.defaultRepositories] } : {}) };
 }
+
+/** The stage field the printed policy belongs in. */
+const policyField = (profile: CheckpointProfile) => profile.repositorySelection === "card" ? "cardCheckpointPolicy" : "checkpointPolicy";
 
 function nextSteps(profile: CheckpointProfile, stageId: string | null, hasMcpToken: boolean): string[] {
   const steps = [
     `SuperPipeline: link the board agent ${profile.target.agent_id} to the agent principal ${profile.occupantPrincipalId} (a person does this in SuperPipeline).`,
-    `SuperPipeline: set the stage's checkpointPolicy to the policy above (PATCH the stage ${stageId ?? "STAGE"} on board ${profile.target.board_id}).`,
+    `SuperPipeline: set the stage's ${policyField(profile)} to the policy above (PATCH the stage ${stageId ?? "STAGE"} on board ${profile.target.board_id}).`,
     "Accounts: the hub's service principal needs the checkpoints:submit and checkpoints:read scopes (once per deployment).",
   ];
   if (!hasMcpToken)
@@ -329,7 +359,8 @@ export function addBenchStage(userId: string, tenantId: string, req: BenchStageA
       { stage: req.name, boardId: req.boardId, action: "add" }, () => nodeRegistrySet(station.nodeId, change, req.repin ?? false)));
     const served = status.profiles.find((p) => p.id === req.name) ?? refuse(502, "the node did not serve the stage it was given");
     const profile = buildProfile({ name: req.name, tenantId, organizationId, sourceTenantId, audience: at, reporter: reporterId, station,
-      agentKey: roster.key, profileKey: roster.profileKey, served, repositories: req.repositories, checkpointRepository: req.checkpointRepository });
+      agentKey: roster.key, profileKey: roster.profileKey, served, repositories: req.repositories, checkpointRepository: req.checkpointRepository,
+      choice: { cardsChoose: req.cardsChoose === true, ...(req.defaultRepositories ? { defaultRepositories: req.defaultRepositories } : {}) } });
     return finish(userId, tenantId, req.name, profile, req.stageId ?? null, status, true, roster.key, undefined, req.keepBench ?? false);
   });
 }
@@ -346,6 +377,7 @@ export function setBenchStage(userId: string, tenantId: string, name: string, re
   return guarded(async () => {
     if (Object.keys(req).length === 0) refuse(400, "nothing to change");
     const { profile: before, stageId } = await currentStage(tenantId, name);
+    const choice = choiceAfter(before, req);
     const boardId = req.boardId ?? before.target.board_id;
     const stationId = req.stationId ?? before.target.station_id;
     const station = await stationFacts(tenantId, stationId);
@@ -385,7 +417,8 @@ export function setBenchStage(userId: string, tenantId: string, name: string, re
     const served = status.profiles.find((p) => p.id === name) ?? refuse(502, "the node did not serve the stage it was given");
     const profile = buildProfile({ name, tenantId, organizationId, sourceTenantId: req.sourceTenantId ?? before.sourceTenantId,
       audience: at, reporter: reporterId, station, agentKey: roster.key, profileKey: roster.profileKey, served,
-      repositories: req.repositories ?? before.repositories, checkpointRepository: req.checkpointRepository ?? before.checkpointRepository });
+      repositories: req.repositories ?? before.repositories, checkpointRepository: req.checkpointRepository ?? before.checkpointRepository,
+      choice });
     return finish(userId, tenantId, name, profile, req.stageId ?? stageId, status, false, roster.key, before, req.keepBench);
   });
 }

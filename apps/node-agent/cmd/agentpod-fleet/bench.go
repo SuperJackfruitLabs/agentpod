@@ -84,10 +84,13 @@ func fleetBenchStage(args []string) {
 	repin := fs.Bool("repin", false, "re-pin the node registry's worker and coordinator digests to the installed bytes")
 	refresh := fs.Bool("refresh", false, "re-derive the hub's pins and the node's target, changing nothing else (set)")
 	keepBench := fs.Bool("keep-bench", false, "keep a card's bench after its checkpoint settles; --keep-bench=false reclaims again (the default)")
-	var repos, workerArgs, env repeatable
+	cardsChoose := fs.Bool("cards-choose", false, "each card chooses its repositories from --repo, the allow-list (set: --cards-choose=false turns it off)")
+	noDefault := fs.Bool("no-default-repo", false, "remove the stage's default repositories (set)")
+	var repos, workerArgs, env, defaults repeatable
 	fs.Var(&repos, "repo", "name=N,provider=forge|github,repository=OWNER/REPO,clone=URL[,base=B][,format=sha1|sha256] (repeatable)")
 	fs.Var(&workerArgs, "worker-arg", "one argument after --worker (repeatable)")
 	fs.Var(&env, "env", "KEY=VALUE for the worker: PATH, LANG, LC_ALL, TZ or TERM (repeatable)")
+	fs.Var(&defaults, "default-repo", "with --cards-choose: a repository a card that names none gets (repeatable)")
 
 	verb := args[0]
 	switch verb {
@@ -157,12 +160,22 @@ func fleetBenchStage(args []string) {
 	if *repin {
 		body["repin"] = true
 	}
-	// Sent only when given, so a `set` that does not name it leaves the stage's choice alone.
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "keep-bench" {
-			body["keepBench"] = *keepBench
-		}
-	})
+	// Sent only when given, so a `set` that does not name one leaves the stage's choice alone.
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	if given["keep-bench"] {
+		body["keepBench"] = *keepBench
+	}
+	if given["cards-choose"] {
+		body["cardsChoose"] = *cardsChoose
+	}
+	if len(defaults) > 0 && *noDefault {
+		fmt.Fprintln(os.Stderr, "--default-repo and --no-default-repo contradict each other: give one")
+		os.Exit(2)
+	}
+	if len(defaults) > 0 {
+		body["defaultRepositories"] = []string(defaults)
+	}
 
 	if verb == "add" {
 		if *bridgeKey != "" {
@@ -170,6 +183,10 @@ func fleetBenchStage(args []string) {
 		}
 		if *refresh {
 			fmt.Fprintln(os.Stderr, "--refresh is for set; add derives everything anyway")
+			os.Exit(2)
+		}
+		if *noDefault {
+			fmt.Fprintln(os.Stderr, "--no-default-repo is for set; a new stage has no default unless --default-repo gives one")
 			os.Exit(2)
 		}
 		missing := []string{}
@@ -193,6 +210,9 @@ func fleetBenchStage(args []string) {
 	}
 	if *refresh {
 		body["refresh"] = true
+	}
+	if *noDefault {
+		body["defaultRepositories"] = []string{}
 	}
 	if len(body) == 0 {
 		// A PATCH with nothing in it would change nothing; say so rather than answer "done".
