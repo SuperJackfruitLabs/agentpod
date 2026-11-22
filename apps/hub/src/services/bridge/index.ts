@@ -52,4 +52,5 @@ export type { WorkAvailableDelivery } from "./work-wake";
 export { checkpointCurrentDecision } from "./checkpoint-current-decision";
 export { CHECKPOINT_COORDINATOR_FLAG, checkpointPrerequisiteError } from "./checkpoint-profiles";
 export { addBenchStage, listBenchStages, removeBenchStage, setBenchStage } from "./bench-stages";
+export { benchDoctor } from "./bench-doctor";
 export { installStageProfilesAtStartup } from "./bench-stage-store";

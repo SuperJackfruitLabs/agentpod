@@ -155,7 +155,7 @@ var adminCommands = []clidoc.Command{
 	{
 		Path: "bench", Group: "Administration",
 		Summary:  "Bench stages: a board's checkpoint work on a SuperBench host, set up from the hub.",
-		Synopsis: "fleet bench stage ...",
+		Synopsis: "fleet bench <stage|doctor> ...",
 		Help:     BenchUsage,
 		Detail: "A stage is two records that must agree: the node's private coordinator registry profile (repositories " +
 			"with their clone URLs, the worker command, the launch) and the hub's checkpoint profile (the pins every claim " +
@@ -246,6 +246,22 @@ var adminCommands = []clidoc.Command{
 		Detail:   "The roster row is kept (`fleet bridge rm KEY` removes it). A node that no longer has the profile is not an error.",
 		Args:     []clidoc.Arg{{Name: "NAME", Meaning: "the stage's name"}},
 		Example:  "fleet bench stage rm review",
+	},
+	{
+		Path: "bench doctor", Summary: "Check everything a stage needs before its first card.",
+		Synopsis: "fleet bench doctor NAME | --station S [--json]",
+		Detail: "One PASS or FAIL line per check, each failure with its next step: this hub's coordinator flag, control pair " +
+			"and SuperPipeline audience; the station's occupant and node; the node's registry (configured, valid), benchd " +
+			"(reachable, managed, free space on its data and state volumes), the worker's and node's pinned digests against " +
+			"the installed bytes; the roster row, its credential source, a trial exchange of the agent's grant (`claim` and " +
+			"`run`), the run-only MCP token and the owner's dispatch grant; the hub's service grant (`checkpoints:submit` and " +
+			"`checkpoints:read`); and, for a stage, the hub's pins and the node's served target. Then the steps no verb takes " +
+			"(Accounts and SuperPipeline) and the stage's `checkpointPolicy`. Changes nothing. Exits 1 when a check failed.",
+		Args:     []clidoc.Arg{{Name: "NAME", Meaning: "a stage name; or give --station for a station with no stage yet"}},
+		Handlers: []string{"fleetBenchDoctor"},
+		Flags:    []clidoc.Flag{{Name: "station", Arg: "S"}, {Name: "json"}},
+		Exit:     "0 when every check passed, 1 when one failed, 2 for a usage error.",
+		Example:  "fleet bench doctor review",
 	},
 	{
 		Path: "principals", Group: "Administration",

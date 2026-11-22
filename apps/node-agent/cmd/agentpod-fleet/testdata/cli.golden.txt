@@ -2360,6 +2360,7 @@ usage:
                        [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
                        [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh]
   fleet bench stage rm NAME
+  fleet bench doctor NAME | --station S [--json]
 
 A stage is the node's private registry profile and the hub's checkpoint profile,
 written together: the node writes its registry and answers with its own
@@ -2381,6 +2382,7 @@ usage:
                        [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
                        [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh]
   fleet bench stage rm NAME
+  fleet bench doctor NAME | --station S [--json]
 
 A stage is the node's private registry profile and the hub's checkpoint profile,
 written together: the node writes its registry and answers with its own
@@ -2417,6 +2419,7 @@ usage:
                        [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
                        [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh]
   fleet bench stage rm NAME
+  fleet bench doctor NAME | --station S [--json]
 
 A stage is the node's private registry profile and the hub's checkpoint profile,
 written together: the node writes its registry and answers with its own
@@ -2440,6 +2443,7 @@ usage:
                        [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
                        [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh]
   fleet bench stage rm NAME
+  fleet bench doctor NAME | --station S [--json]
 
 A stage is the node's private registry profile and the hub's checkpoint profile,
 written together: the node writes its registry and answers with its own
@@ -2458,6 +2462,16 @@ Not signed in to a fleet.
 
 This is separate from `apn enroll`, which gives this MACHINE an identity.
 A node's credential is never used to act on the fleet.
+
+$ fleet bench doctor -h
+exit 0
+--- stdout
+--- stderr
+Usage of fleet bench doctor:
+  -json
+    	print the hub's report as JSON
+  -station string
+    	check a station with no stage yet
 
 $ fleet principals -h
 exit 0

@@ -38,6 +38,16 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   Upgrade: an empty table changes nothing, and the private profile file keeps
   loading; its profiles are adopted into the table the first time the hub rewrites
   their node's registry. See `docs/BENCH_REGISTERED_LAUNCH.md`.
+- `fleet bench doctor NAME | --station S`: one PASS or FAIL line per check before a
+  stage's first card, each failure with its next step. It checks the hub's
+  coordinator flag, control pair and SuperPipeline audience; the station's occupant
+  and node; the node's registry, benchd (reachable, managed, free space on both
+  volumes), and the worker and node digests against the installed bytes; the roster
+  row, its source, a trial exchange of the agent's grant (`claim`, `run`), the
+  run-only MCP token and the owner's dispatch grant; the hub's service grant
+  (`checkpoints:submit`, `checkpoints:read`); and the stage's pins against what the
+  node serves. It then prints the Accounts and SuperPipeline steps no verb takes and
+  the stage's `checkpointPolicy`. It changes nothing and exits 1 on a failure.
 
 - Proposed registered bench launch: a registry profile with `"launch": "registered-v1"`
   delivers the worker's task to the payload only as SuperBench finite stdin and

@@ -1,5 +1,5 @@
 /**
- * `fleet bench stage add|set|list|rm`, through the admin routes, against a
+ * `fleet bench stage add|set|list|rm` and `fleet bench doctor`, through the admin routes, against a
  * fake node that keeps a registry the way the Go node does (`internal/benchbridge/registry_manage.go`):
  * it merges a profile change, refuses unknown fields, and answers with its own `registry_sha256`.
  *
@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { Hono } from "hono";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { BenchStageView } from "@agentpod/contract";
+import { BenchDoctorCheck, BenchStageView } from "@agentpod/contract";
 
 import { db } from "../../src/db/drizzle";
 import { tenants } from "../../src/db/schema/tenants";
@@ -327,6 +327,48 @@ describe("a stage set up from the hub", () => {
       expect(res.status).toBe(400);
     }
     expect(node.requests).toHaveLength(0);
+  });
+});
+
+const Doctor = z.object({ ok: z.boolean(), checks: z.array(BenchDoctorCheck) });
+
+describe("fleet bench doctor", () => {
+  test("passes every check for a served stage and prints what stays manual", async () => {
+    await db.update(bridgeAgents).set({ mcpTokenEncrypted: "fixture-ciphertext" })
+      .where(and(eq(bridgeAgents.tenantId, tenantId), eq(bridgeAgents.key, "review")));
+    const report = Doctor.extend({ manual: z.array(z.string()),
+      checkpointPolicy: z.object({ nodeId: z.string(), reporterPrincipalId: z.string() }).loose() })
+      .parse(await (await call("GET", "/doctor?stage=review")).json());
+    expect(report.checks.filter((c) => c.ok !== true)).toEqual([]);
+    expect(report.ok).toBe(true);
+    expect(report.manual.join("\n")).toContain("SuperPipeline");
+    expect(report.checkpointPolicy).toMatchObject({ nodeId, reporterPrincipalId: reporter });
+  });
+
+  test("fails the service grant and the stage's node target, each with a next step", async () => {
+    serviceScope = "checkpoints:read";
+    node.coordinator = "0".repeat(64);
+    try {
+      const report = Doctor.parse(await (await call("GET", "/doctor?stage=review")).json());
+      expect(report.ok).toBe(false);
+      const failed = Object.fromEntries(report.checks.filter((c) => c.ok === false).map((c) => [c.check, c]));
+      expect(failed["service grant: checkpoint scopes"]?.detail).toBe("missing scope checkpoints:submit");
+      expect(failed["service grant: checkpoint scopes"]?.next).toContain("Accounts");
+      expect(failed["stage: node serves it"]?.detail).toContain("coordinator_implementation_sha256");
+      expect(failed["stage: node serves it"]?.next).toBe("fleet bench stage set review --refresh");
+    } finally {
+      serviceScope = "checkpoints:submit checkpoints:read";
+      node.coordinator = "f".repeat(64);
+    }
+  });
+
+  test("a station with no stage yet is checked too", async () => {
+    const res = await call("GET", `/doctor?station=${stationId}`);
+    expect(res.status).toBe(200);
+    const report = Doctor.parse(await res.json());
+    expect(report.checks.map((c) => c.check)).toContain("benchd: storage");
+    expect((await call("GET", "/doctor")).status).toBe(400);
+    expect((await call("GET", "/doctor?stage=missing")).status).toBe(404);
   });
 });
 

@@ -64,10 +64,14 @@ writes both, from the Hub, with no database edit, no hand-written JSON, no diges
 computed by hand and no restart. A workspace owner or admin runs it.
 
 ```sh
+# Before the first card: everything that can be checked, PASS or FAIL with a next step.
+fleet bench doctor --station STATION
+
 fleet bench stage add review --board brd_… --station STATION --agent agt_… \
   --repo name=app,provider=forge,repository=OWNER/app,clone=ssh://git@forge…/OWNER/app.git,base=main \
   --checkpoint-repo app --worker /usr/local/libexec/HARNESS --source-tenant tnt_…
 
+fleet bench doctor review
 fleet bench stage list
 fleet bench stage set review --board brd_…   # moving the stage to another board
 fleet bench stage rm review
@@ -107,7 +111,7 @@ these repositories, in order (`claimRepositoriesAllowed` in
 ordered, non-empty subset; `registry_sha256` already pins the whole list, so a
 card can only select what the Node serves.
 
-**What stays manual**, printed by `stage add`:
+**What stays manual**, printed by `stage add` and `doctor`:
 
 - Accounts: the agent principal exists and occupies the station, and its grant
   has the `claim` and `run` scopes.
@@ -130,6 +134,7 @@ The routes behind the verbs, all under the admin guard:
 | `POST /api/admin/bench/stages` | `fleet bench stage add` |
 | `PATCH /api/admin/bench/stages/:name` | `fleet bench stage set` |
 | `DELETE /api/admin/bench/stages/:name` | `fleet bench stage rm` |
+| `GET /api/admin/bench/doctor` | `fleet bench doctor` (`?stage=` or `?station=`) |
 
 ### An install from before the verbs
 

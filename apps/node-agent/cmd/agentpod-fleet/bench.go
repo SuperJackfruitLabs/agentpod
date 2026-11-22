@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
 )
@@ -24,6 +27,8 @@ func fleetBench(args []string) {
 	switch args[0] {
 	case "stage":
 		fleetBenchStage(args[1:])
+	case "doctor":
+		fleetBenchDoctor(args[1:])
 	default:
 		fmt.Fprintln(os.Stderr, fleetcli.BenchUsage)
 		os.Exit(2)
@@ -188,4 +193,82 @@ func fleetBenchStage(args []string) {
 		os.Exit(2)
 	}
 	fleetSkillJSON(http.MethodPatch, benchStagesPath+"/"+url.PathEscape(name), body)
+}
+
+type benchDoctorReport struct {
+	OK     bool `json:"ok"`
+	Checks []struct {
+		Check  string `json:"check"`
+		OK     *bool  `json:"ok"`
+		Detail string `json:"detail"`
+		Next   string `json:"next"`
+	} `json:"checks"`
+	Manual           []string        `json:"manual"`
+	CheckpointPolicy json.RawMessage `json:"checkpointPolicy"`
+}
+
+// fleetBenchDoctor prints one line per check, PASS or FAIL with its next step, then the steps no
+// verb here can take. Exit 0 when every check passed, 1 when one failed.
+func fleetBenchDoctor(args []string) {
+	fs := flag.NewFlagSet("fleet bench doctor", flag.ExitOnError)
+	station := fs.String("station", "", "check a station with no stage yet")
+	asJSON := fs.Bool("json", false, "print the hub's report as JSON")
+	name := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		name, args = args[0], args[1:]
+	}
+	_ = fs.Parse(args) // the FlagSet reports a bad flag itself
+	if (name == "") == (*station == "") {
+		fmt.Fprintf(os.Stderr, "doctor takes a stage NAME or --station S\n\n%s\n", fleetcli.BenchUsage)
+		os.Exit(2)
+	}
+	q := url.Values{}
+	if name != "" {
+		q.Set("stage", name)
+	} else {
+		q.Set("station", *station)
+	}
+	raw := fleetRequestBytes(http.MethodGet, "/api/admin/bench/doctor?"+q.Encode(), nil, "", 90*time.Second)
+	if *asJSON {
+		fmt.Println(string(raw))
+		return
+	}
+	var report benchDoctorReport
+	if err := json.Unmarshal(raw, &report); err != nil {
+		fmt.Fprintf(os.Stderr, "the hub's doctor report did not parse: %v\n", err)
+		os.Exit(1)
+	}
+	failed := renderBenchDoctor(os.Stdout, report)
+	if failed {
+		os.Exit(1)
+	}
+}
+
+func renderBenchDoctor(w *os.File, report benchDoctorReport) bool {
+	failed := false
+	for _, c := range report.Checks {
+		mark := "SKIP"
+		if c.OK != nil && *c.OK {
+			mark = "PASS"
+		} else if c.OK != nil {
+			mark, failed = "FAIL", true
+		}
+		fmt.Fprintf(w, "%s  %-34s %s\n", mark, c.Check, c.Detail)
+		if c.Next != "" && mark != "PASS" {
+			fmt.Fprintf(w, "      next: %s\n", c.Next)
+		}
+	}
+	if len(report.Manual) > 0 {
+		fmt.Fprintln(w, "\nManual steps (no fleet verb does these):")
+		for _, m := range report.Manual {
+			fmt.Fprintf(w, "  - %s\n", m)
+		}
+	}
+	if len(report.CheckpointPolicy) > 0 && string(report.CheckpointPolicy) != "null" {
+		var pretty bytes.Buffer
+		if json.Indent(&pretty, report.CheckpointPolicy, "  ", "  ") == nil {
+			fmt.Fprintf(w, "\nThe stage's checkpointPolicy for SuperPipeline:\n  %s\n", pretty.String())
+		}
+	}
+	return failed
 }

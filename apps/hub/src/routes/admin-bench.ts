@@ -1,10 +1,11 @@
 /**
- * Bench stages, as an operator surface — `fleet bench`.
+ * Bench stages and the bench doctor, as an operator surface — `fleet bench`.
  *
  *   GET    /api/admin/bench/stages            every stage in the workspace, with what its node serves
  *   POST   /api/admin/bench/stages            add one (BenchStageAddRequest)
  *   PATCH  /api/admin/bench/stages/:name      change one (BenchStageSetRequest)
  *   DELETE /api/admin/bench/stages/:name      remove one
+ *   GET    /api/admin/bench/doctor?stage=|station=
  *
  * Mounted inside the admin guard (admin.ts): a stage decides which bench runs a board's work and
  * whose grants it spends, which is workspace administration. No response carries a clone URL, a
@@ -14,7 +15,7 @@ import { Hono } from "hono";
 import { BenchStageAddRequest, BenchStageSetRequest } from "@agentpod/contract";
 
 import { resolveTenantId } from "../auth/tenant";
-import { addBenchStage, listBenchStages, removeBenchStage, setBenchStage } from "../services/bridge";
+import { addBenchStage, benchDoctor, listBenchStages, removeBenchStage, setBenchStage } from "../services/bridge";
 
 async function bodyOf(req: Request): Promise<unknown> {
   try {
@@ -44,4 +45,12 @@ export const adminBenchRouter = new Hono()
   .delete("/stages/:name", async (c) => {
     const out = await removeBenchStage(c.get("user").id, resolveTenantId(c), c.req.param("name"));
     return c.json(out.body, out.status);
+  })
+  .get("/doctor", async (c) => {
+    const stage = c.req.query("stage") || undefined;
+    const station = c.req.query("station") || undefined;
+    if (!stage && !station) return c.json({ error: "name a stage or a station" }, 400);
+    const report = await benchDoctor(resolveTenantId(c), { ...(stage ? { name: stage } : {}), ...(station ? { stationId: station } : {}) });
+    if (!report) return c.json({ error: stage ? `no stage named ${stage} in this workspace` : "no such station in this workspace" }, 404);
+    return c.json(report);
   });

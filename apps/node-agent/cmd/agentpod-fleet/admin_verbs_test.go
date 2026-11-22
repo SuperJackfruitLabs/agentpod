@@ -29,13 +29,14 @@ func TestAdminVerbsUseTheHubRoutes(t *testing.T) {
 		{"bridge checkpoint-attempts", []string{"bridge", "checkpoint-attempts"}, "GET", "/api/admin/checkpoint/attempts"},
 		{"bridge checkpoint-settle", []string{"bridge", "checkpoint-settle", "attempt_1", "--evidence", "node journal shows the record cancelled"}, "POST", "/api/admin/checkpoint/attempts/attempt_1/settle"},
 
-		// bench stages
+		// bench stages and the doctor
 		{"bench stage list", []string{"bench", "stage", "list"}, "GET", "/api/admin/bench/stages"},
 		{"bench stage add", []string{"bench", "stage", "add", "review", "--board", "brd_1", "--station", "st_1", "--agent", "agt_1",
 			"--repo", "name=app,provider=forge,repository=o/app,clone=ssh://git@forge.test/o/app.git", "--checkpoint-repo", "app",
 			"--worker", "/usr/libexec/w"}, "POST", "/api/admin/bench/stages"},
 		{"bench stage set", []string{"bench", "stage", "set", "review", "--board", "brd_2"}, "PATCH", "/api/admin/bench/stages/review"},
 		{"bench stage rm", []string{"bench", "stage", "rm", "review"}, "DELETE", "/api/admin/bench/stages/review"},
+		{"bench doctor", []string{"bench", "doctor", "review"}, "GET", "/api/admin/bench/doctor"},
 
 		{"grants list", []string{"grants", "list"}, "GET", "/api/admin/grants"},
 		{"grants show", []string{"grants", "show", "prn_1"}, "GET", "/api/admin/grants/prn_1"},

@@ -2879,12 +2879,12 @@ fleet bridge checkpoint-settle attempt_0123 --evidence "node journal shows the r
 Bench stages: a board's checkpoint work on a SuperBench host, set up from the hub.
 
 ```text
-fleet bench stage ...
+fleet bench <stage|doctor> ...
 ```
 
 A stage is two records that must agree: the node's private coordinator registry profile (repositories with their clone URLs, the worker command, the launch) and the hub's checkpoint profile (the pins every claim is checked against). These verbs write both, in that order, and the hub's pins come from the node's own reply, including `registry_sha256`. Nothing restarts. No reply carries a clone URL, a worker argument or a credential. See [Registered bench launch](https://github.com/SuperJackfruitLabs/agentpod/blob/main/docs/BENCH_REGISTERED_LAUNCH.md).
 
-Subcommands: [`stage`](#fleet-bench-stage).
+Subcommands: [`stage`](#fleet-bench-stage), [`doctor`](#fleet-bench-doctor).
 
 `fleet bench -h` prints:
 
@@ -2899,6 +2899,7 @@ usage:
                        [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
                        [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh]
   fleet bench stage rm NAME
+  fleet bench doctor NAME | --station S [--json]
 
 A stage is the node's private registry profile and the hub's checkpoint profile,
 written together: the node writes its registry and answers with its own
@@ -3039,6 +3040,33 @@ The roster row is kept (`fleet bridge rm KEY` removes it). A node that no longer
 
 ```sh
 fleet bench stage rm review
+```
+
+### fleet bench doctor
+
+Check everything a stage needs before its first card.
+
+```text
+fleet bench doctor NAME | --station S [--json]
+```
+
+One PASS or FAIL line per check, each failure with its next step: this hub's coordinator flag, control pair and SuperPipeline audience; the station's occupant and node; the node's registry (configured, valid), benchd (reachable, managed, free space on its data and state volumes), the worker's and node's pinned digests against the installed bytes; the roster row, its credential source, a trial exchange of the agent's grant (`claim` and `run`), the run-only MCP token and the owner's dispatch grant; the hub's service grant (`checkpoints:submit` and `checkpoints:read`); and, for a stage, the hub's pins and the node's served target. Then the steps no verb takes (Accounts and SuperPipeline) and the stage's `checkpointPolicy`. Changes nothing. Exits 1 when a check failed.
+
+| Argument | Meaning |
+|---|---|
+| `NAME` | a stage name; or give --station for a station with no stage yet |
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--station S` | string | — | Check a station with no stage yet. |
+| `--json` | bool | `false` | Print the hub's report as JSON. |
+
+**Needs:** A workspace admin's token. Anyone else is refused with 403.
+
+**Exit status:** 0 when every check passed, 1 when one failed, 2 for a usage error.
+
+```sh
+fleet bench doctor review
 ```
 
 ## fleet principals

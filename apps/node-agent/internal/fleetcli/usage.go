@@ -45,6 +45,7 @@ const BenchUsage = `usage:
                        [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
                        [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh]
   fleet bench stage rm NAME
+  fleet bench doctor NAME | --station S [--json]
 
 A stage is the node's private registry profile and the hub's checkpoint profile,
 written together: the node writes its registry and answers with its own

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -110,6 +111,8 @@ func TestBenchRefusalsNeverLeaveTheClient(t *testing.T) {
 		"set, args no worker":   {"bench", "stage", "set", "review", "--worker-arg", "x"},
 		"set, bridge key":       {"bench", "stage", "set", "review", "--bridge-key", "k"},
 		"rm, no name":           {"bench", "stage", "rm"},
+		"doctor, nothing":       {"bench", "doctor"},
+		"doctor, both":          {"bench", "doctor", "review", "--station", "st_1"},
 		"unknown verb":          {"bench", "stage", "move"},
 	} {
 		if _, code := run(t, bin, env, args...); code != 2 {
@@ -118,5 +121,35 @@ func TestBenchRefusalsNeverLeaveTheClient(t *testing.T) {
 	}
 	if _, _, _, _, calls := rec.snapshot(); calls != 0 {
 		t.Errorf("%d refused invocations reached the hub", calls)
+	}
+}
+
+// TestBenchDoctorPrintsPassAndFailLines: one line per check, a failure's next step under it, the
+// manual steps, and exit 1 when anything failed.
+func TestBenchDoctorPrintsPassAndFailLines(t *testing.T) {
+	bin := build(t)
+	rec := &recorded{}
+	srv := rec.server(t, `{"ok":false,"checks":[
+		{"check":"hub: checkpoint coordinator","ok":true,"detail":"PROPOSED_CHECKPOINT_COORDINATOR=true"},
+		{"check":"benchd: reachable","ok":false,"detail":"the bench daemon did not answer","next":"Host step: start benchd"},
+		{"check":"benchd: storage","ok":null,"detail":"not checked"}],
+		"manual":["SuperPipeline: link the board agent"],"checkpointPolicy":{"kind":"superbench"}}`)
+	env := []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}
+	out, code := run(t, bin, env, "bench", "doctor", "--station", "st_1")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 for a failed check", code)
+	}
+	_, path, query, _, _ := rec.snapshot()
+	if path != "/api/admin/bench/doctor" || query != "station=st_1" {
+		t.Errorf("asked %s?%s", path, query)
+	}
+	for _, line := range []string{"PASS  hub: checkpoint coordinator", "FAIL  benchd: reachable", "      next: Host step: start benchd",
+		"SKIP  benchd: storage", "Manual steps", "  - SuperPipeline: link the board agent", `"kind": "superbench"`} {
+		if !strings.Contains(out, line) {
+			t.Errorf("output lacks %q:\n%s", line, out)
+		}
+	}
+	if strings.Contains(out, "next: Host step: start benchd\n      next") {
+		t.Error("a passing check printed a next step")
 	}
 }
