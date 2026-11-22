@@ -41,7 +41,8 @@ Two switches must both be set. Neither is set by default.
 
 The Hub side of the coordinator has its own prerequisites, described in
 [bench-checkpoint-reporting.md](contributor/bench-checkpoint-reporting.md):
-`PROPOSED_CHECKPOINT_COORDINATOR=true` with a private profile file,
+`PROPOSED_CHECKPOINT_COORDINATOR=true` (the master switch; profiles come from
+`fleet bench stage`, and an older private profile file still loads),
 `ENFORCE_CONTROL_PAIR=true`, a dispatch grant (`mayDispatch`) from each
 profile's owner for its agent, and a `station-plane` credential source on that
 agent's roster row. Without `ENFORCE_CONTROL_PAIR=true` the Hub logs a
@@ -49,9 +50,104 @@ startup error and loads no checkpoint profile, so no registered launch is reache
 ordinary dispatch continues. A roster row that still holds a legacy token refuses
 every checkpoint cycle with `authority` (`credential.missing`) before `ready` reaches
 the Node, so nothing here is reached either. Give the row a source with
-`fleet bridge set KEY --credential-source station-plane …`, whose audience is the
-Hub's own SuperPipeline origin; see
+`fleet bridge set KEY --credential-source station-plane` (the Hub fills in the occupant, the
+workspace's organization and its own SuperPipeline origin), or add the row as one with
+`fleet bridge add … --credential-source station-plane` and no token; see
 [DEPLOYMENT.md → Giving an agent a plane credential source](DEPLOYMENT.md#giving-an-agent-a-plane-credential-source).
+
+## Setting up a stage
+
+A stage is two records that must agree: the Node's private registry profile
+(repositories with their clone URLs, the worker command, the launch) and the
+Hub's checkpoint profile (the pins every claim is checked against). `fleet bench`
+writes both, from the Hub, with no database edit, no hand-written JSON, no digest
+computed by hand and no restart. A workspace owner or admin runs it.
+
+```sh
+# Before the first card: everything that can be checked, PASS or FAIL with a next step.
+fleet bench doctor --station STATION
+
+fleet bench stage add review --board brd_… --station STATION --agent agt_… \
+  --repo name=app,provider=forge,repository=OWNER/app,clone=ssh://git@forge…/OWNER/app.git,base=main \
+  --checkpoint-repo app --worker /usr/local/libexec/HARNESS --source-tenant tnt_…
+
+fleet bench doctor review
+fleet bench stage list
+fleet bench stage set review --board brd_…   # moving the stage to another board
+fleet bench stage rm review
+```
+
+`stage add` does, in order, each step idempotent and each refusal naming the step:
+
+1. **The roster row.** The station's row for the board, created as a
+   `station-plane` source row (or upgraded to one), with the owner's dispatch
+   grant recorded.
+2. **The Node's registry.** `bench.registry.set` sends the profile: id, selector,
+   repositories with their clone URLs, the checkpoint repository, the worker
+   command, the launch (`registered-v1` unless `--launch grouped`). The Node merges
+   it into its private registry, validates the complete new file, renames it into
+   place (a refused change writes nothing) and rebuilds its coordinator from it.
+   It answers with what it now serves: `registry_sha256` (the sha256 of the bytes
+   installed), each profile's exact target and each repository's digest. It never
+   answers with a clone URL or an argument, and the Hub stores neither.
+3. **The Hub's profile.** Built from the station (occupant, owner, occupancy
+   epoch), the roster row, the workspace's organization, the Hub's own
+   SuperPipeline audience, the Hub's service grant (its `sub` is the reporter) and
+   the Node's reply. It is a row of `bench_stages`, and the selection snapshot is
+   reinstalled at once.
+
+A Node's digest covers every profile it serves, so a write changes the target of
+each stage on that Node; the same write re-pins every other stage on it to the
+Node's new target. `stage set` re-sends only what changed (moving the board sends
+the selector alone; the Node keeps the repositories and worker as installed) and
+re-derives the Hub's pins; `--refresh` does only that, and `--repin` re-pins the
+Node's worker and coordinator digests to the installed bytes after an update. The
+reply to `add` and `set` prints the stage's `checkpointPolicy` for SuperPipeline
+and the steps no verb takes.
+
+`--repo` is the stage's **allow-list**. Today a claim's policy must name exactly
+these repositories, in order (`claimRepositoriesAllowed` in
+`checkpoint-profile.ts`). The later per-card change relaxes that one rule to an
+ordered, non-empty subset; `registry_sha256` already pins the whole list, so a
+card can only select what the Node serves.
+
+**What stays manual**, printed by `stage add` and `doctor`:
+
+- Accounts: the agent principal exists and occupies the station, and its grant
+  has the `claim` and `run` scopes.
+- Accounts: the Hub's service principal holds `checkpoints:submit` and
+  `checkpoints:read` (once per deployment; add them, do not replace its scopes).
+- SuperPipeline: the board agent (`agt_…`) is linked to the agent principal, and
+  the stage's `checkpointPolicy` names this Node, station and agent and the
+  stage's repositories.
+- The run-only MCP token for the agent's board tools:
+  `fleet bridge set KEY --mcp-token spa_…`.
+- The bench host: benchd installed and running, and the coordinator registry
+  installed at `proposedCheckpointRegistry` in the Node config. The registry may
+  hold no stage yet; `stage add` writes the first.
+
+The routes behind the verbs, all under the admin guard:
+
+| Route | Verb |
+| --- | --- |
+| `GET /api/admin/bench/stages` | `fleet bench stage list` |
+| `POST /api/admin/bench/stages` | `fleet bench stage add` |
+| `PATCH /api/admin/bench/stages/:name` | `fleet bench stage set` |
+| `DELETE /api/admin/bench/stages/:name` | `fleet bench stage rm` |
+| `GET /api/admin/bench/doctor` | `fleet bench doctor` (`?stage=` or `?station=`) |
+
+### An install from before the verbs
+
+Nothing changes on upgrade. Migration 0135 creates an empty `bench_stages`, and an
+empty table shadows nothing: the private profile file and its two `hub.env` lines
+keep loading as before, once per configured path. A table row replaces a file
+profile for the same station and board, or the same stage name in the same
+workspace. The first time the Hub rewrites a Node's registry (any `stage add`,
+`set` or `rm` on that Node), each file profile on that Node is adopted into the
+table, re-pinned to the Node's new digest, so the file's stale pin is never
+served. `fleet bench stage list` shows them as `file`, and a profile still only in
+the file as `file-only`; `stage set NAME` takes one over. Once every stage is a
+row, the file and `PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE` can go.
 
 ## Sequence
 

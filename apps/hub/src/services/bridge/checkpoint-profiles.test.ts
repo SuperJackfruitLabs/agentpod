@@ -3,10 +3,11 @@ import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, 
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { readCheckpointProfiles, requireInstalledCheckpointProfile, CHECKPOINT_COORDINATOR_FLAG } from "./checkpoint-profiles";
+import { installTableCheckpointProfiles, installedCheckpointProfiles, mergeCheckpointProfiles, readCheckpointProfiles,
+  requireInstalledCheckpointProfile, CHECKPOINT_COORDINATOR_FLAG } from "./checkpoint-profiles";
 import corpus from "../../../../../packages/contract/src/fixtures/bench-coordinator-v1.json";
 
-import { checkpointProfileId, checkpointTask, parseCheckpointProfile } from "./checkpoint-profile";
+import { checkpointProfileId, checkpointTask, claimRepositoriesAllowed, parseCheckpointProfile } from "./checkpoint-profile";
 import { canonicalCheckpoint } from "./checkpoint-json";
 import { checkpointRuntime } from "./checkpoint-port";
 const prior = { flag: process.env.PROPOSED_CHECKPOINT_COORDINATOR, file: process.env.PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE, pair: process.env.ENFORCE_CONTROL_PAIR };
@@ -131,4 +132,59 @@ test("the bench task names the checkpoint repository, so the harness never start
   const { checkpointRepository: _omitted, ...missing } = { ...fixture(), repositories };
   expect(() => parseCheckpointProfile(missing)).toThrow();
   expect(() => parseCheckpointProfile({ ...fixture(), repositories, checkpointRepository: "docs" })).toThrow();
+});
+
+test("an empty stage table changes nothing: the file's profiles are served as installed", () => {
+  const f = installed(); Object.assign(process.env, f.env);
+  installTableCheckpointProfiles([]);
+  const [pin] = readCheckpointProfiles(f.env);
+  if (!pin) throw new Error("fixture pin missing");
+  expect(installedCheckpointProfiles()).toEqual([pin]);
+});
+
+test("a stage row replaces the file's profile for the same station and board, or the same stage name", () => {
+  const file = parseCheckpointProfile(fixture());
+  const other = parseCheckpointProfile({ ...fixture(), profileKey: "other", target: { ...fixture().target, board_id: "brd_other0001" } });
+  const sameSelector = parseCheckpointProfile({ ...fixture(), profileKey: "renamed", target: { ...fixture().target, registry_sha256: "f".repeat(64) } });
+  const sameName = parseCheckpointProfile({ ...fixture(), target: { ...fixture().target, board_id: "brd_moved0001" } });
+  expect(mergeCheckpointProfiles([file, other], [])).toEqual([file, other]);
+  expect(mergeCheckpointProfiles([file, other], [sameSelector])).toEqual([other, sameSelector]);
+  expect(mergeCheckpointProfiles([file, other], [sameName])).toEqual([other, sameName]);
+  // Another workspace's stage of the same name shadows nothing here.
+  const foreign = parseCheckpointProfile({ ...fixture(), target: { ...fixture().target, tenant_id: "fleet_elsewhere", board_id: "brd_moved0001" } });
+  expect(mergeCheckpointProfiles([file], [foreign])).toEqual([file, foreign]);
+});
+
+test("a table profile is selected with no restart, and replacing the table drops it", () => {
+  const f = installed(); Object.assign(process.env, f.env);
+  const moved = parseCheckpointProfile({ ...fixture(), target: { ...fixture().target, board_id: "brd_moved0001" } });
+  const t = moved.target;
+  try {
+    expect(checkpointRuntime(t.tenant_id, t.board_id, t.station_id, moved.agentKey)).toBeUndefined();
+    installTableCheckpointProfiles([moved]);
+    expect(checkpointRuntime(t.tenant_id, t.board_id, t.station_id, moved.agentKey)).toBeDefined();
+    // The file's copy of the same stage is no longer served next to it.
+    const file = fixture().target;
+    expect(checkpointRuntime(file.tenant_id, file.board_id, file.station_id, moved.agentKey)).toBeUndefined();
+  } finally { installTableCheckpointProfiles([]); }
+  expect(checkpointRuntime(t.tenant_id, t.board_id, t.station_id, moved.agentKey)).toBeUndefined();
+});
+
+test("without the control pair no table profile is served either", () => {
+  const f = installed(); Object.assign(process.env, f.env);
+  delete process.env.ENFORCE_CONTROL_PAIR;
+  const error = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    installTableCheckpointProfiles([parseCheckpointProfile(fixture())]);
+    expect(installedCheckpointProfiles()).toEqual([]);
+  } finally { installTableCheckpointProfiles([]); error.mockRestore(); }
+});
+
+test("a claim names exactly the stage's allow-list today", () => {
+  const api = { name: "api", provider: "forge", repository: "example/api" };
+  const web = { name: "web", provider: "forge", repository: "example/web" };
+  expect(claimRepositoriesAllowed([api, web], [api, web])).toBe(true);
+  expect(claimRepositoriesAllowed([api, web], [api])).toBe(false);
+  expect(claimRepositoriesAllowed([api, web], [web, api])).toBe(false);
+  expect(claimRepositoriesAllowed([api, web], [api, { ...web, repository: "example/other" }])).toBe(false);
 });

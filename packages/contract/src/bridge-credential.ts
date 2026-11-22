@@ -42,3 +42,18 @@ export function bridgeCredentialSourceFor(deploymentAudience: string) {
     .object({ ...fields, audience: z.literal(deploymentAudience) })
     .strict();
 }
+
+/**
+ * A request for a station-plane source the hub fills in itself: the station's occupant, the
+ * workspace's organization and the hub's own SuperPipeline audience. Every one of those is a value
+ * the hub would refuse in any other form, so asking for them adds nothing an operator should type.
+ * A hub resolves it to a full `BridgeCredentialSource` before storing anything.
+ */
+export const BridgeCredentialSourceDerive = z
+  .object({ version: z.literal(1), kind: z.literal("station-plane") })
+  .strict();
+export type BridgeCredentialSourceDerive = z.infer<typeof BridgeCredentialSourceDerive>;
+
+/** What a roster write may carry: a complete source, or a request for the hub to derive one. */
+export const BridgeCredentialSourceRequest = z.union([BridgeCredentialSource, BridgeCredentialSourceDerive]);
+export type BridgeCredentialSourceRequest = z.infer<typeof BridgeCredentialSourceRequest>;

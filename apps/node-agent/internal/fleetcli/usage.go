@@ -23,16 +23,35 @@ const UsersUsage = `usage:
 
 const BridgeUsage = `usage:
   fleet bridge list
-  fleet bridge add --key K --board B --station S --token T [--mcp-token M]
-                   [--mode M] [--concurrency N] [--profile P] [--wait-ms N] [--enabled true|false]
+  fleet bridge add --key K --board B --station S (--token T | --credential-source station-plane)
+                   [--mcp-token M] [--mode M] [--concurrency N] [--profile P] [--wait-ms N]
+                   [--enabled true|false] [--principal P --organization O --audience A]
   fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                    [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
-                   [--credential-source station-plane --principal P --organization O --audience A]
+                   [--credential-source station-plane [--principal P --organization O --audience A]]
                    [--credential-source none --token T]
   fleet bridge rm KEY
   fleet bridge related-work BOARD on|off
   fleet bridge checkpoint-attempts
   fleet bridge checkpoint-settle ATTEMPT --evidence TEXT`
+
+const BenchUsage = `usage:
+  fleet bench stage list
+  fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-repo N
+                       --repo name=N,provider=forge|github,repository=OWNER/REPO,clone=URL[,base=B][,format=sha1|sha256] ...
+                       --worker PATH [--worker-arg A ...] [--env K=V ...] [--launch registered-v1|grouped]
+                       [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin]
+  fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkpoint-repo N] [--repo ... ...]
+                       [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
+                       [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh]
+  fleet bench stage rm NAME
+  fleet bench doctor NAME | --station S [--json]
+
+A stage is the node's private registry profile and the hub's checkpoint profile,
+written together: the node writes its registry and answers with its own
+registry_sha256, and the hub pins that. No restart, no hand-written JSON.
+--repo is the stage's allow-list of repositories. Moving a stage to another
+board is one "stage set NAME --board B".`
 
 const ConfigUsage = `usage:
   fleet config settings                                         every setting the fleet can declare

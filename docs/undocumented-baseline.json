@@ -69,7 +69,6 @@
     "POST /_matrix/push/v1/notify",
     "POST /api/acp/sessions/:sessionId/resume",
     "POST /api/admin/agents",
-    "POST /api/admin/bridge/agents",
     "POST /api/admin/settings/speech/test",
     "POST /api/admin/settings/transcription/test",
     "POST /api/admin/stations/:stationId/setup",

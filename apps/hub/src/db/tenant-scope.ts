@@ -39,6 +39,7 @@ import { acpEvents, acpRuns, acpSessions, acpPromptRequests } from "./schema/acp
 import { matrixBoardRooms } from "./schema/board-rooms";
 import { bridgeAgents, bridgeBoardSettings, bridgeDispatches } from "./schema/bridge";
 import { checkpointDispatches } from "./schema/checkpoint-dispatch";
+import { benchStages } from "./schema/bench-stages";
 import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
 import {
@@ -159,6 +160,7 @@ export const TENANT_SCOPED_TABLES = {
   bridgeBoardSettings,
   bridgeDispatches,
   checkpointDispatches,
+  benchStages,
   agentTasks,
   cloudflareSandboxes,
   matrixRooms,

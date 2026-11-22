@@ -71,14 +71,42 @@ func executableHash(path string) (string, error) {
 	}
 	return rawSHA(raw), nil
 }
-func readRegistry(path, nodeID string) (Registry, string, error) {
-	var r Registry
+
+// RegistryVersion is the private registry file's only version.
+const RegistryVersion = "agentpod.private-coordinator-registry.v1"
+
+// MaxRegistryProfiles bounds one node's registry. Zero is allowed: a host can install its
+// registry with no stage yet, and `fleet bench stage add` writes the first one.
+const MaxRegistryProfiles = 16
+
+const maxRegistryBytes = 64 << 10
+
+func readRegistryRaw(path string) ([]byte, error) {
 	if benchjournal.PhysicalDir(filepath.Dir(path), true) != nil {
-		return r, "", ErrRegistry
+		return nil, ErrRegistry
 	}
-	raw, err := benchjournal.ReadFile(path, 64<<10, true)
-	if err != nil || benchjournal.Decode(raw, &r) != nil || r.Version != "agentpod.private-coordinator-registry.v1" || r.NodeID != nodeID ||
-		len(r.Profiles) < 1 || len(r.Profiles) > 16 || !benchjournal.PhysicalName(r.Socket) {
+	raw, err := benchjournal.ReadFile(path, maxRegistryBytes, true)
+	if err != nil {
+		return nil, ErrRegistry
+	}
+	return raw, nil
+}
+
+func readRegistry(path, nodeID string) (Registry, string, error) {
+	raw, err := readRegistryRaw(path)
+	if err != nil {
+		return Registry{}, "", ErrRegistry
+	}
+	return parseRegistry(raw, nodeID)
+}
+
+// parseRegistry validates exact registry bytes. The digest it returns is the sha256 of those
+// bytes, the target's `registry_sha256`.
+func parseRegistry(raw []byte, nodeID string) (Registry, string, error) {
+	var r Registry
+	err := benchjournal.Decode(raw, &r)
+	if err != nil || r.Version != RegistryVersion || r.NodeID != nodeID ||
+		len(r.Profiles) > MaxRegistryProfiles || !benchjournal.PhysicalName(r.Socket) {
 		return Registry{}, "", ErrRegistry
 	}
 	for _, p := range []string{r.StateRoot, r.IntentRoot, r.ContextParent} {

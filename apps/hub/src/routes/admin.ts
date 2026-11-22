@@ -32,6 +32,7 @@ import { agentsAdminRouter } from "./agents-admin";
 import { adminBridgeAgentsRouter } from "./admin-bridge-agents";
 import { adminBridgeBoardsRouter } from "./admin-bridge-boards";
 import { adminCheckpointAttemptsRouter } from "./admin-checkpoint-attempts";
+import { adminBenchRouter } from "./admin-bench";
 import { adminTranscriptionRoutes } from "./transcription-settings";
 import { adminSpeechRoutes } from "./speech-settings";
 
@@ -94,6 +95,7 @@ adminRouter.route("/bridge/agents", adminBridgeAgentsRouter);
 adminRouter.route("/bridge/boards", adminBridgeBoardsRouter);
 // Unresolved checkpoint attempts: inspect, and settle one explicitly with evidence. Same guard.
 adminRouter.route("/checkpoint/attempts", adminCheckpointAttemptsRouter);
+adminRouter.route("/bench", adminBenchRouter);
 
 // Creating an agent, and putting it in a station. Mounted at the root of
 // `/api/admin` because it owns two path families — `/agents` and

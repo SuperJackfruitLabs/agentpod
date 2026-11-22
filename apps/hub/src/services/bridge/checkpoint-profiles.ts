@@ -61,20 +61,61 @@ export function readCheckpointProfiles(env: Record<string, string | undefined> =
 
 const log = createLogger("bridge-checkpoint");
 let installation: { path: string | undefined; enforced: boolean; profiles: readonly CheckpointProfile[] } | undefined;
+
+/**
+ * Stage profiles from the `bench_stages` table (`fleet bench stage`), installed by
+ * `installTableCheckpointProfiles` at startup and after every stage write. A process snapshot,
+ * like the file: replaced whole, never read row by row on a claim cycle.
+ */
+let tableProfiles: readonly CheckpointProfile[] = Object.freeze([]);
+let merged: { file: readonly CheckpointProfile[]; table: readonly CheckpointProfile[]; profiles: readonly CheckpointProfile[] } | undefined;
+
+/** Replace the table snapshot. The next selection sees it; no restart. */
+export function installTableCheckpointProfiles(profiles: readonly CheckpointProfile[]): void {
+  tableProfiles = Object.freeze([...profiles]);
+}
+
+const sameSelector = (a: CheckpointProfile, b: CheckpointProfile) => a.target.tenant_id === b.target.tenant_id &&
+  a.target.board_id === b.target.board_id && a.target.station_id === b.target.station_id;
+const sameStage = (a: CheckpointProfile, b: CheckpointProfile) => a.target.tenant_id === b.target.tenant_id &&
+  (a.coordinatorProfileId ?? a.profileKey) === (b.coordinatorProfileId ?? b.profileKey);
+
+/**
+ * The file's profiles, then the table's: a table row replaces any file profile for the same
+ * station and board, or the same stage name in the same workspace. That is how an existing
+ * file-based install keeps working unchanged (an empty table shadows nothing) and how `fleet bench
+ * stage` takes a stage over from the file without anyone editing it.
+ */
+export function mergeCheckpointProfiles(file: readonly CheckpointProfile[], table: readonly CheckpointProfile[]): readonly CheckpointProfile[] {
+  const kept = file.filter((f) => !table.some((t) => sameSelector(f, t) || sameStage(f, t)));
+  return Object.freeze([...kept, ...table]);
+}
+
 /** Private pins are installed once per configured path, including a failed load.
- * Editing the same file requires a Hub restart; credentials/current authority are
- * still checked afresh before effects. A malformed installation disables only
- * dedicated dispatch, never ordinary agent loops or their legacy client.
+ * Editing the same file requires a Hub restart; a stage written with `fleet bench stage` does
+ * not. Credentials/current authority are still checked afresh before effects. A malformed file
+ * disables only its own profiles, never ordinary agent loops or their legacy client.
  */
 export function installedCheckpointProfiles(): readonly CheckpointProfile[] {
   if (process.env[CHECKPOINT_COORDINATOR_FLAG] !== "true") return [];
   const path = process.env[CONFIG_FILE];
   const enforced = process.env[CONTROL_PAIR_FLAG] === "true";
-  if (installation && installation.path === path && installation.enforced === enforced) return installation.profiles;
-  const profiles = loadInstallation();
-  installation = { path, enforced, profiles };
-  return profiles;
+  if (!installation || installation.path !== path || installation.enforced !== enforced)
+    installation = { path, enforced, profiles: loadInstallation() };
+  // Without control-pair enforcement no profile is served, from the file or the table.
+  if (!enforced) return Object.freeze([]);
+  if (!merged || merged.file !== installation.profiles || merged.table !== tableProfiles)
+    merged = { file: installation.profiles, table: tableProfiles, profiles: mergeCheckpointProfiles(installation.profiles, tableProfiles) };
+  return merged.profiles;
 }
+
+/** The legacy file's own profiles, as installed: for adopting them into the table. */
+export function installedFileCheckpointProfiles(): readonly CheckpointProfile[] {
+  if (process.env[CHECKPOINT_COORDINATOR_FLAG] !== "true") return [];
+  installedCheckpointProfiles();
+  return installation?.profiles ?? [];
+}
+
 function loadInstallation(): readonly CheckpointProfile[] {
   const prerequisite = checkpointPrerequisiteError();
   if (prerequisite) {
@@ -84,6 +125,8 @@ function loadInstallation(): readonly CheckpointProfile[] {
       { code: "prerequisite", missing: CONTROL_PAIR_FLAG, detail: prerequisite, reload: "restart-required" });
     return Object.freeze([]);
   }
+  // No file is the normal case now: stages come from the table.
+  if (!process.env[CONFIG_FILE]) return Object.freeze([]);
   try {
     const profiles = readCheckpointProfiles();
     log.info("checkpoint profile snapshot loaded", { profiles: profiles.length, reload: "restart-required" });
@@ -93,7 +136,7 @@ function loadInstallation(): readonly CheckpointProfile[] {
     // the path or the file. The error's class and its closed code (an fs errno, a refusal code) do.
     const cause = error instanceof CheckpointRefused ? error.cause : error;
     const errno: unknown = cause instanceof Error ? Reflect.get(cause, "code") : undefined;
-    log.warn("checkpoint profile snapshot unavailable; dedicated dispatch disabled", { code: "unavailable", reload: "restart-required",
+    log.warn("checkpoint profile snapshot unavailable; dedicated dispatch disabled for its profiles", { code: "unavailable", reload: "restart-required",
       errorClass: cause instanceof Error ? cause.name : typeof cause, ...(typeof errno === "string" ? { errno } : {}) });
     return Object.freeze([]);
   }

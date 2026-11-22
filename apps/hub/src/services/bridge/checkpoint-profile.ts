@@ -134,11 +134,26 @@ export function claimRefusal(profile: CheckpointProfile, claim: PendingCheckpoin
   if (p.nodeId !== t.node_id) return "claim.node";
   if (p.checkpointRepository !== profile.checkpointRepository) return "claim.checkpoint_repository";
   if (!p.executors.some((executor) => executor.agentId === t.agent_id && executor.stationId === t.station_id)) return "claim.executor";
-  if (p.repositories.length !== profile.repositories.length || p.repositories.some((member, index) => {
-    const pin = profile.repositories[index];
-    return pin?.name !== member.name || pin.provider !== member.provider || pin.repository !== member.repository;
-  })) return "claim.repositories";
+  if (!claimRepositoriesAllowed(profile.repositories, p.repositories)) return "claim.repositories";
   return undefined;
+}
+
+type RepositoryIdentity = { name: string; provider: string; repository: string };
+const sameRepository = (a: RepositoryIdentity, b: RepositoryIdentity) =>
+  a.name === b.name && a.provider === b.provider && a.repository === b.repository;
+
+/**
+ * Whether a claim's repositories may run under the profile's. The profile's list is the stage's
+ * allow-list (`fleet bench stage --repo`), and today a claim must name exactly that list, in order.
+ * Per-card repositories will relax this one rule to "a non-empty subset, in the allow-list's order"
+ * (treaty `StageDef.cardCheckpointPolicy` and the claim `selection`); `registry_sha256` already
+ * pins the whole allow-list, so a card can only select what the node serves. Exported for tests.
+ */
+export function claimRepositoriesAllowed(allowed: readonly RepositoryIdentity[], claimed: readonly RepositoryIdentity[]): boolean {
+  return claimed.length === allowed.length && claimed.every((member, index) => {
+    const pin = allowed[index];
+    return pin !== undefined && sameRepository(pin, member);
+  });
 }
 export function requireCheckpointProfileClaim(profile: CheckpointProfile, claim: PendingCheckpointClaim): void {
   const reason = claimRefusal(profile, claim);

@@ -34,7 +34,7 @@ Each verb prints the hub's JSON unchanged on stdout. Errors go to stderr; exit 0
 | Nodes | `fleet nodes` (also `update`, `telemetry`, `rm`), `fleet invite`, `fleet runtimes` (list, providers, create, start, stop, rm) |
 | Stations | `fleet stations` (detected, list, adopt, unadopt, git-identity, grant-push, revoke-push, forge-api), `fleet station` (lifecycle, cleanup, changeset, fs), `fleet staff` (options, create, assign, unassign), `fleet config` (settings, show, set, unset, drift, opt-out, opt-in, plan, inspect, apply), `fleet mcp-proxy` (list, enable, disable, rotate) |
 | Skills and plugins | `fleet skills` (artifacts, releases, cohorts, upload, release, cohort, canary, station, native), `fleet plugins` (plan, show, inspect, apply, history, inventory) |
-| Administration | `fleet settings` (show, signup, transcription, speech), `fleet bridge` (list, add, set, rm, related-work), `fleet principals`, `fleet grants`, `fleet users` |
+| Administration | `fleet settings` (show, signup, transcription, speech), `fleet bridge` (list, add, set, rm, related-work), `fleet bench` (stage list, add, set, rm; doctor), `fleet principals`, `fleet grants`, `fleet users` |
 | This binary | `fleet update`, `fleet version`, `fleet help`, `fleet skill` |
 
 `fleet skill` (singular) prints or installs this file. It is not `fleet skills` (plural), which manages skill artifacts on the fleet.
@@ -59,6 +59,7 @@ Read-only (safe to run to look around):
 - `fleet plugins show`, `fleet plugins history`, `fleet plugins inventory`
 - `fleet settings show`, `fleet settings transcription show`, `fleet settings speech show`
 - `fleet bridge list`
+- `fleet bench stage list`, `fleet bench doctor` (asks the node and the plane, changes nothing)
 - `fleet principals list`, `fleet grants list`, `fleet grants show`, `fleet users list`, `fleet users show`
 
 Preparatory (record a plan or re-check; they change nothing on a station, but they do write a record, so run them when the task is about that change): `fleet config plan`, `fleet plugins plan`, `fleet plugins inspect`, and the `plan` and `rollback-plan` subverbs of `fleet skills`.
@@ -72,7 +73,7 @@ Changes shared state or is hard to undo - ASK FIRST:
 - Config: `fleet config set`, `fleet config unset`, `fleet config opt-out`, `fleet config opt-in`, `fleet config apply` (writes a station's config)
 - MCP proxy: `fleet mcp-proxy enable`, `fleet mcp-proxy disable`, `fleet mcp-proxy rotate` (new secrets break existing clients)
 - Skills and plugins: every `apply`, `upload`, `release import`, `cohort create` and `artifact delete` under `fleet skills`, and `fleet plugins apply`
-- Administration: `fleet settings` set, enable and disable verbs, `fleet bridge add`, `fleet bridge set`, `fleet bridge rm`, `fleet bridge related-work`, `fleet principals` suspend, restore and credential verbs, `fleet grants set`, `fleet grants rm`, `fleet users ban`, `fleet users unban`, `fleet users role`
+- Administration: `fleet settings` set, enable and disable verbs, `fleet bridge add`, `fleet bridge set`, `fleet bridge rm`, `fleet bridge related-work`, `fleet bench stage add`, `fleet bench stage set`, `fleet bench stage rm` (write a node's bench registry and the hub's checkpoint pins), `fleet principals` suspend, restore and credential verbs, `fleet grants set`, `fleet grants rm`, `fleet users ban`, `fleet users unban`, `fleet users role`
 - Sign-in state: `fleet login`, `fleet logout`, `fleet devices revoke`
 - This binary: `fleet update` (replaces the binary; also refreshes an already-installed copy of this skill), `fleet skill install` (writes one file under the skills directory)
 

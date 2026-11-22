@@ -42,6 +42,10 @@ func NewHandler(registryPath, hub, nodeID, nodeSecret string) (*Handler, error) 
 	return &Handler{registryPath: registryPath, registry: r, registrySHA: digest, current: current, client: client}, nil
 }
 func (h *Handler) Close() { h.client.Close() }
+
+// RegistrySHA256 is the digest of the registry bytes this handler serves: every target it
+// advertises carries it as `registry_sha256`.
+func (h *Handler) RegistrySHA256() string { return h.registrySHA }
 func (h *Handler) installed() error {
 	r, digest, err := readRegistry(h.registryPath, h.registry.NodeID)
 	if err != nil || digest != h.registrySHA || !reflect.DeepEqual(r, h.registry) {

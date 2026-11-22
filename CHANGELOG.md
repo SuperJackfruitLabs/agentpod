@@ -12,6 +12,43 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Added
 
+- `fleet bridge add --credential-source station-plane` adds a source row with no
+  `--token`. With no `--principal`, `--organization` or `--audience`, the hub fills
+  in the station's occupant, the workspace's organization and its own SuperPipeline
+  origin (`fleet bridge set KEY --credential-source station-plane` does the same for
+  an existing row). The admission checks and the trial exchange are unchanged.
+- The node answers `bench.registry.status|set|remove` (capability
+  `bench.registry.manage`): the hub writes one stage's profile into the node's
+  private coordinator registry, atomically and validated as the whole new file, and
+  the coordinator reloads it with no restart. The reply carries the registry's
+  `registry_sha256` (the digest of the bytes now installed), the worker and
+  coordinator pins against the installed bytes, the bench daemon's reachability and
+  free space, and each served target; never a clone URL or an argument. A registry
+  may now hold no stage, and `repin` re-pins the worker and node digests after an
+  update. Host fields (socket, roots, worker path) are never written from the hub.
+- `fleet bench stage add|set|list|rm`: one SuperBench stage set up from the hub.
+  `add` creates (or upgrades) the station's `station-plane` roster row, writes the
+  node's registry profile through `bench.registry.set`, and builds the hub's
+  checkpoint profile from the station, the roster, the hub's own service grant and
+  the node's reply, so `registry_sha256` is the node's own and nobody computes it.
+  Profiles live in a new `bench_stages` table (migration 0135) and are selected
+  with no restart; moving a stage's board is one `stage set NAME --board B`, which
+  moves its roster row too. Other stages on the node are re-pinned in the same
+  write. No reply, row or audit entry holds a clone URL or a worker argument.
+  Upgrade: an empty table changes nothing, and the private profile file keeps
+  loading; its profiles are adopted into the table the first time the hub rewrites
+  their node's registry. See `docs/BENCH_REGISTERED_LAUNCH.md`.
+- `fleet bench doctor NAME | --station S`: one PASS or FAIL line per check before a
+  stage's first card, each failure with its next step. It checks the hub's
+  coordinator flag, control pair and SuperPipeline audience; the station's occupant
+  and node; the node's registry, benchd (reachable, managed, free space on both
+  volumes), and the worker and node digests against the installed bytes; the roster
+  row, its source, a trial exchange of the agent's grant (`claim`, `run`), the
+  run-only MCP token and the owner's dispatch grant; the hub's service grant
+  (`checkpoints:submit`, `checkpoints:read`); and the stage's pins against what the
+  node serves. It then prints the Accounts and SuperPipeline steps no verb takes and
+  the stage's `checkpointPolicy`. It changes nothing and exits 1 on a failure.
+
 - Proposed registered bench launch: a registry profile with `"launch": "registered-v1"`
   delivers the worker's task to the payload only as SuperBench finite stdin and
   reads its framed result from sealed stdout, then reads the run's receipt back

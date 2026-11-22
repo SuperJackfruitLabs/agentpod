@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetcli"
 )
@@ -56,8 +57,23 @@ func fleetBridge(args []string) {
 		fleetGet(base, args)
 	case "add":
 		_ = fs.Parse(args[1:]) // the FlagSet reports a bad flag itself
+		required := map[string]string{"--key": *key, "--board": *board, "--station": *station}
+		switch *credentialSource {
+		case "":
+			// A token row: the claim token is the row's credential.
+			required["--token"] = *token
+		case "station-plane":
+			// A source row stores no claim token; the hub exchanges the occupant's own identity.
+			if *token != "" {
+				fmt.Fprintln(os.Stderr, "--credential-source station-plane takes no --token: a source row stores no claim token (--mcp-token is kept)")
+				os.Exit(2)
+			}
+		default:
+			fmt.Fprintf(os.Stderr, "add takes --credential-source station-plane or no source, got %q\n", *credentialSource)
+			os.Exit(2)
+		}
 		missing := []string{}
-		for name, v := range map[string]string{"--key": *key, "--board": *board, "--station": *station, "--token": *token} {
+		for name, v := range required {
 			if v == "" {
 				missing = append(missing, name)
 			}
@@ -65,11 +81,16 @@ func fleetBridge(args []string) {
 		if len(missing) > 0 {
 			// Named together rather than one at a time: four required flags discovered by four
 			// failed invocations is four round trips to learn one sentence.
+			sort.Strings(missing)
 			fmt.Fprintf(os.Stderr, "add requires %v\n\n%s\n", missing, fleetcli.BridgeUsage)
 			os.Exit(2)
 		}
-		body := map[string]any{"key": *key, "boardId": *board, "stationId": *station, "token": *token}
+		body := map[string]any{"key": *key, "boardId": *board, "stationId": *station}
+		if *token != "" {
+			body["token"] = *token
+		}
 		addOptional(body, *mcpToken, *mode, *profile, *enabled, *concurrency, *waitMs)
+		addCredentialSource(body, *credentialSource, *principal, *organization, *audience)
 		fleetSkillJSON(http.MethodPost, base, body)
 	case "set":
 		if len(args) < 2 || args[1] == "" {
@@ -151,9 +172,9 @@ func addOptional(body map[string]any, mcpToken, mode, profile, enabled string, c
 // place, and the hub drops the stored tokens. `none` goes back to a token, which the hub refuses
 // without a new `--token`.
 //
-// The three identity flags are all required together, and refused without
+// The three identity flags are given all together or not at all, and refused without
 // `--credential-source station-plane`, so a half-typed source never reaches the hub as a
-// different one. The hub still decides: the principal must occupy the row's station, the
+// different one. With none of them the hub derives all three. The hub still decides: the principal must occupy the row's station, the
 // organization must be the workspace's, and the audience must be the hub's own SuperPipeline.
 func addCredentialSource(body map[string]any, kind, principal, organization, audience string) {
 	identity := principal != "" || organization != "" || audience != ""
@@ -174,6 +195,12 @@ func addCredentialSource(body map[string]any, kind, principal, organization, aud
 		}
 		body["credentialSource"] = nil
 	case "station-plane":
+		if !identity {
+			// The hub fills in all three: the occupant, the workspace's organization and its own
+			// SuperPipeline audience. They are the only values it would accept anyway.
+			body["credentialSource"] = map[string]any{"version": 1, "kind": "station-plane"}
+			return
+		}
 		missing := []string{}
 		for _, f := range []struct{ name, v string }{{"--principal", principal}, {"--organization", organization}, {"--audience", audience}} {
 			if f.v == "" {
@@ -181,7 +208,7 @@ func addCredentialSource(body map[string]any, kind, principal, organization, aud
 			}
 		}
 		if len(missing) > 0 {
-			fmt.Fprintf(os.Stderr, "--credential-source station-plane requires %v\n\n%s\n", missing, fleetcli.BridgeUsage)
+			fmt.Fprintf(os.Stderr, "--credential-source station-plane takes all of --principal, --organization and --audience, or none of them (the hub derives them); missing %v\n\n%s\n", missing, fleetcli.BridgeUsage)
 			os.Exit(2)
 		}
 		body["credentialSource"] = map[string]any{
