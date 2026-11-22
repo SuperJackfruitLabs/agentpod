@@ -102,7 +102,7 @@ import { activityLoggerMiddleware } from './middleware/activity-logger.ts';
 import { registerEnabledProvisioners } from './services/provisioner/index.ts';
 import { enabledProviders } from './services/provisioner/index.ts';
 import { startNodeSweeper } from './services/sweeper/index.ts';
-import { startSuperpipelineBridge } from './services/bridge/index.ts';
+import { installStageProfilesAtStartup, startSuperpipelineBridge } from './services/bridge/index.ts';
 import { isBridgeEnabled, loadBridgeConfig, superpipelineRelayFromEnv } from './services/bridge/index.ts';
 import { createGracefulShutdown } from './services/hub/index.ts';
 import { httpServerSpans } from './telemetry/http-middleware.ts';
@@ -648,6 +648,9 @@ console.log('Node heartbeat sweeper started (45s threshold)');
 // Claim work from a superpipeline board, if this hub has been told to.
 // Off unless ENABLE_SUPERPIPELINE_BRIDGE=true — a hub that has not opted in
 // constructs nothing here, exactly like an unregistered provisioner driver.
+// Bench stages written with `fleet bench stage` are checkpoint profiles; install them before the
+// bridge's first claim cycle.
+await installStageProfilesAtStartup();
 const bridge = await startSuperpipelineBridge();
 console.log(
   'superpipeline bridge:',

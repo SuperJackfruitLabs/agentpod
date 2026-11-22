@@ -101,6 +101,14 @@ still `authority`, and the reason never contains an identifier, token or raw err
 | `node.target.<field>` | The node advertised a target that differs from the profile's in that field |
 | `claim.*` | A claimed checkpoint policy breaks one of the profile's pins |
 | `current.<code>`, `current.error` | Re-reading current authority failed for a reason other than one of the above |
+Profiles come from two places. A stage written with `fleet bench stage` is a row
+of `bench_stages`, built from the node's own registry reply, and is installed
+into the selection snapshot at startup and after every stage write, with no
+restart (BENCH_REGISTERED_LAUNCH.md, "Setting up a stage"). The older private
+file still loads, and a table row replaces a file profile for the same station
+and board or the same stage name. Without `ENFORCE_CONTROL_PAIR=true` neither is
+served.
+
 `PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE` selects an absolute physical
 JSON file, at most 64 KiB, in a private directory. The file and directory must be
 owned by the service user or root and inaccessible to other users; symlinks are
@@ -117,9 +125,10 @@ selection; unrelated agents continue through their ordinary bridge path. Generic
 clients still reject actual checkpoint claims and every non-null policy, so a
 broken installation cannot silently execute policy-required work through ACP.
 
-Profiles are an immutable process snapshot, loaded lazily once per configured
+File profiles are an immutable process snapshot, loaded lazily once per configured
 path, including a failed load. Editing, repairing, replacing or deleting the same
-file does not reload that snapshot: restart the Hub to apply it. A changed server
+file does not reload that snapshot: restart the Hub to apply it, or take the stage
+over with `fleet bench stage set NAME`, which needs no restart. A changed server
 configuration path selects a new snapshot; no file watcher or periodic read runs.
 Roster loop construction selects its dedicated runtime once. Every operation still
 rechecks the literal flag, current issuer/control pair, selected station/node,

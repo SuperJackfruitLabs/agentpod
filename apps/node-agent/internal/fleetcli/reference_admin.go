@@ -153,6 +153,101 @@ var adminCommands = []clidoc.Command{
 		Example:  "fleet bridge checkpoint-settle attempt_0123 --evidence \"node journal shows the record cancelled; no bench lease held\"",
 	},
 	{
+		Path: "bench", Group: "Administration",
+		Summary:  "Bench stages: a board's checkpoint work on a SuperBench host, set up from the hub.",
+		Synopsis: "fleet bench stage ...",
+		Help:     BenchUsage,
+		Detail: "A stage is two records that must agree: the node's private coordinator registry profile (repositories " +
+			"with their clone URLs, the worker command, the launch) and the hub's checkpoint profile (the pins every claim " +
+			"is checked against). These verbs write both, in that order, and the hub's pins come from the node's own reply, " +
+			"including `registry_sha256`. Nothing restarts. No reply carries a clone URL, a worker argument or a credential. " +
+			"See [Registered bench launch](https://github.com/SuperJackfruitLabs/agentpod/blob/main/docs/BENCH_REGISTERED_LAUNCH.md).",
+		Dispatch: []clidoc.Dispatch{{Func: "fleetBench", Tag: "args[0]"}},
+		Auth:     needsAdmin,
+		Exit:     "As below for each verb; with no verb, prints the usage and exits 2.",
+		Example:  "fleet bench stage list",
+	},
+	{
+		Path: "bench stage", Summary: "Add, change, list or remove a bench stage.",
+		Synopsis: "fleet bench stage <list|add|set|rm> ...",
+		Dispatch: []clidoc.Dispatch{{Func: "fleetBenchStage", Tag: "verb"}},
+		Example:  "fleet bench stage list",
+	},
+	{
+		Path: "bench stage list", Summary: "Every stage in the workspace, and whether its node serves it as pinned.",
+		Synopsis: "fleet bench stage list",
+		Detail: "Each stage's `served` is `served` (the node advertises exactly the pinned target), `drifted` (with the " +
+			"fields that differ), `missing`, or `unknown` (the node could not be asked). A profile still loaded from the " +
+			"legacy profile file shows `origin: file-only`.",
+		Example: "fleet bench stage list",
+	},
+	{
+		Path: "bench stage add", Summary: "Set up one stage: roster row, node registry profile and hub profile.",
+		Synopsis: "fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-repo N\n" +
+			"                     --repo name=N,provider=P,repository=OWNER/REPO,clone=URL[,base=B][,format=F] ...\n" +
+			"                     --worker PATH [--worker-arg A ...] [--env K=V ...] [--launch registered-v1|grouped]\n" +
+			"                     [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin]",
+		Detail: "In order, each step idempotent and each refusal naming the step: the station's roster row for the board " +
+			"(created as a `station-plane` source row, or upgraded to one); the node's registry profile (written atomically " +
+			"and reloaded; a refused change writes nothing); the hub's checkpoint profile, built from the station, the roster, " +
+			"the hub's own service grant (the reporter) and the node's reply. Other stages on the same node are re-pinned to " +
+			"the node's new digest in the same write. `--repo` is the stage's allow-list: a claim's policy names exactly these " +
+			"repositories. The reply prints the stage's `checkpointPolicy` for SuperPipeline and the steps still manual. " +
+			"`--source-tenant` is needed only for the workspace's first stage. Missing required flags are named together and exit 2.",
+		Args:     []clidoc.Arg{{Name: "NAME", Meaning: "the stage's name: the node registry profile id and the coordinator profile id"}},
+		Handlers: []string{"fleetBenchStage"},
+		Flags: []clidoc.Flag{
+			{Name: "board", Arg: "B", Required: true},
+			{Name: "station", Arg: "S", Required: true},
+			{Name: "agent", Arg: "agt_…", Required: true},
+			{Name: "checkpoint-repo", Arg: "N", Required: true},
+			{Name: "repo", Arg: "SPEC", Required: true, Repeatable: true},
+			{Name: "worker", Arg: "PATH", Required: true},
+			{Name: "worker-arg", Arg: "A", Repeatable: true},
+			{Name: "env", Arg: "K=V", Repeatable: true},
+			{Name: "launch", Arg: "L"},
+			{Name: "source-tenant", Arg: "tnt_…"},
+			{Name: "stage-id", Arg: "ID"},
+			{Name: "bridge-key", Arg: "K"},
+			{Name: "repin"},
+		},
+		Example: "fleet bench stage add review --board brd_0123456789abcdef --station stn_123 --agent agt_abc123 \\\n" +
+			"  --repo name=app,provider=forge,repository=example/app,clone=ssh://git@forge.example:2222/example/app.git,base=main \\\n" +
+			"  --checkpoint-repo app --worker /usr/local/libexec/bench-harness --source-tenant tnt_0123456789abcdef",
+	},
+	{
+		Path: "bench stage set", Summary: "Change one stage; the hub's pins and the node's target are re-derived.",
+		Synopsis: "fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkpoint-repo N] [--repo SPEC ...]\n" +
+			"                     [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]\n" +
+			"                     [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh]",
+		Detail: "Fields not given keep their value on the node and in the hub. `--board` moves the stage and its roster row to " +
+			"another board in one write. `--repo` replaces the whole allow-list. `--repin` re-pins the node's worker and " +
+			"coordinator digests after an update; `--refresh` re-derives the hub's pins (occupant, owner, occupancy epoch, " +
+			"roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its " +
+			"`--repo` list and `--worker` again. An attempt already running keeps its retained authority and is retired by " +
+			"the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file.",
+		Args:     []clidoc.Arg{{Name: "NAME", Meaning: "the stage's name"}},
+		Handlers: []string{"fleetBenchStage"},
+		Flags: []clidoc.Flag{
+			{Name: "board", Arg: "B"},
+			{Name: "station", Arg: "S"},
+			{Name: "agent", Arg: "agt_…"},
+			{Name: "checkpoint-repo", Arg: "N"},
+			{Name: "repo", Arg: "SPEC", Repeatable: true},
+			{Name: "worker", Arg: "PATH"},
+			{Name: "repin"},
+			{Name: "refresh"},
+		},
+		Example: "fleet bench stage set review --board brd_fedcba9876543210",
+	},
+	{
+		Path: "bench stage rm", Summary: "Remove a stage from its node's registry and from the hub.",
+		Synopsis: "fleet bench stage rm NAME",
+		Detail:   "The roster row is kept (`fleet bridge rm KEY` removes it). A node that no longer has the profile is not an error.",
+		Args:     []clidoc.Arg{{Name: "NAME", Meaning: "the stage's name"}},
+		Example:  "fleet bench stage rm review",
+	},
+	{
 		Path: "principals", Group: "Administration",
 		Summary:  "Identities, service principals and their credentials.",
 		Synopsis: "fleet principals <verb> ...",

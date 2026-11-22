@@ -397,6 +397,10 @@ startup error naming `ENFORCE_CONTROL_PAIR` and loads no checkpoint profile;
 ordinary dispatch is unaffected. Each checkpoint agent also needs a dispatch grant
 from its profile's owner. See
 [bench-checkpoint-reporting.md](contributor/bench-checkpoint-reporting.md).
+Stages are set up with `fleet bench stage add` and checked with `fleet bench
+doctor`, with no profile file and no restart
+([BENCH_REGISTERED_LAUNCH.md → Setting up a stage](BENCH_REGISTERED_LAUNCH.md#setting-up-a-stage));
+an existing `PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE` keeps loading.
 
 | Field | Meaning |
 |---|---|

@@ -78,6 +78,8 @@ func fleetCmd(args []string) {
 		fleetDevices(args[1:])
 	case "bridge":
 		fleetBridge(args[1:])
+	case "bench":
+		fleetBench(args[1:])
 	case "grants":
 		fleetGrants(args[1:])
 	case "config":

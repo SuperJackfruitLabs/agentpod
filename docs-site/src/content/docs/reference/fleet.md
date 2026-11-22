@@ -60,6 +60,7 @@ This page is generated from the binary's own command table and source, and a tes
 |---|---|
 | [`fleet settings`](#fleet-settings) | Hub-wide settings: signup, transcription, speech. |
 | [`fleet bridge`](#fleet-bridge) | The board roster: which agent claims from which board. |
+| [`fleet bench`](#fleet-bench) | Bench stages: a board's checkpoint work on a SuperBench host, set up from the hub. |
 | [`fleet principals`](#fleet-principals) | Identities, service principals and their credentials. |
 | [`fleet grants`](#fleet-grants) | Dispatch authority, as a document (older hubs). |
 | [`fleet users`](#fleet-users) | People: list, show, ban, unban, role (older hubs). |
@@ -2871,6 +2872,173 @@ For an attempt the hub cannot retire by itself. Deletes nothing: the attempt end
 
 ```sh
 fleet bridge checkpoint-settle attempt_0123 --evidence "node journal shows the record cancelled; no bench lease held"
+```
+
+## fleet bench
+
+Bench stages: a board's checkpoint work on a SuperBench host, set up from the hub.
+
+```text
+fleet bench stage ...
+```
+
+A stage is two records that must agree: the node's private coordinator registry profile (repositories with their clone URLs, the worker command, the launch) and the hub's checkpoint profile (the pins every claim is checked against). These verbs write both, in that order, and the hub's pins come from the node's own reply, including `registry_sha256`. Nothing restarts. No reply carries a clone URL, a worker argument or a credential. See [Registered bench launch](https://github.com/SuperJackfruitLabs/agentpod/blob/main/docs/BENCH_REGISTERED_LAUNCH.md).
+
+Subcommands: [`stage`](#fleet-bench-stage).
+
+`fleet bench -h` prints:
+
+```text
+usage:
+  fleet bench stage list
+  fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-repo N
+                       --repo name=N,provider=forge|github,repository=OWNER/REPO,clone=URL[,base=B][,format=sha1|sha256] ...
+                       --worker PATH [--worker-arg A ...] [--env K=V ...] [--launch registered-v1|grouped]
+                       [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin]
+  fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkpoint-repo N] [--repo ... ...]
+                       [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
+                       [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh]
+  fleet bench stage rm NAME
+
+A stage is the node's private registry profile and the hub's checkpoint profile,
+written together: the node writes its registry and answers with its own
+registry_sha256, and the hub pins that. No restart, no hand-written JSON.
+--repo is the stage's allow-list of repositories. Moving a stage to another
+board is one "stage set NAME --board B".
+```
+
+**Needs:** A workspace admin's token. Anyone else is refused with 403.
+
+**Exit status:** As below for each verb; with no verb, prints the usage and exits 2.
+
+```sh
+fleet bench stage list
+```
+
+### fleet bench stage
+
+Add, change, list or remove a bench stage.
+
+```text
+fleet bench stage <list|add|set|rm> ...
+```
+
+Subcommands: [`list`](#fleet-bench-stage-list), [`add`](#fleet-bench-stage-add), [`set`](#fleet-bench-stage-set), [`rm`](#fleet-bench-stage-rm).
+
+**Needs:** A workspace admin's token. Anyone else is refused with 403.
+
+```sh
+fleet bench stage list
+```
+
+#### fleet bench stage list
+
+Every stage in the workspace, and whether its node serves it as pinned.
+
+```text
+fleet bench stage list
+```
+
+Each stage's `served` is `served` (the node advertises exactly the pinned target), `drifted` (with the fields that differ), `missing`, or `unknown` (the node could not be asked). A profile still loaded from the legacy profile file shows `origin: file-only`.
+
+**Needs:** A workspace admin's token. Anyone else is refused with 403.
+
+```sh
+fleet bench stage list
+```
+
+#### fleet bench stage add
+
+Set up one stage: roster row, node registry profile and hub profile.
+
+```text
+fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-repo N
+                     --repo name=N,provider=P,repository=OWNER/REPO,clone=URL[,base=B][,format=F] ...
+                     --worker PATH [--worker-arg A ...] [--env K=V ...] [--launch registered-v1|grouped]
+                     [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin]
+```
+
+In order, each step idempotent and each refusal naming the step: the station's roster row for the board (created as a `station-plane` source row, or upgraded to one); the node's registry profile (written atomically and reloaded; a refused change writes nothing); the hub's checkpoint profile, built from the station, the roster, the hub's own service grant (the reporter) and the node's reply. Other stages on the same node are re-pinned to the node's new digest in the same write. `--repo` is the stage's allow-list: a claim's policy names exactly these repositories. The reply prints the stage's `checkpointPolicy` for SuperPipeline and the steps still manual. `--source-tenant` is needed only for the workspace's first stage. Missing required flags are named together and exit 2.
+
+| Argument | Meaning |
+|---|---|
+| `NAME` | the stage's name: the node registry profile id and the coordinator profile id |
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--board B` | string | — | SuperPipeline board id (brd_). **Required.** |
+| `--station S` | string | — | Station id the stage runs on. **Required.** |
+| `--agent agt_…` | string | — | The SuperPipeline board agent (agt_) linked to the station's occupant. **Required.** |
+| `--checkpoint-repo N` | string | — | The repository the harness starts in. **Required.** |
+| `--repo SPEC` | string | — | Name=N,provider=forge\|github,repository=OWNER/REPO,clone=URL[,base=B][,format=sha1\|sha256] (repeatable). **Required.** |
+| `--worker PATH` | string | — | Absolute path of the worker command on the bench host. **Required.** |
+| `--worker-arg A` | string | — | One argument after `--worker` (repeatable). |
+| `--env K=V` | string | — | KEY=VALUE for the worker: PATH, LANG, LC_ALL, TZ or TERM (repeatable). |
+| `--launch L` | string | — | Registered-v1 (default) or grouped. |
+| `--source-tenant tnt_…` | string | — | The SuperPipeline tenant (tnt_); default: this workspace's other stages'. |
+| `--stage-id ID` | string | — | The SuperPipeline stage it serves, to print its checkpointPolicy command. |
+| `--bridge-key K` | string | — | Roster key for the stage's bridge row (add). |
+| `--repin` | bool | `false` | Re-pin the node registry's worker and coordinator digests to the installed bytes. |
+
+**Needs:** A workspace admin's token. Anyone else is refused with 403.
+
+```sh
+fleet bench stage add review --board brd_0123456789abcdef --station stn_123 --agent agt_abc123 \
+  --repo name=app,provider=forge,repository=example/app,clone=ssh://git@forge.example:2222/example/app.git,base=main \
+  --checkpoint-repo app --worker /usr/local/libexec/bench-harness --source-tenant tnt_0123456789abcdef
+```
+
+#### fleet bench stage set
+
+Change one stage; the hub's pins and the node's target are re-derived.
+
+```text
+fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkpoint-repo N] [--repo SPEC ...]
+                     [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
+                     [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh]
+```
+
+Fields not given keep their value on the node and in the hub. `--board` moves the stage and its roster row to another board in one write. `--repo` replaces the whole allow-list. `--repin` re-pins the node's worker and coordinator digests after an update; `--refresh` re-derives the hub's pins (occupant, owner, occupancy epoch, roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its `--repo` list and `--worker` again. An attempt already running keeps its retained authority and is retired by the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file.
+
+| Argument | Meaning |
+|---|---|
+| `NAME` | the stage's name |
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--board B` | string | — | SuperPipeline board id (brd_). |
+| `--station S` | string | — | Station id the stage runs on. |
+| `--agent agt_…` | string | — | The SuperPipeline board agent (agt_) linked to the station's occupant. |
+| `--checkpoint-repo N` | string | — | The repository the harness starts in. |
+| `--repo SPEC` | string | — | Name=N,provider=forge\|github,repository=OWNER/REPO,clone=URL[,base=B][,format=sha1\|sha256] (repeatable). |
+| `--worker PATH` | string | — | Absolute path of the worker command on the bench host. |
+| `--repin` | bool | `false` | Re-pin the node registry's worker and coordinator digests to the installed bytes. |
+| `--refresh` | bool | `false` | Re-derive the hub's pins and the node's target, changing nothing else (set). |
+
+**Needs:** A workspace admin's token. Anyone else is refused with 403.
+
+```sh
+fleet bench stage set review --board brd_fedcba9876543210
+```
+
+#### fleet bench stage rm
+
+Remove a stage from its node's registry and from the hub.
+
+```text
+fleet bench stage rm NAME
+```
+
+The roster row is kept (`fleet bridge rm KEY` removes it). A node that no longer has the profile is not an error.
+
+| Argument | Meaning |
+|---|---|
+| `NAME` | the stage's name |
+
+**Needs:** A workspace admin's token. Anyone else is refused with 403.
+
+```sh
+fleet bench stage rm review
 ```
 
 ## fleet principals

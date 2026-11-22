@@ -35,6 +35,23 @@ const BridgeUsage = `usage:
   fleet bridge checkpoint-attempts
   fleet bridge checkpoint-settle ATTEMPT --evidence TEXT`
 
+const BenchUsage = `usage:
+  fleet bench stage list
+  fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-repo N
+                       --repo name=N,provider=forge|github,repository=OWNER/REPO,clone=URL[,base=B][,format=sha1|sha256] ...
+                       --worker PATH [--worker-arg A ...] [--env K=V ...] [--launch registered-v1|grouped]
+                       [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin]
+  fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkpoint-repo N] [--repo ... ...]
+                       [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]
+                       [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh]
+  fleet bench stage rm NAME
+
+A stage is the node's private registry profile and the hub's checkpoint profile,
+written together: the node writes its registry and answers with its own
+registry_sha256, and the hub pins that. No restart, no hand-written JSON.
+--repo is the stage's allow-list of repositories. Moving a stage to another
+board is one "stage set NAME --board B".`
+
 const ConfigUsage = `usage:
   fleet config settings                                         every setting the fleet can declare
   fleet config show   [--node ID]                               the declarations themselves, as stored

@@ -26,6 +26,18 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   free space, and each served target; never a clone URL or an argument. A registry
   may now hold no stage, and `repin` re-pins the worker and node digests after an
   update. Host fields (socket, roots, worker path) are never written from the hub.
+- `fleet bench stage add|set|list|rm`: one SuperBench stage set up from the hub.
+  `add` creates (or upgrades) the station's `station-plane` roster row, writes the
+  node's registry profile through `bench.registry.set`, and builds the hub's
+  checkpoint profile from the station, the roster, the hub's own service grant and
+  the node's reply, so `registry_sha256` is the node's own and nobody computes it.
+  Profiles live in a new `bench_stages` table (migration 0135) and are selected
+  with no restart; moving a stage's board is one `stage set NAME --board B`, which
+  moves its roster row too. Other stages on the node are re-pinned in the same
+  write. No reply, row or audit entry holds a clone URL or a worker argument.
+  Upgrade: an empty table changes nothing, and the private profile file keeps
+  loading; its profiles are adopted into the table the first time the hub rewrites
+  their node's registry. See `docs/BENCH_REGISTERED_LAUNCH.md`.
 
 - Proposed registered bench launch: a registry profile with `"launch": "registered-v1"`
   delivers the worker's task to the payload only as SuperBench finite stdin and

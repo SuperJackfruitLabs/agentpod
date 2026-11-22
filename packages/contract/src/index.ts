@@ -50,3 +50,4 @@ export * from "./capability-catalog";
 
 // Proposed coordinator contract; no installed handler or advertised capability.
 export * from "./bench-coordinator";
+export * from "./bench-setup";
