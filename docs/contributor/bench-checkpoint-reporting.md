@@ -135,6 +135,19 @@ and release. A profile whose checkpoint repository is missing or is not one of
 its repositories is refused at load, so a single-repository profile names its
 only repository.
 
+Starting inside the member means a harness's own scratch can land in the
+checkout: a soak saw Hermes write `.hermes/cache/scratch/run_tests.py` there
+by a relative path, though its `HERMES_HOME` is outside the bench, and every
+such run was refused as dirty. Before it starts the harness, the registered
+worker adds each harness's scratch patterns (`/.hermes/cache/` for Hermes;
+`harnessScratch` in `registered_worker.go`) to every member's own
+`info/exclude`. Each member has its own independent Git directory in the bench,
+so the exclude is never committed, never shared with another bench, and the
+repository's tracked `.gitignore` is not touched. SuperBench's dirty check
+(`git status --porcelain --untracked-files=all`) honours it. A harness's
+project files beside the cache (`.hermes/skills`, `.hermes/plugins`) are task
+content and stay visible.
+
 ## What the card shows
 
 Each phase the Hub commits posts one short activity to the card's live stream,

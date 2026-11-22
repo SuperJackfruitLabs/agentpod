@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+// harnessScratch is the scratch each harness can leave in the checkout it
+// works in, as info/exclude patterns anchored at the member's root. Only a
+// harness's own cache belongs here: its project files (Hermes .hermes/skills,
+// .hermes/plugins) are task content and stay visible to Git.
+var harnessScratch = []string{
+	"/.hermes/cache/", // Hermes: HERMES_HOME/cache/scratch, reached by a relative path from the checkout
+}
+
 // ReadRegisteredInput accepts only an owned finite pipe or regular request FD.
 // Pipes get a short deadline, including the mandatory EOF after the one frame.
 func ReadRegisteredInput(ctx context.Context, in *os.File, expectedSHA string) (RegisteredCapsule, error) {
@@ -83,6 +91,9 @@ func ExecuteRegisteredWorker(ctx context.Context, in *os.File, out, logs io.Writ
 	err = inspectRegistered(preflight, c)
 	done()
 	if err != nil {
+		return err
+	}
+	if err = excludeHarnessScratch(c); err != nil {
 		return err
 	}
 	part := ".root"
