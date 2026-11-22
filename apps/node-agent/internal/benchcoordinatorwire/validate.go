@@ -158,7 +158,7 @@ func parseRequest(raw []byte, limit int) (Request, error) {
 		}
 		if r.Operation == "prepare" {
 			t := r.Task
-			if t == nil || !ids(t.ProfileID) || t.Prompt == "" || len(utf16.Encode([]rune(t.Prompt))) > 65536 || t.TimeoutSeconds < 1 || t.TimeoutSeconds > 3600 || (t.RepositoryName != "" && !namePattern.MatchString(t.RepositoryName)) {
+			if t == nil || !ids(t.ProfileID) || t.Prompt == "" || len(utf16.Encode([]rune(t.Prompt))) > 65536 || t.TimeoutSeconds < 1 || t.TimeoutSeconds > 3600 || (t.RepositoryName != "" && !namePattern.MatchString(t.RepositoryName)) || !validRepositoryNames(t) {
 				return Request{}, ErrInvalid
 			}
 		}
@@ -269,4 +269,23 @@ func printableDetail(text string) bool {
 		}
 	}
 	return true
+}
+
+// validRepositoryNames: absent, or 1-32 sorted unique names that hold the
+// task's repository_name. A present but empty list is not "absent".
+func validRepositoryNames(t *Task) bool {
+	if t.RepositoryNames == nil {
+		return true
+	}
+	if len(t.RepositoryNames) < 1 || len(t.RepositoryNames) > 32 || t.RepositoryName == "" {
+		return false
+	}
+	found := false
+	for i, name := range t.RepositoryNames {
+		if !namePattern.MatchString(name) || i > 0 && t.RepositoryNames[i-1] >= name {
+			return false
+		}
+		found = found || name == t.RepositoryName
+	}
+	return found
 }

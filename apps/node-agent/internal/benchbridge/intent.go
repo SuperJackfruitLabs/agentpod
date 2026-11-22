@@ -12,6 +12,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcoordinatorwire"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchjournal"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchlaunch"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchsource"
 )
 
@@ -160,6 +161,11 @@ func (s IntentStore) Resolve(ctx context.Context, prepareRaw []byte,
 			return false, nil
 		}
 		spec, task, err := choose(ctx)
+		if _, terminal := benchlaunch.RefusalCode(err); terminal && ctx.Err() == nil {
+			// A definite refusal of this exact prepare (a repository choice the
+			// node cannot serve): nothing is resolved, and the caller says why.
+			return false, err
+		}
 		if err != nil || ctx.Err() != nil {
 			return false, ErrIntent
 		}
