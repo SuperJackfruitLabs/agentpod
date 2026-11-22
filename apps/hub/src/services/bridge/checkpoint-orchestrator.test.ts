@@ -783,6 +783,8 @@ test("a run ended after the bench pushed this card's work says on the card where
   const saved = completion.service.checkpoints.map((m) => (many ? m.name + " " : "") +
     `${m.task_ref.replace("refs/heads/", "")} (${m.commit.slice(0, 7)})`).join(", ");
   for (const [ended, why] of [[{ reason: "run.unbound", board: { status: "working" } }, "the card moved"],
+    // A person's move ends the run with outcome `moved`: the card says it moved.
+    [{ reason: "run.ended", board: { status: "ended", outcome: "moved" } }, "the card moved"],
     [{ reason: "run.ended", board: { status: "ended", outcome: "released" } }, "the card moved or its run was ended"]] as const) {
     resetCheckpointActivityForTests();
     const h = harness({});
