@@ -4,7 +4,7 @@ import { orgPlane, type OrgPlaneConfig } from "../../auth/org-plane/config";
 import { sharedPlaneVerifier } from "../../auth/org-plane/verify";
 import { parsePendingCheckpointClaim, type PendingCheckpointClaim } from "./checkpoint-claim";
 import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON } from "./checkpoint-json";
-import { CheckpointRefused, parseCheckpointProfile, type CheckpointProfile } from "./checkpoint-profile";
+import { CheckpointRefused, claimedRepositories, parseCheckpointProfile, type CheckpointProfile } from "./checkpoint-profile";
 import { parseCheckpointSource, parseSourceReceipt, parseSourceSnapshot, requireSourceBinding,
   type CheckpointSource, type CheckpointSourceReceipt, type CheckpointSourceSnapshot } from "./checkpoint-source";
 
@@ -133,15 +133,18 @@ export function createCheckpointServiceClient(configuration: CheckpointProfile, 
   }
   function retainedBody(value: PendingCheckpointClaim, body: string): PendingCheckpointClaim {
     const claim = parsePendingCheckpointClaim(value);
+    let pins: ReturnType<typeof claimedRepositories>;
+    try { pins = claimedRepositories(profile, claim); }
+    catch (error) { throw new CheckpointRefused("source", "service.retained_body", error); }
     const submitted = checkpointSettlementSchema.parse(parseCheckpointJSON(new TextEncoder().encode(body)));
     const report = submitted.checkpoint;
     const binding = report.binding;
     if (canonicalCheckpoint(submitted) !== body || binding.boardId !== claim.boardId || binding.cardId !== claim.cardId ||
       binding.runId !== claim.runId || binding.stageKey !== claim.stageKey || binding.leaseEpoch !== claim.leaseEpoch ||
       binding.agentId !== claim.agentId || binding.nodeId !== profile.target.node_id || binding.stationId !== profile.target.station_id ||
-      report.policyDigest !== claim.policyDigest || report.checkpoint.checkpointRepository !== profile.checkpointRepository ||
-      report.checkpoint.members.length !== profile.repositories.length || report.checkpoint.members.some((m, index) => {
-        const pin = profile.repositories[index];
+      report.policyDigest !== claim.policyDigest || report.checkpoint.checkpointRepository !== claim.policy.checkpointRepository ||
+      report.checkpoint.members.length !== pins.length || report.checkpoint.members.some((m, index) => {
+        const pin = pins[index];
         return !pin || pin.name !== m.name || pin.provider !== m.provider || pin.repository !== m.repository || pin.objectFormat !== m.objectFormat ||
           m.branch !== "card/" + claim.cardId;
       })) throw new CheckpointRefused("source", "service.retained_body");

@@ -185,7 +185,9 @@ export async function benchDoctor(tenantId: string, q: { name?: string; stationI
     "Accounts console: the agent principal exists, occupies the station, and its grant has the claim and run scopes.",
     `Accounts: the hub's service principal holds ${CHECKPOINT_SERVICE_SCOPES.join(" and ")} (once per deployment).`,
     `SuperPipeline: the board agent${profile ? ` ${profile.target.agent_id}` : ""} is linked to the agent principal (a person does this).`,
-    "SuperPipeline: the stage's checkpointPolicy names this node, station and agent, and the stage's repositories (see checkpointPolicy).",
+    profile?.repositorySelection === "card"
+      ? "SuperPipeline: the stage's cardCheckpointPolicy names this node, station and agent, and the stage's allow-list (see checkpointPolicy); each card chooses from it."
+      : "SuperPipeline: the stage's checkpointPolicy names this node, station and agent, and the stage's repositories (see checkpointPolicy).",
   ];
   return { ok: !failed, ...(q.name ? { stage: q.name } : {}), stationId, checks, manual,
     ...(profile ? { checkpointPolicy: checkpointPolicyFor(profile) } : {}) };

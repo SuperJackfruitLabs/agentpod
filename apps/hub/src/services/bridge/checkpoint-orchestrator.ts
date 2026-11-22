@@ -330,7 +330,8 @@ export async function endEndedRun(initial: RetainedCheckpointAttempt, ended: Run
     // this card's work, the card says where it is. A board that refuses it changes nothing here.
     const completion = savedWork(attempt, node.reply);
     if (client && completion) await postCheckpointActivity(client, attempt, "stopped_saved",
-      checkpointActivity("stopped_saved", { completion, ended: ended.reason }));
+      checkpointActivity("stopped_saved", { completion, ended: ended.reason,
+        outcome: typeof ended.board.outcome === "string" ? ended.board.outcome : null }));
     return { status: "released", ...ids, reason: `Checkpoint run ended on the board (${ended.reason}); the attempt is retired (${reason})` };
   } catch (error) { return parked(attempt, error instanceof CheckpointRefused ? error.code : "unavailable", error); }
 }

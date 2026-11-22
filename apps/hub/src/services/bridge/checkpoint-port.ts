@@ -130,6 +130,8 @@ function runtimeFor(profile: CheckpointProfile, tenantId: string, boardId: strin
     if (reason) throw new CheckpointRefused("authority", reason);
   }
   return { client: () => checkpointAgentClient(profile), port: {
+    // A stage whose cards choose its repositories claims with protocol v2; every other stage as before.
+    ...(profile.repositorySelection === "card" ? { choosesRepositories: true } : {}),
     current,
     ready: async (identity) => {
       if (identity.tenantId !== tenantId || identity.boardId !== boardId || identity.stationId !== stationId)
@@ -221,7 +223,7 @@ function runtimeFor(profile: CheckpointProfile, tenantId: string, boardId: strin
         ...(context.commentsOmitted === undefined ? {} : { commentsOmitted: context.commentsOmitted }),
         run: null, libraryTools: false }));
       await requireCurrent(chosen);
-      const reserved = await reserveCheckpointAttempt(profile, claim, checkpointTask(profile, prompt));
+      const reserved = await reserveCheckpointAttempt(profile, claim, checkpointTask(profile, claim, prompt));
       return driveCheckpointAttempt(reserved.attempt, client, reserved.send, deps);
     },
   } };

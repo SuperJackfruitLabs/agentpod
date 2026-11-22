@@ -11,7 +11,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { SuperpipelineApiError, SuperpipelineClient } from "./superpipeline";
-import { CHECKPOINT_CLAIM_PROTOCOL } from "./checkpoint-claim";
+import { CARD_CHOICE_CHECKPOINT_PROTOCOLS, CHECKPOINT_CLAIM_PROTOCOL } from "./checkpoint-claim";
 import { contractFetch, errorCodesOf, errorEnvelopeCases, validResponses } from "../../../tests/helpers/superpipeline-contract";
 import { takeContractViolations } from "../../../tests/helpers/superpipeline-contract-violations";
 
@@ -36,10 +36,13 @@ const field = (v: unknown, key: string): unknown => (isRecord(v) ? v[key] : unde
  */
 const CALLS: Record<string, { call: (client: SuperpipelineClient, body: unknown) => Promise<unknown>; check?: (got: unknown, body: unknown) => void }> = {
   claimCard: {
+    // A stage whose cards choose is offered only to a claimant that asked for claim protocol v2.
     call: (c, body) =>
-      isRecord(field(body, "checkpointClaim"))
-        ? c.claim({ checkpointProtocol: CHECKPOINT_CLAIM_PROTOCOL })
-        : c.claim(),
+      isRecord(field(field(body, "stage"), "cardCheckpointPolicy"))
+        ? c.claim({ checkpointProtocol: CHECKPOINT_CLAIM_PROTOCOL, checkpointProtocols: CARD_CHOICE_CHECKPOINT_PROTOCOLS })
+        : isRecord(field(body, "checkpointClaim"))
+          ? c.claim({ checkpointProtocol: CHECKPOINT_CLAIM_PROTOCOL })
+          : c.claim(),
     check: (got, body) => {
       if (field(body, "claimed") === true) expect(field(got, "runId")).toBe(field(body, "runId"));
       else expect(got).toBeNull();

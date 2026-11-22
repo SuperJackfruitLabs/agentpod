@@ -28,11 +28,27 @@ const profileSchema = z.object({
     objectFormat: z.enum(["sha1", "sha256"]),
   }).strict()).min(1).max(32),
   checkpointRepository: name,
+  /**
+   * `card`: each card chooses an ordered subset of `repositories`, the stage's allow-list
+   * (`fleet bench stage --cards-choose`); its claims carry a selection (claim protocol v2). Absent: a
+   * claim names exactly `repositories`, as before.
+   */
+  repositorySelection: z.literal("card").optional(),
+  /** Only with `card`: what a card that names none gets (printed into the stage's `cardCheckpointPolicy`). */
+  defaultRepositories: z.array(name).min(1).max(32).optional(),
 }).strict().refine((value) => (value.coordinatorProfileId ?? value.profileKey) !== "").refine((value) => value.repositories.every((member, index) => index === 0 ||
   (value.repositories[index - 1]?.name ?? "") < member.name) &&
   value.repositories.some((member) => member.name === value.checkpointRepository) &&
   new Set(value.repositories.map((member) => member.repositorySHA256)).size === value.repositories.length &&
-  new Set(value.repositories.map((member) => member.provider + "/" + member.repository)).size === value.repositories.length);
+  new Set(value.repositories.map((member) => member.provider + "/" + member.repository)).size === value.repositories.length)
+  .refine((value) => {
+    // treaty run-checkpoint-policy.v2's relations: a sorted subset that resolves a start repository.
+    const d = value.defaultRepositories;
+    if (!d) return true;
+    return value.repositorySelection === "card" && d.every((member, index) => index === 0 || (d[index - 1] ?? "") < member) &&
+      d.every((member) => value.repositories.some((r) => r.name === member)) &&
+      (d.length === 1 || d.includes(value.checkpointRepository));
+  });
 export type CheckpointProfile = z.infer<typeof profileSchema>;
 export type CheckpointRefusalCode = "invalid" | "authority" | "unavailable" | "uncertain" | "source" | "stale";
 /**
@@ -59,6 +75,8 @@ export type CheckpointRefusalReason =
   | "capacity.backoff"
   | "claim.tenant" | "claim.board" | "claim.agent" | "claim.reporter" | "claim.node" | "claim.checkpoint_repository"
   | "claim.executor" | "claim.repositories"
+  /** A claim with a selection for a stage whose cards do not choose, or without one for a stage whose cards do. */
+  | "claim.selection"
   | "selection.identity" | "selection.target" | "selection.shape" | "selection.current"
   /** The node call itself failed: the broker's timeout, an offline node, or another transport error. */
   | "node.call.timeout" | "node.call.offline" | "node.call.error"
@@ -127,14 +145,20 @@ export function parseCheckpointProfile(value: unknown): CheckpointProfile {
 /** The first pin a claim breaks, or undefined when it is this profile's claim. Exported for tests. */
 export function claimRefusal(profile: CheckpointProfile, claim: PendingCheckpointClaim): CheckpointRefusalReason | undefined {
   const t = profile.target; const p = claim.policy;
+  const chooses = profile.repositorySelection === "card";
   if (claim.tenantId !== profile.sourceTenantId) return "claim.tenant";
   if (claim.boardId !== t.board_id) return "claim.board";
   if (claim.agentId !== t.agent_id) return "claim.agent";
   if (p.reporterPrincipalId !== profile.reporterPrincipalId) return "claim.reporter";
   if (p.nodeId !== t.node_id) return "claim.node";
-  if (p.checkpointRepository !== profile.checkpointRepository) return "claim.checkpoint_repository";
+  if ((claim.selection !== undefined) !== chooses) return "claim.selection";
+  // A card may start in any repository it chose; a fixed stage starts where the profile says.
+  if (chooses ? !p.repositories.some((r) => r.name === p.checkpointRepository) : p.checkpointRepository !== profile.checkpointRepository)
+    return "claim.checkpoint_repository";
   if (!p.executors.some((executor) => executor.agentId === t.agent_id && executor.stationId === t.station_id)) return "claim.executor";
   if (!claimRepositoriesAllowed(profile.repositories, p.repositories)) return "claim.repositories";
+  // A fixed stage's claim still names its whole allow-list.
+  if (!chooses && p.repositories.length !== profile.repositories.length) return "claim.repositories";
   return undefined;
 }
 
@@ -144,15 +168,33 @@ const sameRepository = (a: RepositoryIdentity, b: RepositoryIdentity) =>
 
 /**
  * Whether a claim's repositories may run under the profile's. The profile's list is the stage's
- * allow-list (`fleet bench stage --repo`), and today a claim must name exactly that list, in order.
- * Per-card repositories will relax this one rule to "a non-empty subset, in the allow-list's order"
- * (treaty `StageDef.cardCheckpointPolicy` and the claim `selection`); `registry_sha256` already
- * pins the whole allow-list, so a card can only select what the node serves. Exported for tests.
+ * allow-list (`fleet bench stage --repo`): a claim names a non-empty subset of it, in its order
+ * (sorted by name), each with the same provider and repository. A card that chose repositories
+ * (treaty `StageDef.cardCheckpointPolicy` and the claim `selection`) names its subset; a fixed stage
+ * names the whole list, which `claimRefusal` also requires. `registry_sha256` pins the whole
+ * allow-list, so a card can only select what the node serves. Exported for tests.
  */
 export function claimRepositoriesAllowed(allowed: readonly RepositoryIdentity[], claimed: readonly RepositoryIdentity[]): boolean {
-  return claimed.length === allowed.length && claimed.every((member, index) => {
-    const pin = allowed[index];
+  if (claimed.length === 0 || claimed.length > allowed.length) return false;
+  let next = 0;
+  return claimed.every((member) => {
+    while (next < allowed.length && allowed[next]?.name !== member.name) next++;
+    const pin = allowed[next++];
     return pin !== undefined && sameRepository(pin, member);
+  });
+}
+
+/**
+ * The profile's pins for exactly the claim's repositories, in the claim's order: what the bench is
+ * prepared with and what every source, report and settlement check compares against. Refuses a
+ * claim that is not this profile's (`claimRefusal`).
+ */
+export function claimedRepositories(profile: CheckpointProfile, claim: PendingCheckpointClaim): CheckpointProfile["repositories"] {
+  requireCheckpointProfileClaim(profile, claim);
+  return claim.policy.repositories.map((member) => {
+    const pin = profile.repositories.find((r) => r.name === member.name);
+    if (!pin) throw new CheckpointRefused("authority", "claim.repositories");
+    return pin;
   });
 }
 export function requireCheckpointProfileClaim(profile: CheckpointProfile, claim: PendingCheckpointClaim): void {
@@ -169,17 +211,21 @@ export function checkpointProfileId(profile: CheckpointProfile): string {
 export const CHECKPOINT_TASK_TIMEOUT_SECONDS = 1800;
 
 /**
- * The bench task for a claimed card. `repository_name` is the profile's checkpoint repository: the
+ * The bench task for a claimed card. `repository_name` is the claim's checkpoint repository: the
  * node's worker starts the harness inside that member, and without it in the workspace root, where a
  * harness writes files outside every repository and leaves the bench's tree dirty, so checkpoint and
- * release are refused. Loading a profile already refuses one whose checkpoint repository is missing or
- * not one of its repositories, so a single-repository profile names its only repository here.
+ * release are refused. For a fixed stage that is the profile's own checkpoint repository
+ * (`claimRefusal` requires it). For a stage whose cards choose, `repository_names` is the card's
+ * selection, and the node prepares the bench with only those members of its registry profile.
+ * A fixed stage's task carries no `repository_names`, so its bytes are what they always were.
  */
-export function checkpointTask(profile: CheckpointProfile, prompt: string): {
-  profile_id: string; prompt: string; timeout_seconds: number; repository_name: string;
+export function checkpointTask(profile: CheckpointProfile, claim: PendingCheckpointClaim, prompt: string): {
+  profile_id: string; prompt: string; timeout_seconds: number; repository_name: string; repository_names?: string[];
 } {
+  const repositories = claimedRepositories(profile, claim);
   return { profile_id: checkpointProfileId(profile), prompt, timeout_seconds: CHECKPOINT_TASK_TIMEOUT_SECONDS,
-    repository_name: profile.checkpointRepository };
+    repository_name: claim.policy.checkpointRepository,
+    ...(profile.repositorySelection === "card" ? { repository_names: repositories.map((r) => r.name) } : {}) };
 }
 
 /**

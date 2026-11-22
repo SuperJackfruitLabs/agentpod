@@ -29,6 +29,7 @@ has fenced the execution, drained the output and sealed the capture.
 | Registered worker capsule and result | treaty `docs/2026-11-16-registered-worker-capsule.md`, `schemas/agentpod-local/registered-worker-*.json` | the stdin frame and the stdout frame |
 | Receipt lookup and cancellation | treaty `fixtures/superbench-api/receipt-lookup*.json`, `cancellation*.json` | lost replies and cancellation |
 | Capacity refusal | treaty capacity extension (AgentPod #901) | `capacity_exhausted`, HTTP 422 |
+| Per-card repositories (proposed) | treaty v0.0.16 `schemas/superpipeline-api/run-checkpoint-policy.v2.json`, `run-checkpoint-selection.v1.json`, `card-repositories.v1.json`, `fixtures/superpipeline-run-checkpoint/selection.json`; agent-work.v1 `StageDef.cardCheckpointPolicy`, `CheckpointClaimDiscovery.selection`, `ClaimRequest.checkpointProtocols` | a stage whose cards choose their repositories |
 
 ## Opt-in
 
@@ -109,11 +110,47 @@ and the steps no verb takes. In it, `changed` is this stage's own pins that move
 a Node that serves one stage it is empty, however much `changed` lists. `stage
 rm` answers `otherStagesRepinned` too.
 
-`--repo` is the stage's **allow-list**. Today a claim's policy must name exactly
-these repositories, in order (`claimRepositoriesAllowed` in
-`checkpoint-profile.ts`). The later per-card change relaxes that one rule to an
-ordered, non-empty subset; `registry_sha256` already pins the whole list, so a
-card can only select what the Node serves.
+`--repo` is the stage's **allow-list**. A claim's policy names an ordered,
+non-empty subset of it (`claimRepositoriesAllowed` in `checkpoint-profile.ts`);
+`registry_sha256` pins the whole list, so a card can only select what the Node
+serves. For a fixed stage the subset is the whole list and the start repository
+is `--checkpoint-repo`, exactly as before.
+
+### Cards that choose their repositories
+
+`--cards-choose` makes the stage one whose cards choose (treaty v0.0.16, proposed).
+`--default-repo N` (repeatable) is what a card that names none gets; it must hold
+`--checkpoint-repo` unless it is one repository. `stage set NAME --cards-choose=false`
+turns it off and drops the default; `--no-default-repo` removes the default only.
+
+- **SuperPipeline.** The stage's policy is a `cardCheckpointPolicy`
+  (`run-checkpoint-policy.v2`), which `stage add` prints. A card names
+  `repositories` (and optionally `primaryRepository`) from the allow-list. At claim
+  SuperPipeline narrows the allow-list to the card's choice and freezes it: the
+  claim carries the **narrowed** v1 policy, its digest, and a `selection`
+  (`run-checkpoint-selection.v1`) naming the stage policy's digest, the source
+  (`card`, `default` or `single`), the names and the start repository.
+- **Hub claim.** Only this stage's roster row sends `checkpointProtocols:
+  [checkpoint-claim.v1, checkpoint-claim.v2]` beside `checkpointProtocol`; every
+  other claimant's request is unchanged, and the board offers a card-choice stage
+  to no other claimant. A claimant that did not ask refuses such a stage.
+- **Hub check.** `readCheckpointClaim` and the context read recompute the
+  narrowing from the stage's `cardCheckpointPolicy` and the claim's selection
+  (`checkpoint-selection.ts`) and refuse any difference: the stage policy digest,
+  the order or membership of the names, the source, the start repository, the
+  narrowed policy or its digest. The profile then requires the selection (a fixed
+  stage's claim must carry none) and the claim's repositories to be an ordered
+  subset of the allow-list, starting in one of them. Every later check (source
+  binding, prepared binding, report members, settlement) compares with the
+  profile's pins for exactly the claimed repositories.
+- **Node.** The prepare task carries `repository_names`, the card's choice, with
+  `repository_name` its start. The Node prepares the bench with only those members
+  of its registry profile, which still holds the whole allow-list and the clone
+  URLs, filtered by name. The bench key is still one per card. A card whose bench
+  already exists with another set or another start is refused with `unsupported`
+  and a message naming what the bench holds: the choice is frozen once the bench
+  exists. Reclaim the bench (`bench workspace reclaim`), then a new claim starts
+  a new one. A name the registry does not serve is refused the same way.
 
 **What stays manual**, printed by `stage add` and `doctor`:
 
@@ -122,8 +159,8 @@ card can only select what the Node serves.
 - Accounts: the Hub's service principal holds `checkpoints:submit` and
   `checkpoints:read` (once per deployment; add them, do not replace its scopes).
 - SuperPipeline: the board agent (`agt_…`) is linked to the agent principal, and
-  the stage's `checkpointPolicy` names this Node, station and agent and the
-  stage's repositories.
+  the stage's `checkpointPolicy` (or `cardCheckpointPolicy` for a stage whose
+  cards choose) names this Node, station and agent and the stage's repositories.
 - The run-only MCP token for the agent's board tools:
   `fleet bridge set KEY --mcp-token spa_…`.
 - The bench host: benchd installed and running, and the coordinator registry

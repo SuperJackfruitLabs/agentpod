@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchcoordinator"
@@ -110,6 +111,10 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 	if err != nil {
 		return zero, benchdispatch.SourceTask{}, err
 	}
+	p, err = selected(p, r.Task)
+	if err != nil {
+		return zero, benchdispatch.SourceTask{}, err
+	}
 	identity := benchdispatch.Identity(*r.Identity)
 	stable, _ := json.Marshal([]string{identity.TenantID, identity.BoardID, identity.CardID})
 	key := "cp_" + rawSHA(stable)
@@ -148,6 +153,15 @@ func (h *Handler) choose(ctx context.Context, r benchcoordinatorwire.Request, p 
 				// ID: the registered launch stops an initialization owner it
 				// holds and SuperBench makes the key's next generation, or
 				// refuses and the attempt parks. The grouped launch leases.
+				//
+				// Any other phase is a bench that exists: its repositories and
+				// start were fixed when it was created, so a different choice
+				// is refused, named, never leased or recreated around.
+				if entry.Phase != "reclaiming" && entry.Phase != "reclaimed" {
+					if err := sameBench(entry, p); err != nil {
+						return zero, benchdispatch.SourceTask{}, err
+					}
+				}
 				switch entry.Phase {
 				case "reclaiming":
 					return zero, benchdispatch.SourceTask{}, ErrReclaiming
@@ -210,7 +224,10 @@ func (g groupedCoordinator) Reserved(ctx context.Context, spec benchdispatch.Sou
 
 func (h *Handler) manager(r benchcoordinatorwire.Request, p LocalProfile, intent Intent, phase string) coordinator {
 	var repositories []benchworkspace.Repository
-	for _, repo := range p.Repositories {
+	// The registry holds the stage's whole allow-list; the attempt's spec
+	// names the members it was prepared with. A repository the spec does not
+	// name is not passed on, so a coordinator never sees more than the card chose.
+	for _, repo := range attemptRepositories(p, intent.Spec) {
 		repositories = append(repositories, benchworkspace.Repository{Name: repo.Name, Repository: repo.Repository, Base: repo.Base, Branch: "card/" + r.Identity.CardID})
 	}
 	current := func(ctx context.Context, spec benchdispatch.SourceSpec) error {
@@ -382,6 +399,9 @@ func (h *Handler) serve(ctx context.Context, r benchcoordinatorwire.Request, raw
 			}
 			return h.choose(ctx, r, p)
 		})
+		if _, terminal := benchlaunch.RefusalCode(err); terminal {
+			return failed(r, err)
+		}
 		if err != nil {
 			return pending(r), err
 		}
@@ -551,4 +571,82 @@ func staleOwner(r benchcoordinatorwire.Request) benchcoordinatorwire.Response {
 	response := refused(r.Operation)
 	response.Code = "stale_owner"
 	return response
+}
+
+// choiceRefusal is a prepare whose repository choice the node cannot serve: a
+// name the profile does not hold, or a bench that already exists with another
+// set. It is the launch's terminal refusal, so the hub ends the attempt with
+// the reason instead of parking it, and the same prepare is refused again.
+func choiceRefusal(message string) error {
+	return &benchlaunch.Refusal{Code: "unsupported", Message: message}
+}
+
+// selected is the profile narrowed to a prepare's repository choice. The
+// registry holds the stage's allow-list with clone URLs; a stage whose cards
+// choose sends the card's names (sorted, unique, holding the start
+// repository), and only those are prepared, the start repository being the
+// task's. With no names the profile is unchanged.
+func selected(p LocalProfile, task *benchcoordinatorwire.Task) (LocalProfile, error) {
+	if task == nil || len(task.RepositoryNames) == 0 {
+		return p, nil
+	}
+	byName := make(map[string]LocalRepository, len(p.Repositories))
+	for _, repo := range p.Repositories {
+		byName[repo.Name] = repo
+	}
+	out := p
+	out.Repositories = make([]LocalRepository, 0, len(task.RepositoryNames))
+	start := false
+	for i, name := range task.RepositoryNames {
+		repo, ok := byName[name]
+		if !ok || i > 0 && task.RepositoryNames[i-1] >= name {
+			return LocalProfile{}, choiceRefusal("the card chose a repository this stage's registry does not serve: " + name)
+		}
+		out.Repositories = append(out.Repositories, repo)
+		start = start || name == task.RepositoryName
+	}
+	if !start {
+		return LocalProfile{}, choiceRefusal("the card's start repository is not one it chose")
+	}
+	out.CheckpointRepository = task.RepositoryName
+	return out, nil
+}
+
+// sameBench refuses a card's existing bench whose repositories or start
+// repository differ from this prepare's: the choice is frozen once the bench
+// exists. Reclaim the bench, then a new claim starts a new one.
+func sameBench(entry *benchworkspace.WorkspaceInventory, p LocalProfile) error {
+	same := len(entry.Members) == len(p.Repositories) && entry.CheckpointRepository == p.CheckpointRepository
+	for i := 0; same && i < len(entry.Members); i++ {
+		same = entry.Members[i].Name == p.Repositories[i].Name
+	}
+	if same {
+		return nil
+	}
+	have := make([]string, 0, len(entry.Members))
+	for _, m := range entry.Members {
+		have = append(have, m.Name)
+	}
+	return choiceRefusal("this card's bench already holds " + strings.Join(have, ", ") + " starting in " + entry.CheckpointRepository +
+		"; a card's repositories are fixed once its bench exists: reclaim the bench to change them")
+}
+
+// attemptRepositories is the registry profile's repositories the attempt's
+// spec names, in its order: all of them for a fixed stage, the card's choice
+// otherwise. With no spec yet, the whole profile.
+func attemptRepositories(p LocalProfile, spec *benchdispatch.SourceSpec) []LocalRepository {
+	if spec == nil {
+		return p.Repositories
+	}
+	byName := make(map[string]LocalRepository, len(p.Repositories))
+	for _, repo := range p.Repositories {
+		byName[repo.Name] = repo
+	}
+	out := make([]LocalRepository, 0, len(spec.Repositories))
+	for _, want := range spec.Repositories {
+		if repo, ok := byName[want.Name]; ok {
+			out = append(out, repo)
+		}
+	}
+	return out
 }

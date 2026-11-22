@@ -42,7 +42,7 @@
  * `SEPARATION_OF_DUTIES` and 409 for `GATE_NOT_PENDING` as well.
  */
 
-import { CHECKPOINT_CLAIM_PROTOCOL, CheckpointClaimRefused, readCheckpointClaim, refuseLegacyCheckpoint, parsePendingCheckpointClaim, validateCheckpointContext, type PendingCheckpointClaim } from "./checkpoint-claim";
+import { CARD_CHOICE_CHECKPOINT_PROTOCOLS, CHECKPOINT_CLAIM_PROTOCOL, CheckpointClaimRefused, type CheckpointClaimProtocols, readCheckpointClaim, refuseLegacyCheckpoint, parsePendingCheckpointClaim, validateCheckpointContext, type PendingCheckpointClaim } from "./checkpoint-claim";
 import type { BoardActivity } from "./coalesce";
 import type { ElicitationPendingItem, GatePendingItem } from "./deliveries";
 import { context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
@@ -89,6 +89,12 @@ export interface ClaimOptions {
   maxConcurrency?: number;
   profileKey?: string;
   checkpointProtocol?: typeof CHECKPOINT_CLAIM_PROTOCOL;
+  /**
+   * Every checkpoint claim protocol this claimant speaks, beside `checkpointProtocol`: only
+   * `[v1, v2]`, sent by a bench stage whose cards choose their repositories, so the board offers it
+   * stages with `cardCheckpointPolicy`. Absent for every other claimant, whose body is unchanged.
+   */
+  checkpointProtocols?: CheckpointClaimProtocols;
   checkpointOnly?: boolean;
 }
 
@@ -448,13 +454,19 @@ export class SuperpipelineClient {
    * looked like an empty queue would poll forever and report healthy.
    */
   async claimNext(opts: ClaimOptions = {}): Promise<ClaimOutcome> {
-    readCheckpointClaim(undefined, opts.checkpointProtocol, this.boardId); // Refuse unsupported opt-in before network effects.
+    const chooses = opts.checkpointProtocols !== undefined;
+    if (chooses && (opts.checkpointProtocols?.length !== CARD_CHOICE_CHECKPOINT_PROTOCOLS.length ||
+      opts.checkpointProtocols.some((p, i) => p !== CARD_CHOICE_CHECKPOINT_PROTOCOLS[i])))
+      throw new CheckpointClaimRefused("unsupported");
+    // Refuse unsupported opt-in before network effects.
+    readCheckpointClaim(undefined, opts.checkpointProtocol, this.boardId, chooses);
     if (opts.checkpointOnly !== undefined && (typeof opts.checkpointOnly !== "boolean" ||
       (opts.checkpointOnly && opts.checkpointProtocol !== CHECKPOINT_CLAIM_PROTOCOL)))
       throw new CheckpointClaimRefused("unsupported");
     const body: Record<string, unknown> = {};
     if (opts.checkpointOnly !== undefined) body.checkpointOnly = opts.checkpointOnly;
     if (opts.checkpointProtocol !== undefined) body.checkpointProtocol = opts.checkpointProtocol;
+    if (chooses) body.checkpointProtocols = [...CARD_CHOICE_CHECKPOINT_PROTOCOLS];
     if (opts.maxConcurrency !== undefined) body.maxConcurrency = opts.maxConcurrency;
     if (opts.profileKey !== undefined) body.profileKey = opts.profileKey;
 
@@ -463,7 +475,7 @@ export class SuperpipelineClient {
     // to be treated as someone else.
     const res: unknown = await this.send("POST", `/v1/boards/${this.segment(this.boardId)}/claims`, body);
 
-    const checkpointClaim = readCheckpointClaim(res, opts.checkpointProtocol, this.boardId);
+    const checkpointClaim = readCheckpointClaim(res, opts.checkpointProtocol, this.boardId, chooses);
     if (opts.checkpointOnly && isRecord(res) && res.claimed === true && !checkpointClaim)
       throw new CheckpointClaimRefused("required");
     if (!isClaimed(res)) return { work: null, reason: isRecord(res) && typeof res.reason === "string" ? res.reason : null };

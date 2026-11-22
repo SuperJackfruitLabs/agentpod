@@ -138,6 +138,10 @@ type Task struct {
 	Prompt         string `json:"prompt"`
 	TimeoutSeconds uint64 `json:"timeout_seconds"`
 	RepositoryName string `json:"repository_name,omitempty"`
+	// RepositoryNames is a card's choice of the profile's repositories, for a
+	// stage whose cards choose: sorted, unique, holding RepositoryName. Empty
+	// means every repository of the profile.
+	RepositoryNames []string `json:"repository_names,omitempty"`
 }
 type Request struct {
 	Version       string    `json:"version"`

@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { parsePendingCheckpointClaim, type PendingCheckpointClaim } from "./checkpoint-claim";
 import { canonicalCheckpoint, parseCheckpointJSON } from "./checkpoint-json";
-import { CheckpointRefused, requireCheckpointProfileClaim, type CheckpointProfile } from "./checkpoint-profile";
+import { CheckpointRefused, claimedRepositories, type CheckpointProfile } from "./checkpoint-profile";
 
 const id = z.string().min(1).max(128);
 const sha = z.string().regex(/^[a-f0-9]{64}(?![\s\S])/);
@@ -17,8 +17,9 @@ const sourceShape = {
   requestId: key, sourceRequestSha256: sha, workerContextSha256: sha,
 };
 const sourceSchema = z.object(sourceShape).strict();
+// `selection`: the claim's frozen selection, for a stage whose cards choose (claim protocol v2).
 const snapshotSchema = z.object({ ...sourceShape, tenantId: id, policy: z.unknown(), policyDigest: sha,
-  status: z.string().min(1).max(80), lastHeartbeatMs: integer }).strict();
+  selection: z.unknown().optional(), status: z.string().min(1).max(80), lastHeartbeatMs: integer }).strict();
 const receiptSchema = z.object({ runId: id, leaseEpoch: integer.min(1), sourceDigest: sha, admittedAt: integer }).strict();
 export type CheckpointSource = z.infer<typeof sourceSchema>;
 export type CheckpointSourceSnapshot = z.infer<typeof snapshotSchema>;
@@ -33,13 +34,14 @@ export function sourceOf(snapshot: CheckpointSourceSnapshot): CheckpointSource {
   return parseCheckpointSource(Object.fromEntries(Object.keys(sourceShape).map((name) => [name, Reflect.get(snapshot, name)])));
 }
 export function requireSourceBinding(profile: CheckpointProfile, claim: PendingCheckpointClaim, source: CheckpointSource): void {
-  requireCheckpointProfileClaim(profile, claim);
+  // The profile's pins for the claim's own repositories: the stage's whole list, or the card's choice.
+  const pins = claimedRepositories(profile, claim);
   const b = source.binding;
   if (b.boardId !== claim.boardId || b.cardId !== claim.cardId || b.stageKey !== claim.stageKey ||
     b.runId !== claim.runId || b.leaseEpoch !== claim.leaseEpoch || b.agentId !== claim.agentId ||
     b.stationId !== profile.target.station_id || b.nodeId !== profile.target.node_id ||
-    source.start.length !== profile.repositories.length || source.start.some((member, index) => {
-      const pin = profile.repositories[index];
+    source.start.length !== pins.length || source.start.some((member, index) => {
+      const pin = pins[index];
       return pin?.name !== member.name || member.commit.length !== (pin.objectFormat === "sha1" ? 40 : 64);
     })) throw new CheckpointRefused("source", "source.binding");
 }
@@ -50,7 +52,8 @@ export function parseSourceSnapshot(raw: Uint8Array, profile: CheckpointProfile,
   const actual = parsePendingCheckpointClaim({ version: claim.version, admissionState: "pending",
     tenantId: value.tenantId, boardId: value.binding.boardId, cardId: value.binding.cardId,
     stageKey: value.binding.stageKey, agentId: value.binding.agentId, runId: value.binding.runId,
-    leaseEpoch: value.binding.leaseEpoch, policy: value.policy, policyDigest: value.policyDigest });
+    leaseEpoch: value.binding.leaseEpoch, policy: value.policy, policyDigest: value.policyDigest,
+    ...(value.selection === undefined ? {} : { selection: value.selection }) });
   requireSourceBinding(profile, actual, sourceOf(value));
   if (canonicalCheckpoint(actual) !== canonicalCheckpoint(claim)) throw new CheckpointRefused("stale", "source.claim");
   return value;

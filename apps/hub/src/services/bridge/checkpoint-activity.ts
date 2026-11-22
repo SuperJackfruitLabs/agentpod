@@ -39,7 +39,7 @@ export const HELD_LEASE_OPERATOR_PATH = "`bench workspace stop_admin <key>`, the
 /** The activity for an event, or undefined when there is nothing worth saying. Exported for tests. */
 export function checkpointActivity(event: CheckpointActivityEvent, facts: {
   completion?: BenchCoordinatorCompletion; phase?: string; code?: string; reason?: string; benchKey?: string; message?: string;
-  running?: boolean; ended?: RunEndedReason;
+  running?: boolean; ended?: RunEndedReason; outcome?: string | null;
 } = {}): BoardActivity | undefined {
   const action = `checkpoint.${event}`;
   switch (event) {
@@ -55,10 +55,13 @@ export function checkpointActivity(event: CheckpointActivityEvent, facts: {
     }
     // The board ended the run (the card moved or was cancelled) after the bench had pushed this card's
     // work: the attempt is retired, and the card says where the work is. Nothing pushed, nothing said.
+    // A person's move ends the run with outcome `moved` (`run.ended`); a run still working whose card
+    // no longer names it is `run.unbound`. Both are the card moving.
     case "stopped_saved": {
       const members = facts.completion?.service.checkpoints ?? [];
       if (members.length === 0) return undefined;
-      const why = facts.ended === "run.unbound" ? "the card moved" : "the card moved or its run was ended";
+      const moved = facts.ended === "run.unbound" || (facts.ended === "run.ended" && facts.outcome === "moved");
+      const why = moved ? "the card moved" : "the card moved or its run was ended";
       const saved = members.map((m) => `${members.length > 1 ? `${m.name} ` : ""}${m.task_ref.replace(/^refs\/heads\//, "")} (${m.commit.slice(0, 7)})`).join(", ");
       return { type: "action", action: "checkpoint.stopped", body: `Run stopped because ${why}; partial work saved to ${saved}.`,
         parameter: { ended: facts.ended, commits: members.map((m) => ({ name: m.name, ref: m.task_ref, commit: m.commit })) } };

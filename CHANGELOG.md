@@ -21,6 +21,18 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   reclaim only logs. A card that comes back gets a fresh bench from its card
   branch. Migration 0136 adds `bench_stages.keep_bench`. The node's user must be a
   SuperBench operator.
+- Proposed: a bench stage whose cards choose their repositories (treaty v0.0.16).
+  `fleet bench stage add|set --cards-choose [--default-repo N ...]` keeps `--repo`
+  as the stage's allow-list and prints a `cardCheckpointPolicy`
+  (`run-checkpoint-policy.v2`) for SuperPipeline. Only that stage's claims send
+  `checkpointProtocols: [checkpoint-claim.v1, checkpoint-claim.v2]`; the hub
+  recomputes each claim's narrowing from the stage policy and its `selection` and
+  refuses any difference in digest, order or membership. A claim's repositories
+  must be an ordered subset of the allow-list (a fixed stage's still name all of
+  it), and the node prepares each card's bench with only its choice, filtered by
+  name from the registry's allow-list. A card whose bench exists with another set
+  is refused, named: the choice is frozen once the bench exists. Every other
+  claimant and every v1 claim is unchanged. See `docs/BENCH_REGISTERED_LAUNCH.md`.
 
 - `fleet bridge add --credential-source station-plane` adds a source row with no
   `--token`. With no `--principal`, `--organization` or `--audience`, the hub fills
@@ -74,6 +86,13 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   it by default; installed access, provider readiness and the producer crossing
   remain separate verification requirements.
 
+### Changed
+
+- Treaty pins move to 0.0.17 (`treaty-contracts`, `-cloudevents`,
+  `-ecosystem-identity`, `-matrix-events`). 0.0.16 added the proposed per-card
+  repository contracts; 0.0.17 adds contracts for other products and changes none
+  of the checkpoint or agent-work files.
+
 ### Fixed
 
 - The `fleet bench stage set|rm` reply field `repinned` is now
@@ -108,6 +127,9 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   the contract's `NodeCapability`, so the hello frame's parse dropped it and every
   `fleet bench` verb refused the node as one too old. A contract test now reads the
   node's sources and fails when any capability it advertises is unknown to the hub.
+- A card whose run ended after its work was pushed says "the card moved" when
+  SuperPipeline ended the run with outcome `moved` (a person's move ends the run
+  now), not only when the run was unbound.
 
 - A bridge row with a `station-plane` credential source can hold the run-scoped
   MCP token its harness spends, so an agent on a source row gets its SuperPipeline
