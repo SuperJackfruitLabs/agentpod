@@ -14,6 +14,7 @@
  * requirement, and it is what selects every choice below.
  */
 import { eq } from "drizzle-orm";
+import { BOARD_SPEAKER_DISPLAY_NAME as TREATY_BOARD_SPEAKER_DISPLAY_NAME, boardRoomNames } from "@superjackfruitlabs/treaty-matrix-events";
 
 import { db } from "../../db/drizzle";
 import { matrixBoardRooms } from "../../db/schema/board-rooms";
@@ -22,25 +23,29 @@ import { createLogger } from "../../utils/logger";
 const log = createLogger("matrix-board-room");
 
 /**
- * The localpart the board speaks as.
+ * This hub's board-room names, as treaty gives them to the `agentpod` carrier
+ * (`boardRoomNames`, treaty-matrix-events 0.0.11+): SuperExchange carries board rooms under
+ * names of its own, so a board's room here and its room there are two rooms, and neither
+ * carrier can speak in or claim the alias of the other's.
  *
- * Inside the appservice's existing exclusive `@agent_.*` namespace, so this needs no
- * registration change and no homeserver restart. It reads as an agent and is not
- * one; the display name is what anybody sees. A bare `@superpipeline` would read
- * better and costs a namespace edit plus a reload — that trade can be made later
- * without touching anything here, because the speaker is stored per room rather
- * than derived.
+ * The speaker is inside the appservice's existing exclusive `@agent_.*` namespace, so it needs
+ * no registration change and no homeserver restart. It reads as an agent and is not one; the
+ * display name is what anybody sees. The speaker is stored per room rather than derived, so a
+ * rename later touches nothing here.
  */
-export const BOARD_SPEAKER_LOCALPART = "agent_superpipeline";
-export const BOARD_SPEAKER_DISPLAY_NAME = "superpipeline";
+const NAMES = boardRoomNames("agentpod");
+
+/** The localpart the board speaks as. */
+export const BOARD_SPEAKER_LOCALPART = NAMES.speakerLocalpart;
+export const BOARD_SPEAKER_DISPLAY_NAME = TREATY_BOARD_SPEAKER_DISPLAY_NAME;
 
 /** The room alias for a board, inside the appservice's `#agentpod_.*` namespace. */
 export function boardRoomAlias(boardId: string): string {
-  return `agentpod_board_${boardId.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+  return NAMES.alias(boardId);
 }
 
 export function boardSpeakerMxid(domain: string): string {
-  return `@${BOARD_SPEAKER_LOCALPART}:${domain}`;
+  return NAMES.speakerMxid(domain);
 }
 
 export interface BoardRoomDeps {

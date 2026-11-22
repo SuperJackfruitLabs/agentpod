@@ -182,7 +182,7 @@ importers:
         version: 0.6.6
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1
-        version: 1.32.1(zod@4.6.5)
+        version: 1.32.1(@cfworker/json-schema@4.1.1)(zod@4.6.5)
       '@opencode-ai/sdk':
         specifier: ^1.18.31
         version: 1.18.31
@@ -220,11 +220,11 @@ importers:
         specifier: ^2.11.0
         version: 2.11.0(@opentelemetry/api@1.9.1)
       '@superjackfruitlabs/treaty-cloudevents':
-        specifier: 0.0.6
-        version: 0.0.6
+        specifier: 0.0.15
+        version: 0.0.15
       '@superjackfruitlabs/treaty-matrix-events':
-        specifier: 0.0.10
-        version: 0.0.10
+        specifier: 0.0.15
+        version: 0.0.15
       '@trpc/client':
         specifier: ^11.19.0
         version: 11.19.0(@trpc/server@11.19.0(typescript@5.9.3))(typescript@5.9.3)
@@ -277,9 +277,12 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@superjackfruitlabs/treaty-contracts':
+        specifier: 0.0.15
+        version: 0.0.15
       '@superjackfruitlabs/treaty-ecosystem-identity':
-        specifier: 0.0.2
-        version: 0.0.2
+        specifier: 0.0.15
+        version: 0.0.15
       '@types/bun':
         specifier: latest
         version: 1.4.5
@@ -351,15 +354,15 @@ importers:
   packages/contract:
     dependencies:
       '@superjackfruitlabs/treaty-matrix-events':
-        specifier: 0.0.10
-        version: 0.0.10
+        specifier: 0.0.15
+        version: 0.0.15
       zod:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
       '@superjackfruitlabs/treaty-ecosystem-identity':
-        specifier: 0.0.2
-        version: 0.0.2
+        specifier: 0.0.15
+        version: 0.0.15
       '@types/bun':
         specifier: latest
         version: 1.4.5
@@ -643,6 +646,9 @@ packages:
     resolution: {integrity: sha512-dI+9P7cfWxkTQ+oE+7Aa6onEn92PHgfWXZivjNheCRmTBDBf2fx6RyTi0cmgpYLnD1KLZK9ZYrMxaPZ4oiXhGA==}
     cpu: [x64]
     os: [win32]
+
+  '@cfworker/json-schema@4.1.1':
+    resolution: {integrity: sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==}
 
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
@@ -2230,14 +2236,18 @@ packages:
     peerDependencies:
       svelte: ^5.56.0
 
-  '@superjackfruitlabs/treaty-cloudevents@0.0.6':
-    resolution: {integrity: sha512-+I0C/1M2Y1qoCTm7Pw0ovlJNamdVt8QDtM6KWurN0n46bO1JeQE1OxLxEVugIZ2ZxSbEZfY//1uAzjDsqZ7PgQ==}
+  '@superjackfruitlabs/treaty-cloudevents@0.0.15':
+    resolution: {integrity: sha512-wg12i8WJHStOnqtG/ujeUoNuMiVwr+Xj+A0yVknm+AMgtP0qw5MX22pxQNzkMZmlSDGJXVab0MmzPQbm2X36sg==}
 
-  '@superjackfruitlabs/treaty-ecosystem-identity@0.0.2':
-    resolution: {integrity: sha512-52RhUdq6WVFYHgiKvpjGqZsaRcA9vWeTIPPwLV66bPoXcjM7fODxg/tZ6s96DOOTGAO1IwkbkqOthsHD+ctgSA==}
+  '@superjackfruitlabs/treaty-contracts@0.0.15':
+    resolution: {integrity: sha512-7JE6yFDT6ICWY8/iY1PuLIQF9vot0UhONAdvNn+ZCDAEd0B7ypoiWdmaGLvhjBXiXJ0ObjdotsIMuf2UMGWv2A==}
+    hasBin: true
 
-  '@superjackfruitlabs/treaty-matrix-events@0.0.10':
-    resolution: {integrity: sha512-IiNuI9mvUaGw/6kQVTA8f+POZCgaUvwD1gB7GwvaEoGM2kj78diJ0miiwlI3SPnTFDsPAlufPhOzl7twUYFzCA==}
+  '@superjackfruitlabs/treaty-ecosystem-identity@0.0.15':
+    resolution: {integrity: sha512-CmWbTLyU/YT5OuB1Ke1pUzhUsOA8V1cd6mQY4HZ8eXIZFPwNW+1wBknB3MeveseXyefm24SLlc6WQld0WFl3Yg==}
+
+  '@superjackfruitlabs/treaty-matrix-events@0.0.15':
+    resolution: {integrity: sha512-GE1dVHWyEr7fbNaaBxfuxIIINmO+lOZ/LUMAIFF8XGK1CsYtOEeO4acS/ZBWhDFoBT4kNyHd/QDpY07UsFIMCw==}
 
   '@superjackfruitlabs/vibekit-frame@0.0.18':
     resolution: {integrity: sha512-EUPtAeplpYho8L1MM8MPIdgyUVD7L8AceKE2fD1wBW0Py0walBqKZZ7TasTuoo9CwC+6bdz4LWDLwRfOzcZWCw==}
@@ -6809,6 +6819,8 @@ snapshots:
   '@cbor-extract/cbor-extract-win32-x64@2.2.2':
     optional: true
 
+  '@cfworker/json-schema@4.1.1': {}
+
   '@chevrotain/types@11.1.2': {}
 
   '@csstools/color-helpers@5.1.0': {}
@@ -7550,7 +7562,7 @@ snapshots:
     dependencies:
       '@chevrotain/types': 11.1.2
 
-  '@modelcontextprotocol/sdk@1.32.1(zod@4.6.5)':
+  '@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(zod@4.6.5)':
     dependencies:
       '@hono/node-server': 2.1.5(hono@4.13.13)
       ajv: 8.20.0
@@ -7569,6 +7581,8 @@ snapshots:
       raw-body: 3.0.2
       zod: 4.6.5
       zod-to-json-schema: 3.25.2(zod@4.6.5)
+    optionalDependencies:
+      '@cfworker/json-schema': 4.1.1
     transitivePeerDependencies:
       - supports-color
 
@@ -7921,11 +7935,17 @@ snapshots:
       - '@internationalized/date'
       - '@sveltejs/kit'
 
-  '@superjackfruitlabs/treaty-cloudevents@0.0.6': {}
+  '@superjackfruitlabs/treaty-cloudevents@0.0.15': {}
 
-  '@superjackfruitlabs/treaty-ecosystem-identity@0.0.2': {}
+  '@superjackfruitlabs/treaty-contracts@0.0.15':
+    dependencies:
+      '@cfworker/json-schema': 4.1.1
 
-  '@superjackfruitlabs/treaty-matrix-events@0.0.10': {}
+  '@superjackfruitlabs/treaty-ecosystem-identity@0.0.15':
+    dependencies:
+      jose: 6.2.12
+
+  '@superjackfruitlabs/treaty-matrix-events@0.0.15': {}
 
   '@superjackfruitlabs/vibekit-frame@0.0.18(@superjackfruitlabs/vibekit-ui@0.0.21(@internationalized/date@3.12.4)(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@5.9.3)(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0)))(astro@5.18.2(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(rollup@4.62.4)(tsx@4.23.12)(typescript@5.9.3)(yaml@2.9.1))':
     dependencies:

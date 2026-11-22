@@ -12,7 +12,7 @@ import {
 } from "./apns";
 
 const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-const PEM = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+const PEM = privateKey.export({ type: "pkcs8", format: "pem" });
 const TOKEN = "a".repeat(64);
 
 function decode(part: string) {
