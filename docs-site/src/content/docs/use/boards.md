@@ -19,6 +19,12 @@ The bridge claims by calling the board. The board calls back through three signe
 | `POST /public/bridge/superpipeline/push` | gates, questions, follow-ups, waiting cards and their reminders and outcomes | `SUPERPIPELINE_PUSH_SECRET` |
 | `POST /public/bridge/superpipeline/events` | `gate.pending` from the suite's [event relay](https://treaty.superjackfruit.com/relay/) | `TREATY_RELAY_DELIVERY_SECRET` |
 
+All three carry the suite's delivery signature, `x-treaty-signature`: an HMAC over the timestamp,
+the event's id (`ce-id`) and the exact body, refused outside a five-minute window, so a captured
+delivery cannot be replayed later or under another id. Until SuperPipeline drops it, a board's push
+also carries its older `X-Superpipeline-Signature`, over the body alone; the hub accepts that one
+only from a board that sends no `x-treaty-signature` at all.
+
 The three exist only on a hub with a Matrix bridge configured. The hub registers the push
 subscriptions with each board itself, with the board's own credential, so there is nothing to set
 up on the board. With the push secret unset, nothing is registered and the first two doors answer

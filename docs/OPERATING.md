@@ -1590,7 +1590,10 @@ mounted only when a Matrix bridge is configured: `POST /public/bridge/superpipel
 (`work.available`, below), `POST /public/bridge/superpipeline/push` (gates, questions and the rest,
 below) and `POST /public/bridge/superpipeline/events` (the event relay, below). The first two are
 signed with `SUPERPIPELINE_PUSH_SECRET`, the third with `TREATY_RELAY_DELIVERY_SECRET`; each answers
-503 when its secret is unset. A hub with the bridge off claims nothing. See
+503 when its secret is unset. All three verify `x-treaty-signature` (timestamp, `ce-id` and body, a
+300 s window). The first two still accept a board's older `X-Superpipeline-Signature` (body only), but
+only when no `x-treaty-signature` is sent; `push rejected: bad x-treaty-signature` in the log is a
+delivery whose new signature failed. A hub with the bridge off claims nothing. See
 [DEPLOYMENT.md → superpipeline bridge](./DEPLOYMENT.md#superpipeline-bridge) for the two variables
 and the roster table behind them.
 
