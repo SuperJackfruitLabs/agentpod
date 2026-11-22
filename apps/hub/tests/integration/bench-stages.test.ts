@@ -24,6 +24,8 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { BenchDoctorCheck, BenchStageView, HelloMsg } from "@agentpod/contract";
 import { setNodeCapabilities } from "../../src/services/nodes/registry";
+import { stageKeepsBench as keepFor } from "../../src/services/bridge/checkpoint-reclaim";
+
 
 import { db } from "../../src/db/drizzle";
 import { tenants } from "../../src/db/schema/tenants";
@@ -254,8 +256,8 @@ describe("upgrading a file-based install", () => {
     // `fleet bench stage add` on the same node: the node's digest changes for every profile it serves.
     const res = await call("POST", "/stages", addBody());
     expect(res.status).toBe(201);
-    const body = z.object({ repinned: z.array(z.string()) }).parse(await res.json());
-    expect(body.repinned).toEqual(["legacy"]);
+    const body = z.object({ otherStagesRepinned: z.array(z.string()) }).parse(await res.json());
+    expect(body.otherStagesRepinned).toEqual(["legacy"]);
     const adopted = must(installedFor("legacy"), "adopted profile");
     expect(adopted.target.registry_sha256).toBe(node.digest());
     expect(adopted.target.registry_sha256).not.toBe(before.target.registry_sha256);
@@ -338,8 +340,11 @@ describe("a stage set up from the hub", () => {
     expect(repinned.status).toBe(200);
     // The reply names this stage's own re-pinned fields, not only the other stages it moved.
     const PinChange = z.object({ from: z.string(), to: z.string() });
-    const { changed } = z.object({ changed: z.record(z.string(), PinChange) }).parse(await repinned.json());
+    const { changed, otherStagesRepinned } = z.object({ changed: z.record(z.string(), PinChange),
+      otherStagesRepinned: z.array(z.string()) }).parse(await repinned.json());
     expect(Object.keys(changed).toSorted()).toEqual(["registry_sha256", "worker_sha256"]);
+    // The other stage on the node (adopted from the file) moved to the new digest with it.
+    expect(otherStagesRepinned).toEqual(["legacy"]);
     expect(changed.worker_sha256).toEqual({ from: "e".repeat(64), to: "a".repeat(64) });
     // The runtime kept from before refuses as stale; that is what a loop built once was stuck on.
     expect(await first.port.current(before)).toBe(false);
@@ -348,6 +353,23 @@ describe("a stage set up from the hub", () => {
     const after = must(await next.port.ready(identity), "ready after the change");
     expect(after.workerSHA256).toBe("a".repeat(64));
     expect(await next.port.current(after)).toBe(true);
+  });
+
+  test("a stage reclaims settled benches unless set to --keep-bench, and a re-pin keeps the choice", async () => {
+    const List = z.object({ stages: z.array(BenchStageView) });
+    const keep = async () => List.parse(await (await call("GET", "/stages")).json()).stages.find((st) => st.name === "review")?.keepBench;
+    expect(await keep()).toBe(false);
+    expect(await keepFor(must(installedFor("review"), "review"))).toBe(false);
+    expect((await call("PATCH", "/stages/review", { keepBench: true })).status).toBe(200);
+    expect(await keep()).toBe(true);
+    expect(await keepFor(must(installedFor("review"), "review"))).toBe(true);
+    // Another stage's write re-pins this one and leaves its choice alone.
+    expect((await call("PATCH", "/stages/legacy", { refresh: true })).status).toBe(200);
+    expect(await keep()).toBe(true);
+    expect((await call("PATCH", "/stages/review", { keepBench: false })).status).toBe(200);
+    expect(await keep()).toBe(false);
+    // A stage served only from the profile file has no row: it reclaims, the default.
+    expect(await keepFor({ ...must(installedFor("review"), "review"), coordinatorProfileId: "file-only" })).toBe(false);
   });
 
   test("a stage taken over from the file becomes the table's", async () => {

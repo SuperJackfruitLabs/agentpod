@@ -103,7 +103,11 @@ the selector alone; the Node keeps the repositories and worker as installed) and
 re-derives the Hub's pins; `--refresh` does only that, and `--repin` re-pins the
 Node's worker and coordinator digests to the installed bytes after an update. The
 reply to `add` and `set` prints the stage's `checkpointPolicy` for SuperPipeline
-and the steps no verb takes.
+and the steps no verb takes. In it, `changed` is this stage's own pins that moved
+(each field with its value before and after), and `otherStagesRepinned` names the
+*other* stages on the same Node that the write moved to the Node's new digest; on
+a Node that serves one stage it is empty, however much `changed` lists. `stage
+rm` answers `otherStagesRepinned` too.
 
 `--repo` is the stage's **allow-list**. Today a claim's policy must name exactly
 these repositories, in order (`claimRepositoriesAllowed` in
@@ -142,6 +146,34 @@ The routes behind the verbs, all under the admin guard:
 | `PATCH /api/admin/bench/stages/:name` | `fleet bench stage set` |
 | `DELETE /api/admin/bench/stages/:name` | `fleet bench stage rm` |
 | `GET /api/admin/bench/doctor` | `fleet bench doctor` (`?stage=` or `?station=`) |
+
+### A settled card's bench is reclaimed
+
+Once the Hub has a card's settlement accepted (its work pushed to `card/<id>` and
+the receipt recorded, phase `reported`), it asks the card's Node to reclaim that
+card's bench, `bench.reclaim` (Node capability `bench.reclaim`). Without it a
+settled bench stays `ready` with its whole quota reserved until SuperBench's idle
+sweep, and a host fills after a few cards (`capacity_exhausted`).
+
+- **Per stage, on by default.** `fleet bench stage set NAME --keep-bench` keeps
+  settled benches for that stage; `--keep-bench=false` reclaims again. `fleet
+  bench stage list` shows `keepBench`. A stage served only from the profile file
+  reclaims.
+- **Only a settled bench.** The Hub skips a card that has another unsettled
+  attempt. The Node derives the bench key from the card exactly as a prepare does,
+  and under the bench's journal lock refuses (`unsettled`) while any attempt owns
+  the bench or is not terminal; it reads the bench first and refuses a held lease
+  (`lease_held`) or a bench that is not `ready` (`not_ready`). SuperBench refuses
+  the same itself (`409`). Only the registered launch reclaims (`unsupported`
+  otherwise).
+- **Best effort.** A refusal, a timeout or an offline Node only logs (info for a
+  kept bench, warn otherwise); the card stays reported. A reclaim missed this way
+  is left to SuperBench's idle sweep.
+- **A card that comes back** (a review bounce) finds its key reclaimed and gets a
+  fresh bench prepared from its card branch: a prepare creates over a reclaimed key.
+- **Host step:** `reclaim` is a SuperBench operator operation, so the Node's user
+  must be in benchd's `--operator-uids`. Otherwise every reclaim is refused
+  (`forbidden`) and only logged.
 
 ### An install from before the verbs
 
@@ -299,8 +331,9 @@ concept and `bench workspace` reference):
 4. `bench workspace status <key>`; only if the lease is still shown, `bench
    workspace checkpoint` and `bench workspace release` with the same token.
    Releasing twice can fail once the first cleared the lease.
-5. Optionally `bench workspace reclaim <key>` to delete the released tree. The
-   next attempt on the card creates the bench again.
+5. Optionally `bench workspace reclaim <key>` to delete the released tree (the
+   Hub does this itself for a settled card unless its stage is `--keep-bench`).
+   The next attempt on the card creates the bench again.
 
 The node's next release for that record then finds the lease gone and ends the
 record clean.

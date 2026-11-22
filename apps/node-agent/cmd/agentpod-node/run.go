@@ -333,7 +333,8 @@ func runCmd() {
 	// bench.registry.status|set|remove: the hub's `fleet bench stage` and `fleet bench doctor`.
 	// Answered whether or not a registry is pinned, so the hub can tell "no registry here"
 	// from "this node predates the verbs".
-	extras.Capabilities = append(extras.Capabilities, benchbridge.ManageCapability)
+	// bench.reclaim: the hub reclaims a settled card's bench (answered "unavailable" with no registry).
+	extras.Capabilities = append(extras.Capabilities, benchbridge.ManageCapability, benchbridge.ReclaimCapability)
 	// RunWith returns only when ctx is done; shutdown is not an error worth reporting.
 	_ = gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
 		return gatherHealthReports(reg)

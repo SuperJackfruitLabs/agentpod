@@ -61,12 +61,14 @@ export async function installStageProfilesAtStartup(): Promise<void> {
 
 export async function upsertStage(input: {
   tenantId: string; name: string; profile: CheckpointProfile; stageId?: string | null;
-  origin: "fleet" | "file"; createdBy?: string | null;
+  origin: "fleet" | "file"; createdBy?: string | null; keepBench?: boolean;
 }): Promise<void> {
   const values = {
     tenantId: input.tenantId, name: input.name, boardId: input.profile.target.board_id, stationId: input.profile.target.station_id,
     origin: input.origin, profile: canonicalCheckpoint(input.profile), updatedAt: new Date(),
     ...(input.stageId !== undefined ? { stageId: input.stageId } : {}),
+    // Left out, a re-pin of another stage keeps this stage's own choice.
+    ...(input.keepBench !== undefined ? { keepBench: input.keepBench } : {}),
   };
   await db.insert(benchStages).values({ ...values, createdBy: input.createdBy ?? null })
     .onConflictDoUpdate({ target: [benchStages.tenantId, benchStages.name], set: values });

@@ -10,7 +10,7 @@
  * the legacy file, which the hub does the first time it rewrites that node's registry (the node's
  * digest changes for every profile it serves, so the file's pin would be stale).
  */
-import { pgTable, text, timestamp, primaryKey, uniqueIndex, check } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, primaryKey, uniqueIndex, check, boolean } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { tenants } from "./tenants";
 
@@ -23,6 +23,8 @@ export const benchStages = pgTable("bench_stages", {
   /** The SuperPipeline stage this serves, when given: only used to print its `checkpointPolicy` command. */
   stageId: text("stage_id"),
   origin: text("origin").notNull(),
+  /** Keep a card's bench after its checkpoint settles (`--keep-bench`); off means it is reclaimed. */
+  keepBench: boolean("keep_bench").notNull().default(false),
   profile: text("profile").notNull(),
   createdBy: text("created_by"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

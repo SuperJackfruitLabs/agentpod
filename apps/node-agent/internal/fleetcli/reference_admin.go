@@ -186,7 +186,7 @@ var adminCommands = []clidoc.Command{
 		Synopsis: "fleet bench stage add NAME --board B --station S --agent agt_… --checkpoint-repo N\n" +
 			"                     --repo name=N,provider=P,repository=OWNER/REPO,clone=URL[,base=B][,format=F] ...\n" +
 			"                     --worker PATH [--worker-arg A ...] [--env K=V ...] [--launch registered-v1|grouped]\n" +
-			"                     [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin]",
+			"                     [--source-tenant tnt_…] [--stage-id ID] [--bridge-key K] [--repin] [--keep-bench]",
 		Detail: "In order, each step idempotent and each refusal naming the step: the station's roster row for the board " +
 			"(created as a `station-plane` source row, or upgraded to one); the node's registry profile (written atomically " +
 			"and reloaded; a refused change writes nothing); the hub's checkpoint profile, built from the station, the roster, " +
@@ -210,6 +210,7 @@ var adminCommands = []clidoc.Command{
 			{Name: "stage-id", Arg: "ID"},
 			{Name: "bridge-key", Arg: "K"},
 			{Name: "repin"},
+			{Name: "keep-bench"},
 		},
 		Example: "fleet bench stage add review --board brd_0123456789abcdef --station stn_123 --agent agt_abc123 \\\n" +
 			"  --repo name=app,provider=forge,repository=example/app,clone=ssh://git@forge.example:2222/example/app.git,base=main \\\n" +
@@ -219,13 +220,16 @@ var adminCommands = []clidoc.Command{
 		Path: "bench stage set", Summary: "Change one stage; the hub's pins and the node's target are re-derived.",
 		Synopsis: "fleet bench stage set NAME [--board B] [--station S] [--agent agt_…] [--checkpoint-repo N] [--repo SPEC ...]\n" +
 			"                     [--worker PATH [--worker-arg A ...] [--env K=V ...] [--launch L]]\n" +
-			"                     [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh]",
+			"                     [--source-tenant tnt_…] [--stage-id ID] [--repin] [--refresh] [--keep-bench[=false]]",
 		Detail: "Fields not given keep their value on the node and in the hub. `--board` moves the stage and its roster row to " +
 			"another board in one write. `--repo` replaces the whole allow-list. `--repin` re-pins the node's worker and " +
 			"coordinator digests after an update; `--refresh` re-derives the hub's pins (occupant, owner, occupancy epoch, " +
 			"roster profile, reporter) and changes nothing else. A stage moved to a station on another node needs its " +
 			"`--repo` list and `--worker` again. An attempt already running keeps its retained authority and is retired by " +
-			"the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file.",
+			"the existing stale-owner path. Also takes over a stage still loaded from the legacy profile file. " +
+			"Once a card's checkpoint settles, the hub reclaims its bench (its tree and quota) so the host does not fill; " +
+			"a card that comes back gets a fresh bench from its card branch. `--keep-bench` keeps settled benches for " +
+			"this stage instead, and `--keep-bench=false` returns to the default.",
 		Args:     []clidoc.Arg{{Name: "NAME", Meaning: "the stage's name"}},
 		Handlers: []string{"fleetBenchStage"},
 		Flags: []clidoc.Flag{
@@ -237,6 +241,7 @@ var adminCommands = []clidoc.Command{
 			{Name: "worker", Arg: "PATH"},
 			{Name: "repin"},
 			{Name: "refresh"},
+			{Name: "keep-bench"},
 		},
 		Example: "fleet bench stage set review --board brd_fedcba9876543210",
 	},
