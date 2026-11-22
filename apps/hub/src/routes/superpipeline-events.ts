@@ -1,33 +1,32 @@
 /**
- * POST /public/bridge/superpipeline/events — gates that reach the hub through the suite's event
- * relay (treaty plan step 7), beside the board's direct push.
+ * POST /public/bridge/superpipeline/events — decisions that reach the hub through the suite's event
+ * relay, beside the board's direct push.
  *
  * The relay delivers each event as a CloudEvent in HTTP binary mode, signed with
  * `x-treaty-signature` over the timestamp, the event id and the exact body. The signature is checked
  * against `TREATY_RELAY_DELIVERY_SECRET` before the data is read, and the route fails closed
- * without the secret. A `gate.pending` goes to the same projection the direct push uses
- * (`projectPushedGate`), which is idempotent on the gate id, so a gate delivered by both doors is
- * posted once.
+ * without the secret.
  *
- * Step 7 carries gates only. Any other event type is answered 200 and ignored, so the relay does
- * not retry what this build will never handle. A body that says it is a gate but is not one is
- * 422: retrying cannot fix it, and the relay drops it and logs.
+ * Since treaty phase 2 it takes all eleven decision types (`DECISION_EVENTS`), not `gate.pending`
+ * alone, and hands each to the same handler the push uses (`handleDecisionOnce`), which claims the
+ * event's id first: an event delivered by both doors is acted on once.
+ *
+ * Any other event type is answered 200 and ignored, so the relay does not retry what this build
+ * will never handle. A body that says it is a decision but is not one is 422: retrying cannot fix
+ * it, and the relay drops it and logs.
  */
 import { Hono } from "hono";
 import { CloudEventError, fromBinary, verifyDelivery, SIGNATURE_HEADER } from "@superjackfruitlabs/treaty-cloudevents";
 import { createLogger } from "../utils/logger";
-import { isBoardMoved, isGatePending, type GatePendingDelivery, type GateProjectionDeps } from "../services/board-chat";
-import { projectPushedGate, type SuperpipelinePushDeps } from "./superpipeline-push";
+import { DECISION_TYPES, handleDecisionOnce, type DecisionDeps } from "./superpipeline-decisions";
 
 const log = createLogger("superpipeline-events");
 
 export const GATE_PENDING_TYPE = "com.superjackfruit.superpipeline.gate.pending.v1";
 
-export interface SuperpipelineEventsDeps extends GateProjectionDeps, Pick<SuperpipelinePushDeps, "tenantIdFor"> {
+export interface SuperpipelineEventsDeps extends DecisionDeps {
   /** The secret the event relay signs this hub's deliveries with. */
   secret: string | undefined;
-  /** Test seam: what a verified gate does. Defaults to `projectPushedGate` (the push route's projection). */
-  project?(body: GatePendingDelivery): Promise<{ status: 200 | 404; body: Record<string, unknown> }>;
 }
 
 export function createSuperpipelineEventsRoutes(deps: SuperpipelineEventsDeps) {
@@ -50,7 +49,8 @@ export function createSuperpipelineEventsRoutes(deps: SuperpipelineEventsDeps) {
       log.warn("event rejected: bad signature", { id });
       return c.json({ error: "bad signature" }, 401);
     }
-    if (event.attributes["type"] !== GATE_PENDING_TYPE) {
+    const name = DECISION_TYPES.get(event.attributes["type"] ?? "");
+    if (!name) {
       return c.json({ ok: true, ignored: true }, 200);
     }
     let body: unknown;
@@ -59,16 +59,20 @@ export function createSuperpipelineEventsRoutes(deps: SuperpipelineEventsDeps) {
     } catch {
       return c.json({ error: "invalid json" }, 422);
     }
-    if (!isGatePending(body)) {
-      log.warn("a gate.pending event whose data is not a gate", { id });
-      return c.json({ error: "not a gate" }, 422);
+    // The type names the decision, and the data must be that decision: a body whose `event` says
+    // something else would otherwise be handled as whatever it claims to be.
+    const said = typeof body === "object" && body !== null && "event" in body ? body.event : undefined;
+    if (said !== name) {
+      log.warn("a decision event whose data is another event", { id, type: event.attributes["type"], event: said });
+      return c.json({ error: "data does not match type" }, 422);
     }
-    // A board whose chat has moved out of this hub (`moved-boards.ts`): 200, so the relay does not retry.
-    if (isBoardMoved(body.boardId)) {
-      log.info("gate for a board whose chat has moved; not posted", { id, boardId: body.boardId });
-      return c.json({ ok: true, status: "moved" }, 200);
+    const result = await handleDecisionOnce(id === "" ? null : id, body, deps, "event-relay");
+    // On this door the type already said which decision it is, so data treaty's guard refuses is
+    // wrong data, and a retry will not fix it.
+    if (result.invalid) {
+      log.warn("a decision event whose data treaty's guard refuses", { id, type: event.attributes["type"] });
+      return c.json({ error: "not a valid decision" }, 422);
     }
-    const result = deps.project ? await deps.project(body) : await projectPushedGate(body, deps, "event-relay");
     return c.json(result.body, result.status);
   });
 }

@@ -83,3 +83,6 @@ export * from "./salaam-work";
 
 export * from "./execution-evidence";
 export * from "./agent-approval-rules";
+
+// SuperPipeline events acted on, by the id both doors share (treaty phase 2).
+export * from "./event-receipts";

@@ -116,7 +116,9 @@ describe("src/index.ts", () => {
   test("hands those deps to every projection: push, the gate sweep and the question sweep", () => {
     expect(source).toMatch(/projectGate\(tenantId, delivery, gateProjection\)/);
     expect(source).toMatch(/projectElicitation\(tenantId, delivery, gateProjection\)/);
-    expect(source).toMatch(/createSuperpipelinePushRoutes\(\{[\s\S]*?\.\.\.gateProjection/);
+    expect(source).toMatch(/const decisionDeps = \{[\s\S]*?\.\.\.gateProjection/);
+    expect(source).toMatch(/createSuperpipelinePushRoutes\(\{[\s\S]*?\.\.\.decisionDeps/);
+    expect(source).toMatch(/createSuperpipelineEventsRoutes\(\{[\s\S]*?\.\.\.decisionDeps/);
   });
 
   test("mounts the appservice handler wrapped so a join wakes held posts", () => {

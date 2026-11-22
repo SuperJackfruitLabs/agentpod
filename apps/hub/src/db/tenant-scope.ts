@@ -85,6 +85,7 @@ import {
   skillReleaseCohorts,
 } from "./schema/skills";
 import { tenants } from "./schema/tenants";
+import { superpipelineEventReceipts } from "./schema/event-receipts";
 
 export { BOOTSTRAP_TENANT_ID } from "./schema/tenants";
 
@@ -254,6 +255,15 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "tenant: which tenant an event belongs to is its room's, and that is decided when it can be " +
       "read, by the same path as any other event. Read only by the retry, which lists every row; " +
       "no route reads it.",
+  },
+
+  superpipeline_event_receipts: {
+    table: superpipelineEventReceipts,
+    reason:
+      "SuperPipeline event ids this hub has acted on, so an event the direct push and the event " +
+      "relay both deliver is acted on once. Like `matrix_as_transactions` it records envelopes, " +
+      "not facts about a tenant: the id is the board's event sequence, and which tenant the event " +
+      "belongs to is decided by the handler, after the claim. No route reads it.",
   },
 
   live_activity_tokens: {

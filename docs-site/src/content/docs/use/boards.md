@@ -17,7 +17,7 @@ The bridge claims by calling the board. The board calls back through three signe
 |---|---|---|
 | `POST /public/bridge/superpipeline/work` | `work.available`: a card one of this hub's agents could claim is ready | `SUPERPIPELINE_PUSH_SECRET` |
 | `POST /public/bridge/superpipeline/push` | gates, questions, follow-ups, waiting cards and their reminders and outcomes | `SUPERPIPELINE_PUSH_SECRET` |
-| `POST /public/bridge/superpipeline/events` | `gate.pending` from the suite's [event relay](https://treaty.superjackfruit.com/relay/) | `TREATY_RELAY_DELIVERY_SECRET` |
+| `POST /public/bridge/superpipeline/events` | the same decisions from the suite's [event relay](https://treaty.superjackfruit.com/relay/), each acted on once whichever door brings it first | `TREATY_RELAY_DELIVERY_SECRET` |
 
 All three carry the suite's delivery signature, `x-treaty-signature`: an HMAC over the timestamp,
 the event's id (`ce-id`) and the exact body, refused outside a five-minute window, so a captured

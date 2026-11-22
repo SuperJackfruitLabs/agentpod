@@ -39,36 +39,6 @@ export type { ElicitationPendingDelivery };
 const MAX_BUTTONS = 4;
 
 /**
- * Is this a question this hub knows how to post?
- *
- * The same reasoning as `isGatePending`, which says it best: "authenticated" is not
- * "checked". A board a version ahead, or behind, would otherwise have this hub posting a
- * question with no id to answer it by — which reads to the person in the room exactly
- * like a button that does nothing.
- *
- * `options` is required to be an array but may be EMPTY. A question with no options is a
- * real state and the reader needs it, because silence would otherwise mean both "no
- * question" and "a question you cannot tap".
- */
-export function isElicitationPending(v: unknown): v is ElicitationPendingDelivery {
-  if (typeof v !== "object" || v === null) return false;
-  const d = v as Record<string, unknown>;
-  return (
-    d.event === "elicitation.pending" &&
-    typeof d.boardId === "string" &&
-    typeof d.cardId === "string" &&
-    typeof d.cardTitle === "string" &&
-    typeof d.elicitationId === "string" &&
-    d.elicitationId.length > 0 &&
-    typeof d.runId === "string" &&
-    typeof d.stageKey === "string" &&
-    typeof d.agentId === "string" &&
-    typeof d.question === "string" &&
-    Array.isArray(d.options)
-  );
-}
-
-/**
  * What the room is told.
  *
  * Every option is listed and numbered, however many there are, because the numbers are

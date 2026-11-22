@@ -61,7 +61,8 @@ import {
   questionSubjectV2,
   questionV2Content,
 } from "@superjackfruitlabs/treaty-matrix-events";
-import { ELICITATION_REQUEST_CONTENT_KEY, elicitationRequestCard, isElicitationPending } from "./elicitation-card";
+import { isElicitationPending } from "@superjackfruitlabs/treaty-matrix-events";
+import { ELICITATION_REQUEST_CONTENT_KEY, elicitationRequestCard } from "./elicitation-card";
 import { legacyRequestEvents } from "./legacy-events";
 
 const log = createLogger("matrix-decision-repost");
