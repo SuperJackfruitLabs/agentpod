@@ -10,6 +10,14 @@ import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plan
 const log = createLogger("matrix-gates");
 
 /**
+ * How long a write-back to the board may take before it is given up as not having reached it
+ * (`UNREACHABLE`, which the person may try again). The same 10 s SuperExchange gives the same
+ * calls. Without it a board that accepted the connection and never answered held the answer, and
+ * the room, for as long as the socket stayed open.
+ */
+export const BOARD_WRITE_TIMEOUT_MS = 10_000;
+
+/**
  * Resolve a gate at superpipeline **as the human**, using a short-lived assertion.
  *
  * This is the function `charter →
@@ -154,6 +162,8 @@ interface BoardCallDeps {
   baseUrl: string;
   mint(subject: AssertionSubject): Promise<string>;
   fetch?: typeof fetch;
+  /** Tests: a shorter bound than `BOARD_WRITE_TIMEOUT_MS`. */
+  timeoutMs?: number;
 }
 
 /** POST `body` to a board route with an assertion minted for the person, and read the outcome. */
@@ -191,6 +201,7 @@ async function postToBoardAsPrincipal(
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(deps.timeoutMs ?? BOARD_WRITE_TIMEOUT_MS),
     });
   } catch (err) {
     // The network, not a refusal. Distinguished because a refusal is final and

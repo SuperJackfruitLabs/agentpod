@@ -40,6 +40,7 @@ import {
   questionV2Content,
 } from "@superjackfruitlabs/treaty-matrix-events";
 import { matchPermissionAnswer, unmatchedAnswerText } from "./reply-options";
+import { BOARD_WRITE_TIMEOUT_MS } from "./gate-resolve";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix";
 import { assertionFailureCode, type AssertionSubject } from "../../auth/org-plane/assertion";
 import {
@@ -134,6 +135,23 @@ async function releaseClaim(elicitationId: string): Promise<void> {
  * answering 5xx and the board keeps retrying. Converting it to a 200 would quietly
  * retire push's own retry and leave the sweep as the only path.
  */
+/**
+ * The question as elicitation.pending v1 describes it. A question's option carries no `input`
+ * (only follow-ups and waiting cards ask for one; a question offering free text says `freeText`),
+ * so an `input` a board sent anyway is dropped here rather than carried into question.v2, where
+ * treaty's builders would otherwise read it.
+ */
+function asDescribed(delivery: ElicitationPendingDelivery): ElicitationPendingDelivery {
+  return {
+    ...delivery,
+    options: delivery.options.map((o) => {
+      const option = { ...o };
+      Reflect.deleteProperty(option, "input");
+      return option;
+    }),
+  };
+}
+
 export async function projectElicitation(
   tenantId: string,
   delivery: ElicitationPendingDelivery,
@@ -141,7 +159,7 @@ export async function projectElicitation(
 ): Promise<ElicitationProjectionOutcome> {
   // Bounded once, here, so the prose, the v1 card, question.v2 and the recorded options are all
   // the same question — and the message fits one event (`boundedQuestion`).
-  const d = boundedQuestion(delivery);
+  const d = boundedQuestion(asDescribed(delivery));
   const found = await deps.boardRoom(d.boardId, tenantId, {
     ...(d.boardName ? { boardName: d.boardName } : {}),
   });
@@ -429,6 +447,8 @@ export async function answerElicitationAtSuperpipeline(
     baseUrl: string;
     mint(subject: AssertionSubject): Promise<string>;
     fetch?: typeof fetch;
+    /** Tests: a shorter bound than `BOARD_WRITE_TIMEOUT_MS`. */
+    timeoutMs?: number;
   },
 ): Promise<{ ok: true } | { ok: false; code: string }> {
   let token: string;
@@ -461,6 +481,7 @@ export async function answerElicitationAtSuperpipeline(
           ...(input.text !== undefined ? { text: input.text } : {}),
           ...(input.subject !== undefined ? { subject: input.subject } : {}),
         }),
+        signal: AbortSignal.timeout(deps.timeoutMs ?? BOARD_WRITE_TIMEOUT_MS),
       },
     );
   } catch (err) {

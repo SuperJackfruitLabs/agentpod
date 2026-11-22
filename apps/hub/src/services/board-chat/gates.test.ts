@@ -357,8 +357,8 @@ describe("resolving at the board", () => {
   }
 
   const input = {
-    boardId: "brd_7c1f",
-    gateId: "gate_4e8b",
+    boardId: "brd_7c1f00a1b2c3d4e5",
+    gateId: "gate_4e8b1c2d3f4a5b6c",
     decision: "approve" as const,
     comment: null,
     principalId: "68jYD9VOCmXlPhIYGFOgoZVE6vDUVHPA",
@@ -385,7 +385,7 @@ describe("resolving at the board", () => {
     await resolveGateAtSuperpipeline(input, {
       baseUrl: "https://superpipeline.dev/", mint: async () => "t", fetch: f,
     });
-    expect(calls[0]!.url).toBe("https://superpipeline.dev/v1/boards/brd_7c1f/gates/gate_4e8b/resolve");
+    expect(calls[0]!.url).toBe("https://superpipeline.dev/v1/boards/brd_7c1f00a1b2c3d4e5/gates/gate_4e8b1c2d3f4a5b6c/resolve");
   });
 
   test("omits a comment rather than sending null", async () => {
@@ -616,7 +616,7 @@ describe("saying in the room that the board accepted an answer", () => {
       await settleGateOutcome(
         { gateId: "gate_4e8b", decision: optionId, decidedBy: "prn_fixture" },
         "!room",
-        { boardId: "brd_fixture", eventId: GATE_EVENT_ID },
+        { boardId: "brd_0123456789abcdef", eventId: GATE_EVENT_ID },
         deps,
       );
       expect(replies[0]).toContain(words);

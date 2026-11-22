@@ -10,6 +10,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  BOARD_WRITE_TIMEOUT_MS,
   answerAttentionAtSuperpipeline,
   overrideCheckAtSuperpipeline,
   pullBackAtSuperpipeline,
@@ -28,12 +29,15 @@ const SUBJECT = {
 };
 
 type Outcome = { ok: true } | { ok: false; code: string };
-type Deps = { baseUrl: string; mint(): Promise<string>; fetch: typeof fetch };
+type Deps = { baseUrl: string; mint(): Promise<string>; fetch: typeof fetch; timeoutMs?: number };
 
 /** A board that answers `status` and `body`, after the request is held to the contract. */
 function board(status: number, body: unknown): { deps: Deps; ops: string[] } {
   const ops: string[] = [];
-  const answer = (async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+  const answer: typeof fetch = Object.assign(
+    async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }),
+    { preconnect: fetch.preconnect },
+  );
   return { ops, deps: { baseUrl: "https://board.test", mint: async () => "assertion", fetch: contractWebFetch(answer, ops) } };
 }
 
@@ -99,6 +103,37 @@ const WRITES: Array<[string, string, (deps: Deps) => Promise<Outcome>]> = [
     (d) => answerElicitationAtSuperpipeline({ boardId: BOARD, elicitationId: "apr_5e6f7a8b9c0d1e2f", option: "deny", ...WHO }, d),
   ],
 ];
+
+test("a refused resume or archive can say FORBIDDEN, so the room's words for it stay", () => {
+  // decisions.v1 lists FORBIDDEN for both (a caller with no standing on the board), and the board
+  // now sends it as a code where it used to send text that arrived as HTTP_403. attention-answer.ts
+  // keeps its case for it beside HTTP_403.
+  expect(errorCodesOf("resumeCard").map((c) => c.code)).toContain("FORBIDDEN");
+  expect(errorCodesOf("archiveCard").map((c) => c.code)).toContain("FORBIDDEN");
+});
+
+describe("a board that never answers", () => {
+  test("every write-back gives up within its bound and reads as not reached, so the person can try again", async () => {
+    // A board that takes the connection and never answers: the write-back is aborted by its own
+    // timeout (BOARD_WRITE_TIMEOUT_MS, 10 s; shortened here), never held for as long as the socket.
+    expect(BOARD_WRITE_TIMEOUT_MS).toBe(10_000);
+    const hung: typeof fetch = Object.assign(
+      async (_url: Parameters<typeof fetch>[0], init?: RequestInit) =>
+        new Promise<Response>((_, reject) => {
+          const signal = init?.signal;
+          if (!signal) return; // no bound at all: this never settles, and the test times out
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+      { preconnect: fetch.preconnect },
+    );
+    for (const [operationId, what, write] of WRITES) {
+      const started = performance.now();
+      const got = await write({ baseUrl: "https://board.test", mint: async () => "assertion", fetch: hung, timeoutMs: 50 });
+      expect(got, `${operationId}: ${what}`).toEqual({ ok: false, code: "UNREACHABLE" });
+      expect(performance.now() - started).toBeLessThan(2_000);
+    }
+  });
+});
 
 describe("chat's write-backs, held to decisions.v1", () => {
   for (const [operationId, what, write] of WRITES) {

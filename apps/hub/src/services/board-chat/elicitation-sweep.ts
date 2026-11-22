@@ -17,7 +17,7 @@
  */
 import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge";
 import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig, type SuperpipelineRelay } from "../bridge";
-import { SuperpipelineApiError } from "../bridge";
+import { SuperpipelineApiError, namesItsBoard, type ElicitationPendingItem } from "../bridge";
 import { relayTokenForBoard, type TenantsForBoard } from "./relay-scope";
 import { isBoardMoved } from "./moved-boards";
 import { createLogger } from "../../utils/logger";
@@ -36,7 +36,7 @@ export interface ElicitationSweepDeps {
    */
   tenantIdFor(boardId: string): Promise<string | null>;
   /** What the board is still waiting on, read with the bridge's own token. */
-  pendingElicitations(boardId: string): Promise<ElicitationPendingDelivery[]>;
+  pendingElicitations(boardId: string): Promise<ElicitationPendingItem[]>;
   /**
    * The same read, saying whether it could list SuperToolkit approval requests: true when it was
    * made with the relay's token (`relay.ts`). An agent's read never lists them, so it must not settle
@@ -46,7 +46,7 @@ export interface ElicitationSweepDeps {
   pendingElicitationsScoped?(
     boardId: string,
     tenantId: string,
-  ): Promise<{ elicitations: ElicitationPendingDelivery[]; approvalRequests: boolean }>;
+  ): Promise<{ elicitations: ElicitationPendingItem[]; approvalRequests: boolean }>;
   /** Post the question, exactly once. Idempotent on `elicitation_id`. */
   project(tenantId: string, d: ElicitationPendingDelivery): Promise<ElicitationProjectionOutcome>;
   /** Questions this hub put in a room and has not yet said anything final about. */
@@ -100,7 +100,7 @@ export async function sweepElicitations(deps: ElicitationSweepDeps): Promise<Eli
     const tenantId = await deps.tenantIdFor(boardId);
     if (!tenantId) continue;
 
-    let pending: ElicitationPendingDelivery[];
+    let pending: ElicitationPendingItem[];
     let approvalRequestsListed = false;
     try {
       if (deps.pendingElicitationsScoped) {
@@ -123,6 +123,11 @@ export async function sweepElicitations(deps: ElicitationSweepDeps): Promise<Eli
     }
 
     for (const d of pending) {
+      // decisions.v1 lets a pending item name no board; no carrier can route one to a room.
+      if (!namesItsBoard(d)) {
+        log.warn("board listed a pending question that names no board; not carried", { boardId, elicitationId: d.elicitationId });
+        continue;
+      }
       try {
         const outcome = await deps.project(tenantId, d);
         if (outcome.status === "posted") result.projected += 1;

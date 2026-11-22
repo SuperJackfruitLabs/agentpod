@@ -74,6 +74,22 @@ describe("what push lost", () => {
     expect(result.projected).toBe(1);
   });
 
+  test("a pending question that names no board is not carried, and still keeps its room card open", async () => {
+    // decisions.v1 lets a pending item's boardId be null (a board not yet initialised); no carrier
+    // can route one to a room, so it is skipped rather than projected into a room for "null".
+    const orphan = { ...question("elc_orphan"), boardId: null };
+    const { deps, projected, settled } = rig({
+      pendingElicitations: async () => [orphan, question("elc_1")],
+      postedAwaitingOutcome: async () => [{ elicitationId: "elc_orphan", roomId: "!r:x" }],
+    });
+    const result = await sweepElicitations(deps);
+    expect(projected).toEqual(["elc_1"]);
+    expect(result.projected).toBe(1);
+    expect(result.stuck).toBe(0);
+    // Still on the board's list, so whatever this hub posted for it earlier is not settled as over.
+    expect(settled).toEqual([]);
+  });
+
   test("an already-projected question is not a problem", async () => {
     // `already` is the ordinary healthy answer on a sweep pass — somebody else got
     // there first — and counting it as a delivery would make every pass look busy.

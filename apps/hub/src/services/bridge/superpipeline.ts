@@ -4,28 +4,28 @@
  *
  * ## Why this is not `@superpipeline/agent-sdk`
  *
- * The SDK now speaks `spa_` bearer auth and gained `context(work)`, which is
- * what removed the spike's dev-header dependency, and this client deliberately
- * mirrors its method names and types so it is a drop-in the day the SDK becomes
- * consumable. It is not consumable today, for three reasons in descending order
- * of finality:
+ * The SDK speaks `spa_` bearer auth and has `context(work)`, and this client
+ * mirrors its method names. It is not used here, for three reasons in
+ * descending order of finality:
  *
  * 1. **It is not published.** `packages/agent-sdk/package.json` is
  *    `"private": true` with `"main": "./src/index.ts"`, and `@superpipeline/agent-sdk`
  *    is a 404 on npm. There is no way to depend on it from another repo short
  *    of vendoring the file — and vendoring an unversioned copy is worse than an
  *    honest reimplementation, because it looks like a dependency.
- * 2. **The suite has already decided against a shared package.** A published
- *    package couples two deploy pipelines with very different cadences;
- *    treaty's `fixtures/ecosystem-identity/` exists precisely so the two repos agree
- *    through a checked corpus instead. Adding the coupling here would contradict
- *    the mechanism this repo already runs in CI.
+ * 2. **The wire is the contract, and it is treaty's.** The two repositories
+ *    agree through `agent-work.v1` and `decisions.v1` in
+ *    `@superjackfruitlabs/treaty-contracts`: SuperPipeline validates what it
+ *    serves against them, and this client's tests run their cases through it
+ *    (`superpipeline.contract.test.ts`). A shared client package would couple
+ *    two deploy pipelines with very different cadences for no more agreement
+ *    than that.
  * 3. **Its run verbs return the raw response.** `heartbeat`/`activity`/
  *    `complete` hand back an `HttpResponse` and never throw, so a 403 and a 409
  *    are equally easy to ignore — and telling those two apart is the whole
  *    reason requirement 2 exists. It also has no `submitForReview`, and its
- *    `AgentActivity` omits `parameter` and `result`, which is where a tool
- *    call's input and output have to go.
+ *    `AgentActivity` has no `result`, which is where a tool call's output has
+ *    to go.
  *
  * ## The two failures this client refuses to blur
  *
@@ -44,7 +44,7 @@
 
 import { CHECKPOINT_CLAIM_PROTOCOL, CheckpointClaimRefused, readCheckpointClaim, refuseLegacyCheckpoint, parsePendingCheckpointClaim, validateCheckpointContext, type PendingCheckpointClaim } from "./checkpoint-claim";
 import type { BoardActivity } from "./coalesce";
-import type { ElicitationPendingDelivery, GatePendingDelivery } from "./deliveries";
+import type { ElicitationPendingItem, GatePendingItem } from "./deliveries";
 import { context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import { tracer } from "../../telemetry/otel";
 import { injectTraceHeaders } from "../../telemetry/propagation";
@@ -85,6 +85,13 @@ export const fetchAdapter: Fetcher = async (url, init) => {
   return { status: res.status, ok: res.ok, json: () => res.json() };
 };
 
+export interface ClaimOptions {
+  maxConcurrency?: number;
+  profileKey?: string;
+  checkpointProtocol?: typeof CHECKPOINT_CLAIM_PROTOCOL;
+  checkpointOnly?: boolean;
+}
+
 export interface SuperpipelineClientOptions {
   baseUrl: string;
   boardId: string;
@@ -122,6 +129,14 @@ export interface RunStage {
   checkpointPolicy?: unknown;
 }
 
+/** Why the last attempt at this stage died, as the board says on a claim (agent-work.v1). */
+export interface ClaimLastFailure {
+  reason: string;
+  agentId: string;
+  stageKey: string;
+  endedAt: string;
+}
+
 export interface ClaimedWork {
   runId: string;
   leaseEpoch: number;
@@ -129,7 +144,16 @@ export interface ClaimedWork {
   stage: RunStage | null;
   handoff: unknown;
   checkpointClaim?: PendingCheckpointClaim;
+  /** Present when the board said why the last attempt at this stage died. */
+  lastFailure?: ClaimLastFailure;
 }
+
+/**
+ * What a claim came to: work, or none and the board's reason. `reason` is open (agent-work.v1
+ * ClaimReason: `no_matching_card`, `board_over_budget`, `concurrency_reached`, … and reasons the
+ * board adds later), so it is a string to log, never a branch; null when the board gave none.
+ */
+export type ClaimOutcome = { work: ClaimedWork } | { work: null; reason: string | null };
 
 export interface RunReference {
   id: string;
@@ -407,18 +431,23 @@ export class SuperpipelineClient {
     );
   }
 
+  /** Claim the next ready card, or null when there is none. `claimNext` also says why there was none. */
+  async claim(opts: ClaimOptions = {}): Promise<ClaimedWork | null> {
+    return (await this.claimNext(opts)).work;
+  }
+
   /**
-   * Claim the next ready card, or null when there is none.
+   * Claim the next ready card, or say why there is none.
    *
-   * A bare `{claimed:false}` is also what an over-budget board and an agent at
-   * its concurrency cap return (board-do.ts:1301-1320). superpipeline does not say
-   * which, so neither does this — inventing a reason we were not told is how a
-   * paused board gets reported as an idle one.
+   * `{claimed:false}` carries the board's `reason` (agent-work.v1 ClaimReason): an empty queue,
+   * an over-budget board and an agent at its concurrency cap are told apart there, so the reason
+   * is kept for the caller to log rather than dropped. It is the board's word, passed on as is;
+   * a reason this hub does not know is still just "nothing to claim now".
    *
    * A refusal is an error, never "nothing available": a rejected token that
    * looked like an empty queue would poll forever and report healthy.
    */
-  async claim(opts: { maxConcurrency?: number; profileKey?: string; checkpointProtocol?: typeof CHECKPOINT_CLAIM_PROTOCOL; checkpointOnly?: boolean } = {}): Promise<ClaimedWork | null> {
+  async claimNext(opts: ClaimOptions = {}): Promise<ClaimOutcome> {
     readCheckpointClaim(undefined, opts.checkpointProtocol, this.boardId); // Refuse unsupported opt-in before network effects.
     if (opts.checkpointOnly !== undefined && (typeof opts.checkpointOnly !== "boolean" ||
       (opts.checkpointOnly && opts.checkpointProtocol !== CHECKPOINT_CLAIM_PROTOCOL)))
@@ -432,20 +461,29 @@ export class SuperpipelineClient {
     // No agentId, no capabilities: the token carries the agent's identity and
     // its registered capabilities, and a client-asserted identity is a request
     // to be treated as someone else.
-    const res: unknown = await this.send("POST", `/v1/boards/${this.boardId}/claims`, body);
+    const res: unknown = await this.send("POST", `/v1/boards/${this.segment(this.boardId)}/claims`, body);
 
     const checkpointClaim = readCheckpointClaim(res, opts.checkpointProtocol, this.boardId);
     if (opts.checkpointOnly && isRecord(res) && res.claimed === true && !checkpointClaim)
       throw new CheckpointClaimRefused("required");
-    if (!isClaimed(res)) return null;
+    if (!isClaimed(res)) return { work: null, reason: isRecord(res) && typeof res.reason === "string" ? res.reason : null };
+    const lastFailure = lastFailureOf(res.lastFailure);
     return {
-      runId: res.runId,
-      leaseEpoch: res.leaseEpoch,
-      card: res.card,
-      stage: res.stage ?? null,
-      handoff: res.handoff ?? null,
-      ...(checkpointClaim ? { checkpointClaim } : {}),
+      work: {
+        runId: res.runId,
+        leaseEpoch: res.leaseEpoch,
+        card: res.card,
+        stage: res.stage ?? null,
+        handoff: res.handoff ?? null,
+        ...(checkpointClaim ? { checkpointClaim } : {}),
+        ...(lastFailure ? { lastFailure } : {}),
+      },
     };
+  }
+
+  /** A path segment, encoded: an id is data, never more path. */
+  private segment(id: string): string {
+    return encodeURIComponent(id);
   }
 
   /**
@@ -456,7 +494,7 @@ export class SuperpipelineClient {
    */
   async context(runId: string, checkpointClaim?: PendingCheckpointClaim): Promise<RunContext> {
     const pending = checkpointClaim === undefined ? undefined : parsePendingCheckpointClaim(checkpointClaim);
-    const result = await this.send("GET", `/v1/boards/${this.boardId}/runs/${runId}`);
+    const result = await this.send("GET", `/v1/boards/${this.segment(this.boardId)}/runs/${this.segment(runId)}`);
     if (pending) validateCheckpointContext(result, pending, this.boardId, runId);
     else refuseLegacyCheckpoint(result);
     // Checked where every reader leans on it: the run, and the card's id and title. The rest is
@@ -470,13 +508,13 @@ export class SuperpipelineClient {
    * board has ended the run or unbound its card (checkpoint-run-ended.ts); never a work context.
    */
   async runRecord(runId: string): Promise<unknown> {
-    return await this.send("GET", `/v1/boards/${this.boardId}/runs/${encodeURIComponent(runId)}`);
+    return await this.send("GET", `/v1/boards/${this.segment(this.boardId)}/runs/${this.segment(runId)}`);
   }
 
   /** The runs of the card this run holds (superpipeline GET runs/:runId/attempts): the run's own
    * card only, never another; read-only. */
   async attempts(runId: string): Promise<unknown> {
-    return await this.send("GET", `/v1/boards/${this.boardId}/runs/${encodeURIComponent(runId)}/attempts`);
+    return await this.send("GET", `/v1/boards/${this.segment(this.boardId)}/runs/${this.segment(runId)}/attempts`);
   }
 
   /** The board this client works; read by the board-read scope guard. */
@@ -493,7 +531,7 @@ export class SuperpipelineClient {
   ): Promise<unknown> {
     return this.send(
       "POST",
-      `/v1/boards/${this.boardId}/runs/${encodeURIComponent(run.runId)}/references`,
+      `/v1/boards/${this.segment(this.boardId)}/runs/${this.segment(run.runId)}/references`,
       { leaseEpoch: run.leaseEpoch, ...input },
     );
   }
@@ -510,7 +548,7 @@ export class SuperpipelineClient {
   ): Promise<{ reference_id: string; verification: "unverified" }> {
     const result: unknown = await this.send(
       "POST",
-      `/v1/boards/${this.boardId}/runs/${encodeURIComponent(runId)}/evidence-reference`,
+      `/v1/boards/${this.segment(this.boardId)}/runs/${this.segment(runId)}/evidence-reference`,
       input,
     );
     if (
@@ -562,7 +600,7 @@ export class SuperpipelineClient {
     pulledBack: { by: string } | null;
   } | null> {
     try {
-      const res: unknown = await this.send("GET", `/v1/boards/${this.boardId}/gates/${encodeURIComponent(gateId)}`);
+      const res: unknown = await this.send("GET", `/v1/boards/${this.segment(this.boardId)}/gates/${encodeURIComponent(gateId)}`);
       const g = isRecord(res) ? res.gate : undefined;
       if (!isRecord(g) || typeof g.status !== "string") return null;
       return {
@@ -585,13 +623,13 @@ export class SuperpipelineClient {
    * `token` is the key superpipeline signs deliveries with, not this agent's credential.
    */
   async registerPushConfig(input: { url: string; token: string; events: string[] }): Promise<{ configId: string }> {
-    return (await this.send("POST", `/v1/boards/${this.boardId}/push-configs`, input)) as { configId: string };
+    return (await this.send("POST", `/v1/boards/${this.segment(this.boardId)}/push-configs`, input)) as { configId: string };
   }
 
-  async pendingGates(): Promise<GatePendingDelivery[]> {
-    const res: unknown = await this.send("GET", `/v1/boards/${this.boardId}/gates/pending`);
+  async pendingGates(): Promise<GatePendingItem[]> {
+    const res: unknown = await this.send("GET", `/v1/boards/${this.segment(this.boardId)}/gates/pending`);
     // Each gate is checked by the sweep (`isGatePending`) before it is carried; only the list is read here.
-    return isRecord(res) && Array.isArray(res.gates) ? (res.gates as GatePendingDelivery[]) : [];
+    return isRecord(res) && Array.isArray(res.gates) ? (res.gates as GatePendingItem[]) : [];
   }
 
   /**
@@ -603,10 +641,10 @@ export class SuperpipelineClient {
    * card, and treating a failed read as "nothing pending" would close every open
    * question on the board.
    */
-  async pendingElicitations(): Promise<ElicitationPendingDelivery[]> {
-    const res: unknown = await this.send("GET", `/v1/boards/${this.boardId}/elicitations/pending`);
+  async pendingElicitations(): Promise<ElicitationPendingItem[]> {
+    const res: unknown = await this.send("GET", `/v1/boards/${this.segment(this.boardId)}/elicitations/pending`);
     // Each question is checked by the sweep before it is carried; only the list is read here.
-    return isRecord(res) && Array.isArray(res.elicitations) ? (res.elicitations as ElicitationPendingDelivery[]) : [];
+    return isRecord(res) && Array.isArray(res.elicitations) ? (res.elicitations as ElicitationPendingItem[]) : [];
   }
 
   /**
@@ -615,7 +653,7 @@ export class SuperpipelineClient {
    * carries anything, and a throw from `send` stays a throw, as for the two reads above.
    */
   async pendingDeliveries(): Promise<unknown[]> {
-    const res = await this.send("GET", `/v1/boards/${this.boardId}/deliveries/pending`);
+    const res = await this.send("GET", `/v1/boards/${this.segment(this.boardId)}/deliveries/pending`);
     if (typeof res === "object" && res !== null && "deliveries" in res && Array.isArray(res.deliveries)) {
       return res.deliveries;
     }
@@ -629,7 +667,7 @@ export class SuperpipelineClient {
    * from this list is what settles a room card.
    */
   async pendingAttention(): Promise<unknown[]> {
-    const res = await this.send("GET", `/v1/boards/${this.boardId}/attention/pending`);
+    const res = await this.send("GET", `/v1/boards/${this.segment(this.boardId)}/attention/pending`);
     if (typeof res === "object" && res !== null && "attention" in res && Array.isArray(res.attention)) {
       return res.attention;
     }
@@ -644,7 +682,7 @@ export class SuperpipelineClient {
    * is never read as "no checks".
    */
   async cardChecks(cardId: string): Promise<{ stageKey: string; status: string; checks: unknown[] } | null> {
-    const res = await this.send("GET", `/v1/boards/${this.boardId}/cards/${encodeURIComponent(cardId)}/checks`);
+    const res = await this.send("GET", `/v1/boards/${this.segment(this.boardId)}/cards/${encodeURIComponent(cardId)}/checks`);
     if (typeof res !== "object" || res === null || !("checks" in res)) return null;
     const view: unknown = res.checks;
     if (typeof view !== "object" || view === null) return null;
@@ -656,7 +694,7 @@ export class SuperpipelineClient {
   }
 
   private verb(lease: RunLease, action: string, extra: Record<string, unknown> = {}): Promise<unknown> {
-    return this.send("POST", `/v1/boards/${this.boardId}/runs/${lease.runId}/${action}`, {
+    return this.send("POST", `/v1/boards/${this.segment(this.boardId)}/runs/${this.segment(lease.runId)}/${action}`, {
       leaseEpoch: lease.leaseEpoch,
       ...extra,
     });
@@ -677,7 +715,7 @@ export class SuperpipelineClient {
 
   /** Strict completion is explicit pass; recovery checks the original stored verdict. */
   completeVerified(lease: RunLease, handoff: unknown, beforeSend?: () => Promise<void>): Promise<unknown> {
-    return this.send("POST", `/v1/boards/${this.boardId}/runs/${lease.runId}/complete`, {leaseEpoch:lease.leaseEpoch,outcome:"pass",handoff}, beforeSend);
+    return this.send("POST", `/v1/boards/${this.segment(this.boardId)}/runs/${this.segment(lease.runId)}/complete`, {leaseEpoch:lease.leaseEpoch,outcome:"pass",handoff}, beforeSend);
   }
 
   complete(lease: RunLease, handoff?: unknown): Promise<unknown> {
@@ -694,7 +732,7 @@ export class SuperpipelineClient {
   }
 
   fail(lease: RunLease, reason: string, beforeSend?: () => Promise<void>): Promise<unknown> {
-    return this.send("POST", `/v1/boards/${this.boardId}/runs/${lease.runId}/fail`, {leaseEpoch:lease.leaseEpoch,reason}, beforeSend);
+    return this.send("POST", `/v1/boards/${this.segment(this.boardId)}/runs/${this.segment(lease.runId)}/fail`, {leaseEpoch:lease.leaseEpoch,reason}, beforeSend);
   }
 
   release(lease: RunLease): Promise<unknown> {
@@ -713,9 +751,18 @@ function isCard(v: unknown): v is ClaimedCard {
  * A claim that handed out work (agent-work.v1 ClaimResult, "Claimed"): a run, its lease and its
  * card. Anything less is read as no work, as it always was.
  */
-function isClaimed(v: unknown): v is { claimed: true; runId: string; leaseEpoch: number; card: ClaimedCard; stage?: RunStage; handoff?: unknown } {
+function isClaimed(v: unknown): v is { claimed: true; runId: string; leaseEpoch: number; card: ClaimedCard; stage?: RunStage; handoff?: unknown; lastFailure?: unknown } {
   return isRecord(v) && v.claimed === true && typeof v.runId === "string" && v.runId !== "" &&
     typeof v.leaseEpoch === "number" && isCard(v.card);
+}
+
+/** A claim's `lastFailure`, when it is one; anything else (null included) is none. */
+function lastFailureOf(v: unknown): ClaimLastFailure | undefined {
+  if (!isRecord(v)) return undefined;
+  const { reason, agentId, stageKey, endedAt } = v;
+  return typeof reason === "string" && typeof agentId === "string" && typeof stageKey === "string" && typeof endedAt === "string"
+    ? { reason, agentId, stageKey, endedAt }
+    : undefined;
 }
 
 /** agent-work.v1's RunContext, checked where every reader leans on it: its run and its card. */

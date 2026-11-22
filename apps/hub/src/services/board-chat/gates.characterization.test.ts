@@ -993,6 +993,7 @@ describe("resolveGateAtSuperpipeline", () => {
                 "Content-Type": "application/json",
               },
               "method": "POST",
+              "signal": AbortSignal {},
             },
           ],
         ],
@@ -1038,6 +1039,7 @@ describe("resolveGateAtSuperpipeline", () => {
               "Content-Type": "application/json",
             },
             "method": "POST",
+            "signal": AbortSignal {},
           },
         ],
         "otherMintFailure": {

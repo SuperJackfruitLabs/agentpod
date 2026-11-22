@@ -127,6 +127,20 @@ describe("a question is posted into its board's room", () => {
     expect(JSON.parse(row!.optionsJson)).toEqual(d.options);
   });
 
+  test("an option's input is not carried: a question's options have none (elicitation.pending v1)", async () => {
+    // Only follow-ups and waiting cards ask for an input; a board never sends one on a question.
+    // One that arrived anyway used to reach question.v2 and the recorded options as if it were real.
+    const asked = delivery();
+    const d = { ...asked, options: asked.options.map((o) => ({ ...o, input: { kind: "text", label: "Why?", required: true, maxLength: 50 } })) };
+    const { deps, sent } = rig();
+    expect((await projectElicitation(BOOTSTRAP_TENANT_ID, d, deps)).status).toBe("posted");
+    const carried: unknown = sent[0]?.extra?.options;
+    expect(Array.isArray(carried) && carried.length === 2).toBe(true);
+    expect(JSON.stringify(carried)).not.toContain("input");
+    const [row] = await db.select().from(matrixElicitationEvents).where(eq(matrixElicitationEvents.elicitationId, d.elicitationId));
+    expect(JSON.stringify(row?.optionsV2)).not.toContain("input");
+  });
+
   test("carries the board's name to the room, so the room gets named", async () => {
     const { deps, roomCalls } = rig();
     await projectElicitation(BOOTSTRAP_TENANT_ID, delivery(), deps);

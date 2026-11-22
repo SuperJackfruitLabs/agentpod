@@ -46,7 +46,7 @@ const claimed = {
   claimed: true,
   runId: "run_e074a2160c4b4f28",
   leaseEpoch: 1,
-  card: { id: "crd_1a2b3c4d5e6f7a8b", title: "Rebuild the index", attemptCount: 1 },
+  card: { id: "card_1a2b3c4d5e6f7a8b", title: "Rebuild the index", attemptCount: 1 },
   stage: { key: "work", name: "Work" },
   handoff: null,
 };
@@ -115,6 +115,24 @@ describe("SuperpipelineClient — claim", () => {
     await expect(client.claim()).rejects.toThrow(SuperpipelineApiError);
   });
 
+  test("no work says why: the board's reason is kept, not dropped", async () => {
+    // agent-work.v1 ClaimResult "Unclaimed": `reason` tells an empty queue from an over-budget
+    // board and an agent at its cap. The client used to throw it away.
+    for (const reason of ["no_matching_card", "board_over_budget", "concurrency_reached", "a_reason_from_later"]) {
+      const { client } = fakeBoard(() => ({ status: 200, body: { claimed: false, reason } }));
+      expect(await client.claimNext()).toEqual({ work: null, reason });
+    }
+    expect(await fakeBoard(() => ({ status: 200, body: { claimed: false } })).client.claimNext()).toEqual({ work: null, reason: null });
+  });
+
+  test("a claim after a failure carries why the last attempt died", async () => {
+    const lastFailure = { reason: "harness died", agentId: "agt_31d0a1b2c3d4e5f6", stageKey: "work", endedAt: "2026-11-22T09:00:00.000Z" };
+    const got = await fakeBoard(() => ({ status: 200, body: { ...claimed, lastFailure } })).client.claimNext();
+    expect(got.work?.lastFailure).toEqual(lastFailure);
+    const none = await fakeBoard(() => ({ status: 200, body: { ...claimed, lastFailure: null } })).client.claim();
+    expect(none && "lastFailure" in none).toBe(false);
+  });
+
   test("a claimed:true response missing its run is treated as no work", async () => {
     const { client } = fakeBoard(() => ({ status: 200, body: { claimed: true } }));
     expect(await client.claim()).toBeNull();
@@ -131,8 +149,8 @@ describe("SuperpipelineClient — claim", () => {
 describe("SuperpipelineClient — the agent read surface", () => {
   test("reads a run's context without a lease", async () => {
     const context = {
-      run: { runId: work.runId, cardId: "crd_1", stageKey: "work", leaseEpoch: 1, status: "working", outcome: null, startedAt: "t", endedAt: null },
-      card: { id: "crd_1", title: "t", spec: null, currentStageKey: "work", state: "working", attemptCount: 2 },
+      run: { runId: work.runId, cardId: "card_1a2b3c4d5e6f7a8b", stageKey: "work", leaseEpoch: 1, status: "working", outcome: null, startedAt: "t", endedAt: null },
+      card: { id: "card_1a2b3c4d5e6f7a8b", title: "t", spec: null, currentStageKey: "work", state: "working", attemptCount: 2 },
       stage: { key: "work", name: "Work" },
       handoff: { summary: "prior" },
       references: [],
@@ -193,6 +211,30 @@ describe("SuperpipelineClient — verbs", () => {
       parameter: { path: "a.ts" },
       result: "ok",
     });
+  });
+});
+
+describe("SuperpipelineClient — ids are path segments, never more path", () => {
+  test("a run id and a board id are encoded where they sit in the path", async () => {
+    const urls: string[] = [];
+    const fetch = async (url: string) => {
+      urls.push(url);
+      return { status: 200, ok: true, json: async () => ({ run: {} }) };
+    };
+    const client = new SuperpipelineClient({ baseUrl: "https://board.test", boardId: "brd_a/b?c", token: TOKEN, fetch });
+    const odd = { runId: "run_x/../y?z", leaseEpoch: 1 };
+    await client.heartbeat(odd);
+    await client.completeVerified(odd, {});
+    await client.fail(odd, "x");
+    await client.claim();
+    await client.context(odd.runId).catch(() => undefined);
+    expect(urls).toEqual([
+      "https://board.test/v1/boards/brd_a%2Fb%3Fc/runs/run_x%2F..%2Fy%3Fz/heartbeat",
+      "https://board.test/v1/boards/brd_a%2Fb%3Fc/runs/run_x%2F..%2Fy%3Fz/complete",
+      "https://board.test/v1/boards/brd_a%2Fb%3Fc/runs/run_x%2F..%2Fy%3Fz/fail",
+      "https://board.test/v1/boards/brd_a%2Fb%3Fc/claims",
+      "https://board.test/v1/boards/brd_a%2Fb%3Fc/runs/run_x%2F..%2Fy%3Fz",
+    ]);
   });
 });
 
@@ -267,12 +309,12 @@ describe("SuperpipelineClient — pending gates", () => {
   const gate: GatePendingDelivery = {
     event: "gate.pending",
     boardId: BOARD,
-    cardId: "crd_1a2b3c4d5e6f7a8b",
-    gateId: "gate_4e8b",
+    cardId: "card_1a2b3c4d5e6f7a8b",
+    gateId: "gate_4e8b1c2d3f4a5b6c",
     stageKey: "review",
     returnStageKey: "code",
     cardTitle: "Add OAuth login",
-    producedBy: "agt_31d0",
+    producedBy: "agt_31d0a1b2c3d4e5f6",
     handoffSummary: "Wrote the haiku.",
     options: [{ id: "approve", label: "Approve" }],
     ts: "2026-08-30T00:00:00.000Z",
@@ -304,7 +346,7 @@ describe("SuperpipelineClient — pending gates", () => {
 
 describe("SuperpipelineClient — pending delivery follow-ups", () => {
   test("reads the follow-ups a board is still owed, from the sweep's route", async () => {
-    const followUp = { event: "delivery.pending", gateId: "gate_8f3a" };
+    const followUp = { event: "delivery.pending", gateId: "gate_8f3a1b2c3d4e5f60" };
     const { client, calls } = fakeBoard(() => ({ status: 200, body: { deliveries: [followUp] } }));
     expect(await client.pendingDeliveries()).toEqual([followUp]);
     expect(calls[0]?.url).toBe(`https://board.test/v1/boards/${BOARD}/deliveries/pending`);
@@ -325,7 +367,7 @@ describe("SuperpipelineClient — pending delivery follow-ups", () => {
 
 describe("SuperpipelineClient — cards waiting on a person", () => {
   test("reads the cards a board says are waiting, from the sweep's route", async () => {
-    const waiting = { event: "attention.pending", cardId: "crd_1", waitId: "wait_0123456789abcdef" };
+    const waiting = { event: "attention.pending", cardId: "card_1a2b3c4d5e6f7a8b", waitId: "wait_0123456789abcdef" };
     const { client, calls } = fakeBoard(() => ({ status: 200, body: { attention: [waiting] } }));
     expect(await client.pendingAttention()).toEqual([waiting]);
     expect(calls[0]?.url).toBe(`https://board.test/v1/boards/${BOARD}/attention/pending`);
