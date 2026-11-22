@@ -126,6 +126,13 @@ card can only select what the Node serves.
   installed at `proposedCheckpointRegistry` in the Node config. The registry may
   hold no stage yet; `stage add` writes the first.
 
+**The node must have the verbs.** They answer only on a node built with them, which advertises
+`bench.registry.manage` in its hello frame; an older node is refused with "this node does not
+manage a bench registry from the hub; update it (fleet nodes update) and retry". `fleet nodes
+update` installs the newest *release*, not `main`, so the verbs reach a node only once a release
+that contains them is published. Until then, a node built from source has them; one updated from
+releases does not.
+
 The routes behind the verbs, all under the admin guard:
 
 | Route | Verb |

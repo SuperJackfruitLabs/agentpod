@@ -66,6 +66,11 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Fixed
 
+- The hub kept the node's `bench.registry.manage` capability: it was missing from
+  the contract's `NodeCapability`, so the hello frame's parse dropped it and every
+  `fleet bench` verb refused the node as one too old. A contract test now reads the
+  node's sources and fails when any capability it advertises is unknown to the hub.
+
 - A bridge row with a `station-plane` credential source can hold the run-scoped
   MCP token its harness spends, so an agent on a source row gets its SuperPipeline
   board tools on ordinary cards. Upgrading a token row to a source keeps that token

@@ -22,7 +22,8 @@ import { join } from "node:path";
 import { Hono } from "hono";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { BenchDoctorCheck, BenchStageView } from "@agentpod/contract";
+import { BenchDoctorCheck, BenchStageView, HelloMsg } from "@agentpod/contract";
+import { setNodeCapabilities } from "../../src/services/nodes/registry";
 
 import { db } from "../../src/db/drizzle";
 import { tenants } from "../../src/db/schema/tenants";
@@ -175,7 +176,12 @@ beforeAll(async () => {
   }, { preconnect: realFetch.preconnect });
   await db.insert(tenants).values({ id: tenantId, name: "bench stages fixture", externalSource: "org-plane", externalId: organizationId });
   await db.insert(nodes).values({ id: nodeId, tenantId, userId: owner, name: "bench", hostname: "bench", os: "linux", arch: "amd64",
-    secretHash: "x", status: "online", lastSeenAt: new Date(), capabilities: ["bench.registry.manage"] });
+    secretHash: "x", status: "online", lastSeenAt: new Date() });
+  // Through the hello frame's own parse, as the gateway stores it: a capability the contract does
+  // not know is filtered there, and seeding the row directly hid exactly that.
+  const hello = HelloMsg.parse({ type: "hello", hostInfo: { hostname: "bench", os: "linux", arch: "amd64", cpuCount: 2 },
+    capabilities: ["posture", "frames.large", "bench.registry.manage"] });
+  await setNodeCapabilities(nodeId, hello.capabilities ?? null);
   await db.insert(stations).values({ id: stationId, tenantId, userId: owner, principalId: occupant, occupancyEpoch: 3,
     nodeId, stationKey: "bench:" + suffix, kind: "leaf", displayName: "bench", harness: "hermes", workspacePath: "/bench" });
   attachNode();
