@@ -70,7 +70,12 @@ export type PostureReport = z.infer<typeof PostureReport>;
 // session opened with `acp.open { mcpProxy }` may be given the hub's and Superlibrary's MCP servers.
 // "mcp.proxy.manage": the node answers `mcp.proxy.status|set|rotate`, so which stations its proxy
 // serves can be changed from the hub, without a restart (fleet mcp-proxy).
-export const NodeCapability = z.enum(["posture", "frames.large", "turn.errors", "fleet.reports", "mcp.proxy", "mcp.proxy.manage"]);
+// "bench.registry.manage": the node answers `bench.registry.status|set|remove`, so its private
+// coordinator registry can be written from the hub (fleet bench stage, fleet bench doctor).
+// A capability missing here is filtered out of every hello frame, and the hub then treats every
+// node as one that predates it; node-capabilities.test.ts reads the node's sources to catch that.
+export const NodeCapability = z.enum(["posture", "frames.large", "turn.errors", "fleet.reports", "mcp.proxy", "mcp.proxy.manage",
+  "bench.registry.manage"]);
 export type NodeCapability = z.infer<typeof NodeCapability>;
 
 /**
