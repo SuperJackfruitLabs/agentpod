@@ -1,6 +1,7 @@
 /** Proposed dedicated selection. Only an explicitly installed private profile constructs a port. */
 import { z } from "zod";
-import { CHECKPOINT_CLAIM_PROTOCOL, parsePendingCheckpointClaim, type PendingCheckpointClaim } from "./checkpoint-claim";
+import { CARD_CHOICE_CHECKPOINT_PROTOCOLS, CHECKPOINT_CLAIM_PROTOCOL, parsePendingCheckpointClaim, type CheckpointClaimProtocols,
+  type PendingCheckpointClaim } from "./checkpoint-claim";
 import type { DispatchResult } from "./dispatch-types";
 import type { SuperpipelineClient } from "./superpipeline";
 import { noteCheckpoint } from "./checkpoint-log";
@@ -28,6 +29,8 @@ const targetSchema = z.object({
 export type CheckpointTarget = Readonly<z.infer<typeof targetSchema>>;
 export interface CheckpointSelectionIdentity { tenantId: string; boardId: string; stationId: string }
 export interface CheckpointDispatchPort {
+  /** The bench stage lets each card choose its repositories: its claims ask for claim protocol v2. */
+  readonly choosesRepositories?: boolean;
   /** Must actually verify packaged worker, registry, host and control pair; ACP health is insufficient. */
   ready(identity: Readonly<CheckpointSelectionIdentity>): Promise<CheckpointTarget | undefined>;
   /** Fresh trusted lookup of the exact immutable target, not a caller-provided readiness boolean. */
@@ -39,6 +42,8 @@ export interface CheckpointDispatchPort {
 }
 export interface CheckpointSelection {
   readonly protocol: typeof CHECKPOINT_CLAIM_PROTOCOL;
+  /** `checkpointProtocols` for the claim: only for a stage whose cards choose, else absent. */
+  readonly protocols?: CheckpointClaimProtocols;
   recover(): Promise<DispatchResult | undefined>;
   dispatch(client: SuperpipelineClient, claim: PendingCheckpointClaim): Promise<DispatchResult>;
 }
@@ -70,6 +75,7 @@ export async function selectCheckpointDispatch(port: CheckpointDispatchPort | un
     !await port.current(target)) throw new CheckpointRefused("unavailable", "selection.current");
   return Object.freeze({
     protocol: CHECKPOINT_CLAIM_PROTOCOL,
+    ...(port.choosesRepositories === true ? { protocols: CARD_CHOICE_CHECKPOINT_PROTOCOLS } : {}),
     recover: () => port.recover?.() ?? Promise.resolve(undefined),
     async dispatch(client: SuperpipelineClient, value: PendingCheckpointClaim): Promise<DispatchResult> {
       // Once claimed, never release/stop/report on uncertain ownership, and never select ACP as a fallback.

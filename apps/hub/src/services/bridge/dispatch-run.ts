@@ -74,7 +74,8 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     }
     if (!held) try {
       const work = await client.claim({ maxConcurrency: agent.maxConcurrency, profileKey: agent.profileKey,
-        checkpointProtocol: dedicated.protocol, checkpointOnly: true });
+        checkpointProtocol: dedicated.protocol, ...(dedicated.protocols ? { checkpointProtocols: dedicated.protocols } : {}),
+        checkpointOnly: true });
       if (!work) return { status: "idle" };
       if (!work.checkpointClaim) {
         noteCheckpoint("claim", "claim.no_checkpoint_claim", { runId: work.runId });

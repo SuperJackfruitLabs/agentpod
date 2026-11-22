@@ -107,7 +107,15 @@ const requestUnion = z.discriminatedUnion("operation", [
   z.object({ ...fixed, operation: z.literal("prepare"), ...owned, task: z.object({
     profile_id: id, prompt: z.string().min(1).max(65536).refine(scalar),
     timeout_seconds: integer.min(1).max(3600), repository_name: name.optional(),
-  }).strict() }).strict(),
+    /**
+     * A stage whose cards choose their repositories: the card's selection, sorted, unique, and a
+     * subset of the profile's registry repositories. The node prepares the bench with only these,
+     * and `repository_name` (required with it) is one of them. Absent: every registry repository.
+     */
+    repository_names: z.array(name).min(1).max(32).optional(),
+  }).strict().refine((t) => t.repository_names === undefined || (t.repository_name !== undefined &&
+    t.repository_names.includes(t.repository_name) &&
+    t.repository_names.every((n, i) => i === 0 || (t.repository_names?.[i - 1] ?? "") < n))) }).strict(),
   z.object({ ...fixed, operation: z.literal("execute"), ...owned, binding_sha256: sha, source_receipt: receipt }).strict(),
   z.object({ ...fixed, operation: z.literal("status"), ...owned }).strict(),
 ]);

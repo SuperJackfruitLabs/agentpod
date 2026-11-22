@@ -7,7 +7,10 @@ import { installTableCheckpointProfiles, installedCheckpointProfiles, mergeCheck
   requireInstalledCheckpointProfile, CHECKPOINT_COORDINATOR_FLAG } from "./checkpoint-profiles";
 import corpus from "../../../../../packages/contract/src/fixtures/bench-coordinator-v1.json";
 
-import { checkpointProfileId, checkpointTask, claimRepositoriesAllowed, parseCheckpointProfile } from "./checkpoint-profile";
+import { checkpointProfileId, checkpointTask, claimedRepositories, claimRefusal, claimRepositoriesAllowed, parseCheckpointProfile,
+  type CheckpointProfile } from "./checkpoint-profile";
+import { checkpointPolicyDigest, parsePendingCheckpointClaim, type PendingCheckpointClaim } from "./checkpoint-claim";
+import { canonicalSha256 } from "./checkpoint-policy";
 import { canonicalCheckpoint } from "./checkpoint-json";
 import { checkpointRuntime } from "./checkpoint-port";
 const prior = { flag: process.env.PROPOSED_CHECKPOINT_COORDINATOR, file: process.env.PROPOSED_CHECKPOINT_COORDINATOR_PROFILE_FILE, pair: process.env.ENFORCE_CONTROL_PAIR };
@@ -28,6 +31,28 @@ function fixture() {
     occupantPrincipalId: "prn_" + "d".repeat(20), agentKey: "fixture", profileKey: "fixture", occupancyEpoch: 1,
     target: request.target, checkpointRepository: "api",
     repositories: [{ name: "api", provider: "forge", repository: "example/api", repositorySHA256: "e".repeat(64), objectFormat: "sha1" }] };
+}
+/** A pending claim this profile accepts, naming `names` (default: all) starting in `start`, with a selection when given. */
+function claimFor(profile: CheckpointProfile, names = profile.repositories.map((r) => r.name), start = profile.checkpointRepository,
+  source?: "card" | "default" | "single"): PendingCheckpointClaim {
+  const t = profile.target;
+  const policy = { version: "superpipeline.checkpoint-policy.v1", kind: "superbench", allowUnchanged: false,
+    repositories: profile.repositories.filter((r) => names.includes(r.name)).map((r) => ({ name: r.name, provider: r.provider, repository: r.repository })),
+    checkpointRepository: start, reporterPrincipalId: profile.reporterPrincipalId, nodeId: t.node_id,
+    executors: [{ agentId: t.agent_id, stationId: t.station_id }] };
+  return parsePendingCheckpointClaim({ version: "superpipeline.checkpoint-claim.v1", admissionState: "pending",
+    tenantId: profile.sourceTenantId, boardId: t.board_id, cardId: "card_ABC123", stageKey: "write-test", agentId: t.agent_id,
+    runId: "run_ABC123", leaseEpoch: 7, policy, policyDigest: checkpointPolicyDigest(policy),
+    ...(source ? { selection: { version: "superpipeline.checkpoint-selection.v1", stagePolicyDigest: canonicalSha256({ stage: "x" }),
+      source, repositories: [...names], checkpointRepository: start } } : {}) });
+}
+const threeRepositories = [
+  { name: "api", provider: "forge", repository: "example/api", repositorySHA256: "1".repeat(64), objectFormat: "sha1" },
+  { name: "app", provider: "forge", repository: "example/app", repositorySHA256: "2".repeat(64), objectFormat: "sha1" },
+  { name: "docs", provider: "github", repository: "example/docs", repositorySHA256: "3".repeat(64), objectFormat: "sha256" }];
+function cardProfile(extra: Record<string, unknown> = {}) {
+  return parseCheckpointProfile({ ...fixture(), repositories: threeRepositories, checkpointRepository: "app",
+    repositorySelection: "card", ...extra });
 }
 function installed() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "checkpoint-profile-"))); roots.push(root); chmodSync(root, 0o700);
@@ -122,12 +147,13 @@ test("a default harness profile requires a valid explicit coordinator identity",
 
 test("the bench task names the checkpoint repository, so the harness never starts in the workspace root", () => {
   const single = parseCheckpointProfile(fixture());
-  expect(checkpointTask(single, "do the card")).toEqual({ profile_id: "fixture", prompt: "do the card", timeout_seconds: 1800,
+  expect(checkpointTask(single, claimFor(single), "do the card")).toEqual({ profile_id: "fixture", prompt: "do the card", timeout_seconds: 1800,
     repository_name: "api" });
   const repositories = [
     { name: "api", provider: "forge", repository: "example/api", repositorySHA256: "e".repeat(64), objectFormat: "sha1" },
     { name: "web", provider: "forge", repository: "example/web", repositorySHA256: "f".repeat(64), objectFormat: "sha1" }];
-  expect(checkpointTask(parseCheckpointProfile({ ...fixture(), repositories, checkpointRepository: "web" }), "x").repository_name).toBe("web");
+  const two = parseCheckpointProfile({ ...fixture(), repositories, checkpointRepository: "web" });
+  expect(checkpointTask(two, claimFor(two), "x").repository_name).toBe("web");
   // A multi-repository profile with no checkpoint repository, or one that is not a member, is refused at load.
   const { checkpointRepository: _omitted, ...missing } = { ...fixture(), repositories };
   expect(() => parseCheckpointProfile(missing)).toThrow();
@@ -180,11 +206,54 @@ test("without the control pair no table profile is served either", () => {
   } finally { installTableCheckpointProfiles([]); error.mockRestore(); }
 });
 
-test("a claim names exactly the stage's allow-list today", () => {
+test("a claim names an ordered subset of the stage's allow-list", () => {
   const api = { name: "api", provider: "forge", repository: "example/api" };
+  const app = { name: "app", provider: "forge", repository: "example/app" };
   const web = { name: "web", provider: "forge", repository: "example/web" };
-  expect(claimRepositoriesAllowed([api, web], [api, web])).toBe(true);
-  expect(claimRepositoriesAllowed([api, web], [api])).toBe(false);
+  expect(claimRepositoriesAllowed([api, app, web], [api, app, web])).toBe(true);
+  expect(claimRepositoriesAllowed([api, app, web], [api, web])).toBe(true);
+  expect(claimRepositoriesAllowed([api, app, web], [web])).toBe(true);
   expect(claimRepositoriesAllowed([api, web], [web, api])).toBe(false);
+  expect(claimRepositoriesAllowed([api, web], [api, api])).toBe(false);
+  expect(claimRepositoriesAllowed([api, web], [])).toBe(false);
+  expect(claimRepositoriesAllowed([api, web], [api, app])).toBe(false);
   expect(claimRepositoriesAllowed([api, web], [api, { ...web, repository: "example/other" }])).toBe(false);
+  expect(claimRepositoriesAllowed([api, web], [{ ...api, provider: "github" }])).toBe(false);
+});
+
+test("a fixed stage's claim is unchanged: the whole allow-list, the profile's start, no selection", () => {
+  const fixed = parseCheckpointProfile({ ...fixture(), repositories: threeRepositories, checkpointRepository: "app" });
+  expect(claimRefusal(fixed, claimFor(fixed))).toBeUndefined();
+  expect(claimRefusal(fixed, claimFor(fixed, ["api", "app"]))).toBe("claim.repositories");
+  expect(claimRefusal(fixed, claimFor(fixed, undefined, "api"))).toBe("claim.checkpoint_repository");
+  expect(claimRefusal(fixed, claimFor(fixed, undefined, undefined, "card"))).toBe("claim.selection");
+  const task = checkpointTask(fixed, claimFor(fixed), "x");
+  expect(task).toEqual({ profile_id: "fixture", prompt: "x", timeout_seconds: 1800, repository_name: "app" });
+  expect("repository_names" in task).toBe(false);
+});
+
+test("a card's claim names a subset and may start in any repository it chose", () => {
+  const card = cardProfile();
+  const chosen = claimFor(card, ["api", "docs"], "docs", "card");
+  expect(claimRefusal(card, chosen)).toBeUndefined();
+  expect(claimedRepositories(card, chosen).map((r) => [r.name, r.repositorySHA256])).toEqual([["api", "1".repeat(64)], ["docs", "3".repeat(64)]]);
+  expect(checkpointTask(card, chosen, "x")).toEqual({ profile_id: "fixture", prompt: "x", timeout_seconds: 1800,
+    repository_name: "docs", repository_names: ["api", "docs"] });
+  // A card stage's claim always carries its selection.
+  expect(claimRefusal(card, claimFor(card, ["api", "docs"], "docs"))).toBe("claim.selection");
+  // Outside the allow-list: a profile that does not hold the repository refuses it.
+  const narrow = parseCheckpointProfile({ ...fixture(), repositories: threeRepositories.slice(0, 2), checkpointRepository: "app",
+    repositorySelection: "card" });
+  expect(claimRefusal(narrow, claimFor(card, ["api", "docs"], "docs", "card"))).toBe("claim.repositories");
+  expect(() => checkpointTask(narrow, claimFor(card, ["api", "docs"], "docs", "card"), "x")).toThrow("Checkpoint refused: authority");
+});
+
+test("a card stage's default is a sorted subset that resolves a start", () => {
+  expect(cardProfile({ defaultRepositories: ["app"] }).defaultRepositories).toEqual(["app"]);
+  expect(cardProfile({ defaultRepositories: ["docs"] }).defaultRepositories).toEqual(["docs"]);
+  expect(cardProfile({ defaultRepositories: ["api", "app"] }).defaultRepositories).toEqual(["api", "app"]);
+  for (const defaultRepositories of [["api", "docs"], ["app", "api"], ["mobile"], []])
+    expect(() => cardProfile({ defaultRepositories })).toThrow("Checkpoint refused: invalid");
+  // A default without per-card choice is not a profile.
+  expect(() => parseCheckpointProfile({ ...fixture(), defaultRepositories: ["api"] })).toThrow("Checkpoint refused: invalid");
 });

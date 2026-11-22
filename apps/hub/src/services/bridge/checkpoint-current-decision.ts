@@ -4,7 +4,7 @@ import { BenchCoordinatorCurrentResponse, BenchCoordinatorPrepared, benchCoordin
   parseBenchCoordinatorRequest } from "@agentpod/contract";
 import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON } from "./checkpoint-json";
 import { readCheckpointAttempt, type RetainedCheckpointAttempt } from "./checkpoint-ledger";
-import { checkpointProfileId, CheckpointRefused } from "./checkpoint-profile";
+import { checkpointProfileId, claimedRepositories, CheckpointRefused } from "./checkpoint-profile";
 import { checkpointProfileSuperseded, requireInstalledCheckpointProfile } from "./checkpoint-profiles";
 import { checkpointAuthorityMatches, readCheckpointAuthority } from "./checkpoint-current";
 import { checkpointAgentClient } from "./checkpoint-agent-client";
@@ -21,11 +21,15 @@ export async function retainedCheckpointSource(attempt: RetainedCheckpointAttemp
   if (!attempt.row.prepared) throw new CheckpointRefused("source", "retained.prepared");
   const prepared = BenchCoordinatorPrepared.parse(parseCheckpointJSON(encode(attempt.row.prepared)));
   const b = prepared.binding; const i = b.identity;
-  if (await benchCoordinatorBindingDigest(b) !== prepared.binding_sha256 || prepared.checkpoint_repository !== attempt.profile.checkpointRepository ||
+  // The pins of the claim's own repositories: the stage's whole list, or the card's choice.
+  let pins: ReturnType<typeof claimedRepositories>;
+  try { pins = claimedRepositories(attempt.profile, attempt.claim); }
+  catch (error) { throw new CheckpointRefused("source", "retained.binding", error); }
+  if (await benchCoordinatorBindingDigest(b) !== prepared.binding_sha256 || prepared.checkpoint_repository !== attempt.claim.policy.checkpointRepository ||
     canonicalCheckpoint(i) !== canonicalCheckpoint(attempt.request.identity) ||
     b.host_id !== attempt.profile.target.host_id || b.worker_sha256 !== attempt.profile.target.worker_sha256 ||
-    b.members.length !== attempt.profile.repositories.length || b.members.some((m, index) => {
-      const pin = attempt.profile.repositories[index];
+    b.members.length !== pins.length || b.members.some((m, index) => {
+      const pin = pins[index];
       return !pin || m.name !== pin.name || m.repository_sha256 !== pin.repositorySHA256 || m.object_format !== pin.objectFormat;
     })) throw new CheckpointRefused("source", "retained.binding");
   return { prepared, source: parseCheckpointSource({ binding: { boardId: i.board_id, cardId: i.card_id,

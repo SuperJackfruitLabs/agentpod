@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { checkpointSettlementSchema, type CheckpointSettlement } from "./checkpoint-settlement-data";
 import { BenchCoordinatorCompletion } from "@agentpod/contract";
 import { canonicalCheckpoint } from "./checkpoint-json";
-import { CheckpointRefused, type CheckpointSettlementRefusal } from "./checkpoint-profile";
+import { CheckpointRefused, claimedRepositories, type CheckpointSettlementRefusal } from "./checkpoint-profile";
 import { retainedCheckpointSource } from "./checkpoint-current-decision";
 import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
 
@@ -34,8 +34,12 @@ export async function buildCheckpointSettlement(attempt: RetainedCheckpointAttem
   const changed = final.checkpoints.some((m, index) => m.commit !== source.start[index]?.commit);
   if (!changed && !attempt.claim.policy.allowUnchanged) throw refuse("unchanged");
   const members = [];
+  let pins: ReturnType<typeof claimedRepositories>;
+  try { pins = claimedRepositories(attempt.profile, attempt.claim); }
+  catch (error) { throw refuse("retained_source", error); }
+  if (final.checkpoints.length !== pins.length) throw refuse("foreign_member");
   for (const [index, m] of final.checkpoints.entries()) {
-    const pin = attempt.profile.repositories[index];
+    const pin = pins[index];
     if (!pin || pin.name !== m.name || pin.repositorySHA256 !== m.repository_sha256 ||
       m.task_ref !== "refs/heads/card/" + attempt.claim.cardId) throw refuse("foreign_member");
     members.push({ name: pin.name, provider: pin.provider, repository: pin.repository,
