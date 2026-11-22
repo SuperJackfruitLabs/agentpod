@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { BenchCoordinatorRequest, parseBenchCoordinatorResponse } from "@agentpod/contract";
 import corpus from "../../../../../packages/contract/src/fixtures/bench-coordinator-v1.json";
@@ -10,7 +10,8 @@ import { TEST_PLANE } from "../../auth/org-plane/config";
 import { checkpointPolicyDigest, parsePendingCheckpointClaim } from "./checkpoint-claim";
 import { canonicalCheckpoint } from "./checkpoint-json";
 import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
-import { driveCheckpointAttempt, endEndedRun, RUN_ENDED_GRACE_MS, setParkedLogForTests, type CheckpointDriveDeps } from "./checkpoint-orchestrator";
+import { CHECKPOINT_RUNNING_RECHECK_MS, driveCheckpointAttempt, endEndedRun, RUN_ENDED_GRACE_MS, setParkedLogForTests,
+  type CheckpointDriveDeps } from "./checkpoint-orchestrator";
 import { endedRunView, movedRunView, runView } from "./checkpoint-run-view.test-fixture";
 import { CheckpointClaimRefused, validateCheckpointContext } from "./checkpoint-claim";
 import type { CheckpointServiceClient } from "./checkpoint-service-client";
@@ -171,6 +172,41 @@ test("a run that outlives the execute wait is said once on the card as still run
   const body = String(activities[0]?.body);
   expect(body).toContain("still running");
   for (const word of ["uncertain", "node.call", "waiting at"]) expect(body).not.toContain(word);
+});
+
+// Staging: every run longer than the 60 s execute wait then paid the 30 s fault backoff, with a warning.
+test("a run still going after the execute wait asks for a short recheck and warns nothing", async () => {
+  resetCheckpointActivityForTests();
+  const warn = spyOn(console, "warn").mockImplementation(() => {});
+  const info = spyOn(console, "log").mockImplementation(() => {});
+  try {
+    const attempt = executePending();
+    const h = harness({});
+    const answers: Array<{ ok: false; error: string } | { ok: true; data: unknown }> = [{ ok: false, error: "timeout" },
+      { ok: true, data: pendingStatus(attempt) }];
+    h.deps.request = async () => answers.shift() ?? { ok: true, data: pendingStatus(attempt) };
+    const board = recordingBoard((path) => path.endsWith(`/runs/${attempt.claim.runId}`)
+      ? { status: 200, body: runView(attempt.claim) } : { status: 200 });
+    for (let i = 0; i < 2; i++) {
+      const result = await driveCheckpointAttempt(attempt, board.client, false, h.deps);
+      expect(result).toMatchObject({ status: "unreported", recheckMs: CHECKPOINT_RUNNING_RECHECK_MS });
+    }
+    expect(warn).not.toHaveBeenCalled();
+  } finally { warn.mockRestore(); info.mockRestore(); }
+  // A park that is a fault keeps the fault backoff: no recheck.
+  for (const [attempt, reply] of [[preparePending(), { ok: false, error: "timeout" }],
+    [executePending(), { ok: false, error: "node offline" }]] as const) {
+    const h = harness({});
+    h.deps.request = async () => reply;
+    const board = recordingBoard((path) => path.endsWith(`/runs/${attempt.claim.runId}`)
+      ? { status: 200, body: runView(attempt.claim) } : { status: 200 });
+    const restore = setParkedLogForTests(createQuietLog(() => {}));
+    try {
+      const result = await driveCheckpointAttempt(attempt, board.client, attempt.row.phase === "prepare_pending", h.deps);
+      expect(result.status).toBe("unreported");
+      expect(result.recheckMs).toBeUndefined();
+    } finally { restore(); }
+  }
 });
 
 test("a park that is not a run still going keeps its own words", async () => {

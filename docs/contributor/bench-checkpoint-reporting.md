@@ -467,6 +467,13 @@ That covers an `execute_pending` park on `node.call.timeout` and on a bare
 `node.state:pending` (no detail: no held lease and no message). Every other park
 keeps its `checkpoint.parked` wording.
 
+Nor does the loop treat it as a fault. A run still going comes back with a
+recheck (`DispatchResult.recheckMs`, 5 seconds, capped at 10): the loop waits
+that long and reads the run's `status` again, with no fault backoff, no streak
+and an info line ("the checkpoint task is still running; checking again
+shortly"), and the attempt's own recover backoff waits the same 5 seconds. Every
+other park keeps the 30 second backoff, doubling to its ceiling, and its warning.
+
 The node waits up to 20 seconds (15 for the headers) for each of the Hub's
 current decisions, and asks for one before and after every effect. A decision
 re-reads issuer authority, exchanges a plane grant and reads the run on the

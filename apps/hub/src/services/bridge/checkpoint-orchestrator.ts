@@ -36,11 +36,21 @@ const log = createLogger("bridge-checkpoint");
  * attempt, phase and code, then once per interval with a count, never once per re-check.
  */
 let parkedLog = createQuietLog((message, meta) => log.warn(message, meta));
+/** A run still going is not a fault: logged at info, on its own key. */
+let runningLog = createQuietLog((message, meta) => log.info(message, meta));
+/**
+ * How soon a checkpoint run still going after the execute wait is read again, by `status`. Short,
+ * so a run longer than the wait costs seconds rather than the fault backoff.
+ */
+export const CHECKPOINT_RUNNING_RECHECK_MS = 5_000;
 /** Test seam: a fresh rate limit with its own clock. Returns the restore. */
 export function setParkedLogForTests(next: QuietLog): () => void {
   const prior = parkedLog;
+  const priorRunning = runningLog;
+  // One sink for both: a test reads every park, a fault or a run still going, in order.
   parkedLog = next;
-  return () => { parkedLog = prior; };
+  runningLog = next;
+  return () => { parkedLog = prior; runningLog = priorRunning; };
 }
 /** Why each parked result parked, and the attempt as it parked, so the drive can say it on the card once. */
 const parkFacts = new WeakMap<DispatchResult, { phase: string; code: string; reason?: string; attempt: RetainedCheckpointAttempt;
@@ -80,8 +90,10 @@ const parked = (attempt: RetainedCheckpointAttempt, code: CheckpointRefused["cod
   const facts = cause === undefined ? undefined : errorFacts(cause);
   // A refusal or error that names nothing still parks named: `drive.error`, with its class in the facts.
   const reason: CheckpointRefusalReason = (error instanceof CheckpointRefused ? error.reason : undefined) ?? "drive.error";
-  parkedLog([attempt.row.attemptId, attempt.row.phase, code, reason, facts?.errorClass ?? ""].join("\0"),
-    "checkpoint dispatch parked for reconciliation", {
+  const running = stillRunning({ phase: attempt.row.phase, code, reason }) ||
+    attempt.row.phase === "execute_pending" && code === "uncertain" && reason === "node.state:pending";
+  (running ? runningLog : parkedLog)([attempt.row.attemptId, attempt.row.phase, code, reason, facts?.errorClass ?? ""].join("\0"),
+    running ? "checkpoint task still running; checking its status again shortly" : "checkpoint dispatch parked for reconciliation", {
     tenantId: attempt.row.tenantId, boardId: attempt.row.boardId, runId: attempt.claim.runId,
     attemptId: attempt.row.attemptId, phase: attempt.row.phase, code, reason, ...facts });
   const result: DispatchResult = { status: "unreported", externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId,
@@ -214,6 +226,8 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
   // A run still going is said once, however its re-checks read (a timed-out wait, then a pending status).
   else if (facts) await postCheckpointActivity(client, initial, stillRunning(facts) ? `still_running:${facts.phase}`
     : `parked:${facts.phase}:${facts.code}:${facts.reason ?? ""}`, checkpointActivity("parked", facts));
+  // The benign case: the run is still going. The loop re-reads it shortly rather than backing off.
+  if (facts && !facts.held && stillRunning(facts)) return { ...result, recheckMs: CHECKPOINT_RUNNING_RECHECK_MS };
   return result;
 }
 

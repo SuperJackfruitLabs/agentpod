@@ -162,7 +162,12 @@ function runtimeFor(profile: CheckpointProfile, tenantId: string, boardId: strin
       }
       const { attempt } = pending;
       const key = `${attempt.row.attemptId}:${attempt.row.phase}`;
-      if (!backoff.due(key)) return held(attempt.row.attemptId, attempt.claim.runId);
+      if (!backoff.due(key)) {
+        // A run still going is waited on for seconds, and says so; a fault keeps its backoff.
+        const recheckMs = backoff.recheckIn(key);
+        return recheckMs === undefined ? held(attempt.row.attemptId, attempt.claim.runId)
+          : { ...held(attempt.row.attemptId, attempt.claim.runId), recheckMs };
+      }
       // A client that cannot be built (no plane credential source, for one) asks nothing: a superseded
       // attempt is still resolved below without it, and the drive builds and refuses as before.
       const client = await checkpointAgentClient(profile).catch((error: unknown) => {
@@ -201,7 +206,7 @@ function runtimeFor(profile: CheckpointProfile, tenantId: string, boardId: strin
         return held(attempt.row.attemptId, attempt.claim.runId);
       }
       const result = await driveCheckpointAttempt(attempt, client ?? await checkpointAgentClient(profile), false, deps);
-      if (result.status === "unreported") backoff.parked(key); else backoff.clear();
+      if (result.status === "unreported") backoff.parked(key, result.recheckMs); else backoff.clear();
       return result;
     },
     dispatch: async ({ target: chosen, claim }) => {

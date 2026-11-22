@@ -203,6 +203,12 @@ export interface DispatchResult {
   externalRunId?: string;
   attemptId?: string;
   reason?: string;
+  /**
+   * With `unreported`: nothing is wrong, the work is still running (a checkpoint run that outlived
+   * the hub's execute wait). The loop checks again after this many ms, bounded, instead of backing
+   * off as for a fault, and says so at info.
+   */
+  recheckMs?: number;
 }
 
 /** superpipeline reclaims at 15 minutes; RQ3 measured 12.3s as the longest silence. */

@@ -40,6 +40,8 @@ const DEFAULT_BACKOFF_MS = 30_000;
  * few times an hour rather than every cycle.
  */
 const DEFAULT_MAX_PARKED_BACKOFF_MS = 15 * 60_000;
+/** The longest a still-running checkpoint run waits between status reads (DispatchResult.recheckMs). */
+const MAX_RUNNING_RECHECK_MS = 10_000;
 
 export interface AgentLoopOptions {
   /**
@@ -239,6 +241,20 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
       // The same attempt parked again doubles the wait, up to a ceiling: reconciliation that did not
       // resolve in one backoff rarely resolves in the next, and each check costs authority reads,
       // a node round trip and a log line in the orchestrator.
+      // The benign unreported: a checkpoint run still going after the hub's execute wait. Not a
+      // fault, so no backoff, no streak and no warning: a short, bounded wait and a status read.
+      if (result.status === "unreported" && result.recheckMs !== undefined) {
+        const wait = Math.min(Math.max(result.recheckMs, 0), MAX_RUNNING_RECHECK_MS);
+        quiet(`running:${result.attemptId ?? ""}`, "the checkpoint task is still running; checking again shortly", {
+          ...(result.externalRunId === undefined ? {} : { run: result.externalRunId }),
+          ...(result.attemptId === undefined ? {} : { attempt: result.attemptId }),
+          recheckMs: wait,
+        });
+        parkedKey = undefined;
+        parkedStreak = 0;
+        await sleep(wait, controller.signal);
+        continue;
+      }
       if (result.status === "unreported") {
         const key = `${result.attemptId ?? result.externalRunId ?? ""}:${result.reason ?? ""}`;
         parkedStreak = key === parkedKey ? parkedStreak + 1 : 1;

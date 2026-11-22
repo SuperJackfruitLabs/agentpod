@@ -66,6 +66,11 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Fixed
 
+- A checkpoint run longer than the hub's 60 second execute wait no longer pays the
+  30 second fault backoff, with a warning, on every card. The benign park (the run
+  is still going: `checkpoint.running` on the card) asks the loop to read its
+  status again in 5 seconds, bounded at 10, logged at info. Real failures and every
+  other timeout keep the backoff.
 - A stage changed with `fleet bench stage set` (or `--repin`) reaches the running
   bridge loop. The loop built its checkpoint runtime once, at start, and every later
   cycle refused the new profile as `current.stale`, so no bench card was claimed

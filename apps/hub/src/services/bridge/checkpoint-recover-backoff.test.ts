@@ -20,3 +20,23 @@ test("an attempt parked again waits twice as long, to a ceiling; another attempt
   b.clear();
   expect(b.due("a")).toBe(true);
 });
+
+test("a run still going waits only its recheck, says how long is left, and does not grow the fault backoff", () => {
+  let t = 0;
+  const b = createAttemptBackoff({ now: () => t });
+  b.parked("a", 5_000);
+  expect(b.due("a")).toBe(false);
+  expect(b.recheckIn("a")).toBe(5_000);
+  t = 5_000;
+  expect(b.due("a")).toBe(true);
+  b.parked("a", 5_000);
+  t = 10_000;
+  expect(b.due("a")).toBe(true);
+  // The first fault after it starts from the base, as if no park had come before.
+  b.parked("a");
+  expect(b.recheckIn("a")).toBeUndefined();
+  t = 10_000 + 29_999;
+  expect(b.due("a")).toBe(false);
+  t = 10_000 + 30_000;
+  expect(b.due("a")).toBe(true);
+});
