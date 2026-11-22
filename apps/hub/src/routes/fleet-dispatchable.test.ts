@@ -52,8 +52,11 @@ let agentC = "";
 let humanId = "";
 let suspendedAgent = "";
 
-/** An id shaped like a principal's that names nobody — a stale grant. */
-const GHOST = "prn_00000000000000000000000000";
+/**
+ * An id shaped like a principal's that names nobody — a stale grant. In the id grammar (20 hex):
+ * the verifier refuses a whole token whose mayDispatch holds anything else.
+ */
+const GHOST = "prn_000000000000000000ff";
 
 /**
  * A plane token with these claims, signed by the plane's key.

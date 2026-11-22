@@ -25,7 +25,7 @@ import {
   type PlaneKind,
   type PlanePrincipal,
 } from "../../src/auth/org-plane/client";
-import { setOrgPlaneForTests, TEST_PLANE } from "../../src/auth/org-plane/config";
+import { AGENTPOD_PRODUCT, setOrgPlaneForTests, TEST_PLANE } from "../../src/auth/org-plane/config";
 import { createPrincipalDirectory, setPrincipalDirectoryForTests } from "../../src/auth/org-plane/directory";
 import { createPlaneVerifier, setPlaneVerifierForTests } from "../../src/auth/org-plane/verify";
 
@@ -235,6 +235,7 @@ export function installFakePlane(): void {
       issuer: TEST_PLANE.issuer,
       audience: TEST_PLANE.audience,
       jwksUrl: TEST_PLANE.jwksUrl,
+      product: AGENTPOD_PRODUCT,
       fetch: async () => Response.json(await fakePlaneJwks()),
     }),
   );

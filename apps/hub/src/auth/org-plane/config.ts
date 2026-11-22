@@ -7,6 +7,9 @@
  */
 import { readFileSync } from "node:fs";
 
+/** This hub's product id: what a token's `ent` must contain at its doors (contract §2, "Entitlement check"). */
+export const AGENTPOD_PRODUCT = "agentpod";
+
 export interface ServiceCredential { id: string; secret: string }
 export interface OrgPlaneConfig {
   issuer: string;

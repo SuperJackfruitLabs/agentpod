@@ -1,7 +1,7 @@
 /**
- * The organization plane's access-token claims (treaty's fixtures/ecosystem-identity/token_claims.json v9).
- * Every product verifies against this one shape. Loose: a claim it does not name passes through
- * and is ignored.
+ * The organization plane's access-token claims (treaty's fixtures/ecosystem-identity/token_claims.json v9),
+ * as the hub reads them once treaty's verifier (`verifyAccessToken`, the rules every product shares)
+ * has accepted the token. Loose: a claim it does not name passes through and is ignored.
  */
 import { z } from "zod";
 import { OrganizationId, PrincipalId } from "./ids";
@@ -19,7 +19,9 @@ export const OrgPlaneTokenClaims = z.looseObject({
   org: OrganizationId,
   // Unrecognised values are ignored, never refused — so not an enum.
   ent: z.array(z.string()),
-  // A non-prn_ value is ignored by consumers (valueRules.unrecognisedIsIgnored), so plain strings.
+  // Plain strings here, as token_claims.json types it. The hub's verifier (treaty's
+  // verifyAccessToken) refuses a whole token carrying a non-prn_ value before this schema reads it,
+  // so past the verifier every value is a prn_ id.
   mayDispatch: z.array(z.string()),
   mayGrantReach: z.boolean(),
   scope: z.string().optional(),

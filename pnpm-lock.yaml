@@ -222,6 +222,9 @@ importers:
       '@superjackfruitlabs/treaty-cloudevents':
         specifier: 0.0.15
         version: 0.0.15
+      '@superjackfruitlabs/treaty-ecosystem-identity':
+        specifier: 0.0.15
+        version: 0.0.15
       '@superjackfruitlabs/treaty-matrix-events':
         specifier: 0.0.15
         version: 0.0.15
@@ -278,9 +281,6 @@ importers:
         version: 4.6.5
     devDependencies:
       '@superjackfruitlabs/treaty-contracts':
-        specifier: 0.0.15
-        version: 0.0.15
-      '@superjackfruitlabs/treaty-ecosystem-identity':
         specifier: 0.0.15
         version: 0.0.15
       '@types/bun':

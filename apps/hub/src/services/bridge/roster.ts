@@ -535,9 +535,14 @@ async function requireSpendableGrant(source: BridgeCredentialSource): Promise<vo
   let missing: string[] = [];
   try {
     const issued = await orgPlaneClient().agentToken(source.principalId, source.audience);
-    const claims = await createPlaneVerifier({ issuer: cfg.issuer, jwksUrl: cfg.jwksUrl, audience: source.audience })
-      .verify(issued.accessToken);
-    reason = planeClaimsRefusal(claims, { principalId: source.principalId, org: source.organizationId });
+    const checked = await createPlaneVerifier({ issuer: cfg.issuer, jwksUrl: cfg.jwksUrl, audience: source.audience, product: "superpipeline" })
+      .check(issued.accessToken);
+    const claims = checked.ok ? checked.claims : null;
+    // A grant not entitled to SuperPipeline is refused by the verifier itself now; it is still
+    // named as such to the operator, not as an unverifiable token.
+    reason = !checked.ok && checked.code === "product_not_enabled"
+      ? "claims.ent"
+      : planeClaimsRefusal(claims, { principalId: source.principalId, org: source.organizationId });
     if (claims) missing = missingBridgeScopes(claims);
   } catch {
     throw new BridgeRosterRefusal(
@@ -568,6 +573,7 @@ export function bridgePlaneCredential(
     issuer: cfg.issuer,
     jwksUrl: cfg.jwksUrl,
     audience: source.audience,
+    product: "superpipeline",
   });
   async function snapshot(): Promise<BridgeCredentialSnapshot | null> {
     const [row] = await db

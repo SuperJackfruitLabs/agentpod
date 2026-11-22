@@ -293,6 +293,7 @@ function occupant() {
 
 /** The scope the fixture plane's exchanged grant carries; a test changes it to prove the check. */
 let grantScope: string | undefined = "claim run";
+let grantEnt: string[] = ["superpipeline"];
 
 /**
  * The organization plane's exchange as Accounts answers it: an agent grant for the audience, with
@@ -304,7 +305,7 @@ function installExchange(): () => void {
     agentToken: async (principal, audience) => ({
       expiresIn: 300,
       accessToken: await signPlaneToken({ sub: principal, principalKind: "agent", aud: audience,
-        ent: ["superpipeline"], org: ORGANIZATION, ...(grantScope === undefined ? {} : { scope: grantScope }) }),
+        ent: grantEnt, org: ORGANIZATION, ...(grantScope === undefined ? {} : { scope: grantScope }) }),
     }),
   });
   const realFetch = globalThis.fetch;
@@ -316,6 +317,7 @@ function installExchange(): () => void {
     globalThis.fetch = realFetch;
     restorePlane();
     grantScope = "claim run";
+    grantEnt = ["superpipeline"];
   };
 }
 
@@ -562,6 +564,14 @@ describe("a station-plane source is the occupant's identity, whatever the harnes
       expect(
         await updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", { credentialSource: sourceFor(PRODUCTION) }),
       ).toBe(true);
+    }, "hermes");
+  });
+
+  test("a grant not entitled to SuperPipeline is refused up front as such, not as an unverifiable token", async () => {
+    // The verifier itself refuses it now (treaty's product rule); the operator is still told why.
+    await withSalaamBinding(PRODUCTION, async () => {
+      grantEnt = ["agentpod"];
+      await expect(create()).rejects.toThrow("(claims.ent)");
     }, "hermes");
   });
 

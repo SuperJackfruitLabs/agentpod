@@ -76,7 +76,7 @@ export function createCheckpointServiceClient(configuration: CheckpointProfile, 
   const issuer = createOrgPlaneClient({ url: plane.url, credential: plane.serviceCredential,
     fetch: doFetch, timeoutMs: 5_000 });
   const verifier = sharedPlaneVerifier({ issuer: plane.issuer, audience: profile.sourceAudience,
-    jwksUrl: plane.jwksUrl, fetch: doFetch });
+    jwksUrl: plane.jwksUrl, product: "superpipeline", fetch: doFetch });
 
   async function exchange(claim: PendingCheckpointClaim, scope: "checkpoints:read" | "checkpoints:submit", body?: string, kind: "source" | "settlement" | "receipt" = "source"): Promise<{ raw: Uint8Array; expiresAtMs: number; missing: boolean }> {
     // No automatic retry, redirect, ambient cookie, private error body, or token exposure.
