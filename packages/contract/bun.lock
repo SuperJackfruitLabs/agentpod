@@ -4,20 +4,20 @@
     "": {
       "name": "@agentpod/contract",
       "dependencies": {
-        "@superjackfruitlabs/treaty-matrix-events": "0.0.15",
+        "@superjackfruitlabs/treaty-matrix-events": "0.0.17",
         "zod": "^4.6.5",
       },
       "devDependencies": {
-        "@superjackfruitlabs/treaty-ecosystem-identity": "0.0.15",
+        "@superjackfruitlabs/treaty-ecosystem-identity": "0.0.17",
         "@types/bun": "latest",
         "typescript": "~5.9.3",
       },
     },
   },
   "packages": {
-    "@superjackfruitlabs/treaty-ecosystem-identity": ["@superjackfruitlabs/treaty-ecosystem-identity@0.0.15", "", { "dependencies": { "jose": "6.2.12" } }, "sha512-CmWbTLyU/YT5OuB1Ke1pUzhUsOA8V1cd6mQY4HZ8eXIZFPwNW+1wBknB3MeveseXyefm24SLlc6WQld0WFl3Yg=="],
+    "@superjackfruitlabs/treaty-ecosystem-identity": ["@superjackfruitlabs/treaty-ecosystem-identity@0.0.17", "", { "dependencies": { "jose": "6.2.12" } }, "sha512-83W9pimeBuvygNYXIaYv7spQvw0VBqf4gcTcC/fCfNFQxKL/rnTvmI1PiCaX25jn8mJ23hRd6D3lk/3w7zpkrA=="],
 
-    "@superjackfruitlabs/treaty-matrix-events": ["@superjackfruitlabs/treaty-matrix-events@0.0.15", "", {}, "sha512-GE1dVHWyEr7fbNaaBxfuxIIINmO+lOZ/LUMAIFF8XGK1CsYtOEeO4acS/ZBWhDFoBT4kNyHd/QDpY07UsFIMCw=="],
+    "@superjackfruitlabs/treaty-matrix-events": ["@superjackfruitlabs/treaty-matrix-events@0.0.17", "", {}, "sha512-TlXhrsSm+8qjcvet8/FEAc81Ensp7aWIplY8k3T9Q65feHHis8y71BxGqA6SuROkY6RT1n2+y/Aa5oVk/EzwhA=="],
 
     "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 
