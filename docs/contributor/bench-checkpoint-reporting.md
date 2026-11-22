@@ -209,6 +209,20 @@ For example: `Checkpoint failed: SuperBench refused the bench step after the run
 preserve them before checkpoint/release". Nothing was reported as a pass.`
 Without a message the sentence is the table's.
 
+**The task's own reason.** For a failed run SuperBench's message only says
+`operation failed; inspect retained workspace state and local logs`. When the
+task itself failed and its worker said why (the Hermes adapter does when the
+model provider refuses the call: `Hermes stopped: the model provider answered
+HTTP 401 (unauthorized; check the model key)`), the worker relays that failed
+result on stdout and still exits nonzero, so SuperBench checkpoints nothing.
+The node carries the result's `handoff.error` as `detail.task`, beside
+SuperBench's `detail.message`, and the card's sentence names it instead:
+`Checkpoint failed: the task failed on the bench: "…". Nothing was reported as
+a pass.` The reason is a closed form built on the bench (a provider status and
+what it usually means, a timeout, or only that the harness stopped with an
+error); the provider's own text, which can quote a key or a payload, never
+leaves the bench, and the Hub bounds and redacts it as it does SuperBench's.
+
 **A held lease.** When SuperBench refused the release too, the node's reply
 also carries `detail.lease: "held"`. Before the board is told, the card gets a
 second activity, `checkpoint.parked` with code `lease_held`, naming the bench and

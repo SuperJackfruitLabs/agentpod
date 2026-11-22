@@ -39,7 +39,14 @@ terminal result, and terminal text containing one strict grouped WorkerResult:
 `version: agentpod.superbench-worker.v2`, the exact input binding, `outcome` of
 `complete`, `blocked`, or `failed`, and a string-valued `handoff` object. Normal
 prose, foreign bindings, missing/duplicate terminals, error results, replay gaps, truncation,
-oversize output, and nonzero exits produce no result on stdout. Null values in
+oversize output, and nonzero exits produce no completion on stdout. One exception
+says why: when Hermes itself exits nonzero with a terminal result that carries an
+error (a model key the provider refused, for one), the adapter writes a `failed`
+result whose `handoff` is only `{"error": "…"}` and still exits as a process
+failure. The reason is a closed form: `Hermes stopped: the model provider answered
+HTTP <status> (<what it usually means>)`, `Hermes stopped: the model call timed out`,
+or `Hermes stopped with an error before finishing the task`. The provider's own text
+is never copied, since it can quote a key or a payload. Null values in
 nonterminal tool arguments are permitted; terminal result validation remains
 strict.
 

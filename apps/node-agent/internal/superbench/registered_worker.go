@@ -116,6 +116,13 @@ func ExecuteRegisteredWorker(ctx context.Context, in *os.File, out, logs io.Writ
 	cmd.Stdout = capture
 	cmd.Stderr = logs
 	if cmd.Run() != nil {
+		// A harness that failed may still say why in a failed result. It is relayed, framed as
+		// any result, so the node can name the reason; the exit stays nonzero, never a completion.
+		raw, overflow := capture.read()
+		var result WorkerResult
+		if !overflow && decodeGroupedResult(raw, &result, c.Task.Binding) == nil && result.Outcome == "failed" {
+			_ = WriteRegisteredResult(out, result)
+		}
 		return ErrRegisteredTask
 	}
 	raw, overflow := capture.read()

@@ -123,3 +123,22 @@ test("the bench's message is redacted and bounded before it reaches the card", a
   expect(reason).not.toContain("/data/benches");
   expect(benchMessage(await withMessage("verification_failed", "y".repeat(250)))?.length).toBe(MAX_BENCH_MESSAGE);
 });
+
+// The production soak: a model key the provider refused (HTTP 401) failed the run, and the card said
+// only SuperBench's "operation failed; inspect retained workspace state and local logs".
+test("a failed task's own reason replaces SuperBench's generic operation failed on the card", async () => {
+  const request = BenchCoordinatorRequest.parse(fixture("capacity-refused").request);
+  const task = "Hermes stopped: the model provider answered HTTP 401 (unauthorized; check the model key)";
+  const detail = { message: "operation failed; inspect retained workspace state and local logs", task };
+  const response = await parseBenchCoordinatorResponse(encode({ ...refused("verification_failed"), detail }), request);
+  const ruling = classifyCheckpointRefusal("execute_pending", response);
+  expect(ruling).toEqual({ code: "verification_failed", disposition: "failed",
+    reason: `Checkpoint failed: the task failed on the bench: "${task}". Nothing was reported as a pass.` });
+  // Only a run's failure carries a task's reason; a refused prepare keeps SuperBench's words.
+  expect(classifyCheckpointRefusal("prepare_pending", response)?.reason).toContain("operation failed");
+  // A reason alone is a detail too, and it is bounded like SuperBench's own text.
+  const alone = await parseBenchCoordinatorResponse(encode({ ...refused("verification_failed"), detail: { task } }), request);
+  expect(classifyCheckpointRefusal("execute_pending", alone)?.reason).toContain("HTTP 401");
+  await expect(parseBenchCoordinatorResponse(encode({ ...refused("verification_failed"), detail: { task: "x".repeat(257) } }), request))
+    .rejects.toThrow("Coordinator response refused");
+});

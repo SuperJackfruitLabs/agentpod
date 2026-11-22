@@ -374,6 +374,25 @@ test("a refused checkpoint with a held lease says the bench's words and names th
   expect(board.verbs()).not.toContain("complete");
 });
 
+// The production soak: the model provider refused the key, and the card said only "operation failed".
+test("a run the model provider refused names the provider's status on the card and in the failure", async () => {
+  resetCheckpointActivityForTests();
+  const recorded = nodeRefusals.replies.find((r) => r.name === "task-failed-provider-status");
+  if (!recorded) throw new Error("recorded node refusal missing");
+  const attempt = executePending();
+  const h = harness(recorded.value);
+  const held = ledger(h.deps);
+  const board = recordingBoard();
+  expect((await driveCheckpointAttempt(attempt, board.client, false, h.deps)).status).toBe("failed");
+  const failed = board.calls.find((c) => c.path.endsWith("/activities"))?.body;
+  const fail = board.calls.find((c) => c.path.endsWith("/fail"))?.body;
+  expect(failed).toMatchObject({ action: "checkpoint.failed", parameter: { code: "verification_failed" } });
+  expect(String(failed?.body)).toContain("HTTP 401 (unauthorized; check the model key)");
+  for (const word of ["operation failed", "crashed"]) expect(String(failed?.body)).not.toContain(word);
+  expect(fail?.reason).toBe(failed?.body);
+  expect(held.closed).toBe("fail");
+});
+
 test("a parked reply whose lease is held is said once on the card with the operator's path, not also as a generic park", async () => {
   resetCheckpointActivityForTests();
   const attempt = executePending();

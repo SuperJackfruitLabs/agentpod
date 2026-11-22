@@ -68,6 +68,10 @@ type record struct {
 	// travel to the hub as the refusal's detail, never as a code.
 	Producer       string `json:"producer_message,omitempty"`
 	ReleaseRefusal string `json:"release_refusal,omitempty"`
+	// Task is why the task itself failed, when its worker said so in a failed
+	// result on a run that exited nonzero (a model provider refusing the key,
+	// for one). Bounded and stripped like Producer (taskMessage).
+	Task string `json:"task_error,omitempty"`
 	// Parked says why the attempt waits without sending: bench_stuck or
 	// recreate_refused. Status reports it in place of a plain pending.
 	Parked string `json:"parked,omitempty"`
