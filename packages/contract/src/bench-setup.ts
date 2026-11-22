@@ -150,5 +150,7 @@ export const BenchDoctorCheck = z.object({
   ok: z.boolean().nullable(),
   detail: z.string(),
   next: z.string().optional(),
+  /** With `ok: null`: not a failure, but something the operator should fix (printed WARN). */
+  warn: z.boolean().optional(),
 });
 export type BenchDoctorCheck = z.infer<typeof BenchDoctorCheck>;

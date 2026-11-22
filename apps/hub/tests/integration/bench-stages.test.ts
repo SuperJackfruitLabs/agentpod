@@ -79,7 +79,10 @@ const node = {
   worker: "e".repeat(64), coordinator: "f".repeat(64), host: "host_" + suffix,
   requests: new Array<{ verb: string; params: unknown }>(),
   refuse: "",
-  digest() { return sha(JSON.stringify([...this.profiles.values()])); },
+  /** A registry problem the node reports instead of serving (Go `Problem*`); empty serves. */
+  problem: "",
+  // The whole file, pins included, as the Go node hashes its registry bytes.
+  digest() { return sha(JSON.stringify([this.worker, this.coordinator, [...this.profiles.values()]])); },
   status() {
     const digest = this.digest();
     return { configured: true, valid: true, node_id: nodeId, host_id: this.host, registry_sha256: digest,
@@ -97,7 +100,8 @@ const node = {
   answer(verb: string, params: unknown): unknown {
     this.requests.push({ verb, params });
     if (this.refuse) throw new Error(this.refuse);
-    if (verb === "bench.registry.status") return this.status();
+    if (verb === "bench.registry.status")
+      return this.problem ? { ...this.status(), valid: false, problem: this.problem, registry_sha256: undefined, profiles: [] } : this.status();
     if (verb === "bench.registry.remove") {
       if (!this.profiles.delete(RemoveParams.parse(params).id)) throw new Error("not_found: the node's registry has no profile with that id");
       return this.status();
@@ -298,7 +302,7 @@ describe("a stage set up from the hub", () => {
     expect(stages.map((s) => [s.name, s.served, s.origin])).toEqual([["legacy", "served", "file"], ["review", "served", "fleet"]]);
     node.worker = "d".repeat(64);
     const drifted = List.parse(await (await call("GET", "/stages")).json());
-    expect(drifted.stages[0]).toMatchObject({ served: "drifted", detail: "worker_sha256" });
+    expect(drifted.stages[0]).toMatchObject({ served: "drifted", detail: "registry_sha256, worker_sha256" });
     node.worker = "e".repeat(64);
   });
 
@@ -330,7 +334,13 @@ describe("a stage set up from the hub", () => {
 
     // A worker update, then `fleet bench stage set review --repin`: a new profile, same selector.
     node.worker = "a".repeat(64);
-    expect((await call("PATCH", "/stages/review", { repin: true })).status).toBe(200);
+    const repinned = await call("PATCH", "/stages/review", { repin: true });
+    expect(repinned.status).toBe(200);
+    // The reply names this stage's own re-pinned fields, not only the other stages it moved.
+    const PinChange = z.object({ from: z.string(), to: z.string() });
+    const { changed } = z.object({ changed: z.record(z.string(), PinChange) }).parse(await repinned.json());
+    expect(Object.keys(changed).toSorted()).toEqual(["registry_sha256", "worker_sha256"]);
+    expect(changed.worker_sha256).toEqual({ from: "e".repeat(64), to: "a".repeat(64) });
     // The runtime kept from before refuses as stale; that is what a loop built once was stuck on.
     expect(await first.port.current(before)).toBe(false);
     const next = must(resolve(), "runtime after the change");
@@ -393,11 +403,30 @@ describe("fleet bench doctor", () => {
       expect(failed["service grant: checkpoint scopes"]?.detail).toBe("missing scope checkpoints:submit");
       expect(failed["service grant: checkpoint scopes"]?.next).toContain("Accounts");
       expect(failed["stage: node serves it"]?.detail).toContain("coordinator_implementation_sha256");
-      expect(failed["stage: node serves it"]?.next).toBe("fleet bench stage set review --refresh");
+      // Moved installed bytes are fixed by a repin, not a refresh.
+      expect(failed["stage: node serves it"]?.next).toBe("If the worker or node update was intended: fleet bench stage set review --repin");
     } finally {
       serviceScope = "checkpoints:submit checkpoints:read";
       node.coordinator = "f".repeat(64);
     }
+  });
+
+  test("before a repin the node serves nothing, and the next step is the repin", async () => {
+    node.problem = "coordinator_pin";
+    try {
+      const report = Doctor.parse(await (await call("GET", "/doctor?stage=review")).json());
+      const line = must(report.checks.find((c) => c.check === "stage: node serves it"), "served line");
+      expect(line).toMatchObject({ ok: false, detail: "the node's registry is not served (coordinator_pin)",
+        next: "If the worker or node update was intended: fleet bench stage set review --repin" });
+    } finally { node.problem = ""; }
+  });
+
+  test("a stage adopted from the file has no SuperPipeline stage id: a warning that names the flag", async () => {
+    const report = Doctor.parse(await (await call("GET", "/doctor?stage=legacy")).json());
+    const line = must(report.checks.find((c) => c.check === "stage: SuperPipeline stage"), "stage id line");
+    expect(line).toMatchObject({ ok: null, warn: true, next: "fleet bench stage set legacy --stage-id STAGE_ID" });
+    const review = Doctor.parse(await (await call("GET", "/doctor?stage=review")).json());
+    expect(review.checks.find((c) => c.check === "stage: SuperPipeline stage")).toMatchObject({ ok: true, detail: "stg_review" });
   });
 
   test("a station with no stage yet is checked too", async () => {

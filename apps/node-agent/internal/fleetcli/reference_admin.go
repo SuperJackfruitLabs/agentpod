@@ -255,8 +255,10 @@ var adminCommands = []clidoc.Command{
 			"(reachable, managed, free space on its data and state volumes), the worker's and node's pinned digests against " +
 			"the installed bytes; the roster row, its credential source, a trial exchange of the agent's grant (`claim` and " +
 			"`run`), the run-only MCP token and the owner's dispatch grant; the hub's service grant (`checkpoints:submit` and " +
-			"`checkpoints:read`); and, for a stage, the hub's pins and the node's served target. Then the steps no verb takes " +
-			"(Accounts and SuperPipeline) and the stage's `checkpointPolicy`. Changes nothing. Exits 1 when a check failed.",
+			"`checkpoints:read`); and, for a stage, the hub's pins, the node's served target and its SuperPipeline stage id. " +
+			"A stage with no stage id (one adopted from the profile file) is a WARN line naming `--stage-id`, not a failure. " +
+			"Then the steps no verb takes (Accounts and SuperPipeline) and the stage's `checkpointPolicy`. Changes nothing. " +
+			"Exits 1 when a check failed.",
 		Args:     []clidoc.Arg{{Name: "NAME", Meaning: "a stage name; or give --station for a station with no stage yet"}},
 		Handlers: []string{"fleetBenchDoctor"},
 		Flags:    []clidoc.Flag{{Name: "station", Arg: "S"}, {Name: "json"}},

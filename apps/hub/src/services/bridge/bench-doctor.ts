@@ -48,8 +48,8 @@ const REGISTRY_NEXT: Record<string, string> = {
 
 export async function benchDoctor(tenantId: string, q: { name?: string; stationId?: string }): Promise<DoctorReport | null> {
   const checks: BenchDoctorCheck[] = [];
-  const add = (check: string, ok: boolean | null, detail: string, next?: string) =>
-    checks.push({ check, ok, detail, ...(next && ok !== true ? { next } : {}) });
+  const add = (check: string, ok: boolean | null, detail: string, next?: string, warn = false) =>
+    checks.push({ check, ok, detail, ...(next && ok !== true ? { next } : {}), ...(warn ? { warn: true } : {}) });
 
   const stage = q.name ? await stageProfile(tenantId, q.name) : undefined;
   if (q.name && !stage) return null;
@@ -164,9 +164,20 @@ export async function benchDoctor(tenantId: string, q: { name?: string; stationI
       const served = registry.profiles.find((p) => p.id === name);
       const differ = served ? targetDifference(served.target, profile.target) : [];
       const same = served !== undefined && differ.length === 0;
-      add("stage: node serves it", same, !served ? "the node's registry has no such profile" : same ? "the node advertises exactly the pinned target" :
-        `the node advertises another ${differ.join(", ")} than the hub pins`, `fleet bench stage set ${name} --refresh`);
+      // The next step follows the cause. Installed bytes that moved (a worker or node update) are
+      // fixed only by a repin; the node then serves the stage again, at a new digest.
+      const pinProblem = !registry.valid && (registry.problem === "worker_pin" || registry.problem === "coordinator_pin");
+      const bytesMoved = differ.some((k) => k === "worker_sha256" || k === "coordinator_implementation_sha256");
+      add("stage: node serves it", same,
+        !served ? (pinProblem ? `the node's registry is not served (${registry.problem})` : "the node's registry has no such profile")
+          : same ? "the node advertises exactly the pinned target" : `the node advertises another ${differ.join(", ")} than the hub pins`,
+        pinProblem || bytesMoved ? `If the worker or node update was intended: fleet bench stage set ${name} --repin`
+          : `fleet bench stage set ${name} --refresh`);
     }
+    if (stage?.stageId) add("stage: SuperPipeline stage", true, stage.stageId);
+    else add("stage: SuperPipeline stage", null,
+      "no SuperPipeline stage id is recorded (a stage adopted from the profile file has none), so the printed policy command cannot name it",
+      `fleet bench stage set ${name} --stage-id STAGE_ID`, true);
   }
 
   const failed = checks.some((c) => c.ok === false);

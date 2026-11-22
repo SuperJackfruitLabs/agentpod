@@ -72,6 +72,13 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
   until the hub restarted. The runtime is now looked up at each cycle's start and
   rebuilt only when the installed profile changed; a cycle never swaps its port, and
   an attempt made under the old profile is resolved as superseded.
+- `fleet bench doctor` names `--repin`, not `--refresh`, when the node's served
+  target differs because the installed worker or node bytes moved (or the registry
+  is not served for a stale pin). It warns, with `--stage-id`, about a stage that
+  has no SuperPipeline stage id (one adopted from the profile file).
+- `fleet bench stage set` replies with `changed`: the stage's own pins that moved,
+  each with its value before and after. `repinned` still names the other stages on
+  the node moved to its new digest.
 
 - The hub kept the node's `bench.registry.manage` capability: it was missing from
   the contract's `NodeCapability`, so the hello frame's parse dropped it and every
