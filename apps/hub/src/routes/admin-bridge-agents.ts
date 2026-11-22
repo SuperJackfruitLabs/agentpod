@@ -24,7 +24,7 @@ import {
   AcpSessionMode,
   SalaamOperatorSettlementRequest,
 } from "@agentpod/contract";
-import { BridgeCredentialSource } from "../../../../packages/contract/src/bridge-credential";
+import { BridgeCredentialSourceRequest } from "../../../../packages/contract/src/bridge-credential";
 import { resolveTenantId } from "../auth/tenant";
 import { createLogger } from "../utils/logger";
 import {
@@ -62,7 +62,9 @@ const createSchema = z.object({
   boardId: BOARD_ID,
   stationId: z.string().min(1),
   token: AGENT_TOKEN.optional(),
-  credentialSource: BridgeCredentialSource.nullish(),
+  /** A full source, or `{ version: 1, kind: "station-plane" }`: the hub then fills in the occupant,
+   * the workspace's organization and its own SuperPipeline audience, and needs no token. */
+  credentialSource: BridgeCredentialSourceRequest.nullish(),
   /**
    * The second, `run`-scoped credential — the one the HARNESS spends over MCP so a dispatched
    * agent can complete or block its own card. Never the same as `token`, which can also claim.

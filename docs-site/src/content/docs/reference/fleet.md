@@ -2685,11 +2685,12 @@ Subcommands: [`list`](#fleet-bridge-list), [`add`](#fleet-bridge-add), [`set`](#
 ```text
 usage:
   fleet bridge list
-  fleet bridge add --key K --board B --station S --token T [--mcp-token M]
-                   [--mode M] [--concurrency N] [--profile P] [--wait-ms N] [--enabled true|false]
+  fleet bridge add --key K --board B --station S (--token T | --credential-source station-plane)
+                   [--mcp-token M] [--mode M] [--concurrency N] [--profile P] [--wait-ms N]
+                   [--enabled true|false] [--principal P --organization O --audience A]
   fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                    [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
-                   [--credential-source station-plane --principal P --organization O --audience A]
+                   [--credential-source station-plane [--principal P --organization O --audience A]]
                    [--credential-source none --token T]
   fleet bridge rm KEY
   fleet bridge related-work BOARD on|off
@@ -2724,18 +2725,23 @@ fleet bridge list
 Add a roster row.
 
 ```text
-fleet bridge add --key K --board B --station S --token T [--mcp-token M]
-                 [--mode M] [--concurrency N] [--profile P] [--wait-ms N] [--enabled true|false]
+fleet bridge add --key K --board B --station S (--token T | --credential-source station-plane)
+                 [--mcp-token M] [--mode M] [--concurrency N] [--profile P] [--wait-ms N]
+                 [--enabled true|false] [--principal P --organization O --audience A]
 ```
 
-The four required flags are reported together when missing.
+The required flags are reported together when missing. A token row needs `--token`. `--credential-source station-plane` adds a source row instead, with no claim token: the hub exchanges the station occupant's own plane identity on each board request. With no `--principal`, `--organization` or `--audience` the hub fills in all three (the station's occupant, the workspace's organization and its own SuperPipeline origin), the only values it would admit; give all three or none. A `--token` on a source row exits 2.
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
 | `--key K` | string | — | Roster key (add). **Required.** |
 | `--board B` | string | — | SuperPipeline board id. **Required.** |
 | `--station S` | string | — | Station id the work runs on. **Required.** |
-| `--token T` | string | — | SuperPipeline agent token (claims). **Required.** |
+| `--token T` | string | — | SuperPipeline agent token (claims). |
+| `--credential-source station-plane` | string | — | Station-plane, or none to return to a token (set). |
+| `--principal P` | string | — | The station occupant's prn_ id (station-plane). |
+| `--organization O` | string | — | The workspace's org_ id (station-plane). |
+| `--audience A` | string | — | This deployment's SuperPipeline origin (station-plane). |
 | `--mcp-token M` | string | — | Run-scoped token the harness spends. |
 | `--mode M` | string | — | Permission mode. |
 | `--concurrency N` | int | `0` | Max cards at once; 0 leaves the hub's value. |
@@ -2746,7 +2752,7 @@ The four required flags are reported together when missing.
 **Needs:** A workspace admin's token. Anyone else is refused with 403.
 
 ```sh
-fleet bridge add --key reviewer --board brd_123 --station stn_123 --token "$SP_TOKEN"
+fleet bridge add --key reviewer --board brd_123 --station stn_123 --credential-source station-plane
 ```
 
 ### fleet bridge set
@@ -2756,11 +2762,11 @@ Change some fields of a roster row; the rest stay.
 ```text
 fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                  [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
-                 [--credential-source station-plane --principal P --organization O --audience A]
+                 [--credential-source station-plane [--principal P --organization O --audience A]]
                  [--credential-source none --token T]
 ```
 
-Refuses a change with no fields, which the hub would otherwise answer 200 for and change nothing. `--credential-source station-plane` gives a token row a plane credential source in place: the hub exchanges the agent's own identity for a short-lived grant on each board request and drops the stored claim token. A run-scoped `--mcp-token`, the harness's own board tools, is kept or can be set on the source row. The principal must occupy the row's station (any harness) and be an agent of the workspace's organization, and the audience must be the hub's own SuperPipeline origin (`SUPERPIPELINE_BASE_URL`); anything else is refused. `--credential-source none` returns the row to a token and needs `--token`.
+Refuses a change with no fields, which the hub would otherwise answer 200 for and change nothing. `--credential-source station-plane` gives a token row a plane credential source in place: the hub exchanges the agent's own identity for a short-lived grant on each board request and drops the stored claim token. A run-scoped `--mcp-token`, the harness's own board tools, is kept or can be set on the source row. The principal must occupy the row's station (any harness) and be an agent of the workspace's organization, and the audience must be the hub's own SuperPipeline origin (`SUPERPIPELINE_BASE_URL`); anything else is refused; with none of `--principal`, `--organization` and `--audience` the hub fills them in. `--credential-source none` returns the row to a token and needs `--token`.
 
 | Argument | Meaning |
 |---|---|

@@ -225,6 +225,81 @@ func TestBridgeSetCredentialSourceRefusesAPartialSource(t *testing.T) {
 	}
 }
 
+// TestBridgeAddStationPlaneNeedsNoToken: a source row is added with no claim token, and with no
+// identity flags the hub is asked to derive them. A token on a source row, or a source the CLI
+// does not know, never leaves the client.
+func TestBridgeAddStationPlaneNeedsNoToken(t *testing.T) {
+	bin := build(t)
+	var mu sync.Mutex
+	var body map[string]any
+	var method, path string
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var got map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		mu.Lock()
+		method, path, body = r.Method, r.URL.Path, got
+		calls++
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	env := []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}
+
+	_, code := run(t, bin, env, "bridge", "add", "--key", "bench", "--board", "brd_1", "--station", "st_1",
+		"--credential-source", "station-plane", "--mcp-token", "spa_run")
+	if code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	mu.Lock()
+	if method != http.MethodPost || path != "/api/admin/bridge/agents" {
+		t.Errorf("called %s %s", method, path)
+	}
+	want := map[string]any{"key": "bench", "boardId": "brd_1", "stationId": "st_1", "mcpToken": "spa_run",
+		"credentialSource": map[string]any{"version": float64(1), "kind": "station-plane"}}
+	if got, _ := json.Marshal(body); string(got) != mustJSON(t, want) {
+		t.Errorf("body = %s, want %s", got, mustJSON(t, want))
+	}
+	mu.Unlock()
+
+	_, code = run(t, bin, env, "bridge", "set", "bench", "--credential-source", "station-plane")
+	if code != 0 {
+		t.Fatalf("set: exit = %d", code)
+	}
+	mu.Lock()
+	if got, _ := json.Marshal(body); string(got) != `{"credentialSource":{"kind":"station-plane","version":1}}` {
+		t.Errorf("set: body = %s", got)
+	}
+	before := calls
+	mu.Unlock()
+
+	for name, args := range map[string][]string{
+		"source and token": {"--credential-source", "station-plane", "--token", "spa_x"},
+		"none":             {"--credential-source", "none", "--token", "spa_x"},
+		"no token at all":  {},
+		"half an identity": {"--credential-source", "station-plane", "--principal", "prn_a"},
+	} {
+		base := []string{"bridge", "add", "--key", "bench", "--board", "brd_1", "--station", "st_1"}
+		if _, code := run(t, bin, env, append(base, args...)...); code != 2 {
+			t.Errorf("%s: exit = %d, want 2", name, code)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != before {
+		t.Errorf("a refused add reached the hub")
+	}
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
 // TestUsersBanRequiresAReason — a ban nobody recorded a reason for is one nobody can review,
 // and the person lifting it will not be the person who applied it.
 func TestUsersBanRequiresAReason(t *testing.T) {

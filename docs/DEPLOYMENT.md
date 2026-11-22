@@ -623,30 +623,30 @@ The hub admits a source only when:
   and production only its own. With `SUPERPIPELINE_BASE_URL` unset or not `https`, no source is
   admitted, and a stored source naming another audience is never spent.
 
-**Upgrading an existing token row** happens in place, as a workspace owner or admin, with no
-database edit. The stored claim token is dropped in the same write; a run-scoped MCP token, if
-the row has one, is kept. Read the principal from the
-station's occupant in the console and the organization from the workspace. For the checkpoint
-agent they are the profile's `occupantPrincipalId` and `organizationId`, and the audience is its
-`sourceAudience`. Then:
+**Adding a source row** needs no token at all. The hub fills in the three identity fields itself:
+the station's occupant, the workspace's organization and its own SuperPipeline origin, which are
+the only values it would admit anyway:
 
 ```sh
-# Staging: point fleet at the staging hub.
-AGENTPOD_HUB=https://staging-hub.agentpod.dev fleet bridge set KEY \
-  --credential-source station-plane --principal prn_… --organization org_… \
-  --audience https://staging-app.superpipeline.dev
-
-# Production.
-AGENTPOD_HUB=https://hub.agentpod.dev fleet bridge set KEY \
-  --credential-source station-plane --principal prn_… --organization org_… \
-  --audience https://app.superpipeline.dev
+fleet bridge add --key KEY --board brd_… --station STATION --credential-source station-plane
 ```
 
-The same change is `PATCH /api/admin/bridge/agents/KEY` with
-`{"credentialSource": {"version": 1, "kind": "station-plane", "principalId": "prn_…",
-"organizationId": "org_…", "audience": "<this hub's superpipeline origin>"}}`. A refusal names
-the one rule it broke: the occupant, the workspace mapping, the organization, the principal's kind,
-or the audience the hub expected.
+**Upgrading an existing token row** happens in place, as a workspace owner or admin, with no
+database edit. The stored claim token is dropped in the same write; a run-scoped MCP token, if
+the row has one, is kept:
+
+```sh
+fleet bridge set KEY --credential-source station-plane
+```
+
+You may still spell the three fields out (`--principal prn_… --organization org_… --audience
+https://…`), all three or none; the hub then checks them instead of filling them in. The same
+changes are `POST /api/admin/bridge/agents` and `PATCH /api/admin/bridge/agents/KEY` with
+`{"credentialSource": {"version": 1, "kind": "station-plane"}}`, or the full
+`{"version": 1, "kind": "station-plane", "principalId": "prn_…", "organizationId": "org_…",
+"audience": "<this hub's superpipeline origin>"}`. A refusal names the one rule it broke: no
+occupant, the workspace mapping, the organization, the principal's kind, or the audience the hub
+expected.
 
 A source row stores no claim token, but it may hold the run-scoped MCP token a harness spends
 to report for itself over MCP (Hermes and the other ACP harnesses), exactly as a token row does.

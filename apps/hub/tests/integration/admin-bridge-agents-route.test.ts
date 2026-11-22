@@ -374,6 +374,70 @@ describe("giving a legacy row a credential source", () => {
   });
 });
 
+describe("a source row the hub derives, with no token", () => {
+  const principalId = "prn_0123401234012340abcd";
+  const organizationId = "org_0123401234012340abcd";
+  const STAGING = "https://staging-app.superpipeline.dev";
+  const derive = { version: 1, kind: "station-plane" } as const;
+
+  test("POST with only the kind fills in the occupant, the organization and this hub's audience", async () => {
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
+    if (!tenant) throw Error("fixture tenant missing");
+    const savedOrigin = process.env.SUPERPIPELINE_BASE_URL;
+    process.env.SUPERPIPELINE_BASE_URL = STAGING + "/";
+    await db.update(tenants).set({ externalSource: "org-plane", externalId: organizationId })
+      .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
+    fakePlane.addAgent({ id: principalId });
+    const planeRecord = fakePlane.principals.get(principalId);
+    if (!planeRecord) throw Error("fixture occupant missing");
+    planeRecord.organizationId = organizationId;
+    const restorePlane = setOrgPlaneClientForTests({
+      ...fakePlane,
+      agentToken: async (principal, audience) => ({
+        expiresIn: 300,
+        accessToken: await signPlaneToken({ sub: principal, principalKind: "agent", aud: audience,
+          ent: ["superpipeline"], org: organizationId, scope: "claim run" }),
+      }),
+    });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const address = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      return address === TEST_PLANE.jwksUrl ? Response.json(await fakePlaneJwks()) : realFetch(url, init);
+    }, { preconnect: realFetch.preconnect });
+    try {
+      // No occupant yet: the one missing fact is named, and nothing is stored.
+      const vacant = await post({ key: "bench-kai", boardId: BOARD_ID, stationId: STATION_ID, credentialSource: derive });
+      expect(vacant.status).toBe(400);
+      expect(await jsonField(vacant, "error")).toBe("Station-plane source: the station has no occupant");
+      expect(await readBridgeRoster(BOOTSTRAP_TENANT_ID)).toHaveLength(0);
+
+      await db.update(stations).set({ principalId }).where(eq(stations.id, STATION_ID));
+      const res = await post({ key: "bench-kai", boardId: BOARD_ID, stationId: STATION_ID, credentialSource: derive });
+      expect(res.status).toBe(201);
+      const full = { ...derive, principalId, organizationId, audience: STAGING };
+      expect(JSON.parse(await res.text()).agent).toMatchObject({ hasToken: false, credentialSource: full });
+      const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+      expect(secret?.token).toBe("");
+      expect(secret?.credentialSource).toEqual(full);
+
+      // A legacy row upgrades the same way through PATCH.
+      await post({ ...valid(), key: "coder-kai" });
+      const upgraded = await patch("coder-kai", { credentialSource: derive });
+      expect(upgraded.status).toBe(200);
+      expect(JSON.parse(await upgraded.text()).agent).toMatchObject({ hasToken: false, credentialSource: full });
+    } finally {
+      globalThis.fetch = realFetch;
+      restorePlane();
+      fakePlane.remove(principalId);
+      if (savedOrigin === undefined) delete process.env.SUPERPIPELINE_BASE_URL;
+      else process.env.SUPERPIPELINE_BASE_URL = savedOrigin;
+      await db.update(stations).set({ principalId: null }).where(eq(stations.id, STATION_ID));
+      await db.update(tenants).set({ externalSource: tenant.externalSource, externalId: tenant.externalId })
+        .where(eq(tenants.id, BOOTSTRAP_TENANT_ID));
+    }
+  });
+});
+
 describe("removing one", () => {
   test("it goes, and says so", async () => {
     await post(valid());

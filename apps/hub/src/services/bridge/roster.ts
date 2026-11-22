@@ -32,8 +32,15 @@ import { createLogger } from "../../utils/logger";
 import { superlibraryClient } from "../superlibrary";
 import { decrypt, encrypt } from "../../utils/encryption";
 import type { AcpSessionMode } from "@agentpod/contract";
-import type { BridgeCredentialSource } from "../../../../../packages/contract/src/bridge-credential";
-import { BridgeRosterRefusal, parseDeploymentCredentialSource } from "./credential-audience";
+import type {
+  BridgeCredentialSource,
+  BridgeCredentialSourceRequest,
+} from "../../../../../packages/contract/src/bridge-credential";
+import {
+  BridgeRosterRefusal,
+  deploymentSuperpipelineAudience,
+  parseDeploymentCredentialSource,
+} from "./credential-audience";
 import { tenants } from "../../db/schema/tenants";
 import { orgPlane } from "../../auth/org-plane/config";
 import { createPlaneVerifier } from "../../auth/org-plane/verify";
@@ -100,7 +107,8 @@ export interface BridgeAgentSecrets {
 }
 
 export interface CreateBridgeAgentInput {
-  credentialSource?: BridgeCredentialSource | null;
+  /** A full source, or `{ version: 1, kind: "station-plane" }` for the hub to derive one. */
+  credentialSource?: BridgeCredentialSourceRequest | null;
   tenantId: string;
   key: string;
   boardId: string;
@@ -116,7 +124,8 @@ export interface CreateBridgeAgentInput {
 }
 
 export interface UpdateBridgeAgentInput {
-  credentialSource?: BridgeCredentialSource | null;
+  /** A full source, or `{ version: 1, kind: "station-plane" }` for the hub to derive one. */
+  credentialSource?: BridgeCredentialSourceRequest | null;
   boardId?: string;
   stationId?: string;
   token?: string;
@@ -293,8 +302,14 @@ function revisionOf(agent: BridgeAgentRow): string {
 }
 
 export async function createBridgeAgent(
-  input: CreateBridgeAgentInput,
+  request: CreateBridgeAgentInput,
 ): Promise<void> {
+  const credentialSource = await resolveCredentialSourceRequest(
+    request.tenantId,
+    request.stationId,
+    request.credentialSource,
+  );
+  const input = { ...request, credentialSource };
   await validateCredentialInput(
     input.tenantId,
     input.stationId,
@@ -361,7 +376,7 @@ async function stationOf(
 export async function updateBridgeAgent(
   tenantId: string,
   key: string,
-  patch: UpdateBridgeAgentInput,
+  request: UpdateBridgeAgentInput,
 ): Promise<boolean> {
   const set: Record<string, unknown> = { updatedAt: new Date() };
   const before = await stationOf(tenantId, key);
@@ -371,6 +386,19 @@ export async function updateBridgeAgent(
     .where(and(eq(bridgeAgents.tenantId, tenantId), eq(bridgeAgents.key, key)))
     .limit(1);
   if (!current) return false;
+  const patch: Omit<UpdateBridgeAgentInput, "credentialSource"> & {
+    credentialSource?: BridgeCredentialSource | null;
+  } =
+    request.credentialSource === undefined
+      ? (request as Omit<UpdateBridgeAgentInput, "credentialSource">)
+      : {
+          ...request,
+          credentialSource: await resolveCredentialSourceRequest(
+            tenantId,
+            request.stationId ?? current.stationId,
+            request.credentialSource,
+          ),
+        };
   const source =
     patch.credentialSource !== undefined
       ? patch.credentialSource
@@ -520,6 +548,51 @@ async function validateCredentialInput(
   await requireSpendableGrant(source);
 }
 
+/**
+ * The station-plane source this hub would admit for a station: its occupant, the workspace's
+ * organization and the hub's own SuperPipeline audience. A request that names none of them
+ * (`{ version: 1, kind: "station-plane" }`) is filled in here, so `fleet bridge add` needs no
+ * identifier the hub already knows. A full source passes through unchanged; the usual admission
+ * checks then run on whichever it is. Refuses, naming the one missing fact, when one cannot be read.
+ */
+export async function resolveCredentialSourceRequest(
+  tenantId: string,
+  stationId: string,
+  request: BridgeCredentialSourceRequest | null | undefined,
+): Promise<BridgeCredentialSource | null | undefined> {
+  if (!request || "principalId" in request) return request;
+  const audience = deploymentSuperpipelineAudience();
+  if (!audience)
+    throw new BridgeRosterRefusal(
+      "SUPERPIPELINE_BASE_URL is not an https origin, so this hub admits no station-plane credential source",
+    );
+  const [station] = await db
+    .select({ principalId: stations.principalId })
+    .from(stations)
+    .where(and(eq(stations.id, stationId), eq(stations.tenantId, tenantId)))
+    .limit(1);
+  if (!station)
+    throw new BridgeRosterRefusal("Station-plane source: no such station in this workspace");
+  if (!station.principalId)
+    throw new BridgeRosterRefusal("Station-plane source: the station has no occupant");
+  const [tenant] = await db
+    .select({ externalId: tenants.externalId, externalSource: tenants.externalSource })
+    .from(tenants)
+    .where(eq(tenants.id, tenantId))
+    .limit(1);
+  if (tenant?.externalSource !== "org-plane" || !tenant.externalId)
+    throw new BridgeRosterRefusal(
+      "Station-plane source: this workspace is not mapped to the organization plane",
+    );
+  return {
+    version: 1,
+    kind: "station-plane",
+    principalId: station.principalId,
+    organizationId: tenant.externalId,
+    audience,
+  };
+}
+
 /** What an operator does about each refusal of a trial exchange. */
 const GRANT_REFUSAL: Partial<Record<BridgeCredentialRefusalReason, string>> = {
   "claims.ent": "its grant is not entitled to superpipeline at the organization plane",
@@ -530,15 +603,19 @@ const GRANT_REFUSAL: Partial<Record<BridgeCredentialRefusalReason, string>> = {
   "claims.expired": "it was already expired",
 };
 
+/** What one trial exchange for a source showed. Carries no token, only what was wrong with it. */
+export type TrialGrant =
+  | { ok: true }
+  | { ok: false; exchanged: false }
+  | { ok: false; exchanged: true; reason?: BridgeCredentialRefusalReason; missing: string[] };
+
 /**
- * Exchange once, now, exactly as every board request will, and refuse the row unless that grant
- * would be spent. Without it a row whose agent's grant lacks the `claim` scope is stored, and every
- * cycle after it is refused. The grant is verified and dropped: never stored, never logged.
+ * Exchange once, now, exactly as every board request will, and say whether the grant could be
+ * spent. The grant is verified and dropped: never stored, never logged. Exported for the bench
+ * doctor, which reports the same check without refusing anything.
  */
-async function requireSpendableGrant(source: BridgeCredentialSource): Promise<void> {
+export async function trialAgentGrant(source: BridgeCredentialSource): Promise<TrialGrant> {
   const cfg = orgPlane();
-  let reason: BridgeCredentialRefusalReason | undefined;
-  let missing: string[] = [];
   try {
     const issued = await orgPlaneClient().agentToken(source.principalId, source.audience);
     const checked = await createPlaneVerifier({ issuer: cfg.issuer, jwksUrl: cfg.jwksUrl, audience: source.audience, product: "superpipeline" })
@@ -546,15 +623,30 @@ async function requireSpendableGrant(source: BridgeCredentialSource): Promise<vo
     const claims = checked.ok ? checked.claims : null;
     // A grant not entitled to SuperPipeline is refused by the verifier itself now; it is still
     // named as such to the operator, not as an unverifiable token.
-    reason = !checked.ok && checked.code === "product_not_enabled"
+    const reason = !checked.ok && checked.code === "product_not_enabled"
       ? "claims.ent"
       : planeClaimsRefusal(claims, { principalId: source.principalId, org: source.organizationId });
-    if (claims) missing = missingBridgeScopes(claims);
+    const missing = claims ? missingBridgeScopes(claims) : [];
+    if (!reason && missing.length === 0) return { ok: true };
+    return { ok: false, exchanged: true, ...(reason ? { reason } : {}), missing };
   } catch {
+    return { ok: false, exchanged: false };
+  }
+}
+
+/**
+ * Exchange once, now, exactly as every board request will, and refuse the row unless that grant
+ * would be spent. Without it a row whose agent's grant lacks the `claim` scope is stored, and every
+ * cycle after it is refused.
+ */
+async function requireSpendableGrant(source: BridgeCredentialSource): Promise<void> {
+  const trial = await trialAgentGrant(source);
+  if (trial.ok) return;
+  if (!trial.exchanged)
     throw new BridgeRosterRefusal(
       "Station-plane source: the organization plane would not exchange a grant for the occupant at this audience; nothing was changed",
     );
-  }
+  const { reason, missing } = trial;
   // Scopes first, and every one that is missing: `claim` and `run` are both SuperPipeline agent
   // scopes, and an operator fixing one should not find the other on the next attempt.
   if (missing.length > 0 && (reason === undefined || reason === "claims.scope"))

@@ -12,6 +12,12 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Added
 
+- `fleet bridge add --credential-source station-plane` adds a source row with no
+  `--token`. With no `--principal`, `--organization` or `--audience`, the hub fills
+  in the station's occupant, the workspace's organization and its own SuperPipeline
+  origin (`fleet bridge set KEY --credential-source station-plane` does the same for
+  an existing row). The admission checks and the trial exchange are unchanged.
+
 - Proposed registered bench launch: a registry profile with `"launch": "registered-v1"`
   delivers the worker's task to the payload only as SuperBench finite stdin and
   reads its framed result from sealed stdout, then reads the run's receipt back

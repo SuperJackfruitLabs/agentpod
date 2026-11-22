@@ -74,27 +74,36 @@ var adminCommands = []clidoc.Command{
 	{Path: "bridge list", Summary: "Every roster row.", Synopsis: "fleet bridge list", Example: "fleet bridge list"},
 	{
 		Path: "bridge add", Summary: "Add a roster row.",
-		Synopsis: "fleet bridge add --key K --board B --station S --token T [--mcp-token M]\n                 [--mode M] [--concurrency N] [--profile P] [--wait-ms N] [--enabled true|false]",
-		Detail:   "The four required flags are reported together when missing.",
+		Synopsis: "fleet bridge add --key K --board B --station S (--token T | --credential-source station-plane)\n                 [--mcp-token M] [--mode M] [--concurrency N] [--profile P] [--wait-ms N]\n                 [--enabled true|false] [--principal P --organization O --audience A]",
+		Detail: "The required flags are reported together when missing. A token row needs `--token`. " +
+			"`--credential-source station-plane` adds a source row instead, with no claim token: the hub exchanges " +
+			"the station occupant's own plane identity on each board request. With no `--principal`, `--organization` " +
+			"or `--audience` the hub fills in all three (the station's occupant, the workspace's organization and its " +
+			"own SuperPipeline origin), the only values it would admit; give all three or none. A `--token` on a source row exits 2.",
 		Handlers: []string{"fleetBridge"},
 		Flags: append([]clidoc.Flag{
 			{Name: "key", Arg: "K", Required: true},
 			{Name: "board", Arg: "B", Required: true},
 			{Name: "station", Arg: "S", Required: true},
-			{Name: "token", Arg: "T", Required: true},
+			{Name: "token", Arg: "T"},
+			{Name: "credential-source", Arg: "station-plane"},
+			{Name: "principal", Arg: "P"},
+			{Name: "organization", Arg: "O"},
+			{Name: "audience", Arg: "A"},
 		}, bridgeOptional()...),
-		Example: "fleet bridge add --key reviewer --board brd_123 --station stn_123 --token \"$SP_TOKEN\"",
+		Example: "fleet bridge add --key reviewer --board brd_123 --station stn_123 --credential-source station-plane",
 	},
 	{
 		Path: "bridge set", Summary: "Change some fields of a roster row; the rest stay.",
-		Synopsis: "fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]\n                 [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]\n                 [--credential-source station-plane --principal P --organization O --audience A]\n                 [--credential-source none --token T]",
+		Synopsis: "fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]\n                 [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]\n                 [--credential-source station-plane [--principal P --organization O --audience A]]\n                 [--credential-source none --token T]",
 		Detail: "Refuses a change with no fields, which the hub would otherwise answer 200 for and change nothing. " +
 			"`--credential-source station-plane` gives a token row a plane credential source in place: the hub " +
 			"exchanges the agent's own identity for a short-lived grant on each board request and drops the stored " +
 			"claim token. A run-scoped `--mcp-token`, the harness's own board tools, is kept or can be set on the " +
 			"source row. The principal must occupy the row's station (any harness) and be an agent of the workspace's organization, " +
 			"and the audience must be the hub's own SuperPipeline origin (`SUPERPIPELINE_BASE_URL`); anything else " +
-			"is refused. `--credential-source none` returns the row to a token and needs `--token`.",
+			"is refused; with none of `--principal`, `--organization` and `--audience` the hub fills them in. " +
+			"`--credential-source none` returns the row to a token and needs `--token`.",
 		Args:     []clidoc.Arg{{Name: "KEY", Meaning: "the roster key"}},
 		Handlers: []string{"fleetBridge"},
 		Flags: append([]clidoc.Flag{

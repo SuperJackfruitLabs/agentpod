@@ -49,8 +49,9 @@ startup error and loads no checkpoint profile, so no registered launch is reache
 ordinary dispatch continues. A roster row that still holds a legacy token refuses
 every checkpoint cycle with `authority` (`credential.missing`) before `ready` reaches
 the Node, so nothing here is reached either. Give the row a source with
-`fleet bridge set KEY --credential-source station-plane …`, whose audience is the
-Hub's own SuperPipeline origin; see
+`fleet bridge set KEY --credential-source station-plane` (the Hub fills in the occupant, the
+workspace's organization and its own SuperPipeline origin), or add the row as one with
+`fleet bridge add … --credential-source station-plane` and no token; see
 [DEPLOYMENT.md → Giving an agent a plane credential source](DEPLOYMENT.md#giving-an-agent-a-plane-credential-source).
 
 ## Sequence

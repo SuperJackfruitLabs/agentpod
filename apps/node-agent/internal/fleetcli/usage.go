@@ -23,11 +23,12 @@ const UsersUsage = `usage:
 
 const BridgeUsage = `usage:
   fleet bridge list
-  fleet bridge add --key K --board B --station S --token T [--mcp-token M]
-                   [--mode M] [--concurrency N] [--profile P] [--wait-ms N] [--enabled true|false]
+  fleet bridge add --key K --board B --station S (--token T | --credential-source station-plane)
+                   [--mcp-token M] [--mode M] [--concurrency N] [--profile P] [--wait-ms N]
+                   [--enabled true|false] [--principal P --organization O --audience A]
   fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                    [--token T] [--mcp-token M] [--concurrency N] [--profile P] [--wait-ms N]
-                   [--credential-source station-plane --principal P --organization O --audience A]
+                   [--credential-source station-plane [--principal P --organization O --audience A]]
                    [--credential-source none --token T]
   fleet bridge rm KEY
   fleet bridge related-work BOARD on|off

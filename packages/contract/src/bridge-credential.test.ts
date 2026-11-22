@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { BridgeCredentialSource, bridgeCredentialSourceFor } from "./bridge-credential";
+import { BridgeCredentialSource, BridgeCredentialSourceRequest, bridgeCredentialSourceFor } from "./bridge-credential";
 const PRODUCTION = "https://app.superpipeline.dev";
 const STAGING = "https://staging-app.superpipeline.dev";
 const valid = {
@@ -44,4 +44,13 @@ test("a deployment admits exactly its own audience", () => {
 test("a deployment audience that is not an https origin admits nothing", () => {
   for (const audience of ["", "http://app.superpipeline.dev", "https://app.superpipeline.dev/", "not a url"])
     expect(() => bridgeCredentialSourceFor(audience)).toThrow();
+});
+
+test("a roster write may ask the hub to derive a source, with no identity field half-typed", () => {
+  expect(BridgeCredentialSourceRequest.parse({ version: 1, kind: "station-plane" })).toEqual({ version: 1, kind: "station-plane" });
+  expect(BridgeCredentialSourceRequest.parse(valid)).toEqual(valid);
+  // Some identity fields but not all is neither a full source nor a request to derive one.
+  expect(BridgeCredentialSourceRequest.safeParse({ version: 1, kind: "station-plane", principalId: valid.principalId }).success).toBe(false);
+  expect(BridgeCredentialSourceRequest.safeParse({ version: 1, kind: "token" }).success).toBe(false);
+  expect(BridgeCredentialSourceRequest.safeParse({ version: 1, kind: "station-plane", token: "secret" }).success).toBe(false);
 });
