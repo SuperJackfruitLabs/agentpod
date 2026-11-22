@@ -66,6 +66,10 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Fixed
 
+- A checkpoint run still going no longer logs "checkpoint dispatch refused …
+  attempt.unresolved" at warn on every recover read of its status: it holds new
+  checkpoint claims as before, said once at info by the orchestrator.
+
 - A checkpoint run longer than the hub's 60 second execute wait no longer pays the
   30 second fault backoff, with a warning, on every card. The benign park (the run
   is still going: `checkpoint.running` on the card) asks the loop to read its

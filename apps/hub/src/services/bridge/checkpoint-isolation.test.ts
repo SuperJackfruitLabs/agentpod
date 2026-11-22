@@ -232,6 +232,20 @@ test("an attempt still unresolved holds new checkpoint claims, explicitly, and o
   expect(claims[0]).not.toHaveProperty("checkpointProtocol");
 });
 
+// Staging: while a long run was still going, every recover read of its status logged
+// "checkpoint dispatch refused … attempt.unresolved" at warn.
+test("a run still going holds new checkpoint claims without a refusal, and ordinary claims continue", async () => {
+  const { client, claims } = ordinaryClient();
+  const refused: unknown[] = [];
+  const running = { status: "unreported", attemptId: "attempt_running", reason: "Checkpoint dispatch requires reconciliation",
+    recheckMs: 5_000 } as const;
+  const result = await runOnce(deps(client, { checkpoint: recovering(async () => running), checkpointRefused: (e) => refused.push(e) }));
+  expect(result.status).toBe("idle");
+  expect(refused).toEqual([]);
+  expect(claims).toHaveLength(1);
+  expect(claims[0]).not.toHaveProperty("checkpointOnly");
+});
+
 test("a capacity backoff holds new checkpoint claims, named capacity.backoff, and ordinary claims continue", async () => {
   const { client, claims } = ordinaryClient();
   const refused: unknown[] = [];

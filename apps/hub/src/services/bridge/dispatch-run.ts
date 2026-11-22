@@ -65,7 +65,11 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     }
     if (resumed && resumed.status !== "unreported") return resumed;
     if (resumed) {
-      refuse(new CheckpointRefused("uncertain", resumed.reason === CAPACITY_HOLD_REASON ? "capacity.backoff" : "attempt.unresolved"));
+      // A run still going (`recheckMs`, the benign execute park) holds new checkpoint claims too, but
+      // it is not a refusal: the orchestrator already said it at info, and the next cycle re-reads it.
+      // Naming it here put a warning in the log every few seconds of every long run.
+      if (resumed.recheckMs === undefined)
+        refuse(new CheckpointRefused("uncertain", resumed.reason === CAPACITY_HOLD_REASON ? "capacity.backoff" : "attempt.unresolved"));
       held = true;
     }
     if (!held) try {
