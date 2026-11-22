@@ -254,8 +254,8 @@ describe("upgrading a file-based install", () => {
     // `fleet bench stage add` on the same node: the node's digest changes for every profile it serves.
     const res = await call("POST", "/stages", addBody());
     expect(res.status).toBe(201);
-    const body = z.object({ repinned: z.array(z.string()) }).parse(await res.json());
-    expect(body.repinned).toEqual(["legacy"]);
+    const body = z.object({ otherStagesRepinned: z.array(z.string()) }).parse(await res.json());
+    expect(body.otherStagesRepinned).toEqual(["legacy"]);
     const adopted = must(installedFor("legacy"), "adopted profile");
     expect(adopted.target.registry_sha256).toBe(node.digest());
     expect(adopted.target.registry_sha256).not.toBe(before.target.registry_sha256);
@@ -338,8 +338,11 @@ describe("a stage set up from the hub", () => {
     expect(repinned.status).toBe(200);
     // The reply names this stage's own re-pinned fields, not only the other stages it moved.
     const PinChange = z.object({ from: z.string(), to: z.string() });
-    const { changed } = z.object({ changed: z.record(z.string(), PinChange) }).parse(await repinned.json());
+    const { changed, otherStagesRepinned } = z.object({ changed: z.record(z.string(), PinChange),
+      otherStagesRepinned: z.array(z.string()) }).parse(await repinned.json());
     expect(Object.keys(changed).toSorted()).toEqual(["registry_sha256", "worker_sha256"]);
+    // The other stage on the node (adopted from the file) moved to the new digest with it.
+    expect(otherStagesRepinned).toEqual(["legacy"]);
     expect(changed.worker_sha256).toEqual({ from: "e".repeat(64), to: "a".repeat(64) });
     // The runtime kept from before refuses as stale; that is what a loop built once was stuck on.
     expect(await first.port.current(before)).toBe(false);

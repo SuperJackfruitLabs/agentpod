@@ -66,6 +66,11 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Fixed
 
+- The `fleet bench stage set|rm` reply field `repinned` is now
+  `otherStagesRepinned`: it always named only the other stages on the node moved to
+  its new digest, so on a one-stage node it read `[]` while `changed` listed this
+  stage's own re-pinned fields.
+
 - A checkpoint run still going no longer logs "checkpoint dispatch refused …
   attempt.unresolved" at warn on every recover read of its status: it holds new
   checkpoint claims as before, said once at info by the orchestrator.

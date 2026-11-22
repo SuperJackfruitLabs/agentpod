@@ -287,8 +287,10 @@ async function finish(userId: string, tenantId: string, name: string, profile: C
     .where(and(eq(bridgeAgents.tenantId, tenantId), eq(bridgeAgents.key, rosterKey)));
   return {
     status: created ? 201 : 200,
-    // `changed` is this stage's own pins; `repinned` names the OTHER stages on the node moved to its new digest.
-    body: { stage: view(profile, "fleet", stageId, { ok: true, status }), changed: pinChanges(before, profile), repinned,
+    // `changed` is this stage's own pins; `otherStagesRepinned` names the other stages on the node that
+    // were moved to its new digest. Named so: a bare `repinned: []` read as "nothing was repinned".
+    body: { stage: view(profile, "fleet", stageId, { ok: true, status }), changed: pinChanges(before, profile),
+      otherStagesRepinned: repinned,
       checkpointPolicy: checkpointPolicyFor(profile),
       nextSteps: nextSteps(profile, stageId, Boolean(row?.mcp)) },
   };
@@ -401,7 +403,7 @@ export function removeBenchStage(userId: string, tenantId: string, name: string)
     await reloadStageProfiles();
     const fileStillDeclares = installedFileCheckpointProfiles()
       .some((p) => p.target.tenant_id === tenantId && (p.coordinatorProfileId ?? p.profileKey) === name);
-    return { status: 200, body: { removed: name, repinned, fileStillDeclares,
+    return { status: 200, body: { removed: name, otherStagesRepinned: repinned, fileStillDeclares,
       nextSteps: [`The roster row ${profile.agentKey} is kept; remove it with fleet bridge rm ${profile.agentKey} if the agent should stop claiming.`,
         ...(fileStillDeclares ? ["The legacy profile file still declares this stage; remove it there too, or it is served from the file again after its node registry matches."] : [])] } };
   });

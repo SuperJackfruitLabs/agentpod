@@ -103,7 +103,11 @@ the selector alone; the Node keeps the repositories and worker as installed) and
 re-derives the Hub's pins; `--refresh` does only that, and `--repin` re-pins the
 Node's worker and coordinator digests to the installed bytes after an update. The
 reply to `add` and `set` prints the stage's `checkpointPolicy` for SuperPipeline
-and the steps no verb takes.
+and the steps no verb takes. In it, `changed` is this stage's own pins that moved
+(each field with its value before and after), and `otherStagesRepinned` names the
+*other* stages on the same Node that the write moved to the Node's new digest; on
+a Node that serves one stage it is empty, however much `changed` lists. `stage
+rm` answers `otherStagesRepinned` too.
 
 `--repo` is the stage's **allow-list**. Today a claim's policy must name exactly
 these repositories, in order (`claimRepositoriesAllowed` in
