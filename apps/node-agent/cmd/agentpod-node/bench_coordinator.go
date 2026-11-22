@@ -75,30 +75,49 @@ func checkpointCoordinatorHandler(next gateway.Handler, cfg config.Config) (gate
 			slot.close()
 		}
 	}
-	return gateway.HandlerFunc(func(ctx context.Context, verb string, params json.RawMessage, emit func(int, string, bool, string) error) (any, bool, error) {
-		switch verb {
-		case benchbridge.VerbRegistryStatus, benchbridge.VerbRegistrySet, benchbridge.VerbRegistryRemove:
-			value, err := registryVerb(ctx, manager, verb, params)
-			return value, false, err
-		case benchcoordinatorwire.Verb:
-			if slot == nil {
-				// Unchanged from before the registry verbs: with no registry pinned the
-				// coordinator verb is not this branch's.
-				return next.Handle(ctx, verb, params, emit)
-			}
-		default:
+	return &coordinatorHandler{next: next, slot: slot, manager: manager}, closeAll
+}
+
+// coordinatorHandler wraps the chain. It is a type, not a gateway.HandlerFunc, because a wrapper
+// must forward HandleFrame: ACP and terminal input arrive as frames, and a wrapper that drops
+// gateway.FrameHandler leaves every ACP session waiting for its handshake.
+type coordinatorHandler struct {
+	next    gateway.Handler
+	slot    *coordinatorSlot
+	manager *benchbridge.RegistryManager
+}
+
+func (h *coordinatorHandler) HandleFrame(frameType, id string, raw json.RawMessage) error {
+	if fh, ok := h.next.(gateway.FrameHandler); ok {
+		return fh.HandleFrame(frameType, id, raw)
+	}
+	return nil
+}
+
+func (h *coordinatorHandler) Handle(ctx context.Context, verb string, params json.RawMessage, emit func(int, string, bool, string) error) (any, bool, error) {
+	slot, next := h.slot, h.next
+	switch verb {
+	case benchbridge.VerbRegistryStatus, benchbridge.VerbRegistrySet, benchbridge.VerbRegistryRemove:
+		value, err := registryVerb(ctx, h.manager, verb, params)
+		return value, false, err
+	case benchcoordinatorwire.Verb:
+		if slot == nil {
+			// Unchanged from before the registry verbs: with no registry pinned the
+			// coordinator verb is not this branch's.
 			return next.Handle(ctx, verb, params, emit)
 		}
-		dedicated, err := slot.current()
-		if err != nil || dedicated == nil {
-			request, parseErr := benchcoordinatorwire.ParseRequest(params)
-			if parseErr != nil {
-				return nil, false, benchcoordinatorwire.ErrInvalid
-			}
-			return benchcoordinatorwire.Response{Version: benchcoordinatorwire.Version, Operation: request.Operation, State: "refused", Code: "unavailable"}, false, nil
+	default:
+		return next.Handle(ctx, verb, params, emit)
+	}
+	dedicated, err := slot.current()
+	if err != nil || dedicated == nil {
+		request, parseErr := benchcoordinatorwire.ParseRequest(params)
+		if parseErr != nil {
+			return nil, false, benchcoordinatorwire.ErrInvalid
 		}
-		return dedicated.Handle(ctx, verb, params, emit)
-	}), closeAll
+		return benchcoordinatorwire.Response{Version: benchcoordinatorwire.Version, Operation: request.Operation, State: "refused", Code: "unavailable"}, false, nil
+	}
+	return dedicated.Handle(ctx, verb, params, emit)
 }
 
 func strictDecode(raw json.RawMessage, dst any) error {

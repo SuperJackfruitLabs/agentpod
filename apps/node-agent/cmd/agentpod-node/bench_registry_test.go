@@ -143,3 +143,35 @@ func TestRegistryVerbsAnswerWithNoRegistryPinned(t *testing.T) {
 		t.Fatal("a node with no registry accepted a stage")
 	}
 }
+
+type frameRecorder struct{ frames []string }
+
+func (r *frameRecorder) Handle(context.Context, string, json.RawMessage, func(int, string, bool, string) error) (any, bool, error) {
+	return "ordinary", false, nil
+}
+func (r *frameRecorder) HandleFrame(frameType, id string, _ json.RawMessage) error {
+	r.frames = append(r.frames, frameType+":"+id)
+	return nil
+}
+
+// The coordinator wrapper sits in the production chain in front of the ACP handler, so it must
+// forward input frames: dropping them left every ACP session timing out on its handshake.
+func TestCoordinatorWrapperForwardsInputFrames(t *testing.T) {
+	path, _ := installedRegistry(t, "")
+	for name, cfg := range map[string]config.Config{
+		"no registry": {NodeID: "node_reload"},
+		"registry":    {Hub: "https://hub.test", NodeID: "node_reload", NodeSecret: "secret", ProposedCheckpointRegistry: path},
+	} {
+		inner := &frameRecorder{}
+		h, closeAll := checkpointCoordinatorHandler(inner, cfg)
+		fh, ok := h.(gateway.FrameHandler)
+		if !ok {
+			closeAll()
+			t.Fatalf("%s: the wrapper drops FrameHandler", name)
+		}
+		if err := fh.HandleFrame("input", "acp-1", json.RawMessage(`{"data":"x"}`)); err != nil || len(inner.frames) != 1 || inner.frames[0] != "input:acp-1" {
+			t.Errorf("%s: frame not forwarded: %v %v", name, inner.frames, err)
+		}
+		closeAll()
+	}
+}
