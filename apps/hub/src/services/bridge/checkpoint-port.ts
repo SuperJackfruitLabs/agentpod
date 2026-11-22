@@ -60,16 +60,45 @@ export function readyReplyRefusal(reply: BenchCoordinatorResponse, profile: Chec
   return field ? `node.target.${field}` : "node.target.shape";
 }
 
+export type CheckpointRuntime = { client(): Promise<SuperpipelineClient>; port: CheckpointDispatchPort };
+
+function installedFor(tenantId: string, boardId: string, stationId: string, agentKey: string): CheckpointProfile | undefined {
+  return installedCheckpointProfiles().find((p) => p.target.tenant_id === tenantId &&
+    p.target.board_id === boardId && p.target.station_id === stationId && p.agentKey === agentKey);
+}
+
 /** Called for the actual selected roster row. No ACP readiness, station label,
  * caller URL, or advertised health is used to infer this installation.
  */
-export function checkpointRuntime(tenantId: string, boardId: string, stationId: string, agentKey: string): {
-  client(): Promise<SuperpipelineClient>; port: CheckpointDispatchPort;
-} | undefined {
-  const found = installedCheckpointProfiles().find((p) => p.target.tenant_id === tenantId &&
-    p.target.board_id === boardId && p.target.station_id === stationId && p.agentKey === agentKey);
-  if (!found) return undefined;
-  const profile: CheckpointProfile = found;
+export function checkpointRuntime(tenantId: string, boardId: string, stationId: string, agentKey: string): CheckpointRuntime | undefined {
+  const found = installedFor(tenantId, boardId, stationId, agentKey);
+  return found ? runtimeFor(found, tenantId, boardId, stationId) : undefined;
+}
+
+/**
+ * The runtime for a roster row's loop, looked up again at the start of every claim cycle.
+ *
+ * A loop lives as long as its roster row, but a stage's profile does not: `fleet bench stage set`
+ * (or `--repin`) installs a new one with no restart. A runtime built once at loop start kept the
+ * old profile, and every later cycle refused it as `current.stale`, so no bench card was claimed
+ * again until the hub restarted. The same runtime is returned while the installed profile is
+ * unchanged, so its backoffs hold across cycles; a changed profile gets a new runtime at the next
+ * cycle's start. A cycle never swaps the port it is using, and an attempt reserved under the old
+ * profile is found by the new runtime's `recover` as superseded and resolved by that path.
+ */
+export function checkpointRuntimeResolver(tenantId: string, boardId: string, stationId: string, agentKey: string):
+  () => CheckpointRuntime | undefined {
+  let cached: { pin: string; runtime: CheckpointRuntime } | undefined;
+  return () => {
+    const found = installedFor(tenantId, boardId, stationId, agentKey);
+    if (!found) { cached = undefined; return undefined; }
+    const pin = canonicalCheckpoint(found);
+    if (cached?.pin !== pin) cached = { pin, runtime: runtimeFor(found, tenantId, boardId, stationId) };
+    return cached.runtime;
+  };
+}
+
+function runtimeFor(profile: CheckpointProfile, tenantId: string, boardId: string, stationId: string): CheckpointRuntime {
   const selected = target(profile);
   const backoff = createAttemptBackoff();
   /** After a capacity refusal this station's checkpoint claims wait, growing per card and bounded. */

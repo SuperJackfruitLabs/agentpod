@@ -36,7 +36,7 @@ import { adminBenchRouter } from "../../src/routes/admin-bench";
 import { connectionManager, handleNodeMessage } from "../../src/services/broker";
 import { installedCheckpointProfiles } from "../../src/services/bridge/checkpoint-profiles";
 import { parseCheckpointProfile, type CheckpointProfile } from "../../src/services/bridge/checkpoint-profile";
-import { checkpointRuntime } from "../../src/services/bridge/checkpoint-port";
+import { checkpointRuntime, checkpointRuntimeResolver } from "../../src/services/bridge/checkpoint-port";
 import { reloadStageProfiles } from "../../src/services/bridge/bench-stage-store";
 import { setOrgPlaneClientForTests } from "../../src/auth/org-plane/client";
 import { TEST_PLANE } from "../../src/auth/org-plane/config";
@@ -121,7 +121,19 @@ const node = {
 
 function attachNode() {
   connectionManager.register(nodeId, (message) => {
-    if (message.type !== "req" || !message.verb.startsWith("bench.registry.")) return;
+    if (message.type !== "req") return;
+    if (message.verb === "bench.coordinator") {
+      // The coordinator's `ready`: it advertises the target its registry serves for the selector.
+      const ready = z.object({ operation: z.literal("ready"), tenant_id: z.string(), board_id: z.string(), station_id: z.string() })
+        .loose().parse(message.params);
+      const served = node.status().profiles.find((p) => p.target.tenant_id === ready.tenant_id &&
+        p.target.board_id === ready.board_id && p.target.station_id === ready.station_id);
+      handleNodeMessage(nodeId, { type: "res", id: message.id, ok: true, data: served
+        ? { version: "agentpod.bench-coordinator.v1", operation: "ready", state: "available", target: served.target }
+        : { version: "agentpod.bench-coordinator.v1", operation: "ready", state: "refused", code: "unavailable" } });
+      return;
+    }
+    if (!message.verb.startsWith("bench.registry.")) return;
     try {
       const data = node.answer(message.verb, message.params ?? {});
       handleNodeMessage(nodeId, { type: "res", id: message.id, ok: true, data });
@@ -306,6 +318,26 @@ describe("a stage set up from the hub", () => {
     expect(roster?.boardId).toBe(BOARD2);
     expect(checkpointRuntime(tenantId, BOARD, stationId, "review")).toBeUndefined();
     expect(checkpointRuntime(tenantId, BOARD2, stationId, "review")).toBeDefined();
+  });
+
+  test("a running loop's next cycle dispatches under the changed stage, with no restart", async () => {
+    // What a bridge loop holds: one resolver per roster row, asked at every cycle's start.
+    const resolve = checkpointRuntimeResolver(tenantId, BOARD2, stationId, "review");
+    const identity = { tenantId, boardId: BOARD2, stationId };
+    const first = must(resolve(), "runtime before the change");
+    const before = must(await first.port.ready(identity), "ready before the change");
+    expect(resolve()).toBe(first);
+
+    // A worker update, then `fleet bench stage set review --repin`: a new profile, same selector.
+    node.worker = "a".repeat(64);
+    expect((await call("PATCH", "/stages/review", { repin: true })).status).toBe(200);
+    // The runtime kept from before refuses as stale; that is what a loop built once was stuck on.
+    expect(await first.port.current(before)).toBe(false);
+    const next = must(resolve(), "runtime after the change");
+    expect(next).not.toBe(first);
+    const after = must(await next.port.ready(identity), "ready after the change");
+    expect(after.workerSHA256).toBe("a".repeat(64));
+    expect(await next.port.current(after)).toBe(true);
   });
 
   test("a stage taken over from the file becomes the table's", async () => {

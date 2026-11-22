@@ -66,6 +66,13 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Fixed
 
+- A stage changed with `fleet bench stage set` (or `--repin`) reaches the running
+  bridge loop. The loop built its checkpoint runtime once, at start, and every later
+  cycle refused the new profile as `current.stale`, so no bench card was claimed
+  until the hub restarted. The runtime is now looked up at each cycle's start and
+  rebuilt only when the installed profile changed; a cycle never swaps its port, and
+  an attempt made under the old profile is resolved as superseded.
+
 - The hub kept the node's `bench.registry.manage` capability: it was missing from
   the contract's `NodeCapability`, so the hello frame's parse dropped it and every
   `fleet bench` verb refused the node as one too old. A contract test now reads the

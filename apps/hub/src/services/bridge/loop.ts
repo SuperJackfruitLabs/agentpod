@@ -22,7 +22,7 @@ import { runOnce, type AcpPort, type DispatchResult } from "./dispatch";
 import { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./superpipeline";
 import { createLogger } from "../../utils/logger";
 import { onWorkAvailable } from "./work-wake";
-import { checkpointRuntime } from "./checkpoint-port";
+import { checkpointRuntimeResolver } from "./checkpoint-port";
 import { checkpointCycle, createCheckpointRefusalLog } from "./checkpoint-isolation";
 import { createQuietLog } from "./quiet-log";
 
@@ -388,9 +388,10 @@ export async function startSuperpipelineBridge(
         ...(agent.credentialSource ? {credential: bridgePlaneCredential(agent)} : {}),
         fetch: fetchAdapter,
       });
-      // Config pins belong to this loop's installation, not its polling cycle.
-      // An unavailable snapshot returns no dedicated runtime; ordinary work is unchanged.
-      const dedicated = checkpointRuntime(agent.tenantId ?? BOOTSTRAP_TENANT_ID,
+      // Looked up at every cycle's start, not once here: a stage changed with `fleet bench stage
+      // set` installs a new profile with no restart, and a runtime kept from loop start refused it
+      // as stale forever. An unavailable snapshot returns no dedicated runtime; ordinary work is unchanged.
+      const dedicated = checkpointRuntimeResolver(agent.tenantId ?? BOOTSTRAP_TENANT_ID,
         agent.boardId, agent.stationId, agent.key);
       // A checkpoint refusal never ends this agent's cycle; it is logged once per reason.
       const checkpointRefused = createCheckpointRefusalLog((m, meta) => log(m, { agent: agent.key, ...meta }));
@@ -398,7 +399,7 @@ export async function startSuperpipelineBridge(
         run: async (handover) => {
           return runOnce({
             handover,
-            ...await checkpointCycle(dedicated, client, checkpointRefused),
+            ...await checkpointCycle(dedicated(), client, checkpointRefused),
             checkpointRefused,
             acp,
             agent: config,
