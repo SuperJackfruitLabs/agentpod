@@ -83,6 +83,7 @@ func fleetBenchStage(args []string) {
 	launch := fs.String("launch", "", "registered-v1 (default) or grouped")
 	repin := fs.Bool("repin", false, "re-pin the node registry's worker and coordinator digests to the installed bytes")
 	refresh := fs.Bool("refresh", false, "re-derive the hub's pins and the node's target, changing nothing else (set)")
+	keepBench := fs.Bool("keep-bench", false, "keep a card's bench after its checkpoint settles; --keep-bench=false reclaims again (the default)")
 	var repos, workerArgs, env repeatable
 	fs.Var(&repos, "repo", "name=N,provider=forge|github,repository=OWNER/REPO,clone=URL[,base=B][,format=sha1|sha256] (repeatable)")
 	fs.Var(&workerArgs, "worker-arg", "one argument after --worker (repeatable)")
@@ -156,6 +157,12 @@ func fleetBenchStage(args []string) {
 	if *repin {
 		body["repin"] = true
 	}
+	// Sent only when given, so a `set` that does not name it leaves the stage's choice alone.
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "keep-bench" {
+			body["keepBench"] = *keepBench
+		}
+	})
 
 	if verb == "add" {
 		if *bridgeKey != "" {

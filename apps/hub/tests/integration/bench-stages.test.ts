@@ -24,6 +24,8 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { BenchDoctorCheck, BenchStageView, HelloMsg } from "@agentpod/contract";
 import { setNodeCapabilities } from "../../src/services/nodes/registry";
+import { stageKeepsBench as keepFor } from "../../src/services/bridge/checkpoint-reclaim";
+
 
 import { db } from "../../src/db/drizzle";
 import { tenants } from "../../src/db/schema/tenants";
@@ -351,6 +353,23 @@ describe("a stage set up from the hub", () => {
     const after = must(await next.port.ready(identity), "ready after the change");
     expect(after.workerSHA256).toBe("a".repeat(64));
     expect(await next.port.current(after)).toBe(true);
+  });
+
+  test("a stage reclaims settled benches unless set to --keep-bench, and a re-pin keeps the choice", async () => {
+    const List = z.object({ stages: z.array(BenchStageView) });
+    const keep = async () => List.parse(await (await call("GET", "/stages")).json()).stages.find((st) => st.name === "review")?.keepBench;
+    expect(await keep()).toBe(false);
+    expect(await keepFor(must(installedFor("review"), "review"))).toBe(false);
+    expect((await call("PATCH", "/stages/review", { keepBench: true })).status).toBe(200);
+    expect(await keep()).toBe(true);
+    expect(await keepFor(must(installedFor("review"), "review"))).toBe(true);
+    // Another stage's write re-pins this one and leaves its choice alone.
+    expect((await call("PATCH", "/stages/legacy", { refresh: true })).status).toBe(200);
+    expect(await keep()).toBe(true);
+    expect((await call("PATCH", "/stages/review", { keepBench: false })).status).toBe(200);
+    expect(await keep()).toBe(false);
+    // A stage served only from the profile file has no row: it reclaims, the default.
+    expect(await keepFor({ ...must(installedFor("review"), "review"), coordinatorProfileId: "file-only" })).toBe(false);
   });
 
   test("a stage taken over from the file becomes the table's", async () => {

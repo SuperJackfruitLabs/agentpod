@@ -139,6 +139,26 @@ func (j Journal) update(ctx context.Context, key string, fn func(*document) (boo
 	return benchjournal.WriteAtomic(j.Root, key+".json", out)
 }
 
+// ErrUnsettled refuses a bench whose journal still has an attempt that owns it or is not terminal.
+var ErrUnsettled = errors.New("bench has an unsettled attempt")
+
+// WhileSettled runs fn under the bench's own lock, and only while every record the journal holds for
+// the key is terminal and none owns the bench. A prepare reserves under the same lock, so no attempt
+// can take the bench while fn runs. A key with no journal is settled: nothing was ever launched there.
+func (j Journal) WhileSettled(ctx context.Context, key string, fn func() error) error {
+	return j.update(ctx, key, func(doc *document) (bool, error) {
+		if doc.Active != "" {
+			return false, ErrUnsettled
+		}
+		for i := range doc.Records {
+			if !doc.Records[i].terminal() {
+				return false, ErrUnsettled
+			}
+		}
+		return false, fn()
+	})
+}
+
 // withRecord loads the spec's own record. active reports whether it still owns
 // the bench; fn decides what an inactive record may do.
 func (j Journal) withRecord(ctx context.Context, spec benchdispatch.SourceSpec, fn func(r *record, active bool) (bool, error)) error {

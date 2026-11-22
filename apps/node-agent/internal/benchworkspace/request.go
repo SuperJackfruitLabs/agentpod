@@ -60,6 +60,9 @@ var shapes = map[string]shape{
 	"setup":      {[]string{"key", "holder", "request_id"}, []string{"offline", "repository_name", "lease_token"}},
 	"checkpoint": {[]string{"key", "lease_token"}, nil}, "release": {[]string{"key", "lease_token"}, nil},
 	"stop": {[]string{"key", "lease_token"}, nil}, "stop_admin": {[]string{"key"}, nil}, "archive": {[]string{"key"}, nil},
+	// reclaim deletes a released, idle bench's tree and retires its quota. An operator operation:
+	// the node sends it for a card the hub has settled (benchbridge.Reclaim), never on its own.
+	"reclaim": {[]string{"key"}, nil},
 }
 
 func Known(operation string) bool { _, ok := shapes[operation]; return ok }
@@ -69,10 +72,8 @@ func Known(operation string) bool { _, ok := shapes[operation]; return ok }
 // for the same key makes a fresh bench.
 func Reclaim(phase string) bool { return phase == "reclaiming" || phase == "reclaimed" }
 
-// knownResponse also reads replies to reclaim, an operator operation. AgentPod
-// never sends one: reclaim has no request shape, so Parse and every client
-// refuse it, and only the response codec checks the pinned corpus.
-func knownResponse(operation string) bool { return Known(operation) || operation == "reclaim" }
+// knownResponse is every operation whose reply the codec reads.
+func knownResponse(operation string) bool { return Known(operation) }
 func Growth(operation string) bool {
 	switch operation {
 	case "create", "recover", "lease", "run", "setup":

@@ -100,6 +100,21 @@ func (h *coordinatorHandler) Handle(ctx context.Context, verb string, params jso
 	case benchbridge.VerbRegistryStatus, benchbridge.VerbRegistrySet, benchbridge.VerbRegistryRemove:
 		value, err := registryVerb(ctx, h.manager, verb, params)
 		return value, false, err
+	case benchbridge.VerbReclaim:
+		var req benchbridge.ReclaimRequest
+		if err := strictDecode(params, &req); err != nil {
+			return nil, false, &benchbridge.Refusal{Code: "invalid_request", Message: "not a reclaim request"}
+		}
+		if slot == nil {
+			return benchbridge.ReclaimReply{State: "refused", Code: "unavailable"}, false, nil
+		}
+		// No coordinator (a registry that failed to load) has no bench to reclaim: refused, not an error.
+		dedicated, _ := slot.current()
+		if dedicated == nil {
+			return benchbridge.ReclaimReply{State: "refused", Code: "unavailable"}, false, nil
+		}
+		reply, err := dedicated.Reclaim(ctx, req)
+		return reply, false, err
 	case benchcoordinatorwire.Verb:
 		if slot == nil {
 			// Unchanged from before the registry verbs: with no registry pinned the

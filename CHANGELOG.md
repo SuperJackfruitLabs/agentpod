@@ -12,6 +12,16 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Added
 
+- A settled card's bench is reclaimed. Once the hub records a card's checkpoint
+  settlement, it asks the node to reclaim that card's bench (`bench.reclaim`), so
+  settled benches stop holding their tree and quota until SuperBench's idle sweep
+  and a host no longer fills after a few cards. Per stage and on by default;
+  `fleet bench stage set NAME --keep-bench` keeps them. Never for a card with
+  another unsettled attempt, a held lease or a bench that is not ready; a failed
+  reclaim only logs. A card that comes back gets a fresh bench from its card
+  branch. Migration 0136 adds `bench_stages.keep_bench`. The node's user must be a
+  SuperBench operator.
+
 - `fleet bridge add --credential-source station-plane` adds a source row with no
   `--token`. With no `--principal`, `--organization` or `--audience`, the hub fills
   in the station's occupant, the workspace's organization and its own SuperPipeline

@@ -93,6 +93,15 @@ func TestBenchStageSetSendsOnlyWhatWasAsked(t *testing.T) {
 	if _, _, _, body, _ = rec.snapshot(); mustJSON(t, body) != `{"refresh":true}` {
 		t.Errorf("refresh body %v", body)
 	}
+	// --keep-bench is sent only when given, both ways, so another `set` never resets the stage's choice.
+	for args, want := range map[string]string{"--keep-bench": `{"keepBench":true}`, "--keep-bench=false": `{"keepBench":false}`} {
+		if _, code := run(t, bin, env, "bench", "stage", "set", "review", args); code != 0 {
+			t.Fatalf("%s: exit = %d", args, code)
+		}
+		if _, _, _, body, _ = rec.snapshot(); mustJSON(t, body) != want {
+			t.Errorf("%s: body %v", args, body)
+		}
+	}
 }
 
 func TestBenchRefusalsNeverLeaveTheClient(t *testing.T) {

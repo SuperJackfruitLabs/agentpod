@@ -25,29 +25,34 @@ func reclaimCorpus(t *testing.T) (valid, invalid, lexical []reclaimCase) {
 	return corpus.Valid, corpus.Invalid, corpus.Lexical
 }
 
-// AgentPod never reclaims: SuperBench reclaims released, idle benches itself.
-// Every reclaim request, the valid one included, is refused by the codec that
-// gates every client send.
-func TestReclaimRequestsAreNeverFormed(t *testing.T) {
+// AgentPod reclaims a bench only once the hub has settled its card (benchbridge.Reclaim). The
+// codec forms exactly the corpus's valid request, key only, and refuses every other reclaim request.
+func TestReclaimRequestIsKeyOnly(t *testing.T) {
 	valid, invalid, lexical := reclaimCorpus(t)
-	requests := 0
-	for _, group := range [][]reclaimCase{valid, invalid, lexical} {
+	formed := 0
+	for i, group := range [][]reclaimCase{valid, invalid, lexical} {
 		for _, c := range group {
 			if c.Kind != "request" {
 				continue
 			}
-			requests++
 			raw := []byte(c.Body)
 			if c.Raw != "" {
 				raw = []byte(c.Raw)
 			}
-			if _, err := Parse(raw); err == nil {
-				t.Fatal("reclaim request accepted", c.Name)
+			_, err := Parse(raw)
+			if i == 0 && err != nil {
+				t.Fatal("valid reclaim request refused", c.Name, err)
+			}
+			if i > 0 && err == nil {
+				t.Fatal("invalid reclaim request accepted", c.Name)
+			}
+			if err == nil {
+				formed++
 			}
 		}
 	}
-	if requests == 0 || Known("reclaim") {
-		t.Fatal("reclaim became a request operation")
+	if formed != 1 || !Known("reclaim") || Growth("reclaim") || ReadOnly("reclaim") {
+		t.Fatal("reclaim is not exactly one key-only operator request")
 	}
 }
 

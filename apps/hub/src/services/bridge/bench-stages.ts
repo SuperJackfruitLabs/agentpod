@@ -226,7 +226,7 @@ export function targetDifference(served: CheckpointProfile["target"], pinned: Ch
 }
 
 function view(profile: CheckpointProfile, origin: BenchStageView["origin"], stageId: string | null,
-  node: NodeAnswer | undefined): BenchStageView {
+  node: NodeAnswer | undefined, keepBench = false): BenchStageView {
   const name = profile.coordinatorProfileId ?? profile.profileKey;
   let served: BenchStageView["served"] = "unknown";
   let detail: string | undefined;
@@ -246,7 +246,7 @@ function view(profile: CheckpointProfile, origin: BenchStageView["origin"], stag
     stageId, agentKey: profile.agentKey, agentId: profile.target.agent_id, checkpointRepository: profile.checkpointRepository,
     repositories: profile.repositories.map((r) => ({ name: r.name, provider: r.provider, repository: r.repository,
       repositorySHA256: r.repositorySHA256 })),
-    registrySHA256: profile.target.registry_sha256, served, ...(detail ? { detail } : {}) };
+    registrySHA256: profile.target.registry_sha256, keepBench, served, ...(detail ? { detail } : {}) };
 }
 
 /** The `checkpointPolicy` the SuperPipeline stage needs, for the operator to apply (no service route yet). */
@@ -279,8 +279,10 @@ function pinChanges(before: CheckpointProfile | undefined, after: CheckpointProf
 }
 
 async function finish(userId: string, tenantId: string, name: string, profile: CheckpointProfile, stageId: string | null,
-  status: BenchRegistryStatus, created: boolean, rosterKey: string, before?: CheckpointProfile): Promise<StageResult> {
-  await upsertStage({ tenantId, name, profile, stageId, origin: "fleet", createdBy: userId });
+  status: BenchRegistryStatus, created: boolean, rosterKey: string, before?: CheckpointProfile,
+  keepBench?: boolean): Promise<StageResult> {
+  await upsertStage({ tenantId, name, profile, stageId, origin: "fleet", createdBy: userId, ...(keepBench === undefined ? {} : { keepBench }) });
+  const kept = (await readStage(tenantId, name))?.row.keepBench ?? false;
   const repinned = await repinNode(tenantId, profile.target.node_id, status, name);
   await reloadStageProfiles();
   const [row] = await db.select({ mcp: bridgeAgents.mcpTokenEncrypted }).from(bridgeAgents)
@@ -289,7 +291,7 @@ async function finish(userId: string, tenantId: string, name: string, profile: C
     status: created ? 201 : 200,
     // `changed` is this stage's own pins; `otherStagesRepinned` names the other stages on the node that
     // were moved to its new digest. Named so: a bare `repinned: []` read as "nothing was repinned".
-    body: { stage: view(profile, "fleet", stageId, { ok: true, status }), changed: pinChanges(before, profile),
+    body: { stage: view(profile, "fleet", stageId, { ok: true, status }, kept), changed: pinChanges(before, profile),
       otherStagesRepinned: repinned,
       checkpointPolicy: checkpointPolicyFor(profile),
       nextSteps: nextSteps(profile, stageId, Boolean(row?.mcp)) },
@@ -328,7 +330,7 @@ export function addBenchStage(userId: string, tenantId: string, req: BenchStageA
     const served = status.profiles.find((p) => p.id === req.name) ?? refuse(502, "the node did not serve the stage it was given");
     const profile = buildProfile({ name: req.name, tenantId, organizationId, sourceTenantId, audience: at, reporter: reporterId, station,
       agentKey: roster.key, profileKey: roster.profileKey, served, repositories: req.repositories, checkpointRepository: req.checkpointRepository });
-    return finish(userId, tenantId, req.name, profile, req.stageId ?? null, status, true, roster.key);
+    return finish(userId, tenantId, req.name, profile, req.stageId ?? null, status, true, roster.key, undefined, req.keepBench ?? false);
   });
 }
 
@@ -384,7 +386,7 @@ export function setBenchStage(userId: string, tenantId: string, name: string, re
     const profile = buildProfile({ name, tenantId, organizationId, sourceTenantId: req.sourceTenantId ?? before.sourceTenantId,
       audience: at, reporter: reporterId, station, agentKey: roster.key, profileKey: roster.profileKey, served,
       repositories: req.repositories ?? before.repositories, checkpointRepository: req.checkpointRepository ?? before.checkpointRepository });
-    return finish(userId, tenantId, name, profile, req.stageId ?? stageId, status, false, roster.key, before);
+    return finish(userId, tenantId, name, profile, req.stageId ?? stageId, status, false, roster.key, before, req.keepBench);
   });
 }
 
@@ -419,7 +421,8 @@ export async function listBenchStages(tenantId: string): Promise<{ stages: Bench
   const answers = new Map<string, NodeAnswer>();
   await Promise.all([...nodeIds].map(async (id) => answers.set(id, await nodeRegistryStatus(id))));
   const out = [
-    ...stages.map((s) => view(s.profile, s.row.origin === "file" ? "file" : "fleet", s.row.stageId, answers.get(s.profile.target.node_id))),
+    ...stages.map((s) => view(s.profile, s.row.origin === "file" ? "file" : "fleet", s.row.stageId, answers.get(s.profile.target.node_id),
+      s.row.keepBench)),
     ...fileOnly.map((p) => view(p, "file-only", null, answers.get(p.target.node_id))),
   ];
   out.sort((a, b) => a.name.localeCompare(b.name));

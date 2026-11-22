@@ -92,6 +92,8 @@ const stageFields = {
   worker: BenchStageWorker,
   /** Re-pin the node registry's worker and coordinator digests to the bytes installed now. */
   repin: z.boolean().optional(),
+  /** Keep a card's bench after its checkpoint settles, rather than reclaim it (the default). */
+  keepBench: z.boolean().optional(),
 };
 
 const distinctRepositories = (v: { repositories?: BenchStageRepository[]; checkpointRepository?: string }) =>
@@ -118,6 +120,7 @@ export const BenchStageSetRequest = z.object({
   checkpointRepository: name.optional(),
   worker: BenchStageWorker.optional(),
   repin: z.boolean().optional(),
+  keepBench: z.boolean().optional(),
   /** Re-derive the hub's pins (occupant, owner, epoch, roster, reporter) and the node's target, changing nothing else. */
   refresh: z.boolean().optional(),
 }).strict().refine(distinctRepositories, "each repository appears once, by name and by OWNER/REPO");
@@ -138,6 +141,8 @@ export const BenchStageView = z.object({
   checkpointRepository: z.string(),
   repositories: z.array(z.object({ name: z.string(), provider: z.string(), repository: z.string(), repositorySHA256: sha })),
   registrySHA256: sha,
+  /** Whether a settled card's bench is kept (`--keep-bench`) rather than reclaimed. */
+  keepBench: z.boolean(),
   served: BenchStageServed,
   /** For `drifted`: the target fields that differ. For `unknown`: why the node was not asked. */
   detail: z.string().optional(),
@@ -154,3 +159,16 @@ export const BenchDoctorCheck = z.object({
   warn: z.boolean().optional(),
 });
 export type BenchDoctorCheck = z.infer<typeof BenchDoctorCheck>;
+
+/** `bench.reclaim`: the hub asks the node to reclaim one settled card's bench (Go `benchbridge.ReclaimRequest`). */
+export const BenchReclaimRequest = z.object({
+  tenant_id: z.string(), board_id: z.string(), station_id: z.string(), card_id: z.string(),
+}).strict();
+export type BenchReclaimRequest = z.infer<typeof BenchReclaimRequest>;
+/** The node's answer: reclaimed, absent (nothing left to reclaim) or refused with a closed code. */
+export const BenchReclaimReply = z.object({
+  state: z.enum(["reclaimed", "absent", "refused"]),
+  code: z.enum(["unsettled", "lease_held", "not_ready", "unsupported", "conflict", "forbidden", "unavailable"]).optional(),
+  bench_id: z.string().optional(),
+});
+export type BenchReclaimReply = z.infer<typeof BenchReclaimReply>;
