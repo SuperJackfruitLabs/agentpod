@@ -737,6 +737,38 @@ test.each(["prepare_pending", "prepared", "source_pending", "admitted", "complet
   expect(sent).toEqual(["status"]);
 });
 
+// Operator ruling: a card moved or cancelled after the bench pushed its work says where that work is.
+test("a run ended after the bench pushed this card's work says on the card where it was saved; nothing pushed, nothing said", async () => {
+  const { attempt: base, completion } = await completedAttemptFixture();
+  const completed = { ...base, row: { ...base.row, phase: "completed", completion: canonicalCheckpoint(completion) } };
+  const many = completion.service.checkpoints.length > 1;
+  const saved = completion.service.checkpoints.map((m) => (many ? m.name + " " : "") +
+    `${m.task_ref.replace("refs/heads/", "")} (${m.commit.slice(0, 7)})`).join(", ");
+  for (const [ended, why] of [[{ reason: "run.unbound", board: { status: "working" } }, "the card moved"],
+    [{ reason: "run.ended", board: { status: "ended", outcome: "released" } }, "the card moved or its run was ended"]] as const) {
+    resetCheckpointActivityForTests();
+    const h = harness({});
+    nodeAnswers(h.deps, [refusedStatus("stale_owner")]);
+    const held = retirements(h.deps);
+    const board = recordingBoard();
+    expect((await endEndedRun(completed, ended, h.deps, board.client)).status).toBe("released");
+    expect(held).toEqual([expect.objectContaining({ reason: "run_ended", phase: "completed" })]);
+    const notes = board.calls.filter((c) => c.path.endsWith("/activities")).map((c) => c.body);
+    expect(notes).toEqual([expect.objectContaining({ action: "checkpoint.stopped",
+      body: `Run stopped because ${why}; partial work saved to ${saved}.` })]);
+    expect(saved).toContain("card/");
+    expect(board.verbs().filter((v) => ["complete", "fail", "release"].includes(v))).toEqual([]);
+  }
+  // Retired before anything was pushed: no branch is named, and the card is not written to.
+  resetCheckpointActivityForTests();
+  const h = harness({});
+  nodeAnswers(h.deps, [refusedStatus("stale_owner")]);
+  retirements(h.deps);
+  const board = recordingBoard();
+  expect((await endEndedRun(preparePending(), { reason: "run.unbound", board: { status: "working" } }, h.deps, board.client)).status).toBe("released");
+  expect(board.calls).toEqual([]);
+});
+
 test("a node that cannot be reached does not keep a nothing-running attempt: it is retired with that as evidence", async () => {
   const h = harness({});
   h.deps.request = async () => ({ ok: false, error: "node offline" });

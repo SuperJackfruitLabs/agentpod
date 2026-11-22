@@ -17,10 +17,11 @@ import type { BenchCoordinatorCompletion } from "@agentpod/contract";
 import type { BoardActivity } from "./coalesce";
 import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
 import type { SuperpipelineClient } from "./superpipeline";
+import type { RunEndedReason } from "./checkpoint-run-ended";
 import { noteCheckpoint } from "./checkpoint-log";
 
 export type CheckpointActivityEvent = "prepared" | "running" | "completed" | "pushed" | "submitting" | "parked" | "failed" | "released"
-  | "lease_held";
+  | "lease_held" | "stopped_saved";
 
 /**
  * The supported way to free a bench whose release SuperBench refused (SuperBench's leases and
@@ -38,7 +39,7 @@ export const HELD_LEASE_OPERATOR_PATH = "`bench workspace stop_admin <key>`, the
 /** The activity for an event, or undefined when there is nothing worth saying. Exported for tests. */
 export function checkpointActivity(event: CheckpointActivityEvent, facts: {
   completion?: BenchCoordinatorCompletion; phase?: string; code?: string; reason?: string; benchKey?: string; message?: string;
-  running?: boolean;
+  running?: boolean; ended?: RunEndedReason;
 } = {}): BoardActivity | undefined {
   const action = `checkpoint.${event}`;
   switch (event) {
@@ -51,6 +52,16 @@ export function checkpointActivity(event: CheckpointActivityEvent, facts: {
       const list = members.map((m) => `${m.name} ${m.task_ref.replace(/^refs\/heads\//, "")} @ ${m.commit}`).join(", ");
       return { type: "action", action, body: `Checkpoint pushed: ${list}.`,
         parameter: { commits: members.map((m) => ({ name: m.name, ref: m.task_ref, commit: m.commit })) } };
+    }
+    // The board ended the run (the card moved or was cancelled) after the bench had pushed this card's
+    // work: the attempt is retired, and the card says where the work is. Nothing pushed, nothing said.
+    case "stopped_saved": {
+      const members = facts.completion?.service.checkpoints ?? [];
+      if (members.length === 0) return undefined;
+      const why = facts.ended === "run.unbound" ? "the card moved" : "the card moved or its run was ended";
+      const saved = members.map((m) => `${members.length > 1 ? `${m.name} ` : ""}${m.task_ref.replace(/^refs\/heads\//, "")} (${m.commit.slice(0, 7)})`).join(", ");
+      return { type: "action", action: "checkpoint.stopped", body: `Run stopped because ${why}; partial work saved to ${saved}.`,
+        parameter: { ended: facts.ended, commits: members.map((m) => ({ name: m.name, ref: m.task_ref, commit: m.commit })) } };
     }
     case "submitting": return { type: "action", action, body: "Checkpoint: submitting the result to the board." };
     // A definite node refusal, said before the board is told: the sentence is the run's failure reason.

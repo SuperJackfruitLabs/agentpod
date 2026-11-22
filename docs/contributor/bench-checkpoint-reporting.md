@@ -359,8 +359,20 @@ before a superseded attempt is resolved); on any pass that is about to park in
 `submission_pending` only after an authenticated `CHECKPOINT_RECEIPT_MISSING`,
 because a settlement that landed ends the run too. The read is a `GET`: it
 neither heartbeats the run nor touches the card. Once the board has ended the
-run, the Hub sends it nothing more, not even an activity. A verb on an unbound
-run would act on the card wherever it is now, and an activity would heartbeat it.
+run, the Hub sends it no verb. A verb on an unbound run would act on the card
+wherever it is now, and an activity would heartbeat it.
+
+One activity is the exception, by an operator ruling: when the attempt is
+retired and the bench had already pushed this card's work (the node's completed
+reply, or the completion a `completed` or `submission_pending` attempt retained),
+the card gets one `checkpoint.stopped` activity naming where it is, for example
+`Run stopped because the card moved; partial work saved to card/<card id>
+(<short sha>).` A run the board still shows working but no longer bound
+(`run.unbound`) reads "the card moved"; any other ending reads "the card moved
+or its run was ended". With nothing pushed, nothing is said. The activity is a
+run verb, so the board accepts it only while the run is still `working`
+(`run.unbound`); for a run the board has ended it answers `STALE_LEASE`, which
+is logged and changes nothing.
 
 **The current decision.** A node's current check that fails for an attempt it
 matched now asks the board too. When the board says the run ended, the decision

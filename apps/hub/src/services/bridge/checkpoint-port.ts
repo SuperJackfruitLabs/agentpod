@@ -147,7 +147,7 @@ export function checkpointRuntime(tenantId: string, boardId: string, stationId: 
       if (client && (RUN_ENDABLE_PHASES.has(attempt.row.phase) || attempt.row.phase === "failure_pending")) {
         const ended = await readRunEnded(client, attempt.claim);
         if (ended) {
-          const result = await endEndedRun(attempt, ended, deps);
+          const result = await endEndedRun(attempt, ended, deps, client);
           if (result.status === "unreported") { backoff.parked(key); return result; }
           backoff.clear();
           return undefined;
