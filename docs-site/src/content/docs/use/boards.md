@@ -25,6 +25,11 @@ delivery cannot be replayed later or under another id. Until SuperPipeline drops
 also carries its older `X-Superpipeline-Signature`, over the body alone; the hub accepts that one
 only from a board that sends no `x-treaty-signature` at all.
 
+Each door answers by the suite's receiver status contract, so the board and the relay know whether
+to try again: **2xx** when the event was handled, or is one the hub does not take; **503** when it
+cannot be handled yet, such as a board the hub has not mapped to a workspace, so the sender retries;
+**400** when the body is not the event it says it is, which no retry will fix.
+
 The three exist only on a hub with a Matrix bridge configured. The hub registers the push
 subscriptions with each board itself, with the board's own credential, so there is nothing to set
 up on the board. With the push secret unset, nothing is registered and the first two doors answer

@@ -1593,7 +1593,10 @@ signed with `SUPERPIPELINE_PUSH_SECRET`, the third with `TREATY_RELAY_DELIVERY_S
 503 when its secret is unset. All three verify `x-treaty-signature` (timestamp, `ce-id` and body, a
 300 s window). The first two still accept a board's older `X-Superpipeline-Signature` (body only), but
 only when no `x-treaty-signature` is sent; `push rejected: bad x-treaty-signature` in the log is a
-delivery whose new signature failed. A hub with the bridge off claims nothing. See
+delivery whose new signature failed. All three answer by the suite's receiver status contract:
+2xx handled or permanently ignored (an event this hub does not take, a board whose chat has moved);
+**503** for a board this hub has not mapped to a tenant yet, so the board and the relay retry rather
+than drop it; **400** for a body that is not the event it names (treaty's guard refuses it). A hub with the bridge off claims nothing. See
 [DEPLOYMENT.md → superpipeline bridge](./DEPLOYMENT.md#superpipeline-bridge) for the two variables
 and the roster table behind them.
 

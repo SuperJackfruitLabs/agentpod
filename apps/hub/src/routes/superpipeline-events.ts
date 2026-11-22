@@ -11,9 +11,10 @@
  * alone, and hands each to the same handler the push uses (`handleDecisionOnce`), which claims the
  * event's id first: an event delivered by both doors is acted on once.
  *
- * Any other event type is answered 200 and ignored, so the relay does not retry what this build
- * will never handle. A body that says it is a decision but is not one is 422: retrying cannot fix
- * it, and the relay drops it and logs.
+ * It answers by the receiver status contract (ruling 4): any other event type is 200 and ignored,
+ * so the relay does not retry what this build will never handle; a board this hub has not mapped
+ * yet is 503, so the relay tries again; a body that is not the decision its type names is 400,
+ * which the relay drops and logs, because a retry sends the same bytes.
  */
 import { Hono } from "hono";
 import { CloudEventError, fromBinary, verifyDelivery, SIGNATURE_HEADER } from "@superjackfruitlabs/treaty-cloudevents";
@@ -57,22 +58,16 @@ export function createSuperpipelineEventsRoutes(deps: SuperpipelineEventsDeps) {
     try {
       body = JSON.parse(new TextDecoder().decode(bytes));
     } catch {
-      return c.json({ error: "invalid json" }, 422);
+      return c.json({ error: "invalid json" }, 400);
     }
     // The type names the decision, and the data must be that decision: a body whose `event` says
     // something else would otherwise be handled as whatever it claims to be.
     const said = typeof body === "object" && body !== null && "event" in body ? body.event : undefined;
     if (said !== name) {
       log.warn("a decision event whose data is another event", { id, type: event.attributes["type"], event: said });
-      return c.json({ error: "data does not match type" }, 422);
+      return c.json({ error: "data does not match type" }, 400);
     }
     const result = await handleDecisionOnce(id === "" ? null : id, body, deps, "event-relay");
-    // On this door the type already said which decision it is, so data treaty's guard refuses is
-    // wrong data, and a retry will not fix it.
-    if (result.invalid) {
-      log.warn("a decision event whose data treaty's guard refuses", { id, type: event.attributes["type"] });
-      return c.json({ error: "not a valid decision" }, 422);
-    }
     return c.json(result.body, result.status);
   });
 }

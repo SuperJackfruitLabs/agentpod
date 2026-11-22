@@ -102,10 +102,23 @@ export interface DecisionDeps extends GateProjectionDeps {
 }
 
 export interface DecisionResult {
-  status: 200 | 400 | 404 | 422 | 503;
+  status: 200 | 400 | 503;
   body: Record<string, unknown>;
-  /** Set when the body names a decision event but treaty's guard refuses its data. Never sent. */
-  invalid?: true;
+}
+
+/**
+ * The receiver status contract both doors follow (treaty phase 2, ruling 4; treaty's
+ * `schemas/README.md`): 2xx is handled, or permanently ignored, such as an event this hub does not
+ * take; 503 is transient, such as a board this hub has not mapped yet, so the sender tries again;
+ * any other 4xx is permanently refused, such as an invalid body.
+ */
+const UNKNOWN_BOARD: DecisionResult = { status: 503, body: { error: "unknown board" } };
+
+/** A handler's outcome as the door answers it: an unmapped board is transient, a malformed body permanent. */
+function answered(status: string): DecisionResult {
+  if (status === "unknown-board") return UNKNOWN_BOARD;
+  if (status === "malformed") return { status: 400, body: { error: "invalid body", status } };
+  return { status: 200, body: { ok: true, status } };
 }
 
 /**
@@ -133,7 +146,7 @@ export async function handleDecisionOnce(
     await receipts.release(eventId);
     throw err;
   }
-  if (result.status !== 200 || result.invalid) await receipts.release(eventId);
+  if (result.status !== 200) await receipts.release(eventId);
   return result;
 }
 
@@ -160,7 +173,7 @@ export async function handleDecision(body: unknown, deps: DecisionDeps, via: Dec
     const tenantId = await deps.tenantIdFor(body.boardId);
     if (!tenantId) {
       log.warn("push for a board mapped to no fleet", { boardId: body.boardId });
-      return { status: 404, body: { error: "unknown board" } };
+      return UNKNOWN_BOARD;
     }
     // An approval request carries every argument in full: it goes only into the room of the
     // relay's own workspace. Dropped (200: a retry would not change it), and said in the log.
@@ -177,7 +190,7 @@ export async function handleDecision(body: unknown, deps: DecisionDeps, via: Dec
       elicitationId: body.elicitationId,
       status: outcome.status,
     });
-    return { status: 200, body: { ok: true, status: outcome.status } };
+    return answered(outcome.status);
   }
 
   /**
@@ -189,11 +202,11 @@ export async function handleDecision(body: unknown, deps: DecisionDeps, via: Dec
     const tenantId = await deps.tenantIdFor(body.boardId);
     if (!tenantId) {
       log.warn("push for a board mapped to no fleet", { boardId: body.boardId });
-      return { status: 404, body: { error: "unknown board" } };
+      return UNKNOWN_BOARD;
     }
     const outcome = await projectDelivery(tenantId, body, deps);
     log.info("delivery follow-up projected", { gateId: body.gateId, status: outcome.status });
-    return { status: 200, body: { ok: true, status: outcome.status } };
+    return answered(outcome.status);
   }
 
   /**
@@ -204,11 +217,11 @@ export async function handleDecision(body: unknown, deps: DecisionDeps, via: Dec
     const tenantId = await deps.tenantIdFor(body.boardId);
     if (!tenantId) {
       log.warn("push for a board mapped to no fleet", { boardId: body.boardId });
-      return { status: 404, body: { error: "unknown board" } };
+      return UNKNOWN_BOARD;
     }
     const outcome = await projectAttention(tenantId, body, deps);
     log.info("waiting card projected", { cardId: body.cardId, waitId: body.waitId, status: outcome.status });
-    return { status: 200, body: { ok: true, status: outcome.status } };
+    return answered(outcome.status);
   }
 
   /**
@@ -222,7 +235,7 @@ export async function handleDecision(body: unknown, deps: DecisionDeps, via: Dec
       ? await deps.handleDecisionTimeout(body)
       : await handleDecisionTimeout(body, deps);
     log.info("decision timeout handled", { event: body.event, decisionId: body.decisionId, status: outcome.status });
-    return { status: 200, body: { ok: true, status: outcome.status } };
+    return answered(outcome.status);
   }
 
   /**
@@ -236,7 +249,7 @@ export async function handleDecision(body: unknown, deps: DecisionDeps, via: Dec
       ? await deps.handleGateApprovalRecorded(body)
       : await handleGateApprovalRecorded(body, deps);
     log.info("quorum gate approval handled", { gateId: body.gateId, status: outcome.status });
-    return { status: 200, body: { ok: true, status: outcome.status } };
+    return answered(outcome.status);
   }
 
   /**
@@ -249,14 +262,14 @@ export async function handleDecision(body: unknown, deps: DecisionDeps, via: Dec
       ? await deps.handleDecisionReleased(body)
       : await handleDecisionReleased(body, deps);
     log.info("held approval release handled", { gateId: body.gateId, outcome: body.outcome, status: outcome.status });
-    return { status: 200, body: { ok: true, status: outcome.status } };
+    return answered(outcome.status);
   }
   if (isDecisionPulledBack(body)) {
     const outcome = deps.handleDecisionPulledBack
       ? await deps.handleDecisionPulledBack(body)
       : await handleDecisionPulledBack(body, deps);
     log.info("held approval pull-back handled", { gateId: body.gateId, status: outcome.status });
-    return { status: 200, body: { ok: true, status: outcome.status } };
+    return answered(outcome.status);
   }
 
   /**
@@ -267,12 +280,12 @@ export async function handleDecision(body: unknown, deps: DecisionDeps, via: Dec
   if (isCheckFailed(body)) {
     const outcome = deps.handleCheckFailed ? await deps.handleCheckFailed(body) : await handleCheckFailed(body, deps);
     log.info("failed check handled", { boardId: body.boardId, cardId: body.cardId, check: body.check.name, status: outcome.status });
-    return { status: 200, body: { ok: true, status: outcome.status } };
+    return answered(outcome.status);
   }
   if (isCheckOverridden(body)) {
     const outcome = deps.handleCheckOverridden ? await deps.handleCheckOverridden(body) : await handleCheckOverridden(body, deps);
     log.info("overridden check handled", { boardId: body.boardId, cardId: body.cardId, check: body.check.name, status: outcome.status });
-    return { status: 200, body: { ok: true, status: outcome.status } };
+    return answered(outcome.status);
   }
 
   if (!isGatePending(body)) {
@@ -280,8 +293,12 @@ export async function handleDecision(body: unknown, deps: DecisionDeps, via: Dec
     // shape this build does not know. 200, because it was delivered fine and
     // a non-2xx would make the board retry something it will never like.
     const said = typeof body === "object" && body !== null && "event" in body ? body.event : undefined;
-    const invalid = typeof said === "string" && DECISION_EVENTS.includes(said);
-    return invalid ? { status: 200, body: { ok: true, ignored: true }, invalid: true } : { status: 200, body: { ok: true, ignored: true } };
+    if (typeof said === "string" && DECISION_EVENTS.includes(said)) {
+      // A decision this build knows, whose data treaty's guard refuses: a retry sends the same bytes.
+      log.warn("a decision whose data treaty's guard refuses; refused", { event: said, via });
+      return { status: 400, body: { error: "invalid body", event: said } };
+    }
+    return { status: 200, body: { ok: true, ignored: true } };
   }
   return deps.projectGate ? deps.projectGate(body, via) : projectPushedGate(body, deps, via);
 }
@@ -299,9 +316,9 @@ export async function projectPushedGate(
   const tenantId = await deps.tenantIdFor(body.boardId);
   if (!tenantId) {
     log.warn("gate for a board mapped to no fleet", { boardId: body.boardId, via });
-    return { status: 404, body: { error: "unknown board" } };
+    return UNKNOWN_BOARD;
   }
   const outcome = await projectGate(tenantId, body, deps);
   log.info("gate projected", { gateId: body.gateId, status: outcome.status, via });
-  return { status: 200, body: { ok: true, status: outcome.status } };
+  return answered(outcome.status);
 }

@@ -124,7 +124,13 @@ export function createSuperpipelinePushRoutes(deps: SuperpipelinePushDeps) {
   .post("/bridge/superpipeline/work", async (c) => {
     const signed = await signedBody(deps.secret, c, deps.now ? deps.now() : Date.now());
     if ("refusal" in signed) return signed.refusal;
-    if (!isWorkAvailable(signed.body)) return c.json({ ok: true, ignored: true }, 200);
+    if (!isWorkAvailable(signed.body)) {
+      // Ruling 4: a work.available this build cannot read is refused (a retry sends the same bytes);
+      // any other event is acknowledged and ignored.
+      const said = typeof signed.body === "object" && signed.body !== null && "event" in signed.body ? signed.body.event : undefined;
+      if (said === "work.available") return c.json({ error: "invalid body", event: said }, 400);
+      return c.json({ ok: true, ignored: true }, 200);
+    }
     const boardId = signed.body.boardId;
     const woken = deps.wakeBoard ? deps.wakeBoard(boardId) : wakeBoard(boardId);
     log.info("work available; claim loops woken", { boardId: signed.body.boardId, woken });

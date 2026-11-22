@@ -108,8 +108,8 @@ describe("the event relay's door", () => {
 
   test("refuses a gate.pending whose data is not a gate", async () => {
     const { d, projected } = deps();
-    expect((await deliver(d, { data: { event: "gate.pending" } })).status).toBe(422);
-    expect((await deliver(d, { data: "not json" })).status).toBe(422);
+    expect((await deliver(d, { data: { event: "gate.pending" } })).status).toBe(400);
+    expect((await deliver(d, { data: "not json" })).status).toBe(400);
     expect(projected).toEqual([]);
   });
 });
@@ -234,7 +234,7 @@ describe("every decision event through the relay", () => {
     const { seen, over } = recorders();
     const { d } = deps(over);
     const res = await deliver(d, { data: { event: "check.failed", boardId: "brd_7c1f" }, type: decisionEventType("check.failed") });
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(400);
     expect(seen).toEqual([]);
   });
 
@@ -242,7 +242,7 @@ describe("every decision event through the relay", () => {
     const { seen, over } = recorders();
     const { d } = deps(over);
     const res = await deliver(d, { data: exampleOf("check.failed"), type: decisionEventType("check.overridden") });
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(400);
     expect(seen).toEqual([]);
   });
 
