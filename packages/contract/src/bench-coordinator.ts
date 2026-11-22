@@ -147,10 +147,14 @@ export type BenchCoordinatorCurrentResponse = z.infer<typeof BenchCoordinatorCur
  * because SuperBench refused its release, so an operator must reconcile the bench. Never empty, and it
  * never changes what the state and code mean.
  */
+const detailText = z.string().min(1).refine((m) => new TextEncoder().encode(m).byteLength <= 256 && !/\p{Cc}/u.test(m));
 export const BenchCoordinatorDetail = z.object({
-  message: z.string().min(1).refine((m) => new TextEncoder().encode(m).byteLength <= 256 && !/\p{Cc}/u.test(m)).optional(),
+  /** SuperBench's own refusal text. */
+  message: detailText.optional(),
   lease: z.literal("held").optional(),
-}).strict().refine((d) => d.message !== undefined || d.lease !== undefined);
+  /** The worker's own reason the task failed (a model provider's status, for one); never SuperBench's text. */
+  task: detailText.optional(),
+}).strict().refine((d) => d.message !== undefined || d.lease !== undefined || d.task !== undefined);
 export type BenchCoordinatorDetail = z.infer<typeof BenchCoordinatorDetail>;
 const pending = z.object({ ...fixed, operation: z.enum(["prepare", "execute", "status"]), ...owned,
   state: z.enum(["unknown", "pending", "superseded"]), detail: BenchCoordinatorDetail.optional() }).strict();

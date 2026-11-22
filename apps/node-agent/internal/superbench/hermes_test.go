@@ -44,6 +44,14 @@ func hermesFixture(t *testing.T, mode string) (HermesConfig, hermesInput, string
 		event["replay_gap"] = true
 	case "terminal-failure":
 		event["exit_code"] = 1
+	case "provider-401", "provider-other":
+		// The shape Hermes prints when the provider refuses the model key (seen on staging).
+		event["exit_code"] = 1
+		event["text"] = "Kimi rejected your API key sk-PRIVATE-KEY, so the model can't be reached."
+		event["error"] = "HTTP 401: The API Key sk-PRIVATE-KEY appears to be invalid or may have expired."
+		if mode == "provider-other" {
+			event["error"] = "connection reset by sk-PRIVATE-KEY"
+		}
 	case "terminal-null":
 		event["replay_gap"] = nil
 	case "blocked":
@@ -120,7 +128,7 @@ printf 'child log only\n' >&2
 	} else {
 		body += "cat '" + outputPath + "'\n"
 	}
-	if mode == "nonzero" {
+	if mode == "nonzero" || mode == "provider-401" || mode == "provider-other" {
 		body += "exit 4\n"
 	}
 	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
@@ -288,5 +296,39 @@ func TestHermesFiniteOwnedInput(t *testing.T) {
 	defer cancel()
 	if _, err := readHermesInput(ctx, r); !errors.Is(err, ErrHermesInput) {
 		t.Fatalf("open input not bounded: %v", err)
+	}
+}
+
+// A run Hermes ended in error says why in a failed result with a closed reason,
+// and still exits as a failure. The provider's text, which can quote the key,
+// never passes through.
+func TestHermesProviderFailureSaysWhyWithoutTheProviderText(t *testing.T) {
+	for mode, want := range map[string]string{
+		"provider-401":   "Hermes stopped: the model provider answered HTTP 401 (unauthorized; check the model key)",
+		"provider-other": "Hermes stopped with an error before finishing the task",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			c, in, _ := hermesFixture(t, mode)
+			var out, logs bytes.Buffer
+			if err := runHermes(t.Context(), in, &out, &logs, c); !errors.Is(err, ErrHermesProcess) {
+				t.Fatalf("a provider failure is a process failure: %v", err)
+			}
+			var result WorkerResult
+			if err := decodeGroupedResult(out.Bytes(), &result, in.Binding); err != nil || result.Outcome != "failed" || result.Handoff["error"] != want || len(result.Handoff) != 1 {
+				t.Fatalf("wrong failure result: %v %s", err, out.Bytes())
+			}
+			if strings.Contains(out.String(), "PRIVATE") {
+				t.Fatal("provider text reached the result")
+			}
+		})
+	}
+	for status, want := range map[string]string{"429": "HTTP 429 (rate limited or out of quota)", "503": "HTTP 503 (provider unavailable)", "418": "HTTP 418"} {
+		raw := []byte(`{"type":"result","exit_code":1,"error":"HTTP ` + status + `: upstream said no"}` + "\n")
+		if got := hermesFailure(raw); got != "Hermes stopped: the model provider answered "+want {
+			t.Fatalf("%s: %q", status, got)
+		}
+	}
+	if got := hermesFailure([]byte(`{"type":"result","exit_code":0,"error":""}` + "\n")); got != "" {
+		t.Fatalf("a clean terminal is no failure: %q", got)
 	}
 }

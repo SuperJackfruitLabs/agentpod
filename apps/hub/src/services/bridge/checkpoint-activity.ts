@@ -17,10 +17,11 @@ import type { BenchCoordinatorCompletion } from "@agentpod/contract";
 import type { BoardActivity } from "./coalesce";
 import type { RetainedCheckpointAttempt } from "./checkpoint-ledger";
 import type { SuperpipelineClient } from "./superpipeline";
+import type { RunEndedReason } from "./checkpoint-run-ended";
 import { noteCheckpoint } from "./checkpoint-log";
 
 export type CheckpointActivityEvent = "prepared" | "running" | "completed" | "pushed" | "submitting" | "parked" | "failed" | "released"
-  | "lease_held";
+  | "lease_held" | "stopped_saved";
 
 /**
  * The supported way to free a bench whose release SuperBench refused (SuperBench's leases and
@@ -38,6 +39,7 @@ export const HELD_LEASE_OPERATOR_PATH = "`bench workspace stop_admin <key>`, the
 /** The activity for an event, or undefined when there is nothing worth saying. Exported for tests. */
 export function checkpointActivity(event: CheckpointActivityEvent, facts: {
   completion?: BenchCoordinatorCompletion; phase?: string; code?: string; reason?: string; benchKey?: string; message?: string;
+  running?: boolean; ended?: RunEndedReason;
 } = {}): BoardActivity | undefined {
   const action = `checkpoint.${event}`;
   switch (event) {
@@ -50,6 +52,16 @@ export function checkpointActivity(event: CheckpointActivityEvent, facts: {
       const list = members.map((m) => `${m.name} ${m.task_ref.replace(/^refs\/heads\//, "")} @ ${m.commit}`).join(", ");
       return { type: "action", action, body: `Checkpoint pushed: ${list}.`,
         parameter: { commits: members.map((m) => ({ name: m.name, ref: m.task_ref, commit: m.commit })) } };
+    }
+    // The board ended the run (the card moved or was cancelled) after the bench had pushed this card's
+    // work: the attempt is retired, and the card says where the work is. Nothing pushed, nothing said.
+    case "stopped_saved": {
+      const members = facts.completion?.service.checkpoints ?? [];
+      if (members.length === 0) return undefined;
+      const why = facts.ended === "run.unbound" ? "the card moved" : "the card moved or its run was ended";
+      const saved = members.map((m) => `${members.length > 1 ? `${m.name} ` : ""}${m.task_ref.replace(/^refs\/heads\//, "")} (${m.commit.slice(0, 7)})`).join(", ");
+      return { type: "action", action: "checkpoint.stopped", body: `Run stopped because ${why}; partial work saved to ${saved}.`,
+        parameter: { ended: facts.ended, commits: members.map((m) => ({ name: m.name, ref: m.task_ref, commit: m.commit })) } };
     }
     case "submitting": return { type: "action", action, body: "Checkpoint: submitting the result to the board." };
     // A definite node refusal, said before the board is told: the sentence is the run's failure reason.
@@ -67,12 +79,27 @@ export function checkpointActivity(event: CheckpointActivityEvent, facts: {
         parameter: { phase: facts.phase, code: "lease_held", ...(facts.benchKey ? { benchKey: facts.benchKey } : {}) } };
     }
     case "parked": {
+      // The run outlived the Hub's short execute wait (`NODE_CALL_TIMEOUT_MS.execute`) and is read
+      // later with status. Nothing is wrong, so the card says it is still running, not why it parked.
+      if (stillRunning(facts)) return { type: "action", action: "checkpoint.running",
+        body: "Checkpoint: the task is still running on the bench; its result is checked again shortly.",
+        parameter: { phase: facts.phase, waiting: true, ...(facts.reason ? { reason: facts.reason } : {}) } };
       const why = [facts.code, facts.reason].filter((part): part is string => !!part).join(", ");
       return { type: "action", action, body: `Checkpoint: waiting at ${facts.phase ?? "an unknown phase"}${why ? ` (${why})` : ""}; it is re-checked automatically.`,
         parameter: { phase: facts.phase, code: facts.code, ...(facts.reason ? { reason: facts.reason } : {}) } };
     }
   }
   return undefined;
+}
+
+/**
+ * Whether a park only means the bench run is still going, at `execute_pending`: the Hub's wait on the
+ * node ended (`node.call.timeout`), or the node's status is a bare `pending` (`running`: no detail, so
+ * no held lease and no message from SuperBench). Every other park keeps its own words.
+ */
+export function stillRunning(facts: { phase?: string; code?: string; reason?: string; running?: boolean }): boolean {
+  return facts.phase === "execute_pending" && facts.code === "uncertain" &&
+    (facts.reason === "node.call.timeout" || facts.running === true && facts.reason === "node.state:pending");
 }
 
 const MAX_REMEMBERED = 4096;

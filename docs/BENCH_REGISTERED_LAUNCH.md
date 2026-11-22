@@ -111,7 +111,7 @@ retry of the same attempt reaches the same journal record, never a new launch.
 | Context cancelled while waiting for the run reply | transport error | same as a lost reply; no resend | `pending` |
 | Stale holder | hub `current` check before every send and after every await; journal `active` pointer; producer `conflict`/`forbidden`; lease grant for another holder | no further send; lease not released by a non-owner. A definitely superseded record retires itself (see below) | `refused` `stale_owner` (a newer attempt gets `pending` until the older record is terminal) |
 | Capacity refusal | `capacity_exhausted` (HTTP 422) on create, lease or run | terminal for the attempt; never retried; a held lease is released | `refused` `capacity_exhausted` |
-| Worker crash | run response with a nonzero exit code, or no valid frame on stdout | terminal; lease released when still held | `refused` `verification_failed` |
+| Worker crash | run response with a nonzero exit code, or no valid frame on stdout | terminal; lease released when still held | `refused` `verification_failed`; when the nonzero run's stdout holds a failed result for this binding, its `handoff.error` travels as `detail.task` |
 | Invalid result | stdout fails the io digest, the frame, the canonical bytes or the binding | terminal; lease released when still held | `refused` `verification_failed` |
 | Producer without the finite profile | `invalid_request` or `not_found` on the run | terminal; nothing ran; lease released | `refused` `unsupported` |
 | Readback mismatch | receipt body differs from the captured response, or `absent` after a captured reply | terminal; nothing published | `refused` `verification_failed` |

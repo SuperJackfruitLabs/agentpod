@@ -152,6 +152,45 @@ test("a node call that times out parks the attempt naming the timeout, not a bar
   } finally { restore(); }
 });
 
+// The production soak: every real run outlived the Hub's 60 s execute wait, and each card then read
+// "waiting at execute_pending (uncertain, node.call.timeout)", which looks like a fault. It is not one.
+test("a run that outlives the execute wait is said once on the card as still running, not as a fault", async () => {
+  resetCheckpointActivityForTests();
+  const attempt = executePending();
+  const h = harness({});
+  const answers: Array<{ ok: false; error: string } | { ok: true; data: unknown }> = [{ ok: false, error: "timeout" },
+    { ok: true, data: pendingStatus(attempt) }, { ok: true, data: pendingStatus(attempt) }];
+  h.deps.request = async () => answers.shift() ?? { ok: true, data: pendingStatus(attempt) };
+  const board = recordingBoard((path) => path.endsWith(`/runs/${attempt.claim.runId}`)
+    ? { status: 200, body: runView(attempt.claim) } : { status: 200 });
+  for (let i = 0; i < 3; i++) expect((await driveCheckpointAttempt(attempt, board.client, false, h.deps)).status).toBe("unreported");
+  const activities = board.calls.filter((c) => c.path.endsWith("/activities")).map((c) => c.body);
+  expect(activities).toEqual([expect.objectContaining({ action: "checkpoint.running",
+    parameter: { phase: "execute_pending", waiting: true, reason: "node.call.timeout" } })]);
+  const body = String(activities[0]?.body);
+  expect(body).toContain("still running");
+  for (const word of ["uncertain", "node.call", "waiting at"]) expect(body).not.toContain(word);
+});
+
+test("a park that is not a run still going keeps its own words", async () => {
+  for (const [attempt, reply, reason] of [
+    [preparePending(), { ok: false, error: "timeout" }, "node.call.timeout"],
+    [executePending(), { ok: true, data: { ...pendingStatus(executePending()), detail: { message: "bench is reconciling" } } }, "node.state:pending"],
+    [executePending(), { ok: false, error: "node offline" }, "node.call.offline"],
+  ] as const) {
+    resetCheckpointActivityForTests();
+    const h = harness({});
+    h.deps.request = async () => reply;
+    const board = recordingBoard((path) => path.endsWith(`/runs/${attempt.claim.runId}`)
+      ? { status: 200, body: runView(attempt.claim) } : { status: 200 });
+    expect((await driveCheckpointAttempt(attempt, board.client, attempt.row.phase === "prepare_pending", h.deps)).status).toBe("unreported");
+    const activities = board.calls.filter((c) => c.path.endsWith("/activities")).map((c) => c.body);
+    expect(activities).toEqual([expect.objectContaining({ action: "checkpoint.parked",
+      parameter: expect.objectContaining({ phase: attempt.row.phase, code: "uncertain", reason }) })]);
+    expect(String(activities[0]?.body)).toContain(`waiting at ${attempt.row.phase}`);
+  }
+});
+
 /** The operation of a request the harness recorded. */
 function operationOf(params: unknown): string {
   return BenchCoordinatorRequest.parse(params).operation;
@@ -333,6 +372,25 @@ test("a refused checkpoint with a held lease says the bench's words and names th
   expect(String(lease?.body.body)).toContain(words);
   expect(held.closed).toBe("fail");
   expect(board.verbs()).not.toContain("complete");
+});
+
+// The production soak: the model provider refused the key, and the card said only "operation failed".
+test("a run the model provider refused names the provider's status on the card and in the failure", async () => {
+  resetCheckpointActivityForTests();
+  const recorded = nodeRefusals.replies.find((r) => r.name === "task-failed-provider-status");
+  if (!recorded) throw new Error("recorded node refusal missing");
+  const attempt = executePending();
+  const h = harness(recorded.value);
+  const held = ledger(h.deps);
+  const board = recordingBoard();
+  expect((await driveCheckpointAttempt(attempt, board.client, false, h.deps)).status).toBe("failed");
+  const failed = board.calls.find((c) => c.path.endsWith("/activities"))?.body;
+  const fail = board.calls.find((c) => c.path.endsWith("/fail"))?.body;
+  expect(failed).toMatchObject({ action: "checkpoint.failed", parameter: { code: "verification_failed" } });
+  expect(String(failed?.body)).toContain("HTTP 401 (unauthorized; check the model key)");
+  for (const word of ["operation failed", "crashed"]) expect(String(failed?.body)).not.toContain(word);
+  expect(fail?.reason).toBe(failed?.body);
+  expect(held.closed).toBe("fail");
 });
 
 test("a parked reply whose lease is held is said once on the card with the operator's path, not also as a generic park", async () => {
@@ -677,6 +735,38 @@ test.each(["prepare_pending", "prepared", "source_pending", "admitted", "complet
   expect(result.status).toBe("released");
   expect(held).toEqual([expect.objectContaining({ reason: "run_ended", phase })]);
   expect(sent).toEqual(["status"]);
+});
+
+// Operator ruling: a card moved or cancelled after the bench pushed its work says where that work is.
+test("a run ended after the bench pushed this card's work says on the card where it was saved; nothing pushed, nothing said", async () => {
+  const { attempt: base, completion } = await completedAttemptFixture();
+  const completed = { ...base, row: { ...base.row, phase: "completed", completion: canonicalCheckpoint(completion) } };
+  const many = completion.service.checkpoints.length > 1;
+  const saved = completion.service.checkpoints.map((m) => (many ? m.name + " " : "") +
+    `${m.task_ref.replace("refs/heads/", "")} (${m.commit.slice(0, 7)})`).join(", ");
+  for (const [ended, why] of [[{ reason: "run.unbound", board: { status: "working" } }, "the card moved"],
+    [{ reason: "run.ended", board: { status: "ended", outcome: "released" } }, "the card moved or its run was ended"]] as const) {
+    resetCheckpointActivityForTests();
+    const h = harness({});
+    nodeAnswers(h.deps, [refusedStatus("stale_owner")]);
+    const held = retirements(h.deps);
+    const board = recordingBoard();
+    expect((await endEndedRun(completed, ended, h.deps, board.client)).status).toBe("released");
+    expect(held).toEqual([expect.objectContaining({ reason: "run_ended", phase: "completed" })]);
+    const notes = board.calls.filter((c) => c.path.endsWith("/activities")).map((c) => c.body);
+    expect(notes).toEqual([expect.objectContaining({ action: "checkpoint.stopped",
+      body: `Run stopped because ${why}; partial work saved to ${saved}.` })]);
+    expect(saved).toContain("card/");
+    expect(board.verbs().filter((v) => ["complete", "fail", "release"].includes(v))).toEqual([]);
+  }
+  // Retired before anything was pushed: no branch is named, and the card is not written to.
+  resetCheckpointActivityForTests();
+  const h = harness({});
+  nodeAnswers(h.deps, [refusedStatus("stale_owner")]);
+  retirements(h.deps);
+  const board = recordingBoard();
+  expect((await endEndedRun(preparePending(), { reason: "run.unbound", board: { status: "working" } }, h.deps, board.client)).status).toBe("released");
+  expect(board.calls).toEqual([]);
 });
 
 test("a node that cannot be reached does not keep a nothing-running attempt: it is retired with that as evidence", async () => {

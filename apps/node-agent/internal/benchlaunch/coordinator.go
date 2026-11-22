@@ -16,6 +16,7 @@ import (
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/superbench"
 )
 
 // Mode is the registry profile value that selects this launch.
@@ -36,10 +37,22 @@ type Refusal struct {
 	// LeaseHeld: the record still holds its lease because SuperBench refused
 	// the release. The record is retried, but an operator must reconcile.
 	LeaseHeld bool
+	// Task is the worker's own reason the task failed, when it gave one.
+	Task string
 }
 
 func (r *Refusal) Error() string { return "registered launch refused: " + r.Code }
 func refuse(code string) error   { return &Refusal{Code: code} }
+
+// RefusalTask reports the worker's reason the task failed, carried by a
+// terminal refusal.
+func RefusalTask(err error) string {
+	var r *Refusal
+	if errors.As(err, &r) {
+		return r.Task
+	}
+	return ""
+}
 
 // RefusalMessage reports the producer's message carried by a terminal refusal.
 func RefusalMessage(err error) string {
@@ -85,9 +98,24 @@ func producerMessage(e *benchworkspace.APIError) string {
 	if e == nil {
 		return ""
 	}
+	return boundedText(e.Message)
+}
+
+// taskMessage is the worker's own reason a failed task gives in its result's
+// handoff ("error"), made safe to carry as producerMessage makes SuperBench's.
+// The worker reduces it to a closed form before it leaves the bench (for
+// Hermes, a provider status and what it means); the hub redacts again.
+func taskMessage(result superbench.WorkerResult) string {
+	if result.Outcome != "failed" {
+		return ""
+	}
+	return boundedText(result.Handoff["error"])
+}
+
+func boundedText(text string) string {
 	var b strings.Builder
 	space := false
-	for _, r := range e.Message {
+	for _, r := range text {
 		if r == utf8.RuneError || unicode.IsControl(r) || unicode.IsSpace(r) {
 			space = b.Len() > 0
 			continue
@@ -114,7 +142,7 @@ func refusalOf(r record) error {
 	if message == "" {
 		message = r.ReleaseRefusal
 	}
-	return &Refusal{Code: r.Code, Message: message, LeaseHeld: leaseHeld(r)}
+	return &Refusal{Code: r.Code, Message: message, LeaseHeld: leaseHeld(r), Task: r.Task}
 }
 
 // leaseHeld is a record that still holds its lease after SuperBench refused
@@ -352,20 +380,20 @@ func (c Coordinator) mark(ctx context.Context, spec benchdispatch.SourceSpec, fn
 // owns a lease that it must release; release is attempted, then retried by
 // later status calls until it succeeds.
 func (c Coordinator) terminate(ctx context.Context, spec benchdispatch.SourceSpec, code string, held bool) error {
-	return c.terminateWith(ctx, spec, code, held, "")
+	return c.terminateWith(ctx, spec, code, held, "", "")
 }
 
 // refused ends the record on a definite producer refusal, keeping its message.
 func (c Coordinator) refused(ctx context.Context, spec benchdispatch.SourceSpec, e *benchworkspace.APIError, code string, held bool) error {
-	return c.terminateWith(ctx, spec, code, held, producerMessage(e))
+	return c.terminateWith(ctx, spec, code, held, producerMessage(e), "")
 }
 
-func (c Coordinator) terminateWith(ctx context.Context, spec benchdispatch.SourceSpec, code string, held bool, message string) error {
+func (c Coordinator) terminateWith(ctx context.Context, spec benchdispatch.SourceSpec, code string, held bool, message, task string) error {
 	_ = c.mark(ctx, spec, func(r *record) bool {
 		if r.Phase == phaseRefused || r.Phase == phaseCompleted {
 			return false
 		}
-		r.Phase, r.Code, r.Producer = phaseRefused, code, message
+		r.Phase, r.Code, r.Producer, r.Task = phaseRefused, code, message, task
 		if held && r.Release != "done" {
 			r.Release = "needed"
 		} else if !held && r.Release == "needed" {
@@ -377,5 +405,5 @@ func (c Coordinator) terminateWith(ctx context.Context, spec benchdispatch.Sourc
 	if r, _, err := c.Journal.read(ctx, spec); err == nil && r.Phase == phaseRefused {
 		return refusalOf(r)
 	}
-	return &Refusal{Code: code, Message: message}
+	return &Refusal{Code: code, Message: message, Task: task}
 }

@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { createLogger } from "../../utils/logger";
 import { BENCH_COORDINATOR_VERB, BenchCoordinatorRequest, parseBenchCoordinatorResponse,
-  BenchCoordinatorResponse } from "@agentpod/contract";
+  BenchCoordinatorCompletion, BenchCoordinatorResponse } from "@agentpod/contract";
 import { request as nodeRequest } from "../broker";
 import { canonicalCheckpoint, checkpointDigest, parseCheckpointJSON, parseCheckpointContextJSON } from "./checkpoint-json";
 import { advanceCheckpointAttempt, closeFailedCheckpointAttempt, failCheckpointAttempt, retireCheckpointAttempt,
@@ -25,7 +25,7 @@ import type { DispatchResult } from "./dispatch-types";
 import { createQuietLog, type QuietLog } from "./quiet-log";
 import { errorFacts, nodeCallReason, noteCheckpoint } from "./checkpoint-log";
 import { nodeCallTimeoutMs } from "./checkpoint-node-call";
-import { checkpointActivity, postCheckpointActivity } from "./checkpoint-activity";
+import { checkpointActivity, postCheckpointActivity, stillRunning } from "./checkpoint-activity";
 import { capacityCard, CAPACITY_RELEASE_CAP, type CapacityBackoff } from "./checkpoint-capacity-backoff";
 
 const encode = (raw: string) => new TextEncoder().encode(raw);
@@ -44,7 +44,7 @@ export function setParkedLogForTests(next: QuietLog): () => void {
 }
 /** Why each parked result parked, and the attempt as it parked, so the drive can say it on the card once. */
 const parkFacts = new WeakMap<DispatchResult, { phase: string; code: string; reason?: string; attempt: RetainedCheckpointAttempt;
-  held?: BenchCoordinatorResponse }>();
+  held?: BenchCoordinatorResponse; running?: boolean }>();
 
 /** The node says the attempt's own lease is still held because SuperBench refused its release. */
 const leaseHeld = (response: BenchCoordinatorResponse | undefined): boolean =>
@@ -103,6 +103,8 @@ function parkedReply(attempt: RetainedCheckpointAttempt, response: BenchCoordina
   const result = parked(attempt, "uncertain", new CheckpointRefused("uncertain", `node.state:${why}`));
   const facts = parkFacts.get(result);
   if (facts && leaseHeld(response)) facts.held = response;
+  // A bare pending names no problem: the node's run is unresolved, which while executing means it is still going.
+  if (facts && response.state === "pending" && !("detail" in response && response.detail)) facts.running = true;
   return result;
 }
 
@@ -203,14 +205,15 @@ export async function driveCheckpointAttempt(initial: RetainedCheckpointAttempt,
   // wait forever (the run never comes back) and hold the station's checkpoint claims with it.
   if (facts && RUN_ENDABLE_PHASES.has(facts.attempt.row.phase)) {
     const ended = await readRunEnded(client, facts.attempt.claim);
-    if (ended) return endEndedRun(facts.attempt, ended, deps);
+    if (ended) return endEndedRun(facts.attempt, ended, deps, client);
   }
   // A park is said on the card once per attempt, phase and reason; the re-checks stay quiet. A run the
   // board ended returned above: it is never written to, since an activity on an unbound run heartbeats it.
   // A held lease is the more specific park: it alone is said, with the operator's path, not a generic one too.
   if (facts?.held) await sayLeaseHeld(client, facts.attempt, facts.held, facts.phase);
-  else if (facts) await postCheckpointActivity(client, initial, `parked:${facts.phase}:${facts.code}:${facts.reason ?? ""}`,
-    checkpointActivity("parked", facts));
+  // A run still going is said once, however its re-checks read (a timed-out wait, then a pending status).
+  else if (facts) await postCheckpointActivity(client, initial, stillRunning(facts) ? `still_running:${facts.phase}`
+    : `parked:${facts.phase}:${facts.code}:${facts.reason ?? ""}`, checkpointActivity("parked", facts));
   return result;
 }
 
@@ -272,7 +275,7 @@ async function tellNode(attempt: RetainedCheckpointAttempt, deps: CheckpointDriv
  * - `submission_pending` (after an authenticated missing receipt): `run_ended.unsettled`.
  */
 export async function endEndedRun(initial: RetainedCheckpointAttempt, ended: RunEnded,
-  deps: CheckpointDriveDeps = defaultDeps): Promise<DispatchResult> {
+  deps: CheckpointDriveDeps = defaultDeps, client?: SuperpipelineClient): Promise<DispatchResult> {
   const attempt = initial;
   const phase = attempt.row.phase;
   const ids = { externalRunId: attempt.claim.runId, attemptId: attempt.row.attemptId };
@@ -306,8 +309,27 @@ export async function endEndedRun(initial: RetainedCheckpointAttempt, ended: Run
     if (!await deps.retire(attempt, { reason, by: "hub", evidence }))
       return parked(attempt, "stale", new CheckpointRefused("stale", "ledger.raced"));
     log.info("checkpoint run ended on the board; the attempt is retired and the station is free", { ...meta, reason });
+    // The one write to the card after its run ended (an operator ruling): when the bench had already pushed
+    // this card's work, the card says where it is. A board that refuses it changes nothing here.
+    const completion = savedWork(attempt, node.reply);
+    if (client && completion) await postCheckpointActivity(client, attempt, "stopped_saved",
+      checkpointActivity("stopped_saved", { completion, ended: ended.reason }));
     return { status: "released", ...ids, reason: `Checkpoint run ended on the board (${ended.reason}); the attempt is retired (${reason})` };
   } catch (error) { return parked(attempt, error instanceof CheckpointRefused ? error.code : "unavailable", error); }
+}
+
+/**
+ * The work the bench pushed for this card before its run ended: the node's completed reply, else the
+ * completion the attempt retained (`completed`, `submission_pending`). Undefined when nothing was pushed.
+ */
+function savedWork(attempt: RetainedCheckpointAttempt, reply: BenchCoordinatorResponse | undefined): BenchCoordinatorCompletion | undefined {
+  if (reply?.state === "completed" && "completion" in reply) return reply.completion;
+  if (!attempt.row.completion) return undefined;
+  try { return BenchCoordinatorCompletion.parse(parseCheckpointJSON(encode(attempt.row.completion))); }
+  catch (error) {
+    noteCheckpoint("run-ended", "retained.completion", { attemptId: attempt.row.attemptId }, error);
+    return undefined;
+  }
 }
 
 async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineClient,
@@ -428,7 +450,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
             // The board holds no receipt (an authenticated CHECKPOINT_RECEIPT_MISSING). If it also ended
             // the run, the settlement can never land: end the attempt instead of parking it forever.
             const ended = await readRunEnded(client, attempt.claim);
-            if (ended) return endEndedRun(attempt, ended, deps);
+            if (ended) return endEndedRun(attempt, ended, deps, client);
           }
           if (!receipt) {
             // T37 settlement is idempotent by the complete retained submission.
@@ -459,7 +481,7 @@ async function drive(initial: RetainedCheckpointAttempt, client: SuperpipelineCl
           // Asked first: a run the board ended takes no verb. Its card may have moved on, and `fail` or
           // `release` on that run would act on the card where it is now.
           const ended = await readRunEnded(client, attempt.claim);
-          if (ended) return endEndedRun(attempt, ended, deps);
+          if (ended) return endEndedRun(attempt, ended, deps, client);
           await postCheckpointActivity(client, attempt, failure.disposition,
             checkpointActivity(failure.disposition, { phase: failure.phase, code: failure.code, reason: failure.reason }));
           // The node ended its record but could not release the bench: say what an operator must do, while the lease is ours.
