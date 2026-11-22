@@ -22,6 +22,7 @@ import { capacityCard, createCapacityBackoff, CAPACITY_BACKOFF_BASE_MS, CAPACITY
 import { parseCheckpointProfile } from "./checkpoint-profile";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { SuperpipelineClient } from "./superpipeline";
+import { contractFetch } from "../../../tests/helpers/superpipeline-contract";
 
 // A retained execute_pending attempt shaped like the real ledger row. The
 // broker and authority are injected; nothing touches a database or a node.
@@ -66,7 +67,7 @@ function harness(reply: unknown) {
     now: () => 0,
   };
   const client = new SuperpipelineClient({ baseUrl: "https://board.test", boardId: "brd_ABC123", token: "spa_fixture",
-    fetch: async () => ({ status: 200, ok: true, json: async () => ({}) }) });
+    fetch: contractFetch(async () => ({ status: 200, ok: true, json: async () => ({}) })) });
   return { sent, deps, client };
 }
 
@@ -248,12 +249,12 @@ const workerCrash = (() => {
 function recordingBoard(answer: (path: string) => { status: number; body?: unknown } = () => ({ status: 200 })) {
   const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
   const client = new SuperpipelineClient({ baseUrl: "https://board.test", boardId: "brd_ABC123", token: "spa_fixture",
-    fetch: async (url, init) => {
+    fetch: contractFetch(async (url, init) => {
       const path = url.replace("https://board.test", "");
       calls.push({ path, body: JSON.parse(init.body ?? "{}") });
       const { status, body } = answer(path);
       return { status, ok: status < 300, json: async () => body ?? {} };
-    } });
+    }) });
   // A run verb by its action; the read-only run view (GET runs/:id, checkpoint-run-ended.ts) as "run".
   const verbs = () => calls.map((c) => c.path.replace(/^\/v1\/boards\/brd_ABC123\/runs\/[^/]+$/, "run")
     .replace(/^\/v1\/boards\/brd_ABC123\/runs\/[^/]+\//, ""));

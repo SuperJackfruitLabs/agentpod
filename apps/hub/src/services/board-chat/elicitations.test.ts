@@ -23,6 +23,7 @@ import {
   type ElicitationAnswerDeps,
   type ElicitationProjectionDeps,
 } from "./elicitations";
+import { contractWebFetch } from "../../../tests/helpers/superpipeline-contract";
 
 /**
  * Putting an agent's question in a room and taking the answer back.
@@ -519,7 +520,7 @@ describe("handing the answer to the board", () => {
         mint: async () => {
           throw error;
         },
-        fetch: (async () => (called++, new Response("{}", { status: 200 }))) as unknown as typeof fetch,
+        fetch: contractWebFetch((async () => (called++, new Response("{}", { status: 200 }))) as unknown as typeof fetch),
       },
     );
     expect(result).toEqual({ ok: false, code });
@@ -546,14 +547,14 @@ describe("handing the answer to the board", () => {
       {
         baseUrl: "https://board.test/",
         mint: async (s) => (minted.push(s), `assertion-for-${s.principalId}`),
-        fetch: (async (url: string, init: RequestInit) => {
+        fetch: contractWebFetch((async (url: string, init: RequestInit) => {
           calls.push({
             url,
             auth: new Headers(init.headers).get("Authorization"),
             body: JSON.parse(init.body as string),
           });
           return new Response("{}", { status: 200 });
-        }) as unknown as typeof fetch,
+        }) as unknown as typeof fetch),
       },
     );
 
@@ -574,10 +575,10 @@ describe("handing the answer to the board", () => {
       {
         baseUrl: "https://board.test",
         mint: async () => "t",
-        fetch: (async () =>
+        fetch: contractWebFetch((async () =>
           new Response(JSON.stringify({ error: { code: "ELICITATION_NOT_PENDING" } }), {
             status: 409,
-          })) as unknown as typeof fetch,
+          })) as unknown as typeof fetch),
       },
     );
     expect(result).toEqual({ ok: false, code: "ELICITATION_NOT_PENDING" });
@@ -590,9 +591,9 @@ describe("handing the answer to the board", () => {
       {
         baseUrl: "https://board.test",
         mint: async () => "t",
-        fetch: (async () => {
+        fetch: contractWebFetch((async () => {
           throw new Error("ECONNREFUSED");
-        }) as unknown as typeof fetch,
+        }) as unknown as typeof fetch),
       },
     );
     expect(result).toEqual({ ok: false, code: "UNREACHABLE" });
@@ -604,7 +605,7 @@ describe("handing the answer to the board", () => {
       {
         baseUrl: "https://board.test",
         mint: async () => "t",
-        fetch: (async () => new Response("gateway down", { status: 502 })) as unknown as typeof fetch,
+        fetch: contractWebFetch((async () => new Response("gateway down", { status: 502 })) as unknown as typeof fetch),
       },
     );
     expect(result).toEqual({ ok: false, code: "HTTP_502" });

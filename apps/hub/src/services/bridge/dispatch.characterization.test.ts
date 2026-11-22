@@ -35,6 +35,7 @@ import type { BridgeAgentConfig } from "./config";
 import { openDispatch, recordProduced } from "./ledger";
 import type { StrictWorkSelection } from "./salaam-dispatch";
 import { SuperpipelineClient } from "./superpipeline";
+import { contractFetch } from "../../../tests/helpers/superpipeline-contract";
 import { runOnce, type AcpPort, type DispatchDeps } from "./dispatch";
 
 const STATION_ID = "bridge-dispatch-char-station";
@@ -176,7 +177,7 @@ function rig(o: RigOpts) {
     baseUrl: "https://board.test",
     boardId: BOARD_ID,
     token: TOKEN,
-    fetch: async (url, init) => {
+    fetch: contractFetch(async (url, init) => {
       const path = new URL(url).pathname;
       const method = init.method ?? "GET";
       const body = init.body ? JSON.parse(init.body) : undefined;
@@ -192,7 +193,7 @@ function rig(o: RigOpts) {
       }
       reply ??= ok();
       return { status: reply.status, ok: reply.status >= 200 && reply.status < 300, json: async () => reply.body };
-    },
+    }),
   });
 
   let seq = 0;

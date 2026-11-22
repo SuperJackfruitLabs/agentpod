@@ -19,21 +19,26 @@ import { context, trace } from "@opentelemetry/api";
 import { tracer } from "../../telemetry/otel";
 import { useTestTelemetry } from "../../../tests/helpers/telemetry";
 import type { GatePendingDelivery } from "../board-chat/gates";
+import { contractFetch } from "../../../tests/helpers/superpipeline-contract";
 
 const TOKEN = `spa_${"a1b2c3d4".repeat(6)}`;
 const BOARD = "brd_9c1d4e5f6a7b8c9d";
 
 type Call = { url: string; method: string; headers: Record<string, string>; body?: string };
 
-/** A fake board. `reply` decides each response; every call is recorded. */
+/**
+ * A fake board. `reply` decides each response; every call is recorded, and every request is held to
+ * SuperPipeline's contracts (agent-work.v1, decisions.v1) before it is answered: one that reaches
+ * no operation, or sends a body its operation refuses, fails the test.
+ */
 function fakeBoard(reply: (call: Call) => { status: number; body: unknown }) {
   const calls: Call[] = [];
-  const fetch = async (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => {
+  const fetch = contractFetch(async (url, init) => {
     const call = { url, method: init.method, headers: init.headers, body: init.body };
     calls.push(call);
     const { status, body } = reply(call);
     return { status, ok: status >= 200 && status < 300, json: async () => body };
-  };
+  });
   return { calls, client: new SuperpipelineClient({ baseUrl: "https://board.test", boardId: BOARD, token: TOKEN, fetch }) };
 }
 
@@ -114,6 +119,13 @@ describe("SuperpipelineClient — claim", () => {
     const { client } = fakeBoard(() => ({ status: 200, body: { claimed: true } }));
     expect(await client.claim()).toBeNull();
   });
+
+  test("a claimed:true response whose card has no id or title is no work, not a card to cast", async () => {
+    for (const card of [{ title: "t" }, { id: "card_1a2b3c4d5e6f7a8b" }, "card_1a2b3c4d5e6f7a8b"]) {
+      expect(await fakeBoard(() => ({ status: 200, body: { ...claimed, card } })).client.claim()).toBeNull();
+    }
+    expect(await fakeBoard(() => ({ status: 200, body: { ...claimed, leaseEpoch: "1" } })).client.claim()).toBeNull();
+  });
 });
 
 describe("SuperpipelineClient — the agent read surface", () => {
@@ -132,6 +144,14 @@ describe("SuperpipelineClient — the agent read surface", () => {
     expect(calls[0]!.url).toBe(`https://board.test/v1/boards/${BOARD}/runs/${work.runId}`);
     expect(got.card.attemptCount).toBe(2);
     expect(got.handoff).toEqual({ summary: "prior" });
+  });
+
+  test("a run context is checked where every reader leans on it, not cast", async () => {
+    // agent-work.v1's RunContext: a run, and a card with its id and title. A body without them
+    // used to pass as a RunContext and fail later, as a TypeError in whichever reader got there first.
+    for (const body of [{}, null, { run: {}, card: { title: "no id" } }, { card: { id: "card_1", title: "t" } }]) {
+      await expect(fakeBoard(() => ({ status: 200, body })).client.context(work.runId)).rejects.toThrow(/run context/);
+    }
   });
 
   test("reading another agent's run is a 403 that names the reason", async () => {
@@ -336,7 +356,14 @@ describe("SuperpipelineClient: tracing", () => {
   });
 
   test("inside a trace: a CLIENT span per call, and the header names that span", async () => {
-    const { calls, client } = fakeBoard(() => ({ status: 200, body: {} }));
+    const body = {
+      run: { runId: "run_e074a2160c4b4f28", cardId: "card_1a2b3c4d5e6f7a8b", stageKey: "work", leaseEpoch: 1, status: "working", outcome: null, startedAt: "t", endedAt: null },
+      card: { id: "card_1a2b3c4d5e6f7a8b", title: "Rebuild the index" },
+      stage: null,
+      handoff: null,
+      references: [],
+    };
+    const { calls, client } = fakeBoard(() => ({ status: 200, body }));
     const parent = tracer().startSpan("dispatch");
     await context.with(trace.setSpan(context.active(), parent), () => client.context("run_e074a2160c4b4f28"));
     parent.end();
@@ -375,7 +402,9 @@ test('trusted credentials are refreshed per request and completion guard runs af
 test("strict activity unwraps actual REST receipt and never substitutes a bare response", async () => {
   const strictDecision = {version:1 as const, request_id:crypto.randomUUID(), decision_digest:"a".repeat(64), expires_at:Date.now()+60000};
   const receipt = {accepted:true,cardState:"input-required",elicitationId:"elc_123456",strictDecision};
-  const activity = {type:"elicitation" as const,signal:"select",strictDecision};
+  // As the board's contract has a strict decision: the question and its options ride with it.
+  const activity = {type:"elicitation" as const,signal:"select",body:"Push the release branch?",strictDecision,
+    parameter:{options:[{name:"approve",title:"Approve"},{name:"deny",title:"Deny"}]}};
   const wrapped = fakeBoard(()=>({status:200,body:{activity:receipt}}));
   expect(await wrapped.client.activity(work,activity)).toEqual(receipt);
   const bare = fakeBoard(()=>({status:200,body:receipt}));

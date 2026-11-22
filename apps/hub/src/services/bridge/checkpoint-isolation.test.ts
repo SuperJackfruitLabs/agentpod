@@ -21,6 +21,7 @@ import { BridgeCredentialRefused } from "./plane-credential";
 import type { CheckpointDispatchPort } from "./checkpoint-dispatch";
 import type { AcpPort, DispatchDeps } from "./dispatch-types";
 import type { BridgeAgentConfig } from "./config";
+import { contractFetch } from "../../../tests/helpers/superpipeline-contract";
 
 const agent: BridgeAgentConfig = { key: "a", boardId: "brd_x", token: "spa_x", stationId: "station_x", hubUserId: "usr_x", mode: "full-auto" };
 const unused = (): never => { throw new Error("not part of a claim cycle"); };
@@ -31,10 +32,10 @@ const acp: AcpPort = { stationReady: async () => ({ ready: true }), createSessio
 function ordinaryClient() {
   const claims: Record<string, unknown>[] = [];
   const client = new SuperpipelineClient({ baseUrl: "https://board.test", boardId: agent.boardId, token: agent.token,
-    fetch: async (_url, init) => {
+    fetch: contractFetch(async (_url, init) => {
       claims.push(JSON.parse(init.body ?? "{}"));
       return { status: 200, ok: true, json: async () => ({ claimed: false }) };
-    } });
+    }) });
   return { client, claims };
 }
 function deps(client: SuperpipelineClient, extra: Partial<DispatchDeps> = {}): DispatchDeps {
@@ -174,10 +175,10 @@ test("a refused plane grant on the dedicated path is a named refusal, and the or
       if (++exchanges === 1) throw new BridgeCredentialRefused("claims.scope");
       return "grant";
     },
-    fetch: async (_url, init) => {
+    fetch: contractFetch(async (_url, init) => {
       claims.push(JSON.parse(init.body ?? "{}"));
       return { status: 200, ok: true, json: async () => ({ claimed: false }) };
-    } });
+    }) });
   const target = { tenantId: "tnt_x", sourceTenantId: "tnt_x", boardId: agent.boardId, stationId: agent.stationId,
     agentId: "agt_x", nodeId: "node_x", hostId: "host_x", registryRevision: "r", benchProtocol: "superbench.v2",
     coordinatorImplementationSHA256: "b".repeat(64), executionMode: "linux-cgroup-v2",

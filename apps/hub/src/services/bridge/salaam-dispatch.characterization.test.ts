@@ -36,6 +36,7 @@ import { makeSalaamExecution, workDigest } from "../salaam";
 import * as broker from "../broker/broker";
 import { fakePlane } from "../../../tests/helpers/fake-plane";
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
+import { contractFetch } from "../../../tests/helpers/superpipeline-contract";
 import corpus from "../../../../../packages/contract/src/fixtures/salaam-work-payload-v1.json";
 import { openDispatch } from "./ledger";
 import { reserveSalaamWork } from "./salaam-work";
@@ -295,7 +296,7 @@ function deps(r: Run, o: RigOpts = {}): DispatchDeps {
     baseUrl: "https://board.test",
     boardId: r.boardId,
     token: TOKEN,
-    fetch: async (url, init) => {
+    fetch: contractFetch(async (url, init) => {
       const path = new URL(url).pathname.replace(`/v1/boards/${r.boardId}`, "");
       const method = init.method ?? "GET";
       const body: unknown = init.body ? JSON.parse(init.body) : undefined;
@@ -315,7 +316,7 @@ function deps(r: Run, o: RigOpts = {}): DispatchDeps {
         ok: answer.ok,
         json: async () => (answer.ok ? answer.data : { error: { code: "STALE_LEASE", message: answer.error } }),
       };
-    },
+    }),
   });
   const acp: AcpPort = {
     async stationReady() {

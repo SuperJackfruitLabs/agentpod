@@ -11,6 +11,7 @@ import { driveCheckpointAttempt, type CheckpointDriveDeps } from "./checkpoint-o
 import { parseCheckpointProfile } from "./checkpoint-profile";
 import { createCheckpointServiceClient } from "./checkpoint-service-client";
 import { SuperpipelineClient } from "./superpipeline";
+import { contractFetch } from "../../../tests/helpers/superpipeline-contract";
 
 afterEach(() => resetCheckpointActivityForTests());
 
@@ -58,13 +59,13 @@ async function preparedReply(attempt: RetainedCheckpointAttempt) {
 function board(activityStatus = 200) {
   const activities: Array<Record<string, unknown>> = [];
   const client = new SuperpipelineClient({ baseUrl: "https://board.test", boardId: "brd_ABC123", token: "spa_fixture",
-    fetch: async (url, init) => {
+    fetch: contractFetch(async (url, init) => {
       if (url.endsWith("/activities")) {
         activities.push(JSON.parse(init.body ?? "{}"));
         return { status: activityStatus, ok: activityStatus < 300, json: async () => ({}) };
       }
       return { status: 200, ok: true, json: async () => ({}) };
-    } });
+    }) });
   return { client, activities };
 }
 

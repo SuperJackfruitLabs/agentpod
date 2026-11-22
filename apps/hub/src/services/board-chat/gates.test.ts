@@ -345,13 +345,14 @@ import { AssertionMismatch } from "../../auth/org-plane/assertion";
 describe("resolving at the board", () => {
   function capture(status = 200, body: unknown = {}) {
     const calls: Array<{ url: string; init: RequestInit }> = [];
-    const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    // Every request is held to decisions.v1 before it is answered.
+    const f = contractWebFetch((async (url: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: String(url), init: init ?? {} });
       return new Response(JSON.stringify(body), {
         status,
         headers: { "content-type": "application/json" },
       });
-    }) as unknown as typeof fetch;
+    }) as unknown as typeof fetch);
     return { calls, f };
   }
 
@@ -1068,6 +1069,7 @@ describe("gate.v2 — resolving at the board with the subject binding", () => {
 import { readFileSync } from "node:fs";
 import { GATE_REQUEST_CONTENT_KEY } from "@agentpod/contract";
 import { gateRequestCard } from "./gates";
+import { contractWebFetch } from "../../../tests/helpers/superpipeline-contract";
 
 /** The rules every gate.v2 the hub sends keeps: a body, options with meaning and needs_comment, unique ids, a subject digest. */
 function wellFormed(c: Record<string, unknown>): boolean {

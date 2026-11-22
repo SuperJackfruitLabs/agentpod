@@ -432,19 +432,12 @@ export class SuperpipelineClient {
     // No agentId, no capabilities: the token carries the agent's identity and
     // its registered capabilities, and a client-asserted identity is a request
     // to be treated as someone else.
-    const res = (await this.send("POST", `/v1/boards/${this.boardId}/claims`, body)) as {
-      claimed?: boolean;
-      runId?: string;
-      leaseEpoch?: number;
-      card?: ClaimedCard;
-      stage?: RunStage;
-      handoff?: unknown;
-    };
+    const res: unknown = await this.send("POST", `/v1/boards/${this.boardId}/claims`, body);
 
     const checkpointClaim = readCheckpointClaim(res, opts.checkpointProtocol, this.boardId);
-    if (opts.checkpointOnly && (res as { claimed?: unknown } | null)?.claimed === true && !checkpointClaim)
+    if (opts.checkpointOnly && isRecord(res) && res.claimed === true && !checkpointClaim)
       throw new CheckpointClaimRefused("required");
-    if (!res.claimed || !res.runId || res.leaseEpoch === undefined || !res.card) return null;
+    if (!isClaimed(res)) return null;
     return {
       runId: res.runId,
       leaseEpoch: res.leaseEpoch,
@@ -466,7 +459,10 @@ export class SuperpipelineClient {
     const result = await this.send("GET", `/v1/boards/${this.boardId}/runs/${runId}`);
     if (pending) validateCheckpointContext(result, pending, this.boardId, runId);
     else refuseLegacyCheckpoint(result);
-    return result as RunContext;
+    // Checked where every reader leans on it: the run, and the card's id and title. The rest is
+    // typed as agent-work.v1's RunContext has it and read field by field by each caller.
+    if (!isRunContext(result)) throw new Error(`GET runs/${runId}: the board's run context is not one`);
+    return result;
   }
 
   /**
@@ -512,12 +508,13 @@ export class SuperpipelineClient {
       manifest_sha256: string;
     },
   ): Promise<{ reference_id: string; verification: "unverified" }> {
-    const result = (await this.send(
+    const result: unknown = await this.send(
       "POST",
       `/v1/boards/${this.boardId}/runs/${encodeURIComponent(runId)}/evidence-reference`,
       input,
-    )) as { reference_id?: unknown; verification?: unknown };
+    );
     if (
+      !isRecord(result) ||
       typeof result.reference_id !== "string" ||
       result.verification !== "unverified"
     )
@@ -565,22 +562,13 @@ export class SuperpipelineClient {
     pulledBack: { by: string } | null;
   } | null> {
     try {
-      const res = (await this.send("GET", `/v1/boards/${this.boardId}/gates/${encodeURIComponent(gateId)}`)) as {
-        gate?: {
-          status?: string;
-          decision?: string | null;
-          decidedBy?: string | null;
-          variants?: unknown;
-          heldUntil?: unknown;
-          pulledBack?: unknown;
-        };
-      };
-      const g = res.gate;
-      if (!g || typeof g.status !== "string") return null;
+      const res: unknown = await this.send("GET", `/v1/boards/${this.boardId}/gates/${encodeURIComponent(gateId)}`);
+      const g = isRecord(res) ? res.gate : undefined;
+      if (!isRecord(g) || typeof g.status !== "string") return null;
       return {
         status: g.status,
-        decision: g.decision ?? null,
-        decidedBy: g.decidedBy ?? null,
+        decision: typeof g.decision === "string" ? g.decision : null,
+        decidedBy: typeof g.decidedBy === "string" ? g.decidedBy : null,
         chosen: chosenVariantOf(g.variants),
         heldUntil: typeof g.heldUntil === "string" ? g.heldUntil : null,
         pulledBack: pulledBackOf(g.pulledBack),
@@ -601,10 +589,9 @@ export class SuperpipelineClient {
   }
 
   async pendingGates(): Promise<GatePendingDelivery[]> {
-    const res = (await this.send("GET", `/v1/boards/${this.boardId}/gates/pending`)) as {
-      gates?: GatePendingDelivery[];
-    };
-    return res.gates ?? [];
+    const res: unknown = await this.send("GET", `/v1/boards/${this.boardId}/gates/pending`);
+    // Each gate is checked by the sweep (`isGatePending`) before it is carried; only the list is read here.
+    return isRecord(res) && Array.isArray(res.gates) ? (res.gates as GatePendingDelivery[]) : [];
   }
 
   /**
@@ -617,10 +604,9 @@ export class SuperpipelineClient {
    * question on the board.
    */
   async pendingElicitations(): Promise<ElicitationPendingDelivery[]> {
-    const res = (await this.send("GET", `/v1/boards/${this.boardId}/elicitations/pending`)) as {
-      elicitations?: ElicitationPendingDelivery[];
-    };
-    return res.elicitations ?? [];
+    const res: unknown = await this.send("GET", `/v1/boards/${this.boardId}/elicitations/pending`);
+    // Each question is checked by the sweep before it is carried; only the list is read here.
+    return isRecord(res) && Array.isArray(res.elicitations) ? (res.elicitations as ElicitationPendingDelivery[]) : [];
   }
 
   /**
@@ -685,7 +671,7 @@ export class SuperpipelineClient {
     const response = await this.verb(lease, "activities", { ...activity });
     // REST wraps the native postActivity result. Strict consumers validate the
     // inner receipt; absence must fail closed rather than accept another shape.
-    if (activity.strictDecision) return (response as { activity?: unknown } | null)?.activity;
+    if (activity.strictDecision) return isRecord(response) ? response.activity : undefined;
     return response;
   }
 
@@ -714,6 +700,27 @@ export class SuperpipelineClient {
   release(lease: RunLease): Promise<unknown> {
     return this.verb(lease, "release");
   }
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** A card as a claim or a run context carries it: agent-work.v1's CardView, its id and title checked. */
+function isCard(v: unknown): v is ClaimedCard {
+  return isRecord(v) && typeof v.id === "string" && typeof v.title === "string";
+}
+
+/**
+ * A claim that handed out work (agent-work.v1 ClaimResult, "Claimed"): a run, its lease and its
+ * card. Anything less is read as no work, as it always was.
+ */
+function isClaimed(v: unknown): v is { claimed: true; runId: string; leaseEpoch: number; card: ClaimedCard; stage?: RunStage; handoff?: unknown } {
+  return isRecord(v) && v.claimed === true && typeof v.runId === "string" && v.runId !== "" &&
+    typeof v.leaseEpoch === "number" && isCard(v.card);
+}
+
+/** agent-work.v1's RunContext, checked where every reader leans on it: its run and its card. */
+function isRunContext(v: unknown): v is RunContext {
+  return isRecord(v) && isRecord(v.run) && isCard(v.card);
 }
 
 /** A read's `pulledBack: { by, at, comment }`, kept to who; null when absent or not that shape. */
