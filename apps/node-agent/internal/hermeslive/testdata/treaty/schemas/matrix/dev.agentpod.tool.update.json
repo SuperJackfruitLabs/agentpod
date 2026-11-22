@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/SuperJackfruitLabs/treaty/main/schemas/matrix/dev.agentpod.tool.update.json",
+  "title": "dev.agentpod.tool.update",
+  "description": "One tool call's state, sent to the reader's own devices as a to-device event each time it changes. A reader upserts by `tool_call_id` and orders by `seq`. Tool input and output are deliberately absent: this is a live ticker, not a viewer. Carries no version: it changes only additively. Mirrors AgentPod's `LiveToolUpdate` and the hub's `toolUpdateContent`; the Hermes plugin sends the same body. Readers ignore properties they do not know.",
+  "x-treaty-carrier": {
+    "kind": "to-device"
+  },
+  "type": "object",
+  "required": [
+    "room_id",
+    "session_id",
+    "seq",
+    "tool_call_id",
+    "title",
+    "status",
+    "locations"
+  ],
+  "properties": {
+    "room_id": {
+      "type": "string",
+      "description": "The room the turn is answering in."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "A turn-scoped id: a new value starts a new turn. The AgentPod hub sends the ACP session id of the turn it is streaming; the Hermes plugin sends the turn's own id (falling back to Hermes's session id), so a straggler from an earlier turn is never mistaken for this one."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic within a turn, across this turn's tool updates."
+    },
+    "tool_call_id": {
+      "type": "string",
+      "description": "The identity later updates merge onto. The harness's own id; the Hermes plugin makes one up (`tc-` and 12 hex digits) for a call that has none."
+    },
+    "title": {
+      "type": "string",
+      "description": "What the call is doing, as display text."
+    },
+    "kind": {
+      "type": "string",
+      "description": "ACP's tool kind (read, edit, execute, ...), passed through from the harness unvalidated. Opaque display text: never switched on. Absent when the harness did not say; never sent empty.",
+      "x-treaty-known-values": [
+        "read",
+        "edit",
+        "delete",
+        "move",
+        "search",
+        "execute",
+        "think",
+        "fetch",
+        "switch_mode",
+        "other"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "x-treaty-known-values": [
+        "pending",
+        "in_progress",
+        "completed",
+        "failed"
+      ],
+      "description": "ACP's tool lifecycle. The hub sends one of pending, in_progress, completed, failed; the Hermes plugin never sends pending (a call starts at in_progress). Open to readers: a value not listed in x-treaty-known-values is valid and is drawn generically, never dropped."
+    },
+    "locations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The paths the call touches. Empty when it names none."
+    }
+  }
+}
