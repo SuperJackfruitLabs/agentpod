@@ -300,7 +300,6 @@ export async function createBridgeAgent(
     input.stationId,
     input.credentialSource,
     input.token,
-    input.mcpToken,
   );
   await db.insert(bridgeAgents).values({
     tenantId: input.tenantId,
@@ -377,19 +376,18 @@ export async function updateBridgeAgent(
       ? patch.credentialSource
       : current.credentialSource;
   if (source) {
-    if (patch.token !== undefined || patch.mcpToken)
-      throw new BridgeRosterRefusal("Station-plane credentials cannot store tokens");
+    if (patch.token !== undefined) throw new BridgeRosterRefusal(STATION_PLANE_CLAIM_TOKEN);
     if (!(patch.enabled === false && Object.keys(patch).length === 1)) {
       await validateCredentialInput(
         tenantId,
         patch.stationId ?? current.stationId,
         source,
         undefined,
-        undefined,
       );
     }
+    // The claim token goes; the run-only MCP token stays. It is the harness's, not the bridge's:
+    // dropping it here was what left an upgraded agent with no board tools on ordinary cards.
     set.tokenEncrypted = "";
-    set.mcpTokenEncrypted = null;
   } else if (current.credentialSource && !patch.token?.startsWith("spa_"))
     throw new BridgeRosterRefusal(
       "A legacy credential is required when removing exchange source",
@@ -443,12 +441,21 @@ export async function deleteBridgeAgent(
   return done.length > 0;
 }
 
+/**
+ * A source row stores no credential that can claim: the bridge exchanges the occupant's identity
+ * for each board request instead. It may keep the one `run`-scoped token the HARNESS spends over
+ * MCP (`mcpToken`), exactly as a token row does, so a dispatched agent reports for itself on an
+ * ordinary card. That token cannot claim; SuperPipeline fences every verb it can call to the run
+ * the caller holds and its lease epoch. Checkpoint work never hands it to a bench.
+ */
+const STATION_PLANE_CLAIM_TOKEN =
+  "Station-plane credentials cannot store a claim token; only the run-scoped MCP token (--mcp-token) is kept";
+
 async function validateCredentialInput(
   tenantId: string,
   stationId: string,
   raw: BridgeCredentialSource | null | undefined,
   token?: string,
-  mcpToken?: string | null,
 ) {
   if (!raw) {
     if (!token?.startsWith("spa_"))
@@ -456,8 +463,7 @@ async function validateCredentialInput(
     return;
   }
   const source = parseDeploymentCredentialSource(raw);
-  if (token !== undefined || mcpToken)
-    throw new BridgeRosterRefusal("Station-plane credentials cannot store tokens");
+  if (token !== undefined) throw new BridgeRosterRefusal(STATION_PLANE_CLAIM_TOKEN);
   const [station] = await db
     .select()
     .from(stations)

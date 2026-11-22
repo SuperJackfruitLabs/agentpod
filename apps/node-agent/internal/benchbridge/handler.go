@@ -237,6 +237,12 @@ func failed(r benchcoordinatorwire.Request, err error) (benchcoordinatorwire.Res
 		response := refused(r.Operation)
 		response.Code = code
 		response.Detail = detail(benchlaunch.RefusalMessage(err), benchlaunch.RefusalLeaseHeld(err))
+		if task := benchlaunch.RefusalTask(err); task != "" {
+			if response.Detail == nil {
+				response.Detail = &benchcoordinatorwire.Detail{}
+			}
+			response.Detail.Task = task
+		}
 		return response, nil
 	}
 	response := pending(r)

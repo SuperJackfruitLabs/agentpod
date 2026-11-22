@@ -251,18 +251,19 @@ func ParseResponse(raw []byte, request Request) (Response, error) {
 }
 
 // validDetail admits a non-empty detail: lease, when present, is "held", and
-// message, when present, at most 256 UTF-8 bytes of printable text.
+// message and task, when present, at most 256 UTF-8 bytes of printable text.
 func validDetail(d Detail) bool {
-	if d.Message == "" && d.Lease == "" || d.Lease != "" && d.Lease != "held" {
+	if d.Message == "" && d.Lease == "" && d.Task == "" || d.Lease != "" && d.Lease != "held" {
 		return false
 	}
-	if d.Message == "" {
-		return true
-	}
-	if len(d.Message) > 256 || !utf8.ValidString(d.Message) {
+	return printableDetail(d.Message) && printableDetail(d.Task)
+}
+
+func printableDetail(text string) bool {
+	if len(text) > 256 || !utf8.ValidString(text) {
 		return false
 	}
-	for _, r := range d.Message {
+	for _, r := range text {
 		if unicode.IsControl(r) {
 			return false
 		}

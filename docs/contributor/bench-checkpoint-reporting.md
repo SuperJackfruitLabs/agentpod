@@ -135,6 +135,19 @@ and release. A profile whose checkpoint repository is missing or is not one of
 its repositories is refused at load, so a single-repository profile names its
 only repository.
 
+Starting inside the member means a harness's own scratch can land in the
+checkout: a soak saw Hermes write `.hermes/cache/scratch/run_tests.py` there
+by a relative path, though its `HERMES_HOME` is outside the bench, and every
+such run was refused as dirty. Before it starts the harness, the registered
+worker adds each harness's scratch patterns (`/.hermes/cache/` for Hermes;
+`harnessScratch` in `registered_worker.go`) to every member's own
+`info/exclude`. Each member has its own independent Git directory in the bench,
+so the exclude is never committed, never shared with another bench, and the
+repository's tracked `.gitignore` is not touched. SuperBench's dirty check
+(`git status --porcelain --untracked-files=all`) honours it. A harness's
+project files beside the cache (`.hermes/skills`, `.hermes/plugins`) are task
+content and stay visible.
+
 ## What the card shows
 
 Each phase the Hub commits posts one short activity to the card's live stream,
@@ -195,6 +208,20 @@ For example: `Checkpoint failed: SuperBench refused the bench step after the run
 (verification_failed): "bench has uncommitted or untracked files; commit or
 preserve them before checkpoint/release". Nothing was reported as a pass.`
 Without a message the sentence is the table's.
+
+**The task's own reason.** For a failed run SuperBench's message only says
+`operation failed; inspect retained workspace state and local logs`. When the
+task itself failed and its worker said why (the Hermes adapter does when the
+model provider refuses the call: `Hermes stopped: the model provider answered
+HTTP 401 (unauthorized; check the model key)`), the worker relays that failed
+result on stdout and still exits nonzero, so SuperBench checkpoints nothing.
+The node carries the result's `handoff.error` as `detail.task`, beside
+SuperBench's `detail.message`, and the card's sentence names it instead:
+`Checkpoint failed: the task failed on the bench: "…". Nothing was reported as
+a pass.` The reason is a closed form built on the bench (a provider status and
+what it usually means, a timeout, or only that the harness stopped with an
+error); the provider's own text, which can quote a key or a payload, never
+leaves the bench, and the Hub bounds and redacts it as it does SuperBench's.
 
 **A held lease.** When SuperBench refused the release too, the node's reply
 also carries `detail.lease: "held"`. Before the board is told, the card gets a
@@ -332,8 +359,20 @@ before a superseded attempt is resolved); on any pass that is about to park in
 `submission_pending` only after an authenticated `CHECKPOINT_RECEIPT_MISSING`,
 because a settlement that landed ends the run too. The read is a `GET`: it
 neither heartbeats the run nor touches the card. Once the board has ended the
-run, the Hub sends it nothing more, not even an activity. A verb on an unbound
-run would act on the card wherever it is now, and an activity would heartbeat it.
+run, the Hub sends it no verb. A verb on an unbound run would act on the card
+wherever it is now, and an activity would heartbeat it.
+
+One activity is the exception, by an operator ruling: when the attempt is
+retired and the bench had already pushed this card's work (the node's completed
+reply, or the completion a `completed` or `submission_pending` attempt retained),
+the card gets one `checkpoint.stopped` activity naming where it is, for example
+`Run stopped because the card moved; partial work saved to card/<card id>
+(<short sha>).` A run the board still shows working but no longer bound
+(`run.unbound`) reads "the card moved"; any other ending reads "the card moved
+or its run was ended". With nothing pushed, nothing is said. The activity is a
+run verb, so the board accepts it only while the run is still `working`
+(`run.unbound`); for a run the board has ended it answers `STALE_LEASE`, which
+is logged and changes nothing.
 
 **The current decision.** A node's current check that fails for an attempt it
 matched now asks the board too. When the board says the run ended, the decision
@@ -410,6 +449,14 @@ node did. The waits fit each operation (`checkpoint-node-call.ts`): `ready`
 5 seconds, `status` 60, `prepare` 120 and `execute` 60. An execute runs the
 task for up to its whole timeout, so the Hub never waits for it: a longer run is
 read with `status` on later cycles.
+
+Real runs take longer than the 60 second execute wait, so a run still going is
+said on the card as progress, not as a park: once per attempt, a
+`checkpoint.running` activity reading "the task is still running on the bench;
+its result is checked again shortly" (parameter `waiting: true` and the reason).
+That covers an `execute_pending` park on `node.call.timeout` and on a bare
+`node.state:pending` (no detail: no held lease and no message). Every other park
+keeps its `checkpoint.parked` wording.
 
 The node waits up to 20 seconds (15 for the headers) for each of the Hub's
 current decisions, and asks for one before and after every effect. A decision

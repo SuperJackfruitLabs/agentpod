@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -78,6 +79,13 @@ func runHermes(ctx context.Context, in hermesInput, out, logs io.Writer, c Herme
 		return ErrHermesProcess
 	}
 	if runErr != nil || ctx.Err() != nil || stdout.overflow || stderr.overflow {
+		// A run Hermes itself ended in error (a model key the provider refused, for one) still says
+		// why, in a failed result with a short closed reason. The exit stays nonzero: it is never
+		// a completion, and SuperBench keeps the stopped lease as for any other failure.
+		if reason := hermesFailure(stdout.raw); reason != "" && ctx.Err() == nil && !stdout.overflow {
+			failed, _ := json.Marshal(WorkerResult{Version: GroupedWorkerVersion, Binding: in.Binding, Outcome: "failed", Handoff: map[string]string{"error": reason}})
+			_, _ = out.Write(failed)
+		}
 		return ErrHermesProcess
 	}
 	result, err := parseHermesStream(stdout.raw, in.Binding, c.Model, logs)
@@ -266,4 +274,45 @@ func hermesEventFields(kind string, value any) bool {
 		}
 	}
 	return true
+}
+
+var hermesHTTPStatus = regexp.MustCompile(`\bHTTP ([1-5][0-9][0-9])\b`)
+
+// hermesStatusWords names what a provider status usually means for the operator.
+var hermesStatusWords = map[string]string{
+	"400": "bad request", "401": "unauthorized; check the model key", "402": "payment required; check the provider account",
+	"403": "forbidden; check the model key's access", "404": "not found; check the model name", "408": "timed out",
+	"413": "request too large", "429": "rate limited or out of quota",
+}
+
+// hermesFailure is the reason a failed Hermes run gives in its terminal
+// result, reduced to a closed form: the provider's HTTP status and what it
+// usually means, or a timeout, or only that Hermes stopped with an error. The
+// provider's own text never passes through: it can quote a key or a payload.
+func hermesFailure(raw []byte) string {
+	var last *hermesEvent
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		var e hermesEvent
+		if json.Unmarshal(line, &e) == nil && e.Type == "result" {
+			last = &e
+		}
+	}
+	if last == nil || last.ExitCode == nil || *last.ExitCode == 0 || last.Error == "" {
+		return ""
+	}
+	if m := hermesHTTPStatus.FindStringSubmatch(last.Error); m != nil {
+		words := hermesStatusWords[m[1]]
+		if words == "" && m[1][0] == '5' {
+			words = "provider unavailable"
+		}
+		if words == "" {
+			return "Hermes stopped: the model provider answered HTTP " + m[1]
+		}
+		return "Hermes stopped: the model provider answered HTTP " + m[1] + " (" + words + ")"
+	}
+	lower := strings.ToLower(last.Error)
+	if strings.Contains(lower, "timed out") || strings.Contains(lower, "timeout") {
+		return "Hermes stopped: the model call timed out"
+	}
+	return "Hermes stopped with an error before finishing the task"
 }

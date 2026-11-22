@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+// harnessScratch is the scratch each harness can leave in the checkout it
+// works in, as info/exclude patterns anchored at the member's root. Only a
+// harness's own cache belongs here: its project files (Hermes .hermes/skills,
+// .hermes/plugins) are task content and stay visible to Git.
+var harnessScratch = []string{
+	"/.hermes/cache/", // Hermes: HERMES_HOME/cache/scratch, reached by a relative path from the checkout
+}
+
 // ReadRegisteredInput accepts only an owned finite pipe or regular request FD.
 // Pipes get a short deadline, including the mandatory EOF after the one frame.
 func ReadRegisteredInput(ctx context.Context, in *os.File, expectedSHA string) (RegisteredCapsule, error) {
@@ -85,6 +93,9 @@ func ExecuteRegisteredWorker(ctx context.Context, in *os.File, out, logs io.Writ
 	if err != nil {
 		return err
 	}
+	if err = excludeHarnessScratch(c); err != nil {
+		return err
+	}
 	part := ".root"
 	selected := c.Task.WorkspaceRoot
 	if c.Task.RepositoryName != "" {
@@ -105,6 +116,13 @@ func ExecuteRegisteredWorker(ctx context.Context, in *os.File, out, logs io.Writ
 	cmd.Stdout = capture
 	cmd.Stderr = logs
 	if cmd.Run() != nil {
+		// A harness that failed may still say why in a failed result. It is relayed, framed as
+		// any result, so the node can name the reason; the exit stays nonzero, never a completion.
+		raw, overflow := capture.read()
+		var result WorkerResult
+		if !overflow && decodeGroupedResult(raw, &result, c.Task.Binding) == nil && result.Outcome == "failed" {
+			_ = WriteRegisteredResult(out, result)
+		}
 		return ErrRegisteredTask
 	}
 	raw, overflow := capture.read()

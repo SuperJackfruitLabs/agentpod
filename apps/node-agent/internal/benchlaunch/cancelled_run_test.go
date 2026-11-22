@@ -11,6 +11,7 @@ import (
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchdispatch"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/benchworkspace"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/superbench"
 )
 
 // recordedCancelledRunReply is what benchd answered the run's own POST once a
@@ -130,6 +131,40 @@ func TestRefusedCheckpointCarriesTheBenchsOwnMessage(t *testing.T) {
 	}
 	if _, err = tr.c.Status(context.Background(), tr.spec); RefusalMessage(err) != want {
 		t.Fatal("a later status lost the bench's message", err)
+	}
+}
+
+// The production soak: a model key the provider refused failed the run, and
+// the card said only SuperBench's "operation failed". The worker's failed
+// result names the reason; the refusal carries it beside SuperBench's words,
+// and a later status keeps it.
+func TestFailedRunCarriesTheTasksOwnReason(t *testing.T) {
+	for name, outcome := range map[string]string{"failed": "failed", "complete": "complete"} {
+		t.Run(name, func(t *testing.T) {
+			tr := newTrial(t)
+			tr.prepare(t)
+			generic := "operation failed; inspect retained workspace state and local logs"
+			reason := "Hermes stopped: the model provider answered HTTP 401 (unauthorized; check the model key)"
+			tr.exit, tr.refusalMessage = 1, generic
+			tr.stdout = func([]byte) []byte {
+				var out bytes.Buffer
+				binding := superbench.Binding{BoardID: tr.spec.Identity.BoardID, CardID: tr.spec.Identity.CardID, RunID: tr.spec.Identity.RunID, Epoch: tr.spec.Identity.Epoch}
+				_ = superbench.WriteRegisteredResult(&out, superbench.WorkerResult{Version: superbench.GroupedWorkerVersion, Binding: binding, Outcome: outcome, Handoff: map[string]string{"error": reason + "\n\x00"}})
+				return out.Bytes()
+			}
+			_, err := tr.c.Execute(context.Background(), tr.spec, admitAll)
+			wantCode(t, err, "verification_failed")
+			want := reason
+			if outcome != "failed" {
+				want = "" // only a failed result says why the task failed
+			}
+			if RefusalTask(err) != want || RefusalMessage(err) != generic {
+				t.Fatalf("the refusal said task %q, message %q", RefusalTask(err), RefusalMessage(err))
+			}
+			if _, err = tr.c.Status(context.Background(), tr.spec); RefusalTask(err) != want {
+				t.Fatal("a later status lost the task's reason", err)
+			}
+		})
 	}
 }
 

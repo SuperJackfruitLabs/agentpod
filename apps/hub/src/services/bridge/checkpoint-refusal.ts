@@ -82,7 +82,19 @@ export const MAX_BENCH_MESSAGE = 200;
  * Exported for tests.
  */
 export function benchMessage(response: BenchCoordinatorResponse): string | undefined {
-  const raw = "detail" in response ? response.detail?.message : undefined;
+  return detailText("detail" in response ? response.detail?.message : undefined);
+}
+
+/**
+ * Why the task itself failed, as its worker said in a failed result (`detail.task`): for a model
+ * provider that refused the call, its status and what it means. The same safety as `benchMessage`.
+ * Exported for tests.
+ */
+export function taskMessage(response: BenchCoordinatorResponse): string | undefined {
+  return detailText("detail" in response ? response.detail?.task : undefined);
+}
+
+function detailText(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
   const text = redact(raw).replace(/(?:^|\s)\/[^\s"'`;,]+/g, " [path]").replace(/\s+/g, " ").trim();
   if (!text) return undefined;
@@ -113,7 +125,11 @@ export function classifyCheckpointRefusal(phase: string, response: BenchCoordina
   const disposition = CHECKPOINT_REFUSAL_RULINGS[code]?.[phase];
   if (disposition === undefined || disposition === "parked") return undefined;
   const message = benchMessage(response);
-  const reason = (message === undefined ? undefined : benchSentence(code, phase, message)) ?? sentence(code, phase);
+  // The task's own reason is the most specific: SuperBench's message for a failed run only says the
+  // operation failed, which sent the operator to the bench's logs for a model key the provider refused.
+  const task = phase === "execute_pending" && code === "verification_failed" ? taskMessage(response) : undefined;
+  const reason = (task === undefined ? undefined : `Checkpoint failed: the task failed on the bench: "${task}". Nothing was reported as a pass.`) ??
+    (message === undefined ? undefined : benchSentence(code, phase, message)) ?? sentence(code, phase);
   return { code, disposition, reason };
 }
 

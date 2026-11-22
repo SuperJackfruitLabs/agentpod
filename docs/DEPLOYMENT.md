@@ -624,7 +624,8 @@ The hub admits a source only when:
   admitted, and a stored source naming another audience is never spent.
 
 **Upgrading an existing token row** happens in place, as a workspace owner or admin, with no
-database edit. The stored tokens are dropped in the same write. Read the principal from the
+database edit. The stored claim token is dropped in the same write; a run-scoped MCP token, if
+the row has one, is kept. Read the principal from the
 station's occupant in the console and the organization from the workspace. For the checkpoint
 agent they are the profile's `occupantPrincipalId` and `organizationId`, and the audience is its
 `sourceAudience`. Then:
@@ -647,10 +648,14 @@ The same change is `PATCH /api/admin/bridge/agents/KEY` with
 the one rule it broke: the occupant, the workspace mapping, the organization, the principal's kind,
 or the audience the hub expected.
 
-A source row holds no run-only token either, so a harness that completes its own card over MCP
-with that token (Hermes and the other ACP harnesses) loses those board tools on a source row. A
-row that only does checkpoint work does not need them. `fleet bridge list` shows the source
-it stored. To go back to a token, `fleet bridge set KEY --credential-source none --token spa_…`.
+A source row stores no claim token, but it may hold the run-scoped MCP token a harness spends
+to report for itself over MCP (Hermes and the other ACP harnesses), exactly as a token row does.
+Give it one with `fleet bridge set KEY --mcp-token spa_…`, minted for the same SuperPipeline agent
+as the occupant with the `run` scope only; `fleet bridge list` then shows `hasMcpToken: true`.
+Without it the agent gets no board tools on ordinary cards. That token cannot claim, and
+SuperPipeline refuses each run verb unless the caller holds that run at its current lease epoch.
+Checkpoint work never hands it to a bench: the bench worker gets only its task, and the hub
+reports the card. `fleet bridge list` shows the source it stored. To go back to a token, `fleet bridge set KEY --credential-source none --token spa_…`.
 
 The organization plane must also be willing to mint an agent grant for that audience: the
 audience has to be registered with the issuer the hub uses (`ORG_PLANE_ISSUER`). If it is not,

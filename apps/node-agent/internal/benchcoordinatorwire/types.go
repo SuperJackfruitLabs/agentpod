@@ -161,6 +161,10 @@ type Detail struct {
 	// Lease is "held" when the attempt's own lease is still held because
 	// SuperBench refused its release: an operator must reconcile the bench.
 	Lease string `json:"lease,omitempty"`
+	// Task is the worker's own reason the task failed (for example a model
+	// provider's status), when its failed run said one: the same bounds as
+	// Message. It is never SuperBench's text.
+	Task string `json:"task,omitempty"`
 }
 
 type Response struct {

@@ -113,7 +113,10 @@ func (c Coordinator) advance(ctx context.Context, spec benchdispatch.SourceSpec)
 		return zero, c.terminate(ctx, spec, "stale_owner", held)
 	}
 	if !reply.OK {
-		return zero, c.refused(ctx, spec, reply.Error, "verification_failed", held) // worker crash, or a refused checkpoint
+		// A worker crash, or a refused checkpoint. A task that failed may have said why in a failed
+		// result on its stdout (SuperBench returns it with the nonzero exit): that reason is kept
+		// beside SuperBench's own message, which for a failed run only says the operation failed.
+		return zero, c.terminateWith(ctx, spec, "verification_failed", held, producerMessage(reply.Error), failedTask(spec, outcome, finite))
 	}
 	b := *r.Binding
 	w := outcome.Workspace
@@ -166,6 +169,24 @@ func (c Coordinator) advance(ctx context.Context, spec benchdispatch.SourceSpec)
 		return zero, refuse("stale_owner") // cancelled while the result was being checked
 	}
 	return completion, nil
+}
+
+// failedTask is the reason a failed run's own worker result gives, or "".
+// The result is read only for its words: it is never a completion.
+func failedTask(spec benchdispatch.SourceSpec, outcome *benchworkspace.FiniteRunOutcome, finite benchworkspace.FiniteRunRequest) string {
+	if outcome == nil || outcome.IO == nil || finite.IO == nil {
+		return ""
+	}
+	stdout, err := outcome.IO.Stdout(*finite.IO)
+	if err != nil {
+		return ""
+	}
+	binding := superbench.Binding{BoardID: spec.Identity.BoardID, CardID: spec.Identity.CardID, RunID: spec.Identity.RunID, Epoch: spec.Identity.Epoch}
+	result, err := superbench.ParseRegisteredResult(stdout, binding)
+	if err != nil {
+		return ""
+	}
+	return taskMessage(result)
 }
 
 // cancelledRun ends a record whose run lost its finalization race to a
