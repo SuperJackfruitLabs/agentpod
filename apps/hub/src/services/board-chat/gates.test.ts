@@ -345,19 +345,20 @@ import { AssertionMismatch } from "../../auth/org-plane/assertion";
 describe("resolving at the board", () => {
   function capture(status = 200, body: unknown = {}) {
     const calls: Array<{ url: string; init: RequestInit }> = [];
-    const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    // Every request is held to decisions.v1 before it is answered.
+    const f = contractWebFetch((async (url: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: String(url), init: init ?? {} });
       return new Response(JSON.stringify(body), {
         status,
         headers: { "content-type": "application/json" },
       });
-    }) as unknown as typeof fetch;
+    }) as unknown as typeof fetch);
     return { calls, f };
   }
 
   const input = {
-    boardId: "brd_7c1f",
-    gateId: "gate_4e8b",
+    boardId: "brd_7c1f00a1b2c3d4e5",
+    gateId: "gate_4e8b1c2d3f4a5b6c",
     decision: "approve" as const,
     comment: null,
     principalId: "68jYD9VOCmXlPhIYGFOgoZVE6vDUVHPA",
@@ -384,7 +385,7 @@ describe("resolving at the board", () => {
     await resolveGateAtSuperpipeline(input, {
       baseUrl: "https://superpipeline.dev/", mint: async () => "t", fetch: f,
     });
-    expect(calls[0]!.url).toBe("https://superpipeline.dev/v1/boards/brd_7c1f/gates/gate_4e8b/resolve");
+    expect(calls[0]!.url).toBe("https://superpipeline.dev/v1/boards/brd_7c1f00a1b2c3d4e5/gates/gate_4e8b1c2d3f4a5b6c/resolve");
   });
 
   test("omits a comment rather than sending null", async () => {
@@ -615,7 +616,7 @@ describe("saying in the room that the board accepted an answer", () => {
       await settleGateOutcome(
         { gateId: "gate_4e8b", decision: optionId, decidedBy: "prn_fixture" },
         "!room",
-        { boardId: "brd_fixture", eventId: GATE_EVENT_ID },
+        { boardId: "brd_0123456789abcdef", eventId: GATE_EVENT_ID },
         deps,
       );
       expect(replies[0]).toContain(words);
@@ -1068,6 +1069,7 @@ describe("gate.v2 — resolving at the board with the subject binding", () => {
 import { readFileSync } from "node:fs";
 import { GATE_REQUEST_CONTENT_KEY } from "@agentpod/contract";
 import { gateRequestCard } from "./gates";
+import { contractWebFetch } from "../../../tests/helpers/superpipeline-contract";
 
 /** The rules every gate.v2 the hub sends keeps: a body, options with meaning and needs_comment, unique ids, a subject digest. */
 function wellFormed(c: Record<string, unknown>): boolean {

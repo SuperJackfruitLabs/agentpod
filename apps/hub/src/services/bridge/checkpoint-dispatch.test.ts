@@ -6,6 +6,7 @@ import { SuperpipelineClient } from "./superpipeline";
 import type { DispatchResult } from "./dispatch-types";
 import { setCheckpointLogForTests } from "./checkpoint-log";
 import { createQuietLog } from "./quiet-log";
+import { contractFetch } from "../../../tests/helpers/superpipeline-contract";
 
 const identity = { tenantId: "fleet_hub_fixture", boardId: fixture.pending.boardId, stationId: "station_pilot01" };
 function target(): CheckpointTarget { return { ...identity, sourceTenantId: fixture.pending.tenantId, agentId: fixture.pending.agentId, nodeId: "node_pilot01",
@@ -24,7 +25,7 @@ function harness() {
     dispatch: async (value) => { dispatched.push(value); return { status: "unreported" }; },
   };
   const client = new SuperpipelineClient({ baseUrl: "https://board.test", boardId: identity.boardId, token: "spa_fixture",
-    fetch: async (url) => { calls.push(new URL(url).pathname); return { status: 200, ok: true, json: async () => context }; },
+    fetch: contractFetch(async (url) => { calls.push(new URL(url).pathname); return { status: 200, ok: true, json: async () => context }; }),
   });
   return { observed, checks, calls, dispatched, port, client, invalidate() { valid = false; },
     context(value: unknown) { context = value; } };

@@ -35,6 +35,7 @@ import type { BridgeAgentConfig } from "./config";
 import { openDispatch, recordProduced } from "./ledger";
 import type { StrictWorkSelection } from "./salaam-dispatch";
 import { SuperpipelineClient } from "./superpipeline";
+import { contractFetch } from "../../../tests/helpers/superpipeline-contract";
 import { runOnce, type AcpPort, type DispatchDeps } from "./dispatch";
 
 const STATION_ID = "bridge-dispatch-char-station";
@@ -88,7 +89,7 @@ const refused = (status: number, code: string): Reply => ({ status, body: { erro
 
 function ids(n: number) {
   const tail = String(n).padStart(4, "0");
-  return { runId: `run_c4a7c4a7c4a7${tail}`, cardId: `crd_c4a7c4a7c4a7${tail}` };
+  return { runId: `run_c4a7c4a7c4a7${tail}`, cardId: `card_c4a7c4a7c4a7${tail}` };
 }
 
 /** The ledger and attempt rows for one run, as they stand right now. */
@@ -176,7 +177,7 @@ function rig(o: RigOpts) {
     baseUrl: "https://board.test",
     boardId: BOARD_ID,
     token: TOKEN,
-    fetch: async (url, init) => {
+    fetch: contractFetch(async (url, init) => {
       const path = new URL(url).pathname;
       const method = init.method ?? "GET";
       const body = init.body ? JSON.parse(init.body) : undefined;
@@ -192,7 +193,7 @@ function rig(o: RigOpts) {
       }
       reply ??= ok();
       return { status: reply.status, ok: reply.status >= 200 && reply.status < 300, json: async () => reply.body };
-    },
+    }),
   });
 
   let seq = 0;
@@ -879,7 +880,7 @@ test("a full turn: the session open, the prompt, activities, produced before com
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70010 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70010 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -1129,7 +1130,7 @@ test("a full turn: the session open, the prompt, activities, produced before com
           "meta": {
             "activities": 3,
             "attempt": "<attempt>",
-            "card": "crd_c4a7c4a7c4a70010",
+            "card": "card_c4a7c4a7c4a70010",
             "events": 6,
             "eventsPerActivity": 2,
             "run": "run_c4a7c4a7c4a70010",
@@ -1242,7 +1243,7 @@ test("a turn with a renewing port: a heartbeat before the prompt, and each beat 
         "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70011 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70011 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -1349,7 +1350,7 @@ test("a turn with a renewing port: a heartbeat before the prompt, and each beat 
         "meta": {
           "activities": 0,
           "attempt": "<attempt>",
-          "card": "crd_c4a7c4a7c4a70011",
+          "card": "card_c4a7c4a7c4a70011",
           "events": 1,
           "eventsPerActivity": null,
           "run": "run_c4a7c4a7c4a70011",
@@ -1470,7 +1471,7 @@ test("the board cannot be told the work is done: recorded for replay, unreported
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70012 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70012 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -1625,7 +1626,7 @@ test("the board cannot be told the work is done: recorded for replay, unreported
           "meta": {
             "activities": 1,
             "attempt": "<attempt>",
-            "card": "crd_c4a7c4a7c4a70012",
+            "card": "card_c4a7c4a7c4a70012",
             "events": 2,
             "eventsPerActivity": 2,
             "run": "run_c4a7c4a7c4a70012",
@@ -1697,7 +1698,7 @@ test("a prior run's recorded output is replayed onto the new run; the harness is
         {
           "log": "replaying a prior run's output",
           "meta": {
-            "card": "crd_c4a7c4a7c4a70021",
+            "card": "card_c4a7c4a7c4a70021",
             "priorRun": "run_c4a7c4a7c4a70020",
           },
         },
@@ -2409,7 +2410,7 @@ test("a replay whose complete is refused is handed back; the prior output stays 
         {
           "log": "replaying a prior run's output",
           "meta": {
-            "card": "crd_c4a7c4a7c4a70036",
+            "card": "card_c4a7c4a7c4a70036",
             "priorRun": "run_c4a7c4a7c4a70035",
           },
         },
@@ -2581,7 +2582,7 @@ test("the prompt throws after the session opened: failed, not released, the harn
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70040 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70040 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -2667,7 +2668,7 @@ test("the prompt throws after the session opened: failed, not released, the harn
           "meta": {
             "activities": 0,
             "attempt": null,
-            "card": "crd_c4a7c4a7c4a70040",
+            "card": "card_c4a7c4a7c4a70040",
             "events": 0,
             "eventsPerActivity": null,
             "run": "run_c4a7c4a7c4a70040",
@@ -2783,7 +2784,7 @@ test("the session ends mid-turn: abandoned before the fail is sent", async () =>
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70041 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70041 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -2916,7 +2917,7 @@ test("the session ends mid-turn: abandoned before the fail is sent", async () =>
           "meta": {
             "activities": 1,
             "attempt": "<attempt>",
-            "card": "crd_c4a7c4a7c4a70041",
+            "card": "card_c4a7c4a7c4a70041",
             "events": 2,
             "eventsPerActivity": 2,
             "run": "run_c4a7c4a7c4a70041",
@@ -3029,7 +3030,7 @@ test("the turn times out: abandoned, the harness stopped, the board failed", asy
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70042 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70042 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -3162,7 +3163,7 @@ test("the turn times out: abandoned, the harness stopped, the board failed", asy
           "meta": {
             "activities": 1,
             "attempt": "<attempt>",
-            "card": "crd_c4a7c4a7c4a70042",
+            "card": "card_c4a7c4a7c4a70042",
             "events": 1,
             "eventsPerActivity": 1,
             "run": "run_c4a7c4a7c4a70042",
@@ -3269,7 +3270,7 @@ test("the fail after a timeout answers 409: aborted as a lost lease", async () =
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70043 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70043 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -3366,7 +3367,7 @@ test("the fail after a timeout answers 409: aborted as a lost lease", async () =
           "meta": {
             "activities": 0,
             "attempt": null,
-            "card": "crd_c4a7c4a7c4a70043",
+            "card": "card_c4a7c4a7c4a70043",
             "events": 0,
             "eventsPerActivity": null,
             "run": "run_c4a7c4a7c4a70043",
@@ -3487,7 +3488,7 @@ test("an activity answers 409 and the run was reclaimed: lease-superseded, the a
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70050 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70050 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -3633,7 +3634,7 @@ test("an activity answers 409 and the run was reclaimed: lease-superseded, the a
           "meta": {
             "activities": 2,
             "attempt": "<attempt>",
-            "card": "crd_c4a7c4a7c4a70050",
+            "card": "card_c4a7c4a7c4a70050",
             "events": 3,
             "eventsPerActivity": 1.5,
             "run": "run_c4a7c4a7c4a70050",
@@ -3757,7 +3758,7 @@ test("the complete answers 409 and the agent had completed the run itself: self-
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70051 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70051 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -3920,7 +3921,7 @@ test("the complete answers 409 and the agent had completed the run itself: self-
         {
           "log": "the agent reported for itself; the bridge's report was redundant",
           "meta": {
-            "card": "crd_c4a7c4a7c4a70051",
+            "card": "card_c4a7c4a7c4a70051",
             "outcome": "blocked",
             "run": "run_c4a7c4a7c4a70051",
           },
@@ -3930,7 +3931,7 @@ test("the complete answers 409 and the agent had completed the run itself: self-
           "meta": {
             "activities": 1,
             "attempt": "<attempt>",
-            "card": "crd_c4a7c4a7c4a70051",
+            "card": "card_c4a7c4a7c4a70051",
             "events": 2,
             "eventsPerActivity": 2,
             "run": "run_c4a7c4a7c4a70051",
@@ -4049,7 +4050,7 @@ test("an activity answers 409 because the agent completed the run itself: self-r
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70054 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70054 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -4129,7 +4130,7 @@ test("an activity answers 409 because the agent completed the run itself: self-r
         {
           "log": "the agent reported for itself; the bridge's report was redundant",
           "meta": {
-            "card": "crd_c4a7c4a7c4a70054",
+            "card": "card_c4a7c4a7c4a70054",
             "outcome": "completed",
             "run": "run_c4a7c4a7c4a70054",
           },
@@ -4170,7 +4171,7 @@ test("an activity answers 409 because the agent completed the run itself: self-r
           "meta": {
             "activities": 1,
             "attempt": "<attempt>",
-            "card": "crd_c4a7c4a7c4a70054",
+            "card": "card_c4a7c4a7c4a70054",
             "events": 2,
             "eventsPerActivity": 2,
             "run": "run_c4a7c4a7c4a70054",
@@ -4296,7 +4297,7 @@ test("the run cannot be re-read after a 409: treated as a lost lease", async () 
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70052 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70052 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -4434,7 +4435,7 @@ test("the run cannot be re-read after a 409: treated as a lost lease", async () 
           "meta": {
             "activities": 0,
             "attempt": "<attempt>",
-            "card": "crd_c4a7c4a7c4a70052",
+            "card": "card_c4a7c4a7c4a70052",
             "events": 1,
             "eventsPerActivity": null,
             "run": "run_c4a7c4a7c4a70052",
@@ -4556,7 +4557,7 @@ test("the complete answers 403: a foreign run, the attempt failed, never re-read
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70053 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70053 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -4670,7 +4671,7 @@ test("the complete answers 403: a foreign run, the attempt failed, never re-read
           "meta": {
             "activities": 0,
             "attempt": "<attempt>",
-            "card": "crd_c4a7c4a7c4a70053",
+            "card": "card_c4a7c4a7c4a70053",
             "events": 1,
             "eventsPerActivity": null,
             "run": "run_c4a7c4a7c4a70053",
@@ -4766,7 +4767,7 @@ test("a question answered: elicitation, polled, the answer delivered, the work f
         "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70060 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70060 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -4914,7 +4915,7 @@ test("a question answered: elicitation, polled, the answer delivered, the work f
       {
         "log": "a human answered a permission request",
         "meta": {
-          "card": "crd_c4a7c4a7c4a70060",
+          "card": "card_c4a7c4a7c4a70060",
           "option": "allow_once",
           "run": "run_c4a7c4a7c4a70060",
         },
@@ -5046,7 +5047,7 @@ test("a question answered: elicitation, polled, the answer delivered, the work f
         "meta": {
           "activities": 3,
           "attempt": "<attempt>",
-          "card": "crd_c4a7c4a7c4a70060",
+          "card": "card_c4a7c4a7c4a70060",
           "events": 4,
           "eventsPerActivity": 1.3,
           "run": "run_c4a7c4a7c4a70060",
@@ -5153,7 +5154,7 @@ test("a question nobody answers in time: the session ended, the attempt failed, 
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70061 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70061 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -5308,7 +5309,7 @@ test("a question nobody answers in time: the session ended, the attempt failed, 
         {
           "log": "a permission request went unanswered",
           "meta": {
-            "card": "crd_c4a7c4a7c4a70061",
+            "card": "card_c4a7c4a7c4a70061",
             "reason": "the agent asked for permission and nobody answered within 0s",
             "run": "run_c4a7c4a7c4a70061",
           },
@@ -5318,7 +5319,7 @@ test("a question nobody answers in time: the session ended, the attempt failed, 
           "meta": {
             "activities": 1,
             "attempt": "<attempt>",
-            "card": "crd_c4a7c4a7c4a70061",
+            "card": "card_c4a7c4a7c4a70061",
             "events": 1,
             "eventsPerActivity": 1,
             "run": "run_c4a7c4a7c4a70061",
@@ -5477,7 +5478,7 @@ test("the fail after an unanswered question answers 409: aborted", async () => {
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70065 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70065 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -5687,7 +5688,7 @@ test("the fail after an unanswered question answers 409: aborted", async () => {
           "meta": {
             "activities": 1,
             "attempt": "<attempt>",
-            "card": "crd_c4a7c4a7c4a70065",
+            "card": "card_c4a7c4a7c4a70065",
             "events": 1,
             "eventsPerActivity": 1,
             "run": "run_c4a7c4a7c4a70065",
@@ -5776,7 +5777,7 @@ test("a session that dies while a human decides interrupts the wait", async () =
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70066 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70066 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -5933,7 +5934,7 @@ test("a session that dies while a human decides interrupts the wait", async () =
           "meta": {
             "activities": 1,
             "attempt": "<attempt>",
-            "card": "crd_c4a7c4a7c4a70066",
+            "card": "card_c4a7c4a7c4a70066",
             "events": 2,
             "eventsPerActivity": 2,
             "run": "run_c4a7c4a7c4a70066",
@@ -6059,7 +6060,7 @@ test("an auto-answered permission is not a question: it projects as an activity"
           "text": 
     "# Characterize the bridge
 
-    superpipeline board brd_c4a7c4a7c4a7c4a7 · card crd_c4a7c4a7c4a70067 · stage Work (work) · attempt 2.
+    superpipeline board brd_c4a7c4a7c4a7c4a7 · card card_c4a7c4a7c4a70067 · stage Work (work) · attempt 2.
 
     ## Task
 
@@ -6207,7 +6208,7 @@ test("an auto-answered permission is not a question: it projects as an activity"
           "meta": {
             "activities": 1,
             "attempt": "<attempt>",
-            "card": "crd_c4a7c4a7c4a70067",
+            "card": "card_c4a7c4a7c4a70067",
             "events": 2,
             "eventsPerActivity": 2,
             "run": "run_c4a7c4a7c4a70067",

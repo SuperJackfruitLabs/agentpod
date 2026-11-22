@@ -7,6 +7,22 @@
  * and `board-chat/elicitation-card.ts` re-export them and hold the rules about them).
  */
 
+/**
+ * A pending item as a board's list carries it (decisions.v1 `listPendingGates`,
+ * `listPendingElicitations`): the pushed body, except that `boardId` may be null — the list item
+ * IS the event schema, which allows a board that is not initialised to name none. The carriers
+ * (treaty-matrix-events) refuse such an item, since it cannot be routed to a room, so a sweep
+ * skips it (`namesItsBoard`); past that check it is the delivery type below.
+ */
+export type PendingItem<T extends { boardId: string }> = Omit<T, "boardId"> & { boardId: string | null };
+export type GatePendingItem = PendingItem<GatePendingDelivery>;
+export type ElicitationPendingItem = PendingItem<ElicitationPendingDelivery>;
+
+/** Does this pending item name the board it is on? One that does not is never carried. */
+export function namesItsBoard<T extends { boardId: string }>(item: PendingItem<T>): item is PendingItem<T> & { boardId: string } {
+  return typeof item.boardId === "string" && item.boardId !== "";
+}
+
 /** The body superpipeline pushes on `gate.pending`. */
 export interface GatePendingDelivery {
   event: "gate.pending";
@@ -188,17 +204,18 @@ export interface ElicitationPendingDelivery {
   /** The question. May be empty: an agent can stop on options alone. */
   question: string;
   /**
-   * `id` and `label` since the first version; `meaning`, `needsComment` and `input` since the
-   * decision envelope covers questions (charter: "The decision envelope covers questions and
-   * follow-ups"). The newer fields are `unknown` for the reason the gate's are: an older board
-   * sends none, and they are checked before they are carried (`questionOptionsV2`).
+   * `id` and `label` since the first version; `meaning` and `needsComment` since the decision
+   * envelope covers questions (charter: "The decision envelope covers questions and follow-ups").
+   * The newer fields are `unknown` for the reason the gate's are: an older board sends none, and
+   * they are checked before they are carried (`questionOptionsV2`). A question's option carries no
+   * `input` (elicitation.pending v1): only follow-ups and waiting cards ask for one, and a question
+   * offering free text says so with `freeText`.
    */
   options: Array<{
     id: string;
     label: string;
     meaning?: unknown;
     needsComment?: unknown;
-    input?: unknown;
     /** `once` | `run` | `always`, and `workspace-admin` (charter: strict decisions bind their subject §2). */
     scope?: unknown;
     requires?: unknown;

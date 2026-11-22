@@ -1,0 +1,36 @@
+{
+  "$schema": "https://raw.githubusercontent.com/SuperJackfruitLabs/treaty/main/schemas/treaty/product-manifest.v1.json",
+  "product": "agentpod",
+  "treaty": "0.0.15",
+  "produces": [
+    "agentpod.harness-permission",
+    "agentpod.registered-worker",
+    "agentpod.matrix-activity",
+    "agentpod.live-activity",
+    "agentpod.push-gateway",
+    "agentpod.evidence",
+    "agentpod.capability-catalog",
+    "agentpod.fleet-api",
+    "agentpod.salaam-station"
+  ],
+  "consumes": [
+    "treaty.relay",
+    "superpipeline.events",
+    "superexchange.board-room",
+    "accounts.token-claims",
+    "accounts.identity-corpus",
+    "superbench.local-api",
+    "superbench.checkpoint",
+    "superbench.consumer-bindings",
+    "superpipeline.run-checkpoint",
+    "superpipeline.agent-work",
+    "superpipeline.decisions",
+    "accounts.plane-api",
+    "accounts.sign-in",
+    "superpipeline.direct-push",
+    "superpipeline.mcp",
+    "supertoolkit.managed",
+    "superwitness.telemetry",
+    "superlibrary.api"
+  ]
+}

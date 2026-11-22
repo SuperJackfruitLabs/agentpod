@@ -7,7 +7,9 @@ import { db, type DbExecutor } from "../../db/drizzle";
 import { tenants } from "../../db/schema/tenants";
 import { prefixedId } from "../../utils/ids";
 
-export const AGENTPOD_PRODUCT = "agentpod";
+import { AGENTPOD_PRODUCT } from "./config";
+
+export { AGENTPOD_PRODUCT };
 export const ORG_PLANE_SOURCE = "org-plane";
 
 export type TenantResolution =

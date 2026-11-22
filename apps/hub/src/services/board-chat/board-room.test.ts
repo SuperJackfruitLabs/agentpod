@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { db, rawSql } from "../../db/drizzle";
 import { matrixBoardRooms } from "../../db/schema/board-rooms";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
+import { boardRoomNames } from "@superjackfruitlabs/treaty-matrix-events";
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
 import {
   boardRoomAlias,
@@ -158,6 +159,14 @@ describe("a board's room", () => {
     // It becomes a Matrix alias localpart, and the appservice owns `#agentpod_.*`.
     expect(boardRoomAlias("brd_7c1f")).toBe("agentpod_board_brd_7c1f");
     expect(boardRoomAlias("brd/../etc")).toBe("agentpod_board_brd____etc");
+  });
+
+  test("the names are treaty's agentpod carrier's, and stay what every existing room is called", () => {
+    // Treaty gives each carrier its own names (boardRoomNames); a change there must not rename a
+    // room this hub already holds, so the literals are pinned here as well.
+    expect(boardSpeakerMxid(DOMAIN)).toBe(`@agent_superpipeline:${DOMAIN}`);
+    expect(boardRoomAlias("brd_7c1f")).not.toBe(boardRoomNames("superexchange").alias("brd_7c1f"));
+    expect(boardSpeakerMxid(DOMAIN)).not.toBe(boardRoomNames("superexchange").speakerMxid(DOMAIN));
   });
 });
 

@@ -5,13 +5,13 @@ import { SignJWT, exportJWK, generateKeyPair } from "jose";
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
 import { signPlaneToken } from "../../../tests/helpers/fake-plane";
 import type { PlaneBearerResult } from "../hub-token";
-import { createPlaneVerifier } from "./verify";
+import { createPlaneVerifier, setPlaneVerifierForTests, type PlaneVerifier } from "./verify";
 import { db } from "../../db/drizzle";
 import { tenants } from "../../db/schema/tenants";
 import { eq } from "drizzle-orm";
 import { verifyPlaneBearer } from "../hub-token";
 import { resolveMcpCaller } from "../../mcp/auth";
-import { setOrgPlaneForTests, TEST_PLANE } from "./config";
+import { AGENTPOD_PRODUCT, setOrgPlaneForTests, TEST_PLANE } from "./config";
 import { createDispatchableRoutes } from "../../routes/fleet-dispatchable";
 
 const claims = {
@@ -168,6 +168,16 @@ describe("dispatchable door", () => {
   });
 });
 
+/** The door as it runs: the real verifier installed as the hub's, nothing injected. */
+async function atTheDoor(token: string, verifier: PlaneVerifier) {
+  const putBack = setPlaneVerifierForTests(verifier);
+  try {
+    return await verifyPlaneBearer(token);
+  } finally {
+    putBack();
+  }
+}
+
 describe("verifyPlaneBearer end to end (real verifier, real tenant table)", () => {
   beforeAll(ensurePgMigrations);
 
@@ -178,6 +188,7 @@ describe("verifyPlaneBearer end to end (real verifier, real tenant table)", () =
       issuer: TEST_PLANE.issuer,
       audience: TEST_PLANE.audience,
       jwksUrl: TEST_PLANE.jwksUrl,
+      product: AGENTPOD_PRODUCT,
       fetch: async () => new Response(JSON.stringify({ keys: [jwk] })),
     });
     const token = await new SignJWT({ principalKind: "human", org, ent, mayDispatch: [], mayGrantReach: false, jti: crypto.randomUUID() })
@@ -188,14 +199,16 @@ describe("verifyPlaneBearer end to end (real verifier, real tenant table)", () =
       .setIssuedAt()
       .setExpirationTime("5m")
       .sign(privateKey);
-    return { token, verify: (t: string) => verifier.verify(t) };
+    return { token, verifier };
   }
   const hex = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
 
   test("an org without agentpod in ent: exactly 403 product_not_enabled, and no tenant created", async () => {
     const org = `org_${hex()}`;
-    const { token, verify } = await signed(["superpipeline"], org);
-    expect(await verifyPlaneBearer(token, { verify })).toEqual({
+    // The verifier refuses the token for its product (treaty's rule); the door still answers the
+    // org's 403, never a 401, and creates nothing.
+    const { token, verifier } = await signed(["superpipeline"], org);
+    expect(await atTheDoor(token, verifier)).toEqual({
       ok: false,
       status: 403,
       body: { error: "product_not_enabled", org },
@@ -205,9 +218,9 @@ describe("verifyPlaneBearer end to end (real verifier, real tenant table)", () =
 
   test("an entitled org on first sight gets its tenant, and the caller is in it", async () => {
     const org = `org_${hex()}`;
-    const { token, verify } = await signed(["agentpod"], org);
+    const { token, verifier } = await signed(["agentpod"], org);
     try {
-      const r = await verifyPlaneBearer(token, { verify });
+      const r = await atTheDoor(token, verifier);
       const [row] = await db.select().from(tenants).where(eq(tenants.externalId, org));
       expect(r.ok && r.caller.tenantId).toBe(row!.id);
       expect(r.ok && r.caller.principalKind).toBe("human");

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 
 import { ELICITATION_REQUEST_CONTENT_KEY } from "@agentpod/contract";
 
-import { elicitationRequestCard, type ElicitationPendingDelivery } from "./elicitation-card";
+import { elicitationRequestCard } from "./elicitation-card";
 import { answerElicitationAtSuperpipeline } from "./elicitations";
 import {
   QUESTION_ANSWER_V2_SUITE_TYPE,
@@ -12,6 +12,10 @@ import {
   questionFreeTextV2,
   questionOptionsV2,
   questionV2Content,
+  // Treaty's delivery type, not the hub's: these fixtures exercise treaty's builders, which also
+  // read an option's `input`. A board never sends one on a question (elicitation.pending v1), so
+  // the hub's own type has none and the hub strips one before it builds (elicitations.ts).
+  type ElicitationPendingDelivery,
 } from "@superjackfruitlabs/treaty-matrix-events";
 import {
   handleQuestionAnswer,

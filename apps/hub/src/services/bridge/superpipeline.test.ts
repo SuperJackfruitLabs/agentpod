@@ -19,21 +19,26 @@ import { context, trace } from "@opentelemetry/api";
 import { tracer } from "../../telemetry/otel";
 import { useTestTelemetry } from "../../../tests/helpers/telemetry";
 import type { GatePendingDelivery } from "../board-chat/gates";
+import { contractFetch } from "../../../tests/helpers/superpipeline-contract";
 
 const TOKEN = `spa_${"a1b2c3d4".repeat(6)}`;
 const BOARD = "brd_9c1d4e5f6a7b8c9d";
 
 type Call = { url: string; method: string; headers: Record<string, string>; body?: string };
 
-/** A fake board. `reply` decides each response; every call is recorded. */
+/**
+ * A fake board. `reply` decides each response; every call is recorded, and every request is held to
+ * SuperPipeline's contracts (agent-work.v1, decisions.v1) before it is answered: one that reaches
+ * no operation, or sends a body its operation refuses, fails the test.
+ */
 function fakeBoard(reply: (call: Call) => { status: number; body: unknown }) {
   const calls: Call[] = [];
-  const fetch = async (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => {
+  const fetch = contractFetch(async (url, init) => {
     const call = { url, method: init.method, headers: init.headers, body: init.body };
     calls.push(call);
     const { status, body } = reply(call);
     return { status, ok: status >= 200 && status < 300, json: async () => body };
-  };
+  });
   return { calls, client: new SuperpipelineClient({ baseUrl: "https://board.test", boardId: BOARD, token: TOKEN, fetch }) };
 }
 
@@ -41,7 +46,7 @@ const claimed = {
   claimed: true,
   runId: "run_e074a2160c4b4f28",
   leaseEpoch: 1,
-  card: { id: "crd_1a2b3c4d5e6f7a8b", title: "Rebuild the index", attemptCount: 1 },
+  card: { id: "card_1a2b3c4d5e6f7a8b", title: "Rebuild the index", attemptCount: 1 },
   stage: { key: "work", name: "Work" },
   handoff: null,
 };
@@ -110,17 +115,42 @@ describe("SuperpipelineClient — claim", () => {
     await expect(client.claim()).rejects.toThrow(SuperpipelineApiError);
   });
 
+  test("no work says why: the board's reason is kept, not dropped", async () => {
+    // agent-work.v1 ClaimResult "Unclaimed": `reason` tells an empty queue from an over-budget
+    // board and an agent at its cap. The client used to throw it away.
+    for (const reason of ["no_matching_card", "board_over_budget", "concurrency_reached", "a_reason_from_later"]) {
+      const { client } = fakeBoard(() => ({ status: 200, body: { claimed: false, reason } }));
+      expect(await client.claimNext()).toEqual({ work: null, reason });
+    }
+    expect(await fakeBoard(() => ({ status: 200, body: { claimed: false } })).client.claimNext()).toEqual({ work: null, reason: null });
+  });
+
+  test("a claim after a failure carries why the last attempt died", async () => {
+    const lastFailure = { reason: "harness died", agentId: "agt_31d0a1b2c3d4e5f6", stageKey: "work", endedAt: "2026-11-22T09:00:00.000Z" };
+    const got = await fakeBoard(() => ({ status: 200, body: { ...claimed, lastFailure } })).client.claimNext();
+    expect(got.work?.lastFailure).toEqual(lastFailure);
+    const none = await fakeBoard(() => ({ status: 200, body: { ...claimed, lastFailure: null } })).client.claim();
+    expect(none && "lastFailure" in none).toBe(false);
+  });
+
   test("a claimed:true response missing its run is treated as no work", async () => {
     const { client } = fakeBoard(() => ({ status: 200, body: { claimed: true } }));
     expect(await client.claim()).toBeNull();
+  });
+
+  test("a claimed:true response whose card has no id or title is no work, not a card to cast", async () => {
+    for (const card of [{ title: "t" }, { id: "card_1a2b3c4d5e6f7a8b" }, "card_1a2b3c4d5e6f7a8b"]) {
+      expect(await fakeBoard(() => ({ status: 200, body: { ...claimed, card } })).client.claim()).toBeNull();
+    }
+    expect(await fakeBoard(() => ({ status: 200, body: { ...claimed, leaseEpoch: "1" } })).client.claim()).toBeNull();
   });
 });
 
 describe("SuperpipelineClient — the agent read surface", () => {
   test("reads a run's context without a lease", async () => {
     const context = {
-      run: { runId: work.runId, cardId: "crd_1", stageKey: "work", leaseEpoch: 1, status: "working", outcome: null, startedAt: "t", endedAt: null },
-      card: { id: "crd_1", title: "t", spec: null, currentStageKey: "work", state: "working", attemptCount: 2 },
+      run: { runId: work.runId, cardId: "card_1a2b3c4d5e6f7a8b", stageKey: "work", leaseEpoch: 1, status: "working", outcome: null, startedAt: "t", endedAt: null },
+      card: { id: "card_1a2b3c4d5e6f7a8b", title: "t", spec: null, currentStageKey: "work", state: "working", attemptCount: 2 },
       stage: { key: "work", name: "Work" },
       handoff: { summary: "prior" },
       references: [],
@@ -132,6 +162,14 @@ describe("SuperpipelineClient — the agent read surface", () => {
     expect(calls[0]!.url).toBe(`https://board.test/v1/boards/${BOARD}/runs/${work.runId}`);
     expect(got.card.attemptCount).toBe(2);
     expect(got.handoff).toEqual({ summary: "prior" });
+  });
+
+  test("a run context is checked where every reader leans on it, not cast", async () => {
+    // agent-work.v1's RunContext: a run, and a card with its id and title. A body without them
+    // used to pass as a RunContext and fail later, as a TypeError in whichever reader got there first.
+    for (const body of [{}, null, { run: {}, card: { title: "no id" } }, { card: { id: "card_1", title: "t" } }]) {
+      await expect(fakeBoard(() => ({ status: 200, body })).client.context(work.runId)).rejects.toThrow(/run context/);
+    }
   });
 
   test("reading another agent's run is a 403 that names the reason", async () => {
@@ -173,6 +211,30 @@ describe("SuperpipelineClient — verbs", () => {
       parameter: { path: "a.ts" },
       result: "ok",
     });
+  });
+});
+
+describe("SuperpipelineClient — ids are path segments, never more path", () => {
+  test("a run id and a board id are encoded where they sit in the path", async () => {
+    const urls: string[] = [];
+    const fetch = async (url: string) => {
+      urls.push(url);
+      return { status: 200, ok: true, json: async () => ({ run: {} }) };
+    };
+    const client = new SuperpipelineClient({ baseUrl: "https://board.test", boardId: "brd_a/b?c", token: TOKEN, fetch });
+    const odd = { runId: "run_x/../y?z", leaseEpoch: 1 };
+    await client.heartbeat(odd);
+    await client.completeVerified(odd, {});
+    await client.fail(odd, "x");
+    await client.claim();
+    await client.context(odd.runId).catch(() => undefined);
+    expect(urls).toEqual([
+      "https://board.test/v1/boards/brd_a%2Fb%3Fc/runs/run_x%2F..%2Fy%3Fz/heartbeat",
+      "https://board.test/v1/boards/brd_a%2Fb%3Fc/runs/run_x%2F..%2Fy%3Fz/complete",
+      "https://board.test/v1/boards/brd_a%2Fb%3Fc/runs/run_x%2F..%2Fy%3Fz/fail",
+      "https://board.test/v1/boards/brd_a%2Fb%3Fc/claims",
+      "https://board.test/v1/boards/brd_a%2Fb%3Fc/runs/run_x%2F..%2Fy%3Fz",
+    ]);
   });
 });
 
@@ -247,12 +309,12 @@ describe("SuperpipelineClient — pending gates", () => {
   const gate: GatePendingDelivery = {
     event: "gate.pending",
     boardId: BOARD,
-    cardId: "crd_1a2b3c4d5e6f7a8b",
-    gateId: "gate_4e8b",
+    cardId: "card_1a2b3c4d5e6f7a8b",
+    gateId: "gate_4e8b1c2d3f4a5b6c",
     stageKey: "review",
     returnStageKey: "code",
     cardTitle: "Add OAuth login",
-    producedBy: "agt_31d0",
+    producedBy: "agt_31d0a1b2c3d4e5f6",
     handoffSummary: "Wrote the haiku.",
     options: [{ id: "approve", label: "Approve" }],
     ts: "2026-08-30T00:00:00.000Z",
@@ -284,7 +346,7 @@ describe("SuperpipelineClient — pending gates", () => {
 
 describe("SuperpipelineClient — pending delivery follow-ups", () => {
   test("reads the follow-ups a board is still owed, from the sweep's route", async () => {
-    const followUp = { event: "delivery.pending", gateId: "gate_8f3a" };
+    const followUp = { event: "delivery.pending", gateId: "gate_8f3a1b2c3d4e5f60" };
     const { client, calls } = fakeBoard(() => ({ status: 200, body: { deliveries: [followUp] } }));
     expect(await client.pendingDeliveries()).toEqual([followUp]);
     expect(calls[0]?.url).toBe(`https://board.test/v1/boards/${BOARD}/deliveries/pending`);
@@ -305,7 +367,7 @@ describe("SuperpipelineClient — pending delivery follow-ups", () => {
 
 describe("SuperpipelineClient — cards waiting on a person", () => {
   test("reads the cards a board says are waiting, from the sweep's route", async () => {
-    const waiting = { event: "attention.pending", cardId: "crd_1", waitId: "wait_0123456789abcdef" };
+    const waiting = { event: "attention.pending", cardId: "card_1a2b3c4d5e6f7a8b", waitId: "wait_0123456789abcdef" };
     const { client, calls } = fakeBoard(() => ({ status: 200, body: { attention: [waiting] } }));
     expect(await client.pendingAttention()).toEqual([waiting]);
     expect(calls[0]?.url).toBe(`https://board.test/v1/boards/${BOARD}/attention/pending`);
@@ -336,7 +398,14 @@ describe("SuperpipelineClient: tracing", () => {
   });
 
   test("inside a trace: a CLIENT span per call, and the header names that span", async () => {
-    const { calls, client } = fakeBoard(() => ({ status: 200, body: {} }));
+    const body = {
+      run: { runId: "run_e074a2160c4b4f28", cardId: "card_1a2b3c4d5e6f7a8b", stageKey: "work", leaseEpoch: 1, status: "working", outcome: null, startedAt: "t", endedAt: null },
+      card: { id: "card_1a2b3c4d5e6f7a8b", title: "Rebuild the index" },
+      stage: null,
+      handoff: null,
+      references: [],
+    };
+    const { calls, client } = fakeBoard(() => ({ status: 200, body }));
     const parent = tracer().startSpan("dispatch");
     await context.with(trace.setSpan(context.active(), parent), () => client.context("run_e074a2160c4b4f28"));
     parent.end();
@@ -375,7 +444,9 @@ test('trusted credentials are refreshed per request and completion guard runs af
 test("strict activity unwraps actual REST receipt and never substitutes a bare response", async () => {
   const strictDecision = {version:1 as const, request_id:crypto.randomUUID(), decision_digest:"a".repeat(64), expires_at:Date.now()+60000};
   const receipt = {accepted:true,cardState:"input-required",elicitationId:"elc_123456",strictDecision};
-  const activity = {type:"elicitation" as const,signal:"select",strictDecision};
+  // As the board's contract has a strict decision: the question and its options ride with it.
+  const activity = {type:"elicitation" as const,signal:"select",body:"Push the release branch?",strictDecision,
+    parameter:{options:[{name:"approve",title:"Approve"},{name:"deny",title:"Deny"}]}};
   const wrapped = fakeBoard(()=>({status:200,body:{activity:receipt}}));
   expect(await wrapped.client.activity(work,activity)).toEqual(receipt);
   const bare = fakeBoard(()=>({status:200,body:receipt}));

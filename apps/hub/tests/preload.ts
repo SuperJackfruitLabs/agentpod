@@ -12,10 +12,11 @@
  * native binding nor config before a test has set its environment.
  */
 
-import { afterAll } from "bun:test";
+import { afterAll, afterEach } from "bun:test";
 import { closeOpenMachines } from "../src/services/matrix-as/open-machines";
 import { shutdownTelemetry } from "../src/telemetry/otel";
 import { installFakePlane } from "./helpers/fake-plane";
+import { takeContractViolations } from "./helpers/superpipeline-contract-violations";
 
 /**
  * The organization plane is the hub's only issuer and the only home of its principals (P3 plan,
@@ -27,6 +28,15 @@ import { installFakePlane } from "./helpers/fake-plane";
  * still works, which the outage tests rely on.
  */
 installFakePlane();
+
+/**
+ * A request a checked fake board refused (`helpers/superpipeline-contract.ts`) fails the test that
+ * sent it, even when the code under test caught the throw.
+ */
+afterEach(() => {
+  const refused = takeContractViolations();
+  if (refused.length) throw new Error(`requests SuperPipeline's contracts refuse:\n${refused.join("\n")}`);
+});
 
 afterAll(async () => {
   await closeOpenMachines();

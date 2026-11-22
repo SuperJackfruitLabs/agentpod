@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { SignJWT, exportJWK, generateKeyPair, type JWK } from "jose";
-import { createPlaneVerifier } from "./verify";
+import { readFileSync } from "node:fs";
+import { SignJWT, decodeJwt, exportJWK, generateKeyPair, type JWK } from "jose";
+import { createPlaneVerifier, setPlaneVerifierForTests } from "./verify";
+import { verifyPlaneBearer } from "../hub-token";
 import { pollUntil } from "../../../tests/helpers/wait";
 
 const ISS = "https://accounts.test";
@@ -30,7 +32,7 @@ function sign(key: Key, claims: Record<string, unknown> = {}, nowSec = Math.floo
     .setSubject("prn_0123456789abcdef0123")
     .setAudience((claims.aud as string | string[]) ?? AUD)
     .setIssuedAt(nowSec)
-    .setExpirationTime(nowSec + 300)
+    .setExpirationTime(typeof claims.exp === "number" ? claims.exp : nowSec + 300)
     .sign(key.privateKey);
 }
 
@@ -50,7 +52,7 @@ describe("createPlaneVerifier", () => {
   test("accepts a token for this audience and returns its claims", async () => {
     const k = await keypair("k1");
     const p = plane([k.pub]);
-    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: JWKS, fetch: p.fetch });
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: p.fetch });
     const claims = await v.verify(await sign(k));
     expect(claims?.sub).toBe("prn_0123456789abcdef0123");
     expect(claims?.org).toBe("org_00000000000000000000");
@@ -59,39 +61,43 @@ describe("createPlaneVerifier", () => {
   test("an aud array containing the hub is accepted; one without it is refused", async () => {
     const k = await keypair("k1");
     const p = plane([k.pub]);
-    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: JWKS, fetch: p.fetch });
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: p.fetch });
     expect(await v.verify(await sign(k, { aud: ["https://other.test", AUD] }))).not.toBeNull();
     expect(await v.verify(await sign(k, { aud: ["https://other.test"] }))).toBeNull();
   });
 
   test("the issuer is compared exactly — a trailing slash is a different issuer", async () => {
     const k = await keypair("k1");
-    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: JWKS, fetch: plane([k.pub]).fetch });
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: plane([k.pub]).fetch });
     expect(await v.verify(await sign(k, { iss: `${ISS}/` }))).toBeNull();
   });
 
   test("EdDSA only: an ES256 token is refused even when its key is published", async () => {
     const es = await keypair("es", "ES256");
-    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: JWKS, fetch: plane([es.pub]).fetch });
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: plane([es.pub]).fetch });
     expect(await v.verify(await sign(es))).toBeNull();
   });
 
   test("a v7-shaped token (tenant, no org) is refused", async () => {
     const k = await keypair("k1");
-    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: JWKS, fetch: plane([k.pub]).fetch });
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: plane([k.pub]).fetch });
     expect(await v.verify(await sign(k, { org: undefined, tenant: "fleet_00000000000000000000" }))).toBeNull();
   });
 
-  test("caches the key set, and refetches once it is ten minutes old", async () => {
+  test("caches the key set, and refetches once it is over ten minutes old", async () => {
     const k = await keypair("k1");
     const p = plane([k.pub]);
     let now = 1_900_000_000_000;
-    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: JWKS, fetch: p.fetch, now: () => now });
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: p.fetch, now: () => now });
     const nowSec = () => Math.floor(now / 1000);
     await v.verify(await sign(k, {}, nowSec()));
     await v.verify(await sign(k, {}, nowSec()));
     expect(p.state.fetches).toBe(1);
     now += 10 * 60 * 1000;
+    await v.verify(await sign(k, {}, nowSec()));
+    // treaty's cache (createJwksCache) refreshes a set OLDER than its ten minutes, not one exactly that old.
+    expect(p.state.fetches).toBe(1);
+    now += 1;
     await v.verify(await sign(k, {}, nowSec()));
     expect(p.state.fetches).toBe(2);
   });
@@ -100,7 +106,7 @@ describe("createPlaneVerifier", () => {
     const k1 = await keypair("k1");
     const k2 = await keypair("k2");
     const p = plane([k1.pub]);
-    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: JWKS, fetch: p.fetch });
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: p.fetch });
     await v.verify(await sign(k1));
     p.state.keys = [k1.pub, k2.pub];
     expect(await v.verify(await sign(k2))).not.toBeNull();
@@ -111,7 +117,7 @@ describe("createPlaneVerifier", () => {
     const k = await keypair("k1");
     const p = plane([k.pub]);
     let now = 1_900_000_000_000;
-    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: JWKS, fetch: p.fetch, now: () => now });
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: p.fetch, now: () => now });
     await v.verify(await sign(k, {}, Math.floor(now / 1000)));
     p.state.down = true;
     now += 60 * 60 * 1000; // an hour later: the cache is stale and the plane is unreachable
@@ -122,7 +128,7 @@ describe("createPlaneVerifier", () => {
     const k = await keypair("k1");
     const p = plane([k.pub]);
     let now = 1_900_000_000_000;
-    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: JWKS, fetch: p.fetch, now: () => now, retryAfterMs: 30_000 });
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: p.fetch, now: () => now, retryAfterMs: 30_000 });
     await v.verify(await sign(k, {}, Math.floor(now / 1000)));
     p.state.down = true;
     now += 11 * 60 * 1000;
@@ -134,7 +140,7 @@ describe("createPlaneVerifier", () => {
     const k = await keypair("k1");
     const rogue = await keypair("rogue");
     const p = plane([k.pub]);
-    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: JWKS, fetch: p.fetch, retryAfterMs: 30_000 });
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: p.fetch, retryAfterMs: 30_000 });
     await v.verify(await sign(k));
     for (let i = 0; i < 5; i++) expect(await v.verify(await sign(rogue))).toBeNull();
     expect(p.state.fetches).toBe(2);
@@ -143,7 +149,7 @@ describe("createPlaneVerifier", () => {
     const k = await keypair("k1");
     const p = plane([k.pub]);
     let now = 1_900_000_000_000;
-    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: JWKS, fetch: p.fetch, now: () => now, kidRefetchMs: 5_000 });
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: p.fetch, now: () => now, kidRefetchMs: 5_000 });
     await v.verify(await sign(k, {}, Math.floor(now / 1000)));
     for (let i = 0; i < 5; i++) {
       const rogue = await keypair(`rogue-${i}`);
@@ -159,7 +165,7 @@ describe("createPlaneVerifier", () => {
 
   test("client_id and azp are ignored and amr is not required", async () => {
     const k = await keypair("k1");
-    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: JWKS, fetch: plane([k.pub]).fetch });
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: plane([k.pub]).fetch });
     const claims = await v.verify(await sign(k, { client_id: "superpipeline-web", azp: "superpipeline-web", sid: "s" }));
     expect(claims?.sub).toBe("prn_0123456789abcdef0123");
     expect(claims?.amr).toBeUndefined();
@@ -185,7 +191,7 @@ describe("createPlaneVerifier", () => {
       const p = stallingPlane([k.pub]);
       try {
         let now = Date.now();
-        const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: p.url, now: () => now, fetchTimeoutMs: 3_000 });
+        const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: p.url, now: () => now, fetchTimeoutMs: 3_000 });
         expect(await v.verify(await sign(k, {}, Math.floor(now / 1000)))).not.toBeNull();
         p.state.stall = true;
         now += 11 * 60 * 1000; // stale
@@ -206,7 +212,7 @@ describe("createPlaneVerifier", () => {
       const rogue = await keypair("rogue");
       const p = stallingPlane([k.pub]);
       try {
-        const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: p.url, fetchTimeoutMs: 200 });
+        const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: p.url, fetchTimeoutMs: 200 });
         expect(await v.verify(await sign(k))).not.toBeNull();
         p.state.stall = true;
         const started = performance.now();
@@ -226,7 +232,7 @@ describe("createPlaneVerifier", () => {
       const p = stallingPlane([k.pub]);
       p.state.stall = true;
       try {
-        const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: p.url, fetchTimeoutMs: 200 });
+        const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: p.url, fetchTimeoutMs: 200 });
         const started = performance.now();
         expect(await v.verify(await sign(k))).toBeNull();
         expect(performance.now() - started).toBeLessThan(1_500);
@@ -234,5 +240,126 @@ describe("createPlaneVerifier", () => {
         p.stop();
       }
     });
+  });
+});
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * treaty's signed token vectors (`token_vectors.json`, treaty-ecosystem-identity's corpus): every
+ * verifier in every product must give each case's answer — the claims exactly, or a refusal with
+ * exactly its code. Run here through the hub's own adapter, and through the door, where a refusal
+ * is a 401 except a token refused only for its product, which is that org's 403.
+ */
+describe("treaty's token vectors, through the hub's verifier", () => {
+  interface Vector {
+    name: string;
+    token: string;
+    verifier: { issuer: string; audience: string; product: string; now: number };
+    expect: { ok: true; claims: Record<string, unknown> } | { ok: false; code: string };
+  }
+  const corpus: unknown = JSON.parse(
+    readFileSync(Bun.resolveSync("@superjackfruitlabs/treaty-ecosystem-identity/token_vectors.json", import.meta.dir), "utf8"),
+  );
+  const isVector = (v: unknown): v is Vector =>
+    isRecord(v) && typeof v.name === "string" && typeof v.token === "string" && isRecord(v.verifier) && isRecord(v.expect);
+  const cases = isRecord(corpus) && Array.isArray(corpus.cases) ? corpus.cases.filter(isVector) : [];
+  const jwks: unknown = isRecord(corpus) ? corpus.jwks : undefined;
+
+  const verifierFor = (c: Vector) =>
+    createPlaneVerifier({
+      issuer: c.verifier.issuer,
+      audience: c.verifier.audience,
+      product: c.verifier.product,
+      jwksUrl: JWKS,
+      fetch: async () => Response.json(jwks),
+      now: () => c.verifier.now * 1000,
+    });
+
+  test("the corpus is the one this pin ships: 43 cases, every refusal code among them", () => {
+    expect(cases).toHaveLength(43);
+    const codes = new Set(cases.flatMap((c) => (c.expect.ok ? [] : [c.expect.code])));
+    expect(codes.size).toBe(14);
+  });
+
+  for (const c of cases) {
+    test(`${c.name}: ${c.expect.ok ? "accepted, every claim back" : `refused, ${c.expect.code}`}`, async () => {
+      const v = verifierFor(c);
+      const checked = await v.check(c.token);
+      if (c.expect.ok) {
+        const read: unknown = checked;
+        const verified: unknown = await v.verify(c.token);
+        expect(read).toEqual({ ok: true, claims: c.expect.claims });
+        expect(verified).toEqual(c.expect.claims);
+      } else {
+        expect(checked.ok ? "accepted" : checked.code).toBe(c.expect.code);
+        expect(await v.verify(c.token)).toBeNull();
+      }
+
+      const restore = setPlaneVerifierForTests(v);
+      try {
+        const door = await verifyPlaneBearer(c.token, { tenantFor: async () => ({ ok: true, tenantId: "fleet_vectors" }) });
+        if (c.expect.ok) expect(door.ok).toBe(true);
+        else if (c.expect.code === "product_not_enabled")
+          expect(door).toEqual({ ok: false, status: 403, body: { error: "product_not_enabled", org: String(decodeJwt(c.token).org) } });
+        else expect(door).toEqual({ ok: false, status: 401 });
+      } finally {
+        restore();
+      }
+    });
+  }
+});
+
+/** What moving to treaty's rules changed at this hub's doors, each named once. */
+describe("the rules this hub took from treaty", () => {
+  test("30 s of leeway: a token 29 s past its expiry is accepted, 31 s is not", async () => {
+    const k = await keypair("k1");
+    let now = 1_900_000_000_000;
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: plane([k.pub]).fetch, now: () => now });
+    const token = await sign(k, {}, Math.floor(now / 1000));
+    now += (300 + 29) * 1000;
+    expect(await v.verify(token)).not.toBeNull();
+    now += 2_000;
+    expect((await v.check(token)).ok ? "accepted" : "refused").toBe("refused");
+  });
+
+  test("a token with no kid is refused, and never makes the plane be asked", async () => {
+    const k = await keypair("k1");
+    const p = plane([k.pub]);
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: p.fetch });
+    const nowSec = Math.floor(Date.now() / 1000);
+    const token = await new SignJWT({ principalKind: "human", org: "org_00000000000000000000", ent: ["agentpod"], mayDispatch: [], mayGrantReach: false, jti: "j" })
+      .setProtectedHeader({ alg: "EdDSA" })
+      .setIssuer(ISS)
+      .setAudience(AUD)
+      .setSubject("prn_0123456789abcdef0123")
+      .setIssuedAt(nowSec)
+      .setExpirationTime(nowSec + 300)
+      .sign(k.privateKey);
+    expect(await v.check(token)).toEqual({ ok: false, code: "missing_kid" });
+    expect(p.state.fetches).toBe(0);
+  });
+
+  test("a mayDispatch value that is not a prn refuses the whole token (it used to be kept)", async () => {
+    const k = await keypair("k1");
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: plane([k.pub]).fetch });
+    expect(await v.check(await sign(k, { mayDispatch: ["prn_0123456789abcdef0123", "hermes:*"] }))).toEqual({ ok: false, code: "bad_claim" });
+  });
+
+  test("ent must hold the product: refused, with the org kept for the door's 403", async () => {
+    const k = await keypair("k1");
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: plane([k.pub]).fetch });
+    expect(await v.check(await sign(k, { ent: ["superpipeline"] }))).toEqual({
+      ok: false,
+      code: "product_not_enabled",
+      org: "org_00000000000000000000",
+    });
+  });
+
+  test("a lifetime over 300 s is refused", async () => {
+    const k = await keypair("k1");
+    const v = createPlaneVerifier({ issuer: ISS, audience: AUD, product: "agentpod", jwksUrl: JWKS, fetch: plane([k.pub]).fetch });
+    const nowSec = Math.floor(Date.now() / 1000);
+    expect(await v.check(await sign(k, { exp: nowSec + 301 }, nowSec))).toEqual({ ok: false, code: "lifetime_too_long" });
   });
 });

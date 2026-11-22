@@ -116,7 +116,7 @@ export async function checkpointAgentClient(configuration: CheckpointProfile): P
   const refusal = credentialRefusal(profile, source, deploymentSuperpipelineAudience());
   if (refusal || !source) throw new CheckpointRefused("authority", refusal ?? "credential.missing");
   const issuer = orgPlane();
-  const verifier = sharedPlaneVerifier({ issuer: issuer.issuer, audience: source.audience, jwksUrl: issuer.jwksUrl });
+  const verifier = sharedPlaneVerifier({ issuer: issuer.issuer, audience: source.audience, jwksUrl: issuer.jwksUrl, product: "superpipeline" });
   const snapshot = async () => {
     const current = await readCheckpointAuthority(profile);
     const [stored] = await db.select({ source: bridgeAgents.credentialSource }).from(bridgeAgents).where(and(

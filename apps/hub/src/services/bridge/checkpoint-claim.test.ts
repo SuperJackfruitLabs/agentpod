@@ -5,10 +5,10 @@ import { SuperpipelineClient, type Fetcher } from "./superpipeline";
 
 function board(body: unknown) {
   const calls: Array<{ body?: string }> = [];
-  const fetch: Fetcher = async (_url, init) => {
+  const fetch: Fetcher = contractFetch(async (_url, init) => {
     calls.push(init);
     return { status: 200, ok: true, json: async () => body };
-  };
+  });
   return { calls, client: new SuperpipelineClient({ baseUrl: "https://board.test", boardId: fixture.pending.boardId,
     token: "spa_fixture", fetch }) };
 }
@@ -49,6 +49,7 @@ import { CHECKPOINT_CLAIM_PROTOCOL, checkpointPolicyDigest, parsePendingCheckpoi
 import goldens from "./checkpoint-contract/canonical.fixture.json";
 import policySchema from "./checkpoint-contract/run-checkpoint-policy.v1.json";
 import provenance from "./checkpoint-contract/provenance.json";
+import { contractFetch } from "../../../tests/helpers/superpipeline-contract";
 
 function checkpointReply() { return { ...structuredClone(fixture.claimed), checkpointClaim: structuredClone(fixture.pending) }; }
 const options = { checkpointProtocol: CHECKPOINT_CLAIM_PROTOCOL } as const;

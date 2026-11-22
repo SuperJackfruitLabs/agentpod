@@ -12,6 +12,7 @@ import { readRunEnded, runEndedFromError, runEndedFromView } from "./checkpoint-
 import { boardErrorBody, BOARD_RUN_CODES } from "./checkpoint-agent-client";
 import { SuperpipelineApiError, SuperpipelineClient } from "./superpipeline";
 import { endedRunView as endedRunViewOf, movedRunView as movedRunViewOf, runView } from "./checkpoint-run-view.test-fixture";
+import { contractFetch } from "../../../tests/helpers/superpipeline-contract";
 
 const claim = parsePendingCheckpointClaim({ ...claimFixture.pending,
   policyDigest: checkpointPolicyDigest(claimFixture.pending.policy) });
@@ -69,12 +70,12 @@ test("only the board's exact ending refusals count", () => {
 
 test("readRunEnded reads the run view, and a board that cannot answer is not an answer", async () => {
   const client = (answer: () => { status: number; body: unknown }) => new SuperpipelineClient({ baseUrl: "https://board.test",
-    boardId: claim.boardId, token: "spa_fixture", fetch: async (url, init) => {
+    boardId: claim.boardId, token: "spa_fixture", fetch: contractFetch(async (url, init) => {
       expect(init.method).toBe("GET");
       expect(url).toBe(`https://board.test/v1/boards/${claim.boardId}/runs/${claim.runId}`);
       const { status, body } = answer();
       return { status, ok: status < 300, json: async () => body };
-    } });
+    }) });
   expect((await readRunEnded(client(() => ({ status: 200, body: movedRunView() })), claim))?.reason).toBe("run.unbound");
   expect(await readRunEnded(client(() => ({ status: 200, body: liveRunView() })), claim)).toBeUndefined();
   expect(await readRunEnded(client(() => ({ status: 502, body: {} })), claim)).toBeUndefined();

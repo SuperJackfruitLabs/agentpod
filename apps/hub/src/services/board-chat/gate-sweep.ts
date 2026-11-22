@@ -41,7 +41,7 @@
  */
 
 import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge";
-import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig } from "../bridge";
+import { isBridgeEnabled, loadBridgeConfig, namesItsBoard, type BridgeConfig, type GatePendingItem } from "../bridge";
 import { subscribeBoardsToPush, type SuperpipelineRelay } from "../bridge";
 import { createLogger } from "../../utils/logger";
 import { isGatePending } from "./gates";
@@ -70,7 +70,7 @@ export interface GateSweepDeps {
    */
   tenantIdFor(boardId: string): Promise<string | null>;
   /** Gates the board is still waiting on, read with the bridge's own token. */
-  pendingGates(boardId: string): Promise<GatePendingDelivery[]>;
+  pendingGates(boardId: string): Promise<GatePendingItem[]>;
   /** Post the gate, exactly once. Idempotent on `gate_id`. */
   project(tenantId: string, d: GatePendingDelivery): Promise<ProjectionOutcome>;
 
@@ -291,7 +291,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
     const tenantId = await deps.tenantIdFor(boardId);
     if (!tenantId) continue;
 
-    let gates: GatePendingDelivery[];
+    let gates: GatePendingItem[];
     try {
       gates = await deps.pendingGates(boardId);
     } catch (err) {
@@ -313,6 +313,11 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
     }
 
     for (const gate of gates) {
+      // decisions.v1 lets a pending item name no board; no carrier can route one to a room.
+      if (!namesItsBoard(gate)) {
+        log.warn("board listed a pending gate that names no board; not carried", { boardId });
+        continue;
+      }
       if (!isGatePending(gate)) {
         // Loud, because this is the two repositories' contract having drifted
         // — the thing treaty's `fixtures/ecosystem-identity/matrix_gate_events.json`

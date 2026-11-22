@@ -111,17 +111,27 @@ With the header in place, the hub can verify the token without putting a credent
 
 ## What the hub checks
 
-Every door that takes a token verifies it the same way:
+Every door that takes a token verifies it the same way, with the suite's shared verifier
+(`verifyAccessToken` in
+[`@superjackfruitlabs/treaty-ecosystem-identity`](https://treaty.superjackfruit.com/packages/ecosystem-identity/)).
+Every product applies these same rules, and treaty's signed token vectors prove each verifier
+agrees:
 
 - **The algorithm is `EdDSA`**, fixed by the hub and never read from the token's own header.
   Letting a token nominate the algorithm it should be checked with is the classic JWT confusion
   attack.
-- **The signature** against the plane's key set. The hub caches the set for at most ten minutes,
-  refetches when it sees an unknown `kid`, and keeps verifying against the last good set while
-  the plane is unreachable, so valid tokens keep working through a plane outage.
+- **The header names a `kid`.** A token without one is refused before any key is fetched.
+- **The signature** against the plane's key set. Only Ed25519 keys in the set are used. The hub
+  caches the set for at most ten minutes. On an unknown `kid` it refetches at most once every 30
+  seconds, with a 3-second timeout. While the plane is unreachable it keeps verifying against the
+  last good set, so valid tokens keep working through a plane outage.
 - **`iss`** equals the configured issuer exactly. Never a prefix match.
 - **`aud`**, a string or an array, equals or contains this hub's audience.
-- **`exp`**, which is five minutes after `iat`.
+- **`exp`, `nbf` and `iat`**, each with 30 seconds of leeway for clock skew. A token may live at
+  most five minutes (`exp` − `iat` ≤ 300).
+- **`jti`, `mayDispatch` and `mayGrantReach`** are present. Every `mayDispatch` value must be a
+  bare `prn_` id; any other value refuses the whole token rather than being dropped.
+- **`sub` and `org`** follow the id grammar exactly (`prn_` or `org_` and 20 lowercase hex).
 - **`ent`** includes `agentpod`: the product is enabled for the token's workspace.
 
 The claims it then reads:

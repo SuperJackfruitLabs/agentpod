@@ -23,6 +23,7 @@ import {
   type ElicitationAnswerDeps,
   type ElicitationProjectionDeps,
 } from "./elicitations";
+import { contractWebFetch } from "../../../tests/helpers/superpipeline-contract";
 
 /**
  * Putting an agent's question in a room and taking the answer back.
@@ -124,6 +125,20 @@ describe("a question is posted into its board's room", () => {
     // ever treat as open.
     expect(row!.eventId.startsWith("pending:")).toBe(false);
     expect(JSON.parse(row!.optionsJson)).toEqual(d.options);
+  });
+
+  test("an option's input is not carried: a question's options have none (elicitation.pending v1)", async () => {
+    // Only follow-ups and waiting cards ask for an input; a board never sends one on a question.
+    // One that arrived anyway used to reach question.v2 and the recorded options as if it were real.
+    const asked = delivery();
+    const d = { ...asked, options: asked.options.map((o) => ({ ...o, input: { kind: "text", label: "Why?", required: true, maxLength: 50 } })) };
+    const { deps, sent } = rig();
+    expect((await projectElicitation(BOOTSTRAP_TENANT_ID, d, deps)).status).toBe("posted");
+    const carried: unknown = sent[0]?.extra?.options;
+    expect(Array.isArray(carried) && carried.length === 2).toBe(true);
+    expect(JSON.stringify(carried)).not.toContain("input");
+    const [row] = await db.select().from(matrixElicitationEvents).where(eq(matrixElicitationEvents.elicitationId, d.elicitationId));
+    expect(JSON.stringify(row?.optionsV2)).not.toContain("input");
   });
 
   test("carries the board's name to the room, so the room gets named", async () => {
@@ -519,7 +534,7 @@ describe("handing the answer to the board", () => {
         mint: async () => {
           throw error;
         },
-        fetch: (async () => (called++, new Response("{}", { status: 200 }))) as unknown as typeof fetch,
+        fetch: contractWebFetch((async () => (called++, new Response("{}", { status: 200 }))) as unknown as typeof fetch),
       },
     );
     expect(result).toEqual({ ok: false, code });
@@ -546,14 +561,14 @@ describe("handing the answer to the board", () => {
       {
         baseUrl: "https://board.test/",
         mint: async (s) => (minted.push(s), `assertion-for-${s.principalId}`),
-        fetch: (async (url: string, init: RequestInit) => {
+        fetch: contractWebFetch((async (url: string, init: RequestInit) => {
           calls.push({
             url,
             auth: new Headers(init.headers).get("Authorization"),
             body: JSON.parse(init.body as string),
           });
           return new Response("{}", { status: 200 });
-        }) as unknown as typeof fetch,
+        }) as unknown as typeof fetch),
       },
     );
 
@@ -574,10 +589,10 @@ describe("handing the answer to the board", () => {
       {
         baseUrl: "https://board.test",
         mint: async () => "t",
-        fetch: (async () =>
+        fetch: contractWebFetch((async () =>
           new Response(JSON.stringify({ error: { code: "ELICITATION_NOT_PENDING" } }), {
             status: 409,
-          })) as unknown as typeof fetch,
+          })) as unknown as typeof fetch),
       },
     );
     expect(result).toEqual({ ok: false, code: "ELICITATION_NOT_PENDING" });
@@ -590,9 +605,9 @@ describe("handing the answer to the board", () => {
       {
         baseUrl: "https://board.test",
         mint: async () => "t",
-        fetch: (async () => {
+        fetch: contractWebFetch((async () => {
           throw new Error("ECONNREFUSED");
-        }) as unknown as typeof fetch,
+        }) as unknown as typeof fetch),
       },
     );
     expect(result).toEqual({ ok: false, code: "UNREACHABLE" });
@@ -604,7 +619,7 @@ describe("handing the answer to the board", () => {
       {
         baseUrl: "https://board.test",
         mint: async () => "t",
-        fetch: (async () => new Response("gateway down", { status: 502 })) as unknown as typeof fetch,
+        fetch: contractWebFetch((async () => new Response("gateway down", { status: 502 })) as unknown as typeof fetch),
       },
     );
     expect(result).toEqual({ ok: false, code: "HTTP_502" });

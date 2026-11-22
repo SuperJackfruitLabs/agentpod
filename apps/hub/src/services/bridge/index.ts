@@ -17,9 +17,12 @@ export type {
   DecisionTimeoutDelivery,
   DeliveryPendingDelivery,
   ElicitationPendingDelivery,
+  ElicitationPendingItem,
   GateApprovalRecordedDelivery,
   GatePendingDelivery,
+  GatePendingItem,
 } from "./deliveries";
+export { namesItsBoard } from "./deliveries";
 export { checkBridgeDispatchGrant, ensureBridgeDispatchGrant } from "./dispatch-grant";
 export { attachExecutionReference } from "./execution-reference";
 export { startSuperpipelineBridge } from "./loop";

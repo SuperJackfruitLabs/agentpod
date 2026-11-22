@@ -36,7 +36,16 @@ export async function verifyPlaneBearer(
   token: string,
   deps: { verify?: (t: string) => Promise<OrgPlaneTokenClaims | null>; tenantFor?: typeof tenantForOrg } = {},
 ): Promise<PlaneBearerResult> {
-  const claims = await (deps.verify ?? ((t: string) => planeVerifier().verify(t)))(token);
+  let claims: OrgPlaneTokenClaims | null;
+  if (deps.verify) claims = await deps.verify(token);
+  else {
+    const checked = await planeVerifier().check(token);
+    // The verifier refuses a token whose `ent` lacks this hub's product (treaty's rule); the door
+    // still answers that org's 403, as the entitlement check always has, rather than a 401.
+    if (!checked.ok && checked.code === "product_not_enabled" && checked.org)
+      return { ok: false, status: 403, body: { error: "product_not_enabled", org: checked.org } };
+    claims = checked.ok ? checked.claims : null;
+  }
   if (!claims) return { ok: false, status: 401 };
   const tenant = await (deps.tenantFor ?? tenantForOrg)(claims);
   if (!tenant.ok) return { ok: false, status: tenant.status, body: tenant.body };
