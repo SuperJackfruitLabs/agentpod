@@ -221,7 +221,7 @@ const TARGET_FIELDS = ["tenant_id", "board_id", "agent_id", "station_id", "node_
   "coordinator_implementation_sha256", "execution_mode", "bench_protocol", "worker_version", "worker_sha256"] as const;
 
 /** The target fields the node serves differently from the hub's pin; empty when they agree. */
-export function targetDifference(served: CheckpointProfile["target"], pinned: CheckpointProfile["target"]): string[] {
+export function targetDifference(served: CheckpointProfile["target"], pinned: CheckpointProfile["target"]): (typeof TARGET_FIELDS)[number][] {
   return TARGET_FIELDS.filter((k) => served[k] !== pinned[k]);
 }
 
@@ -271,8 +271,15 @@ function nextSteps(profile: CheckpointProfile, stageId: string | null, hasMcpTok
   return steps;
 }
 
+/** This stage's own pins that a write changed, by field, with the value before and after. */
+function pinChanges(before: CheckpointProfile | undefined, after: CheckpointProfile): Record<string, { from: string; to: string }> {
+  if (!before) return {};
+  return Object.fromEntries(targetDifference(after.target, before.target)
+    .map((k) => [k, { from: before.target[k], to: after.target[k] }]));
+}
+
 async function finish(userId: string, tenantId: string, name: string, profile: CheckpointProfile, stageId: string | null,
-  status: BenchRegistryStatus, created: boolean, rosterKey: string): Promise<StageResult> {
+  status: BenchRegistryStatus, created: boolean, rosterKey: string, before?: CheckpointProfile): Promise<StageResult> {
   await upsertStage({ tenantId, name, profile, stageId, origin: "fleet", createdBy: userId });
   const repinned = await repinNode(tenantId, profile.target.node_id, status, name);
   await reloadStageProfiles();
@@ -280,7 +287,9 @@ async function finish(userId: string, tenantId: string, name: string, profile: C
     .where(and(eq(bridgeAgents.tenantId, tenantId), eq(bridgeAgents.key, rosterKey)));
   return {
     status: created ? 201 : 200,
-    body: { stage: view(profile, "fleet", stageId, { ok: true, status }), repinned, checkpointPolicy: checkpointPolicyFor(profile),
+    // `changed` is this stage's own pins; `repinned` names the OTHER stages on the node moved to its new digest.
+    body: { stage: view(profile, "fleet", stageId, { ok: true, status }), changed: pinChanges(before, profile), repinned,
+      checkpointPolicy: checkpointPolicyFor(profile),
       nextSteps: nextSteps(profile, stageId, Boolean(row?.mcp)) },
   };
 }
@@ -373,7 +382,7 @@ export function setBenchStage(userId: string, tenantId: string, name: string, re
     const profile = buildProfile({ name, tenantId, organizationId, sourceTenantId: req.sourceTenantId ?? before.sourceTenantId,
       audience: at, reporter: reporterId, station, agentKey: roster.key, profileKey: roster.profileKey, served,
       repositories: req.repositories ?? before.repositories, checkpointRepository: req.checkpointRepository ?? before.checkpointRepository });
-    return finish(userId, tenantId, name, profile, req.stageId ?? stageId, status, false, roster.key);
+    return finish(userId, tenantId, name, profile, req.stageId ?? stageId, status, false, roster.key, before);
   });
 }
 
@@ -416,9 +425,10 @@ export async function listBenchStages(tenantId: string): Promise<{ stages: Bench
 }
 
 /** For the doctor: the stage's pinned profile, from the table or the file. */
-export async function stageProfile(tenantId: string, name: string): Promise<{ profile: CheckpointProfile; origin: string } | undefined> {
+export async function stageProfile(tenantId: string, name: string):
+  Promise<{ profile: CheckpointProfile; origin: string; stageId: string | null } | undefined> {
   const stored = await readStage(tenantId, name);
-  if (stored) return { profile: stored.profile, origin: stored.row.origin };
+  if (stored) return { profile: stored.profile, origin: stored.row.origin, stageId: stored.row.stageId };
   const file = installedFileCheckpointProfiles().find((p) => p.target.tenant_id === tenantId && (p.coordinatorProfileId ?? p.profileKey) === name);
-  return file ? { profile: file, origin: "file-only" } : undefined;
+  return file ? { profile: file, origin: "file-only", stageId: null } : undefined;
 }

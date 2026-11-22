@@ -66,6 +66,25 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Fixed
 
+- A checkpoint run longer than the hub's 60 second execute wait no longer pays the
+  30 second fault backoff, with a warning, on every card. The benign park (the run
+  is still going: `checkpoint.running` on the card) asks the loop to read its
+  status again in 5 seconds, bounded at 10, logged at info. Real failures and every
+  other timeout keep the backoff.
+- A stage changed with `fleet bench stage set` (or `--repin`) reaches the running
+  bridge loop. The loop built its checkpoint runtime once, at start, and every later
+  cycle refused the new profile as `current.stale`, so no bench card was claimed
+  until the hub restarted. The runtime is now looked up at each cycle's start and
+  rebuilt only when the installed profile changed; a cycle never swaps its port, and
+  an attempt made under the old profile is resolved as superseded.
+- `fleet bench doctor` names `--repin`, not `--refresh`, when the node's served
+  target differs because the installed worker or node bytes moved (or the registry
+  is not served for a stale pin). It warns, with `--stage-id`, about a stage that
+  has no SuperPipeline stage id (one adopted from the profile file).
+- `fleet bench stage set` replies with `changed`: the stage's own pins that moved,
+  each with its value before and after. `repinned` still names the other stages on
+  the node moved to its new digest.
+
 - The hub kept the node's `bench.registry.manage` capability: it was missing from
   the contract's `NodeCapability`, so the hello frame's parse dropped it and every
   `fleet bench` verb refused the node as one too old. A contract test now reads the

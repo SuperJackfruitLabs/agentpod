@@ -447,6 +447,31 @@ describe("a cycle that claims nothing says why, and never spins", () => {
     expect(logged[0]?.meta).toMatchObject({ status: "unreported", reason: parked.reason });
   });
 
+  // Staging: a checkpoint run longer than the hub's 60 s execute wait paid the 30 s fault backoff
+  // on every card, with a warning. A run still going is re-read in seconds instead.
+  test("a long checkpoint execute is re-read shortly: no fault backoff, no warning, and the streak stays clean", async () => {
+    const running = { status: "unreported", attemptId: "attempt_1", reason: "Checkpoint dispatch requires reconciliation",
+      recheckMs: 5_000 } as const;
+    const parked = { status: "unreported", attemptId: "attempt_1", reason: "Checkpoint dispatch requires reconciliation" } as const;
+    const script: DispatchResult[] = [running, running, { ...running, recheckMs: 60_000 }, { status: "reported" }, parked];
+    let i = 0;
+    const slept: number[] = [];
+    const lines: string[] = [];
+    const loop = startAgentLoop({
+      run: async () => script[i++] ?? { status: "idle" },
+      backoffMs: 30_000,
+      log: (m) => lines.push(m),
+      sleep: async (ms) => { slept.push(ms); },
+    });
+    while (i < script.length + 1) await Promise.resolve();
+    await loop.stop();
+    // Bounded: an overlong recheck is capped. A fault afterwards still starts from the base backoff.
+    expect(slept.slice(0, 4)).toEqual([5_000, 5_000, 10_000, 30_000]);
+    expect(lines.filter((m) => m === "the cycle ended unreported; backing off")).toHaveLength(1);
+    expect(lines).toContain("the checkpoint task is still running; checking again shortly");
+    expect(bridgeLogLevel("the checkpoint task is still running; checking again shortly", { recheckMs: 5_000 })).toBe("info");
+  });
+
   test("the same attempt parked again backs off exponentially, to a ceiling, and resets", async () => {
     const parked = { status: "unreported", attemptId: "attempt_1", reason: "Checkpoint dispatch requires reconciliation" } as const;
     const script: DispatchResult[] = [...Array.from({ length: 8 }, () => parked), { status: "reported" }, parked];

@@ -202,6 +202,7 @@ type benchDoctorReport struct {
 		OK     *bool  `json:"ok"`
 		Detail string `json:"detail"`
 		Next   string `json:"next"`
+		Warn   bool   `json:"warn"`
 	} `json:"checks"`
 	Manual           []string        `json:"manual"`
 	CheckpointPolicy json.RawMessage `json:"checkpointPolicy"`
@@ -248,6 +249,9 @@ func renderBenchDoctor(w *os.File, report benchDoctorReport) bool {
 	failed := false
 	for _, c := range report.Checks {
 		mark := "SKIP"
+		if c.OK == nil && c.Warn {
+			mark = "WARN"
+		}
 		if c.OK != nil && *c.OK {
 			mark = "PASS"
 		} else if c.OK != nil {

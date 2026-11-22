@@ -132,7 +132,8 @@ func TestBenchDoctorPrintsPassAndFailLines(t *testing.T) {
 	srv := rec.server(t, `{"ok":false,"checks":[
 		{"check":"hub: checkpoint coordinator","ok":true,"detail":"PROPOSED_CHECKPOINT_COORDINATOR=true"},
 		{"check":"benchd: reachable","ok":false,"detail":"the bench daemon did not answer","next":"Host step: start benchd"},
-		{"check":"benchd: storage","ok":null,"detail":"not checked"}],
+		{"check":"benchd: storage","ok":null,"detail":"not checked"},
+		{"check":"stage: SuperPipeline stage","ok":null,"warn":true,"detail":"no stage id","next":"fleet bench stage set review --stage-id STAGE_ID"}],
 		"manual":["SuperPipeline: link the board agent"],"checkpointPolicy":{"kind":"superbench"}}`)
 	env := []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}
 	out, code := run(t, bin, env, "bench", "doctor", "--station", "st_1")
@@ -144,7 +145,7 @@ func TestBenchDoctorPrintsPassAndFailLines(t *testing.T) {
 		t.Errorf("asked %s?%s", path, query)
 	}
 	for _, line := range []string{"PASS  hub: checkpoint coordinator", "FAIL  benchd: reachable", "      next: Host step: start benchd",
-		"SKIP  benchd: storage", "Manual steps", "  - SuperPipeline: link the board agent", `"kind": "superbench"`} {
+		"SKIP  benchd: storage", "WARN  stage: SuperPipeline stage", "      next: fleet bench stage set review --stage-id STAGE_ID", "Manual steps", "  - SuperPipeline: link the board agent", `"kind": "superbench"`} {
 		if !strings.Contains(out, line) {
 			t.Errorf("output lacks %q:\n%s", line, out)
 		}
