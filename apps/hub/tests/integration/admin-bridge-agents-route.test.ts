@@ -333,16 +333,29 @@ describe("giving a legacy row a credential source", () => {
       const text = await res.text();
       expect(text).not.toContain(TOKEN);
       expect(text).not.toContain(MCP_TOKEN);
+      // The claim token goes; the run-only MCP token stays, so the harness keeps its board tools.
       expect(JSON.parse(text).agent).toMatchObject({
         hasToken: false,
-        hasMcpToken: false,
+        hasMcpToken: true,
         credentialSource: source("https://staging-app.superpipeline.dev"),
       });
       const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
       expect(secret?.token).toBe("");
+      expect(secret?.mcpToken).toBe(MCP_TOKEN);
       expect(secret?.credentialSource?.audience).toBe(
         "https://staging-app.superpipeline.dev",
       );
+
+      // A claim token is still refused on the source row, as a 400 that says which token is kept.
+      const claim = await patch("coder-kai", { token: TOKEN });
+      expect(claim.status).toBe(400);
+      expect(await jsonField(claim, "error")).toContain("cannot store a claim token");
+      // An MCP token alone is accepted on a source row and never echoed.
+      const rotated = await patch("coder-kai", { mcpToken: MCP_TOKEN });
+      expect(rotated.status).toBe(200);
+      const rotatedText = await rotated.text();
+      expect(rotatedText).not.toContain(MCP_TOKEN);
+      expect(JSON.parse(rotatedText).agent).toMatchObject({ hasToken: false, hasMcpToken: true });
     } finally {
       globalThis.fetch = realFetch;
       restorePlane();

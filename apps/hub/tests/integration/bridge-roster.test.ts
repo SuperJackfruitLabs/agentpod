@@ -372,7 +372,7 @@ test("station-plane roster stores binding only, rejects drift and can always dis
   await withSalaamBinding(PRODUCTION, async () => {
     await expect(
       createBridgeAgent({ ...base(), credentialSource: source }),
-    ).rejects.toThrow("cannot store tokens");
+    ).rejects.toThrow("cannot store a claim token");
     await createBridgeAgent({
       ...base(),
       token: undefined,
@@ -473,7 +473,7 @@ describe("a credential source names this deployment's SuperPipeline audience, an
   });
 });
 
-test("a legacy token row upgrades in place to a credential source, and the token goes", async () => {
+test("a legacy token row upgrades in place to a credential source: the claim token goes, the run-only MCP token stays", async () => {
   await withSalaamBinding(STAGING, async () => {
     await createBridgeAgent({ ...base(), mcpToken: MCP_TOKEN });
     // The deployment's audience only: a production source on a staging hub leaves the row alone.
@@ -497,11 +497,84 @@ test("a legacy token row upgrades in place to a credential source, and the token
       .where(eq(bridgeAgents.key, "coder-kai"));
     expect(row?.credentialSource).toEqual(sourceFor(STAGING));
     expect(row?.tokenEncrypted).toBe("");
-    expect(row?.mcpTokenEncrypted).toBeNull();
+    // Kept, still encrypted: dropping it is what left an upgraded agent with no board tools.
+    expect(row?.mcpTokenEncrypted).not.toBeNull();
+    expect(row?.mcpTokenEncrypted).not.toContain(MCP_TOKEN);
     const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
     expect(secret?.token).toBe("");
-    expect(secret?.mcpToken).toBeNull();
+    expect(secret?.mcpToken).toBe(MCP_TOKEN);
     expect(secret?.credentialSource).toEqual(sourceFor(STAGING));
+    const [view] = await listBridgeAgents(BOOTSTRAP_TENANT_ID);
+    expect(view).toMatchObject({ hasToken: false, hasMcpToken: true });
+  });
+});
+
+/**
+ * A source row keeps the harness's board tools.
+ *
+ * What a source row refuses is a credential that can CLAIM: the bridge exchanges the occupant's
+ * identity for every board request instead. The run-scoped MCP token is a different credential,
+ * the harness's, which SuperPipeline fences to the run the caller holds and its lease epoch. A
+ * token row holds one; a source row was refused one at three layers (the write path, the update
+ * path that wiped it, and a database CHECK), so a bench agent on a source row had no board tools.
+ */
+describe("a station-plane source row keeps the run-only MCP token its harness spends", () => {
+  test("created with a source and an MCP token, the row stores the MCP token and no claim token", async () => {
+    await withSalaamBinding(PRODUCTION, async () => {
+      await createBridgeAgent({ ...base(), token: undefined, credentialSource: sourceFor(PRODUCTION), mcpToken: MCP_TOKEN });
+      const [row] = await db.select().from(bridgeAgents).where(eq(bridgeAgents.key, "coder-kai"));
+      expect(row?.tokenEncrypted).toBe("");
+      expect(row?.mcpTokenEncrypted).not.toBeNull();
+      expect(row?.mcpTokenEncrypted).not.toContain(MCP_TOKEN);
+      const [view] = await listBridgeAgents(BOOTSTRAP_TENANT_ID);
+      expect(view).toMatchObject({ hasToken: false, hasMcpToken: true, credentialSource: sourceFor(PRODUCTION) });
+      const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+      expect(secret).toMatchObject({ token: "", mcpToken: MCP_TOKEN, credentialSource: sourceFor(PRODUCTION) });
+    }, "hermes");
+  });
+
+  test("an existing source row is given an MCP token, and can lose it again, without touching its source", async () => {
+    await withSalaamBinding(PRODUCTION, async () => {
+      await create();
+      expect(await updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", { mcpToken: MCP_TOKEN })).toBe(true);
+      let [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+      expect(secret).toMatchObject({ token: "", mcpToken: MCP_TOKEN, credentialSource: sourceFor(PRODUCTION) });
+      // Any later edit of a source row leaves the MCP token where it was.
+      expect(await updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", { maxConcurrency: 1 })).toBe(true);
+      [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+      expect(secret?.mcpToken).toBe(MCP_TOKEN);
+      expect(await updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", { mcpToken: null })).toBe(true);
+      [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+      expect(secret).toMatchObject({ mcpToken: null, credentialSource: sourceFor(PRODUCTION) });
+    }, "hermes");
+  });
+
+  test("the claim token is still refused on a source row, with or without an MCP token beside it", async () => {
+    await withSalaamBinding(PRODUCTION, async () => {
+      await expect(
+        createBridgeAgent({ ...base(), credentialSource: sourceFor(PRODUCTION), mcpToken: MCP_TOKEN }),
+      ).rejects.toThrow("cannot store a claim token");
+      await create();
+      await expect(
+        updateBridgeAgent(BOOTSTRAP_TENANT_ID, "coder-kai", { token: TOKEN, mcpToken: MCP_TOKEN }),
+      ).rejects.toThrow("cannot store a claim token");
+      const [secret] = await readBridgeRoster(BOOTSTRAP_TENANT_ID);
+      expect(secret).toMatchObject({ token: "", mcpToken: null });
+    }, "hermes");
+  });
+
+  test("the database admits a source row with an MCP token, and still no source row with a claim token", async () => {
+    await withSalaamBinding(PRODUCTION, async () => {
+      await create();
+      await db.update(bridgeAgents).set({ mcpTokenEncrypted: "ciphertext" }).where(eq(bridgeAgents.key, "coder-kai"));
+      // Refused by that CHECK by name, not by any failure: Drizzle wraps the driver's error.
+      const refused = await db
+        .update(bridgeAgents)
+        .set({ tokenEncrypted: "ciphertext" })
+        .where(eq(bridgeAgents.key, "coder-kai"))
+        .then(() => "admitted", (error: unknown) => String(error instanceof Error ? error.cause : error));
+      expect(refused).toContain("bridge_agents_credential_source_check");
+    }, "hermes");
   });
 });
 
