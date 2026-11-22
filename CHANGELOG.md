@@ -29,6 +29,12 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ### Fixed
 
+- A bridge row with a `station-plane` credential source can hold the run-scoped
+  MCP token its harness spends, so an agent on a source row gets its SuperPipeline
+  board tools on ordinary cards. Upgrading a token row to a source keeps that token
+  and drops only the claim token. A source row still refuses a claim token
+  (`fleet bridge set KEY --mcp-token spa_…`). Migration 0134 relaxes the CHECK.
+
 - Recognize the proposed SuperBench logical-capacity refusal only for ordinary
   operations at HTTP 422, preserving its bounded diagnostic without redispatch.
   Cancellation errors and unknown response codes remain closed.

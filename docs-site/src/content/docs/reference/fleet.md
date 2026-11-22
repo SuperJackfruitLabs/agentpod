@@ -2760,7 +2760,7 @@ fleet bridge set KEY [--board B] [--station S] [--mode M] [--enabled true|false]
                  [--credential-source none --token T]
 ```
 
-Refuses a change with no fields, which the hub would otherwise answer 200 for and change nothing. `--credential-source station-plane` gives a token row a plane credential source in place: the hub exchanges the agent's own identity for a short-lived grant on each board request and drops the stored tokens. The principal must occupy the row's station (any harness) and be an agent of the workspace's organization, and the audience must be the hub's own SuperPipeline origin (`SUPERPIPELINE_BASE_URL`); anything else is refused. `--credential-source none` returns the row to a token and needs `--token`.
+Refuses a change with no fields, which the hub would otherwise answer 200 for and change nothing. `--credential-source station-plane` gives a token row a plane credential source in place: the hub exchanges the agent's own identity for a short-lived grant on each board request and drops the stored claim token. A run-scoped `--mcp-token`, the harness's own board tools, is kept or can be set on the source row. The principal must occupy the row's station (any harness) and be an agent of the workspace's organization, and the audience must be the hub's own SuperPipeline origin (`SUPERPIPELINE_BASE_URL`); anything else is refused. `--credential-source none` returns the row to a token and needs `--token`.
 
 | Argument | Meaning |
 |---|---|
