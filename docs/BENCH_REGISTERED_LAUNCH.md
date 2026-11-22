@@ -180,18 +180,21 @@ its reply carries the same `detail.lease: "held"`, so its card says it too.
 The supported path, run as the bench host's operator (SuperBench's "Leases"
 concept and `bench workspace` reference):
 
-1. `bench workspace stop_admin <key>`. It fences the recorded scope and returns
-   the retained lease token; the lease stays held by the attempt's holder
-   (`cp_<attempt>`, shown by `bench workspace status <key>`).
-2. A root `bench workspace run --holder <holder> --request-id <fresh id> <key> --
-   <command>` with the returned token in `BENCH_LEASE_TOKEN`, no
+1. `bench workspace stop_admin <key>`. It fences the recorded scope; the lease
+   stays held by the attempt's holder (`cp_<attempt>`, shown by
+   `bench workspace status <key>`). A stopped token never launches again.
+2. A root `bench workspace renew_admin <key>`. It retires the stopped token and
+   prints its successor for the same holder (`grant_token`), with a fresh
+   continuation. Keep it out of logs.
+3. A root `bench workspace run --holder <holder> --request-id <fresh id> <key> --
+   <command>` with the renewed token in `BENCH_LEASE_TOKEN`, no
    `--repository-name`, whose command commits or removes the stray files. With
    the default `--checkpoint`, a successful run checkpoints the member vector and
    releases.
-3. `bench workspace status <key>`; only if the lease is still shown, `bench
+4. `bench workspace status <key>`; only if the lease is still shown, `bench
    workspace checkpoint` and `bench workspace release` with the same token.
    Releasing twice can fail once the first cleared the lease.
-4. Optionally `bench workspace reclaim <key>` to delete the released tree. The
+5. Optionally `bench workspace reclaim <key>` to delete the released tree. The
    next attempt on the card creates the bench again.
 
 The node's next release for that record then finds the lease gone and ends the

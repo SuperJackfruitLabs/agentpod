@@ -307,7 +307,7 @@ func (c Coordinator) releaseFailed(ctx context.Context, spec benchdispatch.Sourc
 	// left a held lease with no trace. The refusal (a dirty tree, for one)
 	// does not clear itself; docs/BENCH_REGISTERED_LAUNCH.md, "A refused
 	// release", names the supported operator path.
-	log.Printf("bench %s: release refused (%d) while the lease is still held: %q; operator attention needed: bench workspace stop_admin, then a root bench workspace run with the returned token that fixes the tree and checkpoints, then release", spec.BenchKey, failures, message)
+	log.Printf("bench %s: release refused (%d) while the lease is still held: %q; operator attention needed: bench workspace stop_admin, then a root bench workspace renew_admin, then a root bench workspace run with the renewed token that fixes the tree and checkpoints, then release", spec.BenchKey, failures, message)
 }
 
 // releaseStuck reports a record whose release keeps failing, so Status can

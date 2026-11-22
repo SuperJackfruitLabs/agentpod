@@ -24,13 +24,15 @@ export type CheckpointActivityEvent = "prepared" | "running" | "completed" | "pu
 
 /**
  * The supported way to free a bench whose release SuperBench refused (SuperBench's leases and
- * `bench workspace` reference): an operator stop returns the retained token, a root run with it fixes
- * the tree and checkpoints (a successful run checkpoints and releases by default), then the lease is
+ * `bench workspace` reference): an operator stop fences the run, a root renewal retires the stopped
+ * token and issues its successor (a stopped token never launches again), a root run with the new token
+ * fixes the tree and checkpoints (a successful run checkpoints and releases by default), then the lease is
  * released if it is still held, and the bench may be reclaimed. Nothing in the Hub or node does this:
  * the node never checkpoints interrupted work to make a release succeed.
  */
-export const HELD_LEASE_OPERATOR_PATH = "`bench workspace stop_admin <key>`, then a root `bench workspace run --holder <holder> <key> -- <fix>` " +
-  "with the returned token (BENCH_LEASE_TOKEN) that commits or removes the stray files and checkpoints, then `bench workspace release` " +
+export const HELD_LEASE_OPERATOR_PATH = "`bench workspace stop_admin <key>`, then a root `bench workspace renew_admin <key>`, then a root " +
+  "`bench workspace run --holder <holder> <key> -- <fix>` with the renewed token (BENCH_LEASE_TOKEN) that commits or removes the stray " +
+  "files and checkpoints, then `bench workspace release` " +
   "if `status` still shows the lease, and optionally `bench workspace reclaim <key>`";
 
 /** The activity for an event, or undefined when there is nothing worth saying. Exported for tests. */
