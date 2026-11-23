@@ -10,6 +10,8 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+## v0.1.132 — 2026-11-23
+
 ### Added
 
 - A settled card's bench is reclaimed. Once the hub records a card's checkpoint
