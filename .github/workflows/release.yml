@@ -122,8 +122,11 @@ jobs:
             exit 0
           fi
           echo "source=github" >> "$GITHUB_OUTPUT"
-          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/runs?head_sha=$SHA&branch=main&status=success&per_page=1" \
-            -q '.workflow_runs[0] | select(. != null) | "\(.id) \(.run_attempt)"')
+          # Filter on conclusion here, not with the API's status=success: GitHub's filtered list
+          # has left out a finished, successful run for over an hour (superlibrary v0.0.6,
+          # 2026-11-23), while the unfiltered list for the same commit showed it.
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/runs?head_sha=$SHA&branch=main&per_page=20" \
+            -q '[.workflow_runs[] | select(.status == "completed" and .conclusion == "success")][0] | select(. != null) | "\(.id) \(.run_attempt)"')
           [ -n "$run" ] || { echo "::error::no successful $wf run on main for $SHA"; exit 1; }
           echo "run_id=${run% *}" >> "$GITHUB_OUTPUT"
           echo "run_attempt=${run#* }" >> "$GITHUB_OUTPUT"
