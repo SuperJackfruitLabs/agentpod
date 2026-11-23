@@ -10,6 +10,8 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 
 ## Unreleased
 
+## v0.1.132 — 2026-11-23
+
 ### Fixed
 
 - A SuperPipeline decision event for a board this hub will never carry (on no
@@ -27,8 +29,6 @@ Entries go under `## Unreleased`; a release-prep PR stamps them `## vX.Y.Z — Y
 - `fleet bench stage set NAME --keep-bench` and `--keep-bench=false` report the
   flip in the reply's `changed` (`keepBench`, before and after); it answered
   `changed: {}`.
-
-## v0.1.132 — 2026-11-23
 
 ### Added
 
